@@ -17,10 +17,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   dependent on completion of T00 evidence.
 - T12/G1L-324 is delegated to an isolated implementation worker and has started. Its ticket mirror
   is being synchronized on the implementation branch; no implementation result is claimed yet.
-- T00 rootless-runtime work is delegated independently. Podman 5.4.2 is installed and runs
-  rootless with seccomp, cgroups, and user namespaces available. The committed harness on `main`
-  still documents Docker-only evidence; the T00 worker is validating a runtime selector and Podman
-  execution before review and integration.
+- T00 harness commit `4be9fc30f2821e93c63db59da2da38b6e8ca3467` has passed independent
+  security review with the full Docker and rootless Podman harnesses. It is synchronizing durable
+  evidence and Linear before publication; `main` still contains the earlier Docker-only evidence.
 - Chrome remains safely blocked under the strict profile until the minimum seccomp/user-namespace
   composition is proven. The sandbox stays enabled, `--no-sandbox` is forbidden, k3s follows the
   Podman proof, and OpenShift proof remains deferred.
@@ -67,8 +66,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Complete T00 Podman/runtime-selector validation, commission independent review, then integrate
-   only the verified rootless evidence.
+1. Finish T00 durable-evidence and Linear synchronization, then publish and integrate the reviewed
+   Docker/Podman harness commit.
 2. Continue T12 implementation in parallel, including both storage profiles, Alembic, atomic files,
    shared contract tests, and real PostgreSQL/RustFS integration coverage.
 3. Commission an independent T12 review before integration and preserve the explicit T20/T21
@@ -82,6 +81,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including the protected `CI / gate`.
 - Linear G1L-310 and G1L-324 were fetched by identifier and match the approved repository scope;
   both report `In Progress`.
-- Local Podman reports version 5.4.2, rootless mode, seccomp enabled, and the systemd cgroup manager.
-  The worker's full harness result and Chrome sandbox proof are still pending review.
+- T00 commit `4be9fc30f2821e93c63db59da2da38b6e8ca3467` passed independent security
+  review with full Docker and rootless Podman harnesses; its canonical suites passed 122 tests at
+  98.73% application coverage. Chrome remains a deliberate safe failure pending the minimum
+  sandbox profile rather than an unreviewed harness result.
 - Final product validation has not run; the product is incomplete.
