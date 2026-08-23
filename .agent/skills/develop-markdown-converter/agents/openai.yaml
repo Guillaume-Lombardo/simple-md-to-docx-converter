@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop the converter"
+  short_description: "Implement the converter to its specification"
+  default_prompt: "Use $develop-markdown-converter to implement a change that complies with the converter product specification."
