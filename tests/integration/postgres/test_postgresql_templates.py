@@ -23,7 +23,10 @@ from md_converter.persistence.templates import (
     SqlTemplateSelectionRepository,
 )
 from md_converter.templates.models import TemplateIdentity, TemplateStatus
-from tests.storage_contracts import exercise_template_repository_contract
+from tests.storage_contracts import (
+    exercise_template_repository_contract,
+    exercise_template_service_contract,
+)
 
 
 def clear_template_test_data(engine: Engine) -> None:
@@ -46,6 +49,7 @@ def test_postgresql_template_contract_constraints_and_immutability() -> None:
     selections = SqlTemplateSelectionRepository(engine)
     try:
         exercise_template_repository_contract(users, catalog, selections)
+        exercise_template_service_contract(users, catalog, selections)
 
         owner = User(uuid4(), "Owner", f"owner-{uuid4()}", "hash:owner", Role.USER)
         other = User(uuid4(), "Other", f"other-{uuid4()}", "hash:other", Role.USER)

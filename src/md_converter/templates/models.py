@@ -44,6 +44,16 @@ class TemplateIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class TemplateCreate:
+    """Actor-owned template input that deliberately carries no owner identifier."""
+
+    id: UUID
+    name: str
+    description: str
+    status: TemplateStatus = TemplateStatus.ACTIVE
+
+
+@dataclass(frozen=True, slots=True)
 class TemplateSearch:
     """Deterministic paginated template filters."""
 

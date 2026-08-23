@@ -7,6 +7,12 @@ do not expose owner reassignment, and both SQLite and PostgreSQL reject direct o
 Future template-version object keys must continue to derive from stable UUIDs rather than owner
 names, template names, or uploaded filenames.
 
+Application code creates identities through `TemplateService.create` and a `TemplateCreate` input
+that deliberately has no owner field. The service always copies the authenticated actor UUID into
+the immutable owner field before persistence, including when a structurally compatible object tries
+to carry a different owner UUID. Direct repository insertion exists only as a persistence boundary
+and is not an authenticated creation use case.
+
 ## Visibility and search
 
 Every active template is visible to every authenticated user. An archived template is visible

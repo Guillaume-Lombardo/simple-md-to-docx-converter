@@ -25,7 +25,10 @@ from md_converter.persistence.templates import (
     SqlTemplateSelectionRepository,
 )
 from md_converter.templates.models import TemplateIdentity, TemplateStatus
-from tests.storage_contracts import exercise_template_repository_contract
+from tests.storage_contracts import (
+    exercise_template_repository_contract,
+    exercise_template_service_contract,
+)
 
 
 @pytest.mark.integration
@@ -34,6 +37,11 @@ def test_sqlite_template_repository_contract_and_restart(tmp_path: Path) -> None
     engine = create_database_engine(database_url)
     upgrade_database(engine)
     exercise_template_repository_contract(
+        SqlUserRepository(engine),
+        SqlTemplateCatalogRepository(engine),
+        SqlTemplateSelectionRepository(engine),
+    )
+    exercise_template_service_contract(
         SqlUserRepository(engine),
         SqlTemplateCatalogRepository(engine),
         SqlTemplateSelectionRepository(engine),

@@ -10,6 +10,7 @@ from md_converter.auth.models import Role, User
 from md_converter.auth.service import AuthorizationService
 from md_converter.templates.errors import TemplateUnavailableError
 from md_converter.templates.models import (
+    TemplateCreate,
     TemplateIdentity,
     TemplatePage,
     TemplateSearch,
@@ -50,6 +51,18 @@ class TemplateService:
     ) -> None:
         self._catalog = catalog
         self._selections = selections
+
+    def create(self, actor: User, request: TemplateCreate) -> TemplateIdentity:
+        """Create an identity whose immutable owner is always the authenticated actor."""
+        template = TemplateIdentity(
+            id=request.id,
+            owner_id=actor.id,
+            name=request.name,
+            description=request.description,
+            status=request.status,
+        )
+        self._catalog.add(template)
+        return template
 
     def search(self, actor: User, query: TemplateSearch) -> TemplatePage:
         return self._catalog.search(

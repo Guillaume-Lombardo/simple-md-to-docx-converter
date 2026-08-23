@@ -1,6 +1,7 @@
 """Template identity, visibility, authorization, and selection foundations."""
 
 from md_converter.templates.models import (
+    TemplateCreate,
     TemplateIdentity,
     TemplatePage,
     TemplateSearch,
@@ -9,6 +10,7 @@ from md_converter.templates.models import (
 from md_converter.templates.service import TemplateService
 
 __all__ = [
+    "TemplateCreate",
     "TemplateIdentity",
     "TemplatePage",
     "TemplateSearch",

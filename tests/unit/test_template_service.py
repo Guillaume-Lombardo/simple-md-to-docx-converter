@@ -1,5 +1,7 @@
 """Unit branch coverage for template visibility and authorization."""
 
+from dataclasses import fields
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -8,7 +10,11 @@ from pytest_mock import MockerFixture
 from md_converter.auth.errors import AuthenticationError
 from md_converter.auth.models import Role, User
 from md_converter.templates.errors import TemplateUnavailableError
-from md_converter.templates.models import TemplateIdentity, TemplateStatus
+from md_converter.templates.models import (
+    TemplateCreate,
+    TemplateIdentity,
+    TemplateStatus,
+)
 from md_converter.templates.service import TemplateOperation, TemplateService
 
 
@@ -55,3 +61,32 @@ def test_template_service_visibility_selection_and_audit_context(
     assert authorization.administrator_intervention
     with pytest.raises(TemplateUnavailableError):
         service.set_system_fallback(admin, archived.id)
+
+
+@pytest.mark.unit
+def test_template_creation_always_derives_owner_from_actor(
+    mocker: MockerFixture,
+) -> None:
+    actor = User(uuid4(), "Actor", "actor", "hash:actor", Role.USER)
+    forged_owner = User(uuid4(), "Forged", "forged", "hash:forged", Role.USER)
+    forged_request = TemplateIdentity(
+        uuid4(),
+        forged_owner.id,
+        "Owned by actor",
+        "The supplied owner must be ignored",
+        TemplateStatus.ACTIVE,
+    )
+    catalog = mocker.Mock()
+    service = TemplateService(catalog=catalog, selections=mocker.Mock())
+
+    assert {field.name for field in fields(TemplateCreate)} == {
+        "id",
+        "name",
+        "description",
+        "status",
+    }
+    created = service.create(actor, cast(TemplateCreate, forged_request))
+
+    assert created.owner_id == actor.id
+    assert created.owner_id != forged_owner.id
+    catalog.add.assert_called_once_with(created)

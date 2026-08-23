@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import pytest
 
+from md_converter.auth.errors import AuthenticationError
 from md_converter.auth.models import Role, Session, User
 from md_converter.auth.ports import SessionRepository, UserRepository
 from md_converter.config import ConfigurationError
@@ -19,6 +21,7 @@ from md_converter.storage import (
 )
 from md_converter.templates.errors import TemplateUnavailableError
 from md_converter.templates.models import (
+    TemplateCreate,
     TemplateIdentity,
     TemplateSearch,
     TemplateStatus,
@@ -27,6 +30,7 @@ from md_converter.templates.ports import (
     TemplateCatalogRepository,
     TemplateSelectionRepository,
 )
+from md_converter.templates.service import TemplateOperation, TemplateService
 
 
 def exercise_auth_repository_contract(
@@ -228,3 +232,71 @@ def exercise_template_repository_contract(
     with ThreadPoolExecutor(max_workers=4) as executor:
         list(executor.map(select_preferred, range(12)))
     assert selections.preferred_id(alice.id) in choices
+
+
+def exercise_template_service_contract(
+    users: UserRepository,
+    catalog: TemplateCatalogRepository,
+    selections: TemplateSelectionRepository,
+) -> None:
+    """Verify actor-derived ownership and authorization over a real profile."""
+    admin = User(uuid4(), "Admin", f"admin-{uuid4()}", "hash:admin", Role.ADMIN)
+    alice = User(uuid4(), "Alice", f"alice-{uuid4()}", "hash:alice", Role.USER)
+    bob = User(uuid4(), "Bob", f"bob-{uuid4()}", "hash:bob", Role.USER)
+    for user in (admin, alice, bob):
+        users.create(user)
+
+    service = TemplateService(catalog=catalog, selections=selections)
+    shared = service.create(
+        alice,
+        TemplateCreate(uuid4(), "Shared service template", "Visible to every user"),
+    )
+    forged = TemplateIdentity(
+        uuid4(),
+        bob.id,
+        "Forged owner request",
+        "Must still belong to Alice",
+        TemplateStatus.ACTIVE,
+    )
+    actor_owned = service.create(alice, cast(TemplateCreate, forged))
+    assert actor_owned.owner_id == alice.id
+    assert actor_owned.owner_id != bob.id
+
+    archived = TemplateIdentity(
+        uuid4(),
+        alice.id,
+        "Archived service template",
+        "Owner only",
+        TemplateStatus.ARCHIVED,
+    )
+    catalog.add(archived)
+
+    visible = service.search(bob, TemplateSearch(limit=100))
+    assert shared in visible.items
+    assert actor_owned in visible.items
+    assert archived not in visible.items
+    assert service.get_visible(bob, shared.id) == shared
+    with pytest.raises(TemplateUnavailableError):
+        service.get_visible(bob, archived.id)
+    assert service.get_visible(alice, archived.id) == archived
+    assert service.get_visible(admin, archived.id) == archived
+
+    owner_authorization = service.authorize_mutation(alice, archived.id)
+    assert owner_authorization.owner_id == alice.id
+    assert not owner_authorization.administrator_intervention
+    with pytest.raises(AuthenticationError):
+        service.authorize_mutation(bob, archived.id)
+    admin_authorization = service.authorize_mutation(admin, archived.id)
+    assert admin_authorization.operation is TemplateOperation.MUTATE
+    assert admin_authorization.administrator_intervention
+
+    with pytest.raises(AuthenticationError):
+        service.set_system_fallback(bob, actor_owned.id)
+    fallback_authorization = service.set_system_fallback(admin, actor_owned.id)
+    assert fallback_authorization.operation is TemplateOperation.SET_SYSTEM_FALLBACK
+    assert fallback_authorization.administrator_intervention
+    assert service.resolve(bob) == actor_owned
+    service.set_preferred(bob, shared.id)
+    assert service.resolve(bob) == shared
+    service.clear_preferred(bob)
+    assert service.resolve(bob) == actor_owned
