@@ -20,6 +20,10 @@ destination directory, synchronize its content, replace the destination, and syn
 directory. One application replica must have exclusive ownership of this PVC; never mount the
 SQLite database from multiple pods.
 
+Template identities, immutable owners, search fields, preferences, and the system fallback are
+metadata in the same database. T14 stores no template-version content object; T15 must use the
+existing stable-UUID object-store namespace when it adds that content.
+
 For a consistent backup, stop application and worker writes or use SQLite's online backup API,
 then copy both the database and the complete objects directory as one recovery set. Preserve file
 ownership and modes. To restore, keep the application stopped, restore both parts to an empty data
@@ -48,6 +52,7 @@ pair database state with object versions from the same coordinated window. Resto
 database and bucket targets first, run the application migration against the restored database,
 verify representative stable object identifiers, and require readiness before switching traffic.
 Do not rewrite object keys from usernames, filenames, or template names during backup or restore.
+Template identities, preferences, and fallback selection are part of the PostgreSQL recovery set.
 
 ## Operational decisions still open
 

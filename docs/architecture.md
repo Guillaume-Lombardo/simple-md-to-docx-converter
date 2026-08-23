@@ -5,8 +5,10 @@
 The repository provides an installable Python 3.14 package, its development toolchain, and a
 FastAPI application shell. Local authentication and authorization use persistent SQL repositories
 selected by an explicit storage profile. Stable-identifier object-store ports use atomic files or
-AWS S3-compatible operations. There is still no conversion engine, queue, worker, or deployment
-implementation.
+AWS S3-compatible operations. Template identity, ownership, visibility-aware search, user
+preferences, fallback selection, and future-mutation authorization now have storage-neutral domain
+and persistence boundaries. There is still no template content/version API, conversion engine,
+queue, worker, or deployment implementation.
 
 ## Target system
 
@@ -52,3 +54,11 @@ filesystem. Runtime validation belongs to the dedicated toolchain and container 
 
 Values that remain unresolved in section 14 of the product specification are deliberately not
 encoded here.
+
+## Template boundary
+
+T14 stores immutable-owner template identities, per-user preferences, and the singleton system
+fallback in the profile database. Search normalization is computed in application code for
+cross-profile parity, while visibility predicates and pagination execute in the database. The
+authorization service exposes an explicit administrator-intervention context for T15 audit
+persistence. See `docs/templates.md` for the exact delivered and deferred behavior.
