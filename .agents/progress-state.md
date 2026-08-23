@@ -72,8 +72,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Await PM authorization before installing or starting local k3s; once authorized, continue T00
-   with the k3s proof while keeping OpenShift deferred and the browser sandbox intact.
+1. Local k3s `v1.35.5+k3s1` is installed but stopped. Await PM authorization before starting,
+   configuring, or accessing the cluster; once authorized, continue T00 with the k3s proof while
+   keeping OpenShift deferred and the browser sandbox intact.
 2. Re-read Linear and select only a ready ticket whose dependencies are verified `Done`; T04 still
    waits for T00 and T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
