@@ -6,7 +6,7 @@
 - The product specification is the sole normative source for those decisions. This file contains only operational repository rules. If the two diverge, the product specification prevails.
 - Treat the specification as context, not as authorization to implement work outside the current request.
 - Map every change to an explicit objective and the relevant T00–T23 tickets and acceptance criteria.
-- Do not invent values listed as unresolved in section 19. Keep them configurable when a provisional value is harmless; otherwise request a decision before changing a contract, architecture, or acceptance test.
+- Do not invent values listed as unresolved in section 14. Keep them configurable when a provisional value is harmless; otherwise request a decision before changing a contract, architecture, or acceptance test.
 
 ## Language
 

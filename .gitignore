@@ -3,3 +3,15 @@
 
 # Original source material kept only for local reference
 .agent/reference/
+
+# Python and uv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
