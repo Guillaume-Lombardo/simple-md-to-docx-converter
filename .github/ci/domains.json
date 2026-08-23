@@ -1,0 +1,30 @@
+{
+  "container": {
+    "activation_ticket": "T20",
+    "status": "planned"
+  },
+  "document-engines": {
+    "activation_ticket": "T07",
+    "status": "planned"
+  },
+  "e2e-distributed": {
+    "activation_ticket": "T21",
+    "status": "planned"
+  },
+  "e2e-standalone": {
+    "activation_ticket": "T21",
+    "status": "planned"
+  },
+  "functional": {
+    "activation_ticket": "T06",
+    "status": "planned"
+  },
+  "storage-distributed": {
+    "activation_ticket": "T12",
+    "status": "planned"
+  },
+  "storage-standalone": {
+    "activation_ticket": "T12",
+    "status": "planned"
+  }
+}

@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+
+jobs:
+  detect:
+    name: CI / detect domains
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected-domains: ${{ steps.select.outputs.selected-domains }}
+      planned-domains: ${{ steps.select.outputs.planned-domains }}
+      runnable-domains: ${{ steps.select.outputs.runnable-domains }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Select affected domains
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft || false }}
+          COMPLETE_SUITE: ${{ github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --paths-file "$RUNNER_TEMP/changed-paths"
+            --registry .github/ci/domains.json
+            --github-output "$GITHUB_OUTPUT"
+          )
+          : > "$RUNNER_TEMP/changed-paths"
+          if [[ "$COMPLETE_SUITE" != "true" ]]; then
+            if [[ -z "$BASE_SHA" || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              git ls-files -z > "$RUNNER_TEMP/changed-paths"
+            else
+              git diff --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
+            fi
+          fi
+          if [[ "$COMPLETE_SUITE" == "true" ]]; then
+            args+=(--full)
+          fi
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            args+=(--draft)
+          fi
+          python -m scripts.ci.select_domains "${args[@]}"
+
+  light:
+    name: CI / light
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv with a lock-keyed cache
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314
+          save-cache: ${{ github.event_name != 'pull_request' }}
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check types
+        run: uv run ty check
+      - name: Run unit tests with branch coverage
+        run: >-
+          uv run pytest -m unit
+          --cov=md_converter --cov=scripts.ci --cov-branch
+          --cov-report=term-missing --cov-fail-under=90
+      - name: Run cheap CI security checks
+        run: |
+          uv lock --check
+          uv run python -m scripts.ci.validate_ci
+
+  domain-plan:
+    name: CI / affected domains
+    needs: detect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Report runnable and explicitly planned suites
+        env:
+          PLANNED_DOMAINS: ${{ needs.detect.outputs.planned-domains }}
+          RUNNABLE_DOMAINS: ${{ needs.detect.outputs.runnable-domains }}
+          SELECTED_DOMAINS: ${{ needs.detect.outputs.selected-domains }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Domain selection"
+            echo
+            echo "Selected: \`$SELECTED_DOMAINS\`"
+            echo
+            echo "Runnable: \`$RUNNABLE_DOMAINS\`"
+            echo
+            echo "Planned suites not treated as executed: \`$PLANNED_DOMAINS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  heavy:
+    name: CI / ${{ matrix.domain }}
+    if: ${{ needs.detect.outputs.runnable-domains != '[]' }}
+    needs: detect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: ${{ fromJSON(needs.detect.outputs.runnable-domains) }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv with a lock-keyed cache
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314-${{ matrix.domain }}
+          save-cache: ${{ github.event_name != 'pull_request' }}
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Run selected domain suite without a shell
+        run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+
+  gate:
+    name: CI / gate
+    if: ${{ always() }}
+    needs: [detect, light, domain-plan, heavy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every implemented CI stage
+        env:
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DOMAIN_PLAN_RESULT: ${{ needs.domain-plan.result }}
+          HEAVY_RESULT: ${{ needs.heavy.result }}
+          LIGHT_RESULT: ${{ needs.light.result }}
+        run: |
+          set -euo pipefail
+          [[ "$DETECT_RESULT" == "success" ]]
+          [[ "$DOMAIN_PLAN_RESULT" == "success" ]]
+          [[ "$HEAVY_RESULT" == "success" || "$HEAVY_RESULT" == "skipped" ]]
+          [[ "$LIGHT_RESULT" == "success" ]]

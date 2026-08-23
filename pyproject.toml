@@ -34,6 +34,7 @@ include = ["/README.md", "/pyproject.toml", "/src/md_converter"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers"]
+pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
     "unit: deterministic tests without external dependencies",

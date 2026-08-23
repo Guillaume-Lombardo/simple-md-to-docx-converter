@@ -44,6 +44,26 @@ uv run pytest
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
 integration, and end-to-end tests remain included in the default command when they are runnable.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` exposes the single stable required result `CI / gate`. It runs on pull
+requests, merge-group candidates, pushes to `main`, published releases, manual dispatches, and a
+provisional weekly schedule. Pull requests always run formatting, linting, type checking, unit
+tests with branch coverage, lock validation, and cheap workflow security checks. Draft pull
+requests do not run activated heavy domains.
+
+Changed paths are mapped conservatively to functional, document-engine, storage-profile,
+container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle metadata lives in
+`.github/ci/domains.json`. A planned domain is reported in the Actions summary but is never counted
+as executed. Activate a domain only in the ticket that delivers its real suite by changing its
+status to `active` and adding the reviewed command as an argument array; the matrix runner invokes
+that array without a shell. Scheduled, release, and manual runs select every domain, including both
+storage profiles.
+
+The Sunday 03:17 UTC schedule is provisional until T22 fixes the GitHub Actions usage budget and
+final frequency. Release-triggered CI performs validation only; image and Python publication,
+SBOM, provenance, and OIDC permissions remain isolated T22 work.
+
 ## Dependency changes
 
 Use `uv add` to add a runtime dependency and `uv add --dev` to add a development dependency. Review
