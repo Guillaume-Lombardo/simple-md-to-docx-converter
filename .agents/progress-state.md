@@ -9,14 +9,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- T01, T02, and T03 are Done and verified on `main` at `58d27a1`.
-- Linear project status: In Progress. T00, T04, and T05 are In Progress; remaining tickets are in
-  Backlog. T05 started on isolated branch `chore/T05-python-quality` from `58d27a1` after its T01
-  and T03 dependencies were verified `Done` in Linear and the repository mirrors.
-- T05 is implemented and locally validated: Python 3.14 Ruff/ty policy, independent blocking 90%
-  overall, branch-only, and changed-line coverage, strict Coverage.py schema validation,
-  pytest-mock enforcement, and real Git/Ruff boundary tests are ready for independent review. It
-  remains `In Progress` pending hosted CI, merge, and verification on `main`.
+- T01, T02, T03, and T05 are Done and verified on `main` at `4b93725`. Linear G1L-315
+  intentionally remains In Progress until this closure mirror is merged and verified.
+- Linear project status: In Progress. T00 and T04 remain In Progress; remaining tickets are in
+  Backlog.
+- T06 is the next delivery ticket, but implementation must wait for the PM decision on the
+  unresolved Argon2id/local-account/session policy and final-image E2E sequencing.
 - The product is not functional yet: API, conversion, storage, queue, UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
   turn was interrupted before any worker started.
@@ -34,6 +32,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T03 delivered selective read-only GitHub Actions with the single strict `CI / gate`, active
   CI-infrastructure integration domain, and explicit downstream domain lifecycle (PR #12, squash
   `4c36f4f`).
+- T05 delivered the Python 3.14 Ruff/ty policy, blocking overall, branch-only, and changed-line 90%
+  coverage, pytest-mock enforcement, strict Coverage.py validation, and real Git/Ruff boundary
+  tests (PR #14, squash `4b93725`).
 - Live GitHub settings now protect `main`: pull requests, admin enforcement, resolved conversations,
   linear history, strict `CI / gate` from GitHub Actions app `15368`, no force push or deletion,
   squash-only merges, and automatic deletion of merged branches. GitHub approval count remains zero
@@ -42,19 +43,22 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Blockers and Risks
 
-- T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, and Podman/OpenShift
-  validation; this does not block T05.
+- T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, Podman/OpenShift
+  validation, and the authentication parameters needed to unblock T06.
+- T06 also needs a PM decision on whether its final-image E2E coverage is advanced into T06 or
+  explicitly sequenced with T20/T21.
 - Automatic relaunch of a stopped thread requires an external supervisor.
 - GitHub merge queue is unavailable because this public repository is user-owned, so the
   orchestrator must serialize merges.
 
 ## Next Actions
 
-1. Independently review T05, then publish, verify hosted CI, squash-merge, and verify `main` before
-   marking G1L-315 `Done`.
-2. Before each task, verify repository and Linear state; delegate implementation and independent
+1. Independently review and merge the T05 closure mirror, verify `main`, then mark G1L-315 `Done`
+   and re-fetch it for parity.
+2. Obtain the PM decisions required for T06, then synchronize and start G1L-316.
+3. Before each task, verify repository and Linear state; delegate implementation and independent
    review to separate workers.
-3. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
+4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
    current state.
 
 ## Validation
@@ -69,7 +73,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and valid zero-branch coverage, 64 unit/light tests, branch-only 90%/sub-90/malformed boundaries,
   changed-line Git 90%/80%/missing-ref/schema boundaries, real Ruff allow/deny import boundaries,
   lock and CI policy validation, checksum-verified actionlint v1.7.12 with ShellCheck, and clean
-  diffs. Hosted PR/main verification is pending publication.
+  diffs. PR run 32646636269 and main run 32646773360 independently passed the non-skipped
+  CI-infrastructure domain and strict `CI / gate` on the approved and merged trees.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
