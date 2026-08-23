@@ -9,17 +9,16 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean at `33f86a05c88395d7a6535412390e4624231ba5ff` and matches `origin/main`.
-  Main CI run `32655450957` passed.
+- `main` is clean at `85b43b62627f6b0a533a89312fdf73f0a1e27534` and matches `origin/main`.
+  Main CI run `32656611491` passed.
 - PR #20 was squash-merged as `33f86a05`. Its approved T00/T12 decisions are present in the
   specification, ticket mirrors, and Linear issues G1L-310/G1L-324.
 - T01, T02, T03, T05, and T06 are delivered. T00 and T12 are `In Progress` in Linear; T04 remains
   dependent on completion of T00 evidence.
 - T12/G1L-324 is delegated to an isolated implementation worker and has started. Its ticket mirror
   is being synchronized on the implementation branch; no implementation result is claimed yet.
-- T00 harness commit `4be9fc30f2821e93c63db59da2da38b6e8ca3467` has passed independent
-  security review with the full Docker and rootless Podman harnesses. It is synchronizing durable
-  evidence and Linear before publication; `main` still contains the earlier Docker-only evidence.
+- PR #22 delivered the independently reviewed Docker/rootless-Podman harness and durable T00
+  evidence as squash `85b43b62`; Linear G1L-310 remains synchronized as `In Progress`.
 - Chrome remains safely blocked under the strict profile until the minimum seccomp/user-namespace
   composition is proven. The sandbox stays enabled, `--no-sandbox` is forbidden, k3s follows the
   Podman proof, and OpenShift proof remains deferred.
@@ -66,8 +65,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Finish T00 durable-evidence and Linear synchronization, then publish and integrate the reviewed
-   Docker/Podman harness commit.
+1. Continue T00 with the minimum Chrome seccomp/user-namespace composition and k3s proof; keep
+   OpenShift proof deferred and do not weaken the browser sandbox.
 2. Continue T12 implementation in parallel, including both storage profiles, Alembic, atomic files,
    shared contract tests, and real PostgreSQL/RustFS integration coverage.
 3. Commission an independent T12 review before integration and preserve the explicit T20/T21
@@ -79,10 +78,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 - PR #20 checks passed in run `32655376550`; the exact merged SHA passed main run `32655450957`,
   including the protected `CI / gate`.
+- PR #22 checks passed on exact head `2b920706`; squash `85b43b62` passed main run `32656611491`,
+  including the protected `CI / gate`.
 - Linear G1L-310 and G1L-324 were fetched by identifier and match the approved repository scope;
   both report `In Progress`.
-- T00 commit `4be9fc30f2821e93c63db59da2da38b6e8ca3467` passed independent security
-  review with full Docker and rootless Podman harnesses; its canonical suites passed 122 tests at
-  98.73% application coverage. Chrome remains a deliberate safe failure pending the minimum
-  sandbox profile rather than an unreviewed harness result.
+- T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
+  their canonical suites pass 122 tests at 98.73% application coverage. Chrome remains a deliberate
+  safe failure pending the minimum sandbox profile.
 - Final product validation has not run; the product is incomplete.
