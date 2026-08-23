@@ -41,6 +41,8 @@ def validate_workflow_text(text: str) -> list[str]:
         '[[ "$HEAVY_RESULT" == "success" ]]',
         "uv run pytest -m unit",
         "--cov-report=json:coverage.json",
+        "python -m scripts.ci.check_branch_coverage",
+        "--coverage coverage.json --fail-under 90",
         "python -m scripts.ci.check_changed_coverage",
         "github.event_name == 'pull_request' || github.event_name == 'merge_group'",
         "--source-root src/md_converter --fail-under 90",

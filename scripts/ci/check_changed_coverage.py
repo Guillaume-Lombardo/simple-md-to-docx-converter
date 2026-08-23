@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
 HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 MAX_PERCENT = 100.0
+LINE_ARRAY_KEYS = ("executed_lines", "missing_lines", "excluded_lines")
+BRANCH_ARRAY_KEYS = ("executed_branches", "missing_branches")
+BRANCH_PAIR_SIZE = 2
 
 
 class CoverageCheckError(Exception):
@@ -67,17 +70,126 @@ def read_changed_lines(diff: str, *, source_root: PurePosixPath) -> dict[str, se
     return changed
 
 
-def load_coverage(path: Path) -> Mapping[str, Mapping[str, Any]]:
-    """Load Coverage.py JSON file data with a stable validation error."""
+def load_coverage_document(path: Path) -> Mapping[str, Any]:
+    """Load a Coverage.py JSON document with a stable validation error."""
     try:
         raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise CoverageCheckError(
             f"cannot read coverage JSON {path}: {error}"
         ) from error
-    files = raw.get("files") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        raise CoverageCheckError("coverage JSON must contain an object")
+    return raw
+
+
+def _nonnegative_integer(value: object, *, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise CoverageCheckError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _line_set(value: object, *, label: str) -> set[int]:
+    if not isinstance(value, list) or any(
+        isinstance(line, bool) or not isinstance(line, int) or line <= 0
+        for line in value
+    ):
+        raise CoverageCheckError(f"{label} must contain positive integer line numbers")
+    lines = set(value)
+    if len(lines) != len(value):
+        raise CoverageCheckError(f"{label} must not contain duplicate line numbers")
+    return lines
+
+
+def _branch_set(value: object, *, label: str) -> set[tuple[int, int]]:
+    if not isinstance(value, list):
+        raise CoverageCheckError(f"{label} must contain branch pairs")
+    branches: list[tuple[int, int]] = []
+    for branch in value:
+        if (
+            not isinstance(branch, list)
+            or len(branch) != BRANCH_PAIR_SIZE
+            or any(
+                isinstance(line, bool) or not isinstance(line, int) for line in branch
+            )
+        ):
+            raise CoverageCheckError(f"{label} must contain integer branch pairs")
+        branches.append((branch[0], branch[1]))
+    result = set(branches)
+    if len(result) != len(branches):
+        raise CoverageCheckError(f"{label} must not contain duplicate branch pairs")
+    return result
+
+
+def validate_file_coverage(path: str, file_data: Mapping[str, Any]) -> None:
+    """Validate complete line and branch arrays against a file summary."""
+    missing_keys = {
+        *LINE_ARRAY_KEYS,
+        *BRANCH_ARRAY_KEYS,
+        "summary",
+        "functions",
+        "classes",
+    } - file_data.keys()
+    if missing_keys:
+        raise CoverageCheckError(
+            f"incomplete coverage data for {path}: missing {sorted(missing_keys)}"
+        )
+    if not isinstance(file_data["functions"], dict) or not isinstance(
+        file_data["classes"], dict
+    ):
+        raise CoverageCheckError(f"invalid function or class coverage data for {path}")
+
+    executed = _line_set(file_data["executed_lines"], label=f"{path} executed_lines")
+    missing = _line_set(file_data["missing_lines"], label=f"{path} missing_lines")
+    excluded = _line_set(file_data["excluded_lines"], label=f"{path} excluded_lines")
+    if executed & missing or executed & excluded or missing & excluded:
+        raise CoverageCheckError(f"line coverage sets overlap for {path}")
+
+    executed_branches = _branch_set(
+        file_data["executed_branches"], label=f"{path} executed_branches"
+    )
+    missing_branches = _branch_set(
+        file_data["missing_branches"], label=f"{path} missing_branches"
+    )
+    if executed_branches & missing_branches:
+        raise CoverageCheckError(f"branch coverage sets overlap for {path}")
+
+    summary = file_data["summary"]
+    if not isinstance(summary, dict):
+        raise CoverageCheckError(f"coverage summary must be an object for {path}")
+    expected = {
+        "covered_lines": len(executed),
+        "missing_lines": len(missing),
+        "excluded_lines": len(excluded),
+        "num_statements": len(executed | missing),
+        "covered_branches": len(executed_branches),
+        "missing_branches": len(missing_branches),
+        "num_branches": len(executed_branches | missing_branches),
+    }
+    for key, count in expected.items():
+        actual = _nonnegative_integer(summary.get(key), label=f"{path} summary.{key}")
+        if actual != count:
+            raise CoverageCheckError(
+                f"inconsistent coverage summary for {path}: {key}={actual}, expected {count}"
+            )
+    partial = _nonnegative_integer(
+        summary.get("num_partial_branches"),
+        label=f"{path} summary.num_partial_branches",
+    )
+    if partial > len(missing_branches):
+        raise CoverageCheckError(f"invalid partial branch count for {path}")
+
+
+def load_coverage(path: Path) -> Mapping[str, Mapping[str, Any]]:
+    """Load and validate complete per-file Coverage.py JSON data."""
+    raw = load_coverage_document(path)
+    files = raw.get("files")
     if not isinstance(files, dict):
         raise CoverageCheckError("coverage JSON must contain a files object")
+    for file_path, file_data in files.items():
+        if not isinstance(file_path, str) or not isinstance(file_data, dict):
+            raise CoverageCheckError("coverage files must map paths to objects")
+        validate_file_coverage(file_path, file_data)
     return files
 
 
@@ -94,17 +206,9 @@ def calculate_changed_coverage(
             raise CoverageCheckError(
                 f"changed application file is absent from coverage: {path}"
             )
-        executed_raw = file_data.get("executed_lines")
-        missing_raw = file_data.get("missing_lines")
-        if (
-            not isinstance(executed_raw, list)
-            or not all(isinstance(line, int) for line in executed_raw)
-            or not isinstance(missing_raw, list)
-            or not all(isinstance(line, int) for line in missing_raw)
-        ):
-            raise CoverageCheckError(f"invalid line coverage data for {path}")
-        executed = set(executed_raw)
-        missing = set(missing_raw)
+        validate_file_coverage(path, file_data)
+        executed = set(file_data["executed_lines"])
+        missing = set(file_data["missing_lines"])
         relevant = changed_lines & (executed | missing)
         covered += len(relevant & executed)
         executable += len(relevant)

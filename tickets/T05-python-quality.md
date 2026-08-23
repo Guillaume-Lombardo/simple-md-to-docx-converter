@@ -37,7 +37,7 @@ Configure Ruff, ty, Pytest, pytest-cov, the pytest-mock restriction, 90% thresho
   remaining blocker. Work is isolated on `chore/T05-python-quality` from `main` at `58d27a1`.
 - 2026-08-23: Configured Ruff for Python 3.14 correctness, security, modernization, import, and
   maintainability policies; configured `ty` to check `src`, `scripts`, and `tests` against Python
-  3.14; retained every required Pytest marker; and centralized blocking 90% application branch
+  3.14; retained every required Pytest marker; and centralized blocking 90% overall application
   coverage in the canonical Pytest configuration.
 - 2026-08-23: Enforced the pytest-mock policy twice: Ruff bans `unittest.mock`, while the existing
   AST-based CI validator remains a fail-closed static backstop. Narrow Ruff exceptions cover only
@@ -53,9 +53,21 @@ Configure Ruff, ty, Pytest, pytest-cov, the pytest-mock restriction, 90% thresho
   rejected `unittest.mock` imports. The active `ci-infrastructure` domain now executes these tests
   alongside the existing shell-free runner boundary and explicitly disables nested coverage because
   the light job owns application coverage enforcement.
-- 2026-08-23: All 54 default and full tests pass with 100% application branch coverage. Locked
-  synchronization, Ruff format/lint, `ty`, both canonical Pytest commands, the 47-test unit/light
-  suite, actual-branch changed-line evaluation, `uv lock --check`, the CI security validator,
+- 2026-08-23: Addressed review findings by adding an independent branch-only ratio check based on
+  Coverage.py JSON. Both canonical Pytest commands load a fail-closed hook, and the light workflow
+  repeats the explicit check before `CI / gate`; exactly 90% passes, a lower ratio fails, and a
+  valid internally consistent zero-branch report is defined as 100%. Missing, malformed,
+  contradictory, or non-branch reports fail rather than inheriting the combined coverage result.
+- 2026-08-23: Hardened every per-file Coverage.py entry before changed-line measurement. Complete
+  executed, missing, and excluded line arrays must use unique positive integers, remain disjoint,
+  and match statement summary counts. Complete branch arrays, branch summaries, function maps, and
+  class maps are also required and checked for consistency. Regression tests reject incomplete
+  arrays with nonzero statement totals, inconsistent summaries, invalid lines, duplicate/overlapping
+  line or branch sets, and preserve valid excluded/non-executable `0/0` changes.
+- 2026-08-23: All 71 default and full tests pass with 100% overall application coverage and valid
+  100% zero-branch coverage. Locked synchronization, Ruff format/lint, `ty`, both canonical Pytest
+  commands, the 64-test unit/light suite, explicit branch-only and actual-branch changed-line
+  evaluation, the 7-test real-process CI-infrastructure suite, `uv lock --check`, the CI validator,
   checksum-verified actionlint v1.7.12 with ShellCheck, and `git diff --check` all pass.
 - 2026-08-23: T05 changes repository quality and CI policy rather than storage behavior, product
   runtime, or a final application-image workflow. Storage-profile parity, rootless validation, and

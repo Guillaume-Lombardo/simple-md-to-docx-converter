@@ -43,9 +43,10 @@ Use `uv run ruff format --check .` for a non-mutating formatting check. Tests th
 engine or service must use the marker defined in `pyproject.toml`; they must not hide unavailable
 dependencies with ad hoc skips.
 
-The Pytest configuration blocks application branch coverage below 90%. Pull requests and
-merge-group candidates also block when changed executable lines in `src/md_converter` are below
-90% coverage. Use the `pytest-mock` `mocker` fixture for test doubles; direct `unittest.mock`
-imports are prohibited.
+The Pytest configuration independently blocks overall application coverage and application branch
+coverage below 90%. A valid application report containing no branches is treated as 100%; malformed
+or inconsistent Coverage.py JSON fails closed. Pull requests and merge-group candidates also block
+when changed executable lines in `src/md_converter` are below 90% coverage. Use the `pytest-mock`
+`mocker` fixture for test doubles; direct `unittest.mock` imports are prohibited.
 
 See [docs/local-development.md](docs/local-development.md) for the expanded workflow.

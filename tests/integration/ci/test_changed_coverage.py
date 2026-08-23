@@ -11,6 +11,30 @@ import pytest
 from scripts.ci.check_changed_coverage import main
 
 
+def _file_coverage(*, covered: int) -> dict[str, object]:
+    executed = list(range(1, covered + 1))
+    missing = list(range(covered + 1, 11))
+    return {
+        "executed_lines": executed,
+        "missing_lines": missing,
+        "excluded_lines": [],
+        "executed_branches": [],
+        "missing_branches": [],
+        "functions": {},
+        "classes": {},
+        "summary": {
+            "covered_lines": len(executed),
+            "missing_lines": len(missing),
+            "excluded_lines": 0,
+            "num_statements": 10,
+            "covered_branches": 0,
+            "missing_branches": 0,
+            "num_branches": 0,
+            "num_partial_branches": 0,
+        },
+    }
+
+
 def _git(repository: Path, *arguments: str) -> str:
     completed = subprocess.run(
         ["git", *arguments],
@@ -52,14 +76,7 @@ def test_real_git_diff_enforces_success_and_failure_boundary(
     report = tmp_path / "coverage.json"
     report.write_text(
         json.dumps(
-            {
-                "files": {
-                    "src/md_converter/service.py": {
-                        "executed_lines": list(range(1, covered + 1)),
-                        "missing_lines": list(range(covered + 1, 11)),
-                    }
-                }
-            }
+            {"files": {"src/md_converter/service.py": _file_coverage(covered=covered)}}
         ),
         encoding="utf-8",
     )

@@ -36,9 +36,12 @@ include = ["/README.md", "/pyproject.toml", "/src/md_converter"]
 addopts = [
     "--strict-config",
     "--strict-markers",
+    "-p",
+    "scripts.ci.pytest_branch_coverage",
     "--cov=md_converter",
     "--cov-branch",
     "--cov-report=term-missing",
+    "--cov-report=json:coverage.json",
     "--cov-fail-under=90",
 ]
 pythonpath = ["."]

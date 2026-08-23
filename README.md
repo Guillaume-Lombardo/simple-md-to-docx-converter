@@ -30,9 +30,10 @@ uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_
 uv run pytest
 ```
 
-These Pytest commands enforce at least 90% branch coverage for the `md_converter` application
-package. Pull-request CI also enforces 90% coverage of changed executable application lines.
-Tests use `pytest-mock`; direct imports from `unittest.mock` are rejected.
+These Pytest commands independently enforce at least 90% overall coverage and 90% branch-only
+coverage for the `md_converter` application package. Pull-request CI also enforces 90% coverage of
+changed executable application lines. Tests use `pytest-mock`; direct imports from `unittest.mock`
+are rejected.
 
 The lock file is committed. Use `uv sync --locked --all-groups` to require the committed dependency
 resolution. Build dependencies are a locked project group and are also constrained explicitly for

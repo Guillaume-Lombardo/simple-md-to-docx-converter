@@ -44,9 +44,12 @@ uv run pytest
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
 integration, and end-to-end tests remain included in the default command when they are runnable.
 
-Pytest always measures branch coverage for the installed `md_converter` application package and
-fails below 90%. The policy is centralized in `pyproject.toml`, so both canonical commands enforce
-the same threshold. Test doubles use the `mocker` fixture supplied by `pytest-mock`; importing
+Pytest always measures the installed `md_converter` application package and enforces two separate
+thresholds: at least 90% overall application coverage and at least 90% of application branches.
+The branch-only Pytest hook validates Coverage.py JSON after every canonical run, so high line
+coverage cannot hide low branch coverage. A complete, internally consistent report with zero
+branches is defined as 100% branch coverage; missing, malformed, or contradictory branch totals
+fail closed. Test doubles use the `mocker` fixture supplied by `pytest-mock`; importing
 `unittest.mock` directly is rejected by Ruff and by the repository-local CI validator.
 
 Ruff targets Python 3.14 and applies the committed correctness, security, modernization, import,
@@ -59,17 +62,20 @@ tests. `ty` checks `src`, `scripts`, and `tests` explicitly against Python 3.14.
 `.github/workflows/ci.yml` exposes the single stable required result `CI / gate`. It runs on pull
 requests, merge-group candidates, pushes to `main`, published releases, manual dispatches, and a
 provisional weekly schedule. Pull requests always run formatting, linting, type checking, unit
-tests with blocking application branch coverage, changed application line coverage, lock
-validation, and cheap workflow security checks. Draft pull requests do not run activated heavy
-domains.
+tests with blocking overall application coverage, an explicit branch-only JSON check, changed
+application line coverage, lock validation, and cheap workflow security checks. Draft pull requests
+do not run activated heavy domains.
 
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least
 90% of changed executable lines under `src/md_converter` must be covered. The checker uses a
-zero-context Git diff without shell interpretation, ignores tests and tooling, fails closed when a
-changed application file is absent from Coverage.py data, and treats changes containing no
-executable application line as fully covered. Full history is checked out only where commit
-comparison requires it.
+zero-context Git diff without shell interpretation, ignores tests and tooling, and validates every
+Coverage.py file entry before measuring it. Executed, missing, and excluded line sets must contain
+unique positive line numbers, be disjoint, and agree with statement summaries; branch arrays and
+summaries must also be complete and internally consistent. A changed application file absent from
+the report, an incomplete array, or an inconsistent count fails closed. A valid change containing
+only excluded or non-executable lines remains 100% (`0/0`). Full history is checked out only where
+commit comparison requires it.
 
 Changed paths are mapped conservatively to functional, document-engine, storage-profile,
 container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle metadata lives in

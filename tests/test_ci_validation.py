@@ -83,6 +83,19 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 
 
 @pytest.mark.unit
+def test_validator_rejects_removed_branch_only_coverage() -> None:
+    """Combined coverage cannot replace the independent branch ratio gate."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "python -m scripts.ci.check_branch_coverage",
+        "python -m scripts.ci.validate_ci",
+    )
+    assert any(
+        "check_branch_coverage" in error for error in validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 def test_validator_rejects_duplicate_required_gate_name() -> None:
     """Branch protection must observe one unambiguous required check context."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
