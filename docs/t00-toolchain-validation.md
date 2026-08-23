@@ -90,22 +90,36 @@ Kubernetes can reference it.
 The namespace is created atomically with the run label and annotation. Cleanup
 requires the original immutable namespace UID and both ownership metadata
 values, then sends that UID as a Kubernetes deletion precondition through a
-loopback-only API proxy. The network target has a TCP readiness probe so the
-unselected control cannot race the target service startup. Global
+loopback-only API proxy. The proxy runs in a dedicated process group; cleanup
+terminates the full group and scans `/proc` for the run-specific accept-path
+token. Because k3s can rewrite the proxy command line to only `kubectl`, the
+runner also captures every pre-run `kubectl` process as an exact PID/start-time
+identity and fails if any new identity survives cleanup. Baseline processes are
+never killed. The network target has a TCP readiness probe so the unselected
+control cannot race the target service startup. Global
 cleanup similarly requires the original profile/marker identities and content,
-the profile checksum, and the imported image digest. Changed, missing, or
-unowned resources are never deleted automatically; the run fails and reports
-the exact resource requiring operator review. The success path removes only
-resources created by that run. `--sudo-k3s` selects the root-owned local k3s
-kubeconfig and containerd; use the default commands where the invoking user has
-ordinary access.
+the profile checksum, and the imported image digest. Ownership intent and the
+expected identity or digest are recorded before each create/tag/import action,
+so cleanup still examines an exact run-scoped resource when the immediately
+following query fails. Changed or unverified resources are never deleted
+automatically; the run fails and reports the exact resource requiring operator
+review. The success path removes only resources created by that run.
+`--sudo-k3s` selects the root-owned local k3s kubeconfig and containerd; use the
+default commands where the invoking user has ordinary access.
 
 Run the collision, ownership-change, installed-profile-tampering, cleanup-
 refusal, namespace-UID, and image-digest probes without a cluster:
 
 ```bash
 spikes/toolchain/test-k3s-resource-guards.sh
+spikes/toolchain/test-k3s-proxy-lifecycle.sh
+spikes/toolchain/test-k3s-acquisition-failures.sh
 ```
+
+The latter probes exercise proxy success, failure, interrupted-run cleanup, and
+argv/token disappearance while preserving a pre-existing baseline process,
+plus injected post-create identity, digest, Kubernetes API, and containerd query
+failures without requiring a live cluster.
 
 The image build deliberately keeps `--pull=false`. It performs no implicit pull
 or store bootstrap, even though the `FROM` reference is digest-pinned. The first

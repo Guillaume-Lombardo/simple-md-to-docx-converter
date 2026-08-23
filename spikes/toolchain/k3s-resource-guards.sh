@@ -87,6 +87,19 @@ namespace_json_is_owned() {
     ' <<<"${namespace_json}" >/dev/null
 }
 
+namespace_json_has_run_ownership() {
+    local namespace_json="$1"
+    local name="$2"
+    local run_id="$3"
+    jq -e --arg name "${name}" --arg run_id "${run_id}" '
+        .metadata.name == $name
+        and (.metadata.uid | type == "string" and length > 0)
+        and .metadata.labels["t00.g1lom.xyz/owned"] == "true"
+        and .metadata.labels["t00.g1lom.xyz/run-id"] == $run_id
+        and .metadata.annotations["t00.g1lom.xyz/run-id"] == $run_id
+    ' <<<"${namespace_json}" >/dev/null
+}
+
 image_digest_is_owned() {
     local current_digest="$1"
     local expected_digest="$2"

@@ -46,6 +46,11 @@ readonly PROFILE_PATH="${SECCOMP_DIR}/${PROFILE_NAME}"
 readonly PROFILE_MARKER="${SECCOMP_DIR}/.${PROFILE_NAME}.owner"
 readonly IMPORTED_IMAGE="localhost/simple-md-toolchain:t00-${RUN_ID}"
 readonly NAMESPACE="t00-k3s-${RUN_ID}"
+RUNNER="${SCRIPT_DIR}/run-k3s-validation.sh"
+if [[ "${T00_K3S_TEST_MODE:-false}" == true && -n "${T00_K3S_TEST_RUNNER:-}" ]]; then
+    RUNNER="${T00_K3S_TEST_RUNNER}"
+fi
+readonly RUNNER
 
 RESULTS="$(mktemp -d)"
 readonly RESULTS
@@ -55,16 +60,53 @@ MARKER_STAGE=""
 MARKER_STAGE_ID=""
 PROFILE_ID=""
 MARKER_ID=""
-PROFILE_CREATED=false
-MARKER_CREATED=false
+PROFILE_CLAIM_INTENT=false
+MARKER_CLAIM_INTENT=false
 IMPORTED_IMAGE_DIGEST=""
-IMPORTED_IMAGE_CREATED=false
+IMPORTED_IMAGE_INTENT=false
 LOCAL_IMAGE_ID=""
-LOCAL_IMAGE_CREATED=false
+LOCAL_IMAGE_INTENT=false
+IMAGE_ARCHIVE="${RESULTS}/toolchain-image.tar"
+
+inject_test_failure() {
+    local point="$1"
+    [[ "${T00_K3S_TEST_MODE:-false}" == true ]] || return 0
+    [[ "${T00_K3S_TEST_FAIL_AT:-}" == "${point}" ]] || return 0
+    mkdir "${RESULTS}/injected-${point}" 2>/dev/null || return 0
+    printf 'Injected test failure after %s.\n' "${point}" >&2
+    return 86
+}
 
 current_image_digest() {
     "${CTR[@]}" images list "name==\"${IMPORTED_IMAGE}\"" \
         | awk 'NR == 2 {print $3}'
+}
+
+get_image_digest() {
+    local digest=""
+    for _ in {1..3}; do
+        if digest="$(current_image_digest)"; then
+            printf '%s' "${digest}"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+get_namespace_name() {
+    local namespace_name=""
+    for _ in {1..3}; do
+        if namespace_name="$(
+            "${KUBECTL[@]}" get namespace "${NAMESPACE}" \
+                --ignore-not-found -o name 2>/dev/null
+        )"; then
+            printf '%s' "${namespace_name}"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
 }
 
 remove_stage() {
@@ -83,10 +125,7 @@ remove_stage() {
 cleanup_global_resources() {
     local status=0
     local namespace_name
-    if ! namespace_name="$(
-        "${KUBECTL[@]}" get namespace "${NAMESPACE}" \
-            --ignore-not-found -o name 2>/dev/null
-    )"; then
+    if ! namespace_name="$(get_namespace_name)"; then
         printf 'Refusing global cleanup: namespace absence cannot be verified.\n' >&2
         return 1
     fi
@@ -95,19 +134,21 @@ cleanup_global_resources() {
             "${NAMESPACE}" >&2
         return 1
     fi
-    if [[ "${IMPORTED_IMAGE_CREATED}" == true ]]; then
-        if ! current_digest="$(current_image_digest)"; then
+    if [[ "${IMPORTED_IMAGE_INTENT}" == true ]]; then
+        if ! current_digest="$(get_image_digest)"; then
             printf 'Refusing image cleanup: containerd state cannot be verified.\n' >&2
             status=1
             current_digest=""
         fi
-        if ! image_digest_is_owned "${current_digest}" "${IMPORTED_IMAGE_DIGEST}"; then
+        if image_reference_is_absent "${current_digest}"; then
+            :
+        elif ! image_digest_is_owned "${current_digest}" "${IMPORTED_IMAGE_DIGEST}"; then
             printf 'Refusing to remove changed or unowned image: %s\n' \
                 "${IMPORTED_IMAGE}" >&2
             status=1
         else
             "${CTR[@]}" images remove "${IMPORTED_IMAGE}" >/dev/null || status=1
-            if ! remaining_digest="$(current_image_digest)" \
+            if ! remaining_digest="$(get_image_digest)" \
                 || ! image_reference_is_absent "${remaining_digest}"; then
                 printf 'Imported image still exists after cleanup: %s\n' \
                     "${IMPORTED_IMAGE}" >&2
@@ -115,16 +156,20 @@ cleanup_global_resources() {
             fi
         fi
     fi
-    if [[ "${PROFILE_CREATED}" == true ]]; then
+    if [[ "${PROFILE_CLAIM_INTENT}" == true ]] \
+        && "${PRIVILEGE[@]}" test -e "${PROFILE_PATH}"; then
         remove_owned_file "${PROFILE_PATH}" "${PROFILE_MARKER}" "${RUN_ID}" \
             "${PROFILE_SHA256}" "${PROFILE_ID}" "${MARKER_ID}" || status=1
-    elif [[ "${MARKER_CREATED}" == true ]]; then
+    elif [[ "${MARKER_CLAIM_INTENT}" == true ]] \
+        && "${PRIVILEGE[@]}" test -e "${PROFILE_MARKER}"; then
         remove_owned_marker "${PROFILE_MARKER}" "${RUN_ID}" "${MARKER_ID}" || status=1
     fi
-    if [[ "${LOCAL_IMAGE_CREATED}" == true ]]; then
+    if [[ "${LOCAL_IMAGE_INTENT}" == true ]]; then
         current_local_id="$(podman image inspect "${IMPORTED_IMAGE}" --format '{{.Id}}' \
             2>/dev/null || true)"
-        if [[ "${current_local_id}" != "${LOCAL_IMAGE_ID}" ]]; then
+        if [[ -z "${current_local_id}" ]]; then
+            :
+        elif [[ "${current_local_id}" != "${LOCAL_IMAGE_ID}" ]]; then
             printf 'Refusing to remove changed local image tag: %s\n' "${IMPORTED_IMAGE}" >&2
             status=1
         else
@@ -166,7 +211,7 @@ if [[ -n "${existing_namespace}" ]]; then
     printf 'Refusing to reuse pre-existing namespace: %s\n' "${NAMESPACE}" >&2
     exit 1
 fi
-existing_image_digest="$(current_image_digest)"
+existing_image_digest="$(get_image_digest)"
 image_reference_is_absent "${existing_image_digest}" || {
     printf 'Refusing to overwrite pre-existing image: %s\n' "${IMPORTED_IMAGE}" >&2
     exit 1
@@ -182,9 +227,11 @@ MARKER_STAGE="$("${PRIVILEGE[@]}" mktemp \
 MARKER_STAGE_ID="$(guard_identity "${MARKER_STAGE}")"
 "${PRIVILEGE[@]}" install -m 0600 "${RESULTS}/profile-owner" "${MARKER_STAGE}"
 MARKER_STAGE_ID="$(guard_identity "${MARKER_STAGE}")"
+MARKER_ID="${MARKER_STAGE_ID}"
+MARKER_CLAIM_INTENT=true
 "${PRIVILEGE[@]}" ln -- "${MARKER_STAGE}" "${PROFILE_MARKER}"
-MARKER_ID="$(guard_identity "${PROFILE_MARKER}")"
-MARKER_CREATED=true
+inject_test_failure after-marker-create-identity
+[[ "$(guard_identity "${PROFILE_MARKER}")" == "${MARKER_ID}" ]]
 remove_stage "${MARKER_STAGE}" "${MARKER_STAGE_ID}"
 MARKER_STAGE=""
 
@@ -194,9 +241,11 @@ PROFILE_STAGE_ID="$(guard_identity "${PROFILE_STAGE}")"
 "${PRIVILEGE[@]}" install -m 0644 "${SCRIPT_DIR}/chrome-seccomp.json" "${PROFILE_STAGE}"
 PROFILE_STAGE_ID="$(guard_identity "${PROFILE_STAGE}")"
 [[ "$(guard_hash "${PROFILE_STAGE}")" == "${PROFILE_SHA256}" ]]
+PROFILE_ID="${PROFILE_STAGE_ID}"
+PROFILE_CLAIM_INTENT=true
 "${PRIVILEGE[@]}" ln -- "${PROFILE_STAGE}" "${PROFILE_PATH}"
-PROFILE_ID="$(guard_identity "${PROFILE_PATH}")"
-PROFILE_CREATED=true
+inject_test_failure after-profile-create-identity
+[[ "$(guard_identity "${PROFILE_PATH}")" == "${PROFILE_ID}" ]]
 remove_stage "${PROFILE_STAGE}" "${PROFILE_STAGE_ID}"
 PROFILE_STAGE=""
 
@@ -210,21 +259,30 @@ installed_profile_sha256="$(guard_hash "${PROFILE_PATH}")"
     exit 1
 }
 
+LOCAL_IMAGE_ID="$(podman image inspect "${SOURCE_IMAGE}" --format '{{.Id}}')"
+LOCAL_IMAGE_INTENT=true
 podman image tag "${SOURCE_IMAGE}" "${IMPORTED_IMAGE}"
-LOCAL_IMAGE_ID="$(podman image inspect "${IMPORTED_IMAGE}" --format '{{.Id}}')"
-LOCAL_IMAGE_CREATED=true
-podman save "${IMPORTED_IMAGE}" | "${CTR[@]}" images import - >/dev/null
-IMPORTED_IMAGE_DIGEST="$(current_image_digest)"
-image_digest_is_owned "${IMPORTED_IMAGE_DIGEST}" "${IMPORTED_IMAGE_DIGEST}" || {
+inject_test_failure after-podman-tag-inspect
+[[ "$(podman image inspect "${IMPORTED_IMAGE}" --format '{{.Id}}')" == "${LOCAL_IMAGE_ID}" ]]
+podman save --format oci-archive --output "${IMAGE_ARCHIVE}" "${IMPORTED_IMAGE}"
+IMPORTED_IMAGE_DIGEST="$(
+    tar -xOf "${IMAGE_ARCHIVE}" index.json \
+        | jq -er 'if (.manifests | length) == 1 then .manifests[0].digest else error("manifest count") end'
+)"
+image_digest_is_owned "${IMPORTED_IMAGE_DIGEST}" "${IMPORTED_IMAGE_DIGEST}"
+IMPORTED_IMAGE_INTENT=true
+"${CTR[@]}" images import "${IMAGE_ARCHIVE}" >/dev/null
+inject_test_failure after-containerd-import-digest
+current_digest="$(get_image_digest)"
+image_digest_is_owned "${current_digest}" "${IMPORTED_IMAGE_DIGEST}" || {
     printf 'Imported image did not expose one exact digest: %s\n' "${IMPORTED_IMAGE}" >&2
     exit 1
 }
-IMPORTED_IMAGE_CREATED=true
 
 TOOLCHAIN_K3S_RUN_ID="${RUN_ID}" \
 TOOLCHAIN_K3S_IMAGE="${IMPORTED_IMAGE}" \
 TOOLCHAIN_K3S_PROFILE_NAME="${PROFILE_NAME}" \
-    "${SCRIPT_DIR}/run-k3s-validation.sh" "${RUNNER_ARGS[@]}"
+    "${RUNNER}" "${RUNNER_ARGS[@]}"
 
 remaining_namespace="$(
     "${KUBECTL[@]}" get namespace "${NAMESPACE}" \

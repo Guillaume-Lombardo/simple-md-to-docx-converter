@@ -26,8 +26,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
 - T00 review blockers are corrected locally: cluster-global names are unique and collision-checked,
   installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
-  negative probes cover collision and tampering refusal. The hardened live rerun passed and removed
-  every exact run resource; publication and independent approval remain pending.
+  negative probes cover collision, tampering, acquisition failure, and proxy lifecycle. The proxy
+  is terminated as a complete process group. Exact PID/start-time baselining catches survivors even
+  after k3s rewrites argv and preserves pre-existing processes. Hardened live run `reviewfix06`
+  removed every exact run resource; the no-new-process postcheck is verified offline. Publication
+  and independent approval remain pending.
 
 ## Approved Product Decisions
 
@@ -114,7 +117,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   fail-closed probes with containerd `2.2.3-k3s1`. The exact test namespace, Localhost profile, and
   imported image were removed and verified absent after the run.
 - The hardened T00 k3s wrapper's offline collision, ownership-change, installed-profile-tampering,
-  namespace-UID, and image-digest probes pass. Live run `reviewfix05` passes all workload probes,
+  namespace-UID, image-digest, acquisition-failure, and proxy success/failure/interruption probes
+  pass. The orchestrator found and identity-checked two argv-rewritten proxy orphans from legacy
+  `reviewfix04`/`reviewfix05`, terminated only those PIDs, and verified no `kubectl` remained. The
+  new regression detects argv/token disappearance and preserves a baseline `kubectl`. Live run
+  `reviewfix06` passes all workload probes,
   verifies installed profile SHA-256 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`,
   and verifies its namespace, profile, marker, containerd image, and Podman tag absent afterward.
 - The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection

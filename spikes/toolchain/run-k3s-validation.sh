@@ -8,6 +8,10 @@ readonly SCRIPT_DIR
 PRIVILEGE=()
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/k3s-resource-guards.sh"
+# Used by the sourced process-group guards.
+PROCESS_PRIVILEGE=()
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/k3s-process-guards.sh"
 readonly RUN_ID="${TOOLCHAIN_K3S_RUN_ID:-}"
 readonly IMAGE="${TOOLCHAIN_K3S_IMAGE:-}"
 readonly PROFILE_NAME="${TOOLCHAIN_K3S_PROFILE_NAME:-}"
@@ -30,6 +34,8 @@ readonly NAMESPACE="t00-k3s-${RUN_ID}"
 KUBECTL=(kubectl)
 if [[ "${1:-}" == "--sudo-k3s" ]]; then
     KUBECTL=(sudo /usr/local/bin/k3s kubectl)
+    # shellcheck disable=SC2034
+    PROCESS_PRIVILEGE=(sudo)
     shift
 fi
 if (($#)); then
@@ -55,16 +61,44 @@ namespace_is_owned() {
     namespace_json_is_owned "${namespace_json}" "${NAMESPACE}" "${NAMESPACE_UID}" "${RUN_ID}"
 }
 
+inject_test_failure() {
+    local point="$1"
+    [[ "${T00_K3S_TEST_MODE:-false}" == true ]] || return 0
+    [[ "${T00_K3S_TEST_FAIL_AT:-}" == "${point}" ]] || return 0
+    mkdir "${RESULTS}/injected-${point}" 2>/dev/null || return 0
+    printf 'Injected test failure after %s.\n' "${point}" >&2
+    return 86
+}
+
+get_namespace_json() {
+    local namespace_json=""
+    for _ in {1..3}; do
+        if namespace_json="$(
+            k get namespace "${NAMESPACE}" --ignore-not-found -o json 2>/dev/null
+        )"; then
+            printf '%s' "${namespace_json}"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
 cleanup_namespace() {
-    [[ -n "${NAMESPACE_UID:-}" ]] || return 0
+    [[ "${NAMESPACE_CREATION_INTENT:-false}" == true ]] || return 0
     local namespace_json
-    if ! namespace_json="$(
-        k get namespace "${NAMESPACE}" --ignore-not-found -o json 2>/dev/null
-    )"; then
+    if ! namespace_json="$(get_namespace_json)"; then
         printf 'Refusing namespace cleanup: Kubernetes ownership cannot be verified.\n' >&2
         return 1
     fi
     [[ -n "${namespace_json}" ]] || return 0
+    if [[ -z "${NAMESPACE_UID:-}" ]]; then
+        namespace_json_has_run_ownership "${namespace_json}" "${NAMESPACE}" "${RUN_ID}" || {
+            printf 'Refusing to recover namespace ownership: metadata changed.\n' >&2
+            return 1
+        }
+        NAMESPACE_UID="$(jq -er '.metadata.uid' <<<"${namespace_json}")"
+    fi
     namespace_is_owned "${namespace_json}" || {
         printf 'Refusing to delete namespace %s: ownership metadata changed.\n' \
             "${NAMESPACE}" >&2
@@ -74,23 +108,32 @@ cleanup_namespace() {
 }
 
 stop_api_proxy() {
-    [[ -n "${API_PROXY_PID:-}" ]] || return 0
-    if kill -0 "${API_PROXY_PID}" 2>/dev/null; then
-        kill "${API_PROXY_PID}" 2>/dev/null || true
-        wait "${API_PROXY_PID}" 2>/dev/null || true
+    [[ "${API_PROXY_INTENT:-false}" == true ]] || return 0
+    if ! stop_tracked_process_group "${API_PROXY_PID:-}" "${API_PROXY_GROUP:-}" \
+        "${API_PROXY_MATCH_TOKEN}"; then
+        printf 'A run-matching Kubernetes API proxy survived cleanup.\n' >&2
+        return 1
     fi
     API_PROXY_PID=""
+    API_PROXY_GROUP=""
+    API_PROXY_INTENT=false
 }
 
 delete_namespace_with_uid() {
     local delete_options="${RESULTS}/namespace-delete-options.json"
     local proxy_log="${RESULTS}/kubectl-proxy.log"
     local proxy_port=""
-    k proxy --address=127.0.0.1 --port=0 \
+    API_PROXY_MATCH_TOKEN="--accept-paths=^/api/v1/namespaces/${NAMESPACE}$"
+    API_PROXY_INTENT=true
+    start_tracked_process_group "${proxy_log}" "${API_PROXY_MATCH_TOKEN}" \
+        "${KUBECTL[@]}" proxy --address=127.0.0.1 --port=0 \
         --accept-hosts='^localhost$,^127\.0\.0\.1$' \
-        --accept-paths="^/api/v1/namespaces/${NAMESPACE}$" \
-        >"${proxy_log}" 2>&1 &
-    API_PROXY_PID=$!
+        "${API_PROXY_MATCH_TOKEN}" || {
+        stop_api_proxy || true
+        return 1
+    }
+    API_PROXY_PID="${TRACKED_PROCESS_PID}"
+    API_PROXY_GROUP="${TRACKED_PROCESS_GROUP}"
     for _ in {1..30}; do
         proxy_port="$(sed -n 's/^Starting to serve on 127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p' \
             "${proxy_log}")"
@@ -124,8 +167,11 @@ delete_namespace_with_uid() {
 on_exit() {
     local status=$?
     trap - EXIT
-    stop_api_proxy
+    stop_api_proxy || status=1
     if ! cleanup_namespace; then
+        status=1
+    fi
+    if ! verify_no_new_kubectl_processes "${KUBECTL_PROCESS_BASELINE}"; then
         status=1
     fi
     rm -rf -- "${RESULTS}"
@@ -205,14 +251,23 @@ if k get namespace "${NAMESPACE}" >/dev/null 2>&1; then
     printf 'Refusing to reuse existing namespace %s.\n' "${NAMESPACE}" >&2
     exit 1
 fi
+KUBECTL_PROCESS_BASELINE="$(kubectl_process_identities)"
+readonly KUBECTL_PROCESS_BASELINE
 
 RESULTS="$(mktemp -d)"
 readonly RESULTS
 NAMESPACE_UID=""
 API_PROXY_PID=""
+API_PROXY_GROUP=""
+API_PROXY_MATCH_TOKEN=""
+API_PROXY_INTENT=false
+NAMESPACE_CREATION_INTENT=false
 trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-namespace_json="$(jq -n --arg name "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
+NAMESPACE_CREATION_INTENT=true
+jq -n --arg name "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
     apiVersion: "v1",
     kind: "Namespace",
     metadata: {
@@ -223,9 +278,10 @@ namespace_json="$(jq -n --arg name "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
         },
         annotations: {"t00.g1lom.xyz/run-id": $run_id}
     }
-}' | k create -f - -o json)"
+}' | k create -f - -o json | tee "${RESULTS}/namespace-created.json" >/dev/null
+inject_test_failure after-namespace-create-api
+namespace_json="$(<"${RESULTS}/namespace-created.json")"
 NAMESPACE_UID="$(jq -er '.metadata.uid' <<<"${namespace_json}")"
-readonly NAMESPACE_UID
 
 jq -n --arg namespace "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
     apiVersion: "networking.k8s.io/v1",
