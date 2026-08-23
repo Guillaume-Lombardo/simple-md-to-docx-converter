@@ -38,6 +38,10 @@ The product includes a conversion page, template administration, local authentic
 | Distributed storage | PostgreSQL and S3-compatible object storage |
 | Initial authentication | Local username/password behind an OIDC-ready abstraction |
 | Document resources | Remote resources are forbidden |
+| Markdown reader | `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`, with raw HTML rejected before Pandoc |
+| Browser sandbox | Keep Chromium's sandbox enabled; validate a minimal seccomp/user-namespace profile on rootless Podman, then k3s; never use `--no-sandbox`; defer OpenShift proof |
+| Document fonts | Liberation plus Carlito/Caladea, DejaVu as fallback, and Noto only for explicitly required scripts |
+| Distributed test object store | RustFS for CI and k3s, behind a provider-neutral AWS S3-compatible contract |
 | Repository language | English for code, identifiers, docstrings, UI, errors, logs, documentation, commits, and pull requests |
 
 Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
@@ -98,15 +102,23 @@ Supported image candidates are PNG, JPEG, sanitized SVG, static GIF, and WebP. R
 
 ## 5. Markdown, images, and document engines
 
-Fix the Markdown dialect and extension list in product configuration. Prefer `commonmark_x` with explicitly approved table, footnote, image-attribute, and metadata extensions. Disable `raw_html`, `raw_tex`, user filters, user includes, and remote resources.
+Use the exact Pandoc reader expression
+`commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`. Because Pandoc 3.10.2
+can still emit raw HTML nodes with that reader, reject raw HTML in the validated Markdown input
+before invoking Pandoc. Disable user filters, user includes, and remote resources. TeX-like text is
+ordinary text for this reader; no unsupported `-raw_tex` flag is added.
 
 Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not claim it is enabled until the complete pipeline passes. Run Pandoc from the job workspace with fixed arguments, no shell, no network, deadlines, memory limits, and an unprivileged identity.
 
-Render Mermaid through a locally installed Chromium; Puppeteer must never download a browser during build or runtime. Bound pixel resolution and physical document width/height while preserving aspect ratio. Chromium must work with arbitrary UID, writable HOME/XDG directories, bounded `/dev/shm`, read-only root filesystem, and no network. Do not assume `--no-sandbox`; T00 must validate the OpenShift security context and record an explicit security decision.
+Render Mermaid through a locally installed Chromium; Puppeteer must never download a browser during build or runtime. Bound pixel resolution and physical document width/height while preserving aspect ratio. Chromium must work with arbitrary UID, writable HOME/XDG directories, bounded `/dev/shm`, read-only root filesystem, and no network. Keep Chromium's sandbox active and never use `--no-sandbox`. Develop and validate a minimal seccomp and user-namespace profile first on rootless Podman and then on k3s. OpenShift proof is explicitly deferred and remains required before claiming OpenShift compatibility.
 
 Generate DOCX with the selected reference document. Generate PDF from DOCX to preserve Word styling. Give every LibreOffice invocation an isolated temporary user profile and terminate its whole process group on timeout or cancellation.
 
-Templates declare expected fonts. Validate fonts, licenses, Fontconfig behavior, required Pandoc styles, macros, external OOXML relationships, blank canonical conversion, and LibreOffice opening before activation.
+Templates declare expected fonts. Package and validate Liberation plus Carlito/Caladea, use DejaVu as
+the fallback, and add Noto families only for scripts explicitly required by the approved corpus or
+template contract. Validate their licenses, Fontconfig behavior and substitution order, required
+Pandoc styles, macros, external OOXML relationships, blank canonical conversion, and LibreOffice
+opening before activation.
 
 ## 6. Storage and job execution
 
@@ -116,7 +128,11 @@ Use SQLite plus atomic files under `/data`, one application replica, and an embe
 
 ### 6.2 Distributed profile
 
-Use PostgreSQL for metadata, queue state, leases, heartbeat, and concurrency control; use S3-compatible object storage for uploads, results, and template versions. Workers may run separately. Claim jobs with transactional locking such as `FOR UPDATE SKIP LOCKED`. Prevent simultaneous duplicate execution.
+Use PostgreSQL for metadata, queue state, leases, heartbeat, and concurrency control; use
+S3-compatible object storage for uploads, results, and template versions. Use RustFS in CI and k3s,
+while keeping the object-store adapter provider-neutral and compatible with AWS S3. Workers may run
+separately. Claim jobs with transactional locking such as `FOR UPDATE SKIP LOCKED`. Prevent
+simultaneous duplicate execution.
 
 ### 6.3 Shared abstractions
 
@@ -150,6 +166,12 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Produce JSON logs with correlation identifiers and no content, filename, secret, or absolute path.
 - Expose queue depth and age, active jobs, step durations, failures, saturation, expiration, retry, and recovery metrics.
 - Audit actor, owner, operation, target, and version for every sensitive mutation.
+- Build non-UBI engines only from official publisher artifacts. Verify publisher signatures or
+  attestations when available and lock every accepted artifact by digest or checksum. Pandoc's
+  official release SHA-256 is accepted when its release provides no detached signature.
+- Review engine, base-image, operating-system package, font, and transitive-dependency
+  vulnerabilities at least weekly. Triage Critical vulnerabilities urgently, rebuild or mitigate
+  without waiting for the weekly cycle, and record compatibility regression and rollback evidence.
 
 ### 8.1 Local authentication policy
 
@@ -218,6 +240,14 @@ deployment boundaries. T20/T21 must repeat the primary flow and relevant authent
 authorization, revocation, expiration, cookie, and recovery failures against the hardened image;
 this is a sequencing exception, not a waiver of final E2E coverage.
 
+The project manager also approved a T12 sequencing exception: T12 must run provider-neutral contract
+tests and real PostgreSQL/RustFS integration tests for the primary successful path and every relevant
+failure behavior, but its final-image rootless E2E is durable T20/T21 debt because T12 does not yet
+deliver the hardened image. T20/T21 must exercise both profiles against that image, including the
+relevant storage success, failure, restart, recovery, and concurrency paths. The pull request must
+justify this exception and receive explicit reviewer approval; this is not a waiver of integration
+coverage or final E2E coverage.
+
 ## 11. GitHub Actions
 
 Use selective path/domain detection while keeping one required `CI / gate` result. Support pull requests, `merge_group`, `main`, releases, manual execution, and a scheduled complete suite. Pin actions by commit SHA, minimize permissions, avoid privileged containers and untrusted secret access, cache safely, cancel superseded runs, and apply bounded timeouts.
@@ -273,13 +303,13 @@ Recommended delivery order: T00 and T01 can start in parallel, and T00 may conti
 ## 14. Parameters to determine during T00 and T04
 
 - Exact UBI 9 Python 3.14 image digest and availability of Chromium, LibreOffice, and Pandoc from approved build sources.
-- Exact CommonMark dialect/extensions and feasibility of `pandoc --sandbox` with images.
-- Chromium sandbox strategy and OpenShift security context.
-- Approved fonts, licenses, Fontconfig behavior, and substitution policy.
+- OpenShift validation of the approved Chromium sandbox strategy and final target security context.
+- Exact official font artifacts, versions, notices, Fontconfig substitution details, and the scripts
+  that explicitly require Noto coverage.
 - Maximum upload/decompressed size, files, images, diagrams, active jobs, queue depth, worker duration, memory, and ephemeral storage.
-- Source/result retention, template-version retention, audit retention, antivirus integration, and cleanup schedule.
+- RPO/RTO; source/result, template-version, and audit retention; quotas; antivirus integration; and
+  cleanup schedule. Keep these values configurable until approved.
 - GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
-- S3 implementation used by E2E.
 - PDF/A and Word/PDF table-of-contents support.
 
 Do not silently resolve these parameters in implementation work.

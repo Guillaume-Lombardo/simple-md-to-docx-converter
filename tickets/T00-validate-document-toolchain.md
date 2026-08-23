@@ -40,6 +40,9 @@ Validate UBI 9/Python 3.14, Pandoc, Chromium/Mermaid, LibreOffice, sandboxing, f
 - 2026-08-23: Added primary-source decision evidence for every engine and UBI/font input, including available signatures, checksums, licenses, and update/CVE ownership choices that remain for PM/security approval.
 - 2026-08-23: Added a reproducible Pandoc 3.10.2 matrix. The `commonmark_x` candidate supports tables, footnotes, YAML metadata, and image attributes, but `-raw_html` still emits raw HTML nodes and `raw_tex` is unsupported; no final dialect was selected.
 - 2026-08-23: Documented candidate Chromium sandbox compositions without recommending `--no-sandbox`, inventoried font candidates without approval, and passed the Docker probe with disk-backed `/work`. Podman is absent and OpenShift remains deferred, so T00 stays In Progress.
+- 2026-08-23: PM approved official publisher artifacts with available signature/provenance verification and locked integrity; Pandoc SHA-256 is accepted when no detached signature exists. Vulnerabilities are reviewed weekly and Critical findings receive urgent handling.
+- 2026-08-23: PM approved `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html` with mandatory raw-HTML rejection before Pandoc; Chromium keeps its sandbox and must never use `--no-sandbox`; the minimum seccomp/user-namespace profile is validated on rootless Podman and then k3s, while OpenShift proof is deferred.
+- 2026-08-23: PM approved Liberation plus Carlito/Caladea, DejaVu fallback, and Noto only for explicitly required scripts, and authorized system Podman installation on the development VM. T00 remains In Progress until the approved rootless sandbox path and remaining evidence are implemented and verified.
 
 ## Synchronization
 
