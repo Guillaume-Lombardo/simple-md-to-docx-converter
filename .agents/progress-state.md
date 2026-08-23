@@ -1,6 +1,6 @@
 # Orchestration State
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Goal
 
@@ -16,9 +16,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
   stays enabled, `--no-sandbox` is forbidden, k3s validation is next, and OpenShift proof remains
   deferred.
-- T14 implementation exists on `feat/T14-template-ownership`, but independent review found two
-  publication blockers: authenticated-owner derivation and real cross-profile authorization
-  coverage. No T14 pull request is open.
+- T14 head `ea14946bb05966f29858c212f0d6184e1475bbdf` on
+  `feat/T14-template-ownership` implements both prior review corrections: authenticated-owner
+  derivation and real cross-profile authorization coverage. Independent re-review and checks remain
+  pending; no T14 pull request is open.
 
 ## Approved Product Decisions
 
@@ -69,8 +70,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 1. Continue T00 with the k3s proof; keep OpenShift proof deferred and do not weaken the browser
    sandbox.
-2. Correct T14's authenticated-owner creation boundary and real SQLite/PostgreSQL authorization
-   contract before publication. T13 still waits for T11 and T04 still waits for T00.
+2. Independently re-review and check exact T14 head
+   `ea14946bb05966f29858c212f0d6184e1475bbdf` before publication. T13 still waits for T11 and T04
+   still waits for T00.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -81,7 +83,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   squash `4758cbf7682ea815e797e78b871384247a72f884` passed main run `32668864601`,
   including the protected `CI / gate`.
 - Linear G1L-310 was fetched by identifier and matches the local title, project, team, priority,
-  status, acceptance criteria, dependencies, and progress through PR #26. It remains `In Progress`.
+  status, acceptance criteria, dependencies, and all local progress entries, including PR #26 and
+  the approved scope allocations and exclusions. It remains `In Progress`.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
