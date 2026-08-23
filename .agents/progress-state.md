@@ -9,9 +9,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- T01 is Done on `main`; T02 is In Progress on `chore/T02-protect-main` pending independent review,
-  publication, and verification on `main`.
-- Linear project status: In Progress. T00, T02, and T04 are In Progress; T01 is Done; remaining
+- T01 is Done on `main`; T02 is merged on `main` but remains In Progress until T03 publishes the
+  first successful `CI / gate` and that observed check is required strictly.
+- T03 is staged In Progress on `ci/T03-selective-github-actions`, rebased and revalidated on `main`
+  at `2d1f493`; its formal T02 dependency remains recorded because this continuation exists only to
+  break the status-check bootstrap cycle.
+- Linear project status: In Progress. T00, T02, T03, and T04 are In Progress; T01 is Done; remaining
   tickets are in Backlog.
 - The product is not functional yet: API, conversion, storage, queue, UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
@@ -42,9 +45,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Independently review, publish, and verify the T02 repository-policy record on `main`.
-2. Start T03, create the selective workflows and `CI / gate`, then require that observed check on
-   `main` with strict status-check enforcement.
+1. Validate and independently review T03 without changing GitHub settings.
+2. Publish a ready, non-draft T03 pull request, observe the successful `CI / gate` check and its
+   GitHub Actions application identity, then require that exact check strictly on `main` for T02.
 3. Before each task, verify repository and Linear state; delegate implementation and independent
    review to separate workers.
 4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
@@ -55,4 +58,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - Last known project update reports canonical checks passing on `main`.
 - T02 live-state verification confirms all current merge controls; required status checks are
   intentionally null until T03.
+- T03 local validation passes all canonical checks, 39 tests, 98.21% unit/light branch coverage,
+  the active CI-infrastructure subprocess suite, lock and workflow security validation, and
+  checksum-verified actionlint with ShellCheck. Independent review's gate-enforcement and cache
+  findings are fixed locally; the GitHub-hosted `CI / gate` and Actions application identity remain
+  pending publication.
 - Final product validation: not run; the product is incomplete.
