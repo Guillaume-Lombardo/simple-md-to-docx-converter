@@ -56,8 +56,9 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   login HTML, OpenAPI, and storage/readiness/security ports. T06 deliberately supplies temporary
   thread-safe memory adapters; persistence and the across-process no-reset guarantee remain T12.
 - 2026-08-23: Activated the hosted `functional` CI domain with its ASGI and real Argon2id/HTTP
-  integration suites. All 99 default and full tests pass with 97.56% total application coverage
-  (98% rounded; 56 branches measured), and the 11-test domain command passes without skips. Ruff
+  integration suites. All 99 default and full tests pass with 97.58% total application coverage
+  (98% rounded; 56 branches measured) and 98.41% changed-line coverage; the 11-test domain command
+  passes without skips. Ruff
   formatting/linting, `ty`, locked `uv` synchronization, the local CI validator, actionlint with
   ShellCheck, and `git diff --check` pass. The only warning is Starlette's non-blocking TestClient
   notice about its future `httpx2` transition. Final-image rootless E2E remains the explicitly

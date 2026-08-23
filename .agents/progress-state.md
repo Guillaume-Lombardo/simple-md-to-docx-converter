@@ -78,9 +78,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   diffs. PR run 32646636269 and main run 32646773360 independently passed the non-skipped
   CI-infrastructure domain and strict `CI / gate` on the approved and merged trees.
 - T06 local validation passes Ruff formatting/linting, `ty`, locked `uv` sync, both canonical Pytest
-  commands with 99/99 tests, 97.56% application coverage (98% rounded), the non-skipped 11-test
-  functional/Argon2id/HTTP domain, the local CI validator, actionlint with ShellCheck, and clean
-  diffs. Rootless final-image E2E is the explicit PM-approved T20/T21 sequencing exception.
+  commands with 99/99 tests, 97.58% application coverage (98% rounded), 98.41% changed-line
+  coverage, the non-skipped 11-test functional/Argon2id/HTTP domain, the local CI validator,
+  actionlint with ShellCheck, and clean diffs. Rootless final-image E2E is the explicit PM-approved
+  T20/T21 sequencing exception.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
