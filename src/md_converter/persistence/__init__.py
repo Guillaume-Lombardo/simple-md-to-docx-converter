@@ -7,11 +7,17 @@ from md_converter.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
 )
+from md_converter.persistence.templates import (
+    SqlTemplateCatalogRepository,
+    SqlTemplateSelectionRepository,
+)
 
 __all__ = [
     "DatabaseReadinessProbe",
     "PersistenceError",
     "SqlSessionRepository",
+    "SqlTemplateCatalogRepository",
+    "SqlTemplateSelectionRepository",
     "SqlUserRepository",
     "create_database_engine",
 ]

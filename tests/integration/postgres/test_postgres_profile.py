@@ -24,6 +24,8 @@ from md_converter.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
 )
+from md_converter.persistence.templates import SqlTemplateCatalogRepository
+from md_converter.templates.models import TemplateSearch
 from tests.storage_contracts import exercise_auth_repository_contract
 
 
@@ -107,9 +109,17 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
+        connection.execute(
+            text("DROP TABLE IF EXISTS system_template_selection CASCADE")
+        )
+        connection.execute(text("DROP TABLE IF EXISTS template_preferences CASCADE"))
+        connection.execute(text("DROP TABLE IF EXISTS templates CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS sessions CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
+        connection.execute(
+            text("DROP FUNCTION IF EXISTS reject_template_owner_change()")
+        )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         migrations = [executor.submit(upgrade_database, engine) for _ in range(4)]
@@ -118,6 +128,9 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     assert set(inspect(engine).get_table_names()) >= {
         "alembic_version",
         "sessions",
+        "system_template_selection",
+        "template_preferences",
+        "templates",
         "users",
     }
 
@@ -174,6 +187,11 @@ def test_postgresql_real_database_outage_fails_readiness_and_operations() -> Non
         with pytest.raises(PersistenceError) as caught:
             SqlUserRepository(unavailable).list()
         assert target_database not in repr(caught.value)
+        with pytest.raises(PersistenceError) as template_error:
+            SqlTemplateCatalogRepository(unavailable).search(
+                TemplateSearch(), viewer_id=uuid4(), viewer_is_admin=False
+            )
+        assert target_database not in repr(template_error.value)
         unavailable.dispose()
     finally:
         with admin.connect() as connection:

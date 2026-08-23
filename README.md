@@ -3,7 +3,9 @@
 This repository contains the foundation for a service that will convert Markdown documents to
 DOCX and PDF. It currently provides local authentication, administrative account management,
 revocable sessions, health endpoints, and durable standalone or distributed storage profiles.
-Conversion, queue, worker, templates, UI, and final-container features remain under development.
+It also provides template ownership, visibility-aware search, preference, and fallback persistence
+foundations. Conversion, queue, worker, versioned template APIs, UI, and final-container features
+remain under development.
 
 ## Requirements
 
@@ -52,6 +54,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/architecture.md`: target architecture and component boundaries
 - `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
+- `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 

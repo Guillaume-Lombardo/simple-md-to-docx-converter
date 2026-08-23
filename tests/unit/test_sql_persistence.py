@@ -39,6 +39,9 @@ def test_inprocess_sql_repository_control_flow() -> None:
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
         "sessions",
+        "system_template_selection",
+        "template_preferences",
+        "templates",
         "users",
     }
     assert DatabaseReadinessProbe(engine).is_ready()

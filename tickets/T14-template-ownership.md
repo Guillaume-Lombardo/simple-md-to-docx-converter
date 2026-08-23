@@ -40,6 +40,7 @@ Add immutable ownership, global visibility, search, preferences, fallback templa
 ## Progress
 
 - 2026-08-23: Started implementation on `feat/T14-template-ownership` from `main` at `a624407` after confirming Linear project, team, priority, objective, acceptance criteria, and dependency parity. T06 and T12 are both `Done`; T14 has no remaining dependency blocker. Scope is limited to domain and cross-profile persistence foundations for ownership, visibility, authorization, search, preferences, fallback selection, and administrator audit boundaries; T15 version/content mutation APIs and T16/T17 UI remain deferred to their own tickets.
+- 2026-08-23: Implemented frozen template identities with database-enforced immutable owners, globally visible active templates, owner/admin visibility and mutation authorization, explicit administrator-intervention audit context, deterministic NFKC/casefold search with name/description/owner/status filters and pagination, transactional per-user preference and singleton fallback selection, and active preference-to-fallback resolution. Added the second Alembic revision, shared SQLite/PostgreSQL contracts, real constraint/restart/outage/concurrency coverage, two-user-plus-administrator functional authorization tests, and English architecture/storage/template documentation. No template route, UI, content/version row, download, ETag, replacement, restoration, archive/delete command, or persistent audit implementation was added; T14 therefore introduces no final-image E2E-applicable workflow.
 
 ## Synchronization
 
