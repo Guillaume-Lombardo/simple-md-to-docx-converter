@@ -27,7 +27,7 @@ Initialize the English repository, uv project, architecture, canonical commands,
 
 ## Dependencies
 
-- T00
+- None
 
 ## Progress
 
@@ -39,7 +39,8 @@ Initialize the English repository, uv project, architecture, canonical commands,
 - Addressed independent review by constraining Hatchling and its transitive build dependencies, inspecting clean-cache wheel and source distributions, limiting the source distribution to publishable content, and leaving Ruff lint policy to T05.
 - Verified every canonical command, `uv lock --check`, a clean locked no-cache synchronization, a hash-required no-cache build, fresh-wheel import and metadata, 100% branch coverage of the application package, and `git diff --check`.
 - Integration and final-image E2E coverage are not applicable to this bootstrap because it introduces no real component boundary and no user-visible or operational workflow; no integration or E2E exception is claimed, and the pull-request reviewer must confirm this applicability assessment.
-- T01 remains In Progress until this bootstrap is merged and verified on `main` and its T00 dependency is resolved. T00 remains In Progress pending approved engine-source and Chrome/OpenShift sandbox decisions plus Podman/OpenShift validation; T01 does not resolve or validate those deferred product and runtime decisions.
+- 2026-08-23: GitHub PR #5 was independently reviewed, squash-merged into `main` as `99a56d22087211cd2b8d9bfb63b93ecb38e4768e`, and the bootstrap was verified on `main`.
+- 2026-08-23: The project manager approved removing T00 as a dependency because T01's bootstrap is fully delivered and the remaining T00 engine-supply-chain, Chrome sandbox, and OpenShift decisions do not affect the repository bootstrap. T01 continues to block T02–T06 and remains In Progress until this dependency change is merged and verified on `main`; T00 remains In Progress and continues to block its genuinely dependent tickets.
 
 ## Synchronization
 

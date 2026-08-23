@@ -211,7 +211,7 @@ Before the first public release, the project manager must decide the public pack
 | Ticket | Outcome | Depends on |
 |---|---|---|
 | T00 | Validate UBI 9/Python 3.14, Pandoc, Chromium/Mermaid, LibreOffice, sandboxing, fonts, resource budgets, and rootless runtime through spikes | — |
-| T01 | Initialize the English repository, `uv` project, architecture, commands, contribution rules, and local developer workflow | T00 |
+| T01 | Initialize the English repository, `uv` project, architecture, commands, contribution rules, and local developer workflow | — |
 | T02 | Protect `main`, configure required gates, independent review, merge queue or serialized merge, and squash policy | T01 |
 | T03 | Implement selective GitHub Actions workflows, `merge_group`, caching, permissions, timeouts, and required gate | T01, T02 |
 | T04 | Build the corpus, golden infrastructure, fixtures, marker registration, and deterministic comparison tools | T00, T01 |
@@ -235,7 +235,7 @@ Before the first public release, the project manager must decide the public pack
 | T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `md-converter` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
 
-Recommended delivery order: risk spikes and autonomous foundation (T00–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: risk spikes (T00) in parallel with the autonomous foundation (T01–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Parameters to determine during T00 and T04
 
