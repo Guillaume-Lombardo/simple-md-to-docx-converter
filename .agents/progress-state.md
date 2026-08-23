@@ -11,8 +11,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 - T01 is Done on `main`; T02 is merged on `main` but remains In Progress until T03 publishes the
   first successful `CI / gate` and that observed check is required strictly.
-- T03 is staged In Progress on `ci/T03-selective-github-actions`; its formal T02 dependency remains
-  recorded because this continuation exists only to break the status-check bootstrap cycle.
+- T03 is staged In Progress on `ci/T03-selective-github-actions`, rebased and revalidated on `main`
+  at `2d1f493`; its formal T02 dependency remains recorded because this continuation exists only to
+  break the status-check bootstrap cycle.
 - Linear project status: In Progress. T00, T02, T03, and T04 are In Progress; T01 is Done; remaining
   tickets are in Backlog.
 - The product is not functional yet: API, conversion, storage, queue, UI, and final image remain.

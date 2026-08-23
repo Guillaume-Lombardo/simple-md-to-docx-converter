@@ -64,6 +64,10 @@ Implement selective GitHub Actions workflows, merge_group handling, caching, lea
   domain is selected, `CI / gate` now requires the heavy matrix to succeed and rejects a skipped or
   failed result; drafts still remain light-only. Local policy validation also enforces that the
   exact `CI / gate` name occurs once.
+- 2026-08-23: Rebased the unpublished branch without conflict onto `main` at `2d1f493` after PR #11
+  made repository skills discoverable under `.agents/skills/`. Re-read the updated instructions and
+  skills; T03 scope and acceptance criteria are unchanged. Repeated every canonical and targeted
+  validation with the same 39 passing tests and 98.21% unit/light branch coverage.
 - 2026-08-23: GitHub-hosted execution, the first observed `CI / gate` check, and its GitHub Actions
   application identity remain intentionally unverified until the branch is independently reviewed
   and published. No application runtime or final image was introduced, so final-image E2E coverage
