@@ -44,6 +44,7 @@ Initialize the English repository, uv project, architecture, canonical commands,
 - 2026-08-23: GitHub PR #8 was independently reviewed, squash-merged into `main` as `af4cc26f304226e4dfdbe88115e08ab347f71ea0`, and the dependency removal was verified on `main`; T01 retains no dependency and continues to block T02–T06.
 - 2026-08-23: Final verification on `main` at `af4cc26f304226e4dfdbe88115e08ab347f71ea0` passed `uv sync --all-groups`, `uv run ruff format .` with 38 files unchanged, `uv run ruff check .`, `uv run ty check`, `uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"` with 1 test passed, `uv run pytest` with 1 test passed, `uv lock --check`, and `git diff --check`.
 - 2026-08-23: T01 has no remaining limitations and all acceptance criteria are satisfied. Integration and final-image E2E coverage remain not applicable because T01 introduces no real component boundary and no user-visible or operational workflow. T00 continues independently for its engine-supply-chain, Chrome sandbox, and OpenShift work and continues to block only its genuinely dependent tickets.
+- 2026-08-23: Added a concise, durable orchestration state file and an ignored local restart prompt so interrupted orchestrator threads can reconstruct current project truth and resume safely.
 
 ## Synchronization
 
