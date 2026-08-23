@@ -9,6 +9,7 @@ readonly RESULTS
 trap 'rm -rf -- "${RESULTS}"' EXIT
 
 "${SCRIPT_DIR}/run-validation.sh" documents
+TOOLCHAIN_WORK_STORAGE=disk "${SCRIPT_DIR}/run-validation.sh" documents
 
 docker run --rm --entrypoint /bin/bash "${IMAGE}" -c \
     'LC_ALL=C sort --check /opt/toolchain/evidence/rpm-inventory.txt'
@@ -166,5 +167,12 @@ if docker run --rm \
 fi
 grep -Fq '/work does not have the required bounded tmpfs mount options' \
     "${RESULTS}/no-work.err"
+
+if TOOLCHAIN_WORK_STORAGE=unsupported "${SCRIPT_DIR}/run-validation.sh" documents \
+    >"${RESULTS}/work-storage.out" 2>"${RESULTS}/work-storage.err"; then
+    printf 'An unsupported work storage unexpectedly succeeded.\n' >&2
+    exit 1
+fi
+grep -Fq 'Unknown work storage: unsupported' "${RESULTS}/work-storage.err"
 
 printf 'failure-probes=passed\n'

@@ -50,8 +50,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Blockers and Risks
 
-- T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, and Podman/OpenShift
-  validation; these do not block T06.
+- T00 has a primary-source decision matrix, reproducible CommonMark evidence, and Docker proof for
+  tmpfs and disk-backed `/work`. It still needs approved engine sources and update/CVE ownership,
+  a Chrome/OpenShift sandbox design, an approved font/substitution set, the exact Markdown dialect,
+  and Podman/OpenShift validation; these do not block T06.
 - T06 final-image rootless E2E is explicitly tracked as approved T20/T21 sequencing debt; unit,
   functional ASGI, and real authentication/HTTP integration coverage remain mandatory in T06.
 - Automatic relaunch of a stopped thread requires an external supervisor.

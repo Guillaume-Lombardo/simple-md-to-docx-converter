@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly FIXTURES=/opt/toolchain/fixtures
 readonly EXPECTED_UID="${EXPECTED_UID:-}"
+readonly EXPECTED_WORK_STORAGE="${EXPECTED_WORK_STORAGE:-tmpfs}"
 readonly VALIDATION_SCOPE="${VALIDATION_SCOPE:-documents}"
 
 fail() {
@@ -69,8 +70,27 @@ grep -Fq 'Read-only file system' /tmp/root-write.err \
 assert_mount / overlay ro || fail "the root mount is not a read-only overlay"
 assert_mount /tmp tmpfs rw nosuid nodev noexec size= \
     || fail "/tmp does not have the required bounded tmpfs mount options"
-assert_mount /work tmpfs rw nosuid nodev size= \
-    || fail "/work does not have the required bounded tmpfs mount options"
+case "${EXPECTED_WORK_STORAGE}" in
+    tmpfs)
+        assert_mount /work tmpfs rw nosuid nodev size= \
+            || fail "/work does not have the required bounded tmpfs mount options"
+        ;;
+    disk)
+        python3 - <<'PY' || fail "/work is not a dedicated writable disk-backed mount"
+for line in open("/proc/mounts", encoding="utf-8"):
+    fields = line.split()
+    if fields[1] == "/work":
+        if fields[2] == "tmpfs" or "rw" not in fields[3].split(","):
+            raise SystemExit(1)
+        break
+else:
+    raise SystemExit(1)
+PY
+        ;;
+    *)
+        fail "unknown EXPECTED_WORK_STORAGE=${EXPECTED_WORK_STORAGE}"
+        ;;
+esac
 assert_mount /dev/shm tmpfs rw nosuid nodev noexec size= \
     || fail "/dev/shm does not have the required bounded tmpfs mount options"
 
@@ -108,6 +128,89 @@ Path("/work/validation.png").write_bytes(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
 )
+PY
+
+pandoc \
+    --from=commonmark \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark.json
+pandoc \
+    --from=commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-candidate.json
+pandoc \
+    --from=commonmark_x-yaml_metadata_block \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-no-metadata.json
+if pandoc \
+    --from=commonmark_x-raw_tex \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-no-raw-tex.json \
+    2>/work/commonmark-x-no-raw-tex.err; then
+    fail "commonmark_x unexpectedly accepted the unsupported raw_tex extension"
+fi
+grep -Fq "The extension 'raw_tex' is not supported for commonmark_x" \
+    /work/commonmark-x-no-raw-tex.err \
+    || fail "commonmark_x raw_tex rejection changed unexpectedly"
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+
+def load(name):
+    return json.loads(Path(name).read_text(encoding="utf-8"))
+
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+
+baseline = load("/work/commonmark.json")
+candidate = load("/work/commonmark-x-candidate.json")
+no_metadata = load("/work/commonmark-x-no-metadata.json")
+
+baseline_types = {node.get("t") for node in walk(baseline)}
+candidate_nodes = list(walk(candidate))
+candidate_types = {node.get("t") for node in candidate_nodes}
+
+required_blocks = {"Header", "BulletList", "BlockQuote", "CodeBlock", "Table"}
+if not required_blocks.issubset(candidate_types):
+    raise SystemExit("commonmark_x candidate lost a required block structure")
+if "Note" not in candidate_types:
+    raise SystemExit("commonmark_x candidate did not parse the footnote")
+if "Table" in baseline_types or "Note" in baseline_types:
+    raise SystemExit("plain commonmark unexpectedly parsed an extension structure")
+if "title" not in candidate["meta"]:
+    raise SystemExit("commonmark_x candidate did not parse YAML metadata")
+if no_metadata["meta"]:
+    raise SystemExit("disabling yaml_metadata_block unexpectedly retained metadata")
+
+images = [node for node in candidate_nodes if node.get("t") == "Image"]
+if len(images) != 1:
+    raise SystemExit("commonmark_x candidate did not parse exactly one image")
+identifier, _, key_values = images[0]["c"][0]
+if identifier != "probe-image" or ["width", "24px"] not in key_values:
+    raise SystemExit("commonmark_x candidate lost image attributes")
+
+raw_html = [
+    node
+    for node in candidate_nodes
+    if node.get("t") in {"RawBlock", "RawInline"}
+    and node.get("c", [None])[0] == "html"
+]
+if not raw_html:
+    raise SystemExit("raw_html behavior changed: the documented residual risk disappeared")
 PY
 fc-cache --force
 find "${XDG_CACHE_HOME}/fontconfig" -type f -print -quit | grep -q . \
@@ -205,6 +308,8 @@ printf 'libreoffice=%s\n' "$(soffice --version)"
 printf 'font=%s\n' "$(fc-match 'DejaVu Sans' | head -n 1)"
 printf 'uid=%s gid=%s\n' "$(id -u)" "$(id -g)"
 printf 'validation_scope=%s\n' "${VALIDATION_SCOPE}"
+printf 'work_storage=%s\n' "${EXPECTED_WORK_STORAGE}"
+printf 'commonmark_compatibility=passed\n'
 printf 'rpm_inventory_count=%s\n' "$(wc -l < /opt/toolchain/evidence/rpm-inventory.txt)"
 printf 'rpm_inventory_sha256=%s\n' \
     "$(sha256sum /opt/toolchain/evidence/rpm-inventory.txt | cut -d' ' -f1)"

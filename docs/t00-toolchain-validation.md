@@ -13,6 +13,10 @@ engine archives are pinned. RPM dependencies resolved from the mutable UBI
 repositories are not pinned or snapshotted, so rebuilding later can produce a
 different package set. This is not a reproducible-image claim.
 
+The detailed source, signature, license, update-ownership, Chrome-sandbox,
+CommonMark, and font evidence is in `docs/evidence/t00-decision-matrix.md`. It
+deliberately leaves PM-owned choices unresolved.
+
 ## Reproduce the evidence
 
 Requirements:
@@ -62,6 +66,10 @@ The test script verifies:
 512 processes, 1 GiB, and 512 MiB) are probe envelopes, not product defaults.
 The probe prints cgroup memory/process peaks and final `/work` usage so T18 can
 use measured corpus results when it defines the real budgets.
+
+Set `TOOLCHAIN_WORK_STORAGE=disk` to use a dedicated disk-backed bind mount for
+`/work`. This proves engine compatibility with disk storage, not a bounded
+ephemeral-volume policy.
 
 The tiny document fixture used 111,779,840 bytes at the cgroup memory peak,
 8 processes at the cgroup PID peak, and 884 KiB in `/work` during the recorded
@@ -118,6 +126,16 @@ fixed arguments, no-network execution, deadlines, and resource limits instead;
 it must retain a regression test proving that remote and escaping resources are
 unavailable. The exact Markdown extension list remains unresolved as required by
 section 14 of the product specification.
+
+### CommonMark compatibility
+
+The automated fixture compares plain `commonmark` with an explicit
+`commonmark_x` candidate. Pandoc 3.10.2 produces tables, footnotes, YAML
+metadata, and image attributes for the candidate, but retains a raw HTML AST
+node despite `-raw_html`. It rejects `-raw_tex` because that extension is not
+supported for `commonmark_x`. Raw HTML therefore needs a separate tested policy.
+The exact dialect remains a PM decision; the decision matrix records the exact
+reader expressions.
 
 ### Chrome sandbox and OpenShift
 
@@ -183,10 +201,9 @@ this is treated as an E2E exception rather than a non-applicable criterion, it
 requires explicit pull-request reviewer approval.
 
 Podman and a real OpenShift cluster were unavailable in the local environment;
-Docker 29.7.1 was used for the container evidence. The Python project,
-`pyproject.toml`, lockfile, Ruff, `ty`, and Pytest setup are owned by T01/T05 and
-do not exist on the T00 base revision. Canonical Python checks therefore have a
-documented bootstrap gap rather than a passing result.
+Docker 29.7.1 was used for the container evidence. The current repository now
+contains the Python project and canonical quality tooling, so their results are
+reported with this update rather than treated as a bootstrap gap.
 
 The spike does not read or change a storage contract, so standalone and
 distributed storage-profile parity is not affected by T00.
