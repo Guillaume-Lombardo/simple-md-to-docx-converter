@@ -34,7 +34,8 @@ Validate UBI 9/Python 3.14, Pandoc, Chromium/Mermaid, LibreOffice, sandboxing, f
 - 2026-08-23: Reproducible toolchain validation started on `chore/T00-validate-document-toolchain`.
 - 2026-08-23: Added a checksum-pinned UBI 9/Python 3.14 validation image and automated success/failure probes for Pandoc, local resources, Mermaid/Chrome, Fontconfig, LibreOffice, arbitrary UID, read-only root, no network, capabilities, writable areas, and cgroup envelopes.
 - 2026-08-23: Confirmed that the public UBI repositories do not provide Pandoc, Chrome/Chromium, or LibreOffice; upstream source approval remains a product/security decision.
-- 2026-08-23: Confirmed that Pandoc `--sandbox` omits local resources and that Chrome cannot start under the intended runtime-default seccomp plus `no-new-privileges` profile. The namespace-sandbox laboratory control requires `seccomp=unconfined`, which is not accepted as OpenShift evidence.
+- 2026-08-23: Confirmed through warning and OpenXML inspection that Pandoc `--sandbox` omits local resources, and that Chrome cannot start under runtime-default seccomp plus `no-new-privileges`. OpenShift validation is PM-deferred; the committed probe uses neither `seccomp=unconfined` nor a browser no-sandbox flag.
+- 2026-08-23: Review corrections now assert the claimed security properties inside the container, exercise their relevant failure probes, distinguish pinned engine inputs from mutable UBI RPM resolution, record the complete reviewed RPM inventory, and document the `/work` tmpfs versus final disk-backed-runtime gap.
 - 2026-08-23: T00 remains In Progress pending an approved Chrome/OpenShift sandbox architecture, an approved engine-source policy, and validation on Podman/OpenShift. The final-image E2E criterion is deferred to T20/T21 because no final application image exists on this base revision; explicit reviewer approval is required if this is classified as an exception.
 
 ## Synchronization

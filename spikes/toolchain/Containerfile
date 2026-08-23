@@ -66,6 +66,10 @@ RUN dnf install -y libXinerama \
     && dnf clean all \
     && ! ldd "/opt/libreoffice${LIBREOFFICE_VERSION%.*}/program/oosplash" | grep -Fq 'not found'
 
+RUN mkdir -p /opt/toolchain/evidence \
+    && rpm -qa --qf '%{NAME}|%{EPOCHNUM}:%{VERSION}-%{RELEASE}|%{ARCH}|%{LICENSE}\n' \
+        | LC_ALL=C sort > /opt/toolchain/evidence/rpm-inventory.txt
+
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly FIXTURES=/opt/toolchain/fixtures
 readonly EXPECTED_UID="${EXPECTED_UID:-}"
+readonly VALIDATION_SCOPE="${VALIDATION_SCOPE:-documents}"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -15,11 +16,79 @@ require_writable_directory() {
     [[ -w "${directory}" ]] || fail "${directory} is not writable"
 }
 
+status_value() {
+    local name="$1"
+    awk -v name="${name}:" '$1 == name { print $2 }' /proc/self/status
+}
+
+assert_mount() {
+    local path="$1"
+    local filesystem="$2"
+    shift 2
+    python3 - "${path}" "${filesystem}" "$@" <<'PY'
+import sys
+
+path, filesystem, *required = sys.argv[1:]
+for line in open("/proc/mounts", encoding="utf-8"):
+    fields = line.split()
+    if fields[1] != path:
+        continue
+    options = set(fields[3].split(","))
+    exact = {option for option in required if not option.endswith("=")}
+    prefixes = {option for option in required if option.endswith("=")}
+    if (
+        fields[2] != filesystem
+        or not exact.issubset(options)
+        or any(not any(value.startswith(prefix) for value in options) for prefix in prefixes)
+    ):
+        raise SystemExit(1)
+    break
+else:
+    raise SystemExit(1)
+PY
+}
+
 [[ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" == "3.14" ]] \
     || fail "Python 3.14 is required"
 [[ -z "${EXPECTED_UID}" || "$(id -u)" == "${EXPECTED_UID}" ]] \
     || fail "runtime UID does not match EXPECTED_UID=${EXPECTED_UID}"
 [[ "$(id -u)" != 0 ]] || fail "the validation must not run as root"
+
+[[ "$(status_value CapEff)" == "0000000000000000" ]] \
+    || fail "effective capabilities are not empty"
+[[ "$(status_value CapBnd)" == "0000000000000000" ]] \
+    || fail "capability bounding set is not empty"
+[[ "$(status_value NoNewPrivs)" == "1" ]] \
+    || fail "no-new-privileges is not enabled"
+
+if touch /opt/app-root/src/t00-root-write-probe 2>/tmp/root-write.err; then
+    fail "the container root filesystem is writable"
+fi
+grep -Fq 'Read-only file system' /tmp/root-write.err \
+    || fail "root write rejection did not report a read-only filesystem"
+assert_mount / overlay ro || fail "the root mount is not a read-only overlay"
+assert_mount /tmp tmpfs rw nosuid nodev noexec size= \
+    || fail "/tmp does not have the required bounded tmpfs mount options"
+assert_mount /work tmpfs rw nosuid nodev size= \
+    || fail "/work does not have the required bounded tmpfs mount options"
+assert_mount /dev/shm tmpfs rw nosuid nodev noexec size= \
+    || fail "/dev/shm does not have the required bounded tmpfs mount options"
+
+interfaces="$(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+readonly interfaces
+[[ "${interfaces}" == "lo" ]] || fail "network isolation exposed a non-loopback interface"
+
+[[ -r /sys/fs/cgroup/memory.max && "$(</sys/fs/cgroup/memory.max)" != "max" ]] \
+    || fail "memory is not bounded by cgroup"
+[[ -r /sys/fs/cgroup/pids.max && "$(</sys/fs/cgroup/pids.max)" != "max" ]] \
+    || fail "process count is not bounded by cgroup"
+read -r cpu_quota _ </sys/fs/cgroup/cpu.max
+[[ "${cpu_quota}" != "max" ]] || fail "CPU is not bounded by cgroup"
+
+printf 'security_properties=passed\n'
+if [[ "${VALIDATION_SCOPE}" == "security" ]]; then
+    exit 0
+fi
 
 require_writable_directory /work
 require_writable_directory "${HOME}"
@@ -81,30 +150,32 @@ with ZipFile(document) as archive:
         raise SystemExit("DOCX has no Word document part")
     if not any(name.startswith("word/media/") for name in names):
         raise SystemExit("DOCX has no embedded local image")
+
+sandboxed = Path("/work/sandboxed.docx")
+if not sandboxed.is_file() or sandboxed.stat().st_size == 0:
+    raise SystemExit("Pandoc sandbox did not produce a DOCX file")
+with ZipFile(sandboxed) as archive:
+    names = archive.namelist()
+    if "word/document.xml" not in names:
+        raise SystemExit("Sandboxed DOCX has no Word document part")
+    if any(name.startswith("word/media/") for name in names):
+        raise SystemExit("Sandboxed DOCX unexpectedly contains the local image")
 PY
 
-if [[ "${CHROME_SANDBOX_MODE:-target}" == "namespace-lab" ]]; then
-    cat > /work/puppeteer.json <<'JSON'
-{
-  "executablePath": "/usr/bin/google-chrome-stable",
-  "headless": "shell",
-  "args": ["--disable-setuid-sandbox"]
-}
-JSON
-else
+if [[ "${VALIDATION_SCOPE}" == "target" ]]; then
     cat > /work/puppeteer.json <<'JSON'
 {
   "executablePath": "/usr/bin/google-chrome-stable",
   "headless": "shell"
 }
 JSON
+    mmdc \
+        --puppeteerConfigFile /work/puppeteer.json \
+        --input /work/diagram.mmd \
+        --output /work/diagram.svg \
+        --backgroundColor transparent
+    [[ -s /work/diagram.svg ]] || fail "Mermaid did not produce an SVG"
 fi
-mmdc \
-    --puppeteerConfigFile /work/puppeteer.json \
-    --input /work/diagram.mmd \
-    --output /work/diagram.svg \
-    --backgroundColor transparent
-[[ -s /work/diagram.svg ]] || fail "Mermaid did not produce an SVG"
 
 mkdir /work/libreoffice-profile /work/pdf
 soffice \
@@ -133,7 +204,10 @@ printf 'chrome=%s\n' "$(google-chrome-stable --version)"
 printf 'libreoffice=%s\n' "$(soffice --version)"
 printf 'font=%s\n' "$(fc-match 'DejaVu Sans' | head -n 1)"
 printf 'uid=%s gid=%s\n' "$(id -u)" "$(id -g)"
-printf 'chrome_sandbox_mode=%s\n' "${CHROME_SANDBOX_MODE:-target}"
+printf 'validation_scope=%s\n' "${VALIDATION_SCOPE}"
+printf 'rpm_inventory_count=%s\n' "$(wc -l < /opt/toolchain/evidence/rpm-inventory.txt)"
+printf 'rpm_inventory_sha256=%s\n' \
+    "$(sha256sum /opt/toolchain/evidence/rpm-inventory.txt | cut -d' ' -f1)"
 for metric in memory.max memory.peak pids.max pids.peak; do
     if [[ -r "/sys/fs/cgroup/${metric}" ]]; then
         printf 'cgroup_%s=%s\n' "${metric//./_}" "$(<"/sys/fs/cgroup/${metric}")"
