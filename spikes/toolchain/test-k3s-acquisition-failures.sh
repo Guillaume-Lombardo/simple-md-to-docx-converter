@@ -30,9 +30,16 @@ mock_kubectl() {
         create)
             jq --arg uid "uid-${TOOLCHAIN_K3S_RUN_ID}" \
                 '.metadata.uid=$uid' >"${MOCK_STATE}/namespace.json"
-            tee <"${MOCK_STATE}/namespace.json"
+            if [[ "${MOCK_CREATE_INVALID_RECEIPT:-false}" == true ]]; then
+                printf '{}\n'
+            else
+                tee <"${MOCK_STATE}/namespace.json"
+            fi
+            [[ "${MOCK_CREATE_FAIL_WITH_NAMESPACE:-false}" != true ]]
+            return
             ;;
         proxy)
+            touch "${MOCK_STATE}/proxy-started"
             printf 'Starting to serve on 127.0.0.1:43123\n'
             trap 'exit 0' INT TERM
             while :; do sleep 1; done
@@ -113,6 +120,7 @@ mock_podman() {
 }
 
 mock_curl() {
+    touch "${MOCK_STATE}/delete-attempted"
     rm -- "${MOCK_STATE}/namespace.json"
 }
 
@@ -211,9 +219,45 @@ grep -Fq 'Injected test failure after after-namespace-create-api.' \
     exit 1
 }
 [[ ! -e "${TEST_ROOT}/state/namespace.json" ]]
+[[ -e "${TEST_ROOT}/state/delete-attempted" ]]
 [[ -z "$(matching_process_ids '--accept-paths=^/api/v1/namespaces/t00-k3s-acquireapi$')" ]]
+
+run_namespace_create_refusal() {
+    local mode="$1"
+    local run_id="$2"
+    local mode_variable=""
+    local log_file="${TEST_ROOT}/${mode}.log"
+    reset_mock_state
+    case "${mode}" in
+        create-failure)
+            mode_variable=MOCK_CREATE_FAIL_WITH_NAMESPACE
+            ;;
+        invalid-receipt)
+            mode_variable=MOCK_CREATE_INVALID_RECEIPT
+            ;;
+    esac
+    if env PATH="${TEST_ROOT}/bin:${PATH}" \
+        MOCK_STATE="${TEST_ROOT}/state" \
+        TOOLCHAIN_K3S_RUN_ID="${run_id}" \
+        TOOLCHAIN_K3S_IMAGE="localhost/simple-md-toolchain:t00-${run_id}" \
+        TOOLCHAIN_K3S_PROFILE_NAME="t00-k3s-chrome-test-${run_id}.json" \
+        "${mode_variable}=true" \
+        "${SCRIPT_DIR}/run-k3s-validation.sh" >"${log_file}" 2>&1; then
+        printf 'Namespace %s unexpectedly succeeded.\n' "${mode}" >&2
+        return 1
+    fi
+    grep -Fq 'no valid successful-create receipt was captured' "${log_file}"
+    [[ -e "${TEST_ROOT}/state/namespace.json" ]]
+    [[ ! -e "${TEST_ROOT}/state/delete-attempted" ]]
+    [[ ! -e "${TEST_ROOT}/state/proxy-started" ]]
+}
+
+run_namespace_create_refusal create-failure createcollision
+run_namespace_create_refusal invalid-receipt invalidreceipt
 
 printf 'k3s_post_create_identity_failures=passed\n'
 printf 'k3s_post_create_digest_failure=passed\n'
 printf 'k3s_transient_ctr_failure=passed\n'
 printf 'k3s_post_create_api_failure=passed\n'
+printf 'k3s_namespace_create_collision_refusal=passed\n'
+printf 'k3s_namespace_invalid_receipt_refusal=passed\n'

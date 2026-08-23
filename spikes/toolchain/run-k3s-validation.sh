@@ -86,19 +86,18 @@ get_namespace_json() {
 
 cleanup_namespace() {
     [[ "${NAMESPACE_CREATION_INTENT:-false}" == true ]] || return 0
+    if [[ "${NAMESPACE_CREATE_RECEIPT_VALID:-false}" != true \
+        || -z "${NAMESPACE_UID:-}" ]]; then
+        printf '%s\n' \
+            'Refusing namespace cleanup: no valid successful-create receipt was captured.' >&2
+        return 1
+    fi
     local namespace_json
     if ! namespace_json="$(get_namespace_json)"; then
         printf 'Refusing namespace cleanup: Kubernetes ownership cannot be verified.\n' >&2
         return 1
     fi
     [[ -n "${namespace_json}" ]] || return 0
-    if [[ -z "${NAMESPACE_UID:-}" ]]; then
-        namespace_json_has_run_ownership "${namespace_json}" "${NAMESPACE}" "${RUN_ID}" || {
-            printf 'Refusing to recover namespace ownership: metadata changed.\n' >&2
-            return 1
-        }
-        NAMESPACE_UID="$(jq -er '.metadata.uid' <<<"${namespace_json}")"
-    fi
     namespace_is_owned "${namespace_json}" || {
         printf 'Refusing to delete namespace %s: ownership metadata changed.\n' \
             "${NAMESPACE}" >&2
@@ -110,7 +109,7 @@ cleanup_namespace() {
 stop_api_proxy() {
     [[ "${API_PROXY_INTENT:-false}" == true ]] || return 0
     if ! stop_tracked_process_group "${API_PROXY_PID:-}" "${API_PROXY_GROUP:-}" \
-        "${API_PROXY_MATCH_TOKEN}"; then
+        "${API_PROXY_MATCH_TOKEN}" "${KUBECTL_PROCESS_BASELINE}"; then
         printf 'A run-matching Kubernetes API proxy survived cleanup.\n' >&2
         return 1
     fi
@@ -262,6 +261,7 @@ API_PROXY_GROUP=""
 API_PROXY_MATCH_TOKEN=""
 API_PROXY_INTENT=false
 NAMESPACE_CREATION_INTENT=false
+NAMESPACE_CREATE_RECEIPT_VALID=false
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -279,9 +279,11 @@ jq -n --arg name "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
         annotations: {"t00.g1lom.xyz/run-id": $run_id}
     }
 }' | k create -f - -o json | tee "${RESULTS}/namespace-created.json" >/dev/null
-inject_test_failure after-namespace-create-api
 namespace_json="$(<"${RESULTS}/namespace-created.json")"
+namespace_json_has_run_ownership "${namespace_json}" "${NAMESPACE}" "${RUN_ID}"
 NAMESPACE_UID="$(jq -er '.metadata.uid' <<<"${namespace_json}")"
+NAMESPACE_CREATE_RECEIPT_VALID=true
+inject_test_failure after-namespace-create-api
 
 jq -n --arg namespace "${NAMESPACE}" --arg run_id "${RUN_ID}" '{
     apiVersion: "networking.k8s.io/v1",

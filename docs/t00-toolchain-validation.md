@@ -95,8 +95,10 @@ terminates the full group and scans `/proc` for the run-specific accept-path
 token. Because k3s can rewrite the proxy command line to only `kubectl`, the
 runner also captures every pre-run `kubectl` process as an exact PID/start-time
 identity and fails if any new identity survives cleanup. Baseline processes are
-never killed. The network target has a TCP readiness probe so the unselected
-control cannot race the target service startup. Global
+excluded from token-fallback signaling. A pre-existing command-line token is a
+collision that prevents proxy launch, even when its process is in the baseline.
+The network target has a TCP readiness probe so the unselected control cannot
+race the target service startup. Global
 cleanup similarly requires the original profile/marker identities and content,
 the profile checksum, and the imported image digest. Ownership intent and the
 expected identity or digest are recorded before each create/tag/import action,
@@ -120,6 +122,14 @@ The latter probes exercise proxy success, failure, interrupted-run cleanup, and
 argv/token disappearance while preserving a pre-existing baseline process,
 plus injected post-create identity, digest, Kubernetes API, and containerd query
 failures without requiring a live cluster.
+
+Namespace deletion additionally requires the valid JSON response from this
+run's successful `kubectl create`, including its UID and ownership metadata.
+Cleanup never infers ownership from labels on a namespace when creation failed
+or its receipt is absent or invalid; it preserves that namespace and fails for
+operator review. A valid receipt remains authoritative when a later API query
+fails transiently, while the current UID and metadata must still match before
+the preconditioned delete.
 
 The image build deliberately keeps `--pull=false`. It performs no implicit pull
 or store bootstrap, even though the `FROM` reference is digest-pinned. The first

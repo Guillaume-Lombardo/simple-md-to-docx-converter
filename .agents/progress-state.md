@@ -28,9 +28,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
   negative probes cover collision, tampering, acquisition failure, and proxy lifecycle. The proxy
   is terminated as a complete process group. Exact PID/start-time baselining catches survivors even
-  after k3s rewrites argv and preserves pre-existing processes. Hardened live run `reviewfix06`
-  removed every exact run resource; the no-new-process postcheck is verified offline. Publication
-  and independent approval remain pending.
+  after k3s rewrites argv; baseline identities are excluded from token signaling, and an existing
+  token collision blocks launch. Namespace deletion requires this run's valid create receipt and
+  captured UID rather than public metadata alone. Hardened live run `reviewfix06` removed every
+  exact run resource; the added failure paths are verified offline. Publication and independent
+  approval remain pending.
 
 ## Approved Product Decisions
 
@@ -124,6 +126,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   `reviewfix06` passes all workload probes,
   verifies installed profile SHA-256 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`,
   and verifies its namespace, profile, marker, containerd image, and Podman tag absent afterward.
+- Final offline regressions prove that a baseline `kubectl` carrying the same operator-supplied run
+  token survives and blocks launch, and that create collisions or invalid namespace receipts
+  preserve identically labeled namespaces without attempting deletion. A valid receipt still
+  supports cleanup after the injected post-create API failure.
 - The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection
   passes 175 tests at 98% coverage; both canonical Pytest commands report the same 10 PostgreSQL/
   RustFS integration failures because this worktree has no test-service environment variables.

@@ -18,6 +18,52 @@ matching_process_ids() {
     done
 }
 
+process_identity() {
+    local process_id="$1"
+    local start_time=""
+    [[ -r "/proc/${process_id}/stat" ]] || return 1
+    start_time="$(awk '{print $22}' "/proc/${process_id}/stat" 2>/dev/null || true)"
+    [[ -n "${start_time}" ]] || return 1
+    printf '%s:%s\n' "${process_id}" "${start_time}"
+}
+
+identity_is_in_baseline() {
+    local identity="$1"
+    local baseline="$2"
+    [[ -n "${identity}" ]] && grep -Fxq -- "${identity}" <<<"${baseline}"
+}
+
+nonbaseline_matching_process_ids() {
+    local token="$1"
+    local baseline="$2"
+    local matched_pid
+    local matched_identity
+    while read -r matched_pid; do
+        [[ -n "${matched_pid}" ]] || continue
+        matched_identity="$(process_identity "${matched_pid}" 2>/dev/null || true)"
+        identity_is_in_baseline "${matched_identity}" "${baseline}" && continue
+        printf '%s\n' "${matched_pid}"
+    done < <(matching_process_ids "${token}")
+}
+
+process_group_contains_baseline() {
+    local process_group="$1"
+    local baseline="$2"
+    local identity
+    local process_id
+    local current_identity
+    local current_group
+    while read -r identity; do
+        [[ -n "${identity}" ]] || continue
+        process_id="${identity%%:*}"
+        current_identity="$(process_identity "${process_id}" 2>/dev/null || true)"
+        [[ "${current_identity}" == "${identity}" ]] || continue
+        current_group="$(ps -o pgid= -p "${process_id}" 2>/dev/null | tr -d ' ' || true)"
+        [[ "${current_group}" == "${process_group}" ]] && return 0
+    done <<<"${baseline}"
+    return 1
+}
+
 process_group_exists() {
     local process_group="$1"
     ps -eo pgid= | awk -v expected="${process_group}" '
@@ -87,6 +133,7 @@ stop_tracked_process_group() {
     local launcher_pid="$1"
     local process_group="$2"
     local match_token="$3"
+    local baseline="${4:-}"
     local status=0
     local matched_pid
     local matched_group
@@ -110,19 +157,28 @@ stop_tracked_process_group() {
         [[ -n "${matched_pid}" ]] || continue
         matched_group="$(ps -o pgid= -p "${matched_pid}" 2>/dev/null | tr -d ' ' || true)"
         [[ -n "${matched_group}" ]] || continue
+        if process_group_contains_baseline "${matched_group}" "${baseline}"; then
+            status=1
+            continue
+        fi
         signal_process_group TERM "${matched_group}"
-    done < <(matching_process_ids "${match_token}")
+    done < <(nonbaseline_matching_process_ids "${match_token}" "${baseline}")
     for _ in {1..50}; do
-        [[ -z "$(matching_process_ids "${match_token}")" ]] && break
+        [[ -z "$(nonbaseline_matching_process_ids "${match_token}" "${baseline}")" ]] && break
         sleep 0.1
     done
     while read -r matched_pid; do
         [[ -n "${matched_pid}" ]] || continue
         matched_group="$(ps -o pgid= -p "${matched_pid}" 2>/dev/null | tr -d ' ' || true)"
         [[ -n "${matched_group}" ]] || continue
+        if process_group_contains_baseline "${matched_group}" "${baseline}"; then
+            status=1
+            continue
+        fi
         signal_process_group KILL "${matched_group}"
-    done < <(matching_process_ids "${match_token}")
-    [[ -z "$(matching_process_ids "${match_token}")" ]] || status=1
+    done < <(nonbaseline_matching_process_ids "${match_token}" "${baseline}")
+    [[ -z "$(nonbaseline_matching_process_ids "${match_token}" "${baseline}")" ]] \
+        || status=1
     return "${status}"
 }
 
@@ -130,6 +186,11 @@ start_tracked_process_group() {
     local log_file="$1"
     local match_token="$2"
     shift 2
+
+    if [[ -n "$(matching_process_ids "${match_token}")" ]]; then
+        printf 'Refusing process launch: the match token already exists.\n' >&2
+        return 1
+    fi
 
     setsid --wait "$@" >"${log_file}" 2>&1 &
     TRACKED_PROCESS_PID=$!

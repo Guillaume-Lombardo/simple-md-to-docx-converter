@@ -43,9 +43,11 @@ TEST_ROOT="$(mktemp -d)"
 readonly TEST_ROOT
 BASELINE_GROUP=""
 REWRITTEN_GROUP=""
+COLLISION_GROUP=""
 cleanup_test_root() {
     trap - EXIT
     [[ -z "${REWRITTEN_GROUP}" ]] || signal_process_group KILL "${REWRITTEN_GROUP}"
+    [[ -z "${COLLISION_GROUP}" ]] || signal_process_group KILL "${COLLISION_GROUP}"
     [[ -z "${BASELINE_GROUP}" ]] || signal_process_group KILL "${BASELINE_GROUP}"
     rm -rf -- "${TEST_ROOT}"
 }
@@ -119,6 +121,43 @@ stop_tracked_process_group "${rewritten_pid}" "${REWRITTEN_GROUP}" \
 REWRITTEN_GROUP=""
 verify_no_new_kubectl_processes "${baseline_identities}"
 kill -0 "${baseline_pid}"
+
+mkdir "${TEST_ROOT}/collision"
+cp -- /bin/sh "${TEST_ROOT}/collision/kubectl"
+collision_token="t00-proxy-baseline-collision-$$"
+# `$0` is deliberately evaluated by the copied shell process.
+# shellcheck disable=SC2016
+setsid "${TEST_ROOT}/collision/kubectl" -c \
+    'trap "exit 0" INT TERM; bash -c '\''trap "exit 0" INT TERM; while :; do sleep 1; done'\'' "$0-child" & wait' \
+    "${collision_token}" \
+    >"${TEST_ROOT}/collision-baseline.log" 2>&1 &
+collision_pid=$!
+COLLISION_GROUP="${collision_pid}"
+for _ in {1..20}; do
+    collision_identity="$(process_identity "${collision_pid}" 2>/dev/null || true)"
+    [[ -n "${collision_identity}" ]] \
+        && [[ -n "$(matching_process_ids "${collision_token}")" ]] \
+        && break
+    sleep 0.1
+done
+[[ -n "${collision_identity}" ]]
+collision_baseline="${baseline_identities}"$'\n'"${collision_identity}"
+if start_tracked_process_group "${TEST_ROOT}/collision.log" "${collision_token}" \
+    "$0" fake-proxy "${collision_token}" running 2>/dev/null; then
+    printf 'A pre-existing proxy-token collision unexpectedly launched.\n' >&2
+    exit 1
+fi
+if stop_tracked_process_group "" "" "${collision_token}" \
+    "${collision_baseline}"; then
+    printf 'Token fallback unexpectedly accepted a baseline-owned process group.\n' >&2
+    exit 1
+fi
+kill -0 "${collision_pid}"
+[[ -n "$(matching_process_ids "${collision_token}")" ]]
+signal_process_group TERM "${COLLISION_GROUP}"
+wait "${collision_pid}" 2>/dev/null || true
+COLLISION_GROUP=""
+
 signal_process_group TERM "${BASELINE_GROUP}"
 wait "${baseline_pid}" 2>/dev/null || true
 BASELINE_GROUP=""
@@ -127,3 +166,4 @@ printf 'k3s_proxy_success_cleanup=passed\n'
 printf 'k3s_proxy_failure_cleanup=passed\n'
 printf 'k3s_proxy_interrupt_cleanup=passed\n'
 printf 'k3s_proxy_argv_rewrite_detection=passed\n'
+printf 'k3s_proxy_baseline_token_collision=passed\n'
