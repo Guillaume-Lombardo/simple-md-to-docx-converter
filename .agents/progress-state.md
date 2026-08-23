@@ -9,9 +9,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean at `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9` and matches `origin/main`.
-  Main CI run `32669621800` passed, including functional, standalone-storage,
-  distributed-storage, and protected-gate jobs.
+- `main` is clean and matches `origin/main`; delivered history through documentation sync PR #28
+  is verified below.
 - T01, T02, T03, T05, T06, T12, and T14 are delivered. T00 remains `In Progress`; T04 remains
   dependent on completion of T00 evidence.
 - PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
@@ -20,6 +19,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
   fallback foundations as squash `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. The local ticket
   and Linear G1L-325 are fully synchronized as `Done`.
+- PR #28 delivered the approved T00 scope and synchronized orchestration and ticket state as squash
+  `b2e5b3965ad05448c56d6fd857191489f8a94173`; its main validation passed the protected gate.
 
 ## Approved Product Decisions
 
@@ -90,6 +91,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   `32669621800` passed functional, standalone-storage, distributed-storage, and protected-gate
   jobs. T14 final-image E2E is genuinely not applicable; the existing Starlette warning is
   non-blocking.
+- PR #28 head `3f102ee668c95e719e8c22baf20ca944334a4994` was squash-merged as
+  `b2e5b3965ad05448c56d6fd857191489f8a94173`; that exact squash passed main run `32669940608`,
+  including the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
 - Linear G1L-310 was fetched by identifier and matches the local title, project, team, priority,
