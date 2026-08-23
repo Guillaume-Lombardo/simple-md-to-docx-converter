@@ -75,16 +75,58 @@ if "${SCRIPT_DIR}/run-validation.sh" --runtime "${CONTAINER_RUNTIME}" unsupporte
 fi
 grep -Fq 'Unknown validation scope: unsupported' "${RESULTS}/unsupported.err"
 
-if "${SCRIPT_DIR}/run-validation.sh" --runtime "${CONTAINER_RUNTIME}" target \
-    >"${RESULTS}/target.out" 2>"${RESULTS}/target.err"; then
-    printf 'Chrome unexpectedly started under the target security profile.\n' >&2
-    exit 1
-fi
 if [[ "${CONTAINER_RUNTIME}" == podman ]]; then
+    command -v jq >/dev/null 2>&1 || {
+        printf 'jq is required to review the Podman seccomp delta.\n' >&2
+        exit 127
+    }
+    jq --sort-keys \
+        '.syscalls |= map(select((.names | index("chroot")) == null))' \
+        /usr/share/containers/seccomp.json >"${RESULTS}/runtime-without-chroot.json"
+    jq --sort-keys \
+        '.syscalls |= map(select((.names | index("chroot")) == null))' \
+        "${SCRIPT_DIR}/chrome-seccomp.json" >"${RESULTS}/profile-without-chroot.json"
+    cmp "${RESULTS}/runtime-without-chroot.json" \
+        "${RESULTS}/profile-without-chroot.json"
+    jq -e '[.syscalls[] | select(.names | index("chroot"))] == [{
+        "names": ["chroot"],
+        "action": "SCMP_ACT_ALLOW",
+        "args": [],
+        "comment": "Chrome namespace sandbox chroot",
+        "includes": {},
+        "excludes": {}
+    }]' "${SCRIPT_DIR}/chrome-seccomp.json" >/dev/null
+
+    "${SCRIPT_DIR}/run-validation.sh" --runtime podman target \
+        >"${RESULTS}/target.out" 2>"${RESULTS}/target.err"
+    grep -Fq 'chrome_sandbox=passed' "${RESULTS}/target.out"
+    grep -Fq 'validation=passed' "${RESULTS}/target.out"
+
+    if TOOLCHAIN_CHROME_SECCOMP_MODE=runtime-default \
+        "${SCRIPT_DIR}/run-validation.sh" --runtime podman target \
+        >"${RESULTS}/target-default.out" 2>"${RESULTS}/target-default.err"; then
+        printf 'Chrome unexpectedly started under runtime-default seccomp.\n' >&2
+        exit 1
+    fi
     grep -Fq 'Check failed: sys_chroot("/proc/self/fdinfo/") == 0' \
-        "${RESULTS}/target.err"
-    grep -Fq 'zygote_host_impl_linux.cc' "${RESULTS}/target.err"
+        "${RESULTS}/target-default.err"
+    grep -Fq 'zygote_host_impl_linux.cc' "${RESULTS}/target-default.err"
+
+    cp "${SCRIPT_DIR}/chrome-seccomp.json" "${RESULTS}/tampered-seccomp.json"
+    printf ' ' >>"${RESULTS}/tampered-seccomp.json"
+    if TOOLCHAIN_CHROME_SECCOMP_PROFILE="${RESULTS}/tampered-seccomp.json" \
+        "${SCRIPT_DIR}/run-validation.sh" --runtime podman target \
+        >"${RESULTS}/tampered.out" 2>"${RESULTS}/tampered.err"; then
+        printf 'A modified Chrome seccomp profile unexpectedly passed validation.\n' >&2
+        exit 1
+    fi
+    grep -Fq 'Chrome seccomp profile integrity check failed' "${RESULTS}/tampered.err"
 else
+    if "${SCRIPT_DIR}/run-validation.sh" --runtime docker target \
+        >"${RESULTS}/target.out" 2>"${RESULTS}/target.err"; then
+        printf 'Chrome unexpectedly started under Docker runtime-default seccomp.\n' >&2
+        exit 1
+    fi
     grep -Fq 'The setuid sandbox is not running as root' "${RESULTS}/target.err"
     grep -Fq 'failed: errno = Operation not permitted' "${RESULTS}/target.err"
 fi
@@ -160,6 +202,24 @@ if "${CONTAINER_RUNTIME}" run \
 fi
 grep -Fq 'no-new-privileges is not enabled' "${RESULTS}/privileges.err"
 
+if "${CONTAINER_RUNTIME}" run \
+    "${common_security_args[@]}" --security-opt seccomp=unconfined "${IMAGE}" \
+    >"${RESULTS}/seccomp.out" 2>"${RESULTS}/seccomp.err"; then
+    printf 'Execution without seccomp unexpectedly succeeded.\n' >&2
+    exit 1
+fi
+grep -Fq 'seccomp filter mode is not enabled' "${RESULTS}/seccomp.err"
+
+if "${CONTAINER_RUNTIME}" run \
+    "${common_security_args[@]}" --privileged "${IMAGE}" \
+    >"${RESULTS}/privileged.out" 2>"${RESULTS}/privileged.err"; then
+    printf 'Privileged execution unexpectedly succeeded.\n' >&2
+    exit 1
+fi
+grep -Eq \
+    'capabilit(y|ies).*not empty|root filesystem is writable|seccomp filter mode is not enabled' \
+    "${RESULTS}/privileged.err"
+
 if "${CONTAINER_RUNTIME}" run "${common_security_args[@]}" --read-only=false "${IMAGE}" \
     >"${RESULTS}/writable-root.out" 2>"${RESULTS}/writable-root.err"; then
     printf 'Execution with a writable root unexpectedly succeeded.\n' >&2
@@ -171,7 +231,7 @@ if "${CONTAINER_RUNTIME}" run --rm \
     "${runtime_namespace_args[@]}" \
     --user 1000710000:0 \
     --read-only \
-    --network bridge \
+    --network host \
     --cap-drop ALL \
     --security-opt no-new-privileges=true \
     --memory 128m \

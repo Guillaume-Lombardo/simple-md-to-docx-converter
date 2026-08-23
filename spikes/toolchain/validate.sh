@@ -61,6 +61,8 @@ PY
     || fail "capability bounding set is not empty"
 [[ "$(status_value NoNewPrivs)" == "1" ]] \
     || fail "no-new-privileges is not enabled"
+[[ "$(status_value Seccomp)" == "2" ]] \
+    || fail "seccomp filter mode is not enabled"
 
 if touch /opt/app-root/src/t00-root-write-probe 2>/tmp/root-write.err; then
     fail "the container root filesystem is writable"
@@ -361,6 +363,7 @@ JSON
         --output /work/diagram.svg \
         --backgroundColor transparent
     [[ -s /work/diagram.svg ]] || fail "Mermaid did not produce an SVG"
+    node /opt/toolchain/node/check-chrome-sandbox.mjs
 fi
 
 mkdir /work/libreoffice-profile /work/pdf

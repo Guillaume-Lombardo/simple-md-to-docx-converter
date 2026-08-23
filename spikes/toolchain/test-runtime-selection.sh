@@ -67,6 +67,24 @@ assert_contains ' <type=tmpfs,destination=/work,tmpfs-size=1g,tmpfs-mode=0770,U=
     "${RUNTIME_LOG}"
 assert_not_contains 'docker ' "${RUNTIME_LOG}"
 
+: >"${RUNTIME_LOG}"
+run_probe --runtime podman target
+assert_contains \
+    " <--security-opt> <seccomp=${SCRIPT_DIR}/chrome-seccomp.json>" \
+    "${RUNTIME_LOG}"
+assert_not_contains ' <seccomp=unconfined>' "${RUNTIME_LOG}"
+assert_not_contains ' <--privileged>' "${RUNTIME_LOG}"
+assert_not_contains ' <--cap-add>' "${RUNTIME_LOG}"
+assert_not_contains ' <--network> <host>' "${RUNTIME_LOG}"
+assert_not_contains ' <--no-sandbox>' "${RUNTIME_LOG}"
+
+if TOOLCHAIN_CHROME_SECCOMP_MODE=unsupported run_probe --runtime podman target \
+    >"${RESULTS}/seccomp-mode.out" 2>"${RESULTS}/seccomp-mode.err"; then
+    printf 'An unsupported Chrome seccomp mode unexpectedly succeeded.\n' >&2
+    exit 1
+fi
+assert_contains 'Unknown Chrome seccomp mode: unsupported' "${RESULTS}/seccomp-mode.err"
+
 if run_probe --runtime nerdctl security \
     >"${RESULTS}/unknown.out" 2>"${RESULTS}/unknown.err"; then
     printf 'An unsupported runtime unexpectedly succeeded.\n' >&2

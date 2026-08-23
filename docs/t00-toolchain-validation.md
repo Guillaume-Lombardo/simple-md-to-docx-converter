@@ -2,13 +2,15 @@
 
 ## Status
 
-Pandoc, Fontconfig, and LibreOffice are compatible with UBI 9 and Python 3.14 in
-repeatable Docker and rootless Podman compatibility probes. Mermaid CLI is
-installed, but Chrome cannot render under either intended security profile. The
-approved follow-up remains a minimal seccomp/user-namespace profile validated
-on rootless Podman and then k3s, with the Chrome sandbox retained and
-`--no-sandbox` forbidden. Do not use this probe as the production image and do
-not enable Pandoc `--sandbox` for conversions with local resources.
+Pandoc, Fontconfig, LibreOffice, and sandboxed Chrome/Mermaid are compatible
+with UBI 9 and Python 3.14 in the rootless Podman probe. Docker's
+runtime-default seccomp profile still rejects Chrome namespace creation. The
+committed Podman profile is the containers/common 0.62.2 default with only the
+`chroot` capability condition removed; k3s validation remains required. The
+probe retains arbitrary UID, read-only root, no network, no capabilities,
+`no-new-privileges`, explicit bounded writable areas, and cgroup limits. Do not
+use this probe as the production image and do not enable Pandoc `--sandbox` for
+conversions with local resources.
 
 This report records evidence observed on August 23, 2026. The base image and
 engine archives are pinned. RPM dependencies resolved from the mutable UBI
@@ -25,6 +27,7 @@ Requirements:
 
 - Docker with BuildKit or rootless Podman 5.4.2 with permission to run
   containers;
+- `jq` when running the Podman profile-delta review probe;
 - outbound access during the image build to pinned engine URLs and mutable UBI
   repositories;
 - a Linux host with cgroup v2 and support for container seccomp options.
@@ -49,9 +52,21 @@ spikes/toolchain/test-validation.sh
 ```
 
 Pass `--runtime podman` to run the same successful tmpfs and disk-backed probes,
-inventory comparison, Chrome failure probe, and security failure probes through
+inventory comparison, successful sandboxed Chrome probe, runtime-default Chrome
+failure probe, profile-integrity probe, and security failure probes through
 Podman. The harness checks that the selected executable exists and rejects any
 runtime other than `docker` or `podman`.
+
+Run the positive Chrome/Mermaid path directly with:
+
+```bash
+spikes/toolchain/run-validation.sh --runtime podman target
+```
+
+The runner verifies the committed profile SHA-256 before passing it to Podman.
+`TOOLCHAIN_CHROME_SECCOMP_MODE=runtime-default` is retained only to reproduce
+the fail-closed `sys_chroot` baseline. A modified profile or unknown mode is
+rejected before the container build or run.
 
 The image build deliberately keeps `--pull=false`. It performs no implicit pull
 or store bootstrap, even though the `FROM` reference is digest-pinned. The first
@@ -95,14 +110,16 @@ The test script verifies:
 - Pandoc produces a valid DOCX with an embedded local PNG and a reference DOCX;
 - Pandoc `--sandbox` cannot resolve that local resource, reports the failure, and
   produces OpenXML with no embedded media part;
-- Chrome fails deterministically without rendering Mermaid under the intended
-  security profile;
+- Chrome renders Mermaid and reports namespace, PID-namespace,
+  network-namespace, and Seccomp-BPF sandbox layers under the Podman profile;
+- Podman runtime-default seccomp still fails deterministically at Chrome's
+  `sys_chroot` probe, and a modified profile fails its integrity check;
 - Fontconfig resolves DejaVu Sans and creates its cache below the arbitrary
   user's writable XDG cache;
 - LibreOffice uses an isolated user profile and produces a PDF from the DOCX;
-- root execution, non-empty capabilities, missing `no-new-privileges`, writable
-  root, attached network, wrong arbitrary UID, missing bounded work storage, and
-  the intended Chrome target profile fail deterministically.
+- root execution, non-empty capabilities, missing `no-new-privileges`,
+  unconfined seccomp, privileged mode, writable root, host network, wrong
+  arbitrary UID, and missing bounded work storage fail deterministically.
 
 `run-validation.sh` accepts probe-only resource controls through
 `TOOLCHAIN_MEMORY`, `TOOLCHAIN_CPUS`, `TOOLCHAIN_PIDS`,
@@ -208,24 +225,48 @@ The committed probe does not use `seccomp=unconfined`,
 by the PM; the failure remains evidence for T09 rather than an authorization to
 weaken the profile.
 
-Rootless Podman 5.4.2 reaches a different Chrome failure after the same security
-properties pass. Chrome's zygote terminates before Mermaid rendering with:
+Rootless Podman 5.4.2 reaches a different Chrome failure under its default
+seccomp profile after the same security properties pass. Chrome's zygote
+terminates before Mermaid rendering with:
 
 ```text
 Check failed: sys_chroot("/proc/self/fdinfo/") == 0
 FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc
 ```
 
-This is negative sandbox evidence, not a successful Podman seccomp or Chrome
-sandbox composition. The Podman profile does not add capabilities, enable
-networking, disable seccomp, use privileged mode, or pass any browser sandbox
-disabling flag.
+The installed containers/common 0.62.2 default profile allows `chroot` only
+when the container receives `CAP_SYS_CHROOT` and explicitly returns `EPERM`
+without it. Chromium's namespace sandbox deliberately chroots a helper into
+`/proc/self/fdinfo/` to create an empty filesystem view. The smallest observed
+runtime policy change is therefore one syscall rule: retain the complete
+runtime-default profile but allow `chroot` without adding a container
+capability. [containers/common profile](https://github.com/containers/common/blob/v0.62.2/pkg/seccomp/seccomp.json),
+[Chromium sandbox design](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/README.md),
+[Chromium chroot implementation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/services/credentials.cc)
 
-The approved direction for T09 is to design the minimum seccomp/user-namespace
-profile that keeps Chrome's sandbox active, validate it first with rootless
-Podman and then with k3s, and never use `--no-sandbox`. OpenShift validation is
-deferred, and support must not be claimed until the profile is proven on the
-target OpenShift security context.
+The committed `spikes/toolchain/chrome-seccomp.json` has SHA-256
+`bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`.
+Its upstream Debian profile has SHA-256
+`a37993729fdc03beeb0f00c5e31954a1a4412f7624d4672258ac6f5bd44a0ccb`;
+the review diff removes only the capability-conditioned `chroot` allow/deny
+pair and replaces it with one unconditional seccomp allow rule. This opens the
+syscall filter, not the kernel authorization check: the outer container still
+reports zero effective and bounding capabilities. The adjacent third-party
+notice and Apache-2.0 license preserve the profile's upstream provenance.
+
+With that profile, Mermaid renders and Chrome's `chrome://sandbox` diagnostic
+reports layer 1 `Namespace`, PID namespaces `Yes`, network namespaces `Yes`,
+Seccomp-BPF `Yes`, TSYNC `Yes`, and “adequately sandboxed.” The container also
+reports UID `1000710000`, `CapEff=0`, `CapBnd=0`, `NoNewPrivs=1`, seccomp filter
+mode, network `none`, a read-only root, the three bounded writable areas, and
+memory/CPU/PID cgroups. No `--disable-setuid-sandbox`, `--no-sandbox`, added
+capability, privileged mode, unconfined seccomp, host network, or broad root
+write is used in the positive path.
+
+This proves the minimum composition on this rootless Podman host only. k3s must
+load and validate the same portable profile before the profile can be approved
+for that runtime. OpenShift validation is deferred, and support must not be
+claimed until the profile is proven on the target OpenShift security context.
 
 ### Fonts and document conversion
 
@@ -253,9 +294,11 @@ must be measured with the T04 corpus rather than copied from the probe defaults.
 
 The spike crosses real subprocess, filesystem, font, browser, and container
 boundaries. `test-validation.sh` covers the successful Pandoc/Fontconfig/
-LibreOffice path and relevant failures: all claimed container security
-properties, absent bounded work storage, Pandoc sandbox resource omission in
-both logs and OpenXML, and Chrome sandbox rejection under the target profile.
+LibreOffice path, successful Podman Mermaid rendering and Chrome sandbox-status
+diagnostic, and relevant failures: all claimed container security properties,
+absent bounded work storage, Pandoc sandbox resource omission in both logs and
+OpenXML, Podman runtime-default Chrome rejection, and modified-profile
+rejection.
 
 There is no product user-visible or operational workflow in T00, and the final
 rootless application image is delivered by T20. Consequently no T00 test can
@@ -271,9 +314,11 @@ Podman directly through `--runtime podman`. To represent arbitrary container UID
 and GID mappings. Podman's implicit read-only-root tmpfs mounts are disabled and
 replaced by explicit bounded writable mounts for `/tmp`, `/work`, and
 `/dev/shm`; all other claimed rootless security properties are asserted inside
-the container. Both tmpfs and disk-backed document probes and every expected
-failure probe pass. The Docker 29.7.1 regression suite also passes. k3s remains
-unvalidated, and OpenShift remains deferred.
+the container. Both tmpfs and disk-backed document probes pass. The target
+probe additionally renders Mermaid and verifies Chrome's namespace and
+Seccomp-BPF layers; every expected failure probe also passes. The Docker 29.7.1
+regression suite still treats Chrome's namespace failure as safe negative
+evidence. k3s remains unvalidated, and OpenShift remains deferred.
 
 The spike does not read or change a storage contract, so standalone and
 distributed storage-profile parity is not affected by T00.
@@ -283,8 +328,8 @@ distributed storage-profile parity is not affected by T00.
 - operational ownership and implementation of the approved official-artifact,
   available-signature, locked-integrity, weekly-review, and urgent-Critical-CVE
   policy;
-- the exact minimal seccomp/user-namespace profile and its Podman/k3s proof;
-  OpenShift proof remains deferred;
+- k3s validation of the Podman-proven one-syscall seccomp delta; OpenShift proof
+  remains deferred;
 - exact official font artifacts, versions, notices, substitution order, and
   scripts that explicitly require Noto;
 - every production resource, RPO/RTO, retention, quota, antivirus, and cleanup
