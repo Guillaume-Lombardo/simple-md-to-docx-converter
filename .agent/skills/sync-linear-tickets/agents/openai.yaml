@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sync Linear tickets"
+  short_description: "Keep Linear and local tickets synchronized"
+  default_prompt: "Use $sync-linear-tickets to synchronize project work with Linear and tickets/*.md."
