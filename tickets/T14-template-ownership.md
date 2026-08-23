@@ -2,7 +2,7 @@
 ticket: T14
 linear_id: G1L-325
 linear_url: https://linear.app/g1lom/issue/G1L-325/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -24,6 +24,13 @@ Add immutable ownership, global visibility, search, preferences, fallback templa
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
+- Template ownership is immutable and derives from the authenticated user identifier.
+- Every active template is globally visible to authenticated users; mutations remain restricted to the owner or a global administrator, and the service exposes the audit boundary for administrator intervention.
+- Search is deterministic and paginated, with filters for name, description, owner, and status.
+- Each user can select one preferred active template, while a single active system fallback resolves selection when no valid preference exists.
+- Stable domain, service, and repository ports preserve ownership for later T15 versioned mutation and object-key workflows without implementing T15 history, download, ETag, replacement, restoration, or deletion behavior.
+- SQLite and PostgreSQL pass the same repository and authorization contracts, including two regular users, one administrator, relevant constraints, failures, and races.
+- T14 introduces no HTTP route, UI, or other user-visible operational workflow; final-image E2E is therefore not applicable to this ticket rather than deferred or waived.
 
 ## Dependencies
 
@@ -32,7 +39,7 @@ Add immutable ownership, global visibility, search, preferences, fallback templa
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-23: Started implementation on `feat/T14-template-ownership` from `main` at `a624407` after confirming Linear project, team, priority, objective, acceptance criteria, and dependency parity. T06 and T12 are both `Done`; T14 has no remaining dependency blocker. Scope is limited to domain and cross-profile persistence foundations for ownership, visibility, authorization, search, preferences, fallback selection, and administrator audit boundaries; T15 version/content mutation APIs and T16/T17 UI remain deferred to their own tickets.
 
 ## Synchronization
 
