@@ -18,6 +18,20 @@ To reproduce the committed resolution without changing the lock file, run:
 uv sync --locked --all-groups
 ```
 
+Start the current FastAPI shell over HTTPS behind the local or deployment TLS terminator after
+providing bootstrap credentials:
+
+```bash
+export MD_CONVERTER_INITIAL_ADMIN_USERNAME=admin
+read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
+export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
+uv run uvicorn md_converter:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+The session cookie is always `Secure`, so use an HTTPS endpoint for browser or API authentication.
+Do not commit bootstrap credentials or place production secrets in shell history; deployment
+secret injection belongs to the runtime-profile work.
+
 ## Development loop
 
 Format and inspect the project before running tests:
@@ -91,6 +105,10 @@ in `tests/test_ci_runner.py` and `tests/integration/ci`; `CI / gate` rejects a s
 heavy matrix whenever any active domain was selected. Caches are restore-only outside trusted
 pushes to `main`, including pull requests, forks, merge groups, releases, schedules, and manual
 runs.
+
+The `functional` domain is active as of T06. Application changes selected for that domain run the
+ASGI authentication workflow and the real Argon2id integration suite. Final-image E2E remains a
+visible planned domain until T20/T21 deliver the hardened rootless runtime.
 
 The Sunday 03:17 UTC schedule is provisional until T22 fixes the GitHub Actions usage budget and
 final frequency. Release-triggered CI performs validation only; image and Python publication,

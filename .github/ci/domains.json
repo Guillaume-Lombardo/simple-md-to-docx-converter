@@ -31,7 +31,17 @@
   },
   "functional": {
     "activation_ticket": "T06",
-    "status": "planned"
+    "command": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/functional",
+      "tests/integration/auth",
+      "-m",
+      "functional or integration",
+      "--no-cov"
+    ],
+    "status": "active"
   },
   "storage-distributed": {
     "activation_ticket": "T12",

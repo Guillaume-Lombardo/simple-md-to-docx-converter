@@ -1,0 +1,84 @@
+"""Integration test for a real Uvicorn TCP boundary and security adapters."""
+
+from __future__ import annotations
+
+import socket
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from threading import Thread
+
+import httpx
+import pytest
+import uvicorn
+
+from md_converter.app import create_app
+from md_converter.config import Settings
+
+
+@contextmanager
+def running_server(settings: Settings) -> Iterator[str]:
+    """Run Uvicorn on an ephemeral loopback port and always stop its thread."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(settings), log_level="error", lifespan="off")
+    )
+    thread = Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not server.started and thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not server.started:
+        server.should_exit = True
+        thread.join(timeout=5)
+        listener.close()
+        raise RuntimeError("Uvicorn did not start")
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        listener.close()
+        if thread.is_alive():
+            raise RuntimeError("Uvicorn did not stop")
+
+
+@pytest.mark.integration
+def test_real_argon2_http_session_and_logout_cycle() -> None:
+    password = "admin-" + "password"
+    settings = Settings(
+        initial_admin_username="admin",
+        initial_admin_password=password,
+    )
+    with (
+        running_server(settings) as base_url,
+        httpx.Client(base_url=base_url) as client,
+    ):
+        failure = client.post(
+            "/api/v1/login",
+            json={"username": "admin", "password": "wrong-password"},
+        )
+        assert failure.status_code == 401
+
+        login = client.post(
+            "/api/v1/login",
+            json={"username": "admin", "password": password},
+        )
+        assert login.status_code == 200
+        cookie = login.cookies.get("md_converter_session")
+        session_headers = {"Cookie": f"md_converter_session={cookie}"}
+        assert client.get("/api/v1/session", headers=session_headers).status_code == 200
+
+        logout = client.post(
+            "/api/v1/logout",
+            headers={
+                **session_headers,
+                "X-CSRF-Token": login.json()["csrf_token"],
+            },
+        )
+        assert logout.status_code == 204
+        assert client.get("/api/v1/session", headers=session_headers).status_code == 401

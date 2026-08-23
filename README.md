@@ -1,8 +1,9 @@
 # Markdown to DOCX and PDF Converter
 
 This repository contains the foundation for a service that will convert Markdown documents to
-DOCX and PDF. The product is under active development; conversion, HTTP, storage, and container
-features are not implemented yet.
+DOCX and PDF. It currently provides the FastAPI shell, local authentication, administrative local
+account management, revocable sessions, and health endpoints. Conversion, durable storage, queue,
+worker, UI, and final-container features remain under development.
 
 ## Requirements
 
@@ -49,6 +50,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `tests/`: automated tests
 - `build-constraints.txt`: hash-checked constraints exported from the build dependency group
 - `docs/architecture.md`: target architecture and component boundaries
+- `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 
