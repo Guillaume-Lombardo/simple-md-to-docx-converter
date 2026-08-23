@@ -17,8 +17,8 @@ Convert the fixed Markdown dialect to DOCX with fixed Pandoc arguments, isolated
 
 - The implementation satisfies the T07 outcome in `docs/product-specification.md`.
 - Automated tests cover all behavior introduced by this ticket.
-- Every feature in scope that crosses a real boundary includes integration coverage for its primary successful path and relevant failure behavior.
-- Every delivered user-visible or operational workflow in scope includes E2E coverage against the built container for its primary path and relevant critical behavior.
+- Every feature in scope that crosses a real boundary includes integration coverage for its primary successful path and every relevant failure behavior.
+- Every delivered user-visible or operational workflow in scope includes E2E coverage against the final rootless image for its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior.
 - Any integration or E2E exception is justified explicitly in the pull request and approved explicitly by a reviewer.
 - The canonical formatting, linting, type-checking, and applicable test commands pass.
 - Documentation and user-facing text are in English.

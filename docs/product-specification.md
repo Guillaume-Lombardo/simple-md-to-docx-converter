@@ -199,7 +199,7 @@ Light draft checks include formatting, lint, types, unit tests, coverage, and ch
 - Ownership and administrator permissions hold across API and UI.
 - Remote resources, unsafe archives, hostile SVG, unsafe subprocess input, and sensitive logs are prevented.
 - Required checks, 90% coverage thresholds, independent review, and English-only repository artifacts are enforced.
-- Every applicable real-boundary feature has integration coverage, and every delivered user-visible or operational workflow has E2E coverage against the built container.
+- Every applicable real-boundary feature has integration coverage for its primary successful path and every relevant failure behavior, and every delivered user-visible or operational workflow has E2E coverage against the final rootless image for its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior.
 
 ## 13. Delivery tickets
 
