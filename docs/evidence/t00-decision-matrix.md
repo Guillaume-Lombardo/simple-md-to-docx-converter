@@ -4,11 +4,12 @@
 
 This matrix separates reproducible facts from the product decisions approved on August 23, 2026.
 It records the approved artifact policy, browser-sandbox direction, Markdown dialect, font set, and
-vulnerability cadence without turning unexecuted k3s or OpenShift work into evidence.
+vulnerability cadence without turning the deferred OpenShift work into evidence.
 
 All Web sources are primary publisher or platform sources retrieved on August 23, 2026. Local
-observations used Docker 29.7.1, rootless Podman 5.4.2, and the committed T00 probe. Podman ran as
-host UID 1000 on Debian with `runc` and cgroup v2. No k3s or OpenShift result is claimed.
+observations used Docker 29.7.1, rootless Podman 5.4.2, local k3s `v1.35.5+k3s1`, and the committed
+T00 probe. Podman ran as host UID 1000 on Debian with `runc` and cgroup v2. The k3s proof used
+containerd `2.2.3-k3s1` on the same Debian host. No OpenShift result is claimed.
 
 ## Artifact and supply-chain matrix
 
@@ -37,7 +38,7 @@ seccomp-BPF layer. `--no-sandbox` disables all sandboxing for tests and is not r
 
 | Alternative | Evidence and constraint fit | Status |
 |---|---|---|
-| Chromium user-namespace sandbox with its seccomp-BPF sandbox | Rootless Podman succeeds with the containers/common 0.62.2 default profile changed only to allow `chroot` without a container capability. Chrome reports namespace, PID/network namespace, Seccomp-BPF, TSYNC, and adequate-sandbox status while the outer container retains zero capabilities. Docker runtime-default seccomp still denies Chrome's namespace creation. OpenShift supports narrow custom seccomp profiles, but the profile remains untested on target CRI-O/OpenShift. [containers/common profile](https://github.com/containers/common/blob/v0.62.2/pkg/seccomp/seccomp.json), [Chromium implementation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/services/credentials.cc), [OpenShift custom seccomp](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/seccomp-profiles) | Podman composition proven; validate the same portable profile on k3s next. OpenShift proof is deferred. |
+| Chromium user-namespace sandbox with its seccomp-BPF sandbox | Rootless Podman and local k3s succeed with the containers/common 0.62.2 default profile changed only to allow `chroot` without a container capability. Chrome reports namespace, PID/network namespace, Seccomp-BPF, TSYNC, and adequate-sandbox status while the outer container retains zero capabilities. Docker and k3s runtime-default seccomp still deny Chrome's namespace creation. OpenShift supports narrow custom seccomp profiles, but the profile remains untested on target CRI-O/OpenShift. [containers/common profile](https://github.com/containers/common/blob/v0.62.2/pkg/seccomp/seccomp.json), [Chromium implementation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/services/credentials.cc), [OpenShift custom seccomp](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/seccomp-profiles) | Podman and k3s compositions proven; OpenShift proof is deferred. |
 | OpenShift pod user namespace (`hostUsers: false`) combined with Chromium's sandbox | OpenShift 4.20 documents `restricted-v3`, which forces a pod user namespace while retaining dropped capabilities, runtime-default seccomp, and no privilege escalation. Kubernetes documents runtime/filesystem prerequisites. It is unproven that Chrome 151 can use the required nested namespace operations under this profile and arbitrary application UID. [OpenShift SCCs](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/authentication_and_authorization/managing-pod-security-policies), [Kubernetes user namespaces](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/) | Supported platform primitive, unproven composition; target-cluster proof required. |
 | Chromium setuid sandbox | The helper is root-owned mode 4755. `no-new-privileges` prevents privilege gain, and the profile drops capabilities. The probe fails with the expected setuid/namespace errors. | Incompatible with fixed constraints; negative evidence only. |
 | Browser in a separately isolated workload/runtime | Could preserve a sandboxed browser while keeping the worker profile strict, but changes workspace transfer, networking, cancellation, and accounting. It must still use a supported Chrome sandbox. | Architectural fallback only; PM decision and separate threat model required. |
@@ -55,6 +56,13 @@ checksum-locked and renders Mermaid while Chrome reports its namespace and Secco
 active. Docker continues to fail earlier with namespace creation denied by `EPERM`. The positive
 Podman path uses no `--disable-setuid-sandbox`, `--no-sandbox`, `seccomp=unconfined`, added
 capability, privileged mode, host network, or broad writable root.
+
+Local k3s loads the same checksum-locked profile as a kubelet Localhost profile. The successful
+pod uses UID `1000710000`, a read-only root, zero capabilities, `no-new-privileges`, bounded
+memory-backed `/tmp` and `/dev/shm`, disk-backed `/work`, explicit CPU/memory/ephemeral-storage
+limits, and a selected default-deny ingress/egress NetworkPolicy. A reachable unselected control
+pod proves that the network denial is attributable to the policy. Runtime-default Chrome fails at
+namespace creation, and a nonexistent Localhost profile fails before container creation.
 
 ## Pandoc 3.10.2 CommonMark compatibility
 
@@ -109,7 +117,8 @@ order with golden-layout evidence.
 - Podman runtime-default seccomp still reports the zygote `sys_chroot` fatal. The checksum-locked
   one-syscall delta renders Mermaid and Chrome reports namespace, PID/network namespace,
   Seccomp-BPF, TSYNC, and adequate-sandbox status with outer capabilities still empty. Docker
-  retains its namespace `EPERM` failure. k3s validation and deferred OpenShift proof remain
-  outstanding.
+  retains its namespace `EPERM` failure. Local k3s renders Mermaid with the same sandbox layers,
+  while its runtime-default variant retains the namespace `EPERM` failure. Deferred OpenShift
+  proof remains outstanding.
 - Production limits, RPO/RTO, retention, quotas, antivirus, cleanup, exact font artifacts and
   substitutions, and explicit Noto script coverage remain configurable or unresolved.

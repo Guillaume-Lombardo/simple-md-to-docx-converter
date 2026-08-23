@@ -21,6 +21,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and Linear G1L-325 are fully synchronized as `Done`.
 - PR #28 delivered the approved T00 scope and synchronized orchestration and ticket state as squash
   `b2e5b3965ad05448c56d6fd857191489f8a94173`; its main validation passed the protected gate.
+- The PM-authorized local k3s T00 validation passed with the checksum-locked Chrome seccomp profile
+  and fail-closed controls. The exact namespace, Localhost profile, and imported image were removed
+  and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
 
 ## Approved Product Decisions
 
@@ -59,8 +62,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Blockers and Risks
 
-- Chrome/Mermaid still requires k3s validation. OpenShift compatibility cannot be claimed until the
-  deferred target proof runs.
+- Chrome/Mermaid is proven on rootless Podman and local k3s. OpenShift compatibility cannot be
+  claimed until the deferred target proof runs.
 - Exact font artifacts/substitution order and explicit Noto scripts remain T10 work.
 - Production limits, RPO/RTO, retention, quotas, antivirus, and cleanup remain configurable T18
   work. GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget remain T22 work.
@@ -72,9 +75,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Local k3s `v1.35.5+k3s1` is installed but stopped. Await PM authorization before starting,
-   configuring, or accessing the cluster; once authorized, continue T00 with the k3s proof while
-   keeping OpenShift deferred and the browser sandbox intact.
+1. Independently review the completed T00 k3s proof, publish it only after explicit approval, and
+   verify it on `main`; then synchronize T00/Linear and unblock T04. OpenShift validation remains
+   deferred.
 2. Re-read Linear and select only a ready ticket whose dependencies are verified `Done`; T04 still
    waits for T00 and T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
@@ -103,4 +106,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
+- T00 local k3s `v1.35.5+k3s1` passes the target Chrome/Mermaid, network-policy, security, and
+  fail-closed probes with containerd `2.2.3-k3s1`. The exact test namespace, Localhost profile, and
+  imported image were removed and verified absent after the run.
+- The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection
+  passes 175 tests at 98% coverage; both canonical Pytest commands report the same 10 PostgreSQL/
+  RustFS integration failures because this worktree has no test-service environment variables.
 - Final product validation has not run; the product is incomplete.
