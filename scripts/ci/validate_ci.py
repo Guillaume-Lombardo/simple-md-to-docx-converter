@@ -39,10 +39,19 @@ def validate_workflow_text(text: str) -> list[str]:
         'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then',
         '[[ "$HEAVY_RESULT" == "skipped" ]]',
         '[[ "$HEAVY_RESULT" == "success" ]]',
+        "uv run pytest -m unit",
+        "--cov-report=json:coverage.json",
+        "python -m scripts.ci.check_branch_coverage",
+        "--coverage coverage.json --fail-under 90",
+        "python -m scripts.ci.check_changed_coverage",
+        "github.event_name == 'pull_request' || github.event_name == 'merge_group'",
+        "--source-root src/md_converter --fail-under 90",
     )
-    for fragment in required_fragments:
-        if fragment not in text:
-            errors.append(f"missing required workflow fragment: {fragment!r}")
+    errors.extend(
+        f"missing required workflow fragment: {fragment!r}"
+        for fragment in required_fragments
+        if fragment not in text
+    )
     if text.count("name: CI / gate") != 1:
         errors.append("workflow must define exactly one CI / gate check")
 
@@ -52,9 +61,11 @@ def validate_workflow_text(text: str) -> list[str]:
         "--privileged",
         "permissions: write",
     )
-    for fragment in forbidden:
-        if fragment in text:
-            errors.append(f"forbidden workflow fragment: {fragment!r}")
+    errors.extend(
+        f"forbidden workflow fragment: {fragment!r}"
+        for fragment in forbidden
+        if fragment in text
+    )
     if re.search(r"^\s+[a-z][a-z-]*:\s+write(?:\s|$)", text, re.MULTILINE):
         errors.append("write permission is forbidden in the CI workflow")
 
@@ -74,9 +85,11 @@ def validate_workflow_text(text: str) -> list[str]:
         errors.append(
             "every action reference must be pinned to a lowercase hexadecimal revision"
         )
-    for revision in references:
-        if FULL_SHA.fullmatch(revision) is None:
-            errors.append(f"action revision is not a full commit SHA: {revision!r}")
+    errors.extend(
+        f"action revision is not a full commit SHA: {revision!r}"
+        for revision in references
+        if FULL_SHA.fullmatch(revision) is None
+    )
 
     jobs_text = text.split("\njobs:\n", maxsplit=1)[-1]
     job_count = sum(

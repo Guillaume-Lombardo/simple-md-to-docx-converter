@@ -9,10 +9,14 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- T01, T02, and T03 are Done and verified on `main` at `4c36f4f`. This closure branch records the
-  completed T02/T03 evidence; Linear intentionally remains In Progress until the mirror is merged.
-- Linear project status: In Progress. T00 and T04 remain In Progress; T05 is the next ready backlog
-  item after T02/T03 closure. Remaining tickets are in Backlog.
+- T01, T02, and T03 are Done and verified on `main` at `58d27a1`.
+- Linear project status: In Progress. T00, T04, and T05 are In Progress; remaining tickets are in
+  Backlog. T05 started on isolated branch `chore/T05-python-quality` from `58d27a1` after its T01
+  and T03 dependencies were verified `Done` in Linear and the repository mirrors.
+- T05 is implemented and locally validated: Python 3.14 Ruff/ty policy, independent blocking 90%
+  overall, branch-only, and changed-line coverage, strict Coverage.py schema validation,
+  pytest-mock enforcement, and real Git/Ruff boundary tests are ready for independent review. It
+  remains `In Progress` pending hosted CI, merge, and verification on `main`.
 - The product is not functional yet: API, conversion, storage, queue, UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
   turn was interrupted before any worker started.
@@ -46,12 +50,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Independently review and merge this T02/T03 closure mirror, then mark G1L-313 and G1L-312 Done
-   and re-fetch both issues for final parity.
-2. Start T05, the next ready foundation ticket, without waiting for unresolved T00 engine work.
-3. Before each task, verify repository and Linear state; delegate implementation and independent
+1. Independently review T05, then publish, verify hosted CI, squash-merge, and verify `main` before
+   marking G1L-315 `Done`.
+2. Before each task, verify repository and Linear state; delegate implementation and independent
    review to separate workers.
-4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
+3. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
    current state.
 
 ## Validation
@@ -62,6 +65,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   the active CI-infrastructure subprocess suite, lock and workflow security validation, and
   checksum-verified actionlint with ShellCheck. PR and main Actions runs independently confirm the
   hosted path and GitHub Actions app `15368`.
+- T05 local validation passes all canonical checks, 71 default/full tests, 100% overall application
+  and valid zero-branch coverage, 64 unit/light tests, branch-only 90%/sub-90/malformed boundaries,
+  changed-line Git 90%/80%/missing-ref/schema boundaries, real Ruff allow/deny import boundaries,
+  lock and CI policy validation, checksum-verified actionlint v1.7.12 with ShellCheck, and clean
+  diffs. Hosted PR/main verification is pending publication.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.

@@ -78,6 +78,7 @@ jobs:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -103,8 +104,20 @@ jobs:
       - name: Run unit tests with branch coverage
         run: >-
           uv run pytest -m unit
-          --cov=md_converter --cov=scripts.ci --cov-branch
-          --cov-report=term-missing --cov-fail-under=90
+          --cov-report=json:coverage.json
+      - name: Enforce application branch-only coverage
+        run: >-
+          uv run python -m scripts.ci.check_branch_coverage
+          --coverage coverage.json --fail-under 90
+      - name: Enforce changed application line coverage
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: >-
+          uv run python -m scripts.ci.check_changed_coverage
+          --base "$BASE_SHA" --head "$HEAD_SHA"
+          --coverage coverage.json --source-root src/md_converter --fail-under 90
       - name: Run cheap CI security checks
         run: |
           uv lock --check

@@ -10,8 +10,10 @@
       "run",
       "pytest",
       "tests/test_ci_runner.py",
+      "tests/integration/ci",
       "-m",
-      "integration"
+      "integration",
+      "--no-cov"
     ],
     "status": "active"
   },

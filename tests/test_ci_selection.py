@@ -59,6 +59,7 @@ def test_root_containerfile_selects_container_domain() -> None:
         "scripts/ci/run_domain.py",
         "scripts/ci/select_domains.py",
         "tests/test_ci_runner.py",
+        "tests/test_python_quality.py",
         "tests/integration/ci/test_gate.py",
     ],
 )
@@ -82,8 +83,10 @@ def test_committed_ci_infrastructure_domain_is_active_and_runnable() -> None:
         "run",
         "pytest",
         "tests/test_ci_runner.py",
+        "tests/integration/ci",
         "-m",
         "integration",
+        "--no-cov",
     ]
 
 
