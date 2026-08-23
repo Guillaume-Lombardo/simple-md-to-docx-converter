@@ -2,7 +2,7 @@
 ticket: T05
 linear_id: G1L-315
 linear_url: https://linear.app/g1lom/issue/G1L-315/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -71,9 +71,29 @@ Configure Ruff, ty, Pytest, pytest-cov, the pytest-mock restriction, 90% thresho
   checksum-verified actionlint v1.7.12 with ShellCheck, and `git diff --check` all pass.
 - 2026-08-23: T05 changes repository quality and CI policy rather than storage behavior, product
   runtime, or a final application-image workflow. Storage-profile parity, rootless validation, and
-  final-image E2E are therefore not applicable; independent review must confirm this assessment.
-  Hosted pull-request and main-run verification remain pending publication, so T05 stays
-  `In Progress` until the reviewed change is verified on `main`.
+  final-image E2E are therefore not applicable; independent review accepted this assessment.
+- 2026-08-23: Independently approved PR
+  [#14](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/14), exact head
+  `34f4d7c877985b2e7760e0a992c53475b4e79893`, passed hosted pull-request run
+  [32646636269](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/32646636269):
+  `CI / detect domains` (`97211788589`), `CI / light` (`97211788812`),
+  `CI / affected domains` (`97211802774`), non-skipped `CI / ci-infrastructure`
+  (`97211802785`), and `CI / gate` (`97211839003`) all succeeded.
+- 2026-08-23: PR #14 was squash-merged as
+  `4b9372517f83f052f493d999165e1e7902328b1d`; the approved head and squash trees match exactly.
+  Main push run
+  [32646773360](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/32646773360)
+  succeeded on that exact SHA with `CI / detect domains` (`97212125601`), `CI / light`
+  (`97212125725`), non-skipped `CI / ci-infrastructure` (`97212141165`),
+  `CI / affected domains` (`97212141183`), and the strict `CI / gate` (`97212168599`) from
+  GitHub Actions app `15368`.
+- 2026-08-23: Every T05 acceptance criterion is verified on `main`; the repository quality gates
+  are delivered and no T05 limitation remains. Linear intentionally stays `In Progress` until this
+  closure mirror is independently reviewed, merged, and re-read from `main`.
+- 2026-08-23: Closure validation repeated locked synchronization, Ruff formatting and linting,
+  `ty`, both 71-test canonical Pytest suites at 100% application coverage, the seven-test real
+  CI-infrastructure integration selection, `uv lock --check`, the CI validator, and clean diffs;
+  every check passed.
 
 ## Synchronization
 
