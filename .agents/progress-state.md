@@ -19,7 +19,7 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   deferred.
 - PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
   fallback foundations as squash `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. The local ticket
-  is `Done`; Linear G1L-325 still requires its final post-main synchronization.
+  and Linear G1L-325 are fully synchronized as `Done`.
 
 ## Approved Product Decisions
 
@@ -90,8 +90,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   `32669621800` passed functional, standalone-storage, distributed-storage, and protected-gate
   jobs. T14 final-image E2E is genuinely not applicable; the existing Starlette warning is
   non-blocking.
-- Linear G1L-325 was fetched by identifier and still reports `In Progress` with the reviewed T14
-  scope and pre-merge validation. Its final post-main `Done` synchronization remains pending.
+- Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
+  delivery entry matching the local `Done` ticket.
 - Linear G1L-310 was fetched by identifier and matches the local title, project, team, priority,
   status, acceptance criteria, dependencies, and all local progress entries, including PR #26 and
   the approved scope allocations and exclusions. It remains `In Progress`.
