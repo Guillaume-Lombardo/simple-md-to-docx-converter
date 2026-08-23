@@ -2,7 +2,7 @@
 ticket: T03
 linear_id: G1L-312
 linear_url: https://linear.app/g1lom/issue/G1L-312/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -68,11 +68,34 @@ Implement selective GitHub Actions workflows, merge_group handling, caching, lea
   made repository skills discoverable under `.agents/skills/`. Re-read the updated instructions and
   skills; T03 scope and acceptance criteria are unchanged. Repeated every canonical and targeted
   validation with the same 39 passing tests and 98.21% unit/light branch coverage.
-- 2026-08-23: GitHub-hosted execution, the first observed `CI / gate` check, and its GitHub Actions
-  application identity remain intentionally unverified until the branch is independently reviewed
-  and published. No application runtime or final image was introduced, so final-image E2E coverage
-  is not applicable; the reviewer must approve this applicability assessment. Planned heavy suites
-  remain explicit bootstrap gaps, not passed tests.
+- 2026-08-23: Independently reviewed PR
+  [#12](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/12), exact head
+  `89912bc21d50f82791704d0ec1e18a14f4b4183f`, was squash-merged as
+  `4c36f4f65aef0f1008f7b0bd4f5fc22237387536`; the approved head and squash trees match exactly.
+- 2026-08-23: PR run
+  [32643329078](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/32643329078)
+  passed all five jobs on the approved head: `CI / detect domains` (`97203688829`), `CI / light`
+  (`97203688924`), `CI / affected domains` (`97203710557`), non-skipped
+  `CI / ci-infrastructure` (`97203710582`), and exactly one `CI / gate` (`97203742700`). Every check
+  came from `github-actions` app `15368`.
+- 2026-08-23: Main push run
+  [32644131962](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/32644131962)
+  repeated the full selected CI-infrastructure path successfully on squash SHA `4c36f4f`, including
+  the non-skipped integration job (`97205642792`) and single gate (`97205683348`). Live protection
+  now requires that exact app-bound gate strictly.
+- 2026-08-23: Local and hosted validation covers formatting, linting, types, 39 default/full tests,
+  98.21% unit/light branch coverage, both real subprocess integration outcomes, lock consistency,
+  the CI security validator, checksum-verified actionlint v1.7.12 with ShellCheck, and clean diffs.
+  GitHub API and Actions verification covers the hosted operational boundary.
+- 2026-08-23: T03 introduces repository CI rather than application behavior or a final application
+  image, so final-image E2E coverage is not applicable; independent review accepted this assessment.
+  Planned product domains are intentional activation points owned by their recorded downstream
+  tickets, not missing T03 work. Every T03 acceptance criterion is verified and no T03 limitation
+  remains.
+- 2026-08-23: The closure mirror repeated locked synchronization, Ruff formatting and linting,
+  `ty`, 39 default and full tests, 98.21% unit/light branch coverage, both real subprocess
+  integration outcomes, `uv lock --check`, the CI security validator, checksum-verified actionlint
+  v1.7.12 with ShellCheck, and `git diff --check`; every check passed.
 
 ## Synchronization
 
