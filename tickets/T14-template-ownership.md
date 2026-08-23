@@ -2,7 +2,7 @@
 ticket: T14
 linear_id: G1L-325
 linear_url: https://linear.app/g1lom/issue/G1L-325/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -44,6 +44,7 @@ Add immutable ownership, global visibility, search, preferences, fallback templa
 - 2026-08-23: Final local validation passes `uv sync --all-groups`, `uv lock --check`, Ruff format/lint, `ty`, both 184-test canonical Pytest commands at 98.30% application coverage, the 143-test unit slice at 95.64% application and 93.51% branch-only coverage, and 98.96% changed executable application-line coverage. Exact functional, standalone-storage, and distributed-storage domains pass 15, 9, and 10 tests respectively with real PostgreSQL and RustFS; repository CI validation, checksum-verified actionlint v1.7.12, the hash-constrained sdist/wheel build, and `git diff --check` also pass. The only warning is Starlette's existing non-blocking TestClient/httpx2 deprecation notice.
 - 2026-08-23: Independent-review corrections add an actor-based creation input with no owner field, force every created identity to derive its immutable owner from the authenticated actor, and exercise forged-owner resistance plus the complete two-user-and-administrator service authorization and selection contract over both real SQLite and PostgreSQL repositories.
 - 2026-08-23: Correction validation passes the focused unit/SQLite tests (4 tests), the real PostgreSQL template contract (1 test), Ruff formatting and linting, `ty`, the 144-test unit slice at 95.67% application coverage, and both 185-test canonical Pytest commands at 98.31% application coverage with ephemeral PostgreSQL and RustFS services matching CI. Independent re-review found no findings, confirmed 100% changed-line coverage (299/299), and approved publication. The existing Starlette TestClient/httpx2 deprecation warning remains non-blocking.
+- 2026-08-24: GitHub PR #27 exact rebased head `22fcf501ca5e0079e27cd46711fc499cf92ea7e3` passed PR CI run `32669541287`, retained independent approval with no findings and 100% changed-line coverage (299/299), and was squash-merged into `main` as `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. Exact-main run `32669621800` passed the functional, standalone-storage, distributed-storage, and protected-gate jobs. T14 is therefore verified `Done` on `main`. Its only remaining observation is the existing non-blocking Starlette TestClient/httpx2 deprecation warning; final-image E2E is genuinely not applicable because T14 adds no route, UI, or user-visible operational workflow.
 
 ## Synchronization
 
