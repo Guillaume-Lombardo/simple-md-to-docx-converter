@@ -36,12 +36,22 @@
 ## Development workflow
 
 1. Read this file, the product specification, the README, and any applicable contribution instructions.
-2. Inspect `git status --short --branch` and preserve unrelated work.
-3. Identify the relevant ticket dependencies and acceptance criteria before editing.
-4. Keep changes scoped and preserve the architecture and tools selected by the specification.
-5. Add or update tests for every behavioral change.
-6. Run targeted checks first, then every applicable canonical check.
-7. Report every skipped command, unavailable dependency, failed check, and unverified acceptance criterion.
+2. Read the matching `tickets/Txx-*.md` file and fetch its Linear issue by the recorded `linear_id`.
+3. Inspect `git status --short --branch` and preserve unrelated work.
+4. Identify the relevant ticket dependencies and acceptance criteria before editing.
+5. Synchronize status, scope, acceptance criteria, dependencies, and progress between Linear and the local ticket before and after implementation.
+6. Keep changes scoped and preserve the architecture and tools selected by the specification.
+7. Add or update tests for every behavioral change.
+8. Run targeted checks first, then every applicable canonical check.
+9. Report every skipped command, unavailable dependency, failed check, and unverified acceptance criterion.
+
+## Project tracking
+
+- Track the project in [Linear](https://linear.app/g1lom/project/markdown-to-docx-and-pdf-converter-3724edb949f9).
+- Mirror every Linear issue in `tickets/Txx-<slug>.md`; use the recorded `linear_id` for synchronization.
+- Linear is authoritative for operational status and coordination. Ticket files are authoritative for repository-reviewed scope, acceptance criteria, dependencies, and durable progress notes.
+- Use `.agent/skills/sync-linear-tickets/SKILL.md` whenever project work is selected, started, updated, blocked, completed, split, or added.
+- Mark a ticket `Done` only after its change is verified on `main`.
 
 ## Tests and external engines
 
