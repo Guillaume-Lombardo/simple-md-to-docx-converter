@@ -9,8 +9,8 @@ dependency group:
 uv sync --all-groups
 ```
 
-The `.python-version` file selects Python 3.14. The `requires-python` constraint prevents accidental
-use of a different minor version, and `uv.lock` records the complete resolution.
+The `.python-version` file requests Python 3.14. The `requires-python` constraint rejects a different
+minor version, and `uv.lock` records the complete project and dependency-group resolution.
 
 To reproduce the committed resolution without changing the lock file, run:
 
@@ -48,6 +48,22 @@ integration, and end-to-end tests remain included in the default command when th
 
 Use `uv add` to add a runtime dependency and `uv add --dev` to add a development dependency. Review
 and commit both `pyproject.toml` and `uv.lock`. Do not edit resolved versions in `uv.lock` manually.
+
+The PEP 517 backend is pinned in `build-system`, recorded in the `build` dependency group, and
+constrained with its transitive dependencies in `tool.uv`. After changing any build dependency,
+refresh the lock and regenerate the hash-checked build constraints:
+
+```bash
+uv lock
+uv export --locked --only-group build --no-emit-project \
+  --format requirements.txt --no-annotate --output-file build-constraints.txt
+```
+
+Build the source and wheel distributions in isolated build environments constrained by that file:
+
+```bash
+uv build --build-constraint build-constraints.txt --require-hashes
+```
 
 ## External engines
 

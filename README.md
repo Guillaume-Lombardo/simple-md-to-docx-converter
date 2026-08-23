@@ -30,13 +30,19 @@ uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_
 uv run pytest
 ```
 
-The lock file is committed. Use `uv sync --locked --all-groups` when verifying that dependency
-resolution has not changed.
+The lock file is committed. Use `uv sync --locked --all-groups` to require the committed dependency
+resolution. Build dependencies are a locked project group and are also constrained explicitly for
+isolated builds. Build distributions with the generated, hash-checked constraints:
+
+```bash
+uv build --build-constraint build-constraints.txt --require-hashes
+```
 
 ## Repository map
 
-- `src/md_converter_server/`: installable Python package
+- `src/md_converter/`: installable Python package
 - `tests/`: automated tests
+- `build-constraints.txt`: hash-checked constraints exported from the build dependency group
 - `docs/architecture.md`: target architecture and component boundaries
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors

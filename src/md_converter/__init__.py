@@ -1,4 +1,4 @@
-"""Markdown to DOCX and PDF converter server."""
+"""Markdown to DOCX and PDF converter."""
 
 __version__ = "0.1.0"
 

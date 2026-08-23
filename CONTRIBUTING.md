@@ -26,7 +26,8 @@ uv sync --all-groups
 ```
 
 Do not use `pip`, Poetry, Pipenv, or a manually managed virtual environment. Add or remove Python
-dependencies with `uv` and commit the resulting `uv.lock` update.
+dependencies with `uv` and commit the resulting `uv.lock` update. When the build group changes,
+regenerate `build-constraints.txt` using the command in the local development guide.
 
 ## Canonical checks
 
