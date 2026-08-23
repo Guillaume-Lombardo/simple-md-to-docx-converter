@@ -28,7 +28,7 @@ gh pr merge --help
 ## 2. Select branches
 
 1. Capture the target branch from `defaultBranchRef`.
-2. If the current branch is the target, create a short `codex/<issue>-<subject>` branch unless the repository defines another convention.
+2. If the current branch is the target, create a short `<type>/<issue>-<subject>` branch using the repository's allowed Conventional Commit types. Never include `codex`, an agent name, or an automation-tool name in the branch name.
 3. Keep an existing work branch only when it clearly matches the request.
 4. Capture exact source and target names. Reject an empty, identical, protected, or unexpected source branch.
 5. Check that proposed local and remote branches do not already exist in an ambiguous state.

@@ -58,7 +58,8 @@
 
 - Follow trunk-based development: `main` is the only long-lived branch; all work uses a short-lived branch and a pull request.
 - Never push directly to `main`.
-- Name agent branches `codex/<issue>-<subject>`. For human-created branches, use a short Conventional Commit type such as `feat/<subject>`, `fix/<subject>`, `docs/<subject>`, or `chore/<subject>`; use `chore`, never `chores`.
+- Branch names must never contain `codex`, an agent name, or an automation-tool name.
+- Name every branch with a short Conventional Commit type and subject, such as `feat/<issue>-<subject>`, `fix/<issue>-<subject>`, `docs/<issue>-<subject>`, or `chore/<issue>-<subject>`; use `chore`, never `chores`.
 - Keep pull requests cohesive and reviewable. Use squash merge only after required checks and an independent review.
 - Before any push or pull-request publication, present the branch, changed files, concise diff summary, checks run, and known limitations, then obtain explicit approval.
 - Never force-push, merge, delete a branch, or bypass a protection without explicit approval.
