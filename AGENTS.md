@@ -50,7 +50,7 @@
 - Track the project in [Linear](https://linear.app/g1lom/project/markdown-to-docx-and-pdf-converter-3724edb949f9).
 - Mirror every Linear issue in `tickets/Txx-<slug>.md`; use the recorded `linear_id` for synchronization.
 - Linear is authoritative for operational status and coordination. Ticket files are authoritative for repository-reviewed scope, acceptance criteria, dependencies, and durable progress notes.
-- Use `.agent/skills/sync-linear-tickets/SKILL.md` whenever project work is selected, started, updated, blocked, completed, split, or added.
+- Use `.agents/skills/sync-linear-tickets/SKILL.md` whenever project work is selected, started, updated, blocked, completed, split, or added.
 - Mark a ticket `Done` only after its change is verified on `main`.
 
 ## Tests and external engines
@@ -85,5 +85,5 @@
 
 ## Local notes
 
-- `.agent/local-environment.md` is machine-specific and ignored by Git. Keep it in English and store only stable, non-sensitive environment notes.
+- `.agents/local-environment.md` is machine-specific and ignored by Git. Keep it in English and store only stable, non-sensitive environment notes.
 - Never store secrets, tokens, credentials, or document data in local notes.
