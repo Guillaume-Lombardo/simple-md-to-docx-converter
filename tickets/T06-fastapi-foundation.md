@@ -85,6 +85,10 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   median ratio of at most 1.6. A separate nine-sample measurement on this machine produced medians
   of 29.462 ms current-wrong, 29.866 ms unknown, 29.653 ms inactive, 29.463 ms legacy-wrong, and
   29.782 ms malformed (`max/min=1.014`). No wall-clock sleep or secret logging was introduced.
+- 2026-08-23: Final timing-fix light evidence passes 101/101 unit tests with 97.28% application,
+  93.94% branch (62/66), and 97.73% changed-application-line coverage (473/484). Both canonical
+  suites pass 122/122 at 98.73% application coverage, the targeted work-profile/race set passes
+  24/24, and the non-skipped functional/Argon2id/real-HTTP domain passes 14/14.
 
 ## Synchronization
 

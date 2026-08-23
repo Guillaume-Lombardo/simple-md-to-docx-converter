@@ -92,8 +92,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - The last T06 timing re-review finding is implemented: all failed authentication paths have two
   structurally counted current Argon2 work units, and nine-sample real medians range from 29.462 to
   29.866 ms (`max/min=1.014`) without sleeps. Targeted tests pass 24/24, the functional domain
-  passes 14/14, and both canonical suites pass 122/122 at 98.73% application coverage; exact
-  post-commit light branch and changed-line evidence remains to be recorded.
+  passes 14/14, and both canonical suites pass 122/122 at 98.73% application coverage. Exact light
+  evidence passes 101/101 at 97.28% application, 93.94% branch, and 97.73% changed-line coverage.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
