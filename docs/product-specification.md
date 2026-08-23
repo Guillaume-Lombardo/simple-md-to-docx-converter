@@ -235,7 +235,7 @@ Before the first public release, the project manager must decide the public pack
 | T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `md-converter` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
 
-Recommended delivery order: risk spikes (T00) in parallel with the autonomous foundation (T01–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Parameters to determine during T00 and T04
 
