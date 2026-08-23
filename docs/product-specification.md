@@ -300,16 +300,21 @@ Before the first public release, the project manager must decide the public pack
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
 
-## 14. Parameters to determine during T00 and T04
+## 14. Deferred decisions and initial-scope exclusions
 
 - Exact UBI 9 Python 3.14 image digest and availability of Chromium, LibreOffice, and Pandoc from approved build sources.
-- OpenShift validation of the approved Chromium sandbox strategy and final target security context.
-- Exact official font artifacts, versions, notices, Fontconfig substitution details, and the scripts
-  that explicitly require Noto coverage.
-- Maximum upload/decompressed size, files, images, diagrams, active jobs, queue depth, worker duration, memory, and ephemeral storage.
-- RPO/RTO; source/result, template-version, and audit retention; quotas; antivirus integration; and
-  cleanup schedule. Keep these values configurable until approved.
-- GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
-- PDF/A and Word/PDF table-of-contents support.
+- Validate the approved Chromium sandbox strategy on k3s after the rootless Podman proof. OpenShift
+  validation and the final target security context remain deferred and are required before claiming
+  OpenShift compatibility.
+- T10 owns the exact official font artifacts, versions, notices, Fontconfig substitution details,
+  and the scripts that explicitly require Noto coverage. The approved font families in section 2
+  remain fixed while these implementation details are deferred.
+- T18 owns maximum upload and decompressed sizes; file, image, and diagram counts; active-job and
+  queue-depth limits; worker duration, memory, and ephemeral storage; RPO/RTO; source/result,
+  template-version, and audit retention; quotas; antivirus integration; and cleanup schedules.
+  Keep these production values configurable until T18 records their approval.
+- T22 owns GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
+- PDF/A output and automatic Word or PDF table-of-contents generation are outside the initial
+  product scope. Adding either capability requires separately approved future scope.
 
-Do not silently resolve these parameters in implementation work.
+Do not silently resolve deferred parameters in unrelated implementation work.
