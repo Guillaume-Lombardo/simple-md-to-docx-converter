@@ -1,0 +1,99 @@
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+FROM ${BASE_IMAGE}
+
+USER 0
+
+ARG PANDOC_VERSION=3.10.2
+ARG PANDOC_SHA256=c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a
+ARG CHROME_VERSION=151.0.7922.173-1
+ARG CHROME_SHA256=2899353cad3732b8e3a88e76996c340e047d8729ea1b881fdfdd21e0e3baefa5
+ARG LIBREOFFICE_VERSION=26.2.5
+ARG LIBREOFFICE_SHA256=f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
+
+RUN dnf install -y \
+        curl-minimal \
+        dejavu-sans-fonts \
+        dejavu-sans-mono-fonts \
+        dejavu-serif-fonts \
+        findutils \
+        fontconfig \
+        liberation-mono-fonts \
+        alsa-lib \
+        at-spi2-atk \
+        at-spi2-core \
+        atk \
+        cups-libs \
+        libXcomposite \
+        libXdamage \
+        libXfixes \
+        libXrandr \
+        libxkbcommon \
+        mesa-libgbm \
+        nspr \
+        nss \
+        pango \
+        tar \
+        unzip \
+    && dnf clean all
+
+RUN curl --fail --location --silent --show-error \
+        "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" \
+        --output /tmp/pandoc.tar.gz \
+    && echo "${PANDOC_SHA256}  /tmp/pandoc.tar.gz" | sha256sum --check --strict \
+    && tar --extract --gzip --file /tmp/pandoc.tar.gz --strip-components=1 --directory /usr/local \
+    && rm /tmp/pandoc.tar.gz
+
+RUN curl --fail --location --silent --show-error \
+        "https://dl.google.com/linux/chrome/rpm/stable/x86_64/google-chrome-stable-${CHROME_VERSION}.x86_64.rpm" \
+        --output /tmp/google-chrome.rpm \
+    && echo "${CHROME_SHA256}  /tmp/google-chrome.rpm" | sha256sum --check --strict \
+    && rpm --install --nodeps --noscripts /tmp/google-chrome.rpm \
+    && ! ldd /opt/google/chrome/chrome | grep -Fq 'not found' \
+    && rm /tmp/google-chrome.rpm
+
+RUN curl --fail --location --silent --show-error \
+        "https://download.documentfoundation.org/libreoffice/stable/${LIBREOFFICE_VERSION}/rpm/x86_64/LibreOffice_${LIBREOFFICE_VERSION}_Linux_x86-64_rpm.tar.gz" \
+        --output /tmp/libreoffice.tar.gz \
+    && echo "${LIBREOFFICE_SHA256}  /tmp/libreoffice.tar.gz" | sha256sum --check --strict \
+    && mkdir /tmp/libreoffice \
+    && tar --extract --gzip --file /tmp/libreoffice.tar.gz --strip-components=1 --directory /tmp/libreoffice \
+    && dnf install -y /tmp/libreoffice/RPMS/*.rpm \
+    && dnf clean all \
+    && rm -rf /tmp/libreoffice /tmp/libreoffice.tar.gz \
+    && ln -s "/opt/libreoffice${LIBREOFFICE_VERSION%.*}/program/soffice" /usr/local/bin/soffice
+
+RUN dnf install -y libXinerama \
+    && dnf clean all \
+    && ! ldd "/opt/libreoffice${LIBREOFFICE_VERSION%.*}/program/oosplash" | grep -Fq 'not found'
+
+RUN mkdir -p /opt/toolchain/evidence \
+    && rpm -qa --qf '%{NAME}|%{EPOCHNUM}:%{VERSION}-%{RELEASE}|%{ARCH}|%{LICENSE}\n' \
+        | LC_ALL=C sort > /opt/toolchain/evidence/rpm-inventory.txt
+
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+
+WORKDIR /opt/toolchain/node
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm cache clean --force \
+    && ln -s /opt/toolchain/node/node_modules/.bin/mmdc /usr/local/bin/mmdc
+
+COPY fixtures /opt/toolchain/fixtures
+COPY validate.sh /usr/local/bin/validate-toolchain
+
+RUN chmod 0555 /usr/local/bin/validate-toolchain \
+    && chmod -R a=rX /opt/toolchain/fixtures \
+    && mkdir /work \
+    && chgrp 0 /work \
+    && chmod 0770 /work
+
+ENV HOME=/work/home \
+    XDG_CACHE_HOME=/work/xdg/cache \
+    XDG_CONFIG_HOME=/work/xdg/config \
+    XDG_DATA_HOME=/work/xdg/data \
+    XDG_RUNTIME_DIR=/work/xdg/runtime
+
+WORKDIR /work
+USER 1001:0
+ENTRYPOINT ["validate-toolchain"]

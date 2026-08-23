@@ -1,0 +1,10 @@
+{
+  "name": "t00-document-toolchain-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned Mermaid CLI dependency for the T00 validation image.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "11.16.0"
+  }
+}
