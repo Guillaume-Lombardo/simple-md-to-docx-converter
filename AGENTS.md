@@ -60,6 +60,9 @@
 - Tests requiring an unavailable engine must carry the matching marker. Never skip them through ad hoc environment checks or an unconditional `pytest.skip`.
 - Run the full suite when all required engines and services are available. Report missing engines rather than treating their tests as passed.
 - Unit tests must not use the network, containers, document engines, or real external databases.
+- Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—must include at least one integration test for its primary successful path and every relevant failure behavior.
+- Every delivered user-visible or operational workflow must include an E2E test against the built container. Cover its primary path and relevant critical failure, authorization, cancellation, recovery, or concurrency behavior.
+- An integration-test or E2E-test exception requires an explicit justification in the pull request and explicit reviewer approval. Cost, inconvenience, or an unavailable local dependency is not sufficient justification.
 - Maintain at least 90% branch coverage for application Python code and 90% coverage of changed Python lines.
 - Use security tests for archive paths, SVG, uploads, subprocesses, authentication, authorization, queue leases, idempotency, and concurrency whenever those areas change.
 - Inspect DOCX output as OpenXML archives and use the reference corpus and golden tests for rendering changes.

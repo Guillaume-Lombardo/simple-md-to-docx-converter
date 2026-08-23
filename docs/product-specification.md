@@ -180,9 +180,9 @@ markers = [
 
 Unit tests remain fast and deterministic and use pytest-mock rather than direct `unittest.mock`. Ruff must enforce that restriction. Calculate branch coverage from unit tests with a blocking 90% threshold and enforce 90% changed-line coverage in pull requests.
 
-Functional tests exercise assembled application behavior with substituted adapters. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
+Functional tests exercise assembled application behavior with substituted adapters. Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—has at least one integration test covering its primary successful path and every relevant failure behavior. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
 
-E2E tests use the final rootless image, Playwright, two regular users, and one administrator. Cover both profiles, ownership, visibility, `202` submission, polling, cancellation, expiration, download, restart recovery, and absence of double execution. Preserve artifacts only on failure.
+Every delivered user-visible or operational workflow has an E2E test against the final rootless image. Cover its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior. Use Playwright, two regular users, and one administrator where applicable. Cover both profiles, ownership, visibility, `202` submission, polling, cancellation, expiration, download, restart recovery, and absence of double execution. Preserve artifacts only on failure. Any integration or E2E exception requires explicit pull-request justification and explicit reviewer approval; cost, inconvenience, or a missing local dependency is not sufficient.
 
 ## 11. GitHub Actions
 
@@ -199,6 +199,7 @@ Light draft checks include formatting, lint, types, unit tests, coverage, and ch
 - Ownership and administrator permissions hold across API and UI.
 - Remote resources, unsafe archives, hostile SVG, unsafe subprocess input, and sensitive logs are prevented.
 - Required checks, 90% coverage thresholds, independent review, and English-only repository artifacts are enforced.
+- Every applicable real-boundary feature has integration coverage, and every delivered user-visible or operational workflow has E2E coverage against the built container.
 
 ## 13. Delivery tickets
 
