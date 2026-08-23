@@ -2,7 +2,7 @@
 ticket: T06
 linear_id: G1L-316
 linear_url: https://linear.app/g1lom/issue/G1L-316/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
