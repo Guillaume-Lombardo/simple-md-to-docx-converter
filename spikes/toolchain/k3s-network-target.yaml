@@ -5,6 +5,9 @@ metadata:
   labels:
     app.kubernetes.io/name: t00-k3s-network-target
     t00.g1lom.xyz/owned: "true"
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+  annotations:
+    t00.g1lom.xyz/run-id: T00_RUN_ID
 spec:
   automountServiceAccountToken: false
   restartPolicy: Never
@@ -19,6 +22,12 @@ spec:
       image: localhost/simple-md-toolchain:t00
       imagePullPolicy: Never
       command: [/usr/bin/python3, -m, http.server, "8080"]
+      readinessProbe:
+        tcpSocket:
+          port: 8080
+        periodSeconds: 1
+        timeoutSeconds: 1
+        failureThreshold: 30
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
@@ -34,6 +43,9 @@ metadata:
   name: network-target
   labels:
     t00.g1lom.xyz/owned: "true"
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+  annotations:
+    t00.g1lom.xyz/run-id: T00_RUN_ID
 spec:
   selector:
     app.kubernetes.io/name: t00-k3s-network-target

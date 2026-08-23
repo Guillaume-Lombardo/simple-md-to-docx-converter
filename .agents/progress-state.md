@@ -24,6 +24,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - The PM-authorized local k3s T00 validation passed with the checksum-locked Chrome seccomp profile
   and fail-closed controls. The exact namespace, Localhost profile, and imported image were removed
   and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
+- T00 review blockers are corrected locally: cluster-global names are unique and collision-checked,
+  installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
+  negative probes cover collision and tampering refusal. The hardened live rerun passed and removed
+  every exact run resource; publication and independent approval remain pending.
 
 ## Approved Product Decisions
 
@@ -75,9 +79,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Independently review the completed T00 k3s proof, publish it only after explicit approval, and
-   verify it on `main`; then synchronize T00/Linear and unblock T04. OpenShift validation remains
-   deferred.
+1. Commit the corrected T00 k3s proof, publish it only after explicit approval, obtain independent
+   approval, and verify it on `main`; then synchronize T00/Linear and unblock T04. OpenShift
+   validation remains deferred.
 2. Re-read Linear and select only a ready ticket whose dependencies are verified `Done`; T04 still
    waits for T00 and T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
@@ -109,6 +113,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T00 local k3s `v1.35.5+k3s1` passes the target Chrome/Mermaid, network-policy, security, and
   fail-closed probes with containerd `2.2.3-k3s1`. The exact test namespace, Localhost profile, and
   imported image were removed and verified absent after the run.
+- The hardened T00 k3s wrapper's offline collision, ownership-change, installed-profile-tampering,
+  namespace-UID, and image-digest probes pass. Live run `reviewfix05` passes all workload probes,
+  verifies installed profile SHA-256 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`,
+  and verifies its namespace, profile, marker, containerd image, and Podman tag absent afterward.
 - The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection
   passes 175 tests at 98% coverage; both canonical Pytest commands report the same 10 PostgreSQL/
   RustFS integration failures because this worktree has no test-service environment variables.

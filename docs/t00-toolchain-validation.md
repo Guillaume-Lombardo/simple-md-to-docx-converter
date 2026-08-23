@@ -68,32 +68,44 @@ The runner verifies the committed profile SHA-256 before passing it to Podman.
 the fail-closed `sys_chroot` baseline. A modified profile or unknown mode is
 rejected before the container build or run.
 
-Run the k3s probes only after an operator has installed the checksum-verified
-Localhost profile in the kubelet seccomp directory and imported the locally
-built image into k3s containerd. On the recorded single-node host, the exact
-preparation and cleanup were:
+Build the image, then run the ownership-aware k3s wrapper. The kubelet seccomp
+directory must already exist; the wrapper never creates or configures that
+cluster-global directory:
 
 ```bash
-readonly T00_PROFILE=/var/lib/kubelet/seccomp/t00-k3s-chrome-bbd643f78d48.json
-printf '%s  %s\n' \
-  bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46 \
-  spikes/toolchain/chrome-seccomp.json | sha256sum --check --strict
 podman build --pull=false --file spikes/toolchain/Containerfile \
   --tag simple-md-toolchain:t00 spikes/toolchain
-podman save simple-md-toolchain:t00 | sudo /usr/local/bin/k3s ctr images import -
-sudo install -d -m 0755 /var/lib/kubelet/seccomp
-sudo install -m 0644 spikes/toolchain/chrome-seccomp.json "${T00_PROFILE}"
-spikes/toolchain/run-k3s-validation.sh --sudo-k3s
-sudo rm -- "${T00_PROFILE}"
-sudo /usr/local/bin/k3s ctr images remove localhost/simple-md-toolchain:t00
+spikes/toolchain/test-k3s-validation.sh --sudo-k3s
 ```
 
-The harness refuses to reuse its fixed `t00-k3s-toolchain-validation`
-namespace, creates only labeled resources inside it, and removes the namespace
-on success or failure. `--sudo-k3s` selects the root-owned local k3s kubeconfig;
-use the default `kubectl` command on a cluster with an ordinary user kubeconfig.
-The operator must remove only the exact profile and image installed for the
-probe and verify that the namespace, profile, and imported image are absent.
+The wrapper generates one lowercase run identifier and derives a unique
+Localhost profile, ownership marker, containerd image tag, local Podman tag, and
+namespace from it. It preflights every name and refuses any collision rather
+than overwriting a pre-existing resource. The profile and marker are claimed
+through exclusive hard links, and their device/inode identities are captured.
+After installation, the wrapper independently hashes the actual file visible
+under `/var/lib/kubelet/seccomp` and requires the exact committed SHA-256 before
+Kubernetes can reference it.
+
+The namespace is created atomically with the run label and annotation. Cleanup
+requires the original immutable namespace UID and both ownership metadata
+values, then sends that UID as a Kubernetes deletion precondition through a
+loopback-only API proxy. The network target has a TCP readiness probe so the
+unselected control cannot race the target service startup. Global
+cleanup similarly requires the original profile/marker identities and content,
+the profile checksum, and the imported image digest. Changed, missing, or
+unowned resources are never deleted automatically; the run fails and reports
+the exact resource requiring operator review. The success path removes only
+resources created by that run. `--sudo-k3s` selects the root-owned local k3s
+kubeconfig and containerd; use the default commands where the invoking user has
+ordinary access.
+
+Run the collision, ownership-change, installed-profile-tampering, cleanup-
+refusal, namespace-UID, and image-digest probes without a cluster:
+
+```bash
+spikes/toolchain/test-k3s-resource-guards.sh
+```
 
 The image build deliberately keeps `--pull=false`. It performs no implicit pull
 or store bootstrap, even though the `FROM` reference is digest-pinned. The first
@@ -392,5 +404,4 @@ distributed storage-profile parity is not affected by T00.
 - exact official font artifacts, versions, notices, substitution order, and
   scripts that explicitly require Noto;
 - every production resource, RPO/RTO, retention, quota, antivirus, and cleanup
-  value listed in specification section 14;
-- PDF/A and table-of-contents support.
+  value listed in specification section 14.
