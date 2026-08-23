@@ -79,6 +79,8 @@ RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force \
     && ln -s /opt/toolchain/node/node_modules/.bin/mmdc /usr/local/bin/mmdc
 
+COPY --chmod=0444 check-chrome-sandbox.mjs ./
+
 COPY fixtures /opt/toolchain/fixtures
 COPY validate.sh /usr/local/bin/validate-toolchain
 

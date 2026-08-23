@@ -37,7 +37,7 @@ seccomp-BPF layer. `--no-sandbox` disables all sandboxing for tests and is not r
 
 | Alternative | Evidence and constraint fit | Status |
 |---|---|---|
-| Chromium user-namespace sandbox with its seccomp-BPF sandbox | Requires no setuid helper and can in principle retain arbitrary UID, read-only root, dropped capabilities, and `no-new-privileges`. Docker runtime-default seccomp currently denies Chrome's namespace creation. OpenShift supports narrow custom seccomp profiles, but the exact syscall policy and Chrome sandbox status must be reviewed and tested on target CRI-O/OpenShift. [OpenShift custom seccomp](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/seccomp-profiles) | Approved direction: develop the minimum seccomp/user-namespace profile and validate it on rootless Podman, then k3s. OpenShift proof is deferred. |
+| Chromium user-namespace sandbox with its seccomp-BPF sandbox | Rootless Podman succeeds with the containers/common 0.62.2 default profile changed only to allow `chroot` without a container capability. Chrome reports namespace, PID/network namespace, Seccomp-BPF, TSYNC, and adequate-sandbox status while the outer container retains zero capabilities. Docker runtime-default seccomp still denies Chrome's namespace creation. OpenShift supports narrow custom seccomp profiles, but the profile remains untested on target CRI-O/OpenShift. [containers/common profile](https://github.com/containers/common/blob/v0.62.2/pkg/seccomp/seccomp.json), [Chromium implementation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/services/credentials.cc), [OpenShift custom seccomp](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/security_and_compliance/seccomp-profiles) | Podman composition proven; validate the same portable profile on k3s next. OpenShift proof is deferred. |
 | OpenShift pod user namespace (`hostUsers: false`) combined with Chromium's sandbox | OpenShift 4.20 documents `restricted-v3`, which forces a pod user namespace while retaining dropped capabilities, runtime-default seccomp, and no privilege escalation. Kubernetes documents runtime/filesystem prerequisites. It is unproven that Chrome 151 can use the required nested namespace operations under this profile and arbitrary application UID. [OpenShift SCCs](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/authentication_and_authorization/managing-pod-security-policies), [Kubernetes user namespaces](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/) | Supported platform primitive, unproven composition; target-cluster proof required. |
 | Chromium setuid sandbox | The helper is root-owned mode 4755. `no-new-privileges` prevents privilege gain, and the profile drops capabilities. The probe fails with the expected setuid/namespace errors. | Incompatible with fixed constraints; negative evidence only. |
 | Browser in a separately isolated workload/runtime | Could preserve a sandboxed browser while keeping the worker profile strict, but changes workspace transfer, networking, cancellation, and accounting. It must still use a supported Chrome sandbox. | Architectural fallback only; PM decision and separate threat model required. |
@@ -47,13 +47,14 @@ T09 must not convert the Docker failure into permission to weaken Chrome and mus
 network, capability, UID, read-only-root, writable-area, and resource-limit evidence on rootless
 Podman and k3s. Real OpenShift evidence remains deferred and is required before claiming support.
 
-The current rootless Podman harness maps container UID `1000710000` sparsely into the subordinate
-UID range and exposes only explicit bounded writable mounts. These runtime mechanics pass, but
-Chrome still terminates in its zygote at `sys_chroot("/proc/self/fdinfo/")` before Mermaid renders.
-Docker continues to fail earlier with namespace creation denied by `EPERM`. Neither result proves
-the approved minimal seccomp/user-namespace composition; both are safe negative evidence gathered
-without `--no-sandbox`, `seccomp=unconfined`, added capabilities, privileged mode, or network
-access in the target probe.
+The rootless Podman harness maps container UID `1000710000` sparsely into the subordinate UID range
+and exposes only explicit bounded writable mounts. Podman's runtime-default profile still produces
+the zygote `sys_chroot("/proc/self/fdinfo/")` failure. The committed portable profile preserves that
+default policy and changes only its capability-conditioned `chroot` pair to one allow rule. It is
+checksum-locked and renders Mermaid while Chrome reports its namespace and Seccomp-BPF layers
+active. Docker continues to fail earlier with namespace creation denied by `EPERM`. The positive
+Podman path uses no `--disable-setuid-sandbox`, `--no-sandbox`, `seccomp=unconfined`, added
+capability, privileged mode, host network, or broad writable root.
 
 ## Pandoc 3.10.2 CommonMark compatibility
 
@@ -105,8 +106,10 @@ order with golden-layout evidence.
 - The first Podman build stopped because `--pull=false` found no pinned UBI base in Podman's
   separate store. The exact digest was preloaded from the local Docker store before the unchanged
   harness passed. This is a reproducibility caveat, not production registry-signature proof.
-- Chrome still fails before Mermaid rendering: Podman reports the zygote `sys_chroot` fatal, while
-  Docker retains its namespace `EPERM` failure. The minimal sandbox profile, k3s validation, and
-  deferred OpenShift proof remain outstanding.
+- Podman runtime-default seccomp still reports the zygote `sys_chroot` fatal. The checksum-locked
+  one-syscall delta renders Mermaid and Chrome reports namespace, PID/network namespace,
+  Seccomp-BPF, TSYNC, and adequate-sandbox status with outer capabilities still empty. Docker
+  retains its namespace `EPERM` failure. k3s validation and deferred OpenShift proof remain
+  outstanding.
 - Production limits, RPO/RTO, retention, quotas, antivirus, cleanup, exact font artifacts and
   substitutions, and explicit Noto script coverage remain configurable or unresolved.

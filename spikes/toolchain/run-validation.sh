@@ -11,6 +11,9 @@ readonly PIDS="${TOOLCHAIN_PIDS:-512}"
 readonly WORK_SIZE="${TOOLCHAIN_WORK_SIZE:-1g}"
 readonly TMP_SIZE="${TOOLCHAIN_TMP_SIZE:-512m}"
 readonly WORK_STORAGE="${TOOLCHAIN_WORK_STORAGE:-tmpfs}"
+readonly CHROME_SECCOMP_MODE="${TOOLCHAIN_CHROME_SECCOMP_MODE:-profile}"
+readonly CHROME_SECCOMP_PROFILE="${TOOLCHAIN_CHROME_SECCOMP_PROFILE:-${SCRIPT_DIR}/chrome-seccomp.json}"
+readonly CHROME_SECCOMP_SHA256=bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46
 
 usage() {
     cat <<'EOF'
@@ -163,6 +166,30 @@ case "${VALIDATION_SCOPE}" in
         exit 2
         ;;
 esac
+
+if [[ "${CONTAINER_RUNTIME}" == podman && "${VALIDATION_SCOPE}" == target ]]; then
+    case "${CHROME_SECCOMP_MODE}" in
+        profile)
+            [[ -r "${CHROME_SECCOMP_PROFILE}" ]] || {
+                printf 'Chrome seccomp profile is not readable: %s\n' \
+                    "${CHROME_SECCOMP_PROFILE}" >&2
+                exit 1
+            }
+            printf '%s  %s\n' "${CHROME_SECCOMP_SHA256}" "${CHROME_SECCOMP_PROFILE}" \
+                | sha256sum --check --strict >/dev/null || {
+                    printf 'Chrome seccomp profile integrity check failed: %s\n' \
+                        "${CHROME_SECCOMP_PROFILE}" >&2
+                    exit 1
+                }
+            runtime_args+=(--security-opt "seccomp=${CHROME_SECCOMP_PROFILE}")
+            ;;
+        runtime-default) ;;
+        *)
+            printf 'Unknown Chrome seccomp mode: %s\n' "${CHROME_SECCOMP_MODE}" >&2
+            exit 2
+            ;;
+    esac
+fi
 
 "${CONTAINER_RUNTIME}" build \
     --pull=false \
