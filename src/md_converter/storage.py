@@ -60,13 +60,16 @@ class FilesystemObjectStore:
 
     def __init__(self, data_directory: Path) -> None:
         self._root = data_directory / "objects"
-        self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            self._ensure_directory(self._root)
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
 
     def put(self, key: ObjectKey, content: bytes) -> None:
         target = self._path(key)
         temporary: Path | None = None
         try:
-            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._ensure_directory(target.parent)
             descriptor, temporary_name = mkstemp(prefix=".pending-", dir=target.parent)
             temporary = Path(temporary_name)
             with os.fdopen(descriptor, "wb") as output:
@@ -74,35 +77,38 @@ class FilesystemObjectStore:
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, target)
-            directory_descriptor = os.open(target.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
-        except OSError as error:
+            self._sync_directory(target.parent)
+        except OSError:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
-            raise ObjectStoreError("Object storage operation failed") from error
+            raise ObjectStoreError("Object storage operation failed") from None
 
     def get(self, key: ObjectKey) -> bytes:
         try:
             return self._path(key).read_bytes()
         except FileNotFoundError:
             raise ObjectNotFoundError("Object does not exist") from None
-        except OSError as error:
-            raise ObjectStoreError("Object storage operation failed") from error
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
 
     def delete(self, key: ObjectKey) -> None:
+        target = self._path(key)
         try:
-            self._path(key).unlink(missing_ok=True)
-        except OSError as error:
-            raise ObjectStoreError("Object storage operation failed") from error
+            target.unlink()
+        except FileNotFoundError:
+            return
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
+        try:
+            self._sync_directory(target.parent)
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
 
     def exists(self, key: ObjectKey) -> bool:
         try:
             return self._path(key).is_file()
-        except OSError as error:
-            raise ObjectStoreError("Object storage operation failed") from error
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
 
     def is_ready(self) -> bool:
         return self._root.is_dir() and os.access(
@@ -111,6 +117,26 @@ class FilesystemObjectStore:
 
     def _path(self, key: ObjectKey) -> Path:
         return self._root / key.scope.value / str(key.owner_id) / str(key.object_id)
+
+    @staticmethod
+    def _sync_directory(directory: Path) -> None:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        descriptor = os.open(directory, flags)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @classmethod
+    def _ensure_directory(cls, directory: Path) -> None:
+        missing: list[Path] = []
+        current = directory
+        while not current.exists():
+            missing.append(current)
+            current = current.parent
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for created in reversed(missing):
+            cls._sync_directory(created.parent)
 
 
 class S3ObjectStore:

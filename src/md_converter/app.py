@@ -25,6 +25,7 @@ from md_converter.auth.service import (
     SessionPolicy,
 )
 from md_converter.config import Settings, StorageProfile
+from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
@@ -142,6 +143,20 @@ def install_error_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(PersistenceError)
+    def persistence_error_handler(
+        _request: Request, _error: PersistenceError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "PERSISTENCE_UNAVAILABLE",
+                    "message": "Persistent storage is unavailable.",
+                }
+            },
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class AppComponents:
@@ -171,7 +186,6 @@ def build_components(settings: Settings) -> AppComponents:
             data_directory is None
         ):  # validated by Settings; defensive for type narrowing
             raise RuntimeError("Validated standalone settings are incomplete")
-        data_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         database_url = standalone_database_url(data_directory)
         object_store: ObjectStore = FilesystemObjectStore(data_directory)
     else:

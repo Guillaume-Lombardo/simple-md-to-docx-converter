@@ -8,10 +8,12 @@ from uuid import uuid4
 
 import pytest
 from pytest_mock import MockerFixture
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from md_converter.auth.models import Role, Session, User
 from md_converter.config import ConfigurationError
+from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import (
     run_migration_environment,
     upgrade_database,
@@ -106,10 +108,99 @@ def test_inprocess_sql_repository_control_flow() -> None:
 
 @pytest.mark.unit
 def test_database_url_helpers_select_the_expected_drivers() -> None:
-    assert standalone_database_url(Path("/data")).endswith("/data/metadata.sqlite3")
+    data_directory = Path("/data/space ?#%/données")
+    standalone_url = standalone_database_url(data_directory)
+    assert standalone_url.database == str(data_directory / "metadata.sqlite3")
+    sqlite_engine = create_database_engine(standalone_url)
+    assert sqlite_engine.url.database == str(data_directory / "metadata.sqlite3")
+    assert sqlite_engine.hide_parameters
+    sqlite_engine.dispose()
     engine = create_database_engine("postgresql://database/application")
     assert engine.url.drivername == "postgresql+psycopg"
+    assert engine.hide_parameters
     engine.dispose()
+
+
+@pytest.mark.unit
+def test_sql_failures_have_one_stable_sanitized_boundary(
+    mocker: MockerFixture,
+) -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    with engine.connect() as connection:
+        connection.execute(text("PRAGMA query_only=ON"))
+    private_hash = "private-hash-material"
+    with pytest.raises(PersistenceError) as caught:
+        SqlUserRepository(engine).create(
+            User(uuid4(), "Private", "private", private_hash, Role.USER)
+        )
+    assert str(caught.value) == "Persistence operation failed"
+    assert caught.value.__suppress_context__
+    assert private_hash not in repr(caught.value)
+    with engine.connect() as connection:
+        connection.execute(text("PRAGMA query_only=OFF"))
+
+    command = mocker.patch(
+        "md_converter.persistence.migrations.command.upgrade",
+        side_effect=SQLAlchemyError("private SQL and parameters"),
+    )
+    with pytest.raises(PersistenceError) as migration_error:
+        upgrade_database(engine)
+    assert command.called
+    assert str(migration_error.value) == "Persistence operation failed"
+    assert "private" not in repr(migration_error.value)
+    assert migration_error.value.__suppress_context__
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_every_repository_operation_sanitizes_sqlalchemy_failures(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.MagicMock()
+    users = SqlUserRepository(engine)
+    sessions = SqlSessionRepository(engine)
+    private_hash = "private-" + "hash"
+    user = User(uuid4(), "Private", "private", private_hash, Role.USER)
+    now = datetime(2026, 8, 23, tzinfo=UTC)
+    session = Session(
+        token_digest="e" * 64,
+        csrf_digest="f" * 64,
+        user_id=user.id,
+        auth_version=0,
+        created_at=now,
+        last_seen_at=now,
+        idle_expires_at=now + timedelta(minutes=30),
+        absolute_expires_at=now + timedelta(hours=8),
+    )
+    mocker.patch(
+        "md_converter.persistence.sql.DatabaseSession",
+        side_effect=SQLAlchemyError("private SQL parameters"),
+    )
+    operations = (
+        lambda: users.get_by_id(user.id),
+        lambda: users.get_by_normalized_username(user.normalized_username),
+        users.list,
+        lambda: users.commit_verified_login(user.id, 0, private_hash),
+        lambda: users.update_security(user.id, password_hash=private_hash),
+        lambda: sessions.create(session),
+        lambda: sessions.get(session.token_digest),
+        lambda: sessions.save(session),
+        lambda: sessions.revoke(session.token_digest),
+        lambda: sessions.revoke_user(user.id),
+    )
+    for operation in operations:
+        with pytest.raises(PersistenceError) as caught:
+            operation()
+        assert "private" not in repr(caught.value)
+
+    mocker.patch(
+        "md_converter.persistence.sql.create_engine",
+        side_effect=SQLAlchemyError("private URL"),
+    )
+    with pytest.raises(PersistenceError) as engine_error:
+        create_database_engine("sqlite+pysqlite://")
+    assert "private" not in repr(engine_error.value)
 
 
 @pytest.mark.unit

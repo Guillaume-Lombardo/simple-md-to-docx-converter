@@ -33,12 +33,13 @@ def client_error(code: str) -> ClientError:
 def test_filesystem_reads_deletes_and_readiness_delegate_without_raw_names(
     mocker: MockerFixture,
 ) -> None:
-    mkdir = mocker.patch("pathlib.Path.mkdir")
+    ensure_directory = mocker.patch.object(FilesystemObjectStore, "_ensure_directory")
     store = FilesystemObjectStore(Path("/data"))
     root = mocker.MagicMock(spec=Path)
     target = mocker.MagicMock(spec=Path)
     store._root = root
     mocker.patch.object(store, "_path", return_value=target)
+    sync_directory = mocker.patch.object(store, "_sync_directory")
     key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
     target.read_bytes.return_value = b"content"
     target.is_file.return_value = True
@@ -49,9 +50,54 @@ def test_filesystem_reads_deletes_and_readiness_delegate_without_raw_names(
     assert store.exists(key)
     store.delete(key)
     assert store.is_ready()
-    target.unlink.assert_called_once_with(missing_ok=True)
-    mkdir.assert_called_once()
+    target.unlink.assert_called_once_with()
+    sync_directory.assert_called_once_with(target.parent)
+    ensure_directory.assert_called_once_with(Path("/data/objects"))
     access.assert_called_once()
+
+
+@pytest.mark.unit
+def test_filesystem_nested_directory_creation_syncs_each_parent_in_order(
+    mocker: MockerFixture,
+) -> None:
+    directory = Path("/data/objects/uploads/owner")
+    mocker.patch.object(
+        Path, "exists", autospec=True, side_effect=lambda path: path == Path("/")
+    )
+    mkdir = mocker.patch.object(Path, "mkdir", autospec=True)
+    sync_directory = mocker.patch.object(FilesystemObjectStore, "_sync_directory")
+
+    FilesystemObjectStore._ensure_directory(directory)
+
+    mkdir.assert_called_once_with(directory, mode=0o700, parents=True, exist_ok=True)
+    assert [call.args[0] for call in sync_directory.call_args_list] == [
+        Path("/"),
+        Path("/data"),
+        Path("/data/objects"),
+        Path("/data/objects/uploads"),
+    ]
+
+
+@pytest.mark.unit
+def test_filesystem_delete_syncs_after_unlink_and_reports_sync_failure(
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch.object(FilesystemObjectStore, "_ensure_directory")
+    store = FilesystemObjectStore(Path("/data"))
+    target = mocker.MagicMock(spec=Path)
+    target.parent = Path("/data/objects/uploads/owner")
+    mocker.patch.object(store, "_path", return_value=target)
+    manager = mocker.Mock()
+    manager.attach_mock(target.unlink, "unlink")
+    sync_directory = mocker.patch.object(
+        store, "_sync_directory", side_effect=PermissionError
+    )
+    manager.attach_mock(sync_directory, "sync")
+
+    with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
+        store.delete(ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4()))
+
+    assert [call[0] for call in manager.mock_calls] == ["unlink", "sync"]
 
 
 @pytest.mark.unit
@@ -171,7 +217,6 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker.patch("md_converter.app.create_database_engine", return_value=engine)
     mocker.patch("md_converter.app.upgrade_database")
     files = mocker.patch("md_converter.app.FilesystemObjectStore")
-    mkdir = mocker.patch("pathlib.Path.mkdir")
     standalone = Settings(
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
@@ -179,7 +224,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         standalone_data_directory="/data",
     )
     assert build_components(standalone).object_store is files.return_value
-    mkdir.assert_called_once()
+    files.assert_called_once_with(Path("/data"))
 
     s3_client = mocker.patch("md_converter.app.boto3.client")
     distributed = Settings(

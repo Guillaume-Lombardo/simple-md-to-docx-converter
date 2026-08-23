@@ -5,30 +5,58 @@ from __future__ import annotations
 import builtins
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, create_engine, delete, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Engine, create_engine, delete, event, select, text, update
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
 from md_converter.auth.models import Role, Session, User
 from md_converter.config import ConfigurationError
+from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.schema import SessionRow, UserRow
 
 
-def create_database_engine(database_url: str) -> Engine:
+def create_database_engine(database_url: str | URL) -> Engine:
     """Create a profile-neutral synchronous SQLAlchemy engine."""
-    if database_url.startswith("postgresql://"):
-        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-    connect_args = (
-        {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    )
-    return create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
+    try:
+        if isinstance(database_url, str) and database_url.startswith("postgresql://"):
+            database_url = database_url.replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+        resolved_url = (
+            make_url(database_url) if isinstance(database_url, str) else database_url
+        )
+        sqlite = resolved_url.get_backend_name() == "sqlite"
+        engine = create_engine(
+            resolved_url,
+            connect_args={"check_same_thread": False} if sqlite else {},
+            hide_parameters=True,
+            pool_pre_ping=True,
+        )
+        if sqlite:
+            event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+        return engine
+    except SQLAlchemyError:
+        raise PersistenceError from None
 
 
-def standalone_database_url(data_directory: Path) -> str:
+def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
+
+def standalone_database_url(data_directory: Path) -> URL:
     """Build the fixed SQLite metadata location below the standalone PVC root."""
-    return f"sqlite+pysqlite:///{data_directory / 'metadata.sqlite3'}"
+    return URL.create(
+        drivername="sqlite+pysqlite",
+        database=str(data_directory / "metadata.sqlite3"),
+    )
 
 
 def _user(row: UserRow) -> User:
@@ -103,27 +131,38 @@ class SqlUserRepository:
                 )
         except IntegrityError:
             raise KeyError(user.normalized_username) from None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def get_by_id(self, user_id: UUID) -> User | None:
-        with DatabaseSession(self._engine) as database:
-            row = database.get(UserRow, str(user_id))
-            return _user(row) if row is not None else None
+        try:
+            with DatabaseSession(self._engine) as database:
+                row = database.get(UserRow, str(user_id))
+                return _user(row) if row is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def get_by_normalized_username(self, normalized_username: str) -> User | None:
-        with DatabaseSession(self._engine) as database:
-            row = database.scalar(
-                select(UserRow).where(
-                    UserRow.normalized_username == normalized_username
+        try:
+            with DatabaseSession(self._engine) as database:
+                row = database.scalar(
+                    select(UserRow).where(
+                        UserRow.normalized_username == normalized_username
+                    )
                 )
-            )
-            return _user(row) if row is not None else None
+                return _user(row) if row is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def list(self) -> builtins.list[User]:
-        with DatabaseSession(self._engine) as database:
-            rows = database.scalars(
-                select(UserRow).order_by(UserRow.normalized_username)
-            )
-            return [_user(row) for row in rows]
+        try:
+            with DatabaseSession(self._engine) as database:
+                rows = database.scalars(
+                    select(UserRow).order_by(UserRow.normalized_username)
+                )
+                return [_user(row) for row in rows]
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def commit_verified_login(
         self,
@@ -134,18 +173,21 @@ class SqlUserRepository:
         values: dict[str, object] = {"auth_version": UserRow.auth_version}
         if replacement_hash is not None:
             values["password_hash"] = replacement_hash
-        with DatabaseSession(self._engine) as database, database.begin():
-            result = database.execute(
-                update(UserRow)
-                .where(
-                    UserRow.id == str(user_id),
-                    UserRow.active.is_(True),
-                    UserRow.auth_version == expected_auth_version,
-                )
-                .values(**values)
-                .returning(UserRow)
-            ).scalar_one_or_none()
-            return _user(result) if result is not None else None
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                result = database.execute(
+                    update(UserRow)
+                    .where(
+                        UserRow.id == str(user_id),
+                        UserRow.active.is_(True),
+                        UserRow.auth_version == expected_auth_version,
+                    )
+                    .values(**values)
+                    .returning(UserRow)
+                ).scalar_one_or_none()
+                return _user(result) if result is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def update_security(
         self,
@@ -159,14 +201,17 @@ class SqlUserRepository:
             values["active"] = active
         if password_hash is not None:
             values["password_hash"] = password_hash
-        with DatabaseSession(self._engine) as database, database.begin():
-            result = database.execute(
-                update(UserRow)
-                .where(UserRow.id == str(user_id))
-                .values(**values)
-                .returning(UserRow)
-            ).scalar_one_or_none()
-            return _user(result) if result is not None else None
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                result = database.execute(
+                    update(UserRow)
+                    .where(UserRow.id == str(user_id))
+                    .values(**values)
+                    .returning(UserRow)
+                ).scalar_one_or_none()
+                return _user(result) if result is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
 
 class SqlSessionRepository:
@@ -176,41 +221,56 @@ class SqlSessionRepository:
         self._engine = engine
 
     def create(self, session: Session) -> None:
-        with DatabaseSession(self._engine) as database, database.begin():
-            database.add(self._row(session))
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                database.add(self._row(session))
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def get(self, token_digest: str) -> Session | None:
-        with DatabaseSession(self._engine) as database:
-            row = database.get(SessionRow, token_digest)
-            return _session(row) if row is not None else None
+        try:
+            with DatabaseSession(self._engine) as database:
+                row = database.get(SessionRow, token_digest)
+                return _session(row) if row is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def save(self, session: Session) -> None:
-        with DatabaseSession(self._engine) as database, database.begin():
-            database.execute(
-                update(SessionRow)
-                .where(SessionRow.token_digest == session.token_digest)
-                .values(
-                    csrf_digest=session.csrf_digest,
-                    user_id=str(session.user_id),
-                    auth_version=session.auth_version,
-                    created_at=session.created_at,
-                    last_seen_at=session.last_seen_at,
-                    idle_expires_at=session.idle_expires_at,
-                    absolute_expires_at=session.absolute_expires_at,
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                database.execute(
+                    update(SessionRow)
+                    .where(SessionRow.token_digest == session.token_digest)
+                    .values(
+                        csrf_digest=session.csrf_digest,
+                        user_id=str(session.user_id),
+                        auth_version=session.auth_version,
+                        created_at=session.created_at,
+                        last_seen_at=session.last_seen_at,
+                        idle_expires_at=session.idle_expires_at,
+                        absolute_expires_at=session.absolute_expires_at,
+                    )
                 )
-            )
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def revoke(self, token_digest: str) -> None:
-        with DatabaseSession(self._engine) as database, database.begin():
-            database.execute(
-                delete(SessionRow).where(SessionRow.token_digest == token_digest)
-            )
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                database.execute(
+                    delete(SessionRow).where(SessionRow.token_digest == token_digest)
+                )
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     def revoke_user(self, user_id: UUID) -> None:
-        with DatabaseSession(self._engine) as database, database.begin():
-            database.execute(
-                delete(SessionRow).where(SessionRow.user_id == str(user_id))
-            )
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                database.execute(
+                    delete(SessionRow).where(SessionRow.user_id == str(user_id))
+                )
+        except SQLAlchemyError:
+            raise PersistenceError from None
 
     @staticmethod
     def _row(session: Session) -> SessionRow:

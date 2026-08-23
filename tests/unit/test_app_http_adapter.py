@@ -15,6 +15,7 @@ from md_converter.auth.memory import MemoryReadinessProbe
 from md_converter.auth.models import LoginResult, Role, User
 from md_converter.auth.service import AuthenticationService
 from md_converter.config import Settings
+from md_converter.persistence.errors import PersistenceError
 
 
 def isolated_client(
@@ -183,6 +184,28 @@ def test_validation_errors_are_stable_and_never_echo_input(
     }
     assert "plaintext-secret" not in response.text
     assert "input" not in response.text.casefold()
+
+
+@pytest.mark.unit
+def test_persistence_errors_are_stable_and_never_echo_sql_or_parameters(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _, _ = isolated_client(mocker)
+    auth.login.side_effect = PersistenceError()
+    with client:
+        response = client.post(
+            "/api/v1/login",
+            json={"username": "private-user", "password": "private-password"},
+        )
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "PERSISTENCE_UNAVAILABLE",
+            "message": "Persistent storage is unavailable.",
+        }
+    }
+    assert "private" not in response.text
+    assert "sql" not in response.text.casefold()
 
 
 @pytest.mark.unit
