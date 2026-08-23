@@ -167,8 +167,10 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Prevent password-reset and account-state races with an atomic account authentication version:
   compare-and-set the verified login snapshot, carry the accepted version in the session, and
   increment it for password resets, deactivation, and reactivation.
-- Pad every failed, invalid, or obsolete password-hash verification with at least one current
-  Argon2 work-profile verification without wall-clock sleeps.
+- Complete every failed, invalid, or obsolete password-hash path to exactly two current Argon2
+  work-profile units without wall-clock sleeps. Count a real current-profile candidate verification
+  as one unit and add two dummy units when the legacy or malformed candidate itself is not current
+  work.
 - Return sanitized stable error envelopes for request validation and expected API failures; never
   reflect submitted passwords or Pydantic validation input.
 - T06 uses temporary in-memory account and session adapters behind persistence ports; T12 replaces

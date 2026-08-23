@@ -77,6 +77,14 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   functional/Argon2id/real-HTTP domain passes 13/13. Ruff, `ty`, locked `uv` synchronization, CI
   validation, actionlint with ShellCheck, formatting, and diff checks pass. The sole warning remains
   Starlette's non-blocking notice about the future TestClient `httpx2` transition.
+- 2026-08-23: Closed the remaining Argon2 timing finding by making the backend injectable and
+  completing every failed current, unknown, inactive, legacy, malformed, and false-result path to
+  exactly two current-profile work units. Successful current verification and successful legacy
+  verification plus rehash each retain one current-profile unit. Structural tests assert these
+  counts without timing, while a seven-sample interleaved real-Argon2 test enforces a non-flaky
+  median ratio of at most 1.6. A separate nine-sample measurement on this machine produced medians
+  of 29.462 ms current-wrong, 29.866 ms unknown, 29.653 ms inactive, 29.463 ms legacy-wrong, and
+  29.782 ms malformed (`max/min=1.014`). No wall-clock sleep or secret logging was introduced.
 
 ## Synchronization
 

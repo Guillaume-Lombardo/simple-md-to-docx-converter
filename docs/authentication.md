@@ -28,9 +28,12 @@ Passwords use Argon2id. The configurable defaults are `m=19456 KiB`, `t=2`, and 
 
 Unknown, inactive, and wrong-password login attempts return the same English error. Unknown and
 inactive accounts still perform a dummy Argon2 verification. Every failed verification, including
-an invalid or obsolete hash, performs at least one verification using the current Argon2 work
-profile without wall-clock sleeps. An obsolete hash is upgraded only after successful password
-verification and a compare-and-set check of the account security version.
+an invalid or obsolete hash, is completed to exactly two verification work units using the current
+Argon2 profile without wall-clock sleeps. A current-profile candidate contributes its real
+verification as one unit; legacy and malformed candidates receive two current-profile dummy units.
+An obsolete hash is upgraded only after successful password verification and a compare-and-set
+check of the account security version. Successful current verification and successful legacy
+verification plus rehash each perform one current-profile unit.
 
 Sessions use opaque CSPRNG tokens; `MD_CONVERTER_SESSION_TOKEN_BYTES` defaults to 32 bytes and
 cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. Idle and absolute

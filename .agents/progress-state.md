@@ -89,6 +89,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   the 48-test focused race/CSRF/validation/timing/three-identity/selector set; and the non-skipped
   13-test functional/Argon2id/real-HTTP domain. Ruff, `ty`, locked sync, CI validation, actionlint
   with ShellCheck, formatting, and diff checks pass on the committed review-fix tree.
+- The last T06 timing re-review finding is implemented: all failed authentication paths have two
+  structurally counted current Argon2 work units, and nine-sample real medians range from 29.462 to
+  29.866 ms (`max/min=1.014`) without sleeps. Targeted tests pass 24/24, the functional domain
+  passes 14/14, and both canonical suites pass 122/122 at 98.73% application coverage; exact
+  post-commit light branch and changed-line evidence remains to be recorded.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
