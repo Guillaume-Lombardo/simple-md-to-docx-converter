@@ -97,8 +97,8 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   97.73% changed-line. T12 must replace the in-memory adapters with durable SQLite and PostgreSQL
   implementations preserving the authentication-version CAS/security-version contract. The
   independently approved T20/T21 final-image rootless E2E exception remains sequencing debt, not
-  a waiver. This repository mirror is delivered and verified; Linear remains `In Progress` until
-  this closure record is merged.
+  a waiver. This repository mirror is delivered and verified; Linear G1L-316 is `Done` after
+  verified delivery on `main`.
 
 ## Synchronization
 
