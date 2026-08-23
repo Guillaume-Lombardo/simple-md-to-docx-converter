@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly FIXTURES=/opt/toolchain/fixtures
 readonly EXPECTED_UID="${EXPECTED_UID:-}"
+readonly EXPECTED_WORK_STORAGE="${EXPECTED_WORK_STORAGE:-tmpfs}"
 readonly VALIDATION_SCOPE="${VALIDATION_SCOPE:-documents}"
 
 fail() {
@@ -69,8 +70,27 @@ grep -Fq 'Read-only file system' /tmp/root-write.err \
 assert_mount / overlay ro || fail "the root mount is not a read-only overlay"
 assert_mount /tmp tmpfs rw nosuid nodev noexec size= \
     || fail "/tmp does not have the required bounded tmpfs mount options"
-assert_mount /work tmpfs rw nosuid nodev size= \
-    || fail "/work does not have the required bounded tmpfs mount options"
+case "${EXPECTED_WORK_STORAGE}" in
+    tmpfs)
+        assert_mount /work tmpfs rw nosuid nodev size= \
+            || fail "/work does not have the required bounded tmpfs mount options"
+        ;;
+    disk)
+        python3 - <<'PY' || fail "/work is not a dedicated writable disk-backed mount"
+for line in open("/proc/mounts", encoding="utf-8"):
+    fields = line.split()
+    if fields[1] == "/work":
+        if fields[2] == "tmpfs" or "rw" not in fields[3].split(","):
+            raise SystemExit(1)
+        break
+else:
+    raise SystemExit(1)
+PY
+        ;;
+    *)
+        fail "unknown EXPECTED_WORK_STORAGE=${EXPECTED_WORK_STORAGE}"
+        ;;
+esac
 assert_mount /dev/shm tmpfs rw nosuid nodev noexec size= \
     || fail "/dev/shm does not have the required bounded tmpfs mount options"
 
@@ -108,6 +128,172 @@ Path("/work/validation.png").write_bytes(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
 )
+PY
+
+pandoc \
+    --from=commonmark \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark.json
+pandoc \
+    --from=commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-candidate.json
+pandoc \
+    --from=commonmark_x-yaml_metadata_block \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-no-metadata.json
+if pandoc \
+    --from=commonmark_x-raw_tex \
+    --to=json \
+    /work/commonmark-compatibility.md \
+    --output=/work/commonmark-x-no-raw-tex.json \
+    2>/work/commonmark-x-no-raw-tex.err; then
+    fail "commonmark_x unexpectedly accepted the unsupported raw_tex extension"
+fi
+grep -Fq "The extension 'raw_tex' is not supported for commonmark_x" \
+    /work/commonmark-x-no-raw-tex.err \
+    || fail "commonmark_x raw_tex rejection changed unexpectedly"
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+
+def load(name):
+    return json.loads(Path(name).read_text(encoding="utf-8"))
+
+
+def walk(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from walk(child)
+
+
+def inline_text(value):
+    parts = []
+    for node in walk(value):
+        if node.get("t") == "Str":
+            parts.append(node["c"])
+        elif node.get("t") in {"Space", "SoftBreak", "LineBreak"}:
+            parts.append(" ")
+    return "".join(parts)
+
+
+def nodes(document, node_type):
+    return [node for node in walk(document) if node.get("t") == node_type]
+
+
+def assert_core_structures(document, label):
+    headers = [node for node in nodes(document, "Header") if node["c"][0] == 1]
+    if len(headers) != 1 or inline_text(headers[0]["c"][2]) != "Heading":
+        raise SystemExit(f"{label} lost the exact heading fixture")
+
+    bullet_lists = nodes(document, "BulletList")
+    if len(bullet_lists) != 1 or inline_text(bullet_lists[0]) != "list item":
+        raise SystemExit(f"{label} lost the exact bullet-list fixture")
+
+    block_quotes = nodes(document, "BlockQuote")
+    if len(block_quotes) != 1 or inline_text(block_quotes[0]) != "block quote":
+        raise SystemExit(f"{label} lost the exact block-quote fixture")
+
+    code_blocks = nodes(document, "CodeBlock")
+    if (
+        len(code_blocks) != 1
+        or code_blocks[0]["c"][0][1] != ["python"]
+        or code_blocks[0]["c"][1] != 'print("code block")'
+    ):
+        raise SystemExit(f"{label} lost the exact fenced-code fixture")
+
+    links = nodes(document, "Link")
+    if (
+        len(links) != 1
+        or inline_text(links[0]["c"][1]) != "link"
+        or links[0]["c"][2] != ["https://example.invalid/", ""]
+    ):
+        raise SystemExit(f"{label} lost the exact link fixture")
+
+    images = nodes(document, "Image")
+    if (
+        len(images) != 1
+        or inline_text(images[0]["c"][1]) != "local image"
+        or images[0]["c"][2] != ["validation.png", ""]
+    ):
+        raise SystemExit(f"{label} lost the exact image fixture")
+    return images[0]
+
+
+baseline = load("/work/commonmark.json")
+candidate = load("/work/commonmark-x-candidate.json")
+no_metadata = load("/work/commonmark-x-no-metadata.json")
+
+baseline_image = assert_core_structures(baseline, "plain commonmark")
+candidate_image = assert_core_structures(candidate, "commonmark_x candidate")
+if baseline_image["c"][0] != ["", [], []]:
+    raise SystemExit("plain commonmark unexpectedly parsed image attributes")
+
+if nodes(baseline, "Table") or nodes(baseline, "Note"):
+    raise SystemExit("plain commonmark unexpectedly parsed an extension structure")
+tables = nodes(candidate, "Table")
+if len(tables) != 1 or [
+    node["c"] for node in walk(tables[0]) if node.get("t") == "Str"
+] != ["left", "right", "one", "two"]:
+    raise SystemExit("commonmark_x candidate lost the exact table fixture")
+notes = nodes(candidate, "Note")
+if len(notes) != 1 or inline_text(notes[0]) != "Footnote body.":
+    raise SystemExit("commonmark_x candidate lost the exact footnote fixture")
+
+if "title" not in candidate["meta"] or inline_text(candidate["meta"]["title"]) != "Compatibility matrix":
+    raise SystemExit("commonmark_x candidate did not parse YAML metadata")
+if no_metadata["meta"]:
+    raise SystemExit("disabling yaml_metadata_block unexpectedly retained metadata")
+
+identifier, classes, key_values = candidate_image["c"][0]
+if identifier != "probe-image" or ["width", "24px"] not in key_values:
+    raise SystemExit("commonmark_x candidate lost image attributes")
+if classes or key_values != [["width", "24px"]]:
+    raise SystemExit("commonmark_x candidate added unexpected image attributes")
+
+raw_html = [
+    node
+    for node in walk(candidate)
+    if node.get("t") in {"RawBlock", "RawInline"}
+    and node.get("c", [None])[0] == "html"
+]
+if [node["c"] for node in raw_html] != [["html", "<span>"], ["html", "</span>"]]:
+    raise SystemExit("commonmark_x raw HTML behavior changed for the exact fixture")
+raw_html_block = candidate["blocks"][-2]
+if raw_html_block != {
+    "t": "Para",
+    "c": [
+        {"t": "RawInline", "c": ["html", "<span>"]},
+        {"t": "Str", "c": "raw"},
+        {"t": "Space"},
+        {"t": "Str", "c": "HTML"},
+        {"t": "Space"},
+        {"t": "Str", "c": "probe"},
+        {"t": "RawInline", "c": ["html", "</span>"]},
+    ],
+}:
+    raise SystemExit("commonmark_x did not retain the exact raw HTML fixture as raw inline nodes")
+
+tex_nodes = [
+    node
+    for node in walk(candidate)
+    if node.get("t") in {"RawBlock", "RawInline"}
+    and node.get("c", [None])[0] == "tex"
+]
+if tex_nodes:
+    raise SystemExit("commonmark_x unexpectedly parsed the TeX-like fixture as raw TeX")
+last_block = candidate["blocks"][-1]
+if last_block.get("t") != "Para" or inline_text(last_block) != r"\newcommand{\probe}{raw TeX probe}":
+    raise SystemExit("commonmark_x did not retain the exact TeX-like fixture as ordinary text")
 PY
 fc-cache --force
 find "${XDG_CACHE_HOME}/fontconfig" -type f -print -quit | grep -q . \
@@ -205,6 +391,8 @@ printf 'libreoffice=%s\n' "$(soffice --version)"
 printf 'font=%s\n' "$(fc-match 'DejaVu Sans' | head -n 1)"
 printf 'uid=%s gid=%s\n' "$(id -u)" "$(id -g)"
 printf 'validation_scope=%s\n' "${VALIDATION_SCOPE}"
+printf 'work_storage=%s\n' "${EXPECTED_WORK_STORAGE}"
+printf 'commonmark_compatibility=passed\n'
 printf 'rpm_inventory_count=%s\n' "$(wc -l < /opt/toolchain/evidence/rpm-inventory.txt)"
 printf 'rpm_inventory_sha256=%s\n' \
     "$(sha256sum /opt/toolchain/evidence/rpm-inventory.txt | cut -d' ' -f1)"
