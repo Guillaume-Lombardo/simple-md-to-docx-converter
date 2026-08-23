@@ -24,6 +24,11 @@ Implement repository and object-store abstractions, both storage profiles, Alemb
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
+- The distributed object-store adapter is provider-neutral and AWS S3-compatible; CI and k3s use RustFS, never MinIO.
+- Shared contract tests cover standalone atomic files and the distributed object-store implementation.
+- Real PostgreSQL and RustFS integration tests cover the primary successful path and every relevant failure behavior.
+- Final-image rootless E2E is deferred only to T20/T21, is not a waiver of T12 integration coverage, and requires explicit pull-request justification and reviewer approval.
+- RPO/RTO, retention, quotas, antivirus, and cleanup values remain configurable and unresolved until separately approved.
 
 ## Dependencies
 
@@ -32,7 +37,7 @@ Implement repository and object-store abstractions, both storage profiles, Alemb
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-23: PM selected RustFS for CI/k3s while retaining a provider-neutral AWS S3-compatible contract. Real PostgreSQL/RustFS integration success and relevant failures plus shared contract tests remain in T12; only final-image rootless E2E is deferred to T20/T21 with explicit reviewer approval.
 
 ## Synchronization
 

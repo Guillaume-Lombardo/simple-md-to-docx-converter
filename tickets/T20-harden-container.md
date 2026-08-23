@@ -24,6 +24,8 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
+- The final image supports both storage profiles and uses the provider-neutral AWS S3-compatible object-store contract; distributed-profile test deployments use RustFS, never MinIO.
+- The hardened final image is used to discharge the rootless E2E debt explicitly deferred from T12, with explicit reviewer approval of the sequencing exception.
 
 ## Dependencies
 
@@ -34,7 +36,7 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-23: Scope now records the T12 sequencing debt: build the final rootless image for both profiles so T21 can verify the deferred storage workflows. RustFS is the CI/k3s S3-compatible implementation; the application contract remains provider-neutral and AWS S3-compatible.
 
 ## Synchronization
 

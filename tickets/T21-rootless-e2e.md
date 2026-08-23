@@ -24,6 +24,8 @@ Run E2E for both profiles with three identities, real conversion, restart recove
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
+- Both final-image storage profiles are exercised; distributed-profile environments use real PostgreSQL and RustFS through the provider-neutral AWS S3-compatible contract, never MinIO.
+- The suite discharges T12's deferred final-image rootless E2E debt for primary storage workflows and relevant critical failure, restart, recovery, and concurrency behavior.
 
 ## Dependencies
 
@@ -32,7 +34,7 @@ Run E2E for both profiles with three identities, real conversion, restart recove
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-23: Scope now explicitly includes T12's deferred final-image rootless E2E debt. Both profiles must run against the hardened image, with real PostgreSQL/RustFS for the distributed profile and relevant success, failure, restart, recovery, and concurrency paths.
 
 ## Synchronization
 
