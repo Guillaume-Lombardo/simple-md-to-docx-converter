@@ -39,7 +39,7 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 ## Blockers and Risks
 
 - T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, and Podman/OpenShift
-  validation; this does not block T02.
+  validation; this does not block T05.
 - Automatic relaunch of a stopped thread requires an external supervisor.
 - GitHub merge queue is unavailable because this public repository is user-owned, so the
   orchestrator must serialize merges.
