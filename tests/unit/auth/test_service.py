@@ -30,6 +30,7 @@ class FakeHasher:
 
     def __init__(self) -> None:
         self.verifications: list[tuple[str, str]] = []
+        self.on_verify: Callable[[], None] | None = None
 
     def hash(self, password: str) -> str:
         return f"hash:{password}"
@@ -38,6 +39,9 @@ class FakeHasher:
         self, password_hash: str, password: str
     ) -> tuple[bool, str | None]:
         self.verifications.append((password_hash, password))
+        if self.on_verify is not None:
+            callback, self.on_verify = self.on_verify, None
+            callback()
         valid = password_hash in {f"hash:{password}", f"old:{password}"}
         replacement = (
             f"hash:{password}" if valid and password_hash.startswith("old:") else None
@@ -50,8 +54,12 @@ class SequenceTokens:
 
     def __init__(self) -> None:
         self._numbers = count(1)
+        self.on_generate: Callable[[], None] | None = None
 
     def generate(self) -> str:
+        if self.on_generate is not None:
+            callback, self.on_generate = self.on_generate, None
+            callback()
         return f"token-{next(self._numbers)}"
 
 
@@ -125,8 +133,7 @@ def test_login_is_anti_enumerating_and_rehashes_only_a_successful_password() -> 
     service, hasher, _ = build_service()
     admin = service.bootstrap_admin("admin", "correct")
     legacy_hash = "old:" + "correct"
-    admin.password_hash = legacy_hash
-    service.users.save(admin)
+    service.users.update_security(admin.id, password_hash=legacy_hash)
 
     for username, password in [("missing", "guess"), ("admin", "wrong")]:
         assert_error(
@@ -136,7 +143,9 @@ def test_login_is_anti_enumerating_and_rehashes_only_a_successful_password() -> 
             ),
         )
     assert hasher.verifications[0] == (hasher.dummy_hash, "guess")
-    assert admin.password_hash == legacy_hash
+    stored = service.users.get_by_id(admin.id)
+    assert stored is not None
+    assert stored.password_hash == legacy_hash
 
     result = service.login("ADMIN", "correct")
     assert result.user.password_hash == hasher.hash("correct")
@@ -147,8 +156,7 @@ def test_login_is_anti_enumerating_and_rehashes_only_a_successful_password() -> 
 def test_inactive_account_uses_dummy_verification_and_cannot_login() -> None:
     service, hasher, _ = build_service()
     admin = service.bootstrap_admin("admin", "correct")
-    admin.active = False
-    service.users.save(admin)
+    service.users.update_security(admin.id, active=False)
 
     assert_error("INVALID_CREDENTIALS", lambda: service.login("admin", "correct"))
     assert hasher.verifications[-1] == (hasher.dummy_hash, "correct")
@@ -263,3 +271,39 @@ def test_session_repository_never_indexes_raw_tokens() -> None:
     result = service.login("admin", "correct")
     assert service.sessions.get(result.session_token) is None
     assert service.sessions.get(digest_token(result.session_token)) is not None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("needs_rehash", [False, True])
+def test_reset_during_password_verification_rejects_stale_login(
+    needs_rehash: bool,
+) -> None:
+    service, hasher, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    if needs_rehash:
+        service.users.update_security(admin.id, password_hash="old:" + "correct")
+    hasher.on_verify = lambda: service.reset_password(admin, admin.id, "replacement")
+
+    assert_error("INVALID_CREDENTIALS", lambda: service.login("admin", "correct"))
+    current = service.users.get_by_id(admin.id)
+    assert current is not None
+    assert current.password_hash == hasher.hash("replacement")
+    assert current.auth_version == (2 if needs_rehash else 1)
+
+
+@pytest.mark.unit
+def test_security_change_after_login_cas_makes_late_session_unusable() -> None:
+    service, _, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    assert isinstance(service.tokens, SequenceTokens)
+
+    def disable_during_token_generation() -> None:
+        service.set_active(admin, admin.id, active=False)
+
+    service.tokens.on_generate = disable_during_token_generation
+
+    result = service.login("admin", "correct")
+    assert result.user.auth_version == 0
+    assert_error(
+        "AUTHENTICATION_REQUIRED", lambda: service.authenticate(result.session_token)
+    )

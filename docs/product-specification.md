@@ -162,6 +162,15 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Default the configurable idle session lifetime to 30 minutes and the absolute lifetime to 8
   hours. Revoke sessions server-side on logout, account deactivation, and password reset.
 - Send the session token only in a cookie with `HttpOnly`, `Secure`, and `SameSite=Lax`.
+- Reject login POST requests carrying a cross-origin `Origin` before evaluating credentials. Allow
+  the exact request origin and documented non-browser clients that omit `Origin`.
+- Prevent password-reset and account-state races with an atomic account authentication version:
+  compare-and-set the verified login snapshot, carry the accepted version in the session, and
+  increment it for password resets, deactivation, and reactivation.
+- Pad every failed, invalid, or obsolete password-hash verification with at least one current
+  Argon2 work-profile verification without wall-clock sleeps.
+- Return sanitized stable error envelopes for request validation and expected API failures; never
+  reflect submitted passwords or Pydantic validation input.
 - T06 uses temporary in-memory account and session adapters behind persistence ports; T12 replaces
   them with profile implementations without changing the authentication service contract.
 

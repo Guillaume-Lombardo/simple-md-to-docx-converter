@@ -42,6 +42,17 @@ def csrf(payload: dict[str, Any]) -> dict[str, str]:
     return {"X-CSRF-Token": str(payload["csrf_token"])}
 
 
+def session_cookie(client: TestClient) -> str:
+    token = client.cookies.get("md_converter_session")
+    assert token is not None
+    return token
+
+
+def use_session(client: TestClient, token: str) -> None:
+    client.cookies.clear()
+    client.cookies.set("md_converter_session", token)
+
+
 @pytest.mark.functional
 def test_health_login_page_docs_and_openapi_contract() -> None:
     with make_client() as client:
@@ -254,3 +265,88 @@ def test_browser_login_has_stable_failure_and_redirect_success() -> None:
         )
         assert success.status_code == 303
         assert success.headers["location"] == "/docs"
+
+
+@pytest.mark.functional
+def test_login_csrf_rejects_attacker_origin_and_allows_documented_api_policy() -> None:
+    with make_client() as client:
+        payload = {"username": "admin", "password": "admin-password"}
+        hostile = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://attacker.example"},
+            json=payload,
+        )
+        assert hostile.status_code == 403
+        assert hostile.json()["error"]["code"] == "LOGIN_ORIGIN_INVALID"
+        assert "md_converter_session" not in hostile.cookies
+
+        same_origin = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://testserver"},
+            json=payload,
+        )
+        assert same_origin.status_code == 200
+        client.cookies.clear()
+        assert client.post("/api/v1/login", json=payload).status_code == 200
+
+
+@pytest.mark.functional
+def test_admin_alice_and_bob_lifecycle_preserves_identity_isolation() -> None:
+    with make_client() as client:
+        admin = login(client)
+        admin_cookie = session_cookie(client)
+        alice = client.post(
+            "/api/v1/admin/users",
+            headers=csrf(admin),
+            json={"username": "Alice", "password": "alice-password"},
+        ).json()
+        bob = client.post(
+            "/api/v1/admin/users",
+            headers=csrf(admin),
+            json={"username": "Bob", "password": "bob-password"},
+        ).json()
+
+        client.cookies.clear()
+        alice_login = login(client, "alice", "alice-password")
+        alice_cookie = session_cookie(client)
+        assert client.get("/api/v1/admin/users").status_code == 403
+        client.cookies.clear()
+        bob_login = login(client, "bob", "bob-password")
+        bob_cookie = session_cookie(client)
+        assert client.get("/api/v1/admin/users").status_code == 403
+        assert alice_login["user"]["id"] != bob_login["user"]["id"]
+
+        use_session(client, admin_cookie)
+        cross_session = client.patch(
+            f"/api/v1/admin/users/{alice['id']}/active",
+            headers=csrf(alice_login),
+            json={"active": False},
+        )
+        assert cross_session.status_code == 403
+        assert (
+            client.patch(
+                f"/api/v1/admin/users/{alice['id']}/active",
+                headers=csrf(admin),
+                json={"active": False},
+            ).status_code
+            == 200
+        )
+
+        use_session(client, alice_cookie)
+        assert client.get("/api/v1/session").status_code == 401
+        use_session(client, bob_cookie)
+        assert client.get("/api/v1/session").status_code == 200
+
+        use_session(client, admin_cookie)
+        assert (
+            client.post(
+                f"/api/v1/admin/users/{bob['id']}/password",
+                headers=csrf(admin),
+                json={"password": "new-bob-password"},
+            ).status_code
+            == 204
+        )
+        use_session(client, bob_cookie)
+        assert client.get("/api/v1/session").status_code == 401
+        client.cookies.clear()
+        assert login(client, "bob", "new-bob-password")["user"]["id"] == bob["id"]

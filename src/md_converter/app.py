@@ -1,14 +1,15 @@
 """FastAPI application factory and T06 HTTP contract."""
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Form, Header, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from md_converter.auth.errors import AuthenticationError
+from md_converter.auth.errors import LOGIN_ORIGIN_INVALID, AuthenticationError
 from md_converter.auth.memory import (
     MemoryReadinessProbe,
     MemorySessionRepository,
@@ -76,6 +77,67 @@ class LoginResponse(BaseModel):
     )
 
 
+class ErrorDetail(BaseModel):
+    """Stable machine-readable functional error detail."""
+
+    code: str
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    """Stable error envelope used for every expected HTTP failure."""
+
+    error: ErrorDetail
+
+
+ERROR_DESCRIPTIONS = {
+    401: "Authentication failed or is required",
+    403: "The operation is forbidden",
+    404: "The account was not found",
+    409: "The username conflicts with an existing account",
+    422: "The request is invalid",
+    503: "The service is not ready",
+}
+
+
+def error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
+    """Build explicit OpenAPI entries for stable error envelopes."""
+    return {
+        status_code: {
+            "model": ErrorResponse,
+            "description": ERROR_DESCRIPTIONS[status_code],
+        }
+        for status_code in status_codes
+    }
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    """Install sanitized functional and request-validation error handlers."""
+
+    @app.exception_handler(AuthenticationError)
+    def authentication_error_handler(
+        _request: Request, error: AuthenticationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"error": {"code": error.code, "message": error.message}},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    def request_validation_error_handler(
+        _request: Request, _error: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {
+                    "code": "REQUEST_INVALID",
+                    "message": "The request is invalid.",
+                }
+            },
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class AppComponents:
     """Application ports assembled independently of FastAPI."""
@@ -133,12 +195,21 @@ def create_app(
         openapi_url="/openapi.json",
     )
     app.state.components = resolved_components
+    install_error_handlers(app)
 
     def session_token(request: Request) -> str | None:
         return request.cookies.get(resolved_settings.session_cookie_name)
 
     def current_user(request: Request) -> User:
         return auth.authenticate(session_token(request))
+
+    def enforce_login_origin(request: Request) -> None:
+        origin = request.headers.get("Origin")
+        if origin is None:
+            return
+        expected = str(request.base_url).rstrip("/").casefold()
+        if origin.rstrip("/").casefold() != expected:
+            raise LOGIN_ORIGIN_INVALID.new()
 
     def mutation_actor(
         request: Request,
@@ -177,20 +248,15 @@ def create_app(
             path="/",
         )
 
-    @app.exception_handler(AuthenticationError)
-    def authentication_error_handler(
-        _request: Request, error: AuthenticationError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=error.status_code,
-            content={"error": {"code": error.code, "message": error.message}},
-        )
-
     @app.get("/health/live", tags=["health"])
     def live() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/health/ready", tags=["health"])
+    @app.get(
+        "/health/ready",
+        tags=["health"],
+        responses=error_responses(503),
+    )
     def ready() -> Response:
         if resolved_components.readiness.is_ready():
             return JSONResponse({"status": "ready"})
@@ -215,6 +281,7 @@ def create_app(
         request: Request,
         username: Annotated[str, Form()],
         password: Annotated[str, Form()],
+        _origin: Annotated[None, Depends(enforce_login_origin)],
     ) -> Response:
         try:
             result = auth.login(
@@ -237,10 +304,13 @@ def create_app(
         "/api/v1/login",
         response_model=LoginResponse,
         tags=["authentication"],
-        responses={401: {"description": "Invalid credentials"}},
+        responses=error_responses(401, 403, 422),
     )
     def api_login(
-        payload: LoginRequest, request: Request, response: Response
+        payload: LoginRequest,
+        request: Request,
+        response: Response,
+        _origin: Annotated[None, Depends(enforce_login_origin)],
     ) -> LoginResponse:
         result = auth.login(
             payload.username,
@@ -257,6 +327,7 @@ def create_app(
         "/api/v1/logout",
         status_code=status.HTTP_204_NO_CONTENT,
         tags=["authentication"],
+        responses=error_responses(401, 403, 422),
     )
     def api_logout(
         request: Request,
@@ -270,6 +341,7 @@ def create_app(
         "/api/v1/session",
         response_model=UserResponse,
         tags=["authentication"],
+        responses=error_responses(401),
     )
     def api_session(user: Annotated[User, Depends(current_user)]) -> UserResponse:
         return UserResponse.model_validate(user)
@@ -278,6 +350,7 @@ def create_app(
         "/api/v1/admin/users",
         response_model=list[UserResponse],
         tags=["administration"],
+        responses=error_responses(401, 403),
     )
     def list_users(actor: Annotated[User, Depends(admin_user)]) -> list[UserResponse]:
         return [UserResponse.model_validate(user) for user in auth.list_users(actor)]
@@ -287,6 +360,7 @@ def create_app(
         response_model=UserResponse,
         status_code=status.HTTP_201_CREATED,
         tags=["administration"],
+        responses=error_responses(401, 403, 409, 422),
     )
     def create_user(
         payload: UserCreateRequest,
@@ -300,6 +374,7 @@ def create_app(
         "/api/v1/admin/users/{user_id}/active",
         response_model=UserResponse,
         tags=["administration"],
+        responses=error_responses(401, 403, 404, 422),
     )
     def set_user_active(
         user_id: UUID,
@@ -314,6 +389,7 @@ def create_app(
         "/api/v1/admin/users/{user_id}/password",
         status_code=status.HTTP_204_NO_CONTENT,
         tags=["administration"],
+        responses=error_responses(401, 403, 404, 422),
     )
     def reset_user_password(
         user_id: UUID,

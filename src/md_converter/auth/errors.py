@@ -35,6 +35,9 @@ AUTHENTICATION_REQUIRED = ErrorSpec(
     "AUTHENTICATION_REQUIRED", "Authentication is required.", 401
 )
 CSRF_REQUIRED = ErrorSpec("CSRF_REQUIRED", "A valid CSRF token is required.", 403)
+LOGIN_ORIGIN_INVALID = ErrorSpec(
+    "LOGIN_ORIGIN_INVALID", "The login request origin is not allowed.", 403
+)
 FORBIDDEN = ErrorSpec(
     "FORBIDDEN", "You are not authorized to perform this operation.", 403
 )

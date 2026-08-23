@@ -68,11 +68,48 @@ class MemoryUserRepository:
                 key=lambda user: user.normalized_username,
             )
 
-    def save(self, user: User) -> None:
+    def commit_verified_login(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        replacement_hash: str | None,
+    ) -> User | None:
+        """Compare-and-set the verified snapshot before session issuance."""
         with self._lock:
-            if user.id not in self._users:
-                raise KeyError(user.id)
-            self._users[user.id] = replace(user)
+            user = self._users.get(user_id)
+            if (
+                user is None
+                or not user.active
+                or user.auth_version != expected_auth_version
+            ):
+                return None
+            if replacement_hash is not None:
+                user = replace(user, password_hash=replacement_hash)
+                self._users[user.id] = user
+            return replace(user)
+
+    def update_security(
+        self,
+        user_id: UUID,
+        *,
+        active: bool | None = None,
+        password_hash: str | None = None,
+    ) -> User | None:
+        """Atomically change account security state and invalidate older sessions."""
+        with self._lock:
+            user = self._users.get(user_id)
+            if user is None:
+                return None
+            user = replace(
+                user,
+                active=user.active if active is None else active,
+                password_hash=(
+                    user.password_hash if password_hash is None else password_hash
+                ),
+                auth_version=user.auth_version + 1,
+            )
+            self._users[user.id] = user
+            return replace(user)
 
 
 class MemorySessionRepository:

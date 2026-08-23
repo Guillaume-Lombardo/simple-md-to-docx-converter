@@ -58,11 +58,18 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
 - 2026-08-23: Activated the hosted `functional` CI domain with its ASGI and real Argon2id/HTTP
   integration suites. All 99 default and full tests pass with 97.58% total application coverage
   (98% rounded; 56 branches measured) and 98.41% changed-line coverage; the 11-test domain command
-  passes without skips. Ruff
-  formatting/linting, `ty`, locked `uv` synchronization, the local CI validator, actionlint with
-  ShellCheck, and `git diff --check` pass. The only warning is Starlette's non-blocking TestClient
+  passes without skips. Ruff formatting/linting, `ty`, locked `uv` synchronization, the local CI
+  validator, actionlint with ShellCheck, and `git diff --check` pass. The only warning is Starlette's
+  non-blocking TestClient
   notice about its future `httpx2` transition. Final-image rootless E2E remains the explicitly
   approved T20/T21 debt documented in `docs/authentication.md`.
+- 2026-08-23: Addressed independent review findings with a repository-level authentication-version
+  CAS contract, stale-session version checks, deterministic reset/disable/rehash race coverage,
+  current-profile Argon2 failure padding, cross-origin login rejection, sanitized request
+  validation envelopes and explicit OpenAPI error schemas, functional-domain selection for auth
+  integration tests, genuine isolated HTTP-adapter unit coverage, and a complete administrator,
+  Alice, and Bob lifecycle/authorization-isolation scenario. T12 must implement the CAS and
+  security mutation atomically in both durable profiles; T06 adds no persistence.
 
 ## Synchronization
 

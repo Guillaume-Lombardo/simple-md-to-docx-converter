@@ -35,6 +35,13 @@ contract tests when they are introduced. T06 defines storage-neutral account and
 repository ports but does not select either profile; T12 must implement and contract-test both
 persistent adapters.
 
+The user repository contract includes an authentication-version compare-and-set after password
+verification and an atomic security mutation that increments that version. Sessions capture the
+accepted version and reject stale values. This separates expensive Argon2 work from the storage
+transaction while preventing reset, disable, reactivation, and successful-login rehash races. T12
+must map these operations to real SQLite and PostgreSQL transactions; separate read/write calls do
+not satisfy the contract.
+
 ## Security and runtime
 
 Document-controlled network access is forbidden. Future engine adapters must use fixed arguments,

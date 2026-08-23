@@ -27,8 +27,10 @@ Passwords use Argon2id. The configurable defaults are `m=19456 KiB`, `t=2`, and 
 - `MD_CONVERTER_ARGON2_PARALLELISM`
 
 Unknown, inactive, and wrong-password login attempts return the same English error. Unknown and
-inactive accounts still perform a dummy Argon2 verification. An obsolete hash is upgraded only
-after a successful password verification.
+inactive accounts still perform a dummy Argon2 verification. Every failed verification, including
+an invalid or obsolete hash, performs at least one verification using the current Argon2 work
+profile without wall-clock sleeps. An obsolete hash is upgraded only after successful password
+verification and a compare-and-set check of the account security version.
 
 Sessions use opaque CSPRNG tokens; `MD_CONVERTER_SESSION_TOKEN_BYTES` defaults to 32 bytes and
 cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. Idle and absolute
@@ -37,10 +39,25 @@ lifetimes default to 30 minutes and 8 hours and are configured with
 present session, logout revokes it, and account deactivation or password reset revokes every
 session for that account.
 
+Each account carries a monotonically increasing authentication version. Password reset,
+deactivation, and reactivation increment it atomically. Login verifies a snapshot and then uses a
+repository compare-and-set operation before issuing a session containing the accepted version.
+Authentication compares both versions. Consequently, a concurrent reset cannot be overwritten by
+a stale successful verification, and a session created after a concurrent security change is
+immediately unusable even if physical session deletion raced. T12 adapters must implement the
+compare-and-set and security-version update transactionally in SQLite and PostgreSQL; generic
+non-atomic password/account saves are not part of the port.
+
 The cookie name defaults to `md_converter_session` and is configurable with
 `MD_CONVERTER_SESSION_COOKIE_NAME`. It is always `HttpOnly`, `Secure`, `SameSite=Lax`, and scoped to
 `/`. Successful JSON login returns a separate, session-bound CSRF token once. Every authenticated
 mutation requires it in `X-CSRF-Token`; a token from another session is rejected.
+
+Both login POST routes reject an `Origin` that differs from the request origin before credentials
+are evaluated. An exact same-origin value is allowed, as is absence of `Origin` for non-browser API
+clients. Deployment proxies must preserve the external scheme and host so Uvicorn constructs the
+same origin seen by the browser. This policy prevents an attacker site from logging a victim's
+browser into the attacker's account.
 
 ## HTTP surface
 
@@ -53,6 +70,12 @@ mutation requires it in `X-CSRF-Token`; a token from another session is rejected
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
 
 There is intentionally no signup endpoint.
+
+Expected API failures use the stable English envelope
+`{"error":{"code":"...","message":"..."}}`. Request validation never returns Pydantic's raw
+error objects or submitted values, so malformed payloads, passwords, and invalid path identifiers
+are not reflected. OpenAPI declares this envelope for validation, authentication, administration,
+and readiness failures, including the real readiness `503` response.
 
 The ASGI factory is `md_converter:create_app`; Uvicorn is included as the runtime server. Deploy it
 behind the profile's TLS endpoint because authentication cookies are always secure.

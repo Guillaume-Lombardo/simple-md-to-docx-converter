@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from argon2 import PasswordHasher as Argon2Hasher
@@ -41,8 +42,10 @@ class Argon2idPasswordHasher:
         try:
             valid = self._hasher.verify(password_hash, password)
         except VerificationError, VerifyMismatchError:
+            self._pad_current_work(password)
             return False, None
         if not valid:
+            self._pad_current_work(password)
             return False, None
         replacement = (
             self.hash(password)
@@ -50,6 +53,11 @@ class Argon2idPasswordHasher:
             else None
         )
         return True, replacement
+
+    def _pad_current_work(self, password: str) -> None:
+        """Perform one current-profile Argon2 verification on every failed path."""
+        with suppress(VerificationError, VerifyMismatchError):
+            self._hasher.verify(self._dummy_hash, password)
 
 
 class SecretsTokenGenerator:

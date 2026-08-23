@@ -107,9 +107,11 @@ class AuthenticationService:
         valid, replacement = self.hasher.verify_and_rehash(candidate_hash, password)
         if user is None or not user.active or not valid:
             raise INVALID_CREDENTIALS.new()
-        if replacement is not None:
-            user.password_hash = replacement
-            self.users.save(user)
+        committed_user = self.users.commit_verified_login(
+            user.id, user.auth_version, replacement
+        )
+        if committed_user is None:
+            raise INVALID_CREDENTIALS.new()
 
         session_token = self.tokens.generate()
         csrf_token = self.tokens.generate()
@@ -118,7 +120,8 @@ class AuthenticationService:
         session = Session(
             token_digest=digest_token(session_token),
             csrf_digest=digest_token(csrf_token),
-            user_id=user.id,
+            user_id=committed_user.id,
+            auth_version=committed_user.auth_version,
             created_at=now,
             last_seen_at=now,
             idle_expires_at=min(now + self.idle_lifetime, absolute_expires),
@@ -126,13 +129,15 @@ class AuthenticationService:
         )
         self.sessions.create(session)
         return LoginResult(
-            user=user, session_token=session_token, csrf_token=csrf_token
+            user=committed_user,
+            session_token=session_token,
+            csrf_token=csrf_token,
         )
 
     def authenticate(self, session_token: str | None) -> User:
         session = self._active_session(session_token)
         user = self.users.get_by_id(session.user_id)
-        if user is None or not user.active:
+        if user is None or not user.active or user.auth_version != session.auth_version:
             self.sessions.revoke(session.token_digest)
             raise AUTHENTICATION_REQUIRED.new()
         now = self.clock.now()
@@ -181,27 +186,22 @@ class AuthenticationService:
 
     def set_active(self, actor: User, user_id: UUID, *, active: bool) -> User:
         AuthorizationService.require_admin(actor)
-        user = self._required_user(user_id)
-        user.active = active
-        self.users.save(user)
-        if not active:
-            self.sessions.revoke_user(user.id)
+        user = self.users.update_security(user_id, active=active)
+        if user is None:
+            raise USER_NOT_FOUND.new()
+        self.sessions.revoke_user(user.id)
         return user
 
     def reset_password(self, actor: User, user_id: UUID, password: str) -> None:
         AuthorizationService.require_admin(actor)
         if not password:
             raise PASSWORD_INVALID.new()
-        user = self._required_user(user_id)
-        user.password_hash = self.hasher.hash(password)
-        self.users.save(user)
-        self.sessions.revoke_user(user.id)
-
-    def _required_user(self, user_id: UUID) -> User:
-        user = self.users.get_by_id(user_id)
+        user = self.users.update_security(
+            user_id, password_hash=self.hasher.hash(password)
+        )
         if user is None:
             raise USER_NOT_FOUND.new()
-        return user
+        self.sessions.revoke_user(user.id)
 
     def _active_session(self, session_token: str | None) -> Session:
         if not session_token:

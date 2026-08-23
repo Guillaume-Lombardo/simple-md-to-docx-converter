@@ -111,6 +111,14 @@ def test_t06_functional_domain_is_active_and_runnable() -> None:
 
 
 @pytest.mark.unit
+def test_auth_integration_change_selects_functional_domain() -> None:
+    """Real authentication boundary tests cannot bypass their hosted domain."""
+    assert "functional" in select_domains(
+        ["tests/integration/auth/test_http_session.py"]
+    )
+
+
+@pytest.mark.unit
 def test_draft_suppresses_only_runnable_heavy_domains() -> None:
     """Drafts retain visible planned gaps but do not run active heavy suites."""
     registry = {

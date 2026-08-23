@@ -31,6 +31,7 @@ class User:
     password_hash: str
     role: Role
     active: bool = True
+    auth_version: int = 0
 
 
 @dataclass(slots=True)
@@ -40,6 +41,7 @@ class Session:
     token_digest: str
     csrf_digest: str
     user_id: UUID
+    auth_version: int
     created_at: datetime
     last_seen_at: datetime
     idle_expires_at: datetime

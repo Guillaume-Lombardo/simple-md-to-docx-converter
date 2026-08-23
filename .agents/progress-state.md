@@ -14,8 +14,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   Backlog.
 - T06 started on isolated branch `feat/T06-fastapi-auth-foundation` from `db698a5` after its T01
   and T05 dependencies were verified `Done`. The PM resolved account provisioning, Argon2id,
-  session, cookie, and final-image E2E sequencing decisions. Its implementation and local
-  validation are complete and await independent review/publication; no T06 policy blocker remains.
+  session, cookie, and final-image E2E sequencing decisions. The first independent review requested
+  authentication race, login-CSRF, validation-contract, light-coverage, selector, and three-user
+  fixes; those changes are implemented and await re-review/publication. No T06 policy blocker
+  remains.
 - The authentication API foundation is functional. Conversion, durable storage, queue, worker,
   product UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
@@ -82,6 +84,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   coverage, the non-skipped 11-test functional/Argon2id/HTTP domain, the local CI validator,
   actionlint with ShellCheck, and clean diffs. Rootless final-image E2E is the explicit PM-approved
   T20/T21 sequencing exception.
+- T06 review-fix validation currently passes 116/116 default and full tests at 98.70% application
+  coverage, 96/96 exact light tests at 97.22%, the 48-test focused unit/selector set, and the 13-test
+  functional/Argon2id/real-HTTP domain. Final post-commit branch and changed-line evidence is still
+  required before re-review.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.

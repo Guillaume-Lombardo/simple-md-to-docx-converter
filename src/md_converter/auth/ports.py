@@ -27,7 +27,24 @@ class UserRepository(Protocol):
 
     def list(self) -> builtins.list[User]: ...
 
-    def save(self, user: User) -> None: ...
+    def commit_verified_login(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        replacement_hash: str | None,
+    ) -> User | None:
+        """Atomically validate account state/version and optionally replace its hash."""
+        ...
+
+    def update_security(
+        self,
+        user_id: UUID,
+        *,
+        active: bool | None = None,
+        password_hash: str | None = None,
+    ) -> User | None:
+        """Atomically mutate security state and increment its revocation version."""
+        ...
 
 
 class SessionRepository(Protocol):
