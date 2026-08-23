@@ -89,6 +89,16 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   93.94% branch (62/66), and 97.73% changed-application-line coverage (473/484). Both canonical
   suites pass 122/122 at 98.73% application coverage, the targeted work-profile/race set passes
   24/24, and the non-skipped functional/Argon2id/real-HTTP domain passes 14/14.
+- 2026-08-23: Delivered and verified on `main` through PR #16. Independent security and contract
+  review approved exact head `6f7f89c019bd93ed8a0dd18fac9929efa039f398`; it was squash-merged as
+  `8e18235c1b321486b38b1e0993cf3ea622b6acf4`. PR run `32650616075` and main run `32650924178`
+  both passed, including non-skipped `functional` 14/14. The protected `CI / gate` is uniquely
+  emitted by GitHub Actions app `15368`. Coverage remains 97.28% application, 93.94% branch, and
+  97.73% changed-line. T12 must replace the in-memory adapters with durable SQLite and PostgreSQL
+  implementations preserving the authentication-version CAS/security-version contract. The
+  independently approved T20/T21 final-image rootless E2E exception remains sequencing debt, not
+  a waiver. This repository mirror is delivered and verified; Linear remains `In Progress` until
+  this closure record is merged.
 
 ## Synchronization
 
