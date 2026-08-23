@@ -1,0 +1,86 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "toolchain-success",
+    "labels": {
+      "app.kubernetes.io/name": "t00-k3s-toolchain",
+      "t00.g1lom.xyz/network-denied": "true",
+      "t00.g1lom.xyz/owned": "true"
+    }
+  },
+  "spec": {
+    "automountServiceAccountToken": false,
+    "enableServiceLinks": true,
+    "restartPolicy": "Never",
+    "securityContext": {
+      "runAsGroup": 0,
+      "runAsNonRoot": true,
+      "runAsUser": 1000710000,
+      "seccompProfile": {
+        "type": "Localhost",
+        "localhostProfile": "t00-k3s-chrome-bbd643f78d48.json"
+      }
+    },
+    "initContainers": [
+      {
+        "name": "network-policy-settle",
+        "image": "localhost/simple-md-toolchain:t00",
+        "imagePullPolicy": "Never",
+        "command": ["/bin/bash", "-c", "sleep 3"],
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "capabilities": {"drop": ["ALL"]}
+        },
+        "resources": {
+          "requests": {"cpu": "10m", "memory": "16Mi"},
+          "limits": {"cpu": "100m", "memory": "32Mi"}
+        }
+      }
+    ],
+    "containers": [
+      {
+        "name": "probe",
+        "image": "localhost/simple-md-toolchain:t00",
+        "imagePullPolicy": "Never",
+        "env": [
+          {"name": "EXPECTED_RUNTIME", "value": "kubernetes"},
+          {"name": "EXPECTED_NETWORK_ACCESS", "value": "denied"},
+          {"name": "EXPECTED_UID", "value": "1000710000"},
+          {"name": "EXPECTED_WORK_STORAGE", "value": "disk"},
+          {"name": "NETWORK_PROBE_HOST", "value": "network-target"},
+          {"name": "NETWORK_PROBE_PORT", "value": "8080"},
+          {"name": "VALIDATION_SCOPE", "value": "target"}
+        ],
+        "securityContext": {
+          "allowPrivilegeEscalation": false,
+          "readOnlyRootFilesystem": true,
+          "capabilities": {"drop": ["ALL"]}
+        },
+        "resources": {
+          "requests": {
+            "cpu": "250m",
+            "memory": "512Mi",
+            "ephemeral-storage": "256Mi"
+          },
+          "limits": {
+            "cpu": "2",
+            "memory": "2Gi",
+            "ephemeral-storage": "1Gi"
+          }
+        },
+        "volumeMounts": [
+          {"name": "tmp", "mountPath": "/tmp"},
+          {"name": "work", "mountPath": "/work"},
+          {"name": "shm", "mountPath": "/dev/shm"}
+        ]
+      }
+    ],
+    "volumes": [
+      {"name": "tmp", "emptyDir": {"medium": "Memory", "sizeLimit": "512Mi"}},
+      {"name": "work", "emptyDir": {"sizeLimit": "1Gi"}},
+      {"name": "shm", "emptyDir": {"medium": "Memory", "sizeLimit": "128Mi"}}
+    ]
+  }
+}

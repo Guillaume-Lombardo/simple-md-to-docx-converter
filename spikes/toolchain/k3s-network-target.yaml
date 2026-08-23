@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: network-target
+  labels:
+    app.kubernetes.io/name: t00-k3s-network-target
+    t00.g1lom.xyz/owned: "true"
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+  annotations:
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000710000
+    runAsGroup: 0
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: server
+      image: localhost/simple-md-toolchain:t00
+      imagePullPolicy: Never
+      command: [/usr/bin/python3, -m, http.server, "8080"]
+      readinessProbe:
+        tcpSocket:
+          port: 8080
+        periodSeconds: 1
+        timeoutSeconds: 1
+        failureThreshold: 30
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests: {cpu: 10m, memory: 32Mi, ephemeral-storage: 16Mi}
+        limits: {cpu: 100m, memory: 64Mi, ephemeral-storage: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: network-target
+  labels:
+    t00.g1lom.xyz/owned: "true"
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+  annotations:
+    t00.g1lom.xyz/run-id: T00_RUN_ID
+spec:
+  selector:
+    app.kubernetes.io/name: t00-k3s-network-target
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

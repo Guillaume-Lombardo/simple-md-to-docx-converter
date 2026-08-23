@@ -21,6 +21,18 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and Linear G1L-325 are fully synchronized as `Done`.
 - PR #28 delivered the approved T00 scope and synchronized orchestration and ticket state as squash
   `b2e5b3965ad05448c56d6fd857191489f8a94173`; its main validation passed the protected gate.
+- The PM-authorized local k3s T00 validation passed with the checksum-locked Chrome seccomp profile
+  and fail-closed controls. The exact namespace, Localhost profile, and imported image were removed
+  and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
+- T00 review blockers are corrected locally: cluster-global names are unique and collision-checked,
+  installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
+  negative probes cover collision, tampering, acquisition failure, and proxy lifecycle. The proxy
+  is terminated as a complete process group. Exact PID/start-time baselining catches survivors even
+  after k3s rewrites argv; baseline identities are excluded from token signaling, and an existing
+  token collision blocks launch. Namespace deletion requires this run's valid create receipt and
+  captured UID rather than public metadata alone. Hardened live run `reviewfix06` removed every
+  exact run resource; the added failure paths are verified offline. Publication and independent
+  approval remain pending.
 
 ## Approved Product Decisions
 
@@ -59,8 +71,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Blockers and Risks
 
-- Chrome/Mermaid still requires k3s validation. OpenShift compatibility cannot be claimed until the
-  deferred target proof runs.
+- Chrome/Mermaid is proven on rootless Podman and local k3s. OpenShift compatibility cannot be
+  claimed until the deferred target proof runs.
 - Exact font artifacts/substitution order and explicit Noto scripts remain T10 work.
 - Production limits, RPO/RTO, retention, quotas, antivirus, and cleanup remain configurable T18
   work. GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget remain T22 work.
@@ -72,9 +84,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Local k3s `v1.35.5+k3s1` is installed but stopped. Await PM authorization before starting,
-   configuring, or accessing the cluster; once authorized, continue T00 with the k3s proof while
-   keeping OpenShift deferred and the browser sandbox intact.
+1. Commit the corrected T00 k3s proof, publish it only after explicit approval, obtain independent
+   approval, and verify it on `main`; then synchronize T00/Linear and unblock T04. OpenShift
+   validation remains deferred.
 2. Re-read Linear and select only a ready ticket whose dependencies are verified `Done`; T04 still
    waits for T00 and T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
@@ -103,4 +115,22 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
+- T00 local k3s `v1.35.5+k3s1` passes the target Chrome/Mermaid, network-policy, security, and
+  fail-closed probes with containerd `2.2.3-k3s1`. The exact test namespace, Localhost profile, and
+  imported image were removed and verified absent after the run.
+- The hardened T00 k3s wrapper's offline collision, ownership-change, installed-profile-tampering,
+  namespace-UID, image-digest, acquisition-failure, and proxy success/failure/interruption probes
+  pass. The orchestrator found and identity-checked two argv-rewritten proxy orphans from legacy
+  `reviewfix04`/`reviewfix05`, terminated only those PIDs, and verified no `kubectl` remained. The
+  new regression detects argv/token disappearance and preserves a baseline `kubectl`. Live run
+  `reviewfix06` passes all workload probes,
+  verifies installed profile SHA-256 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`,
+  and verifies its namespace, profile, marker, containerd image, and Podman tag absent afterward.
+- Final offline regressions prove that a baseline `kubectl` carrying the same operator-supplied run
+  token survives and blocks launch, and that create collisions or invalid namespace receipts
+  preserve identically labeled namespaces without attempting deletion. A valid receipt still
+  supports cleanup after the injected post-create API failure.
+- The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection
+  passes 175 tests at 98% coverage; both canonical Pytest commands report the same 10 PostgreSQL/
+  RustFS integration failures because this worktree has no test-service environment variables.
 - Final product validation has not run; the product is incomplete.

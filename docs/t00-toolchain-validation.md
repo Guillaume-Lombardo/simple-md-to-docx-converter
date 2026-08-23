@@ -3,16 +3,16 @@
 ## Status
 
 Pandoc, Fontconfig, LibreOffice, and sandboxed Chrome/Mermaid are compatible
-with UBI 9 and Python 3.14 in the rootless Podman probe. Docker's
-runtime-default seccomp profile still rejects Chrome namespace creation. The
-committed Podman profile is the containers/common 0.62.2 default with only the
-`chroot` capability condition removed; k3s validation remains required. The
-probe retains arbitrary UID, read-only root, no network, no capabilities,
-`no-new-privileges`, explicit bounded writable areas, and cgroup limits. Do not
-use this probe as the production image and do not enable Pandoc `--sandbox` for
+with UBI 9 and Python 3.14 in the rootless Podman and local k3s probes. Docker
+and k3s runtime-default seccomp still reject Chrome namespace creation. The
+committed profile is the containers/common 0.62.2 default with only the
+`chroot` capability condition removed. Both positive paths retain arbitrary
+UID, read-only root, no capabilities, `no-new-privileges`, bounded writable
+areas, cgroup limits, and runtime-appropriate network isolation. Do not use
+this probe as the production image and do not enable Pandoc `--sandbox` for
 conversions with local resources.
 
-This report records evidence observed on August 23, 2026. The base image and
+This report records evidence observed on August 23 and 24, 2026. The base image and
 engine archives are pinned. RPM dependencies resolved from the mutable UBI
 repositories are not pinned or snapshotted, so rebuilding later can produce a
 different package set. This is not a reproducible-image claim.
@@ -68,6 +68,69 @@ The runner verifies the committed profile SHA-256 before passing it to Podman.
 the fail-closed `sys_chroot` baseline. A modified profile or unknown mode is
 rejected before the container build or run.
 
+Build the image, then run the ownership-aware k3s wrapper. The kubelet seccomp
+directory must already exist; the wrapper never creates or configures that
+cluster-global directory:
+
+```bash
+podman build --pull=false --file spikes/toolchain/Containerfile \
+  --tag simple-md-toolchain:t00 spikes/toolchain
+spikes/toolchain/test-k3s-validation.sh --sudo-k3s
+```
+
+The wrapper generates one lowercase run identifier and derives a unique
+Localhost profile, ownership marker, containerd image tag, local Podman tag, and
+namespace from it. It preflights every name and refuses any collision rather
+than overwriting a pre-existing resource. The profile and marker are claimed
+through exclusive hard links, and their device/inode identities are captured.
+After installation, the wrapper independently hashes the actual file visible
+under `/var/lib/kubelet/seccomp` and requires the exact committed SHA-256 before
+Kubernetes can reference it.
+
+The namespace is created atomically with the run label and annotation. Cleanup
+requires the original immutable namespace UID and both ownership metadata
+values, then sends that UID as a Kubernetes deletion precondition through a
+loopback-only API proxy. The proxy runs in a dedicated process group; cleanup
+terminates the full group and scans `/proc` for the run-specific accept-path
+token. Because k3s can rewrite the proxy command line to only `kubectl`, the
+runner also captures every pre-run `kubectl` process as an exact PID/start-time
+identity and fails if any new identity survives cleanup. Baseline processes are
+excluded from token-fallback signaling. A pre-existing command-line token is a
+collision that prevents proxy launch, even when its process is in the baseline.
+The network target has a TCP readiness probe so the unselected control cannot
+race the target service startup. Global
+cleanup similarly requires the original profile/marker identities and content,
+the profile checksum, and the imported image digest. Ownership intent and the
+expected identity or digest are recorded before each create/tag/import action,
+so cleanup still examines an exact run-scoped resource when the immediately
+following query fails. Changed or unverified resources are never deleted
+automatically; the run fails and reports the exact resource requiring operator
+review. The success path removes only resources created by that run.
+`--sudo-k3s` selects the root-owned local k3s kubeconfig and containerd; use the
+default commands where the invoking user has ordinary access.
+
+Run the collision, ownership-change, installed-profile-tampering, cleanup-
+refusal, namespace-UID, and image-digest probes without a cluster:
+
+```bash
+spikes/toolchain/test-k3s-resource-guards.sh
+spikes/toolchain/test-k3s-proxy-lifecycle.sh
+spikes/toolchain/test-k3s-acquisition-failures.sh
+```
+
+The latter probes exercise proxy success, failure, interrupted-run cleanup, and
+argv/token disappearance while preserving a pre-existing baseline process,
+plus injected post-create identity, digest, Kubernetes API, and containerd query
+failures without requiring a live cluster.
+
+Namespace deletion additionally requires the valid JSON response from this
+run's successful `kubectl create`, including its UID and ownership metadata.
+Cleanup never infers ownership from labels on a namespace when creation failed
+or its receipt is absent or invalid; it preserves that namespace and fails for
+operator review. A valid receipt remains authoritative when a later API query
+fails transiently, while the current UID and metadata must still match before
+the preconditioned delete.
+
 The image build deliberately keeps `--pull=false`. It performs no implicit pull
 or store bootstrap, even though the `FROM` reference is digest-pinned. The first
 Podman run therefore stopped when its separate rootless image store did not
@@ -120,6 +183,25 @@ The test script verifies:
 - root execution, non-empty capabilities, missing `no-new-privileges`,
   unconfined seccomp, privileged mode, writable root, host network, wrong
   arbitrary UID, and missing bounded work storage fail deterministically.
+
+The k3s harness additionally verifies that:
+
+- Kubernetes loads the exact checksum-locked Localhost profile and fails with
+  `CreateContainerError` when the named profile is absent;
+- the target pod runs as UID `1000710000` with a read-only overlay, zero
+  effective and bounding capabilities, `NoNewPrivs: 1`, and seccomp filter mode;
+- `/tmp` and `/dev/shm` are memory-backed `emptyDir` volumes with 512 MiB and
+  128 MiB limits, `/work` is disk-backed with a 1 GiB `sizeLimit`, and the
+  container has 2 CPU, 2 GiB memory, and 1 GiB ephemeral-storage limits;
+- a default-deny ingress/egress NetworkPolicy blocks the document pod from a
+  known-reachable same-namespace service, while an unselected control pod can
+  reach that service;
+- Chrome renders Mermaid and reports namespace, PID/network namespace,
+  Seccomp-BPF, TSYNC, and adequate-sandbox status under the Localhost profile;
+- runtime-default seccomp still fails at Chrome namespace creation; wrong UID,
+  an added capability, missing `no-new-privileges`, unconfined seccomp,
+  writable root, missing resource limits, and missing `/work` fail inside the
+  pod.
 
 `run-validation.sh` accepts probe-only resource controls through
 `TOOLCHAIN_MEMORY`, `TOOLCHAIN_CPUS`, `TOOLCHAIN_PIDS`,
@@ -207,7 +289,7 @@ The approved dialect and required pre-Pandoc raw-HTML rejection are recorded in
 the decision matrix; the current fixture remains evidence for why both controls
 are necessary.
 
-### Chrome sandbox and OpenShift
+### Chrome sandbox, k3s, and OpenShift
 
 With arbitrary UID `1000710000`, read-only root, no network, all capabilities
 dropped, `no-new-privileges`, and Docker's runtime-default seccomp profile,
@@ -263,10 +345,15 @@ memory/CPU/PID cgroups. No `--disable-setuid-sandbox`, `--no-sandbox`, added
 capability, privileged mode, unconfined seccomp, host network, or broad root
 write is used in the positive path.
 
-This proves the minimum composition on this rootless Podman host only. k3s must
-load and validate the same portable profile before the profile can be approved
-for that runtime. OpenShift validation is deferred, and support must not be
-claimed until the profile is proven on the target OpenShift security context.
+The same profile passed on local k3s `v1.35.5+k3s1` with containerd
+`2.2.3-k3s1`, Debian 13, and Linux `6.12.100+deb13-amd64`. The pod rendered
+Mermaid and produced the same Chrome sandbox diagnostics while Kubernetes
+enforced the outer security context and default-deny network policy. The
+runtime-default variant reproduced the namespace `EPERM` failure, and an
+unknown Localhost profile failed before container creation. This proves the
+minimum composition on this local k3s host. OpenShift validation is deferred,
+and support must not be claimed until the profile is proven on the target
+OpenShift security context.
 
 ### Fonts and document conversion
 
@@ -281,14 +368,16 @@ required styles and golden rendering corpus.
 
 ### Resource budgets
 
-The harness proves that Docker enforces configurable memory, CPU, PID, `/tmp`,
-`/work`, and `/dev/shm` envelopes and exposes peak measurements. The compatibility
-probe uses tmpfs for `/work` so it is self-contained. The final runtime requires
-disk-backed ephemeral storage for `/work`; T20/T21 must repeat the successful
-and exhaustion paths with that storage class. A single tiny fixture is not
-evidence for production limits. Upload, archive, image, diagram, duration,
-memory, concurrency, queue, and retention values remain unresolved for T18 and
-must be measured with the T04 corpus rather than copied from the probe defaults.
+The harness proves that Docker and Podman enforce configurable memory, CPU,
+PID, `/tmp`, `/work`, and `/dev/shm` envelopes and expose peak measurements.
+The k3s pod uses memory-backed bounded `emptyDir` volumes for `/tmp` and
+`/dev/shm`, disk-backed bounded `emptyDir` for `/work`, and explicit CPU,
+memory, and ephemeral-storage limits. Its cgroup exposed the cluster's bounded
+PID maximum of 19,148 rather than a pod-specific PID limit. The recorded target
+run peaked at 586,223,616 bytes and 124 processes and used 1,356 KiB in `/work`.
+These are compatibility observations, not production budgets. T18 must define
+the production PID and other limits, and T20/T21 must repeat success and
+exhaustion against the final image.
 
 ## Coverage and remaining validation
 
@@ -299,6 +388,11 @@ diagnostic, and relevant failures: all claimed container security properties,
 absent bounded work storage, Pandoc sandbox resource omission in both logs and
 OpenXML, Podman runtime-default Chrome rejection, and modified-profile
 rejection.
+
+`run-k3s-validation.sh` covers the successful assembled k3s pod, Chrome sandbox
+diagnostics, a selected default-deny pod and reachable unselected network
+control, runtime-default and missing-profile failures, and every claimed pod
+security constraint that can be weakened independently.
 
 There is no product user-visible or operational workflow in T00, and the final
 rootless application image is delivered by T20. Consequently no T00 test can
@@ -318,7 +412,8 @@ the container. Both tmpfs and disk-backed document probes pass. The target
 probe additionally renders Mermaid and verifies Chrome's namespace and
 Seccomp-BPF layers; every expected failure probe also passes. The Docker 29.7.1
 regression suite still treats Chrome's namespace failure as safe negative
-evidence. k3s remains unvalidated, and OpenShift remains deferred.
+evidence. The local k3s suite passes; post-run cleanup removed the exact test
+namespace, Localhost profile, and imported image. OpenShift remains deferred.
 
 The spike does not read or change a storage contract, so standalone and
 distributed storage-profile parity is not affected by T00.
@@ -328,10 +423,9 @@ distributed storage-profile parity is not affected by T00.
 - operational ownership and implementation of the approved official-artifact,
   available-signature, locked-integrity, weekly-review, and urgent-Critical-CVE
   policy;
-- k3s validation of the Podman-proven one-syscall seccomp delta; OpenShift proof
-  remains deferred;
+- target OpenShift validation of the Podman- and k3s-proven one-syscall seccomp
+  delta remains deferred;
 - exact official font artifacts, versions, notices, substitution order, and
   scripts that explicitly require Noto;
 - every production resource, RPO/RTO, retention, quota, antivirus, and cleanup
-  value listed in specification section 14;
-- PDF/A and table-of-contents support.
+  value listed in specification section 14.

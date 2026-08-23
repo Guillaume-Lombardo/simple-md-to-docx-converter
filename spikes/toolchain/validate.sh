@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly FIXTURES=/opt/toolchain/fixtures
 readonly EXPECTED_UID="${EXPECTED_UID:-}"
+readonly EXPECTED_RUNTIME="${EXPECTED_RUNTIME:-container}"
 readonly EXPECTED_WORK_STORAGE="${EXPECTED_WORK_STORAGE:-tmpfs}"
 readonly VALIDATION_SCOPE="${VALIDATION_SCOPE:-documents}"
 
@@ -70,7 +71,16 @@ fi
 grep -Fq 'Read-only file system' /tmp/root-write.err \
     || fail "root write rejection did not report a read-only filesystem"
 assert_mount / overlay ro || fail "the root mount is not a read-only overlay"
-assert_mount /tmp tmpfs rw nosuid nodev noexec size= \
+tmp_mount_options=(rw nosuid nodev noexec size=)
+shm_mount_options=(rw nosuid nodev noexec size=)
+if [[ "${EXPECTED_RUNTIME}" == "kubernetes" ]]; then
+    # Kubernetes emptyDir volumes do not expose per-volume mount options. Their
+    # size limits are asserted from the applied pod specification by the k3s
+    # harness, while the in-container probe verifies the tmpfs capacity.
+    tmp_mount_options=(rw size=)
+    shm_mount_options=(rw size=)
+fi
+assert_mount /tmp tmpfs "${tmp_mount_options[@]}" \
     || fail "/tmp does not have the required bounded tmpfs mount options"
 case "${EXPECTED_WORK_STORAGE}" in
     tmpfs)
@@ -93,12 +103,43 @@ PY
         fail "unknown EXPECTED_WORK_STORAGE=${EXPECTED_WORK_STORAGE}"
         ;;
 esac
-assert_mount /dev/shm tmpfs rw nosuid nodev noexec size= \
+assert_mount /dev/shm tmpfs "${shm_mount_options[@]}" \
     || fail "/dev/shm does not have the required bounded tmpfs mount options"
 
 interfaces="$(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
 readonly interfaces
-[[ "${interfaces}" == "lo" ]] || fail "network isolation exposed a non-loopback interface"
+case "${EXPECTED_RUNTIME}" in
+    container)
+        [[ "${interfaces}" == "lo" ]] \
+            || fail "network isolation exposed a non-loopback interface"
+        ;;
+    kubernetes)
+        [[ "${interfaces}" == $'eth0\nlo' ]] \
+            || fail "the Kubernetes pod network interfaces changed unexpectedly"
+        python3 - <<'PY' || fail "the Kubernetes network-policy probe failed"
+import os
+import socket
+
+expected = os.environ["EXPECTED_NETWORK_ACCESS"]
+host = os.environ["NETWORK_PROBE_HOST"]
+port = int(os.environ["NETWORK_PROBE_PORT"])
+try:
+    socket.create_connection((host, port), timeout=2).close()
+    connected = True
+except OSError:
+    connected = False
+if expected == "denied" and connected:
+    raise SystemExit("the default-deny policy allowed document-pod egress")
+if expected == "allowed" and not connected:
+    raise SystemExit("the unselected control pod could not reach the probe service")
+if expected not in {"allowed", "denied"}:
+    raise SystemExit(f"unknown EXPECTED_NETWORK_ACCESS={expected}")
+PY
+        ;;
+    *)
+        fail "unknown EXPECTED_RUNTIME=${EXPECTED_RUNTIME}"
+        ;;
+esac
 
 [[ -r /sys/fs/cgroup/memory.max && "$(</sys/fs/cgroup/memory.max)" != "max" ]] \
     || fail "memory is not bounded by cgroup"
