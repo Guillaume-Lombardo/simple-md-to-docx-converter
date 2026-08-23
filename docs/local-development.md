@@ -25,12 +25,19 @@ providing bootstrap credentials:
 export MD_CONVERTER_INITIAL_ADMIN_USERNAME=admin
 read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
+export MD_CONVERTER_STORAGE_PROFILE=standalone
+export MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
 uv run uvicorn md_converter:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
 The session cookie is always `Secure`, so use an HTTPS endpoint for browser or API authentication.
 Do not commit bootstrap credentials or place production secrets in shell history; deployment
 secret injection belongs to the runtime-profile work.
+
+For disposable local development, point `MD_CONVERTER_STANDALONE_DATA_DIRECTORY` at a writable
+directory rather than production `/data`. Distributed development requires a real PostgreSQL
+database and an AWS S3-compatible bucket. See [storage-profiles.md](storage-profiles.md) for the
+complete configuration and recovery contract.
 
 ## Development loop
 
@@ -56,7 +63,9 @@ uv run pytest
 ```
 
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
-integration, and end-to-end tests remain included in the default command when they are runnable.
+integration, and end-to-end tests remain included in the default command. Configure
+`MD_CONVERTER_TEST_POSTGRES_URL` and the `MD_CONVERTER_TEST_S3_*` variables before the canonical
+run. The distributed CI domain provisions PostgreSQL and RustFS and never substitutes MinIO.
 
 Pytest always measures the installed `md_converter` application package and enforces two separate
 thresholds: at least 90% overall application coverage and at least 90% of application branches.

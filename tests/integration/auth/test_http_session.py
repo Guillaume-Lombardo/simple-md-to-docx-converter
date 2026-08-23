@@ -6,6 +6,7 @@ import socket
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from threading import Thread
 
 import httpx
@@ -48,11 +49,13 @@ def running_server(settings: Settings) -> Iterator[str]:
 
 
 @pytest.mark.integration
-def test_real_argon2_http_session_and_logout_cycle() -> None:
+def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
     password = "admin-" + "password"
     settings = Settings(
         initial_admin_username="admin",
         initial_admin_password=password,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
     )
     with (
         running_server(settings) as base_url,

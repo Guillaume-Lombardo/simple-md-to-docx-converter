@@ -25,6 +25,8 @@ def isolated_client(
     settings = Settings(
         initial_admin_username="admin",
         initial_admin_password=password,
+        storage_profile="standalone",
+        standalone_data_directory="/data",
     )
     admin = User(uuid4(), "admin", "admin", "admin-hash", Role.ADMIN)
     alice = User(uuid4(), "Alice", "alice", "alice-hash", Role.USER)
@@ -40,6 +42,7 @@ def isolated_client(
         components=AppComponents(
             authentication=auth,
             readiness=MemoryReadinessProbe(ready=ready),
+            object_store=mocker.Mock(),
         ),
     )
     return TestClient(app, base_url="https://testserver"), auth, admin, alice

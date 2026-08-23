@@ -4,17 +4,13 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
+import boto3
 from fastapi import Depends, FastAPI, Form, Header, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from md_converter.auth.errors import LOGIN_ORIGIN_INVALID, AuthenticationError
-from md_converter.auth.memory import (
-    MemoryReadinessProbe,
-    MemorySessionRepository,
-    MemoryUserRepository,
-)
 from md_converter.auth.models import Role, User
 from md_converter.auth.ports import ReadinessProbe
 from md_converter.auth.security import (
@@ -28,7 +24,16 @@ from md_converter.auth.service import (
     SecurityRuntime,
     SessionPolicy,
 )
-from md_converter.config import Settings
+from md_converter.config import Settings, StorageProfile
+from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.sql import (
+    DatabaseReadinessProbe,
+    SqlSessionRepository,
+    SqlUserRepository,
+    create_database_engine,
+    standalone_database_url,
+)
+from md_converter.storage import FilesystemObjectStore, ObjectStore, S3ObjectStore
 
 
 class LoginRequest(BaseModel):
@@ -144,12 +149,57 @@ class AppComponents:
 
     authentication: AuthenticationService
     readiness: ReadinessProbe
+    object_store: ObjectStore
+
+
+class ProfileReadinessProbe:
+    """Cheap readiness composition for metadata and object persistence."""
+
+    def __init__(self, database: ReadinessProbe, objects: ObjectStore) -> None:
+        self._database = database
+        self._objects = objects
+
+    def is_ready(self) -> bool:
+        return self._database.is_ready() and self._objects.is_ready()
 
 
 def build_components(settings: Settings) -> AppComponents:
-    """Assemble temporary T06 adapters behind durable ports."""
-    users = MemoryUserRepository()
-    sessions = MemorySessionRepository()
+    """Assemble the selected coherent persistent storage profile."""
+    if settings.storage_profile is StorageProfile.STANDALONE:
+        data_directory = settings.standalone_data_directory
+        if (
+            data_directory is None
+        ):  # validated by Settings; defensive for type narrowing
+            raise RuntimeError("Validated standalone settings are incomplete")
+        data_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        database_url = standalone_database_url(data_directory)
+        object_store: ObjectStore = FilesystemObjectStore(data_directory)
+    else:
+        database_secret = settings.distributed_database_url
+        bucket = settings.s3_bucket
+        if database_secret is None or bucket is None:
+            raise RuntimeError("Validated distributed settings are incomplete")
+        database_url = database_secret.get_secret_value()
+        client_options: dict[str, Any] = {}
+        if settings.s3_endpoint_url is not None:
+            client_options["endpoint_url"] = settings.s3_endpoint_url
+        if settings.s3_region is not None:
+            client_options["region_name"] = settings.s3_region
+        if settings.s3_access_key_id is not None:
+            client_options["aws_access_key_id"] = (
+                settings.s3_access_key_id.get_secret_value()
+            )
+            client_options["aws_secret_access_key"] = (
+                settings.s3_secret_access_key.get_secret_value()
+                if settings.s3_secret_access_key is not None
+                else ""
+            )
+        object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
+
+    engine = create_database_engine(database_url)
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    sessions = SqlSessionRepository(engine)
     hasher = Argon2idPasswordHasher(
         memory_cost=settings.argon2_memory_cost,
         time_cost=settings.argon2_time_cost,
@@ -170,7 +220,8 @@ def build_components(settings: Settings) -> AppComponents:
     )
     return AppComponents(
         authentication=authentication,
-        readiness=MemoryReadinessProbe(),
+        readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
+        object_store=object_store,
     )
 
 
