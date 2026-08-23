@@ -53,14 +53,34 @@ inventory comparison, Chrome failure probe, and security failure probes through
 Podman. The harness checks that the selected executable exists and rejects any
 runtime other than `docker` or `podman`.
 
-The image build deliberately keeps `--pull=false`. The recorded first Podman
-run therefore stopped when its separate image store did not contain the pinned
-UBI base. The exact image identified by
-`sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653`
-was preloaded from the local Docker store before rerunning the unchanged
-harness. This prevents an implicit mutable pull, but it is not registry
-signature enforcement and does not replace the approved production supply-chain
-controls.
+The image build deliberately keeps `--pull=false`. It performs no implicit pull
+or store bootstrap, even though the `FROM` reference is digest-pinned. The first
+Podman run therefore stopped when its separate rootless image store did not
+contain that exact UBI base. The initial diagnostic transferred the pinned image
+content from the local Docker store, but a plain `docker save | podman load` can
+leave it untagged and is not a sufficient reproducible bootstrap for a
+`repository@digest` `FROM` reference.
+
+Use the following Bash commands instead. They require rootless Podman 5.4.2 and
+outbound HTTPS access to the public Red Hat registry. The command resolves only
+the immutable digest, uses the default TLS verification, and fails if the
+stored manifest digest does not match:
+
+```bash
+readonly T00_BASE_DIGEST='sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653'
+readonly T00_BASE_IMAGE="registry.access.redhat.com/ubi9/python-314@${T00_BASE_DIGEST}"
+podman pull --quiet "${T00_BASE_IMAGE}"
+test "$(podman image inspect "${T00_BASE_IMAGE}" --format '{{.Digest}}')" = \
+    "${T00_BASE_DIGEST}"
+spikes/toolchain/test-validation.sh --runtime podman
+```
+
+This idempotently adds or reuses the exact manifest and layers in the invoking
+user's rootless Podman store; it does not create a mutable tag or modify the
+Docker store. It creates no temporary archive, so there is no partial export to
+clean up. Keep the cached base until the validation finishes. This bootstrap is
+not registry signature enforcement and does not replace the approved production
+supply-chain controls.
 
 The test script verifies:
 
