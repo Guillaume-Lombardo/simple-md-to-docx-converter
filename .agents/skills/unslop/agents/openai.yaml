@@ -1,0 +1,4 @@
+interface:
+  display_name: "Unslop"
+  short_description: "Rewrite prose in a natural, specific voice"
+  default_prompt: "Use $unslop to rewrite this prose in a natural, specific voice while preserving its meaning."
