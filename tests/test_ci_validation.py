@@ -70,6 +70,19 @@ def test_gate_rejects_skipped_active_domain() -> None:
 
 
 @pytest.mark.unit
+def test_validator_rejects_removed_changed_line_coverage() -> None:
+    """Pull requests cannot bypass the changed application line threshold."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "python -m scripts.ci.check_changed_coverage",
+        "python -m scripts.ci.validate_ci",
+    )
+    assert any(
+        "check_changed_coverage" in error for error in validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 def test_validator_rejects_duplicate_required_gate_name() -> None:
     """Branch protection must observe one unambiguous required check context."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")

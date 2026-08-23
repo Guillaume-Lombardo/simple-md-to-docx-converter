@@ -44,13 +44,32 @@ uv run pytest
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
 integration, and end-to-end tests remain included in the default command when they are runnable.
 
+Pytest always measures branch coverage for the installed `md_converter` application package and
+fails below 90%. The policy is centralized in `pyproject.toml`, so both canonical commands enforce
+the same threshold. Test doubles use the `mocker` fixture supplied by `pytest-mock`; importing
+`unittest.mock` directly is rejected by Ruff and by the repository-local CI validator.
+
+Ruff targets Python 3.14 and applies the committed correctness, security, modernization, import,
+and maintainability rule families to source, CI helpers, and tests. Narrow per-file exceptions are
+recorded only for reviewed subprocess argument vectors and for assertions and process probes in
+tests. `ty` checks `src`, `scripts`, and `tests` explicitly against Python 3.14.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` exposes the single stable required result `CI / gate`. It runs on pull
 requests, merge-group candidates, pushes to `main`, published releases, manual dispatches, and a
 provisional weekly schedule. Pull requests always run formatting, linting, type checking, unit
-tests with branch coverage, lock validation, and cheap workflow security checks. Draft pull
-requests do not run activated heavy domains.
+tests with blocking application branch coverage, changed application line coverage, lock
+validation, and cheap workflow security checks. Draft pull requests do not run activated heavy
+domains.
+
+For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
+compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least
+90% of changed executable lines under `src/md_converter` must be covered. The checker uses a
+zero-context Git diff without shell interpretation, ignores tests and tooling, fails closed when a
+changed application file is absent from Coverage.py data, and treats changes containing no
+executable application line as fully covered. Full history is checked out only where commit
+comparison requires it.
 
 Changed paths are mapped conservatively to functional, document-engine, storage-profile,
 container, and E2E domains by `scripts/ci/select_domains.py`. Domain lifecycle metadata lives in
@@ -61,10 +80,11 @@ that array without a shell. Scheduled, release, and manual runs select every dom
 storage profiles.
 
 The `ci-infrastructure` domain is active now. Changes to the detector, runner, registry, workflow,
-or its integration tests must run the real subprocess success and failure cases in
-`tests/test_ci_runner.py`; `CI / gate` rejects a skipped or failed heavy matrix whenever any active
-domain was selected. Caches are restore-only outside trusted pushes to `main`, including pull
-requests, forks, merge groups, releases, schedules, and manual runs.
+or its integration tests must run the real subprocess and quality-policy success and failure cases
+in `tests/test_ci_runner.py` and `tests/integration/ci`; `CI / gate` rejects a skipped or failed
+heavy matrix whenever any active domain was selected. Caches are restore-only outside trusted
+pushes to `main`, including pull requests, forks, merge groups, releases, schedules, and manual
+runs.
 
 The Sunday 03:17 UTC schedule is provisional until T22 fixes the GitHub Actions usage budget and
 final frequency. Release-triggered CI performs validation only; image and Python publication,

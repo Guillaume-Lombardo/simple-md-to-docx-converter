@@ -17,6 +17,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         ".github/workflows/**",
         "scripts/ci/**",
         "tests/test_ci_runner.py",
+        "tests/test_python_quality.py",
         "tests/integration/ci/**",
     ),
     "container": (
