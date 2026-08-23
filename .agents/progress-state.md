@@ -84,7 +84,7 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - PR #24 checks passed on exact head `add244d4`; squash `fd44c1e` passed main run `32658422667`,
   including the protected gate and real standalone/distributed storage domains.
 - Linear G1L-310 and G1L-324 were fetched by identifier and match the approved repository scope;
-  G1L-310 is `In Progress` and G1L-324 is ready for synchronized closure as `Done`.
+  G1L-310 is `In Progress` and G1L-324 is synchronized as `Done`.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   their canonical suites pass 122 tests at 98.73% application coverage. Chrome remains a deliberate
   safe failure pending the minimum sandbox profile.
