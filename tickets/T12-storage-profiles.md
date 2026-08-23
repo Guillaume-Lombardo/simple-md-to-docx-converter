@@ -2,7 +2,7 @@
 ticket: T12
 linear_id: G1L-324
 linear_url: https://linear.app/g1lom/issue/G1L-324/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -44,6 +44,7 @@ Implement repository and object-store abstractions, both storage profiles, Alemb
 - 2026-08-23: `uv sync --all-groups`, Ruff format/lint, `ty`, both 161-test canonical Pytest commands, exact storage domain commands, `uv lock --check`, repository CI validation, checksum-verified actionlint v1.7.12, hash-constrained sdist/wheel builds, and `git diff --check` pass. Full application coverage is 97.77%; the light suite reaches 94.90%, the independent branch threshold passes, and changed executable application lines reach 90.17%. The only warning is Starlette's existing non-blocking TestClient/httpx2 deprecation notice.
 - 2026-08-23: Documented coherent configuration and coordinated backup/restore mechanics without fixing RPO/RTO, retention, quota, antivirus, or cleanup values. T13 queue and T14/T15 template workflows are not pre-implemented. Final hardened-image rootless E2E remains the approved T20/T21 sequencing debt and requires explicit reviewer approval in the pull request; T12 real integration coverage is complete.
 - 2026-08-23: Addressed independent review findings with exact special-character SQLite paths, `PRAGMA foreign_keys=ON` on every connection, SQLite/PostgreSQL referential-integrity and cascade parity, parameter-hiding and sanitized persistence failures through FastAPI, real PostgreSQL outage/transaction/migration-lock coverage, real RustFS access-denied and missing-bucket coverage, and parent-directory `fsync` after nested creation and deletion. Revalidation passes 173 canonical tests at 97.77% application coverage, 136 unit tests at 94.76% coverage and 93.33% branch-only coverage, and 90.70% changed-line coverage; both storage domains, CI validation, checksum-verified actionlint v1.7.12, the hash-constrained build, and `git diff --check` also pass.
+- 2026-08-23: PR #24 was independently reviewed at exact head `add244d4`, including explicit approval of the T20/T21 final-image E2E sequencing exception, and squash-merged as `fd44c1e`. Main run `32658422667` passed the protected gate and the real `storage-standalone`, `storage-distributed`, `functional`, and `ci-infrastructure` domains. T12 is verified on `main`; its final-image rootless E2E debt remains assigned to T20/T21.
 
 ## Synchronization
 
