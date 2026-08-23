@@ -11,12 +11,95 @@ readonly PIDS="${TOOLCHAIN_PIDS:-512}"
 readonly WORK_SIZE="${TOOLCHAIN_WORK_SIZE:-1g}"
 readonly TMP_SIZE="${TOOLCHAIN_TMP_SIZE:-512m}"
 readonly WORK_STORAGE="${TOOLCHAIN_WORK_STORAGE:-tmpfs}"
-readonly VALIDATION_SCOPE="${1:-documents}"
+
+usage() {
+    cat <<'EOF'
+Usage: run-validation.sh [--runtime docker|podman] [documents|security|target]
+
+Build and run the T00 toolchain probe with the selected container runtime.
+Docker remains the default for backward compatibility.
+EOF
+}
+
+CONTAINER_RUNTIME=docker
+VALIDATION_SCOPE=documents
+scope_is_set=false
+while (($#)); do
+    case "$1" in
+        --runtime)
+            [[ $# -ge 2 ]] || {
+                printf 'Missing value for --runtime.\n' >&2
+                exit 2
+            }
+            CONTAINER_RUNTIME="$2"
+            shift 2
+            ;;
+        --runtime=*)
+            CONTAINER_RUNTIME="${1#*=}"
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        -*)
+            printf 'Unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
+        *)
+            if [[ "${scope_is_set}" == true ]]; then
+                printf 'Unexpected argument: %s\n' "$1" >&2
+                exit 2
+            fi
+            VALIDATION_SCOPE="$1"
+            scope_is_set=true
+            shift
+            ;;
+    esac
+done
+readonly CONTAINER_RUNTIME VALIDATION_SCOPE
+
+case "${CONTAINER_RUNTIME}" in
+    docker | podman) ;;
+    *)
+        printf 'Unknown container runtime: %s\n' "${CONTAINER_RUNTIME}" >&2
+        exit 2
+        ;;
+esac
+command -v "${CONTAINER_RUNTIME}" >/dev/null 2>&1 || {
+    printf 'Container runtime not found: %s\n' "${CONTAINER_RUNTIME}" >&2
+    exit 127
+}
+
+runtime_namespace_args=()
+runtime_shm_args=(--shm-size 128m)
+if [[ "${CONTAINER_RUNTIME}" == podman ]]; then
+    # Map the arbitrary container UID sparsely into the rootless subordinate range.
+    # Disable Podman's implicit read-only tmpfs mounts; only the explicit bounded
+    # /tmp, /work, and /dev/shm mounts below may remain writable.
+    runtime_namespace_args=(
+        --read-only-tmpfs=false
+        --uidmap 0:0:1
+        --uidmap "${RUNTIME_UID}:1:1"
+        --gidmap 0:0:1
+    )
+    runtime_shm_args=(
+        --tmpfs "/dev/shm:rw,nosuid,nodev,noexec,size=128m,mode=1777"
+    )
+fi
 
 cleanup_disk_work() {
     if [[ -n "${WORK_DIRECTORY:-}" && -d "${WORK_DIRECTORY}" ]]; then
-        docker run --rm \
+        "${CONTAINER_RUNTIME}" run --rm \
+            "${runtime_namespace_args[@]}" \
             --user "${RUNTIME_UID}:0" \
+            --read-only \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --memory 128m \
+            --cpus 0.5 \
+            --pids-limit 64 \
             --mount "type=bind,source=${WORK_DIRECTORY},target=/work" \
             --entrypoint /usr/bin/find \
             "${IMAGE}" /work -mindepth 1 -exec chmod a+rwX '{}' + >/dev/null 2>&1 || true
@@ -26,6 +109,7 @@ cleanup_disk_work() {
 
 runtime_args=(
     --rm
+    "${runtime_namespace_args[@]}"
     --user "${RUNTIME_UID}:0"
     --read-only
     --network none
@@ -34,17 +118,25 @@ runtime_args=(
     --memory "${MEMORY}"
     --cpus "${CPUS}"
     --pids-limit "${PIDS}"
-    --shm-size 128m
+    "${runtime_shm_args[@]}"
     --tmpfs "/tmp:rw,nosuid,nodev,noexec,size=${TMP_SIZE},mode=1777"
     --env "EXPECTED_UID=${RUNTIME_UID}"
 )
 
 case "${WORK_STORAGE}" in
     tmpfs)
-        runtime_args+=(
-            --tmpfs "/work:rw,nosuid,nodev,size=${WORK_SIZE},uid=${RUNTIME_UID},gid=0,mode=0770"
-            --env EXPECTED_WORK_STORAGE=tmpfs
-        )
+        if [[ "${CONTAINER_RUNTIME}" == podman ]]; then
+            runtime_args+=(
+                --mount \
+                "type=tmpfs,destination=/work,tmpfs-size=${WORK_SIZE},tmpfs-mode=0770,U=true"
+            )
+        else
+            runtime_args+=(
+                --tmpfs \
+                "/work:rw,nosuid,nodev,size=${WORK_SIZE},uid=${RUNTIME_UID},gid=0,mode=0770"
+            )
+        fi
+        runtime_args+=(--env EXPECTED_WORK_STORAGE=tmpfs)
         ;;
     disk)
         WORK_DIRECTORY="$(mktemp -d "${SCRIPT_DIR}/.t00-work.XXXXXX")"
@@ -72,6 +164,10 @@ case "${VALIDATION_SCOPE}" in
         ;;
 esac
 
-docker build --pull=false --file "${SCRIPT_DIR}/Containerfile" --tag "${IMAGE}" "${SCRIPT_DIR}"
+"${CONTAINER_RUNTIME}" build \
+    --pull=false \
+    --file "${SCRIPT_DIR}/Containerfile" \
+    --tag "${IMAGE}" \
+    "${SCRIPT_DIR}"
 
-docker run "${runtime_args[@]}" "${IMAGE}"
+"${CONTAINER_RUNTIME}" run "${runtime_args[@]}" "${IMAGE}"

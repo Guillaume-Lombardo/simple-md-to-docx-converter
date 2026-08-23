@@ -3,12 +3,12 @@
 ## Status
 
 Pandoc, Fontconfig, and LibreOffice are compatible with UBI 9 and Python 3.14 in
-a repeatable compatibility probe. Mermaid CLI is installed, but Chrome cannot
-render under the intended security profile. The approved follow-up is a minimal
-seccomp/user-namespace profile validated on rootless Podman and then k3s, with
-the Chrome sandbox retained and `--no-sandbox` forbidden. Do not use this probe
-as the production image and do not enable Pandoc `--sandbox` for conversions
-with local resources.
+repeatable Docker and rootless Podman compatibility probes. Mermaid CLI is
+installed, but Chrome cannot render under either intended security profile. The
+approved follow-up remains a minimal seccomp/user-namespace profile validated
+on rootless Podman and then k3s, with the Chrome sandbox retained and
+`--no-sandbox` forbidden. Do not use this probe as the production image and do
+not enable Pandoc `--sandbox` for conversions with local resources.
 
 This report records evidence observed on August 23, 2026. The base image and
 engine archives are pinned. RPM dependencies resolved from the mutable UBI
@@ -23,7 +23,8 @@ records the PM-approved choices and the remaining validation gaps.
 
 Requirements:
 
-- Docker with BuildKit and permission to run containers;
+- Docker with BuildKit or rootless Podman 5.4.2 with permission to run
+  containers;
 - outbound access during the image build to pinned engine URLs and mutable UBI
   repositories;
 - a Linux host with cgroup v2 and support for container seccomp options.
@@ -34,11 +35,52 @@ Run the successful document-engine and security-property probe:
 spikes/toolchain/run-validation.sh documents
 ```
 
+Docker remains the default for backward compatibility. Select rootless Podman
+explicitly without a Docker alias:
+
+```bash
+spikes/toolchain/run-validation.sh --runtime podman documents
+```
+
 Run the successful probe and all expected-failure probes:
 
 ```bash
 spikes/toolchain/test-validation.sh
 ```
+
+Pass `--runtime podman` to run the same successful tmpfs and disk-backed probes,
+inventory comparison, Chrome failure probe, and security failure probes through
+Podman. The harness checks that the selected executable exists and rejects any
+runtime other than `docker` or `podman`.
+
+The image build deliberately keeps `--pull=false`. It performs no implicit pull
+or store bootstrap, even though the `FROM` reference is digest-pinned. The first
+Podman run therefore stopped when its separate rootless image store did not
+contain that exact UBI base. The initial diagnostic transferred the pinned image
+content from the local Docker store, but a plain `docker save | podman load` can
+leave it untagged and is not a sufficient reproducible bootstrap for a
+`repository@digest` `FROM` reference.
+
+Use the following Bash commands instead. They require rootless Podman 5.4.2 and
+outbound HTTPS access to the public Red Hat registry. The command resolves only
+the immutable digest, uses the default TLS verification, and fails if the
+stored manifest digest does not match:
+
+```bash
+readonly T00_BASE_DIGEST='sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653'
+readonly T00_BASE_IMAGE="registry.access.redhat.com/ubi9/python-314@${T00_BASE_DIGEST}"
+podman pull --quiet "${T00_BASE_IMAGE}"
+test "$(podman image inspect "${T00_BASE_IMAGE}" --format '{{.Digest}}')" = \
+    "${T00_BASE_DIGEST}"
+spikes/toolchain/test-validation.sh --runtime podman
+```
+
+This idempotently adds or reuses the exact manifest and layers in the invoking
+user's rootless Podman store; it does not create a mutable tag or modify the
+Docker store. It creates no temporary archive, so there is no partial export to
+clean up. Keep the cached base until the validation finishes. This bootstrap is
+not registry signature enforcement and does not replace the approved production
+supply-chain controls.
 
 The test script verifies:
 
@@ -76,6 +118,11 @@ ephemeral-volume policy.
 The tiny document fixture used 111,779,840 bytes at the cgroup memory peak,
 8 processes at the cgroup PID peak, and 884 KiB in `/work` during the recorded
 successful run. These values describe this one probe only.
+
+The final Podman 5.4.2 run used 114,483,200 bytes at the tmpfs probe memory peak
+and 114,868,224 bytes at the disk probe peak. It used 904 KiB and 1,232 KiB in
+`/work`, respectively. These are compatibility observations for the tiny
+fixture, not production budgets.
 
 ## Pinned inputs and resolved RPM inventory
 
@@ -161,6 +208,19 @@ The committed probe does not use `seccomp=unconfined`,
 by the PM; the failure remains evidence for T09 rather than an authorization to
 weaken the profile.
 
+Rootless Podman 5.4.2 reaches a different Chrome failure after the same security
+properties pass. Chrome's zygote terminates before Mermaid rendering with:
+
+```text
+Check failed: sys_chroot("/proc/self/fdinfo/") == 0
+FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc
+```
+
+This is negative sandbox evidence, not a successful Podman seccomp or Chrome
+sandbox composition. The Podman profile does not add capabilities, enable
+networking, disable seccomp, use privileged mode, or pass any browser sandbox
+disabling flag.
+
 The approved direction for T09 is to design the minimum seccomp/user-namespace
 profile that keeps Chrome's sandbox active, validate it first with rootless
 Podman and then with k3s, and never use `--no-sandbox`. OpenShift validation is
@@ -204,12 +264,16 @@ constraints against the final image and real OpenShift/Podman environments. If
 this is treated as an E2E exception rather than a non-applicable criterion, it
 requires explicit pull-request reviewer approval.
 
-Podman and a real OpenShift cluster were unavailable in the local environment;
-Docker 29.7.1 was used for the container evidence. The PM authorized system
-installation of Podman on this development VM for the next rootless validation;
-k3s follows Podman, while OpenShift remains deferred. The current repository now
-contains the Python project and canonical quality tooling, so their results are
-reported with this update rather than treated as a bootstrap gap.
+The development VM now has system-installed Podman 5.4.2. The recorded run was
+rootless as host UID 1000 on Debian, used `runc` and cgroup v2, and selected
+Podman directly through `--runtime podman`. To represent arbitrary container UID
+`1000710000` inside the rootless subordinate range, the harness uses sparse UID
+and GID mappings. Podman's implicit read-only-root tmpfs mounts are disabled and
+replaced by explicit bounded writable mounts for `/tmp`, `/work`, and
+`/dev/shm`; all other claimed rootless security properties are asserted inside
+the container. Both tmpfs and disk-backed document probes and every expected
+failure probe pass. The Docker 29.7.1 regression suite also passes. k3s remains
+unvalidated, and OpenShift remains deferred.
 
 The spike does not read or change a storage contract, so standalone and
 distributed storage-profile parity is not affected by T00.

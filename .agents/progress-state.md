@@ -7,110 +7,82 @@ Last verified: 2026-08-23
 Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 `docs/product-specification.md` through tickets T00-T23.
 
-## Current State
+## Verified State
 
-- T01, T02, T03, T05, and T06 are Done. T06 is delivered and verified, and its ticket mirror and
-  Linear G1L-316 are synchronized as `Done`.
-- Linear project status: In Progress. T00 and T04 are In Progress; remaining tickets are in
-  Backlog.
-- T06 was delivered by PR #16: approved head `6f7f89c` was squash-merged as `8e18235`; PR run
-  `32650616075` and main run `32650924178` passed, including functional 14/14 and the unique
-  app-`15368` protected gate. Closure PR #17 was squash-merged as `4abb4f5`; parity correction PR
-  #18 was independently reviewed and squash-merged as
-  `f5a40648deb3ee9faa99525815ced0342c76e841`; main run `32651901242` passed, including the unique
-  app-`15368` protected gate. T12 owns the durable replacement for its memory adapters; the
-  approved rootless-image E2E sequencing debt remains T20/T21.
-- The authentication API foundation is functional. Conversion, durable storage, queue, worker,
-  product UI, and final image remain.
-- The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
-  turn was interrupted before any worker started.
+- `main` is clean at `85b43b62627f6b0a533a89312fdf73f0a1e27534` and matches `origin/main`.
+  Main CI run `32656611491` passed.
+- PR #20 was squash-merged as `33f86a05`. Its approved T00/T12 decisions are present in the
+  specification, ticket mirrors, and Linear issues G1L-310/G1L-324.
+- T01, T02, T03, T05, and T06 are delivered. T00 and T12 are `In Progress` in Linear; T04 remains
+  dependent on completion of T00 evidence.
+- T12/G1L-324 is delegated to an isolated implementation worker and has started. Its ticket mirror
+  is being synchronized on the implementation branch; no implementation result is claimed yet.
+- PR #22 delivered the independently reviewed Docker/rootless-Podman harness and durable T00
+  evidence as squash `85b43b62`; Linear G1L-310 remains synchronized as `In Progress`.
+- Chrome remains safely blocked under the strict profile until the minimum seccomp/user-namespace
+  composition is proven. The sandbox stays enabled, `--no-sandbox` is forbidden, k3s follows the
+  Podman proof, and OpenShift proof remains deferred.
 
-## Delivered
+## Approved Product Decisions
 
-- Repository specification, Linear mirrors/synchronization, and development rules.
-- T01 Python 3.14/`uv` bootstrap and package foundation (PRs #2, #5, #8, and #9).
-- Durable orchestration memory plus an ignored local restart prompt (PR #7).
-- Partial T00 reproducible engine and rootless-runtime evidence (PR #4).
-- T04 integration/E2E policy only; the reference corpus is still missing (PR #3).
-- T22 trusted PyPI publication planning only (PR #6).
-- T02 protected `main` and established the single-developer review and serialized merge policy
-  (PR #10, squash `684a45c`).
-- T03 delivered selective read-only GitHub Actions with the single strict `CI / gate`, active
-  CI-infrastructure integration domain, and explicit downstream domain lifecycle (PR #12, squash
-  `4c36f4f`).
-- T05 delivered the Python 3.14 Ruff/ty policy, blocking overall, branch-only, and changed-line 90%
-  coverage, pytest-mock enforcement, strict Coverage.py validation, and real Git/Ruff boundary
-  tests (PR #14, squash `4b93725`).
-- T06 delivered FastAPI configuration and health endpoints, local accounts, sessions, authorization,
-  stable errors, and security contracts (PR #16, squash `8e18235`; closure PR #17, squash
-  `4abb4f5`).
-- Live GitHub settings now protect `main`: pull requests, admin enforcement, resolved conversations,
-  linear history, strict `CI / gate` from GitHub Actions app `15368`, no force push or deletion,
-  squash-only merges, and automatic deletion of merged branches. GitHub approval count remains zero
-  in the single-developer phase; independent agent review is enforced by the orchestrated workflow
-  without deadlocking the sole collaborator.
+- Use official publisher artifacts, verify signatures or attestations when available, lock every
+  accepted digest/checksum, accept Pandoc SHA-256 where no detached signature exists, review CVEs
+  weekly, and handle Critical findings urgently.
+- Use `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html` and reject raw
+  HTML before Pandoc.
+- Package Liberation plus Carlito/Caladea, use DejaVu as fallback, and add Noto only for explicitly
+  required scripts.
+- Keep the distributed object-store adapter provider-neutral and AWS S3-compatible. Use RustFS,
+  never MinIO, for CI and k3s.
+- T12 must include shared storage contracts and real PostgreSQL/RustFS integration success and
+  failure coverage. Only final-image rootless E2E is deferred to T20/T21, with explicit PR
+  justification and independent reviewer approval.
+
+## Delivered Foundation
+
+- Python 3.14/`uv` packaging, repository conventions, durable orchestration memory, protected
+  `main`, selective GitHub Actions with the strict `CI / gate`, Ruff/ty/Pytest quality gates, and
+  90% coverage enforcement.
+- FastAPI configuration and health endpoints, local account administration, revocable sessions,
+  authorization contracts, stable errors, and temporary in-memory persistence ports ready for T12
+  replacement.
+- Reproducible T00 compatibility evidence for Pandoc, Mermaid/Chrome, Fontconfig, LibreOffice,
+  arbitrary UID, read-only root, no network, dropped capabilities, writable areas, and cgroup
+  envelopes, with the remaining sandbox/runtime gaps stated explicitly.
 
 ## Blockers and Risks
 
-- T00 has a primary-source decision matrix, reproducible CommonMark evidence, and Docker proof for
-  tmpfs and disk-backed `/work`. It still needs approved engine sources and update/CVE ownership,
-  a Chrome/OpenShift sandbox design, an approved font/substitution set, the exact Markdown dialect,
-  and Podman/OpenShift validation; these do not block T06.
-- T06 final-image rootless E2E is explicitly tracked as approved T20/T21 sequencing debt; unit,
-  functional ASGI, and real authentication/HTTP integration coverage remain mandatory in T06.
-- Automatic relaunch of a stopped thread requires an external supervisor.
-- GitHub merge queue is unavailable because this public repository is user-owned, so the
-  orchestrator must serialize merges.
+- Chrome/Mermaid cannot be declared supported until the minimal sandbox profile passes Podman and
+  k3s validation. OpenShift compatibility cannot be claimed until the deferred target proof runs.
+- Exact font artifacts/substitution order and explicit Noto scripts remain T10 work.
+- Resource limits, RPO/RTO, retention, quotas, antivirus, cleanup, GitHub Actions heavy-job budget,
+  PDF/A, and table-of-contents support remain deliberately unresolved or configurable.
+- Git SSH transport is not usable on this VM because the configured identity resolves to the public
+  `~/.ssh/codex-dev.pub` file. Read-only `gh` API access works; future Git transport must use an
+  approved authenticated path without exposing credentials or silently changing SSH configuration.
+- GitHub merge queue is unavailable for this user-owned public repository, so merges remain
+  serialized by the orchestrator.
 
 ## Next Actions
 
-1. Select T12 as the next ready implementation ticket: T05 and T06 are verified Done. Keep T00 and
-   T04 In Progress; T04 still waits on T00 and its reference corpus is not ready.
-2. Keep the T06 memory-adapter and final-image E2E debt assigned to T12 and T20/T21 respectively.
-3. Before each task, verify repository and Linear state; delegate implementation and independent
-   review to separate workers.
-4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
-   current state.
+1. Continue T00 with the minimum Chrome seccomp/user-namespace composition and k3s proof; keep
+   OpenShift proof deferred and do not weaken the browser sandbox.
+2. Continue T12 implementation in parallel, including both storage profiles, Alembic, atomic files,
+   shared contract tests, and real PostgreSQL/RustFS integration coverage.
+3. Commission an independent T12 review before integration and preserve the explicit T20/T21
+   final-image E2E debt.
+4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
+   as current state rather than a chronology.
 
 ## Validation
 
-- Main push run 32644131962 is green at `4c36f4f`; all five implemented CI jobs succeeded.
-- T02 live-state verification confirms the strict app-bound `CI / gate` plus every merge control.
-- T03 local validation passes all canonical checks, 39 tests, 98.21% unit/light branch coverage,
-  the active CI-infrastructure subprocess suite, lock and workflow security validation, and
-  checksum-verified actionlint with ShellCheck. PR and main Actions runs independently confirm the
-  hosted path and GitHub Actions app `15368`.
-- T05 local validation passes all canonical checks, 71 default/full tests, 100% overall application
-  and valid zero-branch coverage, 64 unit/light tests, branch-only 90%/sub-90/malformed boundaries,
-  changed-line Git 90%/80%/missing-ref/schema boundaries, real Ruff allow/deny import boundaries,
-  lock and CI policy validation, checksum-verified actionlint v1.7.12 with ShellCheck, and clean
-  diffs. PR run 32646636269 and main run 32646773360 independently passed the non-skipped
-  CI-infrastructure domain and strict `CI / gate` on the approved and merged trees.
-- T06 local validation passes Ruff formatting/linting, `ty`, locked `uv` sync, both canonical Pytest
-  commands with 99/99 tests, 97.58% application coverage (98% rounded), 98.41% changed-line
-  coverage, the non-skipped 11-test functional/Argon2id/HTTP domain, the local CI validator,
-  actionlint with ShellCheck, and clean diffs. Rootless final-image E2E is the explicit PM-approved
-  T20/T21 sequencing exception.
-- T06 review-fix validation passes 116/116 default and full tests at 98.70% application coverage;
-  96/96 exact light tests at 97.22% application, 93.75% branch, and 97.68% changed-line coverage;
-  the 48-test focused race/CSRF/validation/timing/three-identity/selector set; and the non-skipped
-  13-test functional/Argon2id/real-HTTP domain. Ruff, `ty`, locked sync, CI validation, actionlint
-  with ShellCheck, formatting, and diff checks pass on the committed review-fix tree.
-- The last T06 timing re-review finding is implemented: all failed authentication paths have two
-  structurally counted current Argon2 work units, and nine-sample real medians range from 29.462 to
-  29.866 ms (`max/min=1.014`) without sleeps. Targeted tests pass 24/24, the functional domain
-  passes 14/14, and both canonical suites pass 122/122 at 98.73% application coverage. Exact light
-  evidence passes 101/101 at 97.28% application, 93.94% branch, and 97.73% changed-line coverage.
-- T06 delivery is verified on main: approved head `6f7f89c` was squash-merged as `8e18235`; PR run
-  32650616075 and main run 32650924178 both passed, including functional 14/14 and the unique
-  GitHub Actions app 15368 `CI / gate`. Security/contract review and the T20/T21 E2E sequencing
-  exception were independently approved.
-- T06 closure PR #17 was independently approved and squash-merged as `4abb4f5`; main run
-  32651297877 passed on that exact SHA. Linear G1L-316 and the ticket mirror are synchronized as
-  `Done`; parity correction PR #18 was independently reviewed and squash-merged as
-  `f5a40648deb3ee9faa99525815ced0342c76e841`, and main run `32651901242` passed with the unique
-  app-`15368` protected gate.
-- Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
-  image E2E is not applicable to repository CI/protection and independent review accepted that
-  assessment.
-- Final product validation: not run; the product is incomplete.
+- PR #20 checks passed in run `32655376550`; the exact merged SHA passed main run `32655450957`,
+  including the protected `CI / gate`.
+- PR #22 checks passed on exact head `2b920706`; squash `85b43b62` passed main run `32656611491`,
+  including the protected `CI / gate`.
+- Linear G1L-310 and G1L-324 were fetched by identifier and match the approved repository scope;
+  both report `In Progress`.
+- T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
+  their canonical suites pass 122 tests at 98.73% application coverage. Chrome remains a deliberate
+  safe failure pending the minimum sandbox profile.
+- Final product validation has not run; the product is incomplete.

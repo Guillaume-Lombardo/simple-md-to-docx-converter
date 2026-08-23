@@ -4,11 +4,11 @@
 
 This matrix separates reproducible facts from the product decisions approved on August 23, 2026.
 It records the approved artifact policy, browser-sandbox direction, Markdown dialect, font set, and
-vulnerability cadence without turning unexecuted Podman, k3s, or OpenShift work into evidence.
+vulnerability cadence without turning unexecuted k3s or OpenShift work into evidence.
 
 All Web sources are primary publisher or platform sources retrieved on August 23, 2026. Local
-observations used Docker 29.7.1 and the committed T00 probe. Podman is not installed on the host.
-No k3s test was needed for these local facts, and no OpenShift result is claimed.
+observations used Docker 29.7.1, rootless Podman 5.4.2, and the committed T00 probe. Podman ran as
+host UID 1000 on Debian with `runc` and cgroup v2. No k3s or OpenShift result is claimed.
 
 ## Artifact and supply-chain matrix
 
@@ -46,6 +46,14 @@ T09 must not convert the Docker failure into permission to weaken Chrome and mus
 `--no-sandbox`. The supported composition needs successful Mermaid rendering plus sandbox-status,
 network, capability, UID, read-only-root, writable-area, and resource-limit evidence on rootless
 Podman and k3s. Real OpenShift evidence remains deferred and is required before claiming support.
+
+The current rootless Podman harness maps container UID `1000710000` sparsely into the subordinate
+UID range and exposes only explicit bounded writable mounts. These runtime mechanics pass, but
+Chrome still terminates in its zygote at `sys_chroot("/proc/self/fdinfo/")` before Mermaid renders.
+Docker continues to fail earlier with namespace creation denied by `EPERM`. Neither result proves
+the approved minimal seccomp/user-namespace composition; both are safe negative evidence gathered
+without `--no-sandbox`, `seccomp=unconfined`, added capabilities, privileged mode, or network
+access in the target probe.
 
 ## Pandoc 3.10.2 CommonMark compatibility
 
@@ -86,9 +94,19 @@ order with golden-layout evidence.
   the tiny fixture; these are not budgets.
 - The bind proves disk compatibility, not a bounded disk volume. Final proof needs an approved
   `emptyDir.sizeLimit`/ephemeral-storage configuration or equivalent on the target runtime.
-- Podman is absent, and the PM explicitly authorized its system installation on this development
-  VM so the rootless validation can continue. Installation and any use of `sudo` remain separate
-  operational actions. k3s validation follows a successful Podman profile; OpenShift remains
-  PM-deferred.
+- System-installed Podman 5.4.2 ran rootless as host UID 1000 on Debian with `runc` and cgroup v2.
+  The exact runtime selector preserves Docker as the default and invokes Podman without aliases.
+  Sparse UID/GID mappings represent container UID `1000710000`; explicit bounded `/tmp`, `/work`,
+  and `/dev/shm` mounts preserve arbitrary-UID write access while the root remains read-only.
+- Podman's tmpfs and disk-backed document probes complete Pandoc, Fontconfig, and LibreOffice, and
+  all expected security failure probes pass. The Docker regression suite also passes. Podman
+  records approximately 114.5 MB and 114.9 MB cgroup memory peaks and 904 KiB and 1,232 KiB
+  `/work` use for the tiny tmpfs and disk fixtures; these are not budgets.
+- The first Podman build stopped because `--pull=false` found no pinned UBI base in Podman's
+  separate store. The exact digest was preloaded from the local Docker store before the unchanged
+  harness passed. This is a reproducibility caveat, not production registry-signature proof.
+- Chrome still fails before Mermaid rendering: Podman reports the zygote `sys_chroot` fatal, while
+  Docker retains its namespace `EPERM` failure. The minimal sandbox profile, k3s validation, and
+  deferred OpenShift proof remain outstanding.
 - Production limits, RPO/RTO, retention, quotas, antivirus, cleanup, exact font artifacts and
   substitutions, and explicit Noto script coverage remain configurable or unresolved.
