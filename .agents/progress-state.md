@@ -9,13 +9,15 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- T01, T02, T03, T05, and T06 are Done and verified on `main` at `8e18235`.
+- T01, T02, T03, T05, and T06 are Done. T06 is delivered and verified, and its ticket mirror and
+  Linear G1L-316 are synchronized as `Done`.
 - Linear project status: In Progress. T00 and T04 are In Progress; remaining tickets are in
-  Backlog. T06 stays In Progress in Linear only until this closure mirror merges.
+  Backlog.
 - T06 was delivered by PR #16: approved head `6f7f89c` was squash-merged as `8e18235`; PR run
   `32650616075` and main run `32650924178` passed, including functional 14/14 and the unique
-  app-`15368` protected gate. T12 owns the durable replacement for its memory adapters; the
-  approved rootless-image E2E sequencing debt remains T20/T21.
+  app-`15368` protected gate. Closure PR #17 was squash-merged as `4abb4f5`; parity correction PR
+  #18 received independent review and hosted CI verification. T12 owns the durable replacement for
+  its memory adapters; the approved rootless-image E2E sequencing debt remains T20/T21.
 - The authentication API foundation is functional. Conversion, durable storage, queue, worker,
   product UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
@@ -38,7 +40,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   coverage, pytest-mock enforcement, strict Coverage.py validation, and real Git/Ruff boundary
   tests (PR #14, squash `4b93725`).
 - T06 delivered FastAPI configuration and health endpoints, local accounts, sessions, authorization,
-  stable errors, and security contracts (PR #16, squash `8e18235`).
+  stable errors, and security contracts (PR #16, squash `8e18235`; closure PR #17, squash
+  `4abb4f5`).
 - Live GitHub settings now protect `main`: pull requests, admin enforcement, resolved conversations,
   linear history, strict `CI / gate` from GitHub Actions app `15368`, no force push or deletion,
   squash-only merges, and automatic deletion of merged branches. GitHub approval count remains zero
@@ -60,10 +63,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 1. Select T12 as the next ready implementation ticket: T05 and T06 are verified Done. Keep T00 and
    T04 In Progress; T04 still waits on T00 and its reference corpus is not ready.
 2. Keep the T06 memory-adapter and final-image E2E debt assigned to T12 and T20/T21 respectively.
-3. After this closure mirror merges, mark G1L-316 Done in Linear and re-fetch it for parity.
-4. Before each task, verify repository and Linear state; delegate implementation and independent
+3. Before each task, verify repository and Linear state; delegate implementation and independent
    review to separate workers.
-5. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
+4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
    current state.
 
 ## Validation
@@ -99,6 +101,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   32650616075 and main run 32650924178 both passed, including functional 14/14 and the unique
   GitHub Actions app 15368 `CI / gate`. Security/contract review and the T20/T21 E2E sequencing
   exception were independently approved.
+- T06 closure PR #17 was independently approved and squash-merged as `4abb4f5`; main run
+  32651297877 passed on that exact SHA. Linear G1L-316 and the ticket mirror are synchronized as
+  `Done`; parity correction PR #18 received independent review and hosted CI verification.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
