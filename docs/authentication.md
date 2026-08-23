@@ -9,10 +9,8 @@ field values. Administrators use `/api/v1/admin/users` to create accounts, activ
 them, list them, and reset passwords.
 
 The bootstrap operation is atomic and idempotent within the selected repository adapter. It never
-changes an existing administrator password at application restart. T06 ships only in-memory user
-and session adapters: process restart therefore loses all accounts and sessions and recreates the
-configured administrator. T12 must preserve the same port contract with durable standalone and
-distributed adapters, including the no-reset restart guarantee.
+changes an existing administrator password at application restart. SQLite and PostgreSQL preserve
+accounts and sessions across process restarts and implement the same storage-neutral contract.
 
 Usernames are displayed after surrounding whitespace is removed. Uniqueness and login use Unicode
 NFKC normalization, surrounding-whitespace removal, and case folding. Values such as `Alice`,

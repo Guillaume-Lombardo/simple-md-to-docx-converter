@@ -156,6 +156,40 @@ jobs:
       fail-fast: false
       matrix:
         domain: ${{ fromJSON(needs.detect.outputs.runnable-domains) }}
+    services:
+      postgres:
+        image: ${{ matrix.domain == 'storage-distributed' && 'docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8' || '' }}
+        env:
+          POSTGRES_DB: md_converter_test
+          POSTGRES_PASSWORD: t12-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d md_converter_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+      rustfs:
+        image: ${{ matrix.domain == 'storage-distributed' && 'ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04' || '' }}
+        env:
+          RUSTFS_ACCESS_KEY: t12integration
+          RUSTFS_ADDRESS: 0.0.0.0:9000
+          RUSTFS_CONSOLE_ENABLE: false
+          RUSTFS_SECRET_KEY: t12integrationsecret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://127.0.0.1:9000/health"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+    env:
+      MD_CONVERTER_TEST_POSTGRES_URL: postgresql+psycopg://postgres:t12-ci-password@127.0.0.1:5432/md_converter_test
+      MD_CONVERTER_TEST_S3_ACCESS_KEY_ID: t12integration
+      MD_CONVERTER_TEST_S3_BUCKET: md-converter-t12
+      MD_CONVERTER_TEST_S3_ENDPOINT_URL: http://127.0.0.1:9000
+      MD_CONVERTER_TEST_S3_REGION: us-east-1
+      MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY: t12integrationsecret
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -176,6 +210,9 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
+      - name: Prepare the RustFS test bucket
+        if: ${{ matrix.domain == 'storage-distributed' }}
+        run: uv run python -m scripts.ci.prepare_s3_test_bucket
       - name: Run selected domain suite without a shell
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
 

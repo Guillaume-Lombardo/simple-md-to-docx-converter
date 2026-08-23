@@ -45,10 +45,29 @@
   },
   "storage-distributed": {
     "activation_ticket": "T12",
-    "status": "planned"
+    "command": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/integration/postgres",
+      "tests/integration/s3",
+      "-m",
+      "requires_postgres or requires_s3",
+      "--no-cov"
+    ],
+    "status": "active"
   },
   "storage-standalone": {
     "activation_ticket": "T12",
-    "status": "planned"
+    "command": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/integration/sqlite",
+      "-m",
+      "integration",
+      "--no-cov"
+    ],
+    "status": "active"
   }
 }

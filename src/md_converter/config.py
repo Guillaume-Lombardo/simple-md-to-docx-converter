@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+from pathlib import Path
 from typing import Self
 
 from pydantic import Field, SecretStr, ValidationError, model_validator
@@ -10,6 +12,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ConfigurationError(RuntimeError):
     """Raised without configuration values when startup configuration is invalid."""
+
+
+class StorageProfile(StrEnum):
+    """Coherent persistence profiles supported by the service."""
+
+    STANDALONE = "standalone"
+    DISTRIBUTED = "distributed"
 
 
 class Settings(BaseSettings):
@@ -30,6 +39,14 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=30 * 60, ge=1)
     session_absolute_seconds: int = Field(default=8 * 60 * 60, ge=1)
     session_cookie_name: str = Field(default="md_converter_session", min_length=1)
+    storage_profile: StorageProfile
+    standalone_data_directory: Path | None = None
+    distributed_database_url: SecretStr | None = None
+    s3_bucket: str | None = Field(default=None, min_length=1)
+    s3_endpoint_url: str | None = Field(default=None, min_length=1)
+    s3_region: str | None = Field(default=None, min_length=1)
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:
@@ -40,7 +57,42 @@ class Settings(BaseSettings):
             raise ValueError("initial administrator username must not be blank")
         if not self.initial_admin_password.get_secret_value():
             raise ValueError("initial administrator password must not be blank")
+        self._validate_storage_profile()
         return self
+
+    def _validate_storage_profile(self) -> None:
+        s3_values = (
+            self.s3_bucket,
+            self.s3_endpoint_url,
+            self.s3_region,
+            self.s3_access_key_id,
+            self.s3_secret_access_key,
+        )
+        if self.storage_profile is StorageProfile.STANDALONE:
+            if self.standalone_data_directory is None:
+                raise ValueError("standalone profile requires its data directory")
+            if self.distributed_database_url is not None or any(s3_values):
+                raise ValueError("standalone profile cannot use distributed settings")
+            return
+        if self.standalone_data_directory is not None:
+            raise ValueError("distributed profile cannot use standalone settings")
+        if (
+            self.distributed_database_url is None
+            or self.s3_bucket is None
+            or not self.s3_bucket.strip()
+        ):
+            raise ValueError("distributed profile settings are incomplete")
+        url = self.distributed_database_url.get_secret_value()
+        if not url.startswith(("postgresql://", "postgresql+psycopg://")):
+            raise ValueError("distributed profile requires PostgreSQL")
+        if (self.s3_access_key_id is None) != (self.s3_secret_access_key is None):
+            raise ValueError("S3 static credentials must be configured together")
+        if self.s3_access_key_id is not None and not (
+            self.s3_access_key_id.get_secret_value()
+            and self.s3_secret_access_key is not None
+            and self.s3_secret_access_key.get_secret_value()
+        ):
+            raise ValueError("S3 static credentials must not be blank")
 
     @classmethod
     def load(cls) -> Settings:

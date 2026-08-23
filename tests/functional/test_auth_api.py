@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from md_converter.auth.memory import MemoryReadinessProbe
 from md_converter.config import Settings
 
 
-def make_client() -> TestClient:
+def make_client(data_directory: Path) -> TestClient:
     """Build an HTTPS ASGI client with intentionally cheap test-only Argon2 settings."""
     password = "admin-" + "password"
     settings = Settings(
@@ -23,6 +24,8 @@ def make_client() -> TestClient:
         argon2_parallelism=1,
         session_idle_seconds=60,
         session_absolute_seconds=300,
+        storage_profile="standalone",
+        standalone_data_directory=data_directory,
     )
     return TestClient(create_app(settings), base_url="https://testserver")
 
@@ -54,8 +57,8 @@ def use_session(client: TestClient, token: str) -> None:
 
 
 @pytest.mark.functional
-def test_health_login_page_docs_and_openapi_contract() -> None:
-    with make_client() as client:
+def test_health_login_page_docs_and_openapi_contract(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
         assert client.get("/health/live").json() == {"status": "ok"}
         assert client.get("/health/ready").json() == {"status": "ready"}
         page = client.get("/login")
@@ -68,18 +71,21 @@ def test_health_login_page_docs_and_openapi_contract() -> None:
 
 
 @pytest.mark.functional
-def test_readiness_failure_is_cheap_and_stable() -> None:
+def test_readiness_failure_is_cheap_and_stable(tmp_path: Path) -> None:
     password = "admin-" + "password"
     settings = Settings(
         initial_admin_username="admin",
         initial_admin_password=password,
         argon2_memory_cost=8,
         argon2_time_cost=1,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
     )
     built = build_components(settings)
     components = AppComponents(
         authentication=built.authentication,
         readiness=MemoryReadinessProbe(ready=False),
+        object_store=built.object_store,
     )
     with TestClient(
         create_app(settings, components=components), base_url="https://testserver"
@@ -90,8 +96,10 @@ def test_readiness_failure_is_cheap_and_stable() -> None:
 
 
 @pytest.mark.functional
-def test_json_login_sets_hardened_cookie_without_exposing_session_token() -> None:
-    with make_client() as client:
+def test_json_login_sets_hardened_cookie_without_exposing_session_token(
+    tmp_path: Path,
+) -> None:
+    with make_client(tmp_path) as client:
         response = client.post(
             "/api/v1/login",
             json={"username": "ADMIN", "password": "admin-password"},
@@ -109,8 +117,10 @@ def test_json_login_sets_hardened_cookie_without_exposing_session_token() -> Non
 
 
 @pytest.mark.functional
-def test_invalid_unknown_and_inactive_logins_are_indistinguishable() -> None:
-    with make_client() as client:
+def test_invalid_unknown_and_inactive_logins_are_indistinguishable(
+    tmp_path: Path,
+) -> None:
+    with make_client(tmp_path) as client:
         wrong = client.post(
             "/api/v1/login", json={"username": "admin", "password": "wrong"}
         )
@@ -150,8 +160,8 @@ def test_invalid_unknown_and_inactive_logins_are_indistinguishable() -> None:
 
 
 @pytest.mark.functional
-def test_admin_lifecycle_csrf_authorization_and_revocation() -> None:
-    with make_client() as client:
+def test_admin_lifecycle_csrf_authorization_and_revocation(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
         admin = login(client)
         missing_csrf = client.post(
             "/api/v1/admin/users",
@@ -229,8 +239,11 @@ def test_admin_lifecycle_csrf_authorization_and_revocation() -> None:
 
 
 @pytest.mark.functional
-def test_csrf_replay_session_rotation_and_logout() -> None:
-    with make_client() as first, make_client() as unrelated:
+def test_csrf_replay_session_rotation_and_logout(tmp_path: Path) -> None:
+    with (
+        make_client(tmp_path / "first") as first,
+        make_client(tmp_path / "unrelated") as unrelated,
+    ):
         login(first)
         unrelated_login = login(unrelated)
         replay = first.post(
@@ -250,8 +263,8 @@ def test_csrf_replay_session_rotation_and_logout() -> None:
 
 
 @pytest.mark.functional
-def test_browser_login_has_stable_failure_and_redirect_success() -> None:
-    with make_client() as client:
+def test_browser_login_has_stable_failure_and_redirect_success(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
         failed = client.post(
             "/login",
             data={"username": "admin", "password": "wrong"},
@@ -268,8 +281,10 @@ def test_browser_login_has_stable_failure_and_redirect_success() -> None:
 
 
 @pytest.mark.functional
-def test_login_csrf_rejects_attacker_origin_and_allows_documented_api_policy() -> None:
-    with make_client() as client:
+def test_login_csrf_rejects_attacker_origin_and_allows_documented_api_policy(
+    tmp_path: Path,
+) -> None:
+    with make_client(tmp_path) as client:
         payload = {"username": "admin", "password": "admin-password"}
         hostile = client.post(
             "/api/v1/login",
@@ -291,8 +306,10 @@ def test_login_csrf_rejects_attacker_origin_and_allows_documented_api_policy() -
 
 
 @pytest.mark.functional
-def test_admin_alice_and_bob_lifecycle_preserves_identity_isolation() -> None:
-    with make_client() as client:
+def test_admin_alice_and_bob_lifecycle_preserves_identity_isolation(
+    tmp_path: Path,
+) -> None:
+    with make_client(tmp_path) as client:
         admin = login(client)
         admin_cookie = session_cookie(client)
         alice = client.post(
