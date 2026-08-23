@@ -16,8 +16,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T06 was delivered by PR #16: approved head `6f7f89c` was squash-merged as `8e18235`; PR run
   `32650616075` and main run `32650924178` passed, including functional 14/14 and the unique
   app-`15368` protected gate. Closure PR #17 was squash-merged as `4abb4f5`; parity correction PR
-  #18 received independent review and hosted CI verification. T12 owns the durable replacement for
-  its memory adapters; the approved rootless-image E2E sequencing debt remains T20/T21.
+  #18 was independently reviewed and squash-merged as
+  `f5a40648deb3ee9faa99525815ced0342c76e841`; main run `32651901242` passed, including the unique
+  app-`15368` protected gate. T12 owns the durable replacement for its memory adapters; the
+  approved rootless-image E2E sequencing debt remains T20/T21.
 - The authentication API foundation is functional. Conversion, durable storage, queue, worker,
   product UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
@@ -105,7 +107,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   exception were independently approved.
 - T06 closure PR #17 was independently approved and squash-merged as `4abb4f5`; main run
   32651297877 passed on that exact SHA. Linear G1L-316 and the ticket mirror are synchronized as
-  `Done`; parity correction PR #18 received independent review and hosted CI verification.
+  `Done`; parity correction PR #18 was independently reviewed and squash-merged as
+  `f5a40648deb3ee9faa99525815ced0342c76e841`, and main run `32651901242` passed with the unique
+  app-`15368` protected gate.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.

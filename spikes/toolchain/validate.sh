@@ -176,41 +176,124 @@ def walk(value):
             yield from walk(child)
 
 
+def inline_text(value):
+    parts = []
+    for node in walk(value):
+        if node.get("t") == "Str":
+            parts.append(node["c"])
+        elif node.get("t") in {"Space", "SoftBreak", "LineBreak"}:
+            parts.append(" ")
+    return "".join(parts)
+
+
+def nodes(document, node_type):
+    return [node for node in walk(document) if node.get("t") == node_type]
+
+
+def assert_core_structures(document, label):
+    headers = [node for node in nodes(document, "Header") if node["c"][0] == 1]
+    if len(headers) != 1 or inline_text(headers[0]["c"][2]) != "Heading":
+        raise SystemExit(f"{label} lost the exact heading fixture")
+
+    bullet_lists = nodes(document, "BulletList")
+    if len(bullet_lists) != 1 or inline_text(bullet_lists[0]) != "list item":
+        raise SystemExit(f"{label} lost the exact bullet-list fixture")
+
+    block_quotes = nodes(document, "BlockQuote")
+    if len(block_quotes) != 1 or inline_text(block_quotes[0]) != "block quote":
+        raise SystemExit(f"{label} lost the exact block-quote fixture")
+
+    code_blocks = nodes(document, "CodeBlock")
+    if (
+        len(code_blocks) != 1
+        or code_blocks[0]["c"][0][1] != ["python"]
+        or code_blocks[0]["c"][1] != 'print("code block")'
+    ):
+        raise SystemExit(f"{label} lost the exact fenced-code fixture")
+
+    links = nodes(document, "Link")
+    if (
+        len(links) != 1
+        or inline_text(links[0]["c"][1]) != "link"
+        or links[0]["c"][2] != ["https://example.invalid/", ""]
+    ):
+        raise SystemExit(f"{label} lost the exact link fixture")
+
+    images = nodes(document, "Image")
+    if (
+        len(images) != 1
+        or inline_text(images[0]["c"][1]) != "local image"
+        or images[0]["c"][2] != ["validation.png", ""]
+    ):
+        raise SystemExit(f"{label} lost the exact image fixture")
+    return images[0]
+
+
 baseline = load("/work/commonmark.json")
 candidate = load("/work/commonmark-x-candidate.json")
 no_metadata = load("/work/commonmark-x-no-metadata.json")
 
-baseline_types = {node.get("t") for node in walk(baseline)}
-candidate_nodes = list(walk(candidate))
-candidate_types = {node.get("t") for node in candidate_nodes}
+baseline_image = assert_core_structures(baseline, "plain commonmark")
+candidate_image = assert_core_structures(candidate, "commonmark_x candidate")
+if baseline_image["c"][0] != ["", [], []]:
+    raise SystemExit("plain commonmark unexpectedly parsed image attributes")
 
-required_blocks = {"Header", "BulletList", "BlockQuote", "CodeBlock", "Table"}
-if not required_blocks.issubset(candidate_types):
-    raise SystemExit("commonmark_x candidate lost a required block structure")
-if "Note" not in candidate_types:
-    raise SystemExit("commonmark_x candidate did not parse the footnote")
-if "Table" in baseline_types or "Note" in baseline_types:
+if nodes(baseline, "Table") or nodes(baseline, "Note"):
     raise SystemExit("plain commonmark unexpectedly parsed an extension structure")
-if "title" not in candidate["meta"]:
+tables = nodes(candidate, "Table")
+if len(tables) != 1 or [
+    node["c"] for node in walk(tables[0]) if node.get("t") == "Str"
+] != ["left", "right", "one", "two"]:
+    raise SystemExit("commonmark_x candidate lost the exact table fixture")
+notes = nodes(candidate, "Note")
+if len(notes) != 1 or inline_text(notes[0]) != "Footnote body.":
+    raise SystemExit("commonmark_x candidate lost the exact footnote fixture")
+
+if "title" not in candidate["meta"] or inline_text(candidate["meta"]["title"]) != "Compatibility matrix":
     raise SystemExit("commonmark_x candidate did not parse YAML metadata")
 if no_metadata["meta"]:
     raise SystemExit("disabling yaml_metadata_block unexpectedly retained metadata")
 
-images = [node for node in candidate_nodes if node.get("t") == "Image"]
-if len(images) != 1:
-    raise SystemExit("commonmark_x candidate did not parse exactly one image")
-identifier, _, key_values = images[0]["c"][0]
+identifier, classes, key_values = candidate_image["c"][0]
 if identifier != "probe-image" or ["width", "24px"] not in key_values:
     raise SystemExit("commonmark_x candidate lost image attributes")
+if classes or key_values != [["width", "24px"]]:
+    raise SystemExit("commonmark_x candidate added unexpected image attributes")
 
 raw_html = [
     node
-    for node in candidate_nodes
+    for node in walk(candidate)
     if node.get("t") in {"RawBlock", "RawInline"}
     and node.get("c", [None])[0] == "html"
 ]
-if not raw_html:
-    raise SystemExit("raw_html behavior changed: the documented residual risk disappeared")
+if [node["c"] for node in raw_html] != [["html", "<span>"], ["html", "</span>"]]:
+    raise SystemExit("commonmark_x raw HTML behavior changed for the exact fixture")
+raw_html_block = candidate["blocks"][-2]
+if raw_html_block != {
+    "t": "Para",
+    "c": [
+        {"t": "RawInline", "c": ["html", "<span>"]},
+        {"t": "Str", "c": "raw"},
+        {"t": "Space"},
+        {"t": "Str", "c": "HTML"},
+        {"t": "Space"},
+        {"t": "Str", "c": "probe"},
+        {"t": "RawInline", "c": ["html", "</span>"]},
+    ],
+}:
+    raise SystemExit("commonmark_x did not retain the exact raw HTML fixture as raw inline nodes")
+
+tex_nodes = [
+    node
+    for node in walk(candidate)
+    if node.get("t") in {"RawBlock", "RawInline"}
+    and node.get("c", [None])[0] == "tex"
+]
+if tex_nodes:
+    raise SystemExit("commonmark_x unexpectedly parsed the TeX-like fixture as raw TeX")
+last_block = candidate["blocks"][-1]
+if last_block.get("t") != "Para" or inline_text(last_block) != r"\newcommand{\probe}{raw TeX probe}":
+    raise SystemExit("commonmark_x did not retain the exact TeX-like fixture as ordinary text")
 PY
 fc-cache --force
 find "${XDG_CACHE_HOME}/fontconfig" -type f -print -quit | grep -q . \
