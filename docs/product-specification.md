@@ -29,6 +29,7 @@ The product includes a conversion page, template administration, local authentic
 | DOCX to PDF | LibreOffice headless |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
+| Python distribution | `md-converter` on PyPI; availability must be rechecked and the project configured before the first public release |
 | Git workflow | Trunk-based, short branches, pull requests to `main`, squash merge |
 | Python dependencies | `uv` |
 | Quality tools | Ruff, `ty`, Pytest, pytest-cov, and pytest-mock |
@@ -190,6 +191,8 @@ Use selective path/domain detection while keeping one required `CI / gate` resul
 
 Light draft checks include formatting, lint, types, unit tests, coverage, and cheap security checks. Ready and merge-queue checks add affected functional, integration, container, and E2E domains. Run the full two-profile matrix on schedule and before releases. Publish the image, SBOM, and provenance only for releases.
 
+Use an isolated release workflow to publish the `md-converter` Python distribution. Build its sdist and wheel once from the reviewed tagged source, then validate metadata, installation, the documented public import, and artifact integrity before publication. Publish those exact verified artifacts to PyPI; do not rebuild them in the publication job. Use PyPI Trusted Publishing through GitHub OIDC and a protected GitHub `pypi` environment, with `id-token: write` granted only to the publication job and no long-lived PyPI token. Pin every action by full commit SHA, generate and upload PyPI publish attestations, and prevent pull requests, forks, and all other untrusted contexts from publishing. The release version and tag-trigger policy remains a T22 decision and must be documented before implementation. Before the first public release, the project manager must decide the public package license and complete the one-time PyPI project and trusted-publisher configuration; a previously unregistered name is not a permanent reservation.
+
 ## 12. Global acceptance criteria
 
 - Rootless UBI 9/Python 3.14 image works with arbitrary UID and read-only root filesystem.
@@ -227,7 +230,7 @@ Light draft checks include formatting, lint, types, unit tests, coverage, and ch
 | T19 | Add structured logs, correlation, metrics, queue observability, audit, version traceability, and cheap readiness | T15, T18 |
 | T20 | Build hardened reproducible final image with API, embedded-worker, and external-worker modes, SBOM, scans, and smoke test | T11, T12, T13, T18 |
 | T21 | Run rootless E2E for both profiles with three identities, real conversion, restart recovery, concurrency, and failure artifacts | T17, T20 |
-| T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, and provenance | T03, T21 |
+| T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `md-converter` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
 
 Recommended delivery order: risk spikes and autonomous foundation (T00–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
