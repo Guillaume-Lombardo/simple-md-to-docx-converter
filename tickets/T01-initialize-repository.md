@@ -34,6 +34,12 @@ Initialize the English repository, uv project, architecture, canonical commands,
 - Created the Linear project and T00–T23 issues with dependency relationships.
 - Added repository ticket mirrors and the Linear synchronization skill.
 - Added repository-wide synchronization rules to `AGENTS.md` and the product specification.
+- Delivered the synchronization foundation through GitHub PR #2 and verified it on `main` at `6b5a30e5a45ad8634cf02115a978173e4a93428f`.
+- Implemented the remaining bootstrap on `chore/T01-bootstrap-repository`: Python 3.14, the `md-converter` distribution and `md_converter` package, locked `uv` environments, hash-constrained reproducible builds, required Pytest marker registration, a deterministic package-metadata test, and English repository, architecture, contribution, and local-development documentation.
+- Addressed independent review by constraining Hatchling and its transitive build dependencies, inspecting clean-cache wheel and source distributions, limiting the source distribution to publishable content, and leaving Ruff lint policy to T05.
+- Verified every canonical command, `uv lock --check`, a clean locked no-cache synchronization, a hash-required no-cache build, fresh-wheel import and metadata, 100% branch coverage of the application package, and `git diff --check`.
+- Integration and final-image E2E coverage are not applicable to this bootstrap because it introduces no real component boundary and no user-visible or operational workflow; no integration or E2E exception is claimed, and the pull-request reviewer must confirm this applicability assessment.
+- T01 remains In Progress until this bootstrap is merged and verified on `main` and its T00 dependency is resolved. T00 remains In Progress pending approved engine-source and Chrome/OpenShift sandbox decisions plus Podman/OpenShift validation; T01 does not resolve or validate those deferred product and runtime decisions.
 
 ## Synchronization
 

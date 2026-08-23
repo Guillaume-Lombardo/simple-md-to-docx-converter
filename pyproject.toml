@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "md-converter"
+version = "0.1.0"
+description = "A service for converting Markdown documents to DOCX and PDF"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = []
+
+[dependency-groups]
+build = ["hatchling==1.27.0"]
+dev = [
+    "pytest>=9.0,<10",
+    "pytest-cov>=7.0,<8",
+    "pytest-mock>=3.15,<4",
+    "ruff>=0.13,<1",
+    "ty>=0.0.1a20,<1",
+]
+
+[tool.uv]
+build-constraint-dependencies = [
+    "hatchling==1.27.0",
+    "packaging==26.3",
+    "pathspec==1.1.1",
+    "pluggy==1.6.0",
+    "trove-classifiers==2026.6.1.19",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["/README.md", "/pyproject.toml", "/src/md_converter"]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers"]
+testpaths = ["tests"]
+markers = [
+    "unit: deterministic tests without external dependencies",
+    "functional: application behavior through public interfaces",
+    "integration: integration with a real component",
+    "e2e: complete flow against the built container",
+    "slow: excluded from explicitly fast checks",
+    "requires_pandoc: requires Pandoc",
+    "requires_mermaid: requires Mermaid CLI and Chromium",
+    "requires_libreoffice: requires LibreOffice",
+    "requires_postgres: requires PostgreSQL",
+    "requires_s3: requires S3-compatible storage",
+]
+
+[tool.ruff]
+target-version = "py314"
