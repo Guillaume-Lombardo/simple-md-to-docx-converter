@@ -91,6 +91,34 @@ def test_committed_ci_infrastructure_domain_is_active_and_runnable() -> None:
 
 
 @pytest.mark.unit
+def test_t06_functional_domain_is_active_and_runnable() -> None:
+    """Hosted CI executes the T06 ASGI and real Argon2 integration suite."""
+    registry = load_registry(Path(".github/ci/domains.json"))
+    selected = select_domains(["src/md_converter/app.py"])
+    planned, runnable = classify_domains(selected, registry)
+    assert "functional" not in planned
+    assert "functional" in runnable
+    assert registry["functional"]["command"] == [
+        "uv",
+        "run",
+        "pytest",
+        "tests/functional",
+        "tests/integration/auth",
+        "-m",
+        "functional or integration",
+        "--no-cov",
+    ]
+
+
+@pytest.mark.unit
+def test_auth_integration_change_selects_functional_domain() -> None:
+    """Real authentication boundary tests cannot bypass their hosted domain."""
+    assert "functional" in select_domains(
+        ["tests/integration/auth/test_http_session.py"]
+    )
+
+
+@pytest.mark.unit
 def test_draft_suppresses_only_runnable_heavy_domains() -> None:
     """Drafts retain visible planned gaps but do not run active heavy suites."""
     registry = {

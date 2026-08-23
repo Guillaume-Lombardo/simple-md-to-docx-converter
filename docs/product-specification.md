@@ -151,6 +151,31 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Expose queue depth and age, active jobs, step durations, failures, saturation, expiration, retry, and recovery metrics.
 - Audit actor, owner, operation, target, and version for every sensitive mutation.
 
+### 8.1 Local authentication policy
+
+- Do not expose public registration. Inject the initial administrator through startup
+  configuration backed by deployment secrets.
+- Only administrators create, deactivate, reactivate, or reset local accounts.
+- Use Argon2id with configurable parameters defaulting to `m=19456 KiB`, `t=2`, and `p=1`.
+- Use opaque CSPRNG session tokens containing at least 128 bits. Store only a one-way token digest
+  server-side.
+- Default the configurable idle session lifetime to 30 minutes and the absolute lifetime to 8
+  hours. Revoke sessions server-side on logout, account deactivation, and password reset.
+- Send the session token only in a cookie with `HttpOnly`, `Secure`, and `SameSite=Lax`.
+- Reject login POST requests carrying a cross-origin `Origin` before evaluating credentials. Allow
+  the exact request origin and documented non-browser clients that omit `Origin`.
+- Prevent password-reset and account-state races with an atomic account authentication version:
+  compare-and-set the verified login snapshot, carry the accepted version in the session, and
+  increment it for password resets, deactivation, and reactivation.
+- Complete every failed, invalid, or obsolete password-hash path to exactly two current Argon2
+  work-profile units without wall-clock sleeps. Count a real current-profile candidate verification
+  as one unit and add two dummy units when the legacy or malformed candidate itself is not current
+  work.
+- Return sanitized stable error envelopes for request validation and expected API failures; never
+  reflect submitted passwords or Pydantic validation input.
+- T06 uses temporary in-memory account and session adapters behind persistence ports; T12 replaces
+  them with profile implementations without changing the authentication service contract.
+
 ## 9. Repository and autonomous development
 
 Keep `main` as the only long-lived branch. Every contributor and agent uses a short `<type>/<issue>-<subject>` branch and an isolated worktree when needed. Branch names never identify Codex, another agent, or an automation tool. One pull request normally covers one issue or coherent vertical slice. Draft pull requests run light checks; ready pull requests run the required domain matrix. Squash after required checks, resolved discussions, and an independent agent or GitHub review. Delete the branch and worktree only after verified merge.
@@ -184,6 +209,14 @@ Unit tests remain fast and deterministic and use pytest-mock rather than direct 
 Functional tests exercise assembled application behavior with substituted adapters. Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—has at least one integration test covering its primary successful path and every relevant failure behavior. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
 
 Every delivered user-visible or operational workflow has an E2E test against the final rootless image. Cover its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior. Use Playwright, two regular users, and one administrator where applicable. Cover both profiles, ownership, visibility, `202` submission, polling, cancellation, expiration, download, restart recovery, and absence of double execution. Preserve artifacts only on failure. Any integration or E2E exception requires explicit pull-request justification and explicit reviewer approval; cost, inconvenience, or a missing local dependency is not sufficient.
+
+The project manager approved one sequencing exception for T06: its login, session, and local-account
+administration flows receive unit, functional ASGI, and real Argon2id/HTTP integration coverage in
+T06, while final-image rootless E2E is durable T20/T21 debt. The architectural reason is that T06
+deliberately introduces neither the final UBI image nor the standalone/distributed persistence and
+deployment boundaries. T20/T21 must repeat the primary flow and relevant authentication,
+authorization, revocation, expiration, cookie, and recovery failures against the hardened image;
+this is a sequencing exception, not a waiver of final E2E coverage.
 
 ## 11. GitHub Actions
 
@@ -245,7 +278,6 @@ Recommended delivery order: T00 and T01 can start in parallel, and T00 may conti
 - Approved fonts, licenses, Fontconfig behavior, and substitution policy.
 - Maximum upload/decompressed size, files, images, diagrams, active jobs, queue depth, worker duration, memory, and ephemeral storage.
 - Source/result retention, template-version retention, audit retention, antivirus integration, and cleanup schedule.
-- Argon2id parameters and local-account policy.
 - GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
 - S3 implementation used by E2E.
 - PDF/A and Word/PDF table-of-contents support.

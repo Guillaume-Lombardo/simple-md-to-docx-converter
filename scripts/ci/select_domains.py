@@ -45,7 +45,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "containers/**",
         "deploy/**",
     ),
-    "functional": ("src/**", "tests/functional/**"),
+    "functional": ("src/**", "tests/functional/**", "tests/integration/auth/**"),
     "storage-distributed": (
         "src/**",
         "tests/integration/storage/**",

@@ -9,13 +9,17 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- T01, T02, T03, and T05 are Done and verified on `main` at `4b93725`. Linear G1L-315
-  intentionally remains In Progress until this closure mirror is merged and verified.
-- Linear project status: In Progress. T00 and T04 remain In Progress; remaining tickets are in
+- T01, T02, T03, and T05 are Done and verified on `main` at `db698a5`.
+- Linear project status: In Progress. T00, T04, and T06 are In Progress; remaining tickets are in
   Backlog.
-- T06 is the next delivery ticket, but implementation must wait for the PM decision on the
-  unresolved Argon2id/local-account/session policy and final-image E2E sequencing.
-- The product is not functional yet: API, conversion, storage, queue, UI, and final image remain.
+- T06 started on isolated branch `feat/T06-fastapi-auth-foundation` from `db698a5` after its T01
+  and T05 dependencies were verified `Done`. The PM resolved account provisioning, Argon2id,
+  session, cookie, and final-image E2E sequencing decisions. The first independent review requested
+  authentication race, login-CSRF, validation-contract, light-coverage, selector, and three-user
+  fixes; those changes are implemented and await re-review/publication. No T06 policy blocker
+  remains.
+- The authentication API foundation is functional. Conversion, durable storage, queue, worker,
+  product UI, and final image remain.
 - The original orchestrator thread `01a02e30-fcd1-77a2-9fcf-340fd94c073d` is idle after its first
   turn was interrupted before any worker started.
 
@@ -43,19 +47,19 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Blockers and Risks
 
-- T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, Podman/OpenShift
-  validation, and the authentication parameters needed to unblock T06.
-- T06 also needs a PM decision on whether its final-image E2E coverage is advanced into T06 or
-  explicitly sequenced with T20/T21.
+- T00 still needs approved engine sources, a Chrome/OpenShift sandbox design, and Podman/OpenShift
+  validation; these do not block T06.
+- T06 final-image rootless E2E is explicitly tracked as approved T20/T21 sequencing debt; unit,
+  functional ASGI, and real authentication/HTTP integration coverage remain mandatory in T06.
 - Automatic relaunch of a stopped thread requires an external supervisor.
 - GitHub merge queue is unavailable because this public repository is user-owned, so the
   orchestrator must serialize merges.
 
 ## Next Actions
 
-1. Independently review and merge the T05 closure mirror, verify `main`, then mark G1L-315 `Done`
-   and re-fetch it for parity.
-2. Obtain the PM decisions required for T06, then synchronize and start G1L-316.
+1. Independently review T06, then publish, verify hosted CI, squash-merge, and verify `main` before
+   marking G1L-316 `Done`.
+2. Keep the T06 memory-adapter and final-image E2E debt assigned to T12 and T20/T21 respectively.
 3. Before each task, verify repository and Linear state; delegate implementation and independent
    review to separate workers.
 4. After each worker, merge, interruption, or blocker, rewrite this file to describe only the
@@ -75,6 +79,21 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   lock and CI policy validation, checksum-verified actionlint v1.7.12 with ShellCheck, and clean
   diffs. PR run 32646636269 and main run 32646773360 independently passed the non-skipped
   CI-infrastructure domain and strict `CI / gate` on the approved and merged trees.
+- T06 local validation passes Ruff formatting/linting, `ty`, locked `uv` sync, both canonical Pytest
+  commands with 99/99 tests, 97.58% application coverage (98% rounded), 98.41% changed-line
+  coverage, the non-skipped 11-test functional/Argon2id/HTTP domain, the local CI validator,
+  actionlint with ShellCheck, and clean diffs. Rootless final-image E2E is the explicit PM-approved
+  T20/T21 sequencing exception.
+- T06 review-fix validation passes 116/116 default and full tests at 98.70% application coverage;
+  96/96 exact light tests at 97.22% application, 93.75% branch, and 97.68% changed-line coverage;
+  the 48-test focused race/CSRF/validation/timing/three-identity/selector set; and the non-skipped
+  13-test functional/Argon2id/real-HTTP domain. Ruff, `ty`, locked sync, CI validation, actionlint
+  with ShellCheck, formatting, and diff checks pass on the committed review-fix tree.
+- The last T06 timing re-review finding is implemented: all failed authentication paths have two
+  structurally counted current Argon2 work units, and nine-sample real medians range from 29.462 to
+  29.866 ms (`max/min=1.014`) without sleeps. Targeted tests pass 24/24, the functional domain
+  passes 14/14, and both canonical suites pass 122/122 at 98.73% application coverage. Exact light
+  evidence passes 101/101 at 97.28% application, 93.94% branch, and 97.73% changed-line coverage.
 - Live GitHub API/Actions verification covers the T02/T03 operational boundary. Final application-
   image E2E is not applicable to repository CI/protection and independent review accepted that
   assessment.
