@@ -57,7 +57,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - Last known project update reports canonical checks passing on `main`.
 - T02 live-state verification confirms all current merge controls; required status checks are
   intentionally null until T03.
-- T03 local validation passes all canonical checks, 29 tests, 98.13% unit/light branch coverage,
-  lock and workflow security validation, and checksum-verified actionlint with ShellCheck. The
-  GitHub-hosted `CI / gate` and Actions application identity remain pending publication.
+- T03 local validation passes all canonical checks, 39 tests, 98.21% unit/light branch coverage,
+  the active CI-infrastructure subprocess suite, lock and workflow security validation, and
+  checksum-verified actionlint with ShellCheck. Independent review's gate-enforcement and cache
+  findings are fixed locally; the GitHub-hosted `CI / gate` and Actions application identity remain
+  pending publication.
 - Final product validation: not run; the product is incomplete.

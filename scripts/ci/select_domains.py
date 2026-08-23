@@ -12,6 +12,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
 DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
+    "ci-infrastructure": (
+        ".github/ci/**",
+        ".github/workflows/**",
+        "scripts/ci/**",
+        "tests/test_ci_runner.py",
+        "tests/integration/ci/**",
+    ),
     "container": (
         "Containerfile*",
         "**/Containerfile*",

@@ -26,7 +26,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
 def test_source_change_selects_all_application_domains_except_container() -> None:
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
     selected = select_domains(["src/md_converter/service.py"])
-    assert selected == sorted(set(DOMAIN_PATTERNS) - {"container"})
+    assert selected == sorted(set(DOMAIN_PATTERNS) - {"ci-infrastructure", "container"})
 
 
 @pytest.mark.unit
@@ -48,6 +48,43 @@ def test_complete_suite_selects_every_domain_without_paths() -> None:
 def test_root_containerfile_selects_container_domain() -> None:
     """The future final image definition activates container validation."""
     assert select_domains(["Containerfile"]) == ["container"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/ci/domains.json",
+        ".github/workflows/ci.yml",
+        "scripts/ci/run_domain.py",
+        "scripts/ci/select_domains.py",
+        "tests/test_ci_runner.py",
+        "tests/integration/ci/test_gate.py",
+    ],
+)
+def test_ci_implementation_change_selects_active_infrastructure_domain(
+    path: str,
+) -> None:
+    """Every runner, detector, registry, workflow, and integration path enforces real CI tests."""
+    assert "ci-infrastructure" in select_domains([path])
+
+
+@pytest.mark.unit
+def test_committed_ci_infrastructure_domain_is_active_and_runnable() -> None:
+    """The review-required subprocess tests cannot be reported as merely planned."""
+    registry = load_registry(Path(".github/ci/domains.json"))
+    selected = select_domains(["tests/test_ci_runner.py"])
+    planned, runnable = classify_domains(selected, registry)
+    assert planned == []
+    assert runnable == ["ci-infrastructure"]
+    assert registry["ci-infrastructure"]["command"] == [
+        "uv",
+        "run",
+        "pytest",
+        "tests/test_ci_runner.py",
+        "-m",
+        "integration",
+    ]
 
 
 @pytest.mark.unit
@@ -151,6 +188,6 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         line.split("=", maxsplit=1) for line in output.read_text().splitlines()
     )
     assert json.loads(values["selected-domains"]) == sorted(
-        set(DOMAIN_PATTERNS) - {"container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "container"}
     )
     assert json.loads(values["runnable-domains"]) == []

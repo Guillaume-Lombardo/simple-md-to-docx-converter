@@ -60,6 +60,12 @@ status to `active` and adding the reviewed command as an argument array; the mat
 that array without a shell. Scheduled, release, and manual runs select every domain, including both
 storage profiles.
 
+The `ci-infrastructure` domain is active now. Changes to the detector, runner, registry, workflow,
+or its integration tests must run the real subprocess success and failure cases in
+`tests/test_ci_runner.py`; `CI / gate` rejects a skipped or failed heavy matrix whenever any active
+domain was selected. Caches are restore-only outside trusted pushes to `main`, including pull
+requests, forks, merge groups, releases, schedules, and manual runs.
+
 The Sunday 03:17 UTC schedule is provisional until T22 fixes the GitHub Actions usage budget and
 final frequency. Release-triggered CI performs validation only; image and Python publication,
 SBOM, provenance, and OIDC permissions remain isolated T22 work.

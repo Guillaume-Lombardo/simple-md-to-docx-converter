@@ -17,6 +17,10 @@ ACTION_REFERENCE = re.compile(
     r"^\s*uses:\s*[^\s@]+@([0-9a-f]+)(?:\s+#.*)?$", re.MULTILINE
 )
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+TRUSTED_CACHE_WRITE = (
+    "save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+    "&& github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
+)
 
 
 def validate_workflow_text(text: str) -> list[str]:
@@ -32,10 +36,15 @@ def validate_workflow_text(text: str) -> list[str]:
         "permissions:\n  contents: read",
         "concurrency:",
         "name: CI / gate",
+        'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then',
+        '[[ "$HEAVY_RESULT" == "skipped" ]]',
+        '[[ "$HEAVY_RESULT" == "success" ]]',
     )
     for fragment in required_fragments:
         if fragment not in text:
             errors.append(f"missing required workflow fragment: {fragment!r}")
+    if text.count("name: CI / gate") != 1:
+        errors.append("workflow must define exactly one CI / gate check")
 
     forbidden = (
         "pull_request_target",
@@ -48,6 +57,14 @@ def validate_workflow_text(text: str) -> list[str]:
             errors.append(f"forbidden workflow fragment: {fragment!r}")
     if re.search(r"^\s+[a-z][a-z-]*:\s+write(?:\s|$)", text, re.MULTILINE):
         errors.append("write permission is forbidden in the CI workflow")
+
+    cache_write_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.lstrip().startswith("save-cache:")
+    ]
+    if cache_write_lines != [TRUSTED_CACHE_WRITE, TRUSTED_CACHE_WRITE]:
+        errors.append("cache writes must be limited to trusted pushes on main")
 
     uses_lines = [
         line for line in text.splitlines() if line.lstrip().startswith("uses:")

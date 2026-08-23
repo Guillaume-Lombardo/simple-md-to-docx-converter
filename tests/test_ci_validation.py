@@ -48,6 +48,36 @@ def test_validator_rejects_any_write_permission() -> None:
 
 
 @pytest.mark.unit
+def test_validator_rejects_broad_cache_writes() -> None:
+    """Pull requests, merge groups, forks, releases, and manual runs remain restore-only."""
+    errors = validate_workflow_text(
+        "save-cache: ${{ github.event_name != 'pull_request' }}\n"
+    )
+    assert "cache writes must be limited to trusted pushes on main" in errors
+
+
+@pytest.mark.unit
+def test_gate_rejects_skipped_active_domain() -> None:
+    """A selected active domain cannot be accepted as planned or skipped by the gate."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then',
+        'if [[ "$HEAVY_RESULT" == "skipped" ]]; then',
+    )
+    assert any(
+        "RUNNABLE_DOMAINS" in error for error in validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
+def test_validator_rejects_duplicate_required_gate_name() -> None:
+    """Branch protection must observe one unambiguous required check context."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    errors = validate_workflow_text(f"{workflow}\nname: CI / gate\n")
+    assert "workflow must define exactly one CI / gate check" in errors
+
+
+@pytest.mark.unit
 def test_validator_rejects_direct_unittest_mock_import(tmp_path: Path) -> None:
     """Tests must use pytest-mock instead of importing unittest.mock."""
     source = tmp_path / "unsafe.py"

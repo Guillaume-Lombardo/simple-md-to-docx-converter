@@ -91,7 +91,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           cache-suffix: py314
-          save-cache: ${{ github.event_name != 'pull_request' }}
+          save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
       - name: Check formatting
@@ -160,7 +160,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           cache-suffix: py314-${{ matrix.domain }}
-          save-cache: ${{ github.event_name != 'pull_request' }}
+          save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
       - name: Run selected domain suite without a shell
@@ -179,9 +179,14 @@ jobs:
           DOMAIN_PLAN_RESULT: ${{ needs.domain-plan.result }}
           HEAVY_RESULT: ${{ needs.heavy.result }}
           LIGHT_RESULT: ${{ needs.light.result }}
+          RUNNABLE_DOMAINS: ${{ needs.detect.outputs.runnable-domains }}
         run: |
           set -euo pipefail
           [[ "$DETECT_RESULT" == "success" ]]
           [[ "$DOMAIN_PLAN_RESULT" == "success" ]]
-          [[ "$HEAVY_RESULT" == "success" || "$HEAVY_RESULT" == "skipped" ]]
+          if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then
+            [[ "$HEAVY_RESULT" == "skipped" ]]
+          else
+            [[ "$HEAVY_RESULT" == "success" ]]
+          fi
           [[ "$LIGHT_RESULT" == "success" ]]

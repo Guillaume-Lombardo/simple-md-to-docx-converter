@@ -3,6 +3,18 @@
     "activation_ticket": "T20",
     "status": "planned"
   },
+  "ci-infrastructure": {
+    "activation_ticket": "T03",
+    "command": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_ci_runner.py",
+      "-m",
+      "integration"
+    ],
+    "status": "active"
+  },
   "document-engines": {
     "activation_ticket": "T07",
     "status": "planned"
