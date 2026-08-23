@@ -70,6 +70,13 @@ Build FastAPI foundations, configuration, English errors, local accounts, sessio
   integration tests, genuine isolated HTTP-adapter unit coverage, and a complete administrator,
   Alice, and Bob lifecycle/authorization-isolation scenario. T12 must implement the CAS and
   security mutation atomically in both durable profiles; T06 adds no persistence.
+- 2026-08-23: Post-review validation passes the exact hosted-light command with 96/96 unit tests,
+  97.22% application coverage, 93.75% branch coverage (60/64), and 97.68% changed-application-line
+  coverage (463/474). Both canonical suites pass 116/116 at 98.70% application coverage; the
+  focused race/CSRF/validation/timing/three-identity/selector set passes 48/48; and the non-skipped
+  functional/Argon2id/real-HTTP domain passes 13/13. Ruff, `ty`, locked `uv` synchronization, CI
+  validation, actionlint with ShellCheck, formatting, and diff checks pass. The sole warning remains
+  Starlette's non-blocking notice about the future TestClient `httpx2` transition.
 
 ## Synchronization
 
