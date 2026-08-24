@@ -9,19 +9,20 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` delivered T00-T09, T12, and T14. T09 implementation PR #38 and completion PR #39 were
+- `main` delivered T00-T10, T12, and T14. T10 implementation PR #40 was squash-merged as
+  `02e7cc2739d4120260f2c7795b260eeec7c77d66`; its exact main run `32716429800` passed every
+  implemented domain and the protected gate. T09 implementation PR #38 and completion PR #39 were
   squash-merged as `4280ca0699d1c80790aa0a7289a8ba8984c97214` and
   `bc1c6fb8a017461651cb1d1d202a2a7017754777`; their exact main runs `32710022591` and
   `32710324116` passed the protected gate. Linear G1L-319 and the local T09 mirror are `Done`.
-- T10/G1L-321 is `In Progress` on `feat/T10-template-font-validation`, based on clean delivered
-  main. Start commit: `874ee15`.
-- T10 is the smallest ready critical-path ticket. T00 and T07 are verified dependencies; T10 blocks
-  T11 and T15.
+- T10/G1L-321 is delivered on `main`; its local and Linear status are `Done`.
+- T11 is the smallest ready critical-path ticket. Its T09 and T10 dependencies are verified `Done`;
+  it blocks T13.
 - Three read-only independent analyses cover official font artifacts, bounded OOXML architecture,
   and the security/integration test matrix. No implementation ownership overlaps.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
-## T10 Scope
+## Delivered T10 Scope
 
 - Pin official Liberation, Carlito, Caladea, and DejaVu artifacts and notices; record exact
   Fontconfig aliases and deterministic substitution order.
@@ -54,8 +55,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Rebase, publish, and squash-merge after green CI.
-2. Synchronize T10/Linear to `Done`, verify main CI, then immediately select the next ready ticket.
+1. Close T10 tracking through the protected documentation PR and verify its exact main CI.
+2. Start T11 PDF production and synchronize its local mirror with Linear.
 
 ## Validation
 
