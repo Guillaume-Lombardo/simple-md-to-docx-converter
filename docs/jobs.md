@@ -51,8 +51,9 @@ looping, and performs bounded periodic cleanup. The embedded lifecycle exposes u
 failures to its readiness owner. Polling, lease, heartbeat, recovery, cleanup, retention,
 concurrency, and stop values are caller-owned and remain production policy for T18.
 
-The processor port is intentionally storage-neutral. T15 owns its connection to immutable template
-versions and the delivered Pandoc/LibreOffice conversion pipeline. T20 owns final-image process-mode
-wiring. Final rootless-image E2E coverage therefore remains sequenced to T20/T21; T13 covers the
+The processor port is intentionally storage-neutral. It resolves the exact frozen template pair
+through `TemplateService.resolve_frozen_version`; later replacement or restoration cannot change a
+queued job's reference bytes. T20 owns final-image process-mode wiring. Final rootless-image E2E
+coverage therefore remains sequenced to T20/T21; T13 covers the
 HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
 PostgreSQL/S3-compatible storage.

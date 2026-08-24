@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from md_converter.templates.models import TemplateIdentity, TemplatePage, TemplateSearch
+from md_converter.templates.models import (
+    TemplateAuditRecord,
+    TemplateIdentity,
+    TemplatePage,
+    TemplateSearch,
+    TemplateVersion,
+)
 
 
 class TemplateCatalogRepository(Protocol):
@@ -23,6 +29,55 @@ class TemplateCatalogRepository(Protocol):
         viewer_is_admin: bool,
     ) -> TemplatePage: ...
 
+    def create_versioned(
+        self,
+        template: TemplateIdentity,
+        version: TemplateVersion,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def update_metadata(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        name: str,
+        description: str,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def publish_version(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        version: TemplateVersion,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def set_status(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        status: str,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def delete_guarded(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        audit: TemplateAuditRecord,
+    ) -> tuple[TemplateVersion, ...]: ...
+
+    def get_version(
+        self, template_id: UUID, version_id: UUID
+    ) -> TemplateVersion | None: ...
+
+    def list_versions(self, template_id: UUID) -> tuple[TemplateVersion, ...]: ...
+
 
 class TemplateSelectionRepository(Protocol):
     """Transactional preferred-template and system-fallback selection."""
@@ -34,6 +89,10 @@ class TemplateSelectionRepository(Protocol):
     def preferred_id(self, user_id: UUID) -> UUID | None: ...
 
     def set_system_fallback(self, template_id: UUID) -> None: ...
+
+    def set_system_fallback_audited(
+        self, template_id: UUID, audit: TemplateAuditRecord
+    ) -> None: ...
 
     def system_fallback_id(self) -> UUID | None: ...
 

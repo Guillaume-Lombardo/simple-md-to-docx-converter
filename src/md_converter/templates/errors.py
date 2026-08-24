@@ -10,6 +10,22 @@ class TemplateUnavailableError(LookupError):
         super().__init__("Template is not available")
 
 
+class TemplatePreconditionRequiredError(RuntimeError):
+    """A mutation omitted the required If-Match validator."""
+
+
+class TemplateConflictError(RuntimeError):
+    """A mutation raced with a newer representation or violates a guard."""
+
+
+class TemplateStorageError(RuntimeError):
+    """Template metadata or content storage failed without leaking details."""
+
+
+class TemplateRequestError(ValueError):
+    """User-supplied template metadata is invalid."""
+
+
 class TemplateValidationErrorCode(StrEnum):
     """Content-free template validation categories for later API translation."""
 

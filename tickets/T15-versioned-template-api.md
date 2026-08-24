@@ -38,6 +38,14 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   replacement, immutable history, copy-forward restoration, deletion/archive guards, audit, and
   SQLite/PostgreSQL plus filesystem/S3 parity. T16/T17 retain the browser interfaces, and T20/T21
   retain final-image runtime wiring and E2E execution.
+- 2026-08-24: Implemented the versioned `/api/v1/templates` contract with safe immutable downloads,
+  strong revision ETags and required If-Match compare-and-swap mutations, metadata updates, atomic
+  replacement with compensation, copy-forward restoration, archive and reference-guarded deletion,
+  preferred/fallback selection, content-free audit records, and frozen processor version lookup.
+  Added Alembic schema support, shared SQLite/PostgreSQL plus filesystem/S3 behavior, functional
+  ASGI coverage, real standalone and distributed boundary/concurrency coverage, and English API,
+  template, storage, and job documentation. Final rootless-image E2E remains T20/T21 sequencing
+  debt and is not claimed by T15.
 
 ## Synchronization
 
