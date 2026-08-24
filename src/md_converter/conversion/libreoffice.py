@@ -20,6 +20,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
+from urllib.parse import urlsplit
 
 from pypdf import PdfReader
 from pypdf import filters as pypdf_filters
@@ -421,6 +422,8 @@ def _walk_pdf_dictionary(
     value: DictionaryObject,
     state: _PdfWalkState,
     depth: int,
+    *,
+    action_context: bool = False,
 ) -> None:
     action_value = value.get("/S")
     action = (
@@ -430,13 +433,34 @@ def _walk_pdf_dictionary(
     )
     action_name = str(action) if action is not None else ""
     dictionary_type = str(value.get("/Type", ""))
+    is_action = action_context or dictionary_type == "/Action"
     if action_name in _PROHIBITED_ACTIONS or (
-        dictionary_type == "/Action" and action_name not in _SAFE_PDF_ACTIONS
+        is_action and action_name not in _SAFE_PDF_ACTIONS
     ):
         _error(
             ConversionErrorCode.INVALID_PDF,
             "LibreOffice produced an unsafe PDF.",
         )
+    if is_action and action_name == "/URI":
+        uri_value = value.get("/URI")
+        uri = (
+            uri_value.get_object()
+            if isinstance(uri_value, IndirectObject)
+            else uri_value
+        )
+        try:
+            parsed_uri = urlsplit(str(uri) if uri is not None else "")
+        except ValueError:
+            parsed_uri = None
+        if (
+            parsed_uri is None
+            or parsed_uri.scheme not in {"http", "https"}
+            or parsed_uri.hostname is None
+        ):
+            _error(
+                ConversionErrorCode.INVALID_PDF,
+                "LibreOffice produced an unsafe PDF.",
+            )
     for key, child in value.items():
         name = str(key)
         if name in _PROHIBITED_PDF_KEYS:
@@ -444,13 +468,23 @@ def _walk_pdf_dictionary(
                 ConversionErrorCode.INVALID_PDF,
                 "LibreOffice produced an unsafe PDF.",
             )
-        _walk_pdf_object(child, state, depth + 1)
+        child_action_context = (name == "/A" and dictionary_type != "/StructElem") or (
+            name == "/Next" and is_action
+        )
+        _walk_pdf_object(
+            child,
+            state,
+            depth + 1,
+            action_context=child_action_context,
+        )
 
 
 def _walk_pdf_object(
     value: object,
     state: _PdfWalkState,
     depth: int,
+    *,
+    action_context: bool = False,
 ) -> None:
     if depth > state.limits.max_pdf_object_depth:
         _error(ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits.")
@@ -460,7 +494,9 @@ def _walk_pdf_object(
             return
         state.seen_indirect.add(key)
         state.claim()
-        _walk_pdf_object(value.get_object(), state, depth + 1)
+        _walk_pdf_object(
+            value.get_object(), state, depth + 1, action_context=action_context
+        )
         return
     if not isinstance(value, (DictionaryObject, ArrayObject)):
         return
@@ -470,10 +506,10 @@ def _walk_pdf_object(
     state.seen_direct.add(identity)
     state.claim()
     if isinstance(value, DictionaryObject):
-        _walk_pdf_dictionary(value, state, depth)
+        _walk_pdf_dictionary(value, state, depth, action_context=action_context)
     else:
         for child in value:
-            _walk_pdf_object(child, state, depth + 1)
+            _walk_pdf_object(child, state, depth + 1, action_context=action_context)
 
 
 @contextmanager
@@ -526,7 +562,16 @@ def _validate_pdf(data: bytes, limits: PdfLimits) -> tuple[PdfPage, ...]:
         raise
     except LimitReachedError:
         _error(ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits.")
-    except AssertionError, OSError, PyPdfError, RecursionError, TypeError, ValueError:
+    except (
+        AssertionError,
+        AttributeError,
+        LookupError,
+        OSError,
+        PyPdfError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ):
         _error(ConversionErrorCode.INVALID_PDF, "LibreOffice produced an invalid PDF.")
     return tuple(pages)
 

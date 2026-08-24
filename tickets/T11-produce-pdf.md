@@ -50,8 +50,10 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   bounded; all standard unsafe PDF actions and parser failures are normalized; the golden verifies
   engine, font, provenance, dimensions, and deterministic uncompressed reference bytes; and a
   committed rootless harness reproduces the real boundary suite. T20/T21 and Linear now retain the
-  explicitly approved final-image asynchronous E2E debt. Formatting, Ruff, and `ty` pass; 603 unit
-  tests pass at 93.99% coverage, 744 default local tests pass at 95.05%, and all 20 rootless real-
+  explicitly approved final-image asynchronous E2E debt. The final security pass also rejects
+  unknown typeless actions and non-HTTP(S) URI actions, normalizes malformed page trees, and bounds
+  the executable rootless workspace to a 512 MiB tmpfs. Formatting, Ruff, and `ty` pass; 608 unit
+  tests pass at 93.97% coverage, 749 default local tests pass at 95.02%, and all 20 rootless real-
   engine tests pass. The unfiltered host run has 34 expected missing-engine failures; those exact
   boundaries pass in the approved image. Exact-revision re-review and changed-line coverage remain
   before publication.

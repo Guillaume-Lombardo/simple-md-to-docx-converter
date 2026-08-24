@@ -465,11 +465,15 @@ def test_pdf_structure_rejects_indirect_active_action_name(
 
 
 def test_pdf_structure_allows_only_navigation_and_uri_actions() -> None:
-    for action_name in ("/GoTo", "/URI"):
+    for action_name, extra in (
+        ("/GoTo", {}),
+        ("/URI", {NameObject("/URI"): TextStringObject("https://example.com/path")}),
+    ):
         dictionary = DictionaryObject(
             {
                 NameObject("/Type"): NameObject("/Action"),
                 NameObject("/S"): NameObject(action_name),
+                **extra,
             }
         )
         libreoffice._walk_pdf_dictionary(
@@ -492,16 +496,69 @@ def test_pdf_structure_allows_only_navigation_and_uri_actions() -> None:
     assert captured.value.code is ConversionErrorCode.INVALID_PDF
 
 
-def test_pdf_structure_does_not_treat_every_a_key_as_an_action() -> None:
-    graphical_value = DictionaryObject(
-        {NameObject("/S"): NameObject("/ValidGraphicalSubtype")}
+@pytest.mark.parametrize(
+    "target",
+    ("file:///etc/passwd", "javascript:alert(1)", "https:///missing-host"),
+)
+def test_pdf_structure_rejects_unsafe_uri_actions(target: str) -> None:
+    dictionary = DictionaryObject(
+        {
+            NameObject("/S"): NameObject("/URI"),
+            NameObject("/URI"): TextStringObject(target),
+        }
     )
-    dictionary = DictionaryObject({NameObject("/A"): graphical_value})
+    parent = DictionaryObject({NameObject("/A"): dictionary})
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._walk_pdf_dictionary(
+            parent,
+            libreoffice._PdfWalkState(LIMITS),
+            0,
+        )
+    assert captured.value.code is ConversionErrorCode.INVALID_PDF
+
+
+def test_pdf_structure_rejects_unknown_action_without_optional_type() -> None:
+    action = DictionaryObject({NameObject("/S"): NameObject("/UnknownAction")})
+    annotation = DictionaryObject({NameObject("/A"): action})
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._walk_pdf_dictionary(
+            annotation,
+            libreoffice._PdfWalkState(LIMITS),
+            0,
+        )
+    assert captured.value.code is ConversionErrorCode.INVALID_PDF
+
+
+def test_pdf_structure_allows_structure_attributes_named_a() -> None:
+    attributes = DictionaryObject(
+        {
+            NameObject("/O"): NameObject("/Layout"),
+            NameObject("/Placement"): NameObject("/Inline"),
+        }
+    )
+    structure_element = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/StructElem"),
+            NameObject("/S"): NameObject("/P"),
+            NameObject("/A"): attributes,
+        }
+    )
     libreoffice._walk_pdf_dictionary(
-        dictionary,
+        structure_element,
         libreoffice._PdfWalkState(LIMITS),
         0,
     )
+
+
+def test_malformed_page_tree_is_normalized_to_invalid_pdf() -> None:
+    output = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    del writer.root_object[NameObject("/Pages")]
+    writer.write(output)
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._validate_pdf(output.getvalue(), LIMITS)
+    assert captured.value.code is ConversionErrorCode.INVALID_PDF
 
 
 @pytest.mark.parametrize(

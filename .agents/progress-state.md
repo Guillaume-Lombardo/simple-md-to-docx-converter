@@ -22,8 +22,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   `c43b810`; T09 and T10 are verified dependencies.
 - T11 now has an isolated LibreOffice adapter, explicit DOCX/PDF bounds, process-group timeout and
   cancellation, strict PDF validation, canonical traceability, locked PDFium rasterization, and a
-  reproducible exact golden. The canonical unit selection passes 603 tests at 93.99% coverage, the
-  default local suite passes 744 tests at 95.05% coverage, and the hardened rootless UBI harness
+  reproducible exact golden. The canonical unit selection passes 608 tests at 93.97% coverage, the
+  default local suite passes 749 tests at 95.02% coverage, and the hardened rootless UBI harness
   passes all 20 real Pandoc/LibreOffice/PDFium tests.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
@@ -80,8 +80,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
   K3s proof remains valid and no VM networking was modified.
 - Final product validation has not run; the product remains incomplete.
-- T11 validation: formatting, Ruff, and `ty` pass; the unit selection passes 603 tests at 93.99%
-  application coverage; the default local selection passes 744 tests at 95.05%; and the rootless
+- T11 validation: formatting, Ruff, and `ty` pass; the unit selection passes 608 tests at 93.97%
+  application coverage; the default local selection passes 749 tests at 95.02%; and the rootless
   T11 boundary suite passes 20 tests including exact raster golden, concurrent profiles, failure
   outputs, timeout, cancellation, probe failure, and descendant cleanup. The unfiltered host run
   passes 751 tests and has 34 expected missing-engine failures because Pandoc, LibreOffice,
