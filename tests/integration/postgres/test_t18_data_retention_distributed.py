@@ -41,8 +41,6 @@ def test_distributed_retention_matches_standalone_contract() -> None:
     owner_id, template_id = uuid4(), uuid4()
     versions = [uuid4() for _ in range(12)]
     now = datetime.now(UTC)
-    with DatabaseSession(engine) as database:
-        original_reports = set(database.scalars(select(RetentionCleanupRunRow.id)))
     try:
         with DatabaseSession(engine) as database, database.begin():
             database.add(
@@ -141,6 +139,16 @@ def test_distributed_retention_matches_standalone_contract() -> None:
             database.begin(),
         ):
             database.execute(update(RetentionCleanupRunRow).values(removed_count=999))
+        with (
+            pytest.raises(IntegrityError),
+            DatabaseSession(engine) as database,
+            database.begin(),
+        ):
+            database.execute(
+                delete(RetentionCleanupRunRow).where(
+                    RetentionCleanupRunRow.completed_at == now
+                )
+            )
     finally:
         for version_id in versions:
             objects.delete(
@@ -156,9 +164,4 @@ def test_distributed_retention_matches_standalone_contract() -> None:
                 delete(TemplateRow).where(TemplateRow.id == str(template_id))
             )
             database.execute(delete(UserRow).where(UserRow.id == str(owner_id)))
-            database.execute(
-                delete(RetentionCleanupRunRow).where(
-                    RetentionCleanupRunRow.id.not_in(original_reports)
-                )
-            )
         engine.dispose()

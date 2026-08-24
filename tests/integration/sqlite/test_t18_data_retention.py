@@ -5,11 +5,11 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DatabaseSession
 
-from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.migrations import downgrade_database, upgrade_database
 from md_converter.persistence.retention import SqlRetentionRepository
 from md_converter.persistence.schema import (
     RetentionCleanupRunRow,
@@ -134,3 +134,48 @@ def test_retention_preserves_current_and_ten_newest_and_traces_audit_cleanup(
         database.begin(),
     ):
         database.execute(update(TemplateAuditRow).values(operation="rewritten"))
+    with (
+        pytest.raises(IntegrityError),
+        DatabaseSession(engine) as database,
+        database.begin(),
+    ):
+        database.execute(update(RetentionCleanupRunRow).values(removed_count=999))
+    with (
+        pytest.raises(IntegrityError),
+        DatabaseSession(engine) as database,
+        database.begin(),
+    ):
+        database.execute(delete(RetentionCleanupRunRow))
+
+
+@pytest.mark.integration
+def test_sqlite_cleanup_evidence_trigger_has_a_real_downgrade_path(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    report_id = str(UUID(int=999))
+    now = datetime(2026, 8, 24, tzinfo=UTC)
+    with DatabaseSession(engine) as database, database.begin():
+        database.add(
+            RetentionCleanupRunRow(
+                id=report_id,
+                kind="audit",
+                cutoff_at=now,
+                removed_count=0,
+                completed_at=now,
+            )
+        )
+    with (
+        pytest.raises(IntegrityError),
+        DatabaseSession(engine) as database,
+        database.begin(),
+    ):
+        database.execute(delete(RetentionCleanupRunRow))
+
+    downgrade_database(engine, "20260824_08")
+
+    with DatabaseSession(engine) as database, database.begin():
+        result = database.execute(delete(RetentionCleanupRunRow))
+        assert getattr(result, "rowcount", 0) == 1
+    engine.dispose()

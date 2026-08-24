@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from time import monotonic
 from typing import Protocol
 from uuid import UUID
 
@@ -97,6 +98,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
     clock: Callable[[], datetime],
     policy: WorkerPolicy,
     maintenance: MaintenanceCleaner | None = None,
+    monotonic_clock: Callable[[], float] = monotonic,
 ) -> ConversionWorker:
     """Compose a worker that cannot bypass frozen-template resolution."""
     return ConversionWorker(
@@ -106,6 +108,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
             objects,
             FrozenTemplateJobProcessor(resolver, processor),
             clock,
+            monotonic_clock=monotonic_clock,
             maintenance=maintenance,
         ),
         policy=policy,

@@ -56,19 +56,23 @@ leaves the candidate retryable after its cleanup lease expires.
 The worker recovers expired execution leases and incomplete source reservations continuously.
 Cleanup uses elapsed monotonic time, not processed-job count, with a required interval and bounded
 batch size. Transient database or object-store failures use the configured backoff and remain
-retryable.
+retryable. Production external and embedded worker factories inject the same assembled retention
+service. The next cleanup deadline advances before cleanup begins, so a failed maintenance attempt
+uses error backoff without causing an accelerated retry loop.
 
 Superseded template versions are retained for 365 days. Bounded cleanup never claims the current
 version, the ten newest published versions, or a version referenced by retained job metadata.
 Claims use expiring fencing tokens. The object is deleted first and metadata is acknowledged only
 by the claim owner, so a crash remains retryable. Audit rows cannot be updated. After 365 days they
-are deleted in bounded transactions that create immutable content-free cleanup reports.
+are deleted in bounded transactions that create content-free cleanup reports which cannot be
+updated or deleted.
 
 Every conversion and template upload is scanned by ClamAV after its bounded read and before any
 validation, processing, database reservation, or object-store write. The adapter uses clamd
 `INSTREAM` over TCP directly from memory and creates no application temporary scan material.
 `FOUND` returns stable `UPLOAD_MALWARE_DETECTED` with HTTP 422. Connection, timeout, scanner error,
-oversized response, or indeterminate protocol output fails closed with stable
+oversized response, noncanonical or unterminated record, multiple records, trailing data, or other
+indeterminate protocol output fails closed with stable
 `UPLOAD_SCANNER_UNAVAILABLE` and HTTP 503. No durable quarantine is retained.
 
 All implemented numeric ceilings and schedules remain required operator-supplied configuration;
@@ -112,6 +116,7 @@ RPO 1 hour and RTO 2 hours. At least once per calendar quarter, schedule
 `uv run python scripts/run_restore_exercise.py` against an isolated restore target. The supplied
 command must restore the named backup, validate representative stable object identifiers, and
 finish only after readiness succeeds. The runner enforces the profile RTO as its subprocess timeout,
-measures backup age and elapsed recovery, suppresses command output, and retains an immutable
-owner-only JSON report. Store that report directory in protected durable operational storage; it is
-not subject to application cleanup.
+measures backup age and recovery with a monotonic elapsed-time clock while retaining UTC start and
+completion timestamps, suppresses command output, and retains an immutable owner-only JSON report.
+Store that report directory in protected durable operational storage; it is not subject to
+application cleanup.

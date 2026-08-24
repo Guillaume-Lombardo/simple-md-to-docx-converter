@@ -11,6 +11,7 @@ from typing import Protocol
 
 from md_converter.jobs.errors import JobLeaseLostError, JobRepositoryError
 from md_converter.jobs.worker import ConversionWorker
+from md_converter.persistence.errors import PersistenceError
 from md_converter.storage import ObjectStoreError
 
 
@@ -70,11 +71,16 @@ class WorkerLoop:
                 processed = self._worker.run_once()
                 now = self._monotonic_clock()
                 if now >= next_cleanup:
-                    self._worker.cleanup(limit=self._schedule.cleanup_limit)
                     next_cleanup = now + self._schedule.cleanup_interval_seconds
+                    self._worker.cleanup(limit=self._schedule.cleanup_limit)
                 if not processed:
                     stop.wait(self._schedule.idle_poll_seconds)
-            except JobLeaseLostError, JobRepositoryError, ObjectStoreError:
+            except (
+                JobLeaseLostError,
+                JobRepositoryError,
+                ObjectStoreError,
+                PersistenceError,
+            ):
                 stop.wait(self._schedule.error_backoff_seconds)
 
 

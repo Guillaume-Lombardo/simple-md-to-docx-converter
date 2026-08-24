@@ -136,8 +136,9 @@ bucket platforms provide a consistent cross-service recovery point.
 Standalone recovery must meet RPO 24 hours and RTO 4 hours; distributed recovery must meet RPO 1
 hour and RTO 2 hours. Run an automated isolated restore for each deployed profile at least once per
 calendar quarter with `scripts/run_restore_exercise.py`. The restore command owns backup restoration,
-stable-object verification, and readiness verification. The runner measures the approved targets
-and writes an immutable, owner-only report containing no document content or credentials. Retain
+stable-object verification, and readiness verification. The runner measures RTO with an elapsed
+monotonic clock, records UTC timestamps, and writes an immutable, owner-only report containing no
+document content or credentials. Retain
 reports in protected durable operational storage outside application cleanup.
 
 T12 and T18 verify real SQLite/filesystem and PostgreSQL/RustFS boundaries. Applying the configured

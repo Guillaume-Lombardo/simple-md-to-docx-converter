@@ -15,6 +15,7 @@ from md_converter.auth.models import Role, Session, User
 from md_converter.config import ConfigurationError
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import (
+    downgrade_database,
     run_migration_environment,
     upgrade_database,
 )
@@ -37,6 +38,9 @@ RETENTION_REVISION: Any = importlib.import_module(
 )
 IMMUTABILITY_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_08_immutable_retention_records"
+)
+CLEANUP_EVIDENCE_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_09_immutable_cleanup_evidence"
 )
 
 
@@ -259,6 +263,9 @@ def test_alembic_environment_rejects_an_unmanaged_connection(
     with pytest.raises(RuntimeError, match="application-managed"):
         run_migration_environment(context)
 
+    with pytest.raises(ValueError, match="must not be blank"):
+        downgrade_database(create_database_engine("sqlite+pysqlite://"), " ")
+
 
 @pytest.mark.unit
 def test_retention_migrations_cover_schema_and_both_immutability_dialects(
@@ -285,3 +292,15 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     IMMUTABILITY_REVISION.upgrade()
     IMMUTABILITY_REVISION.downgrade()
     assert immutable.execute.call_count == 6
+
+    cleanup_evidence = mocker.patch.object(CLEANUP_EVIDENCE_REVISION, "op")
+    cleanup_evidence.get_bind.return_value.dialect.name = "sqlite"
+    CLEANUP_EVIDENCE_REVISION.upgrade()
+    CLEANUP_EVIDENCE_REVISION.downgrade()
+    assert cleanup_evidence.execute.call_count == 3
+
+    cleanup_evidence.reset_mock()
+    cleanup_evidence.get_bind.return_value.dialect.name = "postgresql"
+    CLEANUP_EVIDENCE_REVISION.upgrade()
+    CLEANUP_EVIDENCE_REVISION.downgrade()
+    assert cleanup_evidence.execute.call_count == 3

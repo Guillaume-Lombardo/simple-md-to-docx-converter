@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 from md_converter.jobs.errors import JobRepositoryError
 from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop, WorkerSchedule
 from md_converter.jobs.worker import ConversionWorker
+from md_converter.persistence.errors import PersistenceError
 
 pytestmark = pytest.mark.unit
 
@@ -88,6 +89,26 @@ def test_loop_retries_transient_failure_and_embedded_worker_exposes_fatal_error(
     embedded._thread.join(1)
     assert embedded.failure is failure
     embedded.stop(timeout_seconds=1)
+
+
+def test_cleanup_failure_advances_cadence_before_transient_backoff(
+    mocker: MockerFixture,
+) -> None:
+    worker = mocker.Mock(spec=ConversionWorker)
+    worker.run_once.return_value = False
+    worker.cleanup.side_effect = (PersistenceError(), None)
+    stop = mocker.Mock()
+    stop.is_set.side_effect = (False, False, False, True)
+    clock = mocker.Mock(side_effect=(0.0, 2.0, 2.5, 4.0))
+
+    WorkerLoop(
+        worker,
+        WorkerSchedule(0.1, 2, 5, 0.2),
+        monotonic_clock=clock,
+    ).run(stop)
+
+    assert worker.cleanup.call_count == 2
+    assert [call.args[0] for call in stop.wait.call_args_list] == [0.2, 0.1, 0.1]
 
 
 @pytest.mark.parametrize(

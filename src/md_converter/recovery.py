@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -98,10 +99,12 @@ class RestoreExerciseRunner:
         reports: RestoreReportStore,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
         new_id: Callable[[], UUID] = uuid4,
     ) -> None:
         self._reports = reports
         self._clock = clock
+        self._monotonic_clock = monotonic_clock
         self._new_id = new_id
 
     def run(
@@ -121,12 +124,16 @@ class RestoreExerciseRunner:
         if backup_at > started:
             raise ValueError("Restore backup timestamp must not be in the future")
         succeeded = False
+        started_monotonic = self._monotonic_clock()
         try:
             succeeded = restore(float(target.rto_seconds))
         finally:
+            completed_monotonic = self._monotonic_clock()
             completed = self._utc(self._clock())
             observed_rpo = (started - backup_at).total_seconds()
-            observed_rto = (completed - started).total_seconds()
+            observed_rto = completed_monotonic - started_monotonic
+            if observed_rto < 0:
+                raise RuntimeError("Restore exercise monotonic clock moved backwards")
             report = RestoreExerciseReport(
                 id=self._new_id(),
                 profile=profile.value,

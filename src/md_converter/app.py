@@ -1,8 +1,10 @@
 """FastAPI application factory and versioned HTTP contract."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -49,8 +51,11 @@ from md_converter.jobs.errors import (
     JobUserQuotaExceededError,
 )
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
+from md_converter.jobs.ports import JobRepository
+from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
 from md_converter.jobs.service import JobService
+from md_converter.jobs.worker import ConversionWorker
 from md_converter.malware import (
     ClamAVUploadScanner,
     MalwareDetectedError,
@@ -96,6 +101,10 @@ from md_converter.templates.models import (
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
+)
+from md_converter.templates.processor import (
+    TemplateAwareProcessor,
+    build_template_conversion_worker,
 )
 from md_converter.templates.runtime import build_template_validator
 from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
@@ -630,6 +639,81 @@ class AppComponents:
     templates: TemplateService | None = None
     job_policies: JobPolicies | None = None
     retention: RetentionService | None = None
+    job_repository: JobRepository | None = None
+
+    def build_conversion_worker(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> ConversionWorker:
+        """Assemble the production worker with all persistent maintenance."""
+
+        if (
+            self.templates is None
+            or self.job_policies is None
+            or self.retention is None
+            or self.job_repository is None
+        ):
+            raise RuntimeError("Production worker components are incomplete")
+        return build_template_conversion_worker(
+            worker_id=worker_id,
+            repository=self.job_repository,
+            objects=self.object_store,
+            resolver=self.templates,
+            processor=processor,
+            clock=clock,
+            policy=self.job_policies.worker,
+            maintenance=self.retention,
+            monotonic_clock=monotonic_clock,
+        )
+
+    def build_external_worker_loop(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> WorkerLoop:
+        """Assemble the shared production loop for an external worker process."""
+
+        if self.job_policies is None:
+            raise RuntimeError("Production worker policies are unavailable")
+        worker = self.build_conversion_worker(
+            worker_id=worker_id,
+            processor=processor,
+            clock=clock,
+            monotonic_clock=monotonic_clock,
+        )
+        return WorkerLoop(
+            worker,
+            self.job_policies.schedule,
+            monotonic_clock=monotonic_clock,
+        )
+
+    def build_embedded_worker(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        thread_name: str,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> EmbeddedWorker:
+        """Assemble the standalone lifecycle from the same production loop."""
+
+        return EmbeddedWorker(
+            self.build_external_worker_loop(
+                worker_id=worker_id,
+                processor=processor,
+                clock=clock,
+                monotonic_clock=monotonic_clock,
+            ),
+            thread_name=thread_name,
+        )
 
 
 class ProfileReadinessProbe:
@@ -698,11 +782,8 @@ def build_components(settings: Settings) -> AppComponents:
             absolute_seconds=settings.session_absolute_seconds,
         ),
     )
-    jobs = JobService(
-        SqlJobRepository(engine, job_policies.admission),
-        object_store,
-        job_policies.service,
-    )
+    job_repository = SqlJobRepository(engine, job_policies.admission)
+    jobs = JobService(job_repository, object_store, job_policies.service)
     templates = TemplateService(
         catalog=SqlTemplateCatalogRepository(engine),
         selections=SqlTemplateSelectionRepository(engine),
@@ -736,6 +817,7 @@ def build_components(settings: Settings) -> AppComponents:
         templates=templates,
         job_policies=job_policies,
         retention=retention,
+        job_repository=job_repository,
     )
 
 

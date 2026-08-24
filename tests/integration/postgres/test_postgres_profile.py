@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 
 from md_converter.app import create_app
 from md_converter.auth.models import Role, Session, User
@@ -15,6 +17,7 @@ from md_converter.config import Settings
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import (
     POSTGRES_MIGRATION_LOCK,
+    downgrade_database,
     upgrade_database,
 )
 from md_converter.persistence.schema import SessionRow, UserRow
@@ -175,6 +178,51 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
             assert waiting == 1
         waiting_migration.result(timeout=10)
     engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_cleanup_evidence_trigger_has_a_real_downgrade_path() -> None:
+    base_url = make_url(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    schema = f"retention_migration_{uuid4().hex}"
+    admin_engine = create_database_engine(base_url)
+    with admin_engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    isolated_url = base_url.update_query_dict({"options": f"-csearch_path={schema}"})
+    engine = create_database_engine(isolated_url)
+    report_id = str(uuid4())
+    try:
+        upgrade_database(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO retention_cleanup_runs "
+                    "(id, kind, cutoff_at, removed_count, completed_at) "
+                    "VALUES (:id, 'audit', :now, 0, :now)"
+                ),
+                {"id": report_id, "now": datetime.now(UTC)},
+            )
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM retention_cleanup_runs WHERE id = :id"),
+                {"id": report_id},
+            )
+
+        downgrade_database(engine, "20260824_08")
+
+        with engine.begin() as connection:
+            assert (
+                connection.execute(
+                    text("DELETE FROM retention_cleanup_runs WHERE id = :id"),
+                    {"id": report_id},
+                ).rowcount
+                == 1
+            )
+    finally:
+        engine.dispose()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin_engine.dispose()
 
 
 @pytest.mark.integration

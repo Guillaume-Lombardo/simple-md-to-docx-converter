@@ -31,8 +31,9 @@ def run_migration_environment(context: Any) -> None:
         context.run_migrations()
 
 
-def upgrade_database(engine: Engine) -> None:
-    """Upgrade a database through Alembic without logging its connection URL."""
+def _migrate_database(engine: Engine, revision: str, *, downgrade: bool) -> None:
+    """Run one application-managed Alembic direction under the profile lock."""
+
     script_location = Path(__file__).parent
     configuration = Config()
     configuration.set_main_option("script_location", str(script_location))
@@ -44,9 +45,24 @@ def upgrade_database(engine: Engine) -> None:
                     {"lock_id": POSTGRES_MIGRATION_LOCK},
                 )
             configuration.attributes["connection"] = connection
-            command.upgrade(configuration, "head")
+            operation = command.downgrade if downgrade else command.upgrade
+            operation(configuration, revision)
     except CommandError, SQLAlchemyError:
         raise PersistenceError from None
 
 
-__all__ = ["run_migration_environment", "upgrade_database"]
+def upgrade_database(engine: Engine) -> None:
+    """Upgrade a database through Alembic without logging its connection URL."""
+
+    _migrate_database(engine, "head", downgrade=False)
+
+
+def downgrade_database(engine: Engine, revision: str) -> None:
+    """Downgrade to an explicit revision for verified operational rollback."""
+
+    if not revision.strip():
+        raise ValueError("Migration revision must not be blank")
+    _migrate_database(engine, revision, downgrade=True)
+
+
+__all__ = ["downgrade_database", "run_migration_environment", "upgrade_database"]
