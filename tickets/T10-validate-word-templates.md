@@ -50,7 +50,8 @@ Inventory fonts and licenses; validate OOXML, templates, required styles, substi
   output-file TOCTOU, default content-type, orphan relationship, and DrawingML supplementary-font
   bypasses before publication. The corrected revision closes all five plus adjacent OLE, embedded
   package, and control-properties content-type variants with unit regressions and a real rootless
-  descendant-termination proof; corrected-revision re-review is in progress.
+  descendant-termination proof. Independent security, specification, and CI/toolchain reviewers
+  approved exact code revision `153bca4` with no remaining finding.
 
 ## Synchronization
 

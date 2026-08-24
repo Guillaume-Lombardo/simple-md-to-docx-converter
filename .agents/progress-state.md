@@ -54,10 +54,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Complete canonical checks and reconcile any failures.
-2. Obtain independent security, specification, and CI review of the exact revision.
-3. Rebase, publish, and squash-merge after green CI.
-4. Synchronize T10/Linear to `Done`, verify main CI, then immediately select the next ready ticket.
+1. Rebase, publish, and squash-merge after green CI.
+2. Synchronize T10/Linear to `Done`, verify main CI, then immediately select the next ready ticket.
 
 ## Validation
 
@@ -69,6 +67,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   The unit suite passes 546 tests at 93.74% application coverage. The final T10 rootless image
   passes the T00 document-engine harness with the exact Pandoc, LibreOffice, Chromium, font,
   rootless, read-only-root, no-network, and dropped-capability contract.
+- Independent security, specification, and CI/toolchain reviewers approved exact code revision
+  `153bca4` without a remaining actionable finding.
 - A fresh T00 K3s rerun reached an environment-specific network control failure before workload
   validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
   K3s proof remains valid and no VM networking was modified.
