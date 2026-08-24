@@ -3,14 +3,16 @@
 This repository contains the foundation for a service that will convert Markdown documents to
 DOCX and PDF. It currently provides local authentication, administrative account management,
 revocable sessions, health endpoints, and durable standalone or distributed storage profiles.
-It also provides template ownership, visibility-aware search, preference, and fallback persistence
-foundations. The internal conversion component now validates standalone Markdown or bounded ZIP
+It also provides a versioned template API with ownership, visibility-aware search, preferences,
+full T10 Pandoc/LibreOffice activation, immutable font-validation evidence,
+safe downloads, optimistic concurrency, immutable history, restoration, audit, and guarded
+deletion across both storage profiles. The internal conversion component now validates standalone Markdown or bounded ZIP
 packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG,
 renders bounded Mermaid diagrams through local sandboxed Chromium, runs Pandoc in an isolated
 workspace, and converts validated DOCX to bounded PDF through an isolated LibreOffice profile.
 The versioned API persists owner-scoped conversion requests, exposes deterministic job state,
 supports idempotent submission and cancellation, and uses lease-owning embedded or external worker
-loops over SQLite or PostgreSQL. Versioned template content, UI, resource policy, and final-container
+loops over SQLite or PostgreSQL. Template and conversion UI, resource policy, and final-container
 features remain under development.
 
 ## Requirements

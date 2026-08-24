@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import boto3
 from fastapi import (
@@ -21,6 +21,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from md_converter.auth.errors import LOGIN_ORIGIN_INVALID, AuthenticationError
@@ -56,12 +57,35 @@ from md_converter.persistence.sql import (
     create_database_engine,
     standalone_database_url,
 )
+from md_converter.persistence.templates import (
+    SqlTemplateCatalogRepository,
+    SqlTemplateSelectionRepository,
+)
 from md_converter.storage import (
     FilesystemObjectStore,
     ObjectStore,
     ObjectStoreError,
     S3ObjectStore,
 )
+from md_converter.templates.errors import (
+    TemplateConflictError,
+    TemplateIntegrityError,
+    TemplatePreconditionRequiredError,
+    TemplateRequestError,
+    TemplateStorageError,
+    TemplateUnavailableError,
+    TemplateValidationError,
+    TemplateValidationErrorCode,
+)
+from md_converter.templates.models import (
+    TemplateCreate,
+    TemplateIdentity,
+    TemplatePage,
+    TemplateSearch,
+    TemplateStatus,
+)
+from md_converter.templates.runtime import build_template_validator
+from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
 
 COMPONENT_VERSIONS = (
     ("chromium", "151.0.7922.173"),
@@ -72,17 +96,45 @@ COMPONENT_VERSIONS = (
 )
 
 
-class BoundedConversionBody:
-    """Bound conversion request bytes before multipart parsing or spooling."""
+class BoundedRequestBody:
+    """Bound upload request bytes before multipart parsing or spooling."""
 
-    def __init__(self, app: ASGIApp, *, maximum_bytes: int) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        conversion_maximum_bytes: int,
+        template_maximum_bytes: int,
+        template_metadata_maximum_bytes: int,
+    ) -> None:
         self._app = app
-        self._maximum_bytes = maximum_bytes
+        self._conversion_maximum_bytes = conversion_maximum_bytes
+        self._template_maximum_bytes = template_maximum_bytes
+        self._template_metadata_maximum_bytes = template_metadata_maximum_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not (
-            scope["method"] == "POST" and scope["path"] == "/api/v1/conversions"
-        ):
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        method, path = scope["method"], scope["path"]
+        template_upload = (method == "POST" and path == "/api/v1/templates") or (
+            method == "PUT"
+            and path.startswith("/api/v1/templates/")
+            and path.endswith("/content")
+        )
+        if method == "POST" and path == "/api/v1/conversions":
+            maximum_bytes = self._conversion_maximum_bytes
+            error_code = "CONVERSION_REQUEST_TOO_LARGE"
+            error_message = "The conversion request is too large."
+        elif template_upload:
+            maximum_bytes = self._template_maximum_bytes
+            error_code = "TEMPLATE_REQUEST_TOO_LARGE"
+            error_message = "The template request is too large."
+        elif method == "PATCH" and path.startswith("/api/v1/templates/"):
+            maximum_bytes = self._template_metadata_maximum_bytes
+            error_code = "TEMPLATE_REQUEST_TOO_LARGE"
+            error_message = "The template request is too large."
+        else:
             await self._app(scope, receive, send)
             return
         body = bytearray()
@@ -92,8 +144,8 @@ class BoundedConversionBody:
             if message["type"] == "http.disconnect":
                 return
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > self._maximum_bytes:
-                await self._reject(send)
+            if len(body) + len(chunk) > maximum_bytes:
+                await self._reject(send, error_code, error_message)
                 return
             body.extend(chunk)
             more_body = bool(message.get("more_body", False))
@@ -109,11 +161,8 @@ class BoundedConversionBody:
         await self._app(scope, replay, send)
 
     @staticmethod
-    async def _reject(send: Send) -> None:
-        content = (
-            b'{"error":{"code":"CONVERSION_REQUEST_TOO_LARGE",'
-            b'"message":"The conversion request is too large."}}'
-        )
+    async def _reject(send: Send, code: str, message: str) -> None:
+        content = f'{{"error":{{"code":"{code}","message":"{message}"}}}}'.encode()
         await send(
             {
                 "type": "http.response.start",
@@ -205,6 +254,48 @@ class ConversionPageResponse(BaseModel):
     limit: int
 
 
+class TemplateResponse(BaseModel):
+    """Visible template identity and optimistic-concurrency revision."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    owner_id: UUID
+    name: str
+    description: str
+    status: TemplateStatus
+    revision: int
+    current_version_id: UUID | None
+
+
+class TemplatePageResponse(BaseModel):
+    items: tuple[TemplateResponse, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+class TemplateVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    template_id: UUID
+    number: int
+    sha256: str
+    size: int
+    created_at: datetime
+    created_by: UUID
+    restored_from_version_id: UUID | None
+    declared_fonts: tuple[str, ...]
+    resolved_fonts: tuple[tuple[str, str], ...]
+    validation_trace: tuple[str, ...]
+
+
+class TemplateMetadataRequest(BaseModel):
+    name: str
+    description: str
+
+
 class ErrorDetail(BaseModel):
     """Stable machine-readable functional error detail."""
 
@@ -223,8 +314,10 @@ ERROR_DESCRIPTIONS = {
     403: "The operation is forbidden",
     404: "The requested resource was not found",
     409: "The request conflicts with current state",
+    412: "A request precondition failed",
     413: "The request body is too large",
     422: "The request is invalid",
+    428: "The request requires a precondition",
     503: "The service is not ready",
 }
 
@@ -335,6 +428,106 @@ def install_error_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(TemplateUnavailableError)
+    def template_unavailable_handler(
+        _request: Request, _error: TemplateUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "TEMPLATE_NOT_FOUND",
+                    "message": "The template was not found.",
+                }
+            },
+        )
+
+    @app.exception_handler(TemplatePreconditionRequiredError)
+    def template_precondition_handler(
+        _request: Request, _error: TemplatePreconditionRequiredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=428,
+            content={
+                "error": {
+                    "code": "TEMPLATE_PRECONDITION_REQUIRED",
+                    "message": "If-Match is required.",
+                }
+            },
+        )
+
+    @app.exception_handler(TemplateConflictError)
+    def template_conflict_handler(
+        _request: Request, _error: TemplateConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=412,
+            content={
+                "error": {
+                    "code": "TEMPLATE_PRECONDITION_FAILED",
+                    "message": "The template has changed or the operation is not allowed.",
+                }
+            },
+        )
+
+    @app.exception_handler(TemplateValidationError)
+    def template_validation_handler(
+        _request: Request, error: TemplateValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=(
+                413 if error.code is TemplateValidationErrorCode.LIMIT_EXCEEDED else 422
+            ),
+            content={
+                "error": {
+                    "code": f"TEMPLATE_{error.code.value.upper()}",
+                    "message": str(error),
+                }
+            },
+        )
+
+    @app.exception_handler(TemplateIntegrityError)
+    def template_integrity_handler(
+        _request: Request, _error: TemplateIntegrityError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "TEMPLATE_INTEGRITY_FAILURE",
+                    "message": "Template content integrity verification failed.",
+                }
+            },
+        )
+
+    @app.exception_handler(TemplateStorageError)
+    def template_storage_handler(
+        _request: Request, _error: TemplateStorageError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "TEMPLATE_STORAGE_UNAVAILABLE",
+                    "message": "Template storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(TemplateRequestError)
+    def template_request_handler(
+        _request: Request, _error: TemplateRequestError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "TEMPLATE_REQUEST_INVALID",
+                    "message": "The template request is invalid.",
+                }
+            },
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class AppComponents:
@@ -344,6 +537,7 @@ class AppComponents:
     readiness: ReadinessProbe
     object_store: ObjectStore
     jobs: JobService
+    templates: TemplateService | None = None
 
 
 class ProfileReadinessProbe:
@@ -416,11 +610,22 @@ def build_components(settings: Settings) -> AppComponents:
         object_store,
         JobServicePolicy(settings.job_result_retention_seconds),
     )
+    templates = TemplateService(
+        catalog=SqlTemplateCatalogRepository(engine),
+        selections=SqlTemplateSelectionRepository(engine),
+        objects=object_store,
+        validate_content=build_template_validator(settings),
+        recovery_policy=TemplateRecoveryPolicy(
+            settings.template_pending_publication_stale_seconds
+        ),
+    )
+    templates.reclaim_pending()
     return AppComponents(
         authentication=authentication,
         readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
         object_store=object_store,
         jobs=jobs,
+        templates=templates,
     )
 
 
@@ -445,8 +650,12 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         openapi_url="/openapi.json",
     )
     app.add_middleware(
-        BoundedConversionBody,
-        maximum_bytes=resolved_settings.conversion_request_max_bytes,
+        BoundedRequestBody,
+        conversion_maximum_bytes=resolved_settings.conversion_request_max_bytes,
+        template_maximum_bytes=resolved_settings.template_request_max_bytes,
+        template_metadata_maximum_bytes=(
+            resolved_settings.template_metadata_request_max_bytes
+        ),
     )
     app.state.components = resolved_components
     install_error_handlers(app)
@@ -504,6 +713,31 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
 
     def conversion_response(job: ConversionJob) -> ConversionResponse:
         return ConversionResponse.model_validate(job)
+
+    def template_response(template: TemplateIdentity) -> TemplateResponse:
+        return TemplateResponse.model_validate(template)
+
+    def template_etag(template: TemplateIdentity) -> str:
+        return f'"template-{template.id}-{template.revision}"'
+
+    def expected_revision(template_id: UUID, if_match: str | None) -> int:
+        if if_match is None:
+            raise TemplatePreconditionRequiredError
+        prefix = f'"template-{template_id}-'
+        if not if_match.startswith(prefix) or not if_match.endswith('"'):
+            raise TemplateConflictError
+        try:
+            revision = int(if_match[len(prefix) : -1])
+        except ValueError:
+            raise TemplateConflictError from None
+        if revision <= 0:
+            raise TemplateConflictError
+        return revision
+
+    def template_runtime() -> TemplateService:
+        if resolved_components.templates is None:
+            raise RuntimeError("Template API runtime is not configured")
+        return resolved_components.templates
 
     @app.get("/health/live", tags=["health"])
     def live() -> dict[str, str]:
@@ -675,7 +909,8 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         if not content or len(content) > resolved_settings.conversion_upload_max_bytes:
             raise JobRequestError
         try:
-            job, _replayed = resolved_components.jobs.submit(
+            job, _replayed = await run_in_threadpool(
+                resolved_components.jobs.submit,
                 JobRequest(
                     owner_id=actor.id,
                     source=content,
@@ -790,5 +1025,334 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 )
             },
         )
+
+    @app.get(
+        "/api/v1/templates",
+        response_model=TemplatePageResponse,
+        tags=["templates"],
+        responses=error_responses(401, 422, 503),
+    )
+    def list_templates(  # noqa: PLR0913, PLR0917 - explicit query contract
+        actor: Annotated[User, Depends(current_user)],
+        name: str | None = None,
+        description: str | None = None,
+        owner_id: UUID | None = None,
+        template_status: Annotated[TemplateStatus | None, Query(alias="status")] = None,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ) -> TemplatePageResponse:
+        page: TemplatePage = template_runtime().search(
+            actor,
+            TemplateSearch(
+                name=name,
+                description=description,
+                owner_id=owner_id,
+                status=template_status,
+                offset=offset,
+                limit=limit,
+            ),
+        )
+        return TemplatePageResponse(
+            items=tuple(template_response(item) for item in page.items),
+            total=page.total,
+            offset=page.offset,
+            limit=page.limit,
+        )
+
+    @app.post(
+        "/api/v1/templates",
+        response_model=TemplateResponse,
+        status_code=201,
+        tags=["templates"],
+        responses=error_responses(401, 403, 413, 422, 503),
+    )
+    async def create_template(  # noqa: PLR0913, PLR0917 - explicit multipart contract
+        response: Response,
+        actor: Annotated[User, Depends(mutation_actor)],
+        name: Annotated[str, Form()],
+        description: Annotated[str, Form()],
+        expected_fonts: Annotated[list[str], Form()],
+        content: Annotated[UploadFile, File()],
+    ) -> TemplateResponse:
+        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        if len(data) > resolved_settings.template_max_archive_bytes:
+            raise TemplateValidationError(
+                code=TemplateValidationErrorCode.LIMIT_EXCEEDED,
+                message="Word template exceeds configured limits.",
+            )
+        if not data:
+            raise TemplateValidationError(
+                code=TemplateValidationErrorCode.INVALID_PACKAGE,
+                message="Word template package is invalid.",
+            )
+        if (
+            len(name) > resolved_settings.template_max_name_characters
+            or len(description) > resolved_settings.template_max_description_characters
+        ):
+            raise TemplateRequestError
+        try:
+            template, _version = await run_in_threadpool(
+                template_runtime().create_versioned,
+                actor,
+                TemplateCreate(uuid4(), name, description),
+                data,
+                tuple(expected_fonts),
+            )
+        except ValueError:
+            raise TemplateRequestError from None
+        response.headers["ETag"] = template_etag(template)
+        response.headers["Location"] = f"/api/v1/templates/{template.id}"
+        return template_response(template)
+
+    @app.get(
+        "/api/v1/templates/{template_id}",
+        response_model=TemplateResponse,
+        tags=["templates"],
+        responses=error_responses(401, 404, 422, 503),
+    )
+    def get_template(
+        template_id: UUID,
+        response: Response,
+        actor: Annotated[User, Depends(current_user)],
+    ) -> TemplateResponse:
+        template = template_runtime().get_visible(actor, template_id)
+        response.headers["ETag"] = template_etag(template)
+        return template_response(template)
+
+    @app.patch(
+        "/api/v1/templates/{template_id}",
+        response_model=TemplateResponse,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def update_template(
+        template_id: UUID,
+        payload: TemplateMetadataRequest,
+        response: Response,
+        actor: Annotated[User, Depends(mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> TemplateResponse:
+        if (
+            len(payload.name) > resolved_settings.template_max_name_characters
+            or len(payload.description)
+            > resolved_settings.template_max_description_characters
+        ):
+            raise TemplateRequestError
+        try:
+            template = template_runtime().update_metadata(
+                actor,
+                template_id,
+                expected_revision=expected_revision(template_id, if_match),
+                name=payload.name,
+                description=payload.description,
+            )
+        except ValueError:
+            raise TemplateRequestError from None
+        response.headers["ETag"] = template_etag(template)
+        return template_response(template)
+
+    @app.put(
+        "/api/v1/templates/{template_id}/content",
+        response_model=TemplateVersionResponse,
+        status_code=201,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 412, 413, 422, 428, 503),
+    )
+    async def replace_template(  # noqa: PLR0913, PLR0917 - explicit multipart contract
+        template_id: UUID,
+        response: Response,
+        actor: Annotated[User, Depends(mutation_actor)],
+        content: Annotated[UploadFile, File()],
+        expected_fonts: Annotated[list[str], Form()],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> TemplateVersionResponse:
+        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        if len(data) > resolved_settings.template_max_archive_bytes:
+            raise TemplateValidationError(
+                TemplateValidationErrorCode.LIMIT_EXCEEDED,
+                "Word template exceeds configured limits.",
+            )
+        if not data:
+            raise TemplateValidationError(
+                TemplateValidationErrorCode.INVALID_PACKAGE,
+                "Word template package is invalid.",
+            )
+        template, version = await run_in_threadpool(
+            template_runtime().replace,
+            actor,
+            template_id,
+            expected_revision=expected_revision(template_id, if_match),
+            content=data,
+            expected_fonts=tuple(expected_fonts),
+        )
+        response.headers["ETag"] = template_etag(template)
+        return TemplateVersionResponse.model_validate(version)
+
+    @app.get(
+        "/api/v1/templates/{template_id}/versions",
+        response_model=tuple[TemplateVersionResponse, ...],
+        tags=["templates"],
+        responses=error_responses(401, 404, 422, 503),
+    )
+    def list_template_versions(
+        template_id: UUID, actor: Annotated[User, Depends(current_user)]
+    ) -> tuple[TemplateVersionResponse, ...]:
+        return tuple(
+            TemplateVersionResponse.model_validate(version)
+            for version in template_runtime().list_versions(actor, template_id)
+        )
+
+    def template_download_response(
+        actor: User, template_id: UUID, version_id: UUID | None
+    ) -> Response:
+        _template, version, data = template_runtime().download(
+            actor, template_id, version_id
+        )
+        return Response(
+            data,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="template-{template_id}-v{version.number}.docx"',
+                "ETag": f'"sha256-{version.sha256}"',
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.get(
+        "/api/v1/templates/{template_id}/content",
+        response_class=Response,
+        tags=["templates"],
+        responses={
+            200: {
+                "description": "Immutable current Word template",
+                "content": {
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                        "schema": {"type": "string", "format": "binary"}
+                    }
+                },
+            },
+            **error_responses(401, 404, 422, 503),
+        },
+    )
+    def download_current_template(
+        template_id: UUID, actor: Annotated[User, Depends(current_user)]
+    ) -> Response:
+        return template_download_response(actor, template_id, None)
+
+    @app.get(
+        "/api/v1/templates/{template_id}/versions/{version_id}/content",
+        response_class=Response,
+        tags=["templates"],
+        responses={
+            200: {
+                "description": "Immutable historical Word template",
+                "content": {
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                        "schema": {"type": "string", "format": "binary"}
+                    }
+                },
+            },
+            **error_responses(401, 404, 422, 503),
+        },
+    )
+    def download_template_version(
+        template_id: UUID,
+        version_id: UUID,
+        actor: Annotated[User, Depends(current_user)],
+    ) -> Response:
+        return template_download_response(actor, template_id, version_id)
+
+    @app.post(
+        "/api/v1/templates/{template_id}/versions/{version_id}/restore",
+        response_model=TemplateVersionResponse,
+        status_code=201,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def restore_template_version(
+        template_id: UUID,
+        version_id: UUID,
+        response: Response,
+        actor: Annotated[User, Depends(mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> TemplateVersionResponse:
+        template, version = template_runtime().restore(
+            actor,
+            template_id,
+            version_id,
+            expected_revision=expected_revision(template_id, if_match),
+        )
+        response.headers["ETag"] = template_etag(template)
+        return TemplateVersionResponse.model_validate(version)
+
+    @app.post(
+        "/api/v1/templates/{template_id}/archive",
+        response_model=TemplateResponse,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def archive_template(
+        template_id: UUID,
+        response: Response,
+        actor: Annotated[User, Depends(mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> TemplateResponse:
+        template = template_runtime().archive(
+            actor,
+            template_id,
+            expected_revision=expected_revision(template_id, if_match),
+        )
+        response.headers["ETag"] = template_etag(template)
+        return template_response(template)
+
+    @app.delete(
+        "/api/v1/templates/{template_id}",
+        status_code=204,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 412, 422, 428, 503),
+    )
+    def delete_template(
+        template_id: UUID,
+        actor: Annotated[User, Depends(mutation_actor)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> None:
+        template_runtime().delete(
+            actor,
+            template_id,
+            expected_revision=expected_revision(template_id, if_match),
+        )
+
+    @app.put(
+        "/api/v1/templates/{template_id}/preferred",
+        status_code=204,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 422, 503),
+    )
+    def set_preferred_template(
+        template_id: UUID, actor: Annotated[User, Depends(mutation_actor)]
+    ) -> None:
+        template_runtime().set_preferred(actor, template_id)
+
+    @app.delete(
+        "/api/v1/template-preference",
+        status_code=204,
+        tags=["templates"],
+        responses=error_responses(401, 403, 422, 503),
+    )
+    def clear_preferred_template(
+        actor: Annotated[User, Depends(mutation_actor)],
+    ) -> None:
+        template_runtime().clear_preferred(actor)
+
+    @app.put(
+        "/api/v1/templates/{template_id}/system-fallback",
+        status_code=204,
+        tags=["templates"],
+        responses=error_responses(401, 403, 404, 422, 503),
+    )
+    def set_system_fallback_template(
+        template_id: UUID, actor: Annotated[User, Depends(mutation_actor)]
+    ) -> None:
+        template_runtime().set_system_fallback(actor, template_id)
 
     return app

@@ -72,6 +72,10 @@ class TemplateRow(Base):
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_templates_status"),
         CheckConstraint(
+            "publication_state IN ('pending', 'published', 'deleting')",
+            name="ck_templates_publication_state",
+        ),
+        CheckConstraint(
             "normalized_name <> ''", name="ck_templates_normalized_name_nonempty"
         ),
     )
@@ -85,6 +89,76 @@ class TemplateRow(Base):
     description: Mapped[str] = mapped_column(String(), nullable=False)
     normalized_description: Mapped[str] = mapped_column(String(), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    current_version_id: Mapped[str | None] = mapped_column(String(36))
+    publication_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="published"
+    )
+
+
+class TemplateVersionRow(Base):
+    """Immutable template content metadata pointing at an object-store key."""
+
+    __tablename__ = "template_versions"
+    __table_args__ = (
+        CheckConstraint("version_number > 0", name="ck_template_versions_number"),
+        CheckConstraint("size > 0", name="ck_template_versions_size"),
+        UniqueConstraint(
+            "template_id", "version_number", name="uq_template_versions_number"
+        ),
+        UniqueConstraint("template_id", "id", name="uq_template_versions_pair"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_template_versions_publication_state",
+        ),
+        CheckConstraint(
+            "publication_state = 'published' OR "
+            "(publication_token IS NOT NULL AND "
+            "publication_lease_expires_at IS NOT NULL)",
+            name="ck_template_versions_pending_lease",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("templates.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    restored_from_version_id: Mapped[str | None] = mapped_column(String(36))
+    declared_fonts: Mapped[str] = mapped_column(String(), nullable=False)
+    resolved_fonts: Mapped[str] = mapped_column(String(), nullable=False)
+    validation_trace: Mapped[str] = mapped_column(String(), nullable=False)
+    publication_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
+    publication_token: Mapped[str | None] = mapped_column(String(36))
+    publication_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class TemplateAuditRow(Base):
+    """Durable content-free audit trail for sensitive template mutations."""
+
+    __tablename__ = "template_audit_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    template_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    version_id: Mapped[str | None] = mapped_column(String(36))
+    administrator_intervention: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class TemplatePreferenceRow(Base):
@@ -120,6 +194,16 @@ Index("ix_templates_owner_id", TemplateRow.owner_id)
 Index("ix_templates_status", TemplateRow.status)
 Index("ix_templates_search_order", TemplateRow.normalized_name, TemplateRow.id)
 Index("ix_template_preferences_template_id", TemplatePreferenceRow.template_id)
+Index(
+    "ix_template_versions_template_number",
+    TemplateVersionRow.template_id,
+    TemplateVersionRow.version_number,
+)
+Index(
+    "ix_template_audit_target",
+    TemplateAuditRow.template_id,
+    TemplateAuditRow.created_at,
+)
 
 
 class ConversionJobRow(Base):

@@ -21,6 +21,8 @@ from md_converter.persistence.jobs import SqlJobRepository
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 LEASE_END = NOW + timedelta(seconds=30)
 RETENTION_END = NOW + timedelta(hours=1)
+TEMPLATE_ID = UUID("00000000-0000-4000-8000-000000000015")
+TEMPLATE_VERSION_ID = UUID("00000000-0000-4000-8000-000000000115")
 
 
 def submission(
@@ -33,8 +35,8 @@ def submission(
         id=uuid4(),
         owner_id=owner_id,
         source_object_id=uuid4(),
-        template_id=uuid4(),
-        template_version_id=uuid4(),
+        template_id=TEMPLATE_ID,
+        template_version_id=TEMPLATE_VERSION_ID,
         output=JobOutput.BOTH,
         component_versions=(("md-converter", "0.1.0"),),
         request_digest="1" * 64,

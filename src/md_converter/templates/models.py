@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
+
+SHA256_CHARACTERS = 64
 
 
 class TemplateStatus(StrEnum):
@@ -13,6 +16,14 @@ class TemplateStatus(StrEnum):
 
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class TemplatePublicationState(StrEnum):
+    """Internal crash-recovery state for template content."""
+
+    PENDING = "pending"
+    PUBLISHED = "published"
+    DELETING = "deleting"
 
 
 def normalize_template_text(value: str) -> str:
@@ -29,10 +40,14 @@ class TemplateIdentity:
     name: str
     description: str
     status: TemplateStatus
+    revision: int = 1
+    current_version_id: UUID | None = None
 
     def __post_init__(self) -> None:
         if not self.normalized_name:
             raise ValueError("Template name must not be blank")
+        if self.revision <= 0:
+            raise ValueError("Template revision must be positive")
 
     @property
     def normalized_name(self) -> str:
@@ -79,3 +94,61 @@ class TemplatePage:
     total: int
     offset: int
     limit: int
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateVersion:
+    """Immutable validated content snapshot."""
+
+    id: UUID
+    template_id: UUID
+    number: int
+    object_owner_id: UUID
+    sha256: str
+    size: int
+    created_at: datetime
+    created_by: UUID
+    restored_from_version_id: UUID | None = None
+    declared_fonts: tuple[str, ...] = ()
+    resolved_fonts: tuple[tuple[str, str], ...] = ()
+    validation_trace: tuple[str, ...] = ()
+    publication_state: TemplatePublicationState = TemplatePublicationState.PUBLISHED
+    publication_token: UUID | None = None
+    publication_lease_expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.number <= 0 or self.size <= 0:
+            raise ValueError("Template version number and size must be positive")
+        if len(self.sha256) != SHA256_CHARACTERS or any(
+            c not in "0123456789abcdef" for c in self.sha256
+        ):
+            raise ValueError("Template version digest must be lowercase SHA-256")
+        if self.created_at.tzinfo is None:
+            raise ValueError("Template version timestamp must include a timezone")
+        object.__setattr__(self, "created_at", self.created_at.astimezone(UTC))
+        if self.publication_lease_expires_at is not None:
+            if self.publication_lease_expires_at.tzinfo is None:
+                raise ValueError("Publication lease timestamp must include a timezone")
+            object.__setattr__(
+                self,
+                "publication_lease_expires_at",
+                self.publication_lease_expires_at.astimezone(UTC),
+            )
+        if self.publication_state is TemplatePublicationState.PENDING and (
+            self.publication_token is None or self.publication_lease_expires_at is None
+        ):
+            raise ValueError("Pending template versions require a publication lease")
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateAuditRecord:
+    """Content-free record of a sensitive template mutation."""
+
+    id: UUID
+    actor_id: UUID
+    owner_id: UUID
+    template_id: UUID
+    operation: str
+    version_id: UUID | None
+    administrator_intervention: bool
+    created_at: datetime

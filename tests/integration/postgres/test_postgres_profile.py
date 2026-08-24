@@ -26,6 +26,7 @@ from md_converter.persistence.sql import (
 )
 from md_converter.persistence.templates import SqlTemplateCatalogRepository
 from md_converter.templates.models import TemplateSearch
+from tests.settings import template_settings
 from tests.storage_contracts import exercise_auth_repository_contract
 
 
@@ -109,6 +110,8 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS template_audit_records CASCADE"))
+        connection.execute(text("DROP TABLE IF EXISTS template_versions CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS conversion_jobs CASCADE"))
         connection.execute(
             text("DROP TABLE IF EXISTS system_template_selection CASCADE")
@@ -121,6 +124,15 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         connection.execute(
             text("DROP FUNCTION IF EXISTS reject_template_owner_change()")
         )
+        connection.execute(
+            text("DROP FUNCTION IF EXISTS reject_template_version_change()")
+        )
+        for statement in (
+            "DROP FUNCTION IF EXISTS enforce_template_version_integrity()",
+            "DROP FUNCTION IF EXISTS enforce_template_current_integrity()",
+            "DROP FUNCTION IF EXISTS enforce_conversion_template_integrity()",
+        ):
+            connection.execute(text(statement))
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         migrations = [executor.submit(upgrade_database, engine) for _ in range(4)]
@@ -130,7 +142,9 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         "alembic_version",
         "sessions",
         "system_template_selection",
+        "template_audit_records",
         "template_preferences",
+        "template_versions",
         "templates",
         "users",
     }
@@ -215,6 +229,7 @@ def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
     engine.dispose()
 
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
         argon2_memory_cost=8,

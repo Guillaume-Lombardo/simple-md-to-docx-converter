@@ -15,6 +15,7 @@ import uvicorn
 
 from md_converter.app import create_app
 from md_converter.config import Settings
+from tests.settings import template_settings
 
 
 @contextmanager
@@ -52,6 +53,7 @@ def running_server(settings: Settings) -> Iterator[str]:
 def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
     password = "admin-" + "password"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=password,
         storage_profile="standalone",

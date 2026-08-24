@@ -43,6 +43,12 @@ def create_database_engine(database_url: str | URL) -> Engine:
         raise PersistenceError from None
 
 
+def serialize_sqlite_write(database: DatabaseSession, engine: Engine) -> None:
+    """Acquire SQLite's write reservation before reading mutation preconditions."""
+    if engine.dialect.name == "sqlite":
+        database.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
 def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) -> None:
     cursor = dbapi_connection.cursor()
     try:

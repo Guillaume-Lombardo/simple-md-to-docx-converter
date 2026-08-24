@@ -9,7 +9,12 @@ from md_converter.auth.models import Role, User
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
-from tests.job_repository_contracts import exercise_job_repository_contract
+from tests.job_repository_contracts import (
+    TEMPLATE_ID,
+    TEMPLATE_VERSION_ID,
+    exercise_job_repository_contract,
+)
+from tests.template_records import publish_template_pair
 
 pytestmark = pytest.mark.unit
 
@@ -22,6 +27,7 @@ def test_inprocess_job_repository_contract() -> None:
     other = User(uuid4(), "Other", "job-other", "hash:other", Role.USER)
     users.create(owner)
     users.create(other)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     exercise_job_repository_contract(SqlJobRepository(engine), owner.id, other.id)
     engine.dispose()
 

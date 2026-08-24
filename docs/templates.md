@@ -1,10 +1,9 @@
-# Template identity and selection foundations
+# Versioned template API
 
-T14 defines template identity independently of the content and version workflows delivered by
-T15. A template has a stable UUID, an owner UUID derived from the authenticated account, a name,
+A template has a stable UUID, an owner UUID derived from the authenticated account, a name,
 a description, and an `active` or `archived` status. The domain model is frozen, repository ports
 do not expose owner reassignment, and both SQLite and PostgreSQL reject direct owner changes.
-Future template-version object keys must continue to derive from stable UUIDs rather than owner
+Template-version object keys derive from stable UUIDs rather than owner
 names, template names, or uploaded filenames.
 
 Application code creates identities through `TemplateService.create` and a `TemplateCreate` input
@@ -25,23 +24,77 @@ page size. T14 does not choose a product page-size limit.
 
 ## Preferences and fallback
 
-Each account has at most one preferred template. Setting a preference or the singleton system
-fallback transactionally requires an active template. Selection resolves an active user
+Each account has at most one preferred template. Setting or clearing a preference and setting the
+singleton system fallback are recorded in the content-free audit trail. Setting a preference or
+fallback transactionally requires an active, published template. Selection resolves an active user
 preference first, then an active system fallback, and otherwise returns no template. An archived
 preference remains recorded but is ignored during resolution, allowing T15 to define archive and
 restoration behavior without silently changing ownership or preference history.
 
 Only an administrator may set the system fallback. Owner/administrator mutation authorization
-returns a `TemplateAuthorization` context containing actor, owner, target, operation, and whether
-the action is an administrator intervention. T15 must persist that context atomically with its
-sensitive version or metadata mutation. T14 deliberately does not add audit storage or pretend
-that authorization alone is a completed audit record.
+records actor, owner, target, operation, and whether the action is an administrator intervention.
 
-## Deliberate T14 boundary
+## HTTP lifecycle and concurrency
 
-There are no template HTTP routes, content uploads, downloads, version rows, `ETag` handling,
-replacement, restoration, archive/delete commands, or template Web pages in T14. Those behaviors
-belong to T15 through T17. Consequently T14 introduces no user-visible or operational workflow to
-exercise against the final rootless image; final-image E2E is not applicable here rather than
-deferred or waived. Domain, functional service, shared SQLite/PostgreSQL contracts, real database
-constraints, concurrency, restart, and failure behavior remain blocking T14 validation.
+Authenticated clients use `/api/v1/templates` to search or create templates. Creation and content
+replacement accept a multipart DOCX plus one or more `expected_fonts` declarations. Before a
+version can become visible, the service invokes the complete T10 activation boundary: bounded
+OpenXML and relationship checks, required Pandoc styles, active-content exclusions, declared-font
+resolution against the pinned manifest, a blank Pandoc conversion using the candidate as
+`reference.docx`, and an isolated LibreOffice rewrite. The immutable version row records declared
+fonts, resolved substitutions, and the successful validation-stage trace. Missing or unsupported
+font declarations and engine failures return sanitized validation errors and publish neither
+metadata nor bytes. All safety ceilings and engine paths/timeouts are required
+`MD_CONVERTER_TEMPLATE_*` settings; T18 retains approval of their production values.
+
+Every identity response carries an `ETag` of the form
+`"template-<template UUID>-<revision>"`. Metadata updates, replacements, restorations, archive, and
+deletion require that exact value in `If-Match`. A missing precondition returns `428`; a stale,
+malformed, or disallowed mutation returns `412`. Concurrent replacements may validate and stage
+independently, but only one compare-and-swap transaction publishes a new current version. The
+losing unpublished object is removed.
+
+Content routes use stable download names, the DOCX media type, `nosniff`, and a SHA-256 ETag. Every
+download, restore, and worker resolution recomputes both byte length and SHA-256 before returning
+content; a mismatch is a sanitized service-integrity failure rather than corrupted output. They
+never reflect an uploaded filename. Active content and every immutable prior version are visible
+to all authenticated users; archived content and history remain visible only to the owner and
+global administrators.
+
+Replacement always creates the next immutable version. Restoration reads a historical object and
+creates a new copy-forward version recording `restored_from_version_id`; it never rewrites
+history. Conversion submission locks and verifies one active, current, published template/version
+pair in the same transaction that freezes those identifiers on the job. Production workers are
+assembled through `build_template_conversion_worker`, which always installs
+`FrozenTemplateJobProcessor`; it uses `TemplateService.resolve_frozen_version` to give the
+conversion processor exactly those validated bytes after later replacements or restorations.
+
+## Authorization, audit, archive, and deletion
+
+Only the immutable owner or a global administrator may rename, update a description, replace,
+restore, archive, or delete. Every mutation writes a content-free audit record with actor, owner,
+operation, target, version when applicable, timestamp, and administrator-intervention flag in the
+same database transaction as the metadata change. Administrator fallback selection is audited in
+the same transaction as the singleton update.
+
+Deletion requires an archived identity and its current ETag. It is rejected while a preference,
+system fallback, or conversion job references the identity. The repository first commits a durable
+`deleting` tombstone, then object deletions use idempotent store operations, and only a fully cleaned
+identity is removed. Creation and replacement likewise reserve hidden `pending` rows before bytes
+are written and publish the current pair only after the object succeeds. Pending publications carry
+a unique fencing token and caller-configured lease expiry. Reconcilers atomically claim only expired
+rows, and finalization, abort, and retry release require the current token, so multiple replicas
+cannot clean up a live upload. Application startup retries those stale claims and deletion
+tombstones, so a process or object-store failure cannot expose a partial version or permanently lose
+cleanup work. Archive preserves history and preferences; selection resolution ignores archived
+identities.
+
+SQLite/filesystem and PostgreSQL/S3 share the service and repository contracts. Filesystem writes
+use fsync plus atomic replacement; S3 and filesystem keys are stable immutable version UUIDs.
+Database constraints and triggers enforce owner/pair integrity, immutable version evidence,
+current-version membership, active/current job submission, and deletion restrictions in addition
+to the application-level transactions.
+
+T16 and T17 retain browser interfaces. T20/T21 retain final rootless-image E2E for both profiles;
+T15 supplies functional ASGI and real SQLite/filesystem plus PostgreSQL/RustFS boundary coverage
+without claiming that later runtime proof.

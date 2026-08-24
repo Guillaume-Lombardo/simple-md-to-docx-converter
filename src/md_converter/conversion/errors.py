@@ -22,6 +22,7 @@ class ConversionErrorCode(StrEnum):
     PDF_FAILURE = "pdf_failure"
     PDF_LIMIT_EXCEEDED = "pdf_limit_exceeded"
     INVALID_PDF = "invalid_pdf"
+    TEMPLATE_INTEGRITY = "template_integrity"
 
 
 class ConversionError(RuntimeError):

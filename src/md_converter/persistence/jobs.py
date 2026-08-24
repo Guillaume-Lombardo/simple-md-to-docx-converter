@@ -12,7 +12,11 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from md_converter.jobs.errors import JobLeaseLostError, JobRepositoryError
+from md_converter.jobs.errors import (
+    JobLeaseLostError,
+    JobRepositoryError,
+    JobRequestError,
+)
 from md_converter.jobs.models import (
     TERMINAL_JOB_STATES,
     ConversionJob,
@@ -26,7 +30,12 @@ from md_converter.jobs.models import (
     LeaseHeartbeat,
     result_object_id,
 )
-from md_converter.persistence.schema import ConversionJobRow
+from md_converter.persistence.schema import (
+    ConversionJobRow,
+    TemplateRow,
+    TemplateVersionRow,
+)
+from md_converter.persistence.sql import serialize_sqlite_write
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -118,9 +127,31 @@ class SqlJobRepository:
         )
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                frozen = database.scalar(
+                    select(TemplateRow.id)
+                    .join(
+                        TemplateVersionRow,
+                        TemplateVersionRow.template_id == TemplateRow.id,
+                    )
+                    .where(
+                        TemplateRow.id == str(submission.template_id),
+                        TemplateRow.status == "active",
+                        TemplateRow.publication_state == "published",
+                        TemplateRow.current_version_id
+                        == str(submission.template_version_id),
+                        TemplateVersionRow.id == str(submission.template_version_id),
+                        TemplateVersionRow.publication_state == "published",
+                    )
+                    .with_for_update()
+                )
+                if frozen is None:
+                    raise JobRequestError
                 database.add(row)
                 database.flush()
                 return _job(row), False
+        except JobRequestError:
+            raise
         except IntegrityError:
             if submission.idempotency_digest is None:
                 raise JobRepositoryError from None

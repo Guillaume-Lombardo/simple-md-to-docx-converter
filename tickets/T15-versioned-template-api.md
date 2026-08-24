@@ -2,7 +2,7 @@
 ticket: T15
 linear_id: G1L-323
 linear_url: https://linear.app/g1lom/issue/G1L-323/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,49 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T10 and T14 are verified `Done` locally and in Linear. Implementation started on
+  `feat/T15-versioned-template-api` from delivered main `74dcba5`. Scope is the owner/admin
+  versioned template HTTP contract, safe content downloads, ETag/If-Match concurrency, atomic
+  replacement, immutable history, copy-forward restoration, deletion/archive guards, audit, and
+  SQLite/PostgreSQL plus filesystem/S3 parity. T16/T17 retain the browser interfaces, and T20/T21
+  retain final-image runtime wiring and E2E execution.
+- 2026-08-24: Implemented the versioned `/api/v1/templates` contract with safe immutable downloads,
+  strong revision ETags and required If-Match compare-and-swap mutations, metadata updates, atomic
+  replacement with compensation, copy-forward restoration, archive and reference-guarded deletion,
+  preferred/fallback selection, content-free audit records, and frozen processor version lookup.
+  Added Alembic schema support, shared SQLite/PostgreSQL plus filesystem/S3 behavior, functional
+  ASGI coverage, real standalone and distributed boundary/concurrency coverage, and English API,
+  template, storage, and job documentation. Final rootless-image E2E remains T20/T21 sequencing
+  debt and is not claimed by T15.
+- 2026-08-24: Addressed independent-review findings by invoking the complete T10 activation
+  boundary with caller-declared fonts and immutable validation evidence; freezing only an active,
+  current, published template/version pair during job submission; verifying stored size and SHA-256
+  for downloads, restore, and processing; and adding durable pending-publication and deletion
+  tombstones reclaimed at startup. Added database owner/pair/current/deletion invariants, audited
+  preference set/clear, required T18-owned bounds and engine configuration, async HTTP offload,
+  stable 413/422 and integrity errors, binary OpenAPI responses, and the exact frozen-version
+  processor adapter. Verification completed with 689 unit tests, 848 applicable default tests at
+  94.24% total coverage and 92.41% changed-Python-line coverage, 13 live PostgreSQL/RustFS tests,
+  and 3 T15 real Pandoc/LibreOffice tests in the rootless toolchain image. The host-only unfiltered
+  command remains unable to execute engine
+  tests because those binaries are intentionally supplied by the toolchain image; full legacy
+  image-suite validation remains owned by its existing T10/T20 environment rather than this ticket.
+- 2026-08-24: The second correction pass added configurable, expiring publication leases with
+  atomic SQLite/PostgreSQL claims and token-fenced finalization, abort, and retry release; SQLite
+  immediate-write serialization for template mutation versus job submission; concrete production
+  worker composition that cannot bypass frozen-version integrity verification; PostgreSQL coverage
+  for every migration-05 relational invariant; and submission races against replacement, archive,
+  and deletion on both profiles. The exact unit gate passes 699 tests with the required 90% branch
+  threshold, the applicable live PostgreSQL/RustFS host suite passes 860 tests, 20 repeated SQLite
+  race runs pass, and all 3 T15 real-engine tests pass in the arbitrary-UID rootless toolchain.
+  K3s remained inactive. The committed Git tree passes 90.05% application branch coverage
+  (1,041/1,156) and 91.95% changed executable-line coverage (811/882).
+- 2026-08-24: Three independent specification, security/concurrency, and test/CI reviewers approved
+  exact implementation head `74f5421`, including explicit approval of final-application-image E2E
+  sequencing to T20/T21 as sequencing rather than a waiver. The branch was rebased on unchanged
+  `origin/main` and published as ready pull request
+  [#46](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/46). Awaiting required
+  GitHub checks before the authorized squash merge.
 
 ## Synchronization
 

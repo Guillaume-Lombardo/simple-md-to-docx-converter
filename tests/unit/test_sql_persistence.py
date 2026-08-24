@@ -44,7 +44,9 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "conversion_jobs",
         "sessions",
         "system_template_selection",
+        "template_audit_records",
         "template_preferences",
+        "template_versions",
         "templates",
         "users",
     }

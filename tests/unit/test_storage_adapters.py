@@ -23,6 +23,7 @@ from md_converter.storage import (
     ObjectStoreError,
     S3ObjectStore,
 )
+from tests.settings import template_settings
 
 
 def client_error(code: str) -> ClientError:
@@ -188,8 +189,10 @@ def test_profile_readiness_short_circuits_failed_metadata(
 def test_distributed_wiring_allows_aws_credential_provider_defaults(
     mocker: MockerFixture,
 ) -> None:
+    reclaim = mocker.patch("md_converter.app.TemplateService.reclaim_pending")
     database_url = "postgresql+psycopg://database/app"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
         storage_profile="distributed",
@@ -211,6 +214,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     create_engine.assert_called_once_with(database_url)
     upgrade.assert_called_once_with(engine)
     s3_client.assert_called_once_with("s3")
+    reclaim.assert_called_once_with()
     assert components.object_store is not None
 
 
@@ -218,12 +222,14 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
 def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker: MockerFixture,
 ) -> None:
+    reclaim = mocker.patch("md_converter.app.TemplateService.reclaim_pending")
     engine = mocker.Mock()
     engine.dialect.name = "sqlite"
     mocker.patch("md_converter.app.create_database_engine", return_value=engine)
     mocker.patch("md_converter.app.upgrade_database")
     files = mocker.patch("md_converter.app.FilesystemObjectStore")
     standalone = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
         storage_profile="standalone",
@@ -238,6 +244,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
 
     s3_client = mocker.patch("md_converter.app.boto3.client")
     distributed = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
         storage_profile="distributed",
@@ -253,6 +260,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         job_result_retention_seconds=3_600,
     )
     build_components(distributed)
+    assert reclaim.call_count == 2
     s3_client.assert_called_once_with(
         "s3",
         endpoint_url="http://s3.test",

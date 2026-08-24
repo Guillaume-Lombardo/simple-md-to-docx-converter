@@ -30,7 +30,7 @@ The intended boundaries are:
 - workers claim persisted jobs, enforce resource limits, and publish results atomically.
 
 The HTTP authentication, conversion-job, worker orchestration, and storage boundaries now exist.
-T15 will connect the worker processor to immutable template versions and the delivered document
+T15 connects the worker processor to immutable template versions and the delivered document
 engines. T18 will supply approved operational values, and T20 will wire final runtime modes.
 
 ## Storage profiles

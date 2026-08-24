@@ -43,6 +43,26 @@ class Settings(BaseSettings):
     conversion_request_max_bytes: int = Field(gt=0)
     conversion_retry_after_seconds: int = Field(gt=0)
     job_result_retention_seconds: int = Field(gt=0)
+    template_max_archive_bytes: int = Field(gt=0)
+    template_request_max_bytes: int = Field(gt=0)
+    template_metadata_request_max_bytes: int = Field(gt=0)
+    template_max_name_characters: int = Field(gt=0)
+    template_max_description_characters: int = Field(gt=0)
+    template_max_entries: int = Field(gt=0)
+    template_max_member_bytes: int = Field(gt=0)
+    template_max_total_bytes: int = Field(gt=0)
+    template_max_compression_ratio: float = Field(ge=1.0)
+    template_max_xml_elements: int = Field(gt=0)
+    template_max_xml_depth: int = Field(gt=0)
+    template_max_xml_attributes: int = Field(gt=0)
+    template_max_declared_fonts: int = Field(gt=0)
+    template_max_font_name_characters: int = Field(gt=0)
+    template_pandoc_executable: str = Field(min_length=1)
+    template_libreoffice_executable: str = Field(min_length=1)
+    template_engine_timeout_seconds: float = Field(gt=0)
+    template_engine_termination_grace_seconds: float = Field(gt=0)
+    template_pending_publication_stale_seconds: float = Field(gt=0, allow_inf_nan=False)
+    template_engine_workspace_root: Path | None = None
     storage_profile: StorageProfile
     standalone_data_directory: Path | None = None
     distributed_database_url: SecretStr | None = None
@@ -63,6 +83,8 @@ class Settings(BaseSettings):
             raise ValueError("initial administrator password must not be blank")
         if self.conversion_request_max_bytes <= self.conversion_upload_max_bytes:
             raise ValueError("conversion request limit must exceed the source limit")
+        if self.template_request_max_bytes <= self.template_max_archive_bytes:
+            raise ValueError("template request limit must exceed the archive limit")
         self._validate_storage_profile()
         return self
 

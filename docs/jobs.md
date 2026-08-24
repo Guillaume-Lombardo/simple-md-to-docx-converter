@@ -4,7 +4,9 @@
 
 Authenticated clients submit multipart Markdown sources to `POST /api/v1/conversions` with a
 template identity, immutable template-version identity, and `docx`, `pdf`, or `both` output. The
-server first reserves a durable job row, atomically stores its source, and activates the queue row
+job transaction locks the template identity and accepts only the exact active, published current
+pair, preventing an archive or replacement race from changing the frozen selection. The server
+then reserves a durable job row, atomically stores its source, and activates the queue row
 before returning `202 Accepted`, `Location`, and `Retry-After`. Abandoned source reservations are
 failed and cleaned by recovery, so a process crash cannot create an untracked private object.
 `Idempotency-Key` is hashed and scoped to the authenticated owner; replaying the same
@@ -51,8 +53,11 @@ looping, and performs bounded periodic cleanup. The embedded lifecycle exposes u
 failures to its readiness owner. Polling, lease, heartbeat, recovery, cleanup, retention,
 concurrency, and stop values are caller-owned and remain production policy for T18.
 
-The processor port is intentionally storage-neutral. T15 owns its connection to immutable template
-versions and the delivered Pandoc/LibreOffice conversion pipeline. T20 owns final-image process-mode
-wiring. Final rootless-image E2E coverage therefore remains sequenced to T20/T21; T13 covers the
+The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
+exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored
+size and SHA-256, and passes the immutable version metadata and bytes to the document processor;
+later replacement or restoration cannot change a queued job's reference bytes. T20 owns final-image
+process-mode wiring. Final rootless-image E2E
+coverage therefore remains sequenced to T20/T21; T13 covers the
 HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
 PostgreSQL/S3-compatible storage.

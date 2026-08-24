@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +19,14 @@ from md_converter.config import Settings
 from md_converter.jobs.models import JobPage, JobState, JobStep
 from md_converter.jobs.service import JobService
 from md_converter.persistence.errors import PersistenceError
+from md_converter.templates.models import (
+    TemplateIdentity,
+    TemplatePage,
+    TemplateStatus,
+    TemplateVersion,
+)
+from md_converter.templates.service import TemplateService
+from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 
@@ -27,6 +36,10 @@ def isolated_client(
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
     settings = Settings(
+        **template_settings(
+            template_max_archive_bytes=1_000,
+            template_request_max_bytes=5_000,
+        ),
         initial_admin_username="admin",
         initial_admin_password=password,
         storage_profile="standalone",
@@ -296,6 +309,19 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
         "200"
     ]["content"]["application/octet-stream"]["schema"]
     assert result_schema == {"type": "string", "format": "binary"}
+    docx_type = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    for path in (
+        "/api/v1/templates/{template_id}/content",
+        "/api/v1/templates/{template_id}/versions/{version_id}/content",
+    ):
+        responses = paths[path]["get"]["responses"]
+        assert responses["200"]["content"][docx_type]["schema"] == {
+            "type": "string",
+            "format": "binary",
+        }
+        assert {"401", "404", "422", "503"} <= responses.keys()
 
 
 @pytest.mark.unit
@@ -312,6 +338,31 @@ def test_conversion_body_is_bounded_before_authentication_and_multipart_parsing(
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "CONVERSION_REQUEST_TOO_LARGE"
     auth.authenticate.assert_not_called()
+
+
+@pytest.mark.unit
+def test_template_body_is_bounded_before_authentication_and_multipart_parsing(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _, _ = isolated_client(mocker)
+    with client:
+        response = client.post(
+            "/api/v1/templates",
+            content=b"x" * 5_001,
+            headers={"Content-Type": "multipart/form-data; boundary=private"},
+        )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "TEMPLATE_REQUEST_TOO_LARGE"
+    auth.authenticate.assert_not_called()
+
+    with client:
+        patch_response = client.patch(
+            f"/api/v1/templates/{uuid4()}",
+            content=b"x" * 4_097,
+            headers={"Content-Type": "application/json"},
+        )
+    assert patch_response.status_code == 413
+    assert patch_response.json()["error"]["code"] == "TEMPLATE_REQUEST_TOO_LARGE"
 
 
 @pytest.mark.unit
@@ -387,3 +438,165 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
             ).status_code
             == 422
         )
+
+
+@pytest.mark.unit
+def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
+    mocker: MockerFixture,
+) -> None:
+    client, _auth, admin, _alice = isolated_client(mocker)
+    templates = mocker.Mock(spec=TemplateService)
+    object.__setattr__(client.app.state.components, "templates", templates)
+    template = TemplateIdentity(
+        uuid4(),
+        admin.id,
+        "Name",
+        "Description",
+        TemplateStatus.ACTIVE,
+        1,
+        uuid4(),
+    )
+    version = TemplateVersion(
+        template.current_version_id or uuid4(),
+        template.id,
+        1,
+        admin.id,
+        "a" * 64,
+        10,
+        datetime.now(UTC),
+        admin.id,
+    )
+    changed = TemplateIdentity(
+        template.id,
+        admin.id,
+        "Changed",
+        "Updated",
+        TemplateStatus.ACTIVE,
+        2,
+        version.id,
+    )
+    templates.search.return_value = TemplatePage((template,), 1, 0, 20)
+    templates.create_versioned.return_value = (template, version)
+    templates.get_visible.return_value = template
+    templates.update_metadata.return_value = changed
+    templates.replace.return_value = (changed, version)
+    templates.list_versions.return_value = (version,)
+    templates.download.return_value = (template, version, b"docx")
+    templates.restore.return_value = (changed, version)
+    templates.archive.return_value = changed
+    csrf = {"X-CSRF-Token": "csrf-token"}
+    etag = f'"template-{template.id}-1"'
+
+    with client:
+        assert client.get("/api/v1/templates").json()["total"] == 1
+        created = client.post(
+            "/api/v1/templates",
+            headers=csrf,
+            data={
+                "name": "Name",
+                "description": "Description",
+                "expected_fonts": "Calibri",
+            },
+            files={"content": ("template.docx", b"docx")},
+        )
+        assert created.status_code == 201
+        assert client.get(f"/api/v1/templates/{template.id}").headers["etag"] == etag
+        for invalid in (
+            None,
+            "bad",
+            f'"template-{template.id}-x"',
+            f'"template-{template.id}-0"',
+        ):
+            headers = dict(csrf)
+            if invalid is not None:
+                headers["If-Match"] = invalid
+            response = client.patch(
+                f"/api/v1/templates/{template.id}",
+                headers=headers,
+                json={"name": "Changed", "description": "Updated"},
+            )
+            assert response.status_code in {412, 428}
+        patched = client.patch(
+            f"/api/v1/templates/{template.id}",
+            headers={**csrf, "If-Match": etag},
+            json={"name": "Changed", "description": "Updated"},
+        )
+        assert patched.status_code == 200
+        replaced = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("template.docx", b"docx")},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert replaced.status_code == 201
+        empty = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("empty.docx", b"")},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert empty.status_code == 422
+        assert empty.json()["error"]["code"] == "TEMPLATE_INVALID_PACKAGE"
+        exact_limit = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("limit.docx", b"x" * 1_000)},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert exact_limit.status_code == 201
+        oversized = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("large.docx", b"x" * 1_001)},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert oversized.status_code == 413
+        assert (
+            client.get(f"/api/v1/templates/{template.id}/versions").status_code == 200
+        )
+        assert client.get(f"/api/v1/templates/{template.id}/content").content == b"docx"
+        assert (
+            client.get(
+                f"/api/v1/templates/{template.id}/versions/{version.id}/content"
+            ).content
+            == b"docx"
+        )
+        assert (
+            client.post(
+                f"/api/v1/templates/{template.id}/versions/{version.id}/restore",
+                headers={**csrf, "If-Match": etag},
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(
+                f"/api/v1/templates/{template.id}/archive",
+                headers={**csrf, "If-Match": etag},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"/api/v1/templates/{template.id}/preferred", headers=csrf
+            ).status_code
+            == 204
+        )
+        assert (
+            client.delete("/api/v1/template-preference", headers=csrf).status_code
+            == 204
+        )
+        assert (
+            client.put(
+                f"/api/v1/templates/{template.id}/system-fallback", headers=csrf
+            ).status_code
+            == 204
+        )
+        assert (
+            client.delete(
+                f"/api/v1/templates/{template.id}",
+                headers={**csrf, "If-Match": etag},
+            ).status_code
+            == 204
+        )
+
+    templates.delete.assert_called_once_with(admin, template.id, expected_revision=1)
