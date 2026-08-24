@@ -62,7 +62,7 @@ def test_queue_observer_enforces_driver_deadline_and_cancels_active_calls(
     result.one.return_value = (0, None, 0)
 
     def execute_with_cancellation(_statement: object):
-        observer.cancel_observations()
+        observer.cancel_observations(timeout_seconds=0.25)
         return result
 
     database.execute.side_effect = execute_with_cancellation
@@ -96,7 +96,7 @@ def test_queue_observer_applies_postgresql_timeout_and_driver_cancel(
 
     def execute(statement: object, _parameters: object = None):
         if database.execute.call_count == 2:
-            observer.cancel_observations()
+            observer.cancel_observations(timeout_seconds=0.25)
             return aggregate
         return mocker.Mock()
 
@@ -104,7 +104,7 @@ def test_queue_observer_applies_postgresql_timeout_and_driver_cancel(
 
     observer.observe_queue(datetime(2026, 8, 24, 20, tzinfo=UTC))
     assert "set_config" in str(database.execute.call_args_list[0].args[0])
-    driver.cancel.assert_called_once_with()
+    driver.cancel_safe.assert_called_once_with(timeout=0.25)
 
 
 def test_queue_observer_rejects_cancelled_or_unavailable_database_boundary(
@@ -138,14 +138,14 @@ def test_queue_observer_supports_driver_without_optional_interrupt_hooks(
     database = _engine_connection(mocker, engine)
     driver = database.connection.driver_connection
     driver.interrupt = None
-    driver.cancel = None
+    driver.cancel_safe = None
     driver.set_progress_handler = None
     observer = SqlOperationalObserver(engine)
     result = mocker.Mock()
     result.one.return_value = (0, None, 0)
 
     def execute(_statement: object):
-        observer.cancel_observations()
+        observer.cancel_observations(timeout_seconds=0.25)
         return result
 
     database.execute.side_effect = execute

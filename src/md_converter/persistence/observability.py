@@ -114,19 +114,20 @@ class SqlOperationalObserver:
         age = 0.0 if oldest is None else max(0.0, (now - oldest).total_seconds())
         return QueueSnapshot(int(row[0] or 0), age, int(row[2] or 0))
 
-    def cancel_observations(self) -> None:
+    def cancel_observations(self, *, timeout_seconds: float | None = None) -> None:
         """Interrupt active driver calls so listener shutdown remains bounded."""
 
+        cancellation_timeout = timeout_seconds or self._default_timeout_seconds or 1.0
         with self._active_lock:
             connections = tuple(self._active_connections.values())
         for connection in connections:
             interrupt = getattr(connection, "interrupt", None)
-            cancel = getattr(connection, "cancel", None)
+            cancel_safe = getattr(connection, "cancel_safe", None)
             with suppress(Exception):
                 if callable(interrupt):
                     interrupt()
-                elif callable(cancel):
-                    cancel()
+                elif callable(cancel_safe):
+                    cancel_safe(timeout=cancellation_timeout)
 
     def _register(self, connection: Any, cancelled: Event | None) -> None:
         with self._active_lock:

@@ -274,7 +274,7 @@ class QueueObserver(Protocol):
         cancelled: Event | None = None,
     ) -> QueueSnapshot: ...
 
-    def cancel_observations(self) -> None:
+    def cancel_observations(self, *, timeout_seconds: float | None = None) -> None:
         """Interrupt every active database observation without leaking workers."""
         ...
 
@@ -544,7 +544,7 @@ class MetricsHttpServer:
         if server is None or thread is None:
             return
         self._stopping.set()
-        self._queue.cancel_observations()
+        self._queue.cancel_observations(timeout_seconds=self._request_timeout_seconds)
         server.shutdown()
         server.server_close()
         thread.join(self._request_timeout_seconds + 1.0)

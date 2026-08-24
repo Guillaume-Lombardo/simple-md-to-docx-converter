@@ -42,8 +42,8 @@ class _QueueObserver:
             raise RuntimeError("private database detail")
         return QueueSnapshot(2, 3.5, 1)
 
-    def cancel_observations(self) -> None:
-        pass
+    def cancel_observations(self, *, timeout_seconds: float | None = None) -> None:
+        del timeout_seconds
 
 
 class _BlockingQueueObserver(_QueueObserver):
@@ -67,7 +67,8 @@ class _BlockingQueueObserver(_QueueObserver):
             now, timeout_seconds=timeout_seconds, cancelled=cancelled
         )
 
-    def cancel_observations(self) -> None:
+    def cancel_observations(self, *, timeout_seconds: float | None = None) -> None:
+        del timeout_seconds
         self.release.set()
 
 
