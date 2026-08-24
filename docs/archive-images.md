@@ -12,8 +12,10 @@ strict UTF-8.
 
 Every ZIP limit is supplied explicitly through `ArchiveLimits`, and every image limit is supplied
 through `ImageLimits`. Image limits cover source bytes, dimensions, pixels, SVG element count, and
-SVG nesting depth. The code intentionally provides no production defaults because T18 owns the
-approved upload, decompression, file-count, image-count, and resource values.
+SVG nesting depth. Configured SVG depth is additionally constrained by a hard safety ceiling of 64
+elements so XML serialization and rasterization cannot reach Python's recursion limit. The code
+intentionally provides no production defaults because T18 owns the approved upload, decompression,
+file-count, image-count, and resource values.
 
 ## Archive boundary
 

@@ -31,6 +31,7 @@ from md_converter.conversion.errors import ConversionError, validation_error
 _SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 _XML_BASE = "{http://www.w3.org/XML/1998/namespace}base"
+_MAX_SAFE_SVG_DEPTH = 64
 _FORBIDDEN_XML = re.compile(rb"(?is)<!\s*(?:doctype|entity)\b")
 _LENGTH = re.compile(r"^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$")
 _URL = re.compile(r"(?is)url\(\s*(['\"]?)(.*?)\1\s*\)")
@@ -68,6 +69,8 @@ class ImageLimits:
         ):
             if type(value) is not int or value <= 0:
                 raise ValueError("Image limits must be positive integers")
+        if self.max_svg_depth > _MAX_SAFE_SVG_DEPTH:
+            raise ValueError(f"SVG nesting depth cannot exceed {_MAX_SAFE_SVG_DEPTH}")
 
 
 def _reject_image(message: str = "Document contains an invalid image.") -> Never:

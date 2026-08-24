@@ -32,7 +32,7 @@ LIMITS = ImageLimits(
     max_height_pixels=256,
     max_pixels=65_536,
     max_svg_elements=1_000,
-    max_svg_depth=100,
+    max_svg_depth=64,
 )
 
 
@@ -99,7 +99,7 @@ def test_dimensions_are_rechecked_after_exif_orientation() -> None:
         normalize_image(
             PurePosixPath("rotated.jpg"),
             output.getvalue(),
-            ImageLimits(100_000, 8, 6, 48, 1_000, 100),
+            ImageLimits(100_000, 8, 6, 48, 1_000, 64),
         )
 
 
@@ -155,7 +155,7 @@ def test_raster_dimension_limits_are_checked_before_decode() -> None:
         normalize_image(
             PurePosixPath("wide.png"),
             _image_bytes("PNG"),
-            ImageLimits(100_000, 7, 256, 65_536, 1_000, 100),
+            ImageLimits(100_000, 7, 256, 65_536, 1_000, 64),
         )
     assert str(captured.value) == "Document image exceeds configured limits."
 
@@ -260,8 +260,8 @@ def test_svg_safe_inline_style_is_preserved() -> None:
     [
         (
             b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">'
-            + b"<g>" * 101
-            + b"</g>" * 101
+            + b"<g>" * 65
+            + b"</g>" * 65
             + b"</svg>"
         ),
         (
@@ -365,3 +365,8 @@ def test_image_limits_require_positive_integers(
 ) -> None:
     with pytest.raises(ValueError, match="positive integers"):
         ImageLimits(*limits)
+
+
+def test_image_limits_reject_unsafe_svg_nesting_depth() -> None:
+    with pytest.raises(ValueError, match="nesting depth cannot exceed 64"):
+        ImageLimits(1, 1, 1, 1, 1, 65)

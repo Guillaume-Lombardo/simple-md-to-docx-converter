@@ -31,7 +31,7 @@ INPUT_LIMITS = ArchiveLimits(
     max_markdown_bytes=100_000,
     max_images=10,
 )
-IMAGE_LIMITS = ImageLimits(500_000, 2_000, 2_000, 4_000_000, 10_000, 256)
+IMAGE_LIMITS = ImageLimits(500_000, 2_000, 2_000, 4_000_000, 10_000, 64)
 DOCX_LIMITS = InspectionLimits(300, 10_000_000, 30_000_000, 200.0)
 
 
