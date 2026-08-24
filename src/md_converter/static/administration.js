@@ -109,32 +109,34 @@ export function createAdministrationController(doc, dependencies = {}) {
     return token ? { ...extra, "X-CSRF-Token": token } : extra;
   }
 
-  async function request(url, options = {}) {
+  async function request(url, options = {}, isCurrent = () => true) {
+    const canPublish = () => !options.signal?.aborted && isCurrent();
     let response;
     try {
       response = await fetchRequest(url, options);
     } catch {
-      if (options.signal?.aborted) return null;
+      if (!canPublish()) return null;
       showMessage("The request could not be completed. Check your connection and try again.");
       return null;
     }
     if (!response.ok) {
-      showMessage(await responseError(response));
+      const message = await responseError(response);
+      if (canPublish()) showMessage(message);
       return null;
     }
     return response;
   }
 
-  async function responseJson(response, validator) {
+  async function responseJson(response, validator, isCurrent = () => true) {
     let value;
     try {
       value = await response.json();
     } catch {
-      showMessage("The server returned an invalid response. Try again.");
+      if (isCurrent()) showMessage("The server returned an invalid response. Try again.");
       return null;
     }
     if (!validator(value)) {
-      showMessage("The server returned an invalid response. Try again.");
+      if (isCurrent()) showMessage("The server returned an invalid response. Try again.");
       return null;
     }
     return value;
@@ -209,14 +211,14 @@ export function createAdministrationController(doc, dependencies = {}) {
     const generation = (previous?.generation || 0) + 1;
     const active = { controller: requestAbort, generation };
     versionLoads.set(template.id, active);
+    const isCurrent = () => !requestAbort.signal.aborted
+      && versionLoads.get(template.id) === active;
     const response = await request(`/api/v1/templates/${template.id}/versions`, {
       signal: requestAbort.signal,
-    });
-    if (!response || requestAbort.signal.aborted
-      || versionLoads.get(template.id) !== active) return;
-    const versions = await responseJson(response, validVersions);
-    if (versions && !requestAbort.signal.aborted
-      && versionLoads.get(template.id) === active) renderVersions(container, template, versions);
+    }, isCurrent);
+    if (!response || !isCurrent()) return;
+    const versions = await responseJson(response, validVersions, isCurrent);
+    if (versions && isCurrent()) renderVersions(container, template, versions);
   }
 
   function renderTemplate(template) {
@@ -330,20 +332,22 @@ export function createAdministrationController(doc, dependencies = {}) {
     versionLoads.clear();
     const requestAbort = new AbortControllerClass();
     templateLoadAbort = requestAbort;
+    const isCurrent = () => !requestAbort.signal.aborted
+      && generation === templateLoadGeneration;
     const loaded = [];
     let offset = 0;
     while (true) {
       const response = await request(`/api/v1/templates?limit=100&offset=${offset}`, {
         signal: requestAbort.signal,
-      });
-      if (!response || generation !== templateLoadGeneration) return;
-      const page = await responseJson(response, validTemplatePage);
-      if (!page || generation !== templateLoadGeneration) return;
+      }, isCurrent);
+      if (!response || !isCurrent()) return;
+      const page = await responseJson(response, validTemplatePage, isCurrent);
+      if (!page || !isCurrent()) return;
       loaded.push(...page.items);
       if (loaded.length >= page.total || page.items.length === 0) break;
       offset = loaded.length;
     }
-    if (generation === templateLoadGeneration && !requestAbort.signal.aborted) {
+    if (isCurrent()) {
       templates = loaded;
       renderTemplates();
     }
@@ -379,8 +383,7 @@ export function createAdministrationController(doc, dependencies = {}) {
       password.autocomplete = "new-password";
       password.required = true;
       appendText(resetForm, "button", "Reset password").type = "submit";
-      resetForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
+      guardedSubmit(resetForm, async () => {
         const response = await request(`/api/v1/admin/users/${user.id}/password`, {
           method: "POST", headers: csrfHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ password: password.value }),
@@ -399,10 +402,14 @@ export function createAdministrationController(doc, dependencies = {}) {
     userLoadAbort?.abort();
     const requestAbort = new AbortControllerClass();
     userLoadAbort = requestAbort;
-    const response = await request("/api/v1/admin/users", { signal: requestAbort.signal });
-    if (!response || generation !== userLoadGeneration) return;
-    const loaded = await responseJson(response, validUsers);
-    if (loaded && generation === userLoadGeneration && !requestAbort.signal.aborted) {
+    const isCurrent = () => !requestAbort.signal.aborted
+      && generation === userLoadGeneration;
+    const response = await request(
+      "/api/v1/admin/users", { signal: requestAbort.signal }, isCurrent,
+    );
+    if (!response || !isCurrent()) return;
+    const loaded = await responseJson(response, validUsers, isCurrent);
+    if (loaded && isCurrent()) {
       users = loaded;
       renderUsers();
     }

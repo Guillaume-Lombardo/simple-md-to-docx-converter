@@ -56,13 +56,13 @@ Build owner and administrator template management and local-account management w
   and database failures without partial catalog state or leaked details. The browser documentation
   now distinguishes loopback HTTP integration from the deployment HTTPS, rootless-runtime, and
   final-image E2E work owned by T20/T21.
-- 2026-08-24: Reverified the hardened change: Ruff format/check and `ty` pass; 20 native JavaScript
-  tests pass with 100% lines/functions and 91.16% branches for the administration module; both
-  pinned-Chromium scenarios pass; and the canonical non-engine Python suite passes 877 tests with
-  94.74% total application coverage, including live PostgreSQL/RustFS tests. The unfiltered suite
-  still has 37 expected host failures because Pandoc, Mermaid/Chromium, LibreOffice, and the pinned
-  font inventory are not installed on the host. Final-image engine and both-profile E2E verification
-  remain T20/T21 sequencing debt.
+- 2026-08-24: Reverified the hardened change: Ruff format/check and `ty` pass; 22 native JavaScript
+  tests pass with 100% lines, 98.11% functions, and 92.11% branches for the administration module;
+  both pinned-Chromium scenarios pass; and the canonical non-engine Python suite passes 877 tests
+  with 94.68% independently reproducible application coverage, including live PostgreSQL/RustFS
+  tests. The unfiltered suite still has 37 expected host failures because Pandoc,
+  Mermaid/Chromium, LibreOffice, and the pinned font inventory are not installed on the host.
+  Final-image engine and both-profile E2E verification remain T20/T21 sequencing debt.
 
 ## Synchronization
 

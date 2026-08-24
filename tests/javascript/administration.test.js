@@ -455,6 +455,73 @@ test("late user and version loads cannot overwrite newer administration state", 
   assert.equal(byText(versionDoc.querySelector("#managed-template-list"), "Version 9 · 1 bytes · later"), undefined);
 });
 
+test("superseded body parsing cannot publish template, user, or version errors", async () => {
+  const doc = new FakeDocument();
+  const templateBody = deferred();
+  const userBody = deferred();
+  let templateCalls = 0;
+  let userCalls = 0;
+  let templateParsing = false;
+  let userParsing = false;
+  const controller = createAdministrationController(doc, {
+    fetch: async (url) => {
+      if (url.startsWith("/api/v1/templates")) {
+        templateCalls += 1;
+        if (templateCalls === 1) return {
+          ok: false,
+          status: 503,
+          json() { templateParsing = true; return templateBody.promise; },
+        };
+        return response(200, { items: [], total: 0 });
+      }
+      userCalls += 1;
+      if (userCalls === 1) return {
+        ok: true,
+        status: 200,
+        json() { userParsing = true; return userBody.promise; },
+      };
+      return response(200, []);
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  await settle();
+  assert.equal(templateParsing, true);
+  assert.equal(userParsing, true);
+  await Promise.all([controller.loadTemplates(), controller.loadUsers()]);
+  templateBody.resolve({ error: { message: "Stale template failure" } });
+  userBody.resolve({ invalid: "stale users" });
+  await settle();
+  assert.equal(doc.querySelector("#administration-alert").textContent, "");
+
+  const versionDoc = new FakeDocument("user");
+  const versionBody = deferred();
+  let versionParsing = false;
+  const versionController = createAdministrationController(versionDoc, {
+    fetch: async (url) => {
+      if (url.endsWith("/versions")) return {
+        ok: false,
+        status: 503,
+        json() { versionParsing = true; return versionBody.promise; },
+      };
+      return response(200, { items: [template({ owner_id: "alice-id" })], total: 1 });
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  await settle();
+  const details = descendants(versionDoc.querySelector("#managed-template-list"))
+    .find((child) => child.tagName === "DETAILS");
+  const loading = byText(details, "Load version history", "button")
+    .listeners.get("click")[0]({});
+  await settle();
+  assert.equal(versionParsing, true);
+  await versionController.loadTemplates();
+  versionBody.resolve({ error: { message: "Stale version failure" } });
+  await loading;
+  assert.equal(versionDoc.querySelector("#administration-alert").textContent, "");
+});
+
 test("malformed success bodies are rejected without replacing current state", async () => {
   for (const badBody of [{ items: [], total: "invalid" }, new Error("truncated")]) {
     const doc = new FakeDocument("user");
@@ -497,4 +564,40 @@ test("guarded forms suppress concurrent duplicate submissions", async () => {
   mutation.resolve(response(201));
   await Promise.all([first, duplicate]);
   assert.equal(posts, 1);
+});
+
+test("password reset suppresses concurrent duplicate mutations", async () => {
+  const doc = new FakeDocument();
+  const mutation = deferred();
+  let resets = 0;
+  createAdministrationController(doc, {
+    fetch: async (url, options = {}) => {
+      if (url.endsWith("/password")) {
+        resets += 1;
+        return mutation.promise;
+      }
+      if (url === "/api/v1/admin/users") {
+        return response(200, [{ id: "alice", username: "Alice", role: "user", active: true }]);
+      }
+      return response(200, { items: [], total: 0 });
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  await settle();
+  const resetForm = descendants(doc.querySelector("#user-list"))
+    .find((child) => child.className === "inline-form");
+  resetForm.elements.password.value = "new-password";
+  const listener = resetForm.listeners.get("submit")[0];
+  const event = { preventDefault() {} };
+  const first = listener(event);
+  const duplicate = listener(event);
+  assert.equal(resets, 1);
+  mutation.resolve(response(200));
+  await Promise.all([first, duplicate]);
+  assert.equal(resets, 1);
+  assert.equal(
+    doc.querySelector("#administration-alert").textContent,
+    "Password reset completed for Alice.",
+  );
 });
