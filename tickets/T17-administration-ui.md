@@ -66,10 +66,12 @@ Build owner and administrator template management and local-account management w
 - 2026-08-24: Corrected PR CI evidence by adding unit coverage for the authenticated administration
   page, its immutable assets, and its unauthenticated redirect. The exact light selection now passes
   710 tests with 90.09% application branch coverage and 100% changed application coverage (28/28
-  executable lines) against `6c222ec`. The pinned-Chromium account workflow now waits for the
-  re-rendered, enabled `Reactivate` control before clicking it; this removes the lost-click race
-  without increasing timeouts. The administration scenario passed three consecutive pinned-browser
-  runs, followed by the complete two-scenario browser suite.
+  executable lines) against `6c222ec`. The pinned-Chromium account workflow now waits for each
+  created account and the released creation form, then for the re-rendered, enabled `Reactivate`
+  control before clicking it. These guards remove two stale-message/lost-click races without
+  increasing timeouts. The scenario tracks Alice's reset credential explicitly while still proving
+  that her prior session is revoked. Each browser correction passed three consecutive pinned runs;
+  the pre-existing SQLite heartbeat timing test also passed ten consecutive local runs.
 
 ## Synchronization
 

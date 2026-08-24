@@ -97,6 +97,10 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   });
   context.after(() => browser.close());
   const page = await browser.newPage();
+  const accountPasswords = {
+    Alice: "alice-password",
+    Bob: "bob-password",
+  };
 
   await login(page, baseUrl, "browser-admin", "browser-password");
   const adminPage = await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
@@ -104,9 +108,15 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await waitForText(page, "body", "Local accounts");
   for (const username of ["Alice", "Bob"]) {
     await page.type('#create-user-form input[name="username"]', username);
-    await page.type('#create-user-form input[name="password"]', `${username.toLowerCase()}-password`);
+    await page.type('#create-user-form input[name="password"]', accountPasswords[username]);
     await page.click('#create-user-form button[type="submit"]');
     await waitForText(page, "#administration-alert", "Account was created.");
+    await page.waitForFunction((createdUsername) => {
+      const form = document.querySelector("#create-user-form");
+      const accountExists = [...document.querySelectorAll("#user-list .management-card h3")]
+        .some((heading) => heading.textContent === createdUsername);
+      return accountExists && form?.dataset.submitting !== "true";
+    }, {}, username);
   }
   await page.type("#user-search", "Alice");
   await waitForText(page, "#user-list", "Alice");
@@ -122,7 +132,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
     .some((card) => card.textContent.includes("user · active")));
 
   await clearSession(page);
-  await login(page, baseUrl, "alice", "alice-password");
+  await login(page, baseUrl, "alice", accountPasswords.Alice);
   await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
   assert.doesNotMatch(await page.$eval("body", (body) => body.innerText), /Local accounts/);
   await page.type('#create-template-form input[name="name"]', "Invalid report");
@@ -226,7 +236,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   const aliceSession = (await page.cookies()).find((cookie) => cookie.name === "md_converter_session");
 
   await clearSession(page);
-  await login(page, baseUrl, "bob", "bob-password");
+  await login(page, baseUrl, "bob", accountPasswords.Bob);
   await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
   await waitForText(page, "#managed-template-list", "Alice renamed report");
   await waitForText(page, "#managed-template-list", "Alice");
@@ -251,7 +261,8 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await waitForText(page, "#managed-template-list", "Alice renamed report");
   assert.ok(await page.$("#managed-template-list details"));
   await page.type("#user-search", "Alice");
-  await page.type('#user-list input[name="password"]', "alice-new-password");
+  accountPasswords.Alice = "alice-new-password";
+  await page.type('#user-list input[name="password"]', accountPasswords.Alice);
   await page.click('#user-list form button[type="submit"]');
   await waitForText(page, "#administration-alert", "Password reset completed for Alice.");
   await page.$$eval("#managed-template-list button", (buttons) => {
@@ -280,7 +291,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
   assert.equal(page.url(), `${baseUrl}/login`);
   await clearSession(page);
-  await login(page, baseUrl, "alice", "alice-new-password");
+  await login(page, baseUrl, "alice", accountPasswords.Alice);
   await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
   await waitForText(page, "#managed-template-list", "Alice renamed report");
   page.once("dialog", (dialog) => dialog.accept());
