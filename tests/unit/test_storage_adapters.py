@@ -208,9 +208,11 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     engine.dialect.name = "postgresql"
     readiness_engine = mocker.MagicMock()
     readiness_engine.dialect.name = "postgresql"
+    observation_engine = mocker.MagicMock()
+    observation_engine.dialect.name = "postgresql"
     create_engine = mocker.patch(
         "md_converter.app.create_database_engine",
-        side_effect=(engine, readiness_engine),
+        side_effect=(engine, readiness_engine, observation_engine),
     )
     upgrade = mocker.patch("md_converter.app.upgrade_database")
     normal_s3 = mocker.Mock()
@@ -221,6 +223,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     components = build_components(settings)
     assert create_engine.call_args_list == [
         mocker.call(database_url),
+        mocker.call(database_url, timeout_seconds=2.0, pool_pre_ping=False),
         mocker.call(database_url, timeout_seconds=2.0, pool_pre_ping=False),
     ]
     upgrade.assert_called_once_with(engine)
@@ -239,6 +242,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     readiness_engine.connect.return_value.__enter__.return_value.execute.assert_called_once()
     readiness_s3.head_bucket.assert_called_once_with(Bucket="objects")
     engine.connect.assert_not_called()
+    observation_engine.connect.assert_not_called()
     normal_s3.head_bucket.assert_not_called()
     reclaim.assert_called_once_with()
     assert components.object_store is not None

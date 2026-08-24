@@ -356,6 +356,24 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
     assert readiness.json()["error"]["code"] == "NOT_READY"
     paths = schema["paths"]
+    for path in paths.values():
+        for operation_name, operation in path.items():
+            if operation_name not in {
+                "get",
+                "put",
+                "post",
+                "delete",
+                "options",
+                "head",
+                "patch",
+                "trace",
+            }:
+                continue
+            for response in operation["responses"].values():
+                assert response["headers"]["X-Correlation-ID"] == {
+                    "description": "Server-generated request correlation identifier.",
+                    "schema": {"type": "string", "format": "uuid"},
+                }
     expected = {
         ("/health/ready", "get"): {"200", "503"},
         ("/api/v1/login", "post"): {"200", "401", "403", "422"},

@@ -8,6 +8,7 @@ safe opaque token. It is neither logged nor persisted and is never reflected. Jo
 only the generated identifier with the durable queue row, so an external or embedded worker restores
 the same server correlation context after a restart or cross-process claim. Clients correlate a
 request by reading the response header rather than choosing the identifier.
+The OpenAPI response schema declares this header and its UUID format for every documented status.
 
 Application events use one-line JSON. The fixed schema includes timestamp, level, event,
 correlation identifier, and selected stable identifiers or low-cardinality state fields. The
@@ -48,11 +49,16 @@ listener at `MD_CONVERTER_WORKER_METRICS_BIND_HOST` and
 loop. `MD_CONVERTER_WORKER_METRICS_MAX_CONNECTIONS` fixes request concurrency,
 `MD_CONVERTER_WORKER_METRICS_OBSERVATION_LIMIT` separately caps simultaneous queue queries,
 `MD_CONVERTER_WORKER_METRICS_ACCEPT_QUEUE_SIZE` bounds the kernel accept queue, and
-`MD_CONVERTER_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS` applies one absolute request-line/header
-deadline. Saturated connections receive a content-free `503` and close without entering an
-unbounded executor queue. Bind and scrape failures are content-free and never expose provider details. API and worker
-counters are intentionally separate process series; this surface does not claim in-process or
-cross-replica aggregation. T20 must connect the external-worker command to this lifecycle.
+`MD_CONVERTER_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS` applies both one absolute
+request-line/header deadline and the queue-observation database budget. PostgreSQL applies a
+statement timeout and bounded pool checkout; SQLite applies an interruptible progress deadline.
+Listener shutdown first rejects new observations, then interrupts active driver calls before
+joining its fixed worker pool, so a blocked scrape cannot leak a request thread or hold shutdown
+open indefinitely. Saturated connections receive a content-free `503` and close without entering
+an unbounded executor queue. Bind and scrape failures are content-free and never expose provider
+details. API and worker counters are intentionally separate process series; this surface does not
+claim in-process or cross-replica aggregation. T20 must connect the external-worker command to this
+lifecycle.
 
 ## Audit and version traceability
 

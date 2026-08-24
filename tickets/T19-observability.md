@@ -98,6 +98,19 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   also passes 1,055 tests. The unrestricted engine suite remains unavailable because Pandoc,
   Chromium, and LibreOffice are not installed. T19 remains `In Progress` pending T20/T21 final-image
   validation, independent review, merge, and verification on `main`.
+- 2026-08-24: Final-review corrections completed. Queue observation now owns a finite database
+  budget on a dedicated engine: PostgreSQL uses bounded pool checkout plus transaction-local
+  `statement_timeout`, SQLite uses an interruptible progress deadline, and listener shutdown
+  rejects new observations and cancels active driver calls before joining its fixed request pool.
+  A truly blocked scrape stops within the bounded lifecycle without leaving metrics threads, and a
+  real PostgreSQL table lock proves the statement timeout. Every documented OpenAPI response now
+  declares the server-generated `X-Correlation-ID` UUID header. Distributed test isolation uses an
+  `ExitStack` so engine disposal and schema deletion still run when S3 client creation, bucket
+  creation, or bucket cleanup fails. Ruff, `ty`, and `git diff --check` pass; the unit gate passes
+  with 850 tests and 93.40% total coverage, and the correct-environment canonical suite passes with
+  1,064 tests and 95.43% total coverage plus a matching 1,064-test no-coverage run. The unrestricted
+  document-engine suite remains unavailable locally. T19 remains `In Progress` pending T20/T21
+  final-image validation, independent review, merge, and verification on `main`.
 
 ## Synchronization
 

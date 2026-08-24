@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BufferedIOBase
 from socket import SHUT_RDWR, socket
-from threading import BoundedSemaphore, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread
 from time import monotonic
 from typing import IO, Any, Protocol
 from uuid import UUID, uuid4
@@ -266,7 +266,17 @@ class QueueSnapshot:
 class QueueObserver(Protocol):
     """Cheap queue observation boundary shared by both SQL profiles."""
 
-    def observe_queue(self, now: datetime) -> QueueSnapshot: ...
+    def observe_queue(
+        self,
+        now: datetime,
+        *,
+        timeout_seconds: float | None = None,
+        cancelled: Event | None = None,
+    ) -> QueueSnapshot: ...
+
+    def cancel_observations(self) -> None:
+        """Interrupt every active database observation without leaking workers."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -498,6 +508,7 @@ class MetricsHttpServer:
         self._accept_queue_size = accept_queue_size
         self._request_timeout_seconds = request_timeout_seconds
         self._lock = Lock()
+        self._stopping = Event()
         self._server: _BoundedMetricsHttpServer | None = None
         self._thread: Thread | None = None
 
@@ -523,14 +534,17 @@ class MetricsHttpServer:
             )
             self._server = server
             self._thread = thread
+            self._stopping.clear()
             thread.start()
 
     def stop(self) -> None:
         with self._lock:
             server = self._server
             thread = self._thread
-            if server is None or thread is None:
-                return
+        if server is None or thread is None:
+            return
+        self._stopping.set()
+        self._queue.cancel_observations()
         server.shutdown()
         server.server_close()
         thread.join(self._request_timeout_seconds + 1.0)
@@ -554,6 +568,7 @@ class MetricsHttpServer:
         queue = self._queue
         observations = BoundedSemaphore(self._observation_limit)
         request_timeout_seconds = self._request_timeout_seconds
+        stopping = self._stopping
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.0"
@@ -574,7 +589,11 @@ class MetricsHttpServer:
                     return
                 try:
                     payload = metrics.render(
-                        queue.observe_queue(datetime.now(UTC))
+                        queue.observe_queue(
+                            datetime.now(UTC),
+                            timeout_seconds=request_timeout_seconds,
+                            cancelled=stopping,
+                        )
                     ).encode()
                 except Exception:  # exporter failures remain local and content-free
                     self._respond(503, b"metrics unavailable\n", "text/plain")

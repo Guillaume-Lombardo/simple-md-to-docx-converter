@@ -65,6 +65,7 @@ from md_converter.malware import (
     UploadScanner,
 )
 from md_converter.observability import (
+    CORRELATION_HEADER,
     AuditReader,
     AuditRecord,
     CorrelationMiddleware,
@@ -401,6 +402,31 @@ def error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
         }
         for status_code in status_codes
     }
+
+
+def document_correlation_headers(app: FastAPI) -> None:
+    """Declare the middleware-generated correlation header on every response."""
+
+    schema = app.openapi()
+    header = {
+        "description": "Server-generated request correlation identifier.",
+        "schema": {"type": "string", "format": "uuid"},
+    }
+    for path in schema["paths"].values():
+        for operation_name, operation in path.items():
+            if operation_name not in {
+                "get",
+                "put",
+                "post",
+                "delete",
+                "options",
+                "head",
+                "patch",
+                "trace",
+            }:
+                continue
+            for response in operation["responses"].values():
+                response.setdefault("headers", {})[CORRELATION_HEADER] = header
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -857,6 +883,11 @@ def build_components(settings: Settings) -> AppComponents:
         timeout_seconds=settings.readiness_timeout_seconds,
         pool_pre_ping=False,
     )
+    observation_engine = create_database_engine(
+        database_url,
+        timeout_seconds=settings.worker_metrics_request_timeout_seconds,
+        pool_pre_ping=False,
+    )
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
     hasher = Argon2idPasswordHasher(
@@ -917,7 +948,10 @@ def build_components(settings: Settings) -> AppComponents:
         retention=retention,
         job_repository=job_repository,
         metrics=metrics,
-        queue_observer=SqlOperationalObserver(engine),
+        queue_observer=SqlOperationalObserver(
+            observation_engine,
+            default_timeout_seconds=settings.worker_metrics_request_timeout_seconds,
+        ),
         audit_reader=SqlAuditReader(engine),
         worker_metrics_bind_host=settings.worker_metrics_bind_host,
         worker_metrics_port=settings.worker_metrics_port,
@@ -1818,4 +1852,5 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     ) -> None:
         template_runtime().set_system_fallback(actor, template_id)
 
+    document_correlation_headers(app)
     return app

@@ -28,13 +28,22 @@ class _QueueObserver:
         self._lock = Lock()
         self.calls = 0
 
-    def observe_queue(self, now: datetime) -> QueueSnapshot:
-        del now
+    def observe_queue(
+        self,
+        now: datetime,
+        *,
+        timeout_seconds: float | None = None,
+        cancelled: Event | None = None,
+    ) -> QueueSnapshot:
+        del now, timeout_seconds, cancelled
         with self._lock:
             self.calls += 1
         if self._fail:
             raise RuntimeError("private database detail")
         return QueueSnapshot(2, 3.5, 1)
+
+    def cancel_observations(self) -> None:
+        pass
 
 
 class _BlockingQueueObserver(_QueueObserver):
@@ -43,11 +52,23 @@ class _BlockingQueueObserver(_QueueObserver):
         self.entered = Event()
         self.release = Event()
 
-    def observe_queue(self, now: datetime) -> QueueSnapshot:
+    def observe_queue(
+        self,
+        now: datetime,
+        *,
+        timeout_seconds: float | None = None,
+        cancelled: Event | None = None,
+    ) -> QueueSnapshot:
         self.entered.set()
-        if not self.release.wait(2):
-            raise RuntimeError("test observer release deadline")
-        return super().observe_queue(now)
+        while not self.release.wait(0.01):
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("observation cancelled")
+        return super().observe_queue(
+            now, timeout_seconds=timeout_seconds, cancelled=cancelled
+        )
+
+    def cancel_observations(self) -> None:
+        self.release.set()
 
 
 def _get(url: str) -> tuple[int, str]:
@@ -146,6 +167,32 @@ def test_worker_metrics_server_caps_database_observations() -> None:
     finally:
         queue.release.set()
         server.stop()
+
+
+def test_worker_metrics_server_stop_interrupts_a_truly_blocked_observation() -> None:
+    queue = _BlockingQueueObserver()
+    server = MetricsHttpServer(
+        OperationalMetrics(),
+        queue,
+        host="127.0.0.1",
+        port=0,
+        max_connections=1,
+        observation_limit=1,
+        request_timeout_seconds=0.2,
+    )
+    server.start()
+    host, port = server.address
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        scrape = pool.submit(_get, f"http://{host}:{port}/metrics")
+        assert queue.entered.wait(1)
+        started = monotonic()
+        server.stop()
+        assert monotonic() - started < 1.0
+        assert scrape.result(timeout=1)[0] in {200, 503}
+    assert not any(
+        thread.name.startswith("external-worker-metrics")
+        for thread in enumerate_threads()
+    )
 
 
 def test_worker_metrics_server_enforces_slowloris_deadline_and_releases_capacity() -> (

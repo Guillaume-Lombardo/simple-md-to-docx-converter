@@ -4,6 +4,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from uuid import UUID, uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from md_converter.auth.models import (
     User,
 )
 from md_converter.config import Settings
+from md_converter.jobs.errors import JobRepositoryError
 from md_converter.jobs.models import JobOutput, JobRequest
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.persistence.jobs import SqlJobRepository
@@ -108,6 +110,26 @@ def test_postgresql_queue_observation_matches_standalone_contract(
         repository.claim("distributed-worker", now, now + timedelta(seconds=30))
         running = SqlOperationalObserver(engine).observe_queue(now)
         assert (running.depth, running.active_jobs) == (0, 1)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_queue_observation_statement_timeout_is_bounded() -> None:
+    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    try:
+        upgrade_database(engine)
+        with engine.connect() as blocker:
+            transaction = blocker.begin()
+            blocker.execute(text("LOCK TABLE conversion_jobs IN ACCESS EXCLUSIVE MODE"))
+            started = monotonic()
+            with pytest.raises(JobRepositoryError):
+                SqlOperationalObserver(engine).observe_queue(
+                    datetime.now(UTC), timeout_seconds=0.1
+                )
+            assert monotonic() - started < 1.0
+            transaction.rollback()
     finally:
         engine.dispose()
 

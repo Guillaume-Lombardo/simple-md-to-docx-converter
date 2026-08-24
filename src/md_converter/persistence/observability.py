@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+import math
+from contextlib import suppress
 from datetime import UTC, datetime
+from threading import Event, Lock
+from time import monotonic
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Engine, String, case, cast, func, literal, select, union_all
+from sqlalchemy import (
+    Engine,
+    String,
+    case,
+    cast,
+    func,
+    literal,
+    select,
+    text,
+    union_all,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -23,12 +38,44 @@ from md_converter.persistence.schema import (
 class SqlOperationalObserver:
     """One-query queue gauges with no row or document materialization."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(
+        self, engine: Engine, *, default_timeout_seconds: float | None = None
+    ) -> None:
+        if default_timeout_seconds is not None and (
+            isinstance(default_timeout_seconds, bool)
+            or not math.isfinite(default_timeout_seconds)
+            or default_timeout_seconds <= 0
+        ):
+            raise ValueError("Queue observation timeout is invalid")
         self._engine = engine
+        self._default_timeout_seconds = default_timeout_seconds
+        self._active_lock = Lock()
+        self._active_connections: dict[int, Any] = {}
 
-    def observe_queue(self, now: datetime) -> QueueSnapshot:
+    def observe_queue(
+        self,
+        now: datetime,
+        *,
+        timeout_seconds: float | None = None,
+        cancelled: Event | None = None,
+    ) -> QueueSnapshot:
+        resolved_timeout = (
+            self._default_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if resolved_timeout is not None and (
+            isinstance(resolved_timeout, bool)
+            or not math.isfinite(resolved_timeout)
+            or resolved_timeout <= 0
+        ):
+            raise ValueError("Queue observation timeout is invalid")
+        deadline = None if resolved_timeout is None else monotonic() + resolved_timeout
         try:
-            with DatabaseSession(self._engine) as database:
+            with self._engine.connect() as database:
+                driver_connection = database.connection.driver_connection
+                self._register(driver_connection, cancelled)
+                self._configure_deadline(database, driver_connection, deadline)
                 row = database.execute(
                     select(
                         func.count(
@@ -59,9 +106,60 @@ class SqlOperationalObserver:
                 ).one()
         except SQLAlchemyError, ValueError, TypeError:
             raise JobRepositoryError from None
+        finally:
+            if "driver_connection" in locals():
+                self._clear_deadline(driver_connection)
+                self._unregister(driver_connection)
         oldest = _utc(row[1])
         age = 0.0 if oldest is None else max(0.0, (now - oldest).total_seconds())
         return QueueSnapshot(int(row[0] or 0), age, int(row[2] or 0))
+
+    def cancel_observations(self) -> None:
+        """Interrupt active driver calls so listener shutdown remains bounded."""
+
+        with self._active_lock:
+            connections = tuple(self._active_connections.values())
+        for connection in connections:
+            interrupt = getattr(connection, "interrupt", None)
+            cancel = getattr(connection, "cancel", None)
+            with suppress(Exception):
+                if callable(interrupt):
+                    interrupt()
+                elif callable(cancel):
+                    cancel()
+
+    def _register(self, connection: Any, cancelled: Event | None) -> None:
+        with self._active_lock:
+            self._active_connections[id(connection)] = connection
+            if cancelled is not None and cancelled.is_set():
+                self._active_connections.pop(id(connection), None)
+                raise JobRepositoryError
+
+    def _unregister(self, connection: Any) -> None:
+        with self._active_lock:
+            self._active_connections.pop(id(connection), None)
+
+    def _configure_deadline(
+        self, database: Any, driver_connection: Any, deadline: float | None
+    ) -> None:
+        if deadline is None:
+            return
+        if self._engine.dialect.name == "postgresql":
+            remaining_ms = max(1, math.ceil((deadline - monotonic()) * 1000))
+            database.execute(
+                text("SELECT set_config('statement_timeout', :timeout, true)"),
+                {"timeout": f"{remaining_ms}ms"},
+            )
+            return
+        progress = getattr(driver_connection, "set_progress_handler", None)
+        if callable(progress):
+            progress(lambda: int(monotonic() >= deadline), 1_000)
+
+    def _clear_deadline(self, driver_connection: Any) -> None:
+        progress = getattr(driver_connection, "set_progress_handler", None)
+        if callable(progress):
+            with suppress(Exception):
+                progress(None, 0)
 
 
 class SqlAuditReader:

@@ -193,6 +193,7 @@ def test_metrics_server_lifecycle_and_bind_failure_are_sanitized(
         server.start()
     server.stop()
     http_server.return_value.shutdown.assert_called_once_with()
+    queue.cancel_observations.assert_called_once_with()
     http_server.return_value.server_close.assert_called_once_with()
     thread.return_value.join.assert_called_once_with(3.0)
     server.stop()

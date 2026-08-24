@@ -43,12 +43,14 @@ def create_database_engine(
         )
         sqlite = resolved_url.get_backend_name() == "sqlite"
         connect_args: dict[str, object] = {"check_same_thread": False} if sqlite else {}
+        engine_options: dict[str, object] = {}
         if timeout_seconds is not None:
             if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
                 raise ValueError("Database timeout must be positive and finite")
             if sqlite:
                 connect_args["timeout"] = timeout_seconds
             else:
+                engine_options["pool_timeout"] = timeout_seconds
                 connect_args.update(
                     {
                         "connect_timeout": max(1, math.ceil(timeout_seconds)),
@@ -63,6 +65,7 @@ def create_database_engine(
             connect_args=connect_args,
             hide_parameters=True,
             pool_pre_ping=pool_pre_ping,
+            **engine_options,
         )
         if sqlite:
             event.listen(engine, "connect", _enable_sqlite_foreign_keys)
