@@ -84,6 +84,9 @@ Build template search, job submission, progressive polling, cancellation, expira
   specification and security reviews approve the exact implementation; the test review approves
   all code and checks pending this mechanical progress-count correction. All reviewers explicitly
   approve T20/T21 final-image E2E sequencing as sequencing, not a waiver.
+- 2026-08-24: The branch was rebased on unchanged `origin/main` and published as ready pull request
+  [#48](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/48). Awaiting required
+  GitHub checks before the authorized squash merge.
 
 ## Synchronization
 
