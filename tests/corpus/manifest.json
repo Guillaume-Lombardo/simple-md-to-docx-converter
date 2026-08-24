@@ -57,7 +57,7 @@
       "id": "markdown-structures", "categories": ["code", "footnotes", "headings", "tables", "unicode"], "kind": "file",
       "purpose": "Cover representative Markdown structure and Unicode inputs.", "future_owner": "T07",
       "entrypoint": "markdown-structures/document.md", "files": ["markdown-structures/document.md"],
-      "expected": {"heading_levels": [1, 2], "table_rows": 2, "footnotes": 1, "code_blocks": 1},
+      "expected": {"heading_levels": [1, 2], "lists": 1, "local_links": 1, "quotes": 1, "attributes": 1, "table_rows": 2, "footnotes": 1, "code_blocks": 1},
       "provenance": {"generator": "project-authored Markdown", "license": "CC0-1.0"}
     },
     {

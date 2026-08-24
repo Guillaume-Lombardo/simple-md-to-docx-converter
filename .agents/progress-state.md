@@ -74,6 +74,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   explicitly.
 - A manifest-owned reference corpus with deterministic synthetic fixtures, bounded OpenXML and
   raster comparison helpers, reusable Pytest fixtures, and an active document-engine CI domain.
+- T07 is implemented locally on `feat/T07-pandoc-docx`: extension-aware raw-HTML and URI rejection,
+  fixed Pandoc DOCX invocation, isolated workspaces and environment, process-group timeout cleanup,
+  stable content-free failures, minimum generated-DOCX validation, and exact Pandoc 3.10.2
+  OpenXML integration coverage. It remains under review and is not delivered until verified on
+  `main`.
 
 ## Blockers and Risks
 
@@ -90,9 +95,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Implement T07 against the approved Markdown dialect and T04 corpus without absorbing T08 image/
-   archive security, T09 Mermaid, T10 template/font, or T11 PDF responsibilities. T08 still waits
-   for T07, and T13 still waits for T11.
+1. Complete independent review and main verification of T07 without absorbing T08 image/archive
+   security, T09 Mermaid, T10 template/font, T11 PDF, or T18 production-limit responsibilities.
+   T08 still waits for T07, and T13 still waits for T11.
 2. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 3. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -129,6 +134,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
   environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
   so final-image E2E coverage is not applicable.
+- T07 formatting, Ruff, and ty checks pass. Its conversion/CI-focused selection passes 69 tests,
+  the exact Pandoc 3.10.2 integration module passes 6 tests, and the service-independent selection
+  passes 360 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
+  LibreOffice suites were intentionally left to orchestrated environments; the two canonical
+  external-service commands were not claimed. T07 has no delivered user-visible or operational
+  workflow, so final-image E2E is not applicable and remains with T20/T21.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.

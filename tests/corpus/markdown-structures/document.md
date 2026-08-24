@@ -4,7 +4,14 @@ title: "Deterministic Unicode résumé"
 
 # Héading level 1 — résumé and résumé
 
-## Heading level 2
+## Heading level 2 {#t07-custom-heading}
+
+- First list item
+- Second list item
+
+[Local section link](#heading-level-2)
+
+> A quoted paragraph with “Unicode punctuation”.
 
 | Name | Value |
 | --- | ---: |

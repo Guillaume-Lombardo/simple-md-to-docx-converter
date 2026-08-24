@@ -22,6 +22,20 @@ def test_committed_workflow_satisfies_local_security_policy() -> None:
 
 
 @pytest.mark.unit
+def test_document_engine_job_installs_only_checksum_locked_pandoc() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "if: ${{ matrix.domain == 'document-engines' }}" in workflow
+    assert (
+        "https://github.com/jgm/pandoc/releases/download/3.10.2/"
+        "pandoc-3.10.2-linux-amd64.tar.gz"
+    ) in workflow
+    assert (
+        "c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a" in workflow
+    )
+    assert "sha256sum --check --strict" in workflow
+
+
+@pytest.mark.unit
 def test_validator_rejects_unpinned_action_and_secret_access() -> None:
     """Mutable action tags and secret reads are rejected together."""
     workflow = "uses: actions/checkout@v7\nsecrets.DEPLOY_TOKEN\n"
