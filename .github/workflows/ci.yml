@@ -210,6 +210,25 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
+      - name: Install verified Pandoc for document-engine tests
+        if: ${{ matrix.domain == 'document-engines' }}
+        env:
+          PANDOC_SHA256: c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a
+          PANDOC_URL: https://github.com/jgm/pandoc/releases/download/3.10.2/pandoc-3.10.2-linux-amd64.tar.gz
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pandoc-3.10.2-linux-amd64.tar.gz"
+          install_root="$RUNNER_TEMP/pandoc-install"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --connect-timeout 20 --max-time 180 --retry 3 --retry-all-errors \
+            --output "$archive" "$PANDOC_URL"
+          echo "$PANDOC_SHA256  $archive" | sha256sum --check --strict
+          mkdir --mode=0700 "$install_root"
+          tar --extract --gzip --file="$archive" --directory="$install_root" \
+            --no-same-owner --no-same-permissions
+          pandoc_bin="$install_root/pandoc-3.10.2/bin"
+          [[ -x "$pandoc_bin/pandoc" ]]
+          echo "$pandoc_bin" >> "$GITHUB_PATH"
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket

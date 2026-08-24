@@ -10,8 +10,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 ## Verified State
 
 - `main` is clean and matches `origin/main`; delivered history through T04 PR #32 is verified below.
-- T00, T01, T02, T03, T04, T05, T06, T12, and T14 are delivered. Linear G1L-310 is synchronized
-  as `Done`; Linear G1L-314 follows this durable T04 completion sync.
+- T00, T01, T02, T03, T04, T05, T06, T12, and T14 are delivered. Linear G1L-310 and G1L-314 are
+  synchronized as `Done`; T07 is active on `feat/T07-pandoc-docx`.
 - PR #32 delivered the complete manifest-owned corpus, provenance-pinned generated
   DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
   RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
@@ -74,6 +74,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   explicitly.
 - A manifest-owned reference corpus with deterministic synthetic fixtures, bounded OpenXML and
   raster comparison helpers, reusable Pytest fixtures, and an active document-engine CI domain.
+- T07 is implemented locally on `feat/T07-pandoc-docx`: extension-aware raw-HTML and URI rejection,
+  fixed Pandoc DOCX invocation, isolated workspaces and environment, process-group timeout cleanup,
+  stable content-free failures, minimum generated-DOCX validation, and exact Pandoc 3.10.2
+  OpenXML integration coverage. Exact implementation head
+  `7a4acaf3dd26ed4c1750fe9730ffa91345e94631` received independent approval with no findings; it is
+  not delivered until its pull request and exact squash are verified on `main`.
 
 ## Blockers and Risks
 
@@ -90,12 +96,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Synchronize Linear G1L-314 as `Done`, then select T07 as the next dependency-ready ticket.
-2. Implement T07 against the approved Markdown dialect and T04 corpus without absorbing T08 image/
-   archive security, T09 Mermaid, T10 template/font, or T11 PDF responsibilities. T08 still waits
-   for T07, and T13 still waits for T11.
-3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
-4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
+1. Complete independent review and main verification of T07 without absorbing T08 image/archive
+   security, T09 Mermaid, T10 template/font, T11 PDF, or T18 production-limit responsibilities.
+   T08 still waits for T07, and T13 still waits for T11.
+2. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
+3. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
 
 ## Validation
@@ -122,15 +127,21 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310 reports `Done`, contains the PR #30 completion evidence and attachment, and matches
-  the local T00 mirror. Linear G1L-314 still reports `In Progress` pending this durable completion
-  sync; its T00 and T01 dependencies are both verified `Done`.
+- Linear G1L-310 and G1L-314 report `Done` and match their local mirrors. T07/G1L-317 is tracked as
+  `In Progress`; its T04 and T06 dependencies are both verified `Done`, and its local implementation
+  commit is under independent review.
 - T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
   coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
   tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
   commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
   environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
   so final-image E2E coverage is not applicable.
+- T07 formatting, Ruff, and ty checks pass. Its conversion/Pandoc-focused selection passes 96 tests,
+  including 6 exact Pandoc 3.10.2 integration tests; the service-independent selection plus real
+  Pandoc passes 396 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
+  LibreOffice suites were intentionally left to orchestrated environments; the two canonical
+  external-service commands were not claimed. T07 has no delivered user-visible or operational
+  workflow, so final-image E2E is not applicable and remains with T20/T21.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
