@@ -8,6 +8,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 import pytest
 
@@ -21,7 +22,12 @@ from tests.golden.corpus import (
     read_manifest,
 )
 from tests.golden.limits import ArchiveLimits
-from tests.golden.openxml import OpenXmlError, compare_docx, inspect_docx
+from tests.golden.openxml import (
+    READ_CHUNK_BYTES,
+    OpenXmlError,
+    compare_docx,
+    inspect_docx,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -70,6 +76,42 @@ def mark_first_zip_member_encrypted(data: bytes) -> bytes:
     central_flags = int.from_bytes(changed[central + 8 : central + 10], "little") | 1
     changed[local + 6 : local + 8] = local_flags.to_bytes(2, "little")
     changed[central + 8 : central + 10] = central_flags.to_bytes(2, "little")
+    return bytes(changed)
+
+
+def patch_zip_uncompressed_size(data: bytes, member_name: str, size: int) -> bytes:
+    """Patch matching local and central size declarations in a ZIP test fixture."""
+
+    changed = bytearray(data)
+    matches = 0
+    layouts = (
+        (b"PK\x03\x04", 26, 28, 22, 30),
+        (b"PK\x01\x02", 28, 30, 24, 46),
+    )
+    for (
+        signature,
+        name_length_offset,
+        _extra_length_offset,
+        size_offset,
+        header_size,
+    ) in layouts:
+        position = 0
+        while (position := changed.find(signature, position)) >= 0:
+            name_length = int.from_bytes(
+                changed[
+                    position + name_length_offset : position + name_length_offset + 2
+                ],
+                "little",
+            )
+            name_start = position + header_size
+            name = bytes(changed[name_start : name_start + name_length]).decode()
+            if name == member_name:
+                changed[position + size_offset : position + size_offset + 4] = (
+                    size.to_bytes(4, "little")
+                )
+                matches += 1
+            position += len(signature)
+    assert matches == 2
     return bytes(changed)
 
 
@@ -313,6 +355,25 @@ def test_archive_limits_validate_all_fields() -> None:
         ArchiveLimits(1, 1, 1, float("inf"))
 
 
+@pytest.mark.parametrize("invalid", [True, 1.0, float("inf")])
+@pytest.mark.parametrize("field_index", range(3))
+def test_archive_integer_limits_reject_bool_float_and_infinity(
+    invalid: object, field_index: int
+) -> None:
+    values = [1, 1, 1]
+    values[field_index] = cast("int", invalid)
+    with pytest.raises(ValueError, match="positive integers"):
+        ArchiveLimits(values[0], values[1], values[2], 1.0)
+
+
+@pytest.mark.parametrize("invalid", [True, float("inf"), float("nan"), "2"])
+def test_archive_compression_ratio_rejects_non_finite_or_non_numeric(
+    invalid: object,
+) -> None:
+    with pytest.raises(ValueError, match="finite non-boolean"):
+        ArchiveLimits(1, 1, 1, cast("float", invalid))
+
+
 def test_docx_rejects_invalid_zip() -> None:
     with pytest.raises(OpenXmlError, match="valid ZIP"):
         inspect_docx(b"not a zip", LIMITS)
@@ -411,6 +472,37 @@ def test_docx_inspection_hashes_binary_media(corpus_manifest: CorpusManifest) ->
         rewrite_docx(base, extras=[("word/media/image.png", b"pixels")]), LIMITS
     )
     assert set(snapshot.binary_sha256) == {"word/media/image.png"}
+
+
+def test_docx_bounded_reader_rejects_forged_uncompressed_size(
+    corpus_manifest: CorpusManifest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = build_case_bytes(corpus_manifest.by_id("template-classic"))
+    output = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(base)) as source,
+        zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as target,
+    ):
+        for member in source.infolist():
+            target.writestr(member.filename, source.read(member))
+        target.writestr("word/media/compression-bomb.bin", bytes(4 * 1024 * 1024))
+    forged = patch_zip_uncompressed_size(
+        output.getvalue(), "word/media/compression-bomb.bin", 1
+    )
+    read_sizes: list[int] = []
+    original_read = zipfile.ZipExtFile.read
+
+    def tracked_read(stream: zipfile.ZipExtFile, size: int = -1) -> bytes:
+        read_sizes.append(size)
+        return original_read(stream, size)
+
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", tracked_read)
+    with pytest.raises(OpenXmlError, match=r"integrity|declared size"):
+        inspect_docx(
+            forged, ArchiveLimits(20, 8 * 1024 * 1024, 16 * 1024 * 1024, 100.0)
+        )
+    assert read_sizes
+    assert all(0 < size <= READ_CHUNK_BYTES for size in read_sizes)
 
 
 def test_unknown_builder_and_non_generated_case_are_rejected(

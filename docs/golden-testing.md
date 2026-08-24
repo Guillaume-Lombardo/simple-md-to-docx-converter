@@ -28,7 +28,10 @@ are metadata-checked before any member is read and are not T18 production limits
 relationship metadata, ordered document text, style identifiers, page sizes, and SHA-256 hashes of
 binary media. It rejects malformed, duplicate, encrypted, symbolic-link, traversal, DTD, and entity
 inputs. Relationship targets are observations only and are never dereferenced. `inspect_docx`
-requires the same explicit `ArchiveLimits`; it has no hidden resource defaults.
+requires the same explicit `ArchiveLimits`; it has no hidden resource defaults. Parts are read in
+bounded chunks while their actual decompressed member and archive totals are counted. Declared-size
+overruns, CRC failures, truncated streams, and decompression failures become `OpenXmlError` rather
+than escaping as backend-specific exceptions.
 
 `compare_docx` requires callers to pass `ignored_parts` explicitly. This makes any allowance for a
 volatile OpenXML part visible at each test call; there is no implicit ignore list. ZIP timestamps,

@@ -7,6 +7,7 @@ import io
 import stat
 import unicodedata
 import zipfile
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -17,6 +18,7 @@ from tests.golden.limits import ArchiveLimits
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
 XML_PART_SUFFIXES = (".xml", ".rels")
+READ_CHUNK_BYTES = 64 * 1024
 
 
 class OpenXmlError(ValueError):
@@ -134,6 +136,65 @@ def _preflight_members(
     return [member.filename for member in members if not member.is_dir()]
 
 
+def _read_member_bounded(
+    archive: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    limits: ArchiveLimits,
+    total_uncompressed: int,
+) -> tuple[bytes, int]:
+    """Read one part in bounded chunks and verify actual size and archive integrity."""
+
+    payload = bytearray()
+    actual_size = 0
+    try:
+        with archive.open(member, "r") as source:
+            while True:
+                read_size = min(
+                    READ_CHUNK_BYTES,
+                    limits.max_member_uncompressed_bytes - actual_size + 1,
+                    limits.max_total_uncompressed_bytes
+                    - total_uncompressed
+                    - actual_size
+                    + 1,
+                    member.file_size - actual_size + 1,
+                )
+                chunk = source.read(max(read_size, 1))
+                if not chunk:
+                    break
+                actual_size += len(chunk)
+                if actual_size > member.file_size:
+                    raise OpenXmlError(
+                        f"DOCX part exceeds its declared size: {member.filename}"
+                    )
+                if actual_size > limits.max_member_uncompressed_bytes:
+                    raise OpenXmlError(
+                        f"DOCX part exceeds the uncompressed-size cap: {member.filename}"
+                    )
+                if (
+                    total_uncompressed + actual_size
+                    > limits.max_total_uncompressed_bytes
+                ):
+                    raise OpenXmlError("DOCX exceeds the total uncompressed-size cap")
+                payload.extend(chunk)
+    except OpenXmlError:
+        raise
+    except (
+        EOFError,
+        NotImplementedError,
+        RuntimeError,
+        zipfile.BadZipFile,
+        zlib.error,
+    ) as error:
+        raise OpenXmlError(
+            f"DOCX part failed integrity validation: {member.filename}"
+        ) from error
+    if actual_size != member.file_size:
+        raise OpenXmlError(
+            f"DOCX part size does not match its declaration: {member.filename}"
+        )
+    return bytes(payload), total_uncompressed + actual_size
+
+
 def inspect_docx(data: bytes, limits: ArchiveLimits) -> DocxSnapshot:
     """Inspect DOCX bytes without extraction or relationship dereferencing."""
 
@@ -142,7 +203,8 @@ def inspect_docx(data: bytes, limits: ArchiveLimits) -> DocxSnapshot:
     except zipfile.BadZipFile as error:
         raise OpenXmlError("DOCX is not a valid ZIP archive") from error
     with archive:
-        names = _preflight_members(archive.infolist(), limits)
+        members = archive.infolist()
+        names = _preflight_members(members, limits)
         required = {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
         missing = sorted(required - set(names))
         if missing:
@@ -150,8 +212,15 @@ def inspect_docx(data: bytes, limits: ArchiveLimits) -> DocxSnapshot:
         xml_parts: dict[str, str] = {}
         roots: dict[str, ElementTree.Element] = {}
         binary_sha256: dict[str, str] = {}
-        for name in sorted(names):
-            payload = archive.read(name)
+        total_uncompressed = 0
+        for member in sorted(
+            (item for item in members if not item.is_dir()),
+            key=lambda item: item.filename,
+        ):
+            name = member.filename
+            payload, total_uncompressed = _read_member_bounded(
+                archive, member, limits, total_uncompressed
+            )
             if name.endswith(XML_PART_SUFFIXES) or name == "[Content_Types].xml":
                 xml_parts[name], roots[name] = _canonical_xml(payload, name)
             elif not name.endswith("/"):

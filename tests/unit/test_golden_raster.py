@@ -1,5 +1,7 @@
 """Boundary tests for engine-neutral PDF raster comparisons."""
 
+from typing import cast
+
 import pytest
 
 from tests.golden.limits import RasterLimits
@@ -105,3 +107,15 @@ def test_caller_supplied_raster_limits_are_enforced(
 def test_raster_limits_require_positive_values() -> None:
     with pytest.raises(ValueError, match="positive"):
         RasterLimits(0, 1, 1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid", [True, 1.0, float("inf")])
+@pytest.mark.parametrize("field_index", range(3))
+def test_raster_integer_limits_reject_bool_float_and_infinity(
+    invalid: object, field_index: int
+) -> None:
+    values = [1, 1, 1]
+    values[field_index] = cast("int", invalid)
+    with pytest.raises(ValueError, match="positive integers"):
+        RasterLimits(values[0], values[1], values[2])

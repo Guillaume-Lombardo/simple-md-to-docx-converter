@@ -122,11 +122,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - Linear G1L-310 reports `Done`, contains the PR #30 completion evidence and attachment, and matches
   the local T00 mirror. Linear G1L-314 reports `In Progress`; its T00 and T01 dependencies are both
   verified `Done`.
-- T04 formatting, Ruff, and ty checks pass. Its focused selection passes 120 tests; its helper-only
-  coverage run passes 89 tests at 99% branch coverage; its active CI integration command passes 57
-  tests; and the service-independent suite passes 270 tests at 98% application coverage. Both canonical Pytest
+- T04 formatting, Ruff, and ty checks pass. Its focused selection passes 143 tests; its helper-only
+  coverage run passes 112 tests at 99% branch coverage; its active CI integration command passes 71
+  tests; and the service-independent suite passes 293 tests at 98% application coverage. Both canonical Pytest
   commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
-  environment variables; all other 270 tests pass. T04 has no user-visible or operational workflow,
+  environment variables; all other 293 tests pass. T04 has no user-visible or operational workflow,
   so final-image E2E coverage is not applicable.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
