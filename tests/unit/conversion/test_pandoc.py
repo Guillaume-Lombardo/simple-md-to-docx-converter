@@ -5,10 +5,11 @@ from __future__ import annotations
 import io
 import subprocess
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
+from md_converter.conversion.archive import ApprovedResource
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
 from md_converter.conversion.validation import PANDOC_READER, ApprovedMarkdown
@@ -52,10 +53,10 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
             "pandoc",
             f"--from={PANDOC_READER}",
             "--to=docx",
-            "--reference-doc=reference.docx",
-            f"--resource-path={workspace}",
-            "--output=output.docx",
-            "input.md",
+            f"--reference-doc={workspace / 'reference.docx'}",
+            f"--resource-path={workspace / 'package'}",
+            f"--output={workspace / 'output.docx'}",
+            str(workspace / "package/input.md"),
         ]
         assert options["shell"] is False
         assert options["start_new_session"] is True
@@ -109,6 +110,36 @@ def test_each_conversion_uses_a_distinct_cleaned_workspace(
     adapter.convert(ApprovedMarkdown("# Second"), reference)
     assert len(set(workspaces)) == 2
     assert all(not workspace.exists() for workspace in workspaces)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.unit
+def test_adapter_materializes_only_approved_package_resources(
+    tmp_path: Path, mocker
+) -> None:
+    reference = minimal_docx()
+    png = b"\x89PNG\r\n\x1a\nnormalized"
+    process = mocker.Mock()
+    process.wait.return_value = 0
+
+    def start(arguments, **options):
+        workspace = options["cwd"]
+        assert (workspace / "package/docs/readme.md").read_text() == (
+            "![safe](../assets/image.svg)"
+        )
+        assert (workspace / "package/assets/image.svg").read_bytes() == png
+        assert arguments[4] == f"--resource-path={workspace / 'package/docs'}"
+        assert arguments[6] == str(workspace / "package/docs/readme.md")
+        (workspace / "output.docx").write_bytes(reference)
+        return process
+
+    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    approved = ApprovedMarkdown(
+        "![safe](../assets/image.svg)",
+        entrypoint=PurePosixPath("docs/readme.md"),
+        resources=(ApprovedResource(PurePosixPath("assets/image.svg"), png),),
+    )
+    assert converter(tmp_path).convert(approved, reference) == reference
     assert list(tmp_path.iterdir()) == []
 
 

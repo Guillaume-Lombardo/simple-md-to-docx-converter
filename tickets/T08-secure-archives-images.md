@@ -2,7 +2,7 @@
 ticket: T08
 linear_id: G1L-318
 linear_url: https://linear.app/g1lom/issue/G1L-318/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,12 @@ Implement safe archive validation and extraction, image normalization, hostile S
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T04 and T07 are verified `Done` in the repository and Linear. Implementation started
+  on `feat/T08-secure-archives-images`. Scope is limited to safe ZIP validation/extraction, root
+  Markdown selection, local-resource resolution, PNG/JPEG/static-GIF/WebP normalization, hostile
+  SVG sanitization and local rasterization, and their security/integration tests. T09 Mermaid, T10
+  template/font management, T11 PDF, and T18 production limit values remain outside this ticket;
+  archive and image limits stay configurable.
 
 ## Synchronization
 

@@ -14,11 +14,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from md_converter.conversion.archive import ApprovedDocument
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.validation import (
     PANDOC_READER,
     ApprovedMarkdown,
-    validate_markdown,
+    validate_document,
 )
 
 _REQUIRED_DOCX_PARTS = frozenset(
@@ -102,7 +103,9 @@ class PandocDocxConverter:
         return environment
 
     def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes:
-        validated = validate_markdown(markdown.text)
+        validated = validate_document(
+            ApprovedDocument(markdown.text, markdown.entrypoint, markdown.resources)
+        )
         try:
             temporary = tempfile.TemporaryDirectory(
                 prefix="md-converter-pandoc-", dir=self._config.workspace_root
@@ -134,10 +137,19 @@ class PandocDocxConverter:
         try:
             for directory in ("home", "tmp", "cache", "config", "data"):
                 (workspace / directory).mkdir(mode=0o700)
-            markdown_path = workspace / "input.md"
+            package_path = workspace / "package"
+            package_path.mkdir(mode=0o700)
+            markdown_path = package_path / markdown.entrypoint
+            markdown_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             reference_path = workspace / "reference.docx"
             output_path = workspace / "output.docx"
             markdown_path.write_text(markdown.text, encoding="utf-8")
+            for resource in markdown.resources:
+                resource_path = package_path / resource.path
+                resource_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if resource_path.exists() or resource_path.is_symlink():
+                    raise OSError
+                resource_path.write_bytes(resource.content)
             reference_path.write_bytes(reference_docx)
         except OSError:
             raise self._workspace_failure() from None
@@ -145,10 +157,10 @@ class PandocDocxConverter:
             self._config.executable,
             f"--from={PANDOC_READER}",
             "--to=docx",
-            f"--reference-doc={reference_path.name}",
-            f"--resource-path={workspace}",
-            f"--output={output_path.name}",
-            markdown_path.name,
+            f"--reference-doc={reference_path}",
+            f"--resource-path={markdown_path.parent}",
+            f"--output={output_path}",
+            str(markdown_path),
         ]
         process = self._start(arguments, workspace)
         self._wait(process)

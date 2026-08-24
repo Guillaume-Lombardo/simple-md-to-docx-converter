@@ -19,10 +19,11 @@ rejected. The validator rejects raw HTML and every link or image destination tha
 protocol-relative form, or encoded equivalent. The same conservative checks apply inside YAML
 front matter and footnote continuations, where extension syntax could otherwise hide content from
 a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual code spans and code
-blocks. All image tokens, including relative and absolute local paths, are rejected until T08 can
-materialize a typed approved asset inside the workspace; T07 does not read document-selected files.
-Pandoc raw-code attributes such as `{=html}` and `{=tex}` are also rejected when attached to inline
-code or used as a fence info string. The same characters remain valid as literal code content.
+blocks. Standalone Markdown still rejects every image token. T08 archive inputs may bind a safe
+relative image destination to a normalized PNG in an immutable approved-resource manifest; missing,
+escaping, ambiguous, absolute, and remote destinations fail before the engine. Pandoc raw-code
+attributes such as `{=html}` and `{=tex}` are also rejected when attached to inline code or used as
+a fence info string. The same characters remain valid as literal code content.
 
 This validation prevents Pandoc from fetching a remote destination supplied by a document. T07
 does not claim operating-system network isolation; final runtime network policy belongs to the
@@ -31,12 +32,12 @@ the approved local-resource behavior that T08 must implement and test.
 
 ## Process boundary
 
-Each conversion uses a new temporary workspace containing only the Markdown input, opaque reference
-DOCX, isolated home/cache/config/data/temp directories, and generated output. Pandoc receives no
-shell, no standard input or captured document output, a process group of its own, and only the
-explicitly supplied `PATH`, fixed `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `TZ=UTC`, plus
-workspace-local directory variables. Host locale, timezone, and unrelated environment values are
-not inherited.
+Each conversion uses a new temporary workspace containing only the Markdown input, T08-approved
+normalized resources, opaque reference DOCX, isolated home/cache/config/data/temp directories, and
+generated output. Pandoc receives no shell, no standard input or captured document output, a
+process group of its own, and only the explicitly supplied `PATH`, fixed `LANG=C.UTF-8`,
+`LC_ALL=C.UTF-8`, and `TZ=UTC`, plus workspace-local directory variables. Host locale, timezone,
+and unrelated environment values are not inherited.
 
 The arguments are fixed to the approved reader, DOCX writer, workspace reference document,
 workspace resource path, and fixed input/output names. There are no user-controlled options,

@@ -1,10 +1,19 @@
 """Unit tests for pre-Pandoc Markdown validation."""
 
+from pathlib import PurePosixPath
+
 import pytest
 
+from md_converter.conversion.archive import ApprovedDocument, ApprovedResource
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.service import DocxConversionService
-from md_converter.conversion.validation import PANDOC_READER, validate_markdown
+from md_converter.conversion.validation import (
+    PANDOC_READER,
+    validate_document,
+    validate_markdown,
+)
+
+PNG = b"\x89PNG\r\n\x1a\nnormalized"
 
 
 @pytest.mark.unit
@@ -129,6 +138,95 @@ def test_local_images_are_rejected_until_t08_materializes_approved_assets(
     assert captured.value.code is ConversionErrorCode.VALIDATION
     assert str(captured.value) == "Markdown input contains an unapproved image."
     converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "![local](../assets/image.png)",
+        "Safe.[^1]\n\n[^1]: ![local](../assets/image.png)",
+        "---\ncover: '![local](../assets/image.png)'\n---\n# Safe",
+    ],
+)
+def test_archive_images_must_bind_to_approved_normalized_resources(
+    mocker, markdown: str
+) -> None:
+    converter = mocker.Mock()
+    service = DocxConversionService(converter)
+    document = ApprovedDocument(
+        markdown,
+        PurePosixPath("docs/readme.md"),
+        (ApprovedResource(PurePosixPath("assets/image.png"), PNG),),
+    )
+    service.convert_document(document, b"reference")
+    approved = converter.convert.call_args.args[0]
+    assert approved.entrypoint == PurePosixPath("docs/readme.md")
+    assert approved.resources == document.resources
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("image", "message"),
+    [
+        ("![missing](missing.png)", "missing or unapproved"),
+        ("![escape](../../outside.png)", "escapes the archive"),
+        ("![absolute](/etc/passwd)", "image path is invalid"),
+        ("![query](../assets/image.png?raw=1)", "image path is invalid"),
+        ("![fragment](../assets/image.png#part)", "image path is invalid"),
+        ("![encoded](..%2fassets/image.png)", "image path is invalid"),
+        ("![double](%252e%252e%252fassets/image.png)", "image path is invalid"),
+    ],
+)
+def test_invalid_archive_image_references_fail_before_converter(
+    mocker, image: str, message: str
+) -> None:
+    converter = mocker.Mock()
+    document = ApprovedDocument(
+        image,
+        PurePosixPath("docs/readme.md"),
+        (ApprovedResource(PurePosixPath("assets/image.png"), PNG),),
+    )
+    with pytest.raises(ConversionError, match=message):
+        DocxConversionService(converter).convert_document(document, b"reference")
+    converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "document",
+    [
+        ApprovedDocument("# Safe", PurePosixPath("../escape.md"), ()),
+        ApprovedDocument(
+            "![x](x.png)",
+            PurePosixPath("document.md"),
+            (ApprovedResource(PurePosixPath("../x.png"), PNG),),
+        ),
+        ApprovedDocument(
+            "![x](x.png)",
+            PurePosixPath("document.md"),
+            (ApprovedResource(PurePosixPath("x.png"), b"not png"),),
+        ),
+        ApprovedDocument(
+            "![x](DOCUMENT.MD)",
+            PurePosixPath("document.md"),
+            (ApprovedResource(PurePosixPath("DOCUMENT.MD"), PNG),),
+        ),
+        ApprovedDocument(
+            "![x](assets/x.png)",
+            PurePosixPath("document.md"),
+            (
+                ApprovedResource(PurePosixPath("assets"), PNG),
+                ApprovedResource(PurePosixPath("assets/x.png"), PNG),
+            ),
+        ),
+    ],
+)
+def test_forged_approved_document_manifest_is_rejected(
+    document: ApprovedDocument,
+) -> None:
+    with pytest.raises(ConversionError, match="package is invalid"):
+        validate_document(document)
 
 
 @pytest.mark.unit
