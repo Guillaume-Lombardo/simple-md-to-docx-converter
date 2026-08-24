@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from md_converter.config import Settings
 from md_converter.jobs.policy import (
+    ArchiveResourceBudget,
+    DiagramResourceBudget,
     DocumentResourceBudget,
     JobAdmissionPolicy,
     ResourceBudget,
@@ -49,15 +51,22 @@ def build_job_policies(settings: Settings) -> JobPolicies:
             global_queue_capacity=settings.job_global_queue_capacity,
         ),
         documents=DocumentResourceBudget(
-            upload_bytes=settings.conversion_upload_max_bytes,
-            decompressed_bytes=settings.conversion_max_decompressed_bytes,
-            file_count=settings.conversion_max_files,
-            image_count=settings.conversion_max_images,
-            diagram_count=settings.conversion_max_diagrams,
+            archive=ArchiveResourceBudget(
+                upload_bytes=settings.conversion_upload_max_bytes,
+                decompressed_bytes=settings.conversion_max_decompressed_bytes,
+                file_count=settings.conversion_max_files,
+                image_count=settings.conversion_max_images,
+            ),
+            diagrams=DiagramResourceBudget(
+                diagram_count=settings.conversion_max_diagrams
+            ),
         ),
         resources=resources,
         retention=retention,
-        service=JobServicePolicy(retention.job_artifact_seconds),
+        service=JobServicePolicy(
+            retention.job_artifact_seconds,
+            max_job_duration_seconds=resources.job_duration_seconds,
+        ),
         worker=WorkerPolicy(
             lease_seconds=settings.worker_lease_seconds,
             heartbeat_seconds=settings.worker_heartbeat_seconds,

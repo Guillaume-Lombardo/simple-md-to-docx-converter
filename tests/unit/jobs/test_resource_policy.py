@@ -15,8 +15,10 @@ from md_converter.config import Settings
 from md_converter.jobs.errors import JobProcessingCancelled
 from md_converter.jobs.models import JobProcessResult, JobState
 from md_converter.jobs.policy import (
-    DocumentResourceBudget,
+    ArchiveResourceBudget,
+    DiagramResourceBudget,
     JobAdmissionPolicy,
+    JobExecutionBudget,
     ResourceBudget,
     RetentionPolicy,
 )
@@ -38,13 +40,16 @@ NOW = datetime(2026, 8, 24, tzinfo=UTC)
     (
         (JobAdmissionPolicy, (0, 1)),
         (JobAdmissionPolicy, (1, True)),
-        (DocumentResourceBudget, (2, 1, 1, 1, 1)),
+        (ArchiveResourceBudget, (0, 1, 1, 1)),
+        (DiagramResourceBudget, (0,)),
         (ResourceBudget, (float("inf"), 1, 1)),
         (ResourceBudget, (1, 0, 1)),
         (RetentionPolicy, (1, 1, 1, 0)),
         (JobServicePolicy, (float("inf"),)),
+        (JobServicePolicy, (1, float("inf"))),
         (WorkerSchedule, (1, float("inf"), 1, 1)),
         (WorkerPolicy, (1, 0.5, 1, 1, float("inf"))),
+        (JobExecutionBudget, (1, 0, 2)),
     ),
 )
 def test_resource_policies_reject_unbounded_values(
@@ -52,6 +57,15 @@ def test_resource_policies_reject_unbounded_values(
 ) -> None:
     with pytest.raises(ValueError):
         factory(*values)
+
+
+def test_execution_budget_uses_inclusive_finite_monotonic_deadline() -> None:
+    budget = JobExecutionBudget(2.5, 10.0, 12.5)
+    assert budget.remaining_seconds(11.0) == 1.5
+    assert budget.remaining_seconds(12.5) == 0
+    assert budget.exhausted(13.0)
+    with pytest.raises(ValueError, match="reading"):
+        budget.remaining_seconds(float("nan"))
 
 
 def test_settings_assemble_every_job_policy_without_defaults(tmp_path: Path) -> None:
@@ -68,8 +82,15 @@ def test_settings_assemble_every_job_policy_without_defaults(tmp_path: Path) -> 
     )
     policies = build_job_policies(settings)
     assert policies.admission == JobAdmissionPolicy(2, 10)
-    assert policies.documents.file_count == 100
+    assert policies.documents.archive == ArchiveResourceBudget(
+        upload_bytes=1_000,
+        decompressed_bytes=10_000_000,
+        file_count=100,
+        image_count=50,
+    )
+    assert policies.documents.diagrams == DiagramResourceBudget(diagram_count=20)
     assert policies.worker.max_job_duration_seconds == 60
+    assert policies.service.max_job_duration_seconds == 60
     assert policies.schedule.cleanup_interval_seconds == 60
     assert policies.resources.worker_memory_bytes == 536_870_912
 
@@ -77,7 +98,6 @@ def test_settings_assemble_every_job_policy_without_defaults(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "overrides",
     (
-        {"conversion_max_decompressed_bytes": 999},
         {"template_request_max_bytes": 1_000_000},
         {"worker_heartbeat_seconds": 30.0},
     ),
@@ -101,6 +121,23 @@ def test_settings_reject_incoherent_resource_relationships(
         Settings.model_validate(values)
 
 
+def test_upload_and_decompressed_limits_are_independent(tmp_path: Path) -> None:
+    settings = Settings(
+        **template_settings(conversion_max_decompressed_bytes=500),
+        initial_admin_username="admin",
+        initial_admin_password="sec" + "ret",
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000,
+        conversion_request_max_bytes=2_000,
+        conversion_retry_after_seconds=3,
+        job_result_retention_seconds=120,
+    )
+    policies = build_job_policies(settings)
+    assert policies.documents.archive.upload_bytes == 1_000
+    assert policies.documents.archive.decompressed_bytes == 500
+
+
 def test_worker_turns_duration_exhaustion_into_safe_failure(
     mocker: MockerFixture,
 ) -> None:
@@ -117,9 +154,8 @@ def test_worker_turns_duration_exhaustion_into_safe_failure(
     )
     repository.claim.return_value = claimed
     repository.cancellation_requested.return_value = False
-    clock = mocker.Mock(
-        side_effect=(NOW, NOW + timedelta(seconds=2), NOW + timedelta(seconds=2))
-    )
+    clock = mocker.Mock(return_value=NOW)
+    monotonic_clock = mocker.Mock(side_effect=(0.0, 2.0, 2.0))
 
     def process(*_args: object, **kwargs: object) -> JobProcessResult:
         cancelled = cast("Callable[[], bool]", kwargs["cancelled"])
@@ -129,7 +165,13 @@ def test_worker_turns_duration_exhaustion_into_safe_failure(
     processor.process.side_effect = process
     worker = ConversionWorker(
         worker_id="budget-worker",
-        runtime=WorkerRuntime(repository, objects, processor, clock),
+        runtime=WorkerRuntime(
+            repository,
+            objects,
+            processor,
+            clock,
+            monotonic_clock,
+        ),
         policy=WorkerPolicy(30, 5, 120, 10, max_job_duration_seconds=1),
     )
     assert worker.run_once()

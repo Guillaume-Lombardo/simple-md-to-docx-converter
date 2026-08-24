@@ -27,17 +27,36 @@ read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_STORAGE_PROFILE=standalone
 export MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-export MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=1048576
-export MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=1114112
-export MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=1
-export MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=3600
+: "${MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_MAX_FILES:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_MAX_IMAGES:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_MAX_DIAGRAMS:?set a disposable local value}"
+: "${MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_JOB_ACTIVE_LIMIT_PER_USER:?set a disposable local value}"
+: "${MD_CONVERTER_JOB_GLOBAL_QUEUE_CAPACITY:?set a disposable local value}"
+: "${MD_CONVERTER_JOB_MAX_DURATION_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_LEASE_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_HEARTBEAT_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_IDLE_POLL_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS:?set a disposable local value}"
+: "${MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE:?set a disposable local value}"
 uv run uvicorn md_converter:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-The four numeric values above are disposable development examples, not approved production policy.
-They are mandatory so an operator cannot unknowingly inherit request-body, upload, polling, or
-retention limits. The request-body limit must exceed the source limit to allow bounded multipart
-metadata. T18 owns their production values together with quota and cleanup schedules.
+Set the required variables in the current shell before running this guard block. The documentation
+deliberately supplies no numeric values: even local examples must not be mistaken for approved
+production policy. The request-body limit must exceed the source limit to allow bounded multipart
+metadata. Upload and decompressed-content limits are independent ceilings; either may be smaller
+depending on the accepted standalone-file and archive contracts. The heartbeat must remain shorter
+than the lease. Template-policy variables listed in
+[storage-profiles.md](storage-profiles.md) are also required by the current application factory.
 
 The session cookie is always `Secure`, so use an HTTPS endpoint for browser or API authentication.
 Do not commit bootstrap credentials or place production secrets in shell history; deployment

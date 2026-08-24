@@ -29,25 +29,68 @@ class JobAdmissionPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class DocumentResourceBudget:
-    """Structural ceilings applied by the document-validation pipeline."""
+class ArchiveResourceBudget:
+    """Typed archive-validation slice for future processor composition."""
 
     upload_bytes: int
     decompressed_bytes: int
     file_count: int
     image_count: int
-    diagram_count: int
 
     def __post_init__(self) -> None:
         _positive_integer("Upload budget", self.upload_bytes)
         _positive_integer("Decompressed-content budget", self.decompressed_bytes)
         _positive_integer("File-count budget", self.file_count)
         _positive_integer("Image-count budget", self.image_count)
+
+
+@dataclass(frozen=True, slots=True)
+class DiagramResourceBudget:
+    """Typed Mermaid-validation slice for future processor composition."""
+
+    diagram_count: int
+
+    def __post_init__(self) -> None:
         _positive_integer("Diagram-count budget", self.diagram_count)
-        if self.decompressed_bytes < self.upload_bytes:
-            raise ValueError(
-                "Decompressed-content budget cannot be below upload budget"
-            )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentResourceBudget:
+    """Structural ceilings projected onto archive and diagram boundaries."""
+
+    archive: ArchiveResourceBudget
+    diagrams: DiagramResourceBudget
+
+
+@dataclass(frozen=True, slots=True)
+class JobExecutionBudget:
+    """One claimed job's monotonic duration budget."""
+
+    duration_seconds: float
+    started_monotonic: float
+    deadline_monotonic: float
+
+    def __post_init__(self) -> None:
+        _positive_number("Job execution duration", self.duration_seconds)
+        if not math.isfinite(self.started_monotonic):
+            raise ValueError("Job execution start must be finite")
+        if not math.isfinite(self.deadline_monotonic) or not math.isclose(
+            self.deadline_monotonic - self.started_monotonic,
+            self.duration_seconds,
+        ):
+            raise ValueError("Job execution deadline must match its duration")
+
+    def remaining_seconds(self, now_monotonic: float) -> float:
+        """Return a non-negative remaining duration from a monotonic reading."""
+
+        if not math.isfinite(now_monotonic):
+            raise ValueError("Monotonic reading must be finite")
+        return max(0.0, self.deadline_monotonic - now_monotonic)
+
+    def exhausted(self, now_monotonic: float) -> bool:
+        """Return whether a monotonic reading reached the inclusive deadline."""
+
+        return self.remaining_seconds(now_monotonic) == 0
 
 
 @dataclass(frozen=True, slots=True)

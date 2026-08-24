@@ -23,14 +23,21 @@ database or document details.
 ## Document and worker budgets
 
 The required upload, decompressed-byte, file, image, and diagram ceilings are assembled as a
-`DocumentResourceBudget`. Existing archive, image, Mermaid, Pandoc, and LibreOffice adapters retain
-their own finer-grained validated limits. Final conversion composition must derive those adapter
-limits from this policy rather than supply independent values.
+`DocumentResourceBudget` with typed `ArchiveResourceBudget` and `DiagramResourceBudget`
+projections. Upload and decompressed limits are independent because standalone Markdown and archive
+inputs apply them at different boundaries. Existing archive, image, Mermaid, Pandoc, and
+LibreOffice adapters retain their own finer-grained validated limits. Final conversion composition
+must derive those adapter limits from these projections rather than supply independent values.
 
-`MD_CONVERTER_JOB_MAX_DURATION_SECONDS` is enforced by the worker cancellation callback and by the
-existing subprocess deadlines. A cooperative processor that reaches the overall deadline ends with
-the stable `resource_budget_exceeded` failure. A durable user cancellation wins over the duration
-failure. Engine process groups remain responsible for terminating their descendants.
+`MD_CONVERTER_JOB_MAX_DURATION_SECONDS` is converted into a monotonic `JobExecutionBudget` for each
+claim. The processor receives a callable cancellation probe exposing that budget, including its
+monotonic deadline and remaining duration. A durable user cancellation wins over duration
+exhaustion; duration exhaustion wins over a simultaneous functional or unexpected processor error
+and produces the stable `resource_budget_exceeded` failure. Lease loss remains an infrastructure
+failure and wins before terminal transitions. Existing subprocess deadlines remain responsible for
+terminating engine process groups. Final processor composition must pass the remaining monotonic
+duration to each engine adapter; that assembly is deferred until the reserved conversion
+composition is available.
 
 Memory and disk-backed workspace ceilings are required configuration
 (`MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES` and
@@ -78,5 +85,5 @@ settings, T18 requires:
 - `MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS`
 - `MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE`
 
-The heartbeat must be shorter than the lease. The decompressed-byte ceiling cannot be smaller than
-the upload ceiling. All durations must be finite and positive.
+The heartbeat must be shorter than the lease. All durations must be finite and positive. No ordering
+is imposed between upload and decompressed-content ceilings.

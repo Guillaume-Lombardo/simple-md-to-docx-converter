@@ -99,8 +99,6 @@ class Settings(BaseSettings):
             raise ValueError("initial administrator password must not be blank")
         if self.conversion_request_max_bytes <= self.conversion_upload_max_bytes:
             raise ValueError("conversion request limit must exceed the source limit")
-        if self.conversion_max_decompressed_bytes < self.conversion_upload_max_bytes:
-            raise ValueError("decompressed limit must not be smaller than upload limit")
         if self.template_request_max_bytes <= self.template_max_archive_bytes:
             raise ValueError("template request limit must exceed the archive limit")
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:

@@ -17,6 +17,16 @@ from md_converter.jobs.models import (
     JobSubmission,
     LeaseHeartbeat,
 )
+from md_converter.jobs.policy import JobExecutionBudget
+
+
+class CancellationProbe(Protocol):
+    """Callable cancellation boundary carrying the current execution budget."""
+
+    @property
+    def budget(self) -> JobExecutionBudget | None: ...
+
+    def __call__(self) -> bool: ...
 
 
 class JobRepository(Protocol):
@@ -94,6 +104,6 @@ class JobProcessor(Protocol):
         self,
         job: ConversionJob,
         *,
-        cancelled: Callable[[], bool],
+        cancelled: CancellationProbe,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult: ...

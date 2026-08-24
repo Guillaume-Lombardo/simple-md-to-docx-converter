@@ -34,6 +34,37 @@ Template activation invokes both configured document engines synchronously insid
 thread, so request handlers do not block the ASGI event loop. Startup also retries durable hidden
 publication reservations and deletion tombstones before accepting traffic.
 
+Both profiles also require the complete T18 resource policy below. Placeholders intentionally do
+not establish production values:
+
+```text
+MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved positive value>
+MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
+MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_FILES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_IMAGES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_DIAGRAMS=<approved positive value>
+MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved positive value>
+MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved positive value>
+MD_CONVERTER_JOB_ACTIVE_LIMIT_PER_USER=<approved positive value>
+MD_CONVERTER_JOB_GLOBAL_QUEUE_CAPACITY=<approved positive value>
+MD_CONVERTER_JOB_MAX_DURATION_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES=<approved positive value>
+MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES=<approved positive value>
+MD_CONVERTER_WORKER_LEASE_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_HEARTBEAT_SECONDS=<approved finite value shorter than lease>
+MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_IDLE_POLL_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
+```
+
+Upload and decompressed-content limits are independent. A standalone Markdown upload can make the
+upload ceiling larger than the decompressed archive ceiling, while another approved policy may do
+the reverse. Configuration therefore validates each as positive without imposing an unsupported
+ordering.
+
 ## Standalone
 
 Set:
@@ -41,10 +72,7 @@ Set:
 ```text
 MD_CONVERTER_STORAGE_PROFILE=standalone
 MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
-MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
-MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
-MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
+# plus every shared T18 resource-policy variable listed above
 ```
 
 Metadata is stored in `/data/metadata.sqlite3`. Object bytes are stored below `/data/objects`;
@@ -75,10 +103,7 @@ Set:
 MD_CONVERTER_STORAGE_PROFILE=distributed
 MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
 MD_CONVERTER_S3_BUCKET=...
-MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
-MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
-MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
-MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
+# plus every shared T18 resource-policy variable listed above
 ```
 
 `MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.
@@ -102,9 +127,16 @@ bucket platforms provide a consistent cross-service recovery point.
 
 ## Operational decisions still open
 
-No production retention, cleanup schedule, quota, antivirus policy, RPO, or RTO is fixed here.
-Request-body size, upload size, polling advice, and result retention must be supplied explicitly;
-their approved production values remain T18 work. Operators must keep those values configurable
-until they receive separate product approval. T12 verifies real
+The T18 mechanisms are implemented, but the PM has not approved any production numeric value for
+uploads, decompression, file/image/diagram counts, user/global capacity, duration, memory,
+ephemeral storage, leases, retries, cleanup, or retained job artifacts. The PM must also decide:
+
+- whether source and result retention remain one job-artifact window or become separate contracts;
+- template-version and audit-record retention periods and deletion semantics;
+- the antivirus engine/provider, scan boundary, failure policy, and quarantine behavior;
+- standalone and distributed RPO/RTO targets and the operational proof required for each;
+- the final container/deployment enforcement values for memory and ephemeral storage.
+
+Operators must keep all placeholders configurable until those decisions are recorded. T12 verifies real
 SQLite/filesystem and PostgreSQL/RustFS boundaries. Final hardened-image rootless storage E2E is
 the explicitly approved T20/T21 sequencing debt and is not an integration-test waiver.

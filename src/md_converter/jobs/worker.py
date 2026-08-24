@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import Event, Lock, Thread
+from time import monotonic
 
 from md_converter.conversion.errors import ConversionError
 from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
@@ -19,6 +20,7 @@ from md_converter.jobs.models import (
     LeaseHeartbeat,
     result_object_id,
 )
+from md_converter.jobs.policy import JobExecutionBudget
 from md_converter.jobs.ports import JobProcessor, JobRepository
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
 
@@ -65,6 +67,7 @@ class WorkerRuntime:
     objects: ObjectStore
     processor: JobProcessor
     clock: Callable[[], datetime]
+    monotonic_clock: Callable[[], float] = monotonic
 
 
 @dataclass(slots=True)
@@ -73,6 +76,26 @@ class _ProgressState:
 
     step: JobStep
     percentage: int
+
+
+@dataclass(frozen=True, slots=True)
+class _BudgetCancellationProbe:
+    """Worker-owned cancellation probe visible to the processor boundary."""
+
+    budget: JobExecutionBudget | None
+    lease_lost: Event
+    duration_exhausted: Event
+    monotonic_clock: Callable[[], float]
+    durable_requested: Callable[[], bool]
+
+    def __call__(self) -> bool:
+        if self.budget is not None and self.budget.exhausted(self.monotonic_clock()):
+            self.duration_exhausted.set()
+        return (
+            self.lease_lost.is_set()
+            or self.duration_exhausted.is_set()
+            or self.durable_requested()
+        )
 
 
 class ConversionWorker:
@@ -92,6 +115,7 @@ class ConversionWorker:
         self._objects = runtime.objects
         self._processor = runtime.processor
         self._clock = runtime.clock
+        self._monotonic_clock = runtime.monotonic_clock
         self._policy = policy
 
     def run_once(self) -> bool:  # noqa: PLR0912, PLR0915 - lifecycle is explicit
@@ -106,10 +130,17 @@ class ConversionWorker:
         if job.lease_token is None:  # guarded by the domain model
             raise JobLeaseLostError("Conversion job lease token is missing")
         lease_token = job.lease_token
-        deadline = (
+        started_monotonic = self._monotonic_clock()
+        budget = (
             None
             if self._policy.max_job_duration_seconds is None
-            else now + timedelta(seconds=self._policy.max_job_duration_seconds)
+            else JobExecutionBudget(
+                duration_seconds=self._policy.max_job_duration_seconds,
+                started_monotonic=started_monotonic,
+                deadline_monotonic=(
+                    started_monotonic + self._policy.max_job_duration_seconds
+                ),
+            )
         )
 
         progress_state = _ProgressState(job.step, job.progress)
@@ -149,16 +180,15 @@ class ConversionWorker:
                         lease_lost.set()
                         return
 
-        def cancelled() -> bool:
-            if deadline is not None and self._clock() >= deadline:
-                duration_exhausted.set()
-            return (
-                lease_lost.is_set()
-                or duration_exhausted.is_set()
-                or self._repository.cancellation_requested(
-                    job.id, self._worker_id, lease_token
-                )
-            )
+        cancelled = _BudgetCancellationProbe(
+            budget=budget,
+            lease_lost=lease_lost,
+            duration_exhausted=duration_exhausted,
+            monotonic_clock=self._monotonic_clock,
+            durable_requested=lambda: self._repository.cancellation_requested(
+                job.id, self._worker_id, lease_token
+            ),
+        )
 
         def progress(step: JobStep, percentage: int) -> None:
             with progress_lock:
@@ -190,15 +220,23 @@ class ConversionWorker:
             with heartbeat_operation:
                 if keepalive_errors:
                     raise keepalive_errors[0]
+                if isinstance(processing_error, JobLeaseLostError):
+                    raise processing_error
+                if budget is not None and budget.exhausted(self._monotonic_clock()):
+                    duration_exhausted.set()
+                durable_cancelled = self._repository.cancellation_requested(
+                    job.id, self._worker_id, lease_token
+                )
+                if durable_cancelled:
+                    self._finish_cancelled(job)
+                    keepalive_stop.set()
+                    return True
+                if duration_exhausted.is_set():
+                    self._finish_budget_exceeded(job)
+                    keepalive_stop.set()
+                    return True
                 if isinstance(processing_error, JobProcessingCancelled):
-                    if duration_exhausted.is_set() and not (
-                        self._repository.cancellation_requested(
-                            job.id, self._worker_id, lease_token
-                        )
-                    ):
-                        self._finish_budget_exceeded(job)
-                    else:
-                        self._finish_cancelled(job)
+                    self._finish_cancelled(job)
                     keepalive_stop.set()
                     return True
                 if isinstance(processing_error, ConversionError):

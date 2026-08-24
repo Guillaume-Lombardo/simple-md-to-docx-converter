@@ -9,9 +9,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
 from md_converter.auth.models import Role, User
 from md_converter.jobs.errors import (
+    JobConflictError,
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
@@ -21,17 +23,50 @@ from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.schema import ConversionJobRow
 from md_converter.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.storage import FilesystemObjectStore, ObjectKey, ObjectScope
+from md_converter.storage import (
+    FilesystemObjectStore,
+    ObjectKey,
+    ObjectScope,
+    ObjectStore,
+    ObjectStoreError,
+)
 from tests.job_repository_contracts import TEMPLATE_ID, TEMPLATE_VERSION_ID
 from tests.template_records import publish_template_pair
 
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
 COMPONENTS = (("md-converter", "0.1.0"),)
+
+
+class FailOnceResultDeleteStore:
+    """Real filesystem delegate with one injected result-deletion failure."""
+
+    def __init__(self, delegate: ObjectStore) -> None:
+        self._delegate = delegate
+        self.failed = False
+
+    def put(self, key: ObjectKey, content: bytes) -> None:
+        self._delegate.put(key, content)
+
+    def get(self, key: ObjectKey) -> bytes:
+        return self._delegate.get(key)
+
+    def delete(self, key: ObjectKey) -> None:
+        if key.scope is ObjectScope.RESULT and not self.failed:
+            self.failed = True
+            raise ObjectStoreError("Object storage operation failed")
+        self._delegate.delete(key)
+
+    def exists(self, key: ObjectKey) -> bool:
+        return self._delegate.exists(key)
+
+    def is_ready(self) -> bool:
+        return self._delegate.is_ready()
 
 
 def _request(owner_id: UUID, source: bytes, now: datetime = NOW) -> JobRequest:
@@ -74,6 +109,16 @@ def test_sqlite_admission_is_owner_scoped_global_and_idempotent(tmp_path: Path) 
     first, replayed = service.submit(_request(owners[0].id, b"# one"), "one")
     assert not replayed
     assert service.submit(_request(owners[0].id, b"# one"), "one") == (first, True)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        replays = tuple(
+            executor.map(
+                lambda _index: service.submit(_request(owners[0].id, b"# one"), "one"),
+                range(8),
+            )
+        )
+    assert {job.id for job, replayed in replays if replayed} == {first.id}
+    with pytest.raises(JobConflictError):
+        service.submit(_request(owners[0].id, b"# changed"), "one")
     with pytest.raises(JobUserQuotaExceededError):
         service.submit(_request(owners[0].id, b"# second"), "second")
     service.submit(_request(owners[1].id, b"# other"), "other")
@@ -88,6 +133,29 @@ def test_sqlite_admission_is_owner_scoped_global_and_idempotent(tmp_path: Path) 
         _request(owners[0].id, b"# replacement"), "replacement"
     )
     assert replacement.state is JobState.QUEUED
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_sqlite_concurrent_same_owner_never_overshoots_quota(tmp_path: Path) -> None:
+    engine, repository, objects, owners = _runtime(tmp_path, owner_count=1, capacity=20)
+    service = JobService(repository, objects, JobServicePolicy(10))
+
+    def submit(index: int) -> bool:
+        try:
+            service.submit(
+                _request(owners[0].id, f"# source {index}".encode()),
+                f"same-owner-{index}",
+            )
+        except JobUserQuotaExceededError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        admitted = tuple(executor.map(submit, range(20)))
+    assert sum(admitted) == 1
+    assert repository.list_owner(owners[0].id, offset=0, limit=20).total == 1
     engine.dispose()
 
 
@@ -148,4 +216,65 @@ def test_retention_cleanup_expires_metadata_and_removes_private_source(
     expired = repository.get(queued.id)
     assert expired is not None and expired.state is JobState.EXPIRED
     assert not objects.exists(source_key)
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_filesystem_result_cleanup_reclaims_lease_and_retries_deletion(
+    tmp_path: Path,
+) -> None:
+    engine, repository, objects, owners = _runtime(tmp_path, owner_count=1, capacity=2)
+    service = JobService(repository, objects, JobServicePolicy(10))
+    queued, _ = service.submit(_request(owners[0].id, b"private"), "result-cleanup")
+
+    class ResultProcessor:
+        def process(self, *_args: object, **_kwargs: object) -> JobProcessResult:
+            return JobProcessResult(b"result")
+
+    processing_worker = ConversionWorker(
+        worker_id="processor",
+        runtime=WorkerRuntime(repository, objects, ResultProcessor(), lambda: NOW),
+        policy=WorkerPolicy(5, 1, 10, 2),
+    )
+    assert processing_worker.run_once()
+    succeeded = repository.get(queued.id)
+    assert succeeded is not None and succeeded.result_object_id is not None
+    source_key = ObjectKey(ObjectScope.UPLOAD, owners[0].id, queued.source_object_id)
+    result_key = ObjectKey(ObjectScope.RESULT, owners[0].id, succeeded.result_object_id)
+    failing_store = FailOnceResultDeleteStore(objects)
+    failing_cleanup = ConversionWorker(
+        worker_id="cleanup-failing",
+        runtime=WorkerRuntime(
+            repository,
+            failing_store,
+            ResultProcessor(),
+            lambda: NOW + timedelta(seconds=11),
+        ),
+        policy=WorkerPolicy(5, 1, 10, 2),
+    )
+    with pytest.raises(ObjectStoreError):
+        failing_cleanup.cleanup(limit=1)
+    assert failing_store.failed
+    assert not objects.exists(source_key)
+    assert objects.exists(result_key)
+
+    with Session(engine) as database:
+        row = database.get(ConversionJobRow, str(queued.id))
+        assert row is not None and row.cleanup_token is not None
+        stale_token = UUID(row.cleanup_token)
+    assert not repository.complete_cleanup(queued.id, uuid4())
+    reclaimed = repository.expire_terminal(
+        "cleanup-retry",
+        NOW + timedelta(seconds=17),
+        NOW + timedelta(seconds=22),
+        1,
+    )
+    assert len(reclaimed) == 1 and reclaimed[0].cleanup_token != stale_token
+    assert not repository.complete_cleanup(queued.id, stale_token)
+    for object_id in reclaimed[0].result_object_ids:
+        objects.delete(ObjectKey(ObjectScope.RESULT, owners[0].id, object_id))
+    assert repository.complete_cleanup(queued.id, reclaimed[0].cleanup_token)
+    assert not objects.exists(result_key)
+    expired = repository.get(queued.id)
+    assert expired is not None and expired.state is JobState.EXPIRED
     engine.dispose()

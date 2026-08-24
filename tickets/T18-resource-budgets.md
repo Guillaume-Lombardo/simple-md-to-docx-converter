@@ -45,13 +45,32 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   bypass later saturation. Duration exhaustion produces a safe stable failure while durable user
   cancellation retains precedence. Cleanup remains bounded, fenced, retry-safe, and deterministic.
 - 2026-08-24: Added unit, SQLite/filesystem, PostgreSQL/RustFS, and short concurrent load coverage.
-  The applicable canonical suite passed with 907 tests and 95% displayed application line coverage;
-  real T18 PostgreSQL/RustFS tests passed. The unrestricted suite reached 906 passing tests but 37
-  document-engine tests failed because Pandoc, Mermaid/Chromium, and LibreOffice are unavailable on
-  this host. Post-T17 assembly must wire the new repository/policy factory and map owner saturation
-  to HTTP 429 and global saturation to HTTP 503 with `Retry-After`. Final-image cgroup/ephemeral
-  enforcement and E2E remain T20/T21 work. No production values, antivirus provider, template/audit
-  retention contract, RPO, or RTO were invented without PM approval.
+  The corrected applicable canonical suite passed with 918 tests and 95% displayed application
+  line coverage; real T18 PostgreSQL/RustFS tests passed. A separate unrestricted run without
+  service environment variables reached 909 passing tests and 53 expected failures because
+  Pandoc, Mermaid/Chromium, LibreOffice, PostgreSQL, and RustFS are unavailable in that invocation.
+  Post-T17 assembly must wire the new repository/policy factory and map owner saturation to HTTP 429
+  and global saturation to HTTP 503 with `Retry-After`. Final-image cgroup/ephemeral enforcement and
+  E2E remain T20/T21 work. No production values, antivirus provider, template/audit retention
+  contract, RPO, or RTO were invented without PM approval.
+- 2026-08-24: Independent-review corrections switched overall job duration to a monotonic execution
+  budget carried by the processor cancellation probe, fixed deterministic lease/cancellation/
+  duration/error precedence, removed the unsupported upload/decompression ordering, added typed
+  archive/diagram policy projections, completed local/profile configuration placeholders, and
+  expanded both real storage-profile suites for same-owner races, saturated exact replay,
+  idempotency conflict, result-attempt cleanup, injected deletion failure, cleanup-lease reclaim,
+  and stale acknowledgement fencing.
+
+## Unresolved PM decisions
+
+- Numeric production values for every T18 upload, structural, admission, duration, memory,
+  ephemeral-storage, lease, retry, retention, and cleanup setting.
+- Whether source and result retention remain one job-artifact window or become independent
+  contracts, plus template-version and audit-record retention/deletion semantics.
+- Antivirus engine/provider, scan boundary, failure policy, and quarantine behavior.
+- Standalone and distributed RPO/RTO targets and their required operational proof.
+- Final-image memory and ephemeral-storage enforcement values. T20 owns applying approved values.
+- T20/T21 final-rootless-image E2E remains sequencing debt, not a waiver.
 
 ## Synchronization
 
