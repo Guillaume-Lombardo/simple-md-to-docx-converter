@@ -35,6 +35,7 @@ Build the document corpus, golden infrastructure, fixtures, marker registration,
 - Defined mandatory integration coverage for every feature that crosses a real boundary.
 - Defined mandatory E2E coverage for every delivered user-visible or operational workflow.
 - Defined the explicit justification and reviewer-approval process for exceptions.
+- 2026-08-24: T00 and T01 are verified `Done` in both the repository and Linear. T04 implementation started on `feat/T04-golden-infrastructure` to add the approved corpus categories, deterministic DOCX/OpenXML and PDF-raster comparison primitives, reusable fixtures, marker coverage, and tests without implementing the downstream T07/T08/T09/T10/T11 conversion features themselves.
 
 ## Synchronization
 
