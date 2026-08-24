@@ -21,6 +21,7 @@ from md_converter.jobs.errors import (
     JobUserQuotaExceededError,
 )
 from md_converter.jobs.models import JobPage, JobState, JobStep
+from md_converter.jobs.runner import EmbeddedWorker
 from md_converter.jobs.service import JobService
 from md_converter.malware import (
     MalwareDetectedError,
@@ -150,6 +151,57 @@ def test_application_lifespan_does_not_close_injected_components(
         assert client.get("/health/live").status_code == 200
 
     engine.dispose.assert_not_called()
+
+
+@pytest.mark.unit
+def test_embedded_worker_lifespan_is_owned_and_failure_blocks_readiness(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+    worker = mocker.Mock(spec=EmbeddedWorker)
+    worker.failure = None
+    app = create_app(
+        _lifecycle_settings(),
+        components=components,
+        embedded_worker=worker,
+        embedded_worker_stop_timeout_seconds=7,
+        manage_components=True,
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        worker.start.assert_called_once_with()
+        assert client.get("/health/ready").status_code == 200
+        worker.failure = RuntimeError("worker stopped")
+        assert client.get("/health/ready").status_code == 503
+
+    worker.stop.assert_called_once_with(timeout_seconds=7)
+    engine.dispose.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_embedded_worker_start_failure_closes_owned_components(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+    worker = mocker.Mock(spec=EmbeddedWorker)
+    worker.start.side_effect = RuntimeError("worker startup failed")
+    app = create_app(
+        _lifecycle_settings(),
+        components=components,
+        embedded_worker=worker,
+        manage_components=True,
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="worker startup failed"),
+        TestClient(app, base_url="https://testserver"),
+    ):
+        pass
+
+    worker.stop.assert_not_called()
+    engine.dispose.assert_called_once_with()
 
 
 @pytest.mark.unit
@@ -669,6 +721,15 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
                 "/api/v1/conversions",
                 headers=headers,
                 files={"source": ("source.md", b"x" * 1_000_001)},
+                data=data,
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files={"source": ("source.txt", b"valid")},
                 data=data,
             ).status_code
             == 422

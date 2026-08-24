@@ -14,6 +14,7 @@ from sqlalchemy import Engine, create_engine, delete, event, select, text, updat
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
+from sqlalchemy.sql.dml import Update
 
 from md_converter.auth.models import (
     AuthenticationAuditContext,
@@ -249,16 +250,18 @@ class SqlUserRepository:
             values["password_hash"] = replacement_hash
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                result = database.execute(
+                serialize_sqlite_write(database, self._engine)
+                result = self._update_user_row(
+                    database,
                     update(UserRow)
                     .where(
                         UserRow.id == str(user_id),
                         UserRow.active.is_(True),
                         UserRow.auth_version == expected_auth_version,
                     )
-                    .values(**values)
-                    .returning(UserRow)
-                ).scalar_one_or_none()
+                    .values(**values),
+                    str(user_id),
+                )
                 return _user(result) if result is not None else None
         except SQLAlchemyError:
             raise PersistenceError from None
@@ -278,17 +281,30 @@ class SqlUserRepository:
             values["password_hash"] = password_hash
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                result = database.execute(
-                    update(UserRow)
-                    .where(UserRow.id == str(user_id))
-                    .values(**values)
-                    .returning(UserRow)
-                ).scalar_one_or_none()
+                serialize_sqlite_write(database, self._engine)
+                result = self._update_user_row(
+                    database,
+                    update(UserRow).where(UserRow.id == str(user_id)).values(**values),
+                    str(user_id),
+                )
                 if result is not None and audit is not None:
                     database.add(self._audit_row(_user(result), audit))
                 return _user(result) if result is not None else None
         except SQLAlchemyError:
             raise PersistenceError from None
+
+    def _update_user_row(
+        self,
+        database: DatabaseSession,
+        statement: Update,
+        user_id: str,
+    ) -> UserRow | None:
+        if self._engine.dialect.name != "sqlite":
+            return database.execute(statement.returning(UserRow)).scalar_one_or_none()
+        result = database.execute(statement)
+        if getattr(result, "rowcount", 0) != 1:
+            return None
+        return database.get(UserRow, user_id)
 
     @staticmethod
     def _audit_row(

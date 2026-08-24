@@ -111,6 +111,7 @@ RUN mkdir -p /data /work /tmp/md-converter \
     && sha256sum /opt/md-converter/rpm-inventory.txt \
     && echo "${RPM_INVENTORY_SHA256}  /opt/md-converter/rpm-inventory.txt" \
         | sha256sum --check --strict \
+    && rm -f /usr/bin/curl /usr/bin/openssl /usr/sbin/httpd \
     && find /opt/md-converter -xdev -type d -exec chmod g=u {} + \
     && find /opt/md-converter -xdev -type f -exec chmod g=u {} +
 

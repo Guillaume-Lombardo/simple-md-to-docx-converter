@@ -4,6 +4,8 @@
 
 Authenticated clients submit multipart Markdown sources to `POST /api/v1/conversions` with a
 template identity, immutable template-version identity, and `docx`, `pdf`, or `both` output. The
+source filename must end in `.md` or `.zip`; Markdown is decoded as strict UTF-8, while ZIP inputs
+are validated by the secure archive adapter before conversion. The
 job transaction locks the template identity and accepts only the exact active, published current
 pair, preventing an archive or replacement race from changing the frozen selection. The server
 then reserves a durable job row, atomically stores its source, and activates the queue row
@@ -70,8 +72,9 @@ exact frozen template pair through `TemplateService.resolve_frozen_version`, ver
 size and SHA-256, and passes the immutable version metadata and bytes to the document processor;
 later replacement or restoration cannot change a queued job's reference bytes. It also passes the
 worker's absolute monotonic deadline so document processors can cap every engine invocation by the
-remaining overall duration. T20 owns final-image process-mode wiring. Final rootless-image E2E
-coverage therefore remains sequenced to T20/T21; T13 covers the
+remaining overall duration. T20 provides the production template-aware processor and final-image
+process-mode wiring. Its container smoke tests cover both standalone and distributed modes; T21
+retains the complete user-workflow E2E matrix. T13 covers the
 HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
 PostgreSQL/S3-compatible storage.
 

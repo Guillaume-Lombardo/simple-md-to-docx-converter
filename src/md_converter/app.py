@@ -998,15 +998,19 @@ def build_components(settings: Settings) -> AppComponents:
         return components
 
 
-def create_app(  # noqa: PLR0915 - the factory keeps route-local security dependencies
+def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composition
     settings: Settings | None = None,
     *,
     components: AppComponents | None = None,
     scanner: UploadScanner | None = None,
+    embedded_worker: EmbeddedWorker | None = None,
+    embedded_worker_stop_timeout_seconds: float = 30.0,
+    manage_components: bool = False,
 ) -> FastAPI:
     """Create a configured application or fail before serving requests."""
     resolved_settings = settings if settings is not None else Settings.load()
     resolved_components = components or build_components(resolved_settings)
+    owns_components = components is None or manage_components
     if scanner is not None:
         resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
@@ -1016,18 +1020,28 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             resolved_settings.initial_admin_password.get_secret_value(),
         )
     except Exception:
-        if components is None:
+        if owns_components:
             resolved_components.close()
         raise
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         del _app
+        worker_started = False
         try:
+            if embedded_worker is not None:
+                embedded_worker.start()
+                worker_started = True
             yield
         finally:
-            if components is None:
-                resolved_components.close()
+            try:
+                if embedded_worker is not None and worker_started:
+                    embedded_worker.stop(
+                        timeout_seconds=embedded_worker_stop_timeout_seconds
+                    )
+            finally:
+                if owns_components:
+                    resolved_components.close()
 
     app = FastAPI(
         title="Markdown Converter API",
@@ -1180,7 +1194,8 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         responses=error_responses(503),
     )
     def ready() -> Response:
-        if resolved_components.readiness.is_ready():
+        worker_ready = embedded_worker is None or embedded_worker.failure is None
+        if worker_ready and resolved_components.readiness.is_ready():
             return JSONResponse({"status": "ready"})
         log_event("readiness_failed")
         return JSONResponse(
@@ -1434,6 +1449,12 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
+        if source.filename is None or Path(source.filename).suffix.casefold() not in {
+            ".md",
+            ".zip",
+        }:
+            await source.close()
+            raise JobRequestError
         try:
             content = await source.read(
                 resolved_settings.conversion_upload_max_bytes + 1

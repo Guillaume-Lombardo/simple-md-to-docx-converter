@@ -8,9 +8,8 @@ default is fixed for reproducibility.
 
 The entrypoint accepts exactly `api`, `embedded-worker`, or `external-worker`. `api` serves HTTP
 without a worker. `embedded-worker` is the one-replica standalone process. `external-worker` is a
-distributed worker without HTTP. The latter two modes require the package-native
-`md_converter.runtime` assembly described below; they fail closed until that module lands after the
-T19 source freeze.
+distributed worker without HTTP. Both worker modes use the package-native `md_converter.runtime`
+assembly and the same production conversion processor.
 
 Every mode refuses UID 0, non-empty effective or bounding capabilities, absent
 `no-new-privileges`, a writable root, or missing dedicated `/tmp`, `/work`, and `/dev/shm` mounts.
@@ -38,6 +37,10 @@ ClamAV is an external `clamd` service selected through `MD_CONVERTER_CLAMAV_HOST
 Network policy must permit only the required clamd, PostgreSQL, S3-compatible, DNS, and inbound HTTP
 flows. Scanner unavailability remains fail-closed; the application keeps no durable quarantine.
 Credentials and the initial administrator password belong in a Secret, never a ConfigMap or image.
+The image also requires explicit conversion limits for archive compression, image dimensions and
+SVG structure, Mermaid source/output dimensions, PDF structure, and cancellation polling. Configure
+the locked `mmdc`, Chromium, Pandoc, LibreOffice, and font-manifest paths; none of these limits is an
+implicit production recommendation.
 
 ## Verification and supply chain
 
@@ -54,35 +57,30 @@ bash scripts/container/supply-chain.sh localhost/md-converter:t20 artifacts/cont
 The smoke harness uses real rootless Podman, an arbitrary UID supported by the host subordinate-ID
 map, the reviewed Chrome seccomp profile, read-only root, no capabilities, `no-new-privileges`, and
 bounded cgroups and writable areas. It executes Pandoc, sandboxed Mermaid/Chrome, and LibreOffice.
-The API smoke exercises standalone SQLite/filesystem readiness in the final image. Full three-user,
-two-profile conversion/recovery/concurrency E2E remains T21 scope.
+The standalone smoke starts the embedded worker on the image's SQLite 3.34 runtime. The distributed
+smoke starts PostgreSQL, RustFS, an API process, and an external worker; it verifies the worker
+metrics listener and a clean SIGTERM exit. Full three-user, two-profile conversion, recovery, and
+concurrency E2E remains T21 scope.
 
 The supply-chain command downloads SHA-locked Syft and Grype releases, writes CycloneDX and SPDX
 JSON SBOMs, and fails on fixed Critical findings. Scanner databases remain time-varying evidence;
 retain the JSON report with the image digest and scan timestamp. T22 owns release publication,
 provenance, and registry attachment.
 
-## Package-native runtime change still required
+## Production conversion runtime
 
-After T19 releases application source, T20 needs one `src/md_converter/runtime.py` module and focused
-tests. It must compose the existing public `build_components`, `create_app`,
-`build_embedded_worker`, and `build_external_worker_loop` factories with a production
-`TemplateAwareProcessor`. That processor must load the owner-bound source through `ObjectStore`,
-validate `.md` or `.zip`, run Mermaid/Pandoc and optional LibreOffice with the configured T18
-budgets and cancellation deadline, and publish DOCX, PDF plus traceability, or the deterministic
-combined ZIP. It must attach embedded-worker start/stop/failure to FastAPI lifespan and handle
-SIGTERM for external workers. No duplicate image-only implementation is acceptable.
+The processor loads the frozen owner-scoped source and the exact verified template version, accepts
+only `.md` or `.zip` submissions, and delegates validation, Mermaid rendering, DOCX creation, and
+PDF creation to the existing bounded adapters. PDF traceability is canonical; `both` output is a
+deterministic ZIP containing `document.docx`, `document.pdf`, and `traceability.json`. Embedded
+worker failure makes standalone readiness fail. External workers expose process-local metrics and
+stop on SIGINT or SIGTERM.
 
-The UBI runtime exposes SQLite 3.34.1, while current developer tests use a newer library. The first
-standalone final-image startup proved that SQL `RETURNING` is rejected and exposed 14 affected
-statements. Preserve PostgreSQL `RETURNING`, but implement atomic SQLite-compatible fallbacks for:
+The UBI runtime provides SQLite 3.34.1. SQLite mutations acquire `BEGIN IMMEDIATE`, execute their
+conditional update, and select the result in the same transaction; PostgreSQL keeps
+`UPDATE ... RETURNING` and `SKIP LOCKED`. Tests install a SQLite 3.34 grammar guard so any emitted
+`UPDATE ... RETURNING` fails even on newer developer SQLite libraries.
 
-- jobs: `activate_source`, `request_cancel`, `claim`, `heartbeat`, both updates in
-  `recover_expired_leases`, `expire_terminal`, `complete_cleanup`, and both branches of
-  `_finish_owned`;
-- users: `commit_verified_login` and `update_security`;
-- templates: `claim_stale_pending` and `_cas_update`.
-
-Focused tests must exercise every success, stale/fencing miss, and concurrent ownership behavior on
-SQLite 3.34, then repeat the standalone rootless API and queue smoke in this image. Do not replace
-UBI's SQLite or weaken PostgreSQL locking to avoid these changes.
+Build-only npm tooling and unused curl, OpenSSL, and Apache HTTPD command-line executables are
+absent from the runtime filesystem. Required shared libraries and the complete RPM inventory remain
+recorded. This reduces unused attack surface without altering the vulnerability threshold.

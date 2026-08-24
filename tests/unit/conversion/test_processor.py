@@ -1,0 +1,257 @@
+"""Unit coverage for the package-native production conversion processor."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import zipfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from md_converter.config import ConfigurationError, Settings
+from md_converter.conversion.archive import ArchiveLimits
+from md_converter.conversion.errors import ConversionError, ConversionErrorCode
+from md_converter.conversion.images import ImageLimits
+from md_converter.conversion.libreoffice import (
+    PdfArtifact,
+    PdfPage,
+    PdfTraceabilityManifest,
+)
+from md_converter.conversion.processor import (
+    ProcessorTraceability,
+    ProductionTemplateAwareProcessor,
+    build_production_processor,
+)
+from md_converter.jobs.errors import JobProcessingCancelled
+from md_converter.jobs.models import ConversionJob, JobOutput, JobState, JobStep
+from md_converter.storage import ObjectKey, ObjectNotFoundError, ObjectScope
+from md_converter.templates.models import TemplateVersion
+from tests.settings import template_settings
+
+pytestmark = pytest.mark.unit
+
+
+class _Cancellation:
+    budget = None
+
+    def __init__(self, *values: bool) -> None:
+        self._values = list(values)
+
+    def __call__(self) -> bool:
+        return self._values.pop(0) if self._values else False
+
+
+def _job(output: JobOutput) -> ConversionJob:
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+    return ConversionJob(
+        id=uuid4(),
+        owner_id=uuid4(),
+        source_object_id=uuid4(),
+        template_id=uuid4(),
+        template_version_id=uuid4(),
+        output=output,
+        component_versions=(
+            ("chromium", "151.0.7922.173"),
+            ("libreoffice", "26.2.5.2"),
+            ("md-converter", "0.1.0"),
+            ("mermaid-cli", "11.16.0"),
+            ("pandoc", "3.10.2"),
+        ),
+        state=JobState.RUNNING,
+        step=JobStep.VALIDATING,
+        progress=0,
+        request_digest="1" * 64,
+        idempotency_digest=None,
+        created_at=now,
+        updated_at=now,
+        attempt=1,
+        lease_owner="worker-1",
+        lease_token=uuid4(),
+        lease_expires_at=now + timedelta(minutes=1),
+    )
+
+
+def _template(job: ConversionJob, content: bytes) -> TemplateVersion:
+    return TemplateVersion(
+        id=job.template_version_id,
+        template_id=job.template_id,
+        number=3,
+        object_owner_id=uuid4(),
+        sha256=hashlib.sha256(content).hexdigest(),
+        size=len(content),
+        created_at=datetime(2026, 8, 25, tzinfo=UTC),
+        created_by=uuid4(),
+    )
+
+
+def _manifest() -> PdfTraceabilityManifest:
+    return PdfTraceabilityManifest(
+        schema_version=1,
+        application_version="0.1.0",
+        conversion_contract_version="1",
+        template_id=str(uuid4()),
+        template_version="3",
+        template_sha256="2" * 64,
+        source_docx_sha256="3" * 64,
+        output_pdf_sha256="4" * 64,
+        output_pdf_bytes=3,
+        pages=(PdfPage(612, 792),),
+        pandoc_version="3.10.2",
+        pandoc_reader="commonmark_x",
+        mermaid_version="11.16.0",
+        chromium_version="151.0.7922.173",
+        libreoffice_version="26.2.5.2",
+        font_manifest_sha256="5" * 64,
+        export_filter="pdf:writer_pdf_Export",
+        output_format="pdf",
+    )
+
+
+def _processor(mocker, source: bytes):
+    objects = mocker.Mock()
+    objects.get.return_value = source
+    docx = mocker.Mock()
+    docx.convert.return_value = b"docx"
+    docx.convert_archive.return_value = b"archive-docx"
+    pdf = mocker.Mock()
+    pdf.convert.return_value = PdfArtifact(b"pdf", _manifest())
+    processor = ProductionTemplateAwareProcessor(
+        objects=objects,
+        docx=docx,
+        pdf=pdf,
+        archive_limits=ArchiveLimits(1000, 10, 1000, 2000, 100, 1000, 3),
+        image_limits=ImageLimits(1000, 100, 100, 10_000, 100, 10),
+        traceability=ProcessorTraceability("0.1.0", "1", "commonmark_x", "5" * 64),
+    )
+    return processor, objects, docx, pdf
+
+
+@pytest.mark.parametrize("output", [JobOutput.PDF, JobOutput.BOTH])
+def test_processor_uses_frozen_source_template_and_traceability(
+    mocker, output: JobOutput
+) -> None:
+    job = _job(output)
+    template_content = b"template"
+    processor, objects, docx, pdf = _processor(mocker, b"# Frozen\n")
+    progress = mocker.Mock()
+
+    result = processor.process_with_template(
+        job,
+        _template(job, template_content),
+        template_content,
+        cancelled=_Cancellation(),
+        deadline_monotonic=42.0,
+        progress=progress,
+    )
+
+    objects.get.assert_called_once_with(
+        ObjectKey(ObjectScope.UPLOAD, job.owner_id, job.source_object_id)
+    )
+    docx.convert.assert_called_once_with(
+        "# Frozen\n", template_content, deadline_monotonic=42.0
+    )
+    context = pdf.convert.call_args.args[1]
+    assert context.template_id == str(job.template_id)
+    assert context.template_version == "3"
+    assert context.template_sha256 == hashlib.sha256(template_content).hexdigest()
+    assert (
+        result.progress_manifest == pdf.convert.return_value.manifest.canonical_json()
+    )
+    assert progress.call_args_list[-1].args == (JobStep.PUBLISHING, 95)
+    if output is JobOutput.PDF:
+        assert result.content == b"pdf"
+    else:
+        with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+            assert archive.namelist() == [
+                "document.docx",
+                "document.pdf",
+                "traceability.json",
+            ]
+            assert archive.read("document.docx") == b"docx"
+
+
+def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None:
+    job = _job(JobOutput.BOTH)
+    processor, _objects, docx, _pdf = _processor(mocker, b"PK\x03\x04archive")
+    template = _template(job, b"template")
+    arguments = (job, template, b"template")
+    keywords = {
+        "cancelled": _Cancellation(),
+        "deadline_monotonic": None,
+        "progress": mocker.Mock(),
+    }
+
+    first = processor.process_with_template(*arguments, **keywords).content
+    keywords["cancelled"] = _Cancellation()
+    second = processor.process_with_template(*arguments, **keywords).content
+
+    assert first == second
+    docx.convert_archive.assert_called_with(
+        b"PK\x03\x04archive",
+        b"template",
+        processor._archive_limits,
+        processor._image_limits,
+        deadline_monotonic=None,
+    )
+
+
+def test_processor_rejects_missing_non_utf8_and_cancelled_sources(mocker) -> None:
+    job = _job(JobOutput.DOCX)
+    processor, objects, _docx, _pdf = _processor(mocker, b"\xff")
+    template = _template(job, b"template")
+    call = {
+        "cancelled": _Cancellation(),
+        "deadline_monotonic": None,
+        "progress": mocker.Mock(),
+    }
+    with pytest.raises(ConversionError) as invalid:
+        processor.process_with_template(job, template, b"template", **call)
+    assert invalid.value.code is ConversionErrorCode.VALIDATION
+
+    objects.get.side_effect = ObjectNotFoundError
+    with pytest.raises(ConversionError) as missing:
+        processor.process_with_template(job, template, b"template", **call)
+    assert missing.value.code is ConversionErrorCode.SOURCE_INTEGRITY
+
+    with pytest.raises(JobProcessingCancelled):
+        processor.process_with_template(
+            job,
+            template,
+            b"template",
+            cancelled=_Cancellation(True),
+            deadline_monotonic=None,
+            progress=mocker.Mock(),
+        )
+
+
+def test_production_processor_assembles_locked_adapters_and_manifest(
+    mocker, tmp_path: Path
+) -> None:
+    manifest = tmp_path / "font-manifest.json"
+    manifest.write_bytes(b'{"fonts":[]}')
+    settings = Settings(
+        initial_admin_username="admin",
+        initial_admin_password="test-" + "password",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3600,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path / "data",
+        **template_settings(conversion_font_manifest_path=manifest),
+    )
+
+    processor = build_production_processor(settings, mocker.Mock())
+
+    assert isinstance(processor, ProductionTemplateAwareProcessor)
+    assert (
+        processor._traceability.font_manifest_sha256
+        == hashlib.sha256(manifest.read_bytes()).hexdigest()
+    )
+
+    manifest.unlink()
+    with pytest.raises(ConfigurationError, match="font manifest"):
+        build_production_processor(settings, mocker.Mock())

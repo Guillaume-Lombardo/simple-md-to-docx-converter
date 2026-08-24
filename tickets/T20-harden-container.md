@@ -54,9 +54,17 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   were generated, and the fixed-Critical Grype gate passes after removing build-only npm tooling.
   The canonical non-engine suite passes all 997 applicable tests against real PostgreSQL and RustFS
   with 95.06% coverage; Ruff, ty, ShellCheck, and CI configuration validation also pass. Standalone
-  API startup remains blocked by SQLite 3.34 incompatibility with source-level `RETURNING` queries;
-  worker modes also await the package-native runtime assembly owned by T19 before final T20
-  verification.
+  The initial standalone startup and package-native runtime gaps were carried forward for resolution
+  after T19 integration.
+- 2026-08-25: Integrated verified T19 `main` at `3056736`, implemented all 14 SQLite 3.34 write
+  fallbacks while retaining PostgreSQL `RETURNING`, and assembled the production template-aware
+  processor plus embedded and external worker runtimes. Guarded SQLite tests reject any remaining
+  `UPDATE ... RETURNING` execution. The final rootless image
+  `1711b7d8762f06b907def197987aba7646869ac04246b3a69058c7e153229e18` is reproducible and passes
+  standalone SQLite/filesystem and distributed PostgreSQL/RustFS smoke tests, including external
+  worker metrics and graceful termination. CycloneDX and SPDX SBOMs were generated; Grype reports
+  28 findings (8 High, 18 Medium, 2 Low) and zero Critical findings, so the fixed Critical gate
+  passes without suppressions or threshold changes.
 
 ## Synchronization
 

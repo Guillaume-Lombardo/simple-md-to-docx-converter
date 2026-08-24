@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, and_, case, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
+from sqlalchemy.sql.dml import Update
 from sqlalchemy.sql.elements import ColumnElement
 
 from md_converter.jobs.errors import (
@@ -228,15 +229,17 @@ class SqlJobRepository:
     def activate_source(self, job_id: UUID, now: datetime) -> ConversionJob:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                row = database.scalar(
+                serialize_sqlite_write(database, self._engine)
+                row = self._update_job_row(
+                    database,
                     update(ConversionJobRow)
                     .where(
                         ConversionJobRow.id == str(job_id),
                         ConversionJobRow.state == JobState.QUEUED.value,
                         ConversionJobRow.source_ready.is_(False),
                     )
-                    .values(source_ready=True, updated_at=now)
-                    .returning(ConversionJobRow)
+                    .values(source_ready=True, updated_at=now),
+                    str(job_id),
                 )
                 if row is not None:
                     return _job(row)
@@ -298,7 +301,9 @@ class SqlJobRepository:
     ) -> ConversionJob | None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                row = database.scalar(
+                serialize_sqlite_write(database, self._engine)
+                row = self._update_job_row(
+                    database,
                     update(ConversionJobRow)
                     .where(
                         ConversionJobRow.id == str(job_id),
@@ -330,8 +335,8 @@ class SqlJobRepository:
                             ),
                             else_=False,
                         ),
-                    )
-                    .returning(ConversionJobRow)
+                    ),
+                    str(job_id),
                 )
                 if row is not None:
                     return _job(row)
@@ -350,6 +355,7 @@ class SqlJobRepository:
     ) -> ConversionJob | None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 statement = (
                     select(ConversionJobRow)
                     .where(
@@ -365,7 +371,7 @@ class SqlJobRepository:
                 if row is None:
                     return None
                 lease_token = uuid4()
-                claimed_id = database.scalar(
+                claim_update = (
                     update(ConversionJobRow)
                     .where(
                         ConversionJobRow.id == row.id,
@@ -383,9 +389,17 @@ class SqlJobRepository:
                         heartbeat_at=now,
                         cancel_requested=False,
                     )
-                    .returning(ConversionJobRow.id)
                 )
-                if claimed_id is None:
+                if self._engine.dialect.name == "sqlite":
+                    claimed = (
+                        getattr(database.execute(claim_update), "rowcount", 0) == 1
+                    )
+                else:
+                    claimed = (
+                        database.scalar(claim_update.returning(ConversionJobRow.id))
+                        is not None
+                    )
+                if not claimed:
                     return None
                 database.flush()
                 database.refresh(row)
@@ -396,7 +410,8 @@ class SqlJobRepository:
     def heartbeat(self, heartbeat: LeaseHeartbeat) -> bool:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                job_id = database.scalar(
+                serialize_sqlite_write(database, self._engine)
+                statement = (
                     update(ConversionJobRow)
                     .where(
                         *self._owned_lease(
@@ -425,9 +440,13 @@ class SqlJobRepository:
                             else_=heartbeat.progress,
                         ),
                     )
-                    .returning(ConversionJobRow.id)
                 )
-                return job_id is not None
+                if self._engine.dialect.name == "sqlite":
+                    return getattr(database.execute(statement), "rowcount", 0) == 1
+                return (
+                    database.scalar(statement.returning(ConversionJobRow.id))
+                    is not None
+                )
         except SQLAlchemyError:
             raise JobRepositoryError from None
 
@@ -524,64 +543,75 @@ class SqlJobRepository:
     ) -> int:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                recovered = tuple(
-                    database.scalars(
-                        update(ConversionJobRow)
-                        .where(
-                            ConversionJobRow.state == JobState.RUNNING.value,
-                            ConversionJobRow.lease_expires_at < now,
-                        )
-                        .values(
-                            state=case(
-                                (
-                                    ConversionJobRow.cancel_requested.is_(True),
-                                    JobState.CANCELLED.value,
-                                ),
-                                else_=JobState.QUEUED.value,
-                            ),
-                            step=case(
-                                (
-                                    ConversionJobRow.cancel_requested.is_(True),
-                                    ConversionJobRow.step,
-                                ),
-                                else_=JobStep.QUEUED.value,
-                            ),
-                            progress=case(
-                                (
-                                    ConversionJobRow.cancel_requested.is_(True),
-                                    ConversionJobRow.progress,
-                                ),
-                                else_=0,
-                            ),
-                            updated_at=now,
-                            expires_at=case(
-                                (
-                                    ConversionJobRow.cancel_requested.is_(True),
-                                    expires_at,
-                                ),
-                                else_=ConversionJobRow.expires_at,
-                            ),
-                            **self._cleared_lease(),
-                        )
-                        .returning(ConversionJobRow.id)
+                serialize_sqlite_write(database, self._engine)
+                recover_statement = (
+                    update(ConversionJobRow)
+                    .where(
+                        ConversionJobRow.state == JobState.RUNNING.value,
+                        ConversionJobRow.lease_expires_at < now,
                     )
+                    .values(
+                        state=case(
+                            (
+                                ConversionJobRow.cancel_requested.is_(True),
+                                JobState.CANCELLED.value,
+                            ),
+                            else_=JobState.QUEUED.value,
+                        ),
+                        step=case(
+                            (
+                                ConversionJobRow.cancel_requested.is_(True),
+                                ConversionJobRow.step,
+                            ),
+                            else_=JobStep.QUEUED.value,
+                        ),
+                        progress=case(
+                            (
+                                ConversionJobRow.cancel_requested.is_(True),
+                                ConversionJobRow.progress,
+                            ),
+                            else_=0,
+                        ),
+                        updated_at=now,
+                        expires_at=case(
+                            (
+                                ConversionJobRow.cancel_requested.is_(True),
+                                expires_at,
+                            ),
+                            else_=ConversionJobRow.expires_at,
+                        ),
+                        **self._cleared_lease(),
+                    )
+                )
+                incomplete_statement = (
+                    update(ConversionJobRow)
+                    .where(
+                        ConversionJobRow.state == JobState.QUEUED.value,
+                        ConversionJobRow.source_ready.is_(False),
+                        ConversionJobRow.created_at <= incomplete_before,
+                    )
+                    .values(
+                        state=JobState.FAILED.value,
+                        error_code="source_upload_incomplete",
+                        error_message="Source upload did not complete.",
+                        updated_at=now,
+                        expires_at=expires_at,
+                    )
+                )
+                if self._engine.dialect.name == "sqlite":
+                    recovered_count = int(
+                        getattr(database.execute(recover_statement), "rowcount", 0)
+                    )
+                    incomplete_count = int(
+                        getattr(database.execute(incomplete_statement), "rowcount", 0)
+                    )
+                    return recovered_count + incomplete_count
+                recovered = tuple(
+                    database.scalars(recover_statement.returning(ConversionJobRow.id))
                 )
                 incomplete = tuple(
                     database.scalars(
-                        update(ConversionJobRow)
-                        .where(
-                            ConversionJobRow.state == JobState.QUEUED.value,
-                            ConversionJobRow.source_ready.is_(False),
-                            ConversionJobRow.created_at <= incomplete_before,
-                        )
-                        .values(
-                            state=JobState.FAILED.value,
-                            error_code="source_upload_incomplete",
-                            error_message="Source upload did not complete.",
-                            updated_at=now,
-                            expires_at=expires_at,
-                        )
-                        .returning(ConversionJobRow.id)
+                        incomplete_statement.returning(ConversionJobRow.id)
                     )
                 )
                 return len(recovered) + len(incomplete)
@@ -602,6 +632,7 @@ class SqlJobRepository:
         )
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 claimable = or_(
                     and_(
                         ConversionJobRow.state.in_(terminal_values),
@@ -628,7 +659,8 @@ class SqlJobRepository:
                 expired: list[ExpiredJobObjects] = []
                 for candidate_id in candidate_ids:
                     cleanup_token = uuid4()
-                    row = database.scalar(
+                    row = self._update_job_row(
+                        database,
                         update(ConversionJobRow)
                         .where(ConversionJobRow.id == candidate_id, claimable)
                         .values(
@@ -639,8 +671,8 @@ class SqlJobRepository:
                             cleanup_owner=worker_id,
                             cleanup_token=str(cleanup_token),
                             cleanup_expires_at=cleanup_lease_expires_at,
-                        )
-                        .returning(ConversionJobRow)
+                        ),
+                        candidate_id,
                     )
                     if row is None:
                         continue
@@ -672,7 +704,8 @@ class SqlJobRepository:
     def complete_cleanup(self, job_id: UUID, cleanup_token: UUID) -> bool:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                cleaned_id = database.scalar(
+                serialize_sqlite_write(database, self._engine)
+                statement = (
                     update(ConversionJobRow)
                     .where(
                         ConversionJobRow.id == str(job_id),
@@ -687,9 +720,13 @@ class SqlJobRepository:
                         cleanup_token=None,
                         cleanup_expires_at=None,
                     )
-                    .returning(ConversionJobRow.id)
                 )
-                return cleaned_id is not None
+                if self._engine.dialect.name == "sqlite":
+                    return getattr(database.execute(statement), "rowcount", 0) == 1
+                return (
+                    database.scalar(statement.returning(ConversionJobRow.id))
+                    is not None
+                )
         except SQLAlchemyError:
             raise JobRepositoryError from None
 
@@ -719,6 +756,7 @@ class SqlJobRepository:
     ) -> ConversionJob:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 conditions = (
                     *self._owned_lease(job_id, worker_id, lease_token),
                     ConversionJobRow.lease_expires_at >= now,
@@ -729,14 +767,16 @@ class SqlJobRepository:
                         *conditions,
                         ConversionJobRow.cancel_requested.is_(False),
                     )
-                row = database.scalar(
+                row = self._update_job_row(
+                    database,
                     update(ConversionJobRow)
                     .where(*desired_conditions)
-                    .values(**values)
-                    .returning(ConversionJobRow)
+                    .values(**values),
+                    str(job_id),
                 )
                 if row is None and cancellation_wins:
-                    row = database.scalar(
+                    row = self._update_job_row(
+                        database,
                         update(ConversionJobRow)
                         .where(
                             *conditions,
@@ -747,8 +787,8 @@ class SqlJobRepository:
                             updated_at=now,
                             expires_at=expires_at,
                             **self._cleared_lease(),
-                        )
-                        .returning(ConversionJobRow)
+                        ),
+                        str(job_id),
                     )
                 if row is None:
                     raise JobLeaseLostError("Conversion job lease was lost")
@@ -768,6 +808,19 @@ class SqlJobRepository:
             ConversionJobRow.lease_owner == worker_id,
             ConversionJobRow.lease_token == str(lease_token),
         )
+
+    def _update_job_row(
+        self,
+        database: DatabaseSession,
+        statement: Update,
+        job_id: str,
+    ) -> ConversionJobRow | None:
+        if self._engine.dialect.name != "sqlite":
+            return database.scalar(statement.returning(ConversionJobRow))
+        result = database.execute(statement)
+        if getattr(result, "rowcount", 0) != 1:
+            return None
+        return database.get(ConversionJobRow, job_id)
 
     @staticmethod
     def _cleared_lease() -> dict[str, object]:

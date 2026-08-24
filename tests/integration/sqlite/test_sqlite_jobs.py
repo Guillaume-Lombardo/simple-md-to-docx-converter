@@ -52,6 +52,7 @@ from tests.job_repository_contracts import (
     TEMPLATE_VERSION_ID,
     exercise_job_repository_contract,
 )
+from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 from tests.template_records import publish_template_pair
 
 COMPONENT_VERSIONS = (("md-converter", "0.1.0"),)
@@ -189,6 +190,7 @@ class BlockingResultStore(ResultStoreFailure):
 def test_sqlite_job_repository_contract_and_restart(tmp_path: Path) -> None:
     database_url = standalone_database_url(tmp_path)
     engine = create_database_engine(database_url)
+    enforce_sqlite_334_update_grammar(engine)
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     owner = User(uuid4(), "Owner", "owner", "hash:owner", Role.USER)
