@@ -2,7 +2,7 @@
 ticket: T15
 linear_id: G1L-323
 linear_url: https://linear.app/g1lom/issue/G1L-323/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,12 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T10 and T14 are verified `Done` locally and in Linear. Implementation started on
+  `feat/T15-versioned-template-api` from delivered main `74dcba5`. Scope is the owner/admin
+  versioned template HTTP contract, safe content downloads, ETag/If-Match concurrency, atomic
+  replacement, immutable history, copy-forward restoration, deletion/archive guards, audit, and
+  SQLite/PostgreSQL plus filesystem/S3 parity. T16/T17 retain the browser interfaces, and T20/T21
+  retain final-image runtime wiring and E2E execution.
 
 ## Synchronization
 

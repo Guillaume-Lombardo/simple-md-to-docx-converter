@@ -9,16 +9,18 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` at `bb5c1d0` has delivered T00-T14. T13 implementation PR #44 was squash-merged after
-  independent specification, security, and test approval; its exact local and remote branch was
-  removed.
-- T13/G1L-322 is complete in the repository. Its completion mirror and Linear state are being
-  synchronized on `docs/T13-close-persistent-queue` before the next critical-path ticket starts.
+- `main` at `74dcba5` has delivered T00-T14. T13 implementation PR #44 and completion PR #45 were
+  squash-merged after green CI and independent review; their exact local and remote branches were
+  removed. T13/G1L-322 is `Done` locally and in Linear.
+- T15/G1L-323 is the next ready critical-path ticket. It is `In Progress` on
+  `feat/T15-versioned-template-api`, based on delivered main `74dcba5`; dependencies T10 and T14 are
+  verified `Done` locally and in Linear.
 - The durable job API and queue support SQLite/PostgreSQL, owner-scoped idempotency, unique lease
   and cleanup fencing, periodic heartbeat and recovery, cancellation-wins transitions, safe source
   staging and result publication, request bounds, retry-safe cleanup, and embedded/external workers.
-- Required production-policy values remain configurable for T18. T15 retains immutable
-  template-version processing, while T20/T21 retain final runtime wiring and rootless-image E2E.
+- T15 owns immutable template mutation, download, audit, and processor-version resolution. Required
+  production-policy values remain configurable for T18, while T20/T21 retain final runtime wiring
+  and rootless-image E2E.
 - K3s is stopped. The existing `t12-postgres-v2` and `t12-rustfs-v2` containers remain running and
   were used without modification for real profile tests.
 
@@ -56,11 +58,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - No PM-only blocker exists.
 - The T13 final-image E2E sequencing debt was explicitly approved by all three independent reviewers
   and remains owned by T20/T21.
-- The real document processor cannot be assembled until T15 provides immutable template-version
-  content resolution; T13 tests the worker through its explicit processor port.
+- T15 must preserve T14 template identity and authorization while introducing immutable versions,
+  optimistic concurrency, object cleanup, and audit parity across both storage profiles.
 
 ## Next Actions
 
-1. Merge this completion synchronization after its required checks and verify T13 `Done` locally
-   and in Linear.
-2. Select and start the smallest ready critical-path ticket without pausing for routine approval.
+1. Implement and validate T15 versioned template contracts on both storage profiles.
+2. Commission independent specification, security, and test review before publishing a ready PR.
