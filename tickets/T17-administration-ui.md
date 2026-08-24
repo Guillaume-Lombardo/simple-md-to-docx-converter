@@ -45,10 +45,24 @@ Build owner and administrator template management and local-account management w
   image and both deployable profiles; this sequencing debt is not a waiver of final E2E coverage.
 - 2026-08-24: Verified Ruff formatting/lint, `ty`, native JavaScript tests, both pinned-Chromium
   browser scenarios, and 860 locally runnable Python tests. Application coverage is 94.52%; the
-  T17 JavaScript module has 100% line/function and 91.27% branch coverage. The exact canonical
-  commands were also attempted: PostgreSQL/RustFS environment variables and host document engines
-  are unavailable, while the available rootless toolchain image passed 34 of 44 engine tests but
+  T17 JavaScript module has 100% line/function and 91.27% branch coverage. Host document engines
+  remain unavailable, while the available rootless toolchain image passed 34 of 44 engine tests but
   carries stale font/golden evidence. Final hardened-image and two-profile E2E remain T20/T21 debt.
+- 2026-08-24: Review hardening added abort/generation guards for late template, account, and version
+  responses; duplicate-submit guards; malformed-success handling; and browser coverage for invalid
+  DOCX, CSRF denial, stale `If-Match`, guarded deletion, revoked sessions, and duplicate creation.
+  Live PostgreSQL/RustFS integration now verifies owner representation and search with two users and
+  an administrator, persistence across clients, authorization denial, and sanitized missing-bucket
+  and database failures without partial catalog state or leaked details. The browser documentation
+  now distinguishes loopback HTTP integration from the deployment HTTPS, rootless-runtime, and
+  final-image E2E work owned by T20/T21.
+- 2026-08-24: Reverified the hardened change: Ruff format/check and `ty` pass; 20 native JavaScript
+  tests pass with 100% lines/functions and 91.16% branches for the administration module; both
+  pinned-Chromium scenarios pass; and the canonical non-engine Python suite passes 877 tests with
+  94.74% total application coverage, including live PostgreSQL/RustFS tests. The unfiltered suite
+  still has 37 expected host failures because Pandoc, Mermaid/Chromium, LibreOffice, and the pinned
+  font inventory are not installed on the host. Final-image engine and both-profile E2E verification
+  remain T20/T21 sequencing debt.
 
 ## Synchronization
 

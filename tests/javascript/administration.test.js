@@ -8,6 +8,9 @@ import {
   templateMatches,
   userMatches,
   validTemplateFile,
+  validTemplatePage,
+  validUsers,
+  validVersions,
 } from "../../src/md_converter/static/administration.js";
 
 class FakeClassList {
@@ -139,6 +142,16 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 test("administration helpers validate safe filtering and concurrency metadata", () => {
   const item = template();
   assert.deepEqual(splitFonts(" Liberation Serif, , Carlito "), ["Liberation Serif", "Carlito"]);
@@ -156,6 +169,13 @@ test("administration helpers validate safe filtering and concurrency metadata", 
   assert.match(validTemplateFile({ name: "x.docx", size: 0 }, 2), /empty/);
   assert.match(validTemplateFile({ name: "x.DOCX", size: 3 }, 2), /limit/);
   assert.equal(validTemplateFile({ name: "x.DOCX", size: 2 }, 2), null);
+  assert.equal(validTemplatePage({ items: [item], total: 1 }), true);
+  assert.equal(validTemplatePage({ items: [], total: -1 }), false);
+  assert.equal(validTemplatePage({ items: [{}], total: 1 }), false);
+  assert.equal(validUsers([{ id: "a", username: "A", role: "user", active: true }]), true);
+  assert.equal(validUsers([{ id: "a", username: "A", role: "owner", active: true }]), false);
+  assert.equal(validVersions([{ id: "v", number: 1, size: 1, created_at: "now" }]), true);
+  assert.equal(validVersions([{ id: "v", number: "1", size: 1, created_at: "now" }]), false);
   assert.equal(createAdministrationController({ querySelector: () => null }), null);
 });
 
@@ -267,7 +287,7 @@ test("administrator controller exercises template and account workflows", async 
 
 test("regular controller hides mutations and reports stable failures and empty states", async () => {
   const doc = new FakeDocument("user");
-  const replies = [response(200, { items: [] }), new Error("offline")];
+  const replies = [response(200, { items: [], total: 0 }), new Error("offline")];
   createAdministrationController(doc, {
     fetch: async () => {
       const reply = replies.shift();
@@ -303,7 +323,7 @@ test("administration controller handles rejected requests, empty history, and de
   createAdministrationController(doc, {
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
-    if (url === "/api/v1/templates?limit=100&offset=0") return response(200, { items: [template()], total: 1 });
+      if (url === "/api/v1/templates?limit=100&offset=0") return response(200, { items: [template()], total: 1 });
       if (url === "/api/v1/admin/users") return response(200, []);
       if (url.endsWith("/versions")) return response(200, []);
       return response(200);
@@ -355,4 +375,126 @@ test("template loading follows every server page", async () => {
     "/api/v1/templates?limit=100&offset=1",
   ]);
   assert.equal(byClass(doc.querySelector("#managed-template-list"), "management-card").length, 2);
+});
+
+test("late template loads are aborted and cannot overwrite newer state", async () => {
+  const doc = new FakeDocument("user");
+  const first = deferred();
+  const second = deferred();
+  const signals = [];
+  let call = 0;
+  const controller = createAdministrationController(doc, {
+    fetch: (_url, options) => {
+      signals.push(options.signal);
+      call += 1;
+      return call === 1 ? first.promise : second.promise;
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  const newer = controller.loadTemplates();
+  assert.equal(signals[0].aborted, true);
+  second.resolve(response(200, { items: [template({ name: "Newest" })], total: 1 }));
+  await newer;
+  first.resolve(response(200, { items: [template({ name: "Stale" })], total: 1 }));
+  await settle();
+  const text = doc.querySelector("#managed-template-list").children[0]
+    .children[0].children[0].children[0].textContent;
+  assert.equal(text, "Newest");
+});
+
+test("late user and version loads cannot overwrite newer administration state", async () => {
+  const userDoc = new FakeDocument();
+  const firstUsers = deferred();
+  const secondUsers = deferred();
+  const userSignals = [];
+  let userCalls = 0;
+  const userController = createAdministrationController(userDoc, {
+    fetch: (url, options = {}) => {
+      if (url.startsWith("/api/v1/templates")) {
+        return Promise.resolve(response(200, { items: [], total: 0 }));
+      }
+      userSignals.push(options.signal);
+      userCalls += 1;
+      return userCalls === 1 ? firstUsers.promise : secondUsers.promise;
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  const newerUsers = userController.loadUsers();
+  assert.equal(userSignals[0].aborted, true);
+  secondUsers.resolve(response(200, [{ id: "new", username: "Newest", role: "user", active: true }]));
+  await newerUsers;
+  firstUsers.resolve(response(200, [{ id: "old", username: "Stale", role: "user", active: true }]));
+  await settle();
+  assert.match(userDoc.querySelector("#user-list").children[0].children[0].textContent, /Newest/);
+
+  const versionDoc = new FakeDocument("user");
+  const versions = deferred();
+  let versionSignal;
+  const versionController = createAdministrationController(versionDoc, {
+    fetch: (url, options = {}) => {
+      if (url.endsWith("/versions")) {
+        versionSignal = options.signal;
+        return versions.promise;
+      }
+      return Promise.resolve(response(200, { items: [template({ owner_id: "alice-id" })], total: 1 }));
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  await settle();
+  const details = descendants(versionDoc.querySelector("#managed-template-list"))
+    .find((child) => child.tagName === "DETAILS");
+  const loadButton = byText(details, "Load version history", "button");
+  const loading = loadButton.listeners.get("click")[0]({});
+  await versionController.loadTemplates();
+  assert.equal(versionSignal.aborted, true);
+  versions.resolve(response(200, [{ id: "stale", number: 9, size: 1, created_at: "later" }]));
+  await loading;
+  assert.equal(byText(versionDoc.querySelector("#managed-template-list"), "Version 9 · 1 bytes · later"), undefined);
+});
+
+test("malformed success bodies are rejected without replacing current state", async () => {
+  for (const badBody of [{ items: [], total: "invalid" }, new Error("truncated")]) {
+    const doc = new FakeDocument("user");
+    createAdministrationController(doc, {
+      fetch: async () => response(200, badBody),
+      confirm: () => false,
+      FormData: FakeFormData,
+    });
+    await settle();
+    assert.match(doc.querySelector("#administration-alert").textContent, /invalid response/);
+    assert.equal(doc.querySelector("#managed-template-list").children.length, 0);
+  }
+});
+
+test("guarded forms suppress concurrent duplicate submissions", async () => {
+  const doc = new FakeDocument("user");
+  const mutation = deferred();
+  let posts = 0;
+  createAdministrationController(doc, {
+    fetch: async (url, options = {}) => {
+      if ((options.method || "GET") === "POST") {
+        posts += 1;
+        return mutation.promise;
+      }
+      return response(200, { items: [], total: 0 });
+    },
+    confirm: () => false,
+    FormData: FakeFormData,
+  });
+  await settle();
+  const form = doc.querySelector("#create-template-form");
+  form.elements.name.value = "Only once";
+  form.elements.description.value = "Concurrent click";
+  form.elements.content.files = [{ name: "valid.docx", size: 1 }];
+  const listener = form.listeners.get("submit")[0];
+  const event = { preventDefault() {} };
+  const first = listener(event);
+  const duplicate = listener(event);
+  assert.equal(posts, 1);
+  mutation.resolve(response(201));
+  await Promise.all([first, duplicate]);
+  assert.equal(posts, 1);
 });

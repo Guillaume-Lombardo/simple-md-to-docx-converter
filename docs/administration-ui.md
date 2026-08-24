@@ -54,15 +54,27 @@ retain the API's generated names, `nosniff`, content digest, and authorization b
 ## Verification and sequencing
 
 `npm run test:web` executes native JavaScript unit tests and independently blocks line, branch, and
-function coverage below 90% across both browser modules. T17 also exercises the assembled HTTPS
-application over real SQLite and filesystem boundaries with two ordinary users and an
-administrator. A pinned-Chromium browser scenario runs those identities through template creation,
-download, metadata changes, replacement, version history and restoration, preference changes,
-archive/deletion, server-side denial, account creation and search, status changes, and password
-reset.
+function coverage below 90% across both browser modules. T17 exercises the ASGI application through
+an HTTPS test origin over real SQLite and filesystem boundaries and separately verifies owner
+representation, search, authorization, and storage failures against live PostgreSQL and RustFS.
+A pinned-Chromium browser scenario runs two ordinary users and an administrator against a loopback
+HTTP server through template creation and invalid uploads, download, metadata changes including a
+stale `If-Match`, replacement, version history and restoration, preference changes, guarded
+archive/deletion, CSRF and revoked-session denial, account creation and search, status changes, and
+password reset. It also checks that duplicate form submission does not create duplicate mutations.
 
-The hardened final image and its two deployable profiles belong to T20/T21. Consequently, the T17
-Chromium scenario uses the validated rootless toolchain image around the current application rather
-than claiming final-image E2E. T20/T21 must repeat the primary administration workflows and relevant
-authorization, failure, recovery, and concurrency cases against the final image in both profiles.
-This is explicit sequencing debt, not a waiver.
+The browser suite requires the repository Python environment, the pinned Puppeteer dependency, and
+the pinned Chrome version installed by CI. Its committed CI-equivalent invocation is:
+
+```bash
+npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
+MD_CONVERTER_TEST_PUPPETEER="$PWD/spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js" \
+MD_CONVERTER_TEST_CHROMIUM=/usr/bin/google-chrome-stable \
+npm run test:web-browser
+```
+
+The hardened final image and its two deployable profiles belong to T20/T21. The T17 browser suite is
+current-application browser integration: it does not claim deployment HTTPS, a rootless runtime, or
+final-image E2E. T20/T21 must repeat the primary administration workflows and relevant authorization,
+failure, recovery, and concurrency cases against the final image in both profiles. This is explicit
+sequencing debt, not a waiver.

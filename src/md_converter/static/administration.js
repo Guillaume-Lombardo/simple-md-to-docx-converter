@@ -46,12 +46,33 @@ export function validTemplateFile(file, maximumBytes) {
   return null;
 }
 
+export function validTemplatePage(page) {
+  return Boolean(page && Array.isArray(page.items) && Number.isInteger(page.total)
+    && page.total >= 0 && page.items.every((item) => item && typeof item.id === "string"
+      && typeof item.owner_id === "string" && typeof item.owner_username === "string"
+      && typeof item.name === "string" && typeof item.description === "string"
+      && ["active", "archived"].includes(item.status) && Number.isInteger(item.revision)));
+}
+
+export function validUsers(users) {
+  return Array.isArray(users) && users.every((user) => user && typeof user.id === "string"
+    && typeof user.username === "string" && ["admin", "user"].includes(user.role)
+    && typeof user.active === "boolean");
+}
+
+export function validVersions(versions) {
+  return Array.isArray(versions) && versions.every((version) => version
+    && typeof version.id === "string" && Number.isInteger(version.number)
+    && Number.isInteger(version.size) && typeof version.created_at === "string");
+}
+
 export function createAdministrationController(doc, dependencies = {}) {
   const list = doc.querySelector("#managed-template-list");
   if (!list) return null;
   const fetchRequest = dependencies.fetch || globalThis.fetch.bind(globalThis);
   const confirmAction = dependencies.confirm || globalThis.confirm.bind(globalThis);
   const FormDataClass = dependencies.FormData || globalThis.FormData;
+  const AbortControllerClass = dependencies.AbortController || globalThis.AbortController;
   const alert = doc.querySelector("#administration-alert");
   const filter = doc.querySelector("#template-filter");
   const mine = doc.querySelector("#my-templates");
@@ -65,6 +86,11 @@ export function createAdministrationController(doc, dependencies = {}) {
   let templates = [];
   let users = [];
   let preferredId = doc.body.dataset.preferredTemplateId;
+  let templateLoadGeneration = 0;
+  let templateLoadAbort = null;
+  let userLoadGeneration = 0;
+  let userLoadAbort = null;
+  const versionLoads = new Map();
 
   function showMessage(message, failure = true) {
     alert.textContent = message;
@@ -88,6 +114,7 @@ export function createAdministrationController(doc, dependencies = {}) {
     try {
       response = await fetchRequest(url, options);
     } catch {
+      if (options.signal?.aborted) return null;
       showMessage("The request could not be completed. Check your connection and try again.");
       return null;
     }
@@ -98,11 +125,47 @@ export function createAdministrationController(doc, dependencies = {}) {
     return response;
   }
 
+  async function responseJson(response, validator) {
+    let value;
+    try {
+      value = await response.json();
+    } catch {
+      showMessage("The server returned an invalid response. Try again.");
+      return null;
+    }
+    if (!validator(value)) {
+      showMessage("The server returned an invalid response. Try again.");
+      return null;
+    }
+    return value;
+  }
+
   function actionButton(parent, label, handler, className = "") {
     const button = appendText(parent, "button", label, className);
     button.type = "button";
-    button.addEventListener("click", handler);
+    button.addEventListener("click", async (event) => {
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await handler(event);
+      } finally {
+        button.disabled = false;
+      }
+    });
     return button;
+  }
+
+  function guardedSubmit(form, handler) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (form.dataset.submitting === "true") return;
+      form.dataset.submitting = "true";
+      try {
+        await handler(event);
+      } finally {
+        delete form.dataset.submitting;
+      }
+    });
   }
 
   async function mutateTemplate(template, url, options, successMessage) {
@@ -139,6 +202,23 @@ export function createAdministrationController(doc, dependencies = {}) {
     }
   }
 
+  async function loadVersions(container, template) {
+    const previous = versionLoads.get(template.id);
+    previous?.controller.abort();
+    const requestAbort = new AbortControllerClass();
+    const generation = (previous?.generation || 0) + 1;
+    const active = { controller: requestAbort, generation };
+    versionLoads.set(template.id, active);
+    const response = await request(`/api/v1/templates/${template.id}/versions`, {
+      signal: requestAbort.signal,
+    });
+    if (!response || requestAbort.signal.aborted
+      || versionLoads.get(template.id) !== active) return;
+    const versions = await responseJson(response, validVersions);
+    if (versions && !requestAbort.signal.aborted
+      && versionLoads.get(template.id) === active) renderVersions(container, template, versions);
+  }
+
   function renderTemplate(template) {
     const item = appendText(list, "li", "", "management-card");
     const heading = appendText(item, "div", "", "management-heading");
@@ -150,8 +230,8 @@ export function createAdministrationController(doc, dependencies = {}) {
     const actions = appendText(item, "div", "", "actions wrap");
     const download = appendText(actions, "a", "Download current", "button secondary");
     download.href = `/api/v1/templates/${template.id}/content`;
-    if (template.status === "active") {
-      const isPreferred = preferredId === template.id;
+    const isPreferred = preferredId === template.id;
+    if (template.status === "active" || isPreferred) {
       actionButton(actions, isPreferred ? "Clear preferred" : "Make preferred", async () => {
         const response = await request(
           isPreferred ? "/api/v1/template-preference" : `/api/v1/templates/${template.id}/preferred`,
@@ -183,8 +263,7 @@ export function createAdministrationController(doc, dependencies = {}) {
     description.name = "description";
     description.value = template.description;
     appendText(metadata, "button", "Save details").type = "submit";
-    metadata.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    guardedSubmit(metadata, async () => {
       await mutateTemplate(template, `/api/v1/templates/${template.id}`, {
         method: "PATCH",
         headers: csrfHeaders({ "Content-Type": "application/json", "If-Match": templateEtag(template) }),
@@ -205,8 +284,7 @@ export function createAdministrationController(doc, dependencies = {}) {
     fonts.name = "expected_fonts";
     fonts.placeholder = "Liberation Serif, Carlito";
     appendText(replacement, "button", "Replace template").type = "submit";
-    replacement.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    guardedSubmit(replacement, async () => {
       const invalid = validTemplateFile(file.files?.[0], maximumBytes);
       if (invalid) return showMessage(invalid);
       const data = new FormDataClass();
@@ -219,8 +297,7 @@ export function createAdministrationController(doc, dependencies = {}) {
 
     const versions = appendText(details, "div", "", "version-list");
     actionButton(details, "Load version history", async () => {
-      const response = await request(`/api/v1/templates/${template.id}/versions`);
-      if (response) renderVersions(versions, template, await response.json());
+      await loadVersions(versions, template);
     }, "secondary");
     if (template.status === "active") {
       actionButton(actions, "Archive", async () => {
@@ -247,18 +324,29 @@ export function createAdministrationController(doc, dependencies = {}) {
   }
 
   async function loadTemplates() {
+    const generation = ++templateLoadGeneration;
+    templateLoadAbort?.abort();
+    for (const active of versionLoads.values()) active.controller.abort();
+    versionLoads.clear();
+    const requestAbort = new AbortControllerClass();
+    templateLoadAbort = requestAbort;
     const loaded = [];
     let offset = 0;
     while (true) {
-      const response = await request(`/api/v1/templates?limit=100&offset=${offset}`);
-      if (!response) return;
-      const page = await response.json();
+      const response = await request(`/api/v1/templates?limit=100&offset=${offset}`, {
+        signal: requestAbort.signal,
+      });
+      if (!response || generation !== templateLoadGeneration) return;
+      const page = await responseJson(response, validTemplatePage);
+      if (!page || generation !== templateLoadGeneration) return;
       loaded.push(...page.items);
       if (loaded.length >= page.total || page.items.length === 0) break;
       offset = loaded.length;
     }
-    templates = loaded;
-    renderTemplates();
+    if (generation === templateLoadGeneration && !requestAbort.signal.aborted) {
+      templates = loaded;
+      renderTemplates();
+    }
   }
 
   function renderUsers() {
@@ -307,17 +395,23 @@ export function createAdministrationController(doc, dependencies = {}) {
 
   async function loadUsers() {
     if (!userList) return;
-    const response = await request("/api/v1/admin/users");
-    if (!response) return;
-    users = await response.json();
-    renderUsers();
+    const generation = ++userLoadGeneration;
+    userLoadAbort?.abort();
+    const requestAbort = new AbortControllerClass();
+    userLoadAbort = requestAbort;
+    const response = await request("/api/v1/admin/users", { signal: requestAbort.signal });
+    if (!response || generation !== userLoadGeneration) return;
+    const loaded = await responseJson(response, validUsers);
+    if (loaded && generation === userLoadGeneration && !requestAbort.signal.aborted) {
+      users = loaded;
+      renderUsers();
+    }
   }
 
   filter.addEventListener("input", renderTemplates);
   mine.addEventListener("change", renderTemplates);
   userSearch?.addEventListener("input", renderUsers);
-  createTemplateForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  guardedSubmit(createTemplateForm, async () => {
     clearMessage();
     const file = createTemplateForm.elements.content.files?.[0];
     const invalid = validTemplateFile(file, maximumBytes);
@@ -334,8 +428,7 @@ export function createAdministrationController(doc, dependencies = {}) {
       await loadTemplates();
     }
   });
-  createUserForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  if (createUserForm) guardedSubmit(createUserForm, async () => {
     const response = await request("/api/v1/admin/users", {
       method: "POST", headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({

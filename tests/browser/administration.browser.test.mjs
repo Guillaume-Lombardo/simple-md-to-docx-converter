@@ -68,7 +68,9 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   const docxResult = spawnSync(python, ["-c", "import base64; from tests.unit.test_template_validation import _docx; print(base64.b64encode(_docx()).decode())"], { cwd: repository, encoding: "utf8" });
   assert.equal(docxResult.status, 0, docxResult.stderr);
   const templateFile = path.join(temporary, "template.docx");
+  const invalidTemplateFile = path.join(temporary, "invalid.docx");
   await writeFile(templateFile, Buffer.from(docxResult.stdout.trim(), "base64"));
+  await writeFile(invalidTemplateFile, "not a DOCX archive");
   const server = spawn(python, [
     "-m", "tests.browser.administration_server", "--port", String(port),
     "--data", path.join(temporary, "data"),
@@ -117,13 +119,61 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await login(page, baseUrl, "alice", "alice-password");
   await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
   assert.doesNotMatch(await page.$eval("body", (body) => body.innerText), /Local accounts/);
+  await page.type('#create-template-form input[name="name"]', "Invalid report");
+  await page.type('#create-template-form textarea[name="description"]', "Rejected safely");
+  await page.type('#create-template-form input[name="expected_fonts"]', "Calibri");
+  await (await page.$('#create-template-form input[name="content"]')).uploadFile(invalidTemplateFile);
+  await page.click('#create-template-form button[type="submit"]');
+  await waitForText(page, "#administration-alert", "Word template package is invalid.");
+  await page.$eval("#create-template-form", (form) => form.reset());
   await page.type('#create-template-form input[name="name"]', "Alice report");
   await page.type('#create-template-form textarea[name="description"]', "Owned by Alice");
   await page.type('#create-template-form input[name="expected_fonts"]', "Calibri, Cambria, Courier New");
   await (await page.$('#create-template-form input[name="content"]')).uploadFile(templateFile);
-  await page.click('#create-template-form button[type="submit"]');
+  await page.$eval("#create-template-form", (form) => {
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
   await waitForText(page, "#administration-alert", "Template was created.");
   await waitForText(page, "#managed-template-list", "Alice report");
+  const concurrencyFailures = await page.evaluate(async () => {
+    const listing = await (await fetch("/api/v1/templates?limit=100")).json();
+    const item = listing.items[0];
+    const csrf = decodeURIComponent(document.cookie.split(";").map((part) => part.trim())
+      .find((part) => part.startsWith("__Host-md_converter_csrf=")).split("=")[1]);
+    const headers = {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf,
+      "If-Match": `"template-${item.id}-${item.revision}"`,
+    };
+    const missingCsrf = await fetch(`/api/v1/templates/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "If-Match": headers["If-Match"] },
+      body: JSON.stringify({ name: "Missing CSRF", description: "Rejected" }),
+    });
+    const first = await fetch(`/api/v1/templates/${item.id}`, {
+      method: "PATCH", headers,
+      body: JSON.stringify({ name: "Alice concurrent report", description: "First writer" }),
+    });
+    const stale = await fetch(`/api/v1/templates/${item.id}`, {
+      method: "PATCH", headers,
+      body: JSON.stringify({ name: "Lost update", description: "Stale writer" }),
+    });
+    return {
+      total: listing.total,
+      missing: { status: missingCsrf.status, body: await missingCsrf.json() },
+      first: first.status,
+      stale: { status: stale.status, body: await stale.json() },
+    };
+  });
+  assert.equal(concurrencyFailures.total, 1);
+  assert.equal(concurrencyFailures.missing.status, 403);
+  assert.equal(concurrencyFailures.missing.body.error.code, "CSRF_REQUIRED");
+  assert.equal(concurrencyFailures.first, 200);
+  assert.equal(concurrencyFailures.stale.status, 412);
+  assert.equal(concurrencyFailures.stale.body.error.code, "TEMPLATE_PRECONDITION_FAILED");
+  await page.reload({ waitUntil: "networkidle0" });
+  await waitForText(page, "#managed-template-list", "Alice concurrent report");
   await page.click("#managed-template-list details summary");
   await page.$eval("#managed-template-list details form", (form) => {
     form.elements.name.value = "Alice renamed report";
@@ -167,14 +217,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   assert.equal(currentDownload.status, 200);
   assert.match(currentDownload.disposition, /attachment/);
   assert.ok(currentDownload.size > 0);
-  await page.$$eval("#managed-template-list button", (buttons) => {
-    buttons.find((button) => button.textContent === "Make preferred").click();
-  });
-  await waitForText(page, "#administration-alert", "preferred template");
-  await page.$$eval("#managed-template-list button", (buttons) => {
-    buttons.find((button) => button.textContent === "Clear preferred").click();
-  });
-  await waitForText(page, "#administration-alert", "preferred template was cleared");
+  const aliceSession = (await page.cookies()).find((cookie) => cookie.name === "md_converter_session");
 
   await clearSession(page);
   await login(page, baseUrl, "bob", "bob-password");
@@ -205,6 +248,10 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await page.type('#user-list input[name="password"]', "alice-new-password");
   await page.click('#user-list form button[type="submit"]');
   await waitForText(page, "#administration-alert", "Password reset completed for Alice.");
+  await page.$$eval("#managed-template-list button", (buttons) => {
+    buttons.find((button) => button.textContent === "Make preferred").click();
+  });
+  await waitForText(page, "#administration-alert", "preferred template");
   page.once("dialog", (dialog) => dialog.accept());
   await page.$$eval("#managed-template-list button", (buttons) => {
     buttons.find((button) => button.textContent === "Archive").click();
@@ -216,9 +263,24 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await page.$$eval("#managed-template-list button", (buttons) => {
     buttons.find((button) => button.textContent === "Delete").click();
   });
-  await waitForText(page, "#administration-alert", "Template was deleted.");
-  await waitForText(page, "#managed-template-list", "No templates match");
+  await waitForText(page, "#administration-alert", "has changed or the operation is not allowed.");
+  await page.$$eval("#managed-template-list button", (buttons) => {
+    buttons.find((button) => button.textContent === "Clear preferred").click();
+  });
+  await waitForText(page, "#administration-alert", "preferred template was cleared");
 
   await clearSession(page);
+  await page.setCookie({ ...aliceSession, url: baseUrl });
+  await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
+  assert.equal(page.url(), `${baseUrl}/login`);
+  await clearSession(page);
   await login(page, baseUrl, "alice", "alice-new-password");
+  await page.goto(`${baseUrl}/templates`, { waitUntil: "networkidle0" });
+  await waitForText(page, "#managed-template-list", "Alice renamed report");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.$$eval("#managed-template-list button", (buttons) => {
+    buttons.find((button) => button.textContent === "Delete").click();
+  });
+  await waitForText(page, "#administration-alert", "Template was deleted.");
+  await waitForText(page, "#managed-template-list", "No templates match");
 });
