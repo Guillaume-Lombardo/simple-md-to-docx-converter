@@ -3,6 +3,9 @@
 body { margin: 0; }
 .topbar { display: flex; justify-content: space-between; padding: 1rem 5vw; background: #172033; color: white; }
 .brand { color: white; font-weight: 750; text-decoration: none; }
+.topbar nav { display: flex; gap: 1rem; }
+.topbar nav a { color: white; }
+.topbar nav a[aria-current="page"] { font-weight: 800; text-decoration-thickness: .16rem; }
 .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); gap: 1.5rem; max-width: 72rem; margin: 2rem auto; padding: 0 1rem; }
 .auth-shell { max-width: 28rem; margin: 12vh auto; padding: 1rem; }
 .panel { background: white; border: 1px solid #d8dee8; border-radius: .75rem; padding: 1.5rem; box-shadow: 0 .25rem 1rem #1720330d; }

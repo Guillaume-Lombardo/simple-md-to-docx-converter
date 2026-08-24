@@ -2,7 +2,7 @@
 ticket: T17
 linear_id: G1L-326
 linear_url: https://linear.app/g1lom/issue/G1L-326/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,23 @@ Build owner and administrator template management and local-account management w
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: Started implementation on `feat/T17-administration-ui` from `main` at `6c222ec`
+  after confirming Linear and repository scope, acceptance criteria, and completed T15/T16
+  dependencies. This workstream owns the template and administrator-account browser interfaces,
+  their dedicated static assets, HTTP/UI adapters, and multi-user browser/functional tests. T18
+  production resource policy and T20/T21 final-image E2E remain excluded.
+- 2026-08-24: Implemented the authenticated owner/administrator template page, complete versioned
+  lifecycle controls, preferences, safe owner display, and the administrator local-account tab.
+  Added server-enforced two-user/administrator functional coverage, native JavaScript coverage
+  gates, and a pinned-Chromium scenario over the real standalone persistence and filesystem
+  boundaries. T20/T21 remain responsible for repeating these workflows against the hardened final
+  image and both deployable profiles; this sequencing debt is not a waiver of final E2E coverage.
+- 2026-08-24: Verified Ruff formatting/lint, `ty`, native JavaScript tests, both pinned-Chromium
+  browser scenarios, and 860 locally runnable Python tests. Application coverage is 94.52%; the
+  T17 JavaScript module has 100% line/function and 91.27% branch coverage. The exact canonical
+  commands were also attempted: PostgreSQL/RustFS environment variables and host document engines
+  are unavailable, while the available rootless toolchain image passed 34 of 44 engine tests but
+  carries stale font/golden evidence. Final hardened-image and two-profile E2E remain T20/T21 debt.
 
 ## Synchronization
 

@@ -53,7 +53,7 @@ def test_login_and_conversion_pages_escape_persisted_identity_text() -> None:
     assert 'data-max-upload-bytes="123"' in page
     assert str(template.current_version_id) in page
     assert str(job.id) in page
-    assert "Templates" not in page and "Users" not in page
+    assert "Templates" in page and "Users" not in page
     assert 'role="alert"' in render_login_page(invalid=True)
     assert 'role="alert"' not in render_login_page()
 

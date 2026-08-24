@@ -95,6 +95,7 @@ Database constraints and triggers enforce owner/pair integrity, immutable versio
 current-version membership, active/current job submission, and deletion restrictions in addition
 to the application-level transactions.
 
-T16 and T17 retain browser interfaces. T20/T21 retain final rootless-image E2E for both profiles;
-T15 supplies functional ASGI and real SQLite/filesystem plus PostgreSQL/RustFS boundary coverage
-without claiming that later runtime proof.
+T17 provides the owner and administrator browser interface described in
+`docs/administration-ui.md`. T20/T21 retain final rootless-image E2E for both profiles; T15 supplies
+functional ASGI and real SQLite/filesystem plus PostgreSQL/RustFS boundary coverage without
+claiming that later runtime proof.
