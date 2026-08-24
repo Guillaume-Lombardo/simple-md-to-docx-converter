@@ -31,7 +31,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - The T15 correction tree passes 699 unit tests with the exact 90% branch threshold, 860 applicable
   host tests with live PostgreSQL/RustFS, 20 repeated SQLite submission/mutation race runs, and the
   3 T15 activation/publication tests in the arbitrary-UID rootless toolchain image. K3s remained
-  inactive. Changed-line coverage is pending the committed-tree check.
+  inactive. The committed Git tree passes 90.05% application branch coverage (1,041/1,156) and
+  91.95% changed executable-line coverage (811/882).
 - Canonical unit selection passed 655 tests at 93.55% overall application coverage and more than
   90% branch coverage.
 - Canonical default selection passed 805 tests at 94.73% overall coverage, including real

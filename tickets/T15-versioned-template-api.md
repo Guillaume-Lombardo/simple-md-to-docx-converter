@@ -67,7 +67,8 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   and deletion on both profiles. The exact unit gate passes 699 tests with the required 90% branch
   threshold, the applicable live PostgreSQL/RustFS host suite passes 860 tests, 20 repeated SQLite
   race runs pass, and all 3 T15 real-engine tests pass in the arbitrary-UID rootless toolchain.
-  K3s remained inactive. Changed-line coverage will be recorded from the committed Git tree.
+  K3s remained inactive. The committed Git tree passes 90.05% application branch coverage
+  (1,041/1,156) and 91.95% changed executable-line coverage (811/882).
 
 ## Synchronization
 
