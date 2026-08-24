@@ -2,7 +2,7 @@
 ticket: T15
 linear_id: G1L-323
 linear_url: https://linear.app/g1lom/issue/G1L-323/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -75,6 +75,11 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   `origin/main` and published as ready pull request
   [#46](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/46). Awaiting required
   GitHub checks before the authorized squash merge.
+- 2026-08-24: Pull request #46 passed every required GitHub check, including document engines,
+  functional, standalone storage, distributed PostgreSQL/RustFS, coverage, and the protected gate.
+  It was squash-merged as `201116a` and verified on `main`; the exact source branch was removed
+  locally and remotely. Linear G1L-323 is `Done`. The approved final-application-image E2E
+  sequencing remains mandatory in T20/T21.
 
 ## Synchronization
 
