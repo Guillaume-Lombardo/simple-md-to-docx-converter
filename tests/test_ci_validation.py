@@ -40,6 +40,9 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
         "6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f" in workflow
     )
     assert 'PUPPETEER_SKIP_DOWNLOAD: "true"' in workflow
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
+    assert "node-version: 22.23.1" in workflow
+    assert 'test "$(node --version)" = "v22.23.1"' in workflow
     assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
     assert "mmdc --version" in workflow
     assert "google-chrome-stable --version" in workflow

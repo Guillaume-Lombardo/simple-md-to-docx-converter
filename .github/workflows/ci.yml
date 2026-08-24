@@ -229,6 +229,12 @@ jobs:
           pandoc_bin="$install_root/pandoc-3.10.2/bin"
           [[ -x "$pandoc_bin/pandoc" ]]
           echo "$pandoc_bin" >> "$GITHUB_PATH"
+      - name: Set up the pinned Node runtime for Mermaid tests
+        if: ${{ matrix.domain == 'document-engines' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+          check-latest: false
       - name: Install verified Mermaid and Chrome for document-engine tests
         if: ${{ matrix.domain == 'document-engines' }}
         env:
@@ -248,6 +254,7 @@ jobs:
             | sha256sum --check --strict
           npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
           echo "$GITHUB_WORKSPACE/spikes/toolchain/node_modules/.bin" >> "$GITHUB_PATH"
+          test "$(node --version)" = "v22.23.1"
           test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.16.0"
           test "$(google-chrome-stable --version)" = "Google Chrome 151.0.7922.173"
       - name: Prepare the RustFS test bucket
