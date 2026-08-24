@@ -87,7 +87,20 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   passing tests; its 37 failures are confined to unavailable Pandoc, Mermaid/Chromium,
   LibreOffice, and font artifacts. A real ClamAV installation is unavailable on this host, so the
   deterministic real TCP INSTREAM boundary test is the local provider proof. Changed application
-  line coverage is 98.36% (601/611 lines) against the exact committed implementation revision.
+  line coverage was 98.36% (601/611 lines) for the initial implementation revision.
+- 2026-08-24: Closed final-review gaps by assembling the same retention service into production
+  external and embedded worker factories, advancing cleanup cadence before transient-error
+  backoff, and adding assembled behavior coverage. ClamAV now accepts only one canonical,
+  NUL-terminated `stream: OK` or valid `stream: <signature> FOUND` record and fails closed for empty
+  prefixes, malformed termination, multiple or contradictory records, and trailing data. Alembic
+  revision `20260824_09` prevents both update and deletion of cleanup evidence while leaving the
+  approved bounded deletion of expired audit rows intact; real SQLite and isolated PostgreSQL
+  upgrade/downgrade tests verify the trigger lifecycle without weakening production enforcement.
+  Restore exercises now measure RTO from an injected monotonic clock while retaining UTC evidence,
+  including wall-clock rollback coverage. Final review validation passed 62 focused tests, Ruff,
+  `ty`, all 22 Web tests, 786 unit tests with the branch gate, and 978 applicable tests with live
+  PostgreSQL/RustFS and 95.06% application coverage. Changed application coverage is 98.67%
+  (669/678 lines) at commit `5f7e6b3`.
 
 Workload-dependent ceilings and schedules remain required operator-supplied configuration. Applying memory and ephemeral-storage ceilings and
 repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
