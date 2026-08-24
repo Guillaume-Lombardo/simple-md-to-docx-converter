@@ -9,11 +9,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- `main` at `201116a` contains T00-T15. T15 implementation PR #46 was squash-merged after green CI
-  and independent specification, security/concurrency, and test/CI approval; its exact local and
-  remote source branch was removed.
-- T15/G1L-323 is `Done` in Linear. Its local completion mirror is being published on
-  `docs/T15-close-versioned-template-api` before the next critical-path ticket starts.
+- `main` at `1635c17` contains T00-T15. T15 implementation PR #46 and completion PR #47 were
+  squash-merged after green CI and independent review; their exact local and remote branches were
+  removed. T15/G1L-323 is `Done` locally and in Linear.
+- T16/G1L-327 is `In Progress` on `feat/T16-conversion-ui`, based on delivered main `1635c17`; its
+  T13, T14, and T15 dependencies are verified `Done` locally and in Linear.
 - T15 provides immutable template versions, optimistic concurrency, owner-scoped download and
   audit behavior, fenced pending-publication recovery, integrity checks, and frozen template
   resolution in production worker assembly across SQLite/filesystem and PostgreSQL/S3 profiles.
@@ -47,5 +47,5 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Action
 
-Merge the T15 completion synchronization after its required checks, then select and start T16,
-whose T13, T14, and T15 dependencies are verified delivered.
+Implement and validate the T16 asynchronous conversion UI, including accessible browser behavior
+and JavaScript coverage, then commission independent specification, security, and test review.

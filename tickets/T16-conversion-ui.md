@@ -2,7 +2,7 @@
 ticket: T16
 linear_id: G1L-327
 linear_url: https://linear.app/g1lom/issue/G1L-327/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -33,7 +33,12 @@ Build template search, job submission, progressive polling, cancellation, expira
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T13, T14, and T15 are verified `Done` locally and in Linear. Implementation started
+  on `feat/T16-conversion-ui` from delivered main `1635c17`. Scope is the authenticated,
+  server-rendered conversion page with accessible upload/drag-and-drop, template search and
+  selection, output choice, job submission, progressive status polling, cancellation, expiration,
+  download, and stable English errors. T17 retains template/account administration UI, while
+  T20/T21 retain final-application-image browser E2E execution.
 
 ## Synchronization
 
