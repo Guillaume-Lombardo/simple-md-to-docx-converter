@@ -45,10 +45,10 @@ def _validated(data: bytes) -> ValidatedTemplate:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("duration", [0, -1, True])
-def test_template_recovery_policy_rejects_invalid_duration(duration: float) -> None:
-    with pytest.raises(ValueError):
-        TemplateRecoveryPolicy(duration)
+def test_template_recovery_policy_rejects_invalid_duration() -> None:
+    for duration in (0, -1, True, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="finite and positive"):
+            TemplateRecoveryPolicy(duration)
 
 
 @pytest.mark.unit

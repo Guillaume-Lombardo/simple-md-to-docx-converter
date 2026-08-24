@@ -74,11 +74,12 @@ class TemplateRecoveryPolicy:
     pending_publication_stale_seconds: float
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.pending_publication_stale_seconds, bool)
-            or self.pending_publication_stale_seconds <= 0
+        if isinstance(self.pending_publication_stale_seconds, bool) or not (
+            0 < self.pending_publication_stale_seconds < float("inf")
         ):
-            raise ValueError("Template publication lease duration must be positive")
+            raise ValueError(
+                "Template publication lease duration must be finite and positive"
+            )
 
 
 class TemplateService:

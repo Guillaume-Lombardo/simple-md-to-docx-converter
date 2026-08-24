@@ -70,6 +70,26 @@ def test_invalid_security_configuration_is_rejected(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("duration", [float("inf"), float("nan")])
+def test_template_recovery_duration_must_be_finite(duration: float) -> None:
+    values: dict[str, object] = {
+        **template_settings(),
+        "initial_admin_username": "admin",
+        "initial_admin_password": "secret",
+        "storage_profile": "standalone",
+        "standalone_data_directory": "/data",
+        "conversion_upload_max_bytes": 1_000_000,
+        "conversion_request_max_bytes": 1_100_000,
+        "conversion_retry_after_seconds": 1,
+        "job_result_retention_seconds": 3_600,
+        "template_pending_publication_stale_seconds": duration,
+    }
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(values)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("missing", TEMPLATE_REQUIRED_FIELDS)
 def test_template_runtime_configuration_has_no_implicit_defaults(
     missing: str,

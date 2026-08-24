@@ -457,11 +457,12 @@ def test_versioned_api_service_publishes_only_after_real_engine_activation(
         os.environ,
     )
     service, _catalog, owner, _engine = _versioned_service(tmp_path, context)
+    candidate = _candidate_reference()
 
     template, version = service.create_versioned(
         owner,
         TemplateCreate(uuid4(), "Real activation", "T15 boundary"),
-        _candidate_reference(),
+        candidate,
         DEFAULT_REFERENCE_FONTS.families,
     )
 
@@ -472,7 +473,7 @@ def test_versioned_api_service_publishes_only_after_real_engine_activation(
         "pandoc_blank_conversion",
         "libreoffice_open_save",
     )
-    assert service.download(owner, template.id)[2] == _candidate_reference()
+    assert service.download(owner, template.id)[2] == candidate
 
 
 @pytest.mark.parametrize("failed_engine", ["pandoc", "libreoffice"])
