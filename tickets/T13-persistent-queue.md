@@ -61,6 +61,9 @@ Implement the persistent queue, job API, state machine, idempotency, workers, le
   font tests because those engines are not installed on the host. Final independent specification
   and security reviews approve the implementation; the test review approves it after this mechanical
   validation-count correction. All three explicitly approve the T20/T21 E2E sequencing exception.
+- 2026-08-24: Published ready pull request
+  [#44](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/44) after the branch
+  was rebased on `origin/main`. Awaiting required GitHub checks before authorized squash merge.
 
 ## Synchronization
 

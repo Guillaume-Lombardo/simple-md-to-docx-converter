@@ -14,6 +14,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   implemented domain and the protected gate. T11 is `Done` locally and in Linear.
 - T13/G1L-322 is `In Progress` on `feat/T13-persistent-queue-workers`, based on `80974b3`; its T11
   and T12 dependencies are verified `Done` locally and in Linear.
+- Ready pull request #44 publishes the independently approved T13 implementation. Its source branch
+  was rebased on unchanged `origin/main`; required GitHub checks are pending.
 - The uncommitted T13 implementation contains the durable job state machine, owner-scoped
   idempotency, authenticated conversion API, SQLite/PostgreSQL queue and Alembic schema, unique
   lease and cleanup fencing tokens, attempt-specific result publication, independent periodic
@@ -63,7 +65,6 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Commit the exact reviewed implementation, verify changed-line coverage, rebase if `origin/main`
-   advanced, then publish the ready PR under standing authorization.
-2. Require green CI and independent approval, squash-merge, synchronize T13 to `Done`, clean the
+1. Require green CI on PR #44, then squash-merge under standing authorization.
+2. Verify the squash on `main`, synchronize T13 to `Done`, clean the
    exact branch, and immediately continue the next ready critical-path ticket.
