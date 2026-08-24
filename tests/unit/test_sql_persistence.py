@@ -32,6 +32,12 @@ REVISION: Any = importlib.import_module(
 JOB_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_03_conversion_jobs"
 )
+RETENTION_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_07_retention_cleanup"
+)
+IMMUTABILITY_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_08_immutable_retention_records"
+)
 
 
 @pytest.mark.unit
@@ -252,3 +258,30 @@ def test_alembic_environment_rejects_an_unmanaged_connection(
     context.config.attributes = {"connection": object()}
     with pytest.raises(RuntimeError, match="application-managed"):
         run_migration_environment(context)
+
+
+@pytest.mark.unit
+def test_retention_migrations_cover_schema_and_both_immutability_dialects(
+    mocker: MockerFixture,
+) -> None:
+    retention = mocker.patch.object(RETENTION_REVISION, "op")
+    batch = retention.batch_alter_table.return_value.__enter__.return_value
+    RETENTION_REVISION.upgrade()
+    assert retention.add_column.call_count == 2
+    assert retention.create_index.call_count == 2
+    retention.create_table.assert_called_once()
+    RETENTION_REVISION.downgrade()
+    assert retention.drop_index.call_count == 2
+    assert batch.drop_column.call_count == 2
+
+    immutable = mocker.patch.object(IMMUTABILITY_REVISION, "op")
+    immutable.get_bind.return_value.dialect.name = "sqlite"
+    IMMUTABILITY_REVISION.upgrade()
+    IMMUTABILITY_REVISION.downgrade()
+    assert immutable.execute.call_count == 4
+
+    immutable.reset_mock()
+    immutable.get_bind.return_value.dialect.name = "postgresql"
+    IMMUTABILITY_REVISION.upgrade()
+    IMMUTABILITY_REVISION.downgrade()
+    assert immutable.execute.call_count == 6
