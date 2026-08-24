@@ -681,6 +681,10 @@ class AppComponents:
     audit_reader: AuditReader | None = None
     worker_metrics_bind_host: str = "127.0.0.1"
     worker_metrics_port: int = 9464
+    worker_metrics_max_connections: int = 4
+    worker_metrics_observation_limit: int = 2
+    worker_metrics_accept_queue_size: int = 8
+    worker_metrics_request_timeout_seconds: float = 2.0
 
     def build_conversion_worker(
         self,
@@ -782,6 +786,10 @@ class AppComponents:
                 self.queue_observer,
                 host=self.worker_metrics_bind_host,
                 port=self.worker_metrics_port,
+                max_connections=self.worker_metrics_max_connections,
+                observation_limit=self.worker_metrics_observation_limit,
+                accept_queue_size=self.worker_metrics_accept_queue_size,
+                request_timeout_seconds=self.worker_metrics_request_timeout_seconds,
             ),
         )
 
@@ -913,6 +921,12 @@ def build_components(settings: Settings) -> AppComponents:
         audit_reader=SqlAuditReader(engine),
         worker_metrics_bind_host=settings.worker_metrics_bind_host,
         worker_metrics_port=settings.worker_metrics_port,
+        worker_metrics_max_connections=settings.worker_metrics_max_connections,
+        worker_metrics_observation_limit=settings.worker_metrics_observation_limit,
+        worker_metrics_accept_queue_size=settings.worker_metrics_accept_queue_size,
+        worker_metrics_request_timeout_seconds=(
+            settings.worker_metrics_request_timeout_seconds
+        ),
     )
 
 

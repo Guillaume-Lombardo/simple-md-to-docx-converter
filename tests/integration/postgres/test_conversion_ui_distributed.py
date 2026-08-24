@@ -14,7 +14,6 @@ from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.schema import (
     ConversionJobRow,
     SystemTemplateSelectionRow,
-    TemplateAuditRow,
     TemplateRow,
     UserRow,
 )
@@ -97,11 +96,6 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
                             ConversionJobRow.id == str(job_id)
                         )
                     )
-                connection.execute(
-                    delete(TemplateAuditRow).where(
-                        TemplateAuditRow.template_id == str(template_id)
-                    )
-                )
                 connection.execute(
                     delete(TemplateRow).where(TemplateRow.id == str(template_id))
                 )

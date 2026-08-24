@@ -59,6 +59,13 @@ def test_security_defaults_and_secret_redaction() -> None:
         {"readiness_timeout_seconds": float("inf")},
         {"worker_metrics_bind_host": "bad host/private"},
         {"worker_metrics_port": 0},
+        {"worker_metrics_max_connections": 0},
+        {
+            "worker_metrics_max_connections": 1,
+            "worker_metrics_observation_limit": 2,
+        },
+        {"worker_metrics_accept_queue_size": 0},
+        {"worker_metrics_request_timeout_seconds": float("inf")},
         {"clamav_port": 65_536},
         {"clamav_timeout_seconds": float("inf")},
     ],

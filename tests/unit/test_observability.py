@@ -3,10 +3,12 @@
 import json
 import logging
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 from pytest_mock import MockerFixture
 
+from md_converter import observability
 from md_converter.observability import (
     JsonLogFormatter,
     MetricsHttpServer,
@@ -24,12 +26,29 @@ from md_converter.observability import (
 pytestmark = pytest.mark.unit
 
 
-def test_correlation_accepts_safe_opaque_values_and_replaces_hostile_input() -> None:
-    assert normalize_correlation_id("edge-request_42") == "edge-request_42"
-    generated = normalize_correlation_id("../../private/source.md\nsecret=value")
-    assert len(generated) == 32
-    assert generated.isalnum()
-    assert "source" not in generated
+@pytest.mark.parametrize(
+    "supplied",
+    [
+        None,
+        "secret-token-value",
+        "quarterly-results.docx",
+        "Bearer-private-credential",
+        "00000000-0000-4000-8000-000000000001",
+        "../../private/source.md\nsecret=value",
+    ],
+)
+def test_correlation_is_server_generated_for_every_caller_value(
+    supplied: str | None,
+) -> None:
+    generated = normalize_correlation_id(supplied)
+    assert str(UUID(generated)) == generated
+    assert UUID(generated).version == 4
+    assert generated != supplied
+    if supplied is not None:
+        assert supplied not in generated
+
+
+def test_internal_correlation_context_rejects_hostile_values() -> None:
     with (
         pytest.raises(ValueError, match="Correlation"),
         correlated("../../private"),
@@ -161,9 +180,10 @@ def test_metrics_server_lifecycle_and_bind_failure_are_sanitized(
     mocker: MockerFixture,
 ) -> None:
     queue = mocker.Mock(spec=QueueObserver)
-    http_server = mocker.patch("md_converter.observability.ThreadingHTTPServer")
+    http_server = mocker.patch("md_converter.observability._BoundedMetricsHttpServer")
     thread = mocker.patch("md_converter.observability.Thread")
     http_server.return_value.server_address = ("127.0.0.1", 9464)
+    thread.return_value.is_alive.return_value = False
     server = MetricsHttpServer(OperationalMetrics(), queue, host="127.0.0.1", port=9464)
 
     server.start()
@@ -174,7 +194,7 @@ def test_metrics_server_lifecycle_and_bind_failure_are_sanitized(
     server.stop()
     http_server.return_value.shutdown.assert_called_once_with()
     http_server.return_value.server_close.assert_called_once_with()
-    thread.return_value.join.assert_called_once_with()
+    thread.return_value.join.assert_called_once_with(3.0)
     server.stop()
     with pytest.raises(RuntimeError, match="not running"):
         _ = server.address
@@ -190,3 +210,116 @@ def test_metrics_server_lifecycle_and_bind_failure_are_sanitized(
     for host, port in (("", 1), ("bad host", 1), ("127.0.0.1", True)):
         with pytest.raises(ValueError, match="Metrics bind"):
             MetricsHttpServer(OperationalMetrics(), queue, host=host, port=port)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_connections": True},
+        {"max_connections": 0},
+        {"observation_limit": True},
+        {"observation_limit": 0},
+        {"max_connections": 1, "observation_limit": 2},
+        {"accept_queue_size": True},
+        {"accept_queue_size": 0},
+        {"request_timeout_seconds": True},
+        {"request_timeout_seconds": float("inf")},
+        {"request_timeout_seconds": 0},
+    ],
+)
+def test_metrics_server_rejects_every_invalid_limit(limits: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="server limits"):
+        MetricsHttpServer(
+            OperationalMetrics(),
+            cast(QueueObserver, object()),
+            host="127.0.0.1",
+            port=9464,
+            **limits,
+        )
+
+
+def test_deadline_reader_enforces_absolute_budget_and_bounded_reads(
+    mocker: MockerFixture,
+) -> None:
+    connection = mocker.Mock()
+    connection.recv.side_effect = [b"a", b"\n"]
+    mocker.patch("md_converter.observability.monotonic", return_value=1.0)
+    reader = observability._DeadlineReader(connection, 2.0)
+    assert reader.readline() == b"a\n"
+    assert reader.readable()
+    assert connection.settimeout.call_count == 2
+
+    connection.recv.side_effect = [b"z"]
+    assert observability._DeadlineReader(connection, 2.0).readline(1) == b"z"
+    connection.recv.side_effect = [b""]
+    assert observability._DeadlineReader(connection, 2.0).readline() == b""
+
+    connection.reset_mock()
+    connection.recv.side_effect = [b"x", b""]
+    reader = observability._DeadlineReader(connection, 2.0)
+    assert reader.read(2) == b"x"
+    connection.recv.side_effect = [b"x", b"y"]
+    assert observability._DeadlineReader(connection, 2.0).read(2) == b"xy"
+    with pytest.raises(ValueError, match="require a size"):
+        reader.read()
+
+    mocker.patch("md_converter.observability.monotonic", return_value=3.0)
+    with pytest.raises(TimeoutError):
+        observability._DeadlineReader(connection, 2.0).readline(1)
+
+
+def test_bounded_metrics_server_admission_and_failure_paths(
+    mocker: MockerFixture,
+) -> None:
+    server = object.__new__(observability._BoundedMetricsHttpServer)
+    server._admission = mocker.Mock()
+    server._executor = mocker.Mock()
+    server._request_timeout_seconds = 0.5
+    server.shutdown_request = mocker.Mock()
+    server._reject_saturated = mocker.Mock()
+    request = mocker.Mock()
+    address = ("127.0.0.1", 1)
+
+    server._admission.acquire.return_value = False
+    server.process_request(request, address)
+    server._reject_saturated.assert_called_once_with(request)
+    server.shutdown_request.assert_called_once_with(request)
+
+    server._admission.acquire.return_value = True
+    server.process_request(request, address)
+    server._executor.submit.assert_called_once_with(
+        server._process_admitted, request, address
+    )
+
+    server._executor.submit.side_effect = RuntimeError
+    server.process_request(request, address)
+    server._admission.release.assert_called_once_with()
+
+    server.finish_request = mocker.Mock(side_effect=RuntimeError)
+    server.handle_error = mocker.Mock()
+    server.shutdown_request.reset_mock()
+    server._admission.release.reset_mock()
+    server._process_admitted(request, address)
+    server.handle_error.assert_called_once_with(request, address)
+    server.shutdown_request.assert_called_once_with(request)
+    server._admission.release.assert_called_once_with()
+
+    server.finish_request.side_effect = None
+    server.handle_error.reset_mock()
+    server._process_admitted(request, address)
+    server.handle_error.assert_not_called()
+
+
+def test_bounded_metrics_server_saturation_response_is_safe(
+    mocker: MockerFixture,
+) -> None:
+    server = object.__new__(observability._BoundedMetricsHttpServer)
+    server._request_timeout_seconds = 0.5
+    request = mocker.Mock()
+    server._reject_saturated(request)
+    request.settimeout.assert_called_once_with(0.1)
+    assert b"503 Service Unavailable" in request.sendall.call_args.args[0]
+    assert b"metrics unavailable" in request.sendall.call_args.args[0]
+
+    request.sendall.side_effect = OSError
+    server._reject_saturated(request)

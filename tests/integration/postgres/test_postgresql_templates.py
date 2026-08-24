@@ -22,7 +22,6 @@ from md_converter.persistence.schema import (
     ConversionJobRow,
     SessionRow,
     SystemTemplateSelectionRow,
-    TemplateAuditRow,
     TemplatePreferenceRow,
     TemplateRow,
     TemplateVersionRow,
@@ -53,7 +52,6 @@ from tests.storage_contracts import (
 def clear_template_test_data(engine: Engine) -> None:
     with engine.begin() as connection:
         connection.execute(delete(ConversionJobRow))
-        connection.execute(delete(TemplateAuditRow))
         connection.execute(delete(SystemTemplateSelectionRow))
         connection.execute(delete(TemplatePreferenceRow))
         connection.execute(delete(TemplateVersionRow))

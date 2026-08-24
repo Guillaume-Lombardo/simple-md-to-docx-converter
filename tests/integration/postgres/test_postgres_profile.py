@@ -117,6 +117,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         connection.execute(
             text("DROP TABLE IF EXISTS authentication_audit_records CASCADE")
         )
+        connection.execute(text("DROP TABLE IF EXISTS audit_cleanup_guards CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS template_audit_records CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS template_versions CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS conversion_jobs CASCADE"))
@@ -137,6 +138,9 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         connection.execute(
             text("DROP FUNCTION IF EXISTS reject_immutable_retention_update() CASCADE")
         )
+        connection.execute(
+            text("DROP FUNCTION IF EXISTS reject_unauthorized_audit_delete() CASCADE")
+        )
         for statement in (
             "DROP FUNCTION IF EXISTS enforce_template_version_integrity()",
             "DROP FUNCTION IF EXISTS enforce_template_current_integrity()",
@@ -150,6 +154,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
             migration.result(timeout=10)
     assert set(inspect(engine).get_table_names()) >= {
         "alembic_version",
+        "audit_cleanup_guards",
         "authentication_audit_records",
         "sessions",
         "system_template_selection",

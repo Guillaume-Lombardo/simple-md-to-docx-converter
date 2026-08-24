@@ -18,7 +18,6 @@ from md_converter.app import AppComponents, build_components, create_app
 from md_converter.config import Settings
 from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.schema import (
-    TemplateAuditRow,
     TemplatePreferenceRow,
     TemplateRow,
     TemplateVersionRow,
@@ -150,11 +149,6 @@ def _cleanup(components: AppComponents, user_ids: set[UUID]) -> None:
             connection.execute(
                 delete(TemplatePreferenceRow).where(
                     TemplatePreferenceRow.template_id.in_(template_ids)
-                )
-            )
-            connection.execute(
-                delete(TemplateAuditRow).where(
-                    TemplateAuditRow.template_id.in_(template_ids)
                 )
             )
             connection.execute(

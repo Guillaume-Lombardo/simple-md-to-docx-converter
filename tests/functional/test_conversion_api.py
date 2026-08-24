@@ -64,6 +64,7 @@ def submit(  # noqa: PLR0913 - explicit HTTP form helper
 @pytest.mark.functional
 def test_conversion_api_idempotency_authorization_cancellation_and_result(  # noqa: PLR0915
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     admin_password = "admin-" + "password"
     settings = Settings(
@@ -150,8 +151,10 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         assert first.status_code == 202
         assert first.headers["Location"].endswith(first.json()["id"])
         assert first.headers["Retry-After"] == "2"
-        assert first.headers["X-Correlation-ID"] == "edge-request-42"
-        assert first.json()["correlation_id"] == "edge-request-42"
+        correlation_id = first.headers["X-Correlation-ID"]
+        assert UUID(correlation_id).version == 4
+        assert correlation_id != "edge-request-42"
+        assert first.json()["correlation_id"] == correlation_id
         assert first.json()["component_versions"]
         assert first.json()["expires_at"] is None
         first_id = UUID(first.json()["id"])
@@ -159,7 +162,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             create_database_engine(standalone_database_url(tmp_path))
         ).get(first_id)
         assert persisted is not None
-        assert persisted.correlation_id == "edge-request-42"
+        assert persisted.correlation_id == correlation_id
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
         assert "md_converter_queue_depth 1" in metrics.text
@@ -223,10 +226,25 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         assert client.get(f"/api/v1/conversions/{first_id}").status_code == 404
         assert client.get("/api/v1/audit").status_code == 403
 
-        hostile = client.get(
-            "/health/live", headers={"X-Correlation-ID": "../../private.md"}
+        attacker_values = (
+            "private-secret-token",
+            "customer-upload.docx",
+            "Bearer-private-credential",
+            "00000000-0000-4000-8000-000000000001",
+            "../../private.md",
         )
-        assert hostile.headers["X-Correlation-ID"] != "../../private.md"
+        generated_ids = []
+        for attacker_value in attacker_values:
+            response = client.get(
+                "/health/live", headers={"X-Correlation-ID": attacker_value}
+            )
+            generated = response.headers["X-Correlation-ID"]
+            assert UUID(generated).version == 4
+            assert generated != attacker_value
+            generated_ids.append(generated)
+        assert len(set(generated_ids)) == len(attacker_values)
+        captured_logs = capsys.readouterr().out
+        assert all(value not in captured_logs for value in attacker_values)
 
         admin = login(client, "admin", admin_password)
         csrf = str(admin["csrf_token"])

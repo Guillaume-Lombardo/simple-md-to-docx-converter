@@ -64,6 +64,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
     upgrade_database(engine)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
+        "audit_cleanup_guards",
         "authentication_audit_records",
         "conversion_jobs",
         "retention_cleanup_runs",
@@ -395,16 +396,19 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     auth_audit.get_bind.return_value.dialect.name = "sqlite"
     AUTH_AUDIT_REVISION.upgrade()
     AUTH_AUDIT_REVISION.downgrade()
-    auth_audit.create_table.assert_called_once()
+    assert auth_audit.create_table.call_count == 2
     assert auth_audit.create_index.call_count == 2
-    assert auth_audit.execute.call_count == 2
-    auth_audit.drop_table.assert_called_once_with("authentication_audit_records")
+    assert auth_audit.execute.call_count == 6
+    assert [call.args[0] for call in auth_audit.drop_table.call_args_list] == [
+        "authentication_audit_records",
+        "audit_cleanup_guards",
+    ]
 
     auth_audit.reset_mock()
     auth_audit.get_bind.return_value.dialect.name = "postgresql"
     AUTH_AUDIT_REVISION.upgrade()
     AUTH_AUDIT_REVISION.downgrade()
-    assert auth_audit.execute.call_count == 2
+    assert auth_audit.execute.call_count == 8
 
     cleanup_evidence.reset_mock()
     cleanup_evidence.get_bind.return_value.dialect.name = "postgresql"

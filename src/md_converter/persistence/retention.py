@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, literal, select, text, union_all
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -145,55 +145,50 @@ class SqlRetentionRepository:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
-                template_candidates = tuple(
+                if self._engine.dialect.name == "postgresql":
                     database.execute(
-                        select(TemplateAuditRow.id, TemplateAuditRow.created_at)
-                        .where(TemplateAuditRow.created_at < cutoff_at)
-                        .order_by(TemplateAuditRow.created_at, TemplateAuditRow.id)
-                        .limit(limit)
-                        .with_for_update(
-                            skip_locked=self._engine.dialect.name == "postgresql"
-                        )
+                        text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                        {"lock_id": 1_914_365_011},
                     )
-                )
-                authentication_candidates = tuple(
+                combined = union_all(
+                    select(
+                        TemplateAuditRow.id.label("id"),
+                        TemplateAuditRow.created_at.label("created_at"),
+                        literal("template").label("record_type"),
+                    ).where(TemplateAuditRow.created_at < cutoff_at),
+                    select(
+                        AuthenticationAuditRow.id.label("id"),
+                        AuthenticationAuditRow.created_at.label("created_at"),
+                        literal("authentication").label("record_type"),
+                    ).where(AuthenticationAuditRow.created_at < cutoff_at),
+                ).subquery()
+                candidates = tuple(
                     database.execute(
-                        select(
-                            AuthenticationAuditRow.id,
-                            AuthenticationAuditRow.created_at,
-                        )
-                        .where(AuthenticationAuditRow.created_at < cutoff_at)
+                        select(combined)
                         .order_by(
-                            AuthenticationAuditRow.created_at,
-                            AuthenticationAuditRow.id,
+                            combined.c.created_at,
+                            combined.c.id,
+                            combined.c.record_type,
                         )
                         .limit(limit)
-                        .with_for_update(
-                            skip_locked=self._engine.dialect.name == "postgresql"
-                        )
                     )
                 )
-                candidates = sorted(
-                    [
-                        (self._utc(row.created_at), row.id, "template")
-                        for row in template_candidates
-                    ]
-                    + [
-                        (self._utc(row.created_at), row.id, "authentication")
-                        for row in authentication_candidates
-                    ]
-                )[:limit]
                 removed = 0
                 if candidates:
+                    guard_id = str(uuid4())
+                    database.execute(
+                        text("INSERT INTO audit_cleanup_guards (id) VALUES (:id)"),
+                        {"id": guard_id},
+                    )
                     template_ids = [
-                        candidate[1]
+                        candidate.id
                         for candidate in candidates
-                        if candidate[2] == "template"
+                        if candidate.record_type == "template"
                     ]
                     authentication_ids = [
-                        candidate[1]
+                        candidate.id
                         for candidate in candidates
-                        if candidate[2] == "authentication"
+                        if candidate.record_type == "authentication"
                     ]
                     for row_type, identifiers in (
                         (TemplateAuditRow, template_ids),
@@ -204,6 +199,10 @@ class SqlRetentionRepository:
                                 delete(row_type).where(row_type.id.in_(identifiers))
                             )
                             removed += int(getattr(result, "rowcount", 0))
+                    database.execute(
+                        text("DELETE FROM audit_cleanup_guards WHERE id = :id"),
+                        {"id": guard_id},
+                    )
                 database.add(
                     RetentionCleanupRunRow(
                         id=str(uuid4()),

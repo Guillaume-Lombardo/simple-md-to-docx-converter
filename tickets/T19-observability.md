@@ -72,6 +72,32 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   --check` pass. The unrestricted suite remains unavailable because Pandoc, Chromium, and
   LibreOffice are not installed. T19 remains `In Progress` pending T20/T21 final-image validation,
   independent review, merge, and verification on `main`.
+- 2026-08-24: Second-review corrections started from `ac49563`. The bounded T19 scope is to make
+  request correlation entirely server-generated, bound external-worker metrics admission and
+  request execution, harden distributed-test resource isolation and failure sequencing, and make
+  cross-table audit cleanup globally ordered and concurrency-safe with real PostgreSQL evidence.
+  T20 ownership, publication, merge, and ticket state remain unchanged.
+- 2026-08-24: Second-review corrections completed. HTTP correlation is now a fresh server UUIDv4
+  for every request and caller text never reaches the response identifier, durable job row, or log.
+  External-worker metrics use fixed request concurrency, a bounded accept queue, an absolute header
+  deadline, a separate database-observation cap, safe saturation, and leak-free bounded shutdown.
+  Every distributed integration test now owns a unique PostgreSQL schema and, when applicable, a
+  unique RustFS bucket; both are removed in fixture teardown, and the missing-bucket-to-healthy
+  regression passes without shared state. Audit cleanup uses one globally ordered `UNION ALL`
+  candidate limit and one PostgreSQL transaction advisory lock, so cleaners serialize without
+  selecting or locking `limit` rows from each table. Direct audit updates/deletes are rejected and
+  only the guarded cleanup transaction may delete selected expired rows and commit immutable
+  evidence. Real PostgreSQL covers merged pagination, both immutable operations, shared retention,
+  concurrent cleaners, and revision 11 downgrade removal. During validation, one downgrade test
+  initially counted a same-named public-schema trigger and was corrected to target its isolated
+  relation. A later complete run exposed five deterministic failures from legacy direct audit
+  teardown in the shared schema; per-test schema/bucket isolation removed that contamination, and
+  the entire PostgreSQL directory then passed. Five repeated high-risk real-boundary runs passed
+  20/20. The unit gate passes with 843 tests and 93.35% total coverage. The correct-environment
+  canonical suite passes with 1,055 tests and 95.35% total coverage; its no-coverage confirmation
+  also passes 1,055 tests. The unrestricted engine suite remains unavailable because Pandoc,
+  Chromium, and LibreOffice are not installed. T19 remains `In Progress` pending T20/T21 final-image
+  validation, independent review, merge, and verification on `main`.
 
 ## Synchronization
 

@@ -5,7 +5,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, insert, select
+from sqlalchemy import delete, func, insert, select
+from sqlalchemy.exc import IntegrityError
 
 from md_converter.auth.models import Role, User
 from md_converter.jobs.errors import JobRepositoryError
@@ -126,12 +127,14 @@ def test_sqlite_authentication_audit_shares_bounded_retention_order(
     upgrade_database(engine)
     now = datetime(2026, 8, 24, 20, tzinfo=UTC)
     stable_id = uuid4()
+    old_authentication_id = uuid4()
+    template_audit_id = uuid4()
     with engine.begin() as connection:
         connection.execute(
             insert(AuthenticationAuditRow),
             [
                 {
-                    "id": str(uuid4()),
+                    "id": str(old_authentication_id),
                     "actor_id": str(stable_id),
                     "owner_id": str(stable_id),
                     "operation": "user_create",
@@ -154,7 +157,7 @@ def test_sqlite_authentication_audit_shares_bounded_retention_order(
         )
         connection.execute(
             insert(TemplateAuditRow).values(
-                id=str(uuid4()),
+                id=str(template_audit_id),
                 actor_id=str(stable_id),
                 owner_id=str(stable_id),
                 template_id=str(uuid4()),
@@ -164,6 +167,13 @@ def test_sqlite_authentication_audit_shares_bounded_retention_order(
                 created_at=now - timedelta(days=2),
             )
         )
+
+    for row_type, identifier in (
+        (AuthenticationAuditRow, old_authentication_id),
+        (TemplateAuditRow, template_audit_id),
+    ):
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(delete(row_type).where(row_type.id == str(identifier)))
 
     retention = SqlRetentionRepository(engine)
     assert (

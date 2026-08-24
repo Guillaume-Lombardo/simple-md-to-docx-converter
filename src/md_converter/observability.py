@@ -9,14 +9,17 @@ import re
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock, Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from io import BufferedIOBase
+from socket import SHUT_RDWR, socket
+from threading import BoundedSemaphore, Lock, Thread
 from time import monotonic
-from typing import IO, Protocol
+from typing import IO, Any, Protocol
 from uuid import UUID, uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -98,15 +101,13 @@ _SAFE_LOG_FIELDS = frozenset(
 
 
 def normalize_correlation_id(value: str | None) -> str:
-    """Accept a safe opaque caller identifier or create an application identifier."""
+    """Create a server identifier without reflecting caller-controlled text."""
 
-    if (
-        value is not None
-        and ".." not in value
-        and _CORRELATION_PATTERN.fullmatch(value)
-    ):
-        return value
-    return uuid4().hex
+    # Inspecting the header remains deliberately side-effect free: even a syntactically
+    # valid UUID must never become a logged or durable application identifier.
+    if value is not None:
+        _valid_correlation_id(value)
+    return str(uuid4())
 
 
 def require_correlation_id(value: str) -> str:
@@ -202,7 +203,7 @@ def log_event(event: str, *, level: int = logging.INFO, **fields: object) -> Non
 
 
 class CorrelationMiddleware:
-    """Bind safe request correlation and return it without reading request bodies."""
+    """Bind server-generated request correlation without reading request bodies."""
 
     def __init__(self, app: ASGIApp, *, metrics: OperationalMetrics) -> None:
         self._app = app
@@ -460,24 +461,44 @@ def _validate_numeric_log_value(name: str, value: object) -> int | float:
 class MetricsHttpServer:
     """Lifecycle-owned scrape surface for one external worker process."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - every listener resource bound is explicit
         self,
         metrics: OperationalMetrics,
         queue: QueueObserver,
         *,
         host: str,
         port: int,
+        max_connections: int = 4,
+        observation_limit: int = 2,
+        accept_queue_size: int = 8,
+        request_timeout_seconds: float = 2.0,
     ) -> None:
         if not host or any(character.isspace() for character in host):
             raise ValueError("Metrics bind host is invalid")
         if isinstance(port, bool) or not 0 <= port <= MAX_TCP_PORT:
             raise ValueError("Metrics bind port is invalid")
+        if (
+            isinstance(max_connections, bool)
+            or max_connections <= 0
+            or isinstance(observation_limit, bool)
+            or not 0 < observation_limit <= max_connections
+            or isinstance(accept_queue_size, bool)
+            or accept_queue_size <= 0
+            or isinstance(request_timeout_seconds, bool)
+            or not math.isfinite(request_timeout_seconds)
+            or request_timeout_seconds <= 0
+        ):
+            raise ValueError("Metrics server limits are invalid")
         self._metrics = metrics
         self._queue = queue
         self._host = host
         self._port = port
+        self._max_connections = max_connections
+        self._observation_limit = observation_limit
+        self._accept_queue_size = accept_queue_size
+        self._request_timeout_seconds = request_timeout_seconds
         self._lock = Lock()
-        self._server: ThreadingHTTPServer | None = None
+        self._server: _BoundedMetricsHttpServer | None = None
         self._thread: Thread | None = None
 
     def start(self) -> None:
@@ -486,10 +507,15 @@ class MetricsHttpServer:
                 raise RuntimeError("Metrics server is already running")
             handler = self._handler()
             try:
-                server = ThreadingHTTPServer((self._host, self._port), handler)
+                server = _BoundedMetricsHttpServer(
+                    (self._host, self._port),
+                    handler,
+                    max_connections=self._max_connections,
+                    accept_queue_size=self._accept_queue_size,
+                    request_timeout_seconds=self._request_timeout_seconds,
+                )
             except OSError:
                 raise MetricsServerError("Metrics listener failed to start") from None
-            server.daemon_threads = True
             thread = Thread(
                 target=server.serve_forever,
                 name="external-worker-metrics",
@@ -507,7 +533,9 @@ class MetricsHttpServer:
                 return
         server.shutdown()
         server.server_close()
-        thread.join()
+        thread.join(self._request_timeout_seconds + 1.0)
+        if thread.is_alive():
+            raise MetricsServerError("Metrics listener failed to stop")
         with self._lock:
             if self._server is server:
                 self._server = None
@@ -524,11 +552,25 @@ class MetricsHttpServer:
     def _handler(self) -> type[BaseHTTPRequestHandler]:
         metrics = self._metrics
         queue = self._queue
+        observations = BoundedSemaphore(self._observation_limit)
+        request_timeout_seconds = self._request_timeout_seconds
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def setup(self) -> None:
+                super().setup()
+                deadline = monotonic() + request_timeout_seconds
+                self.connection.settimeout(request_timeout_seconds)
+                self.rfile.close()
+                self.rfile = _DeadlineReader(self.connection, deadline)
+
             def do_GET(self) -> None:
                 if self.path != "/metrics":
                     self._respond(404, b"not found\n", "text/plain")
+                    return
+                if not observations.acquire(blocking=False):
+                    self._respond(503, b"metrics unavailable\n", "text/plain")
                     return
                 try:
                     payload = metrics.render(
@@ -537,6 +579,8 @@ class MetricsHttpServer:
                 except Exception:  # exporter failures remain local and content-free
                     self._respond(503, b"metrics unavailable\n", "text/plain")
                     return
+                finally:
+                    observations.release()
                 self._respond(
                     200,
                     payload,
@@ -547,10 +591,118 @@ class MetricsHttpServer:
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(payload)
+                self.close_connection = True
 
             def log_message(self, format: str, *args: object) -> None:
                 del format, args
 
         return Handler
+
+
+class _DeadlineReader(BufferedIOBase):
+    """Apply one absolute deadline across request-line and header reads."""
+
+    def __init__(self, connection: socket, deadline: float) -> None:
+        super().__init__()
+        self._connection = connection
+        self._deadline = deadline
+
+    def readline(self, size: int | None = -1) -> bytes:
+        resolved_size = -1 if size is None else size
+        result = bytearray()
+        while resolved_size < 0 or len(result) < resolved_size:
+            item = self._receive_one()
+            if not item:
+                break
+            result.extend(item)
+            if item == b"\n":
+                break
+        return bytes(result)
+
+    def read(self, size: int | None = -1) -> bytes:
+        resolved_size = -1 if size is None else size
+        if resolved_size < 0:
+            raise ValueError("Bounded request reads require a size")
+        result = bytearray()
+        while len(result) < resolved_size:
+            item = self._receive_one()
+            if not item:
+                break
+            result.extend(item)
+        return bytes(result)
+
+    def readable(self) -> bool:
+        return True
+
+    def _receive_one(self) -> bytes:
+        remaining = self._deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        self._connection.settimeout(remaining)
+        return self._connection.recv(1)
+
+
+class _BoundedMetricsHttpServer(HTTPServer):
+    """HTTP server with fixed request concurrency and no executor backlog."""
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        *,
+        max_connections: int,
+        accept_queue_size: int,
+        request_timeout_seconds: float,
+    ) -> None:
+        self.request_queue_size = accept_queue_size
+        self._request_timeout_seconds = request_timeout_seconds
+        self._admission = BoundedSemaphore(max_connections)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_connections,
+            thread_name_prefix="external-worker-metrics-request",
+        )
+        super().__init__(server_address, handler)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._admission.acquire(blocking=False):
+            self._reject_saturated(request)
+            self.shutdown_request(request)
+            return
+        try:
+            self._executor.submit(self._process_admitted, request, client_address)
+        except RuntimeError:
+            self._admission.release()
+            self.shutdown_request(request)
+
+    def server_close(self) -> None:
+        super().server_close()
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        del request, client_address
+
+    def _process_admitted(self, request: socket, client_address: object) -> None:
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+            self._admission.release()
+
+    def _reject_saturated(self, request: socket) -> None:
+        try:
+            request.settimeout(min(self._request_timeout_seconds, 0.1))
+            request.sendall(
+                b"HTTP/1.0 503 Service Unavailable\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: 20\r\n"
+                b"Connection: close\r\n\r\n"
+                b"metrics unavailable\n"
+            )
+            request.shutdown(SHUT_RDWR)
+        except OSError:
+            pass

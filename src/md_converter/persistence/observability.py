@@ -109,7 +109,11 @@ class SqlAuditReader:
                 ).subquery()
                 rows = database.execute(
                     select(combined)
-                    .order_by(combined.c.created_at.desc(), combined.c.id.desc())
+                    .order_by(
+                        combined.c.created_at.desc(),
+                        combined.c.id.desc(),
+                        combined.c.target_type.desc(),
+                    )
                     .offset(offset)
                     .limit(limit)
                 )

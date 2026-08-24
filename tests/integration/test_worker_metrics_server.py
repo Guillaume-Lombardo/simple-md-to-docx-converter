@@ -2,7 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from threading import Lock
+from socket import create_connection
+from threading import Event, Lock
+from threading import enumerate as enumerate_threads
+from time import monotonic, sleep
+from typing import Any
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
@@ -33,6 +37,19 @@ class _QueueObserver:
         return QueueSnapshot(2, 3.5, 1)
 
 
+class _BlockingQueueObserver(_QueueObserver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+
+    def observe_queue(self, now: datetime) -> QueueSnapshot:
+        self.entered.set()
+        if not self.release.wait(2):
+            raise RuntimeError("test observer release deadline")
+        return super().observe_queue(now)
+
+
 def _get(url: str) -> tuple[int, str]:
     try:
         with urlopen(url, timeout=2) as response:  # noqa: S310 - fixed loopback test
@@ -45,7 +62,14 @@ def test_worker_metrics_server_is_independently_and_concurrently_scrapeable() ->
     queue = _QueueObserver()
     metrics = OperationalMetrics()
     metrics.record_retry("worker_loop")
-    server = MetricsHttpServer(metrics, queue, host="127.0.0.1", port=0)
+    server = MetricsHttpServer(
+        metrics,
+        queue,
+        host="127.0.0.1",
+        port=0,
+        max_connections=16,
+        observation_limit=16,
+    )
     server.start()
     try:
         host, port = server.address
@@ -96,6 +120,108 @@ def test_worker_metrics_server_sanitizes_probe_and_bind_failures() -> None:
         first.stop()
 
 
+def test_worker_metrics_server_caps_database_observations() -> None:
+    queue = _BlockingQueueObserver()
+    server = MetricsHttpServer(
+        OperationalMetrics(),
+        queue,
+        host="127.0.0.1",
+        port=0,
+        max_connections=2,
+        observation_limit=1,
+        request_timeout_seconds=0.5,
+    )
+    server.start()
+    try:
+        host, port = server.address
+        url = f"http://{host}:{port}/metrics"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = pool.submit(_get, url)
+            assert queue.entered.wait(1)
+            assert _get(url) == (503, "metrics unavailable\n")
+            assert queue.calls == 0
+            queue.release.set()
+            assert first.result(timeout=1)[0] == 200
+        assert queue.calls == 1
+    finally:
+        queue.release.set()
+        server.stop()
+
+
+def test_worker_metrics_server_enforces_slowloris_deadline_and_releases_capacity() -> (
+    None
+):
+    server = MetricsHttpServer(
+        OperationalMetrics(),
+        _QueueObserver(),
+        host="127.0.0.1",
+        port=0,
+        max_connections=1,
+        observation_limit=1,
+        accept_queue_size=1,
+        request_timeout_seconds=0.12,
+    )
+    server.start()
+    host, port = server.address
+    slow = create_connection((host, port), timeout=1)
+    started = monotonic()
+    try:
+        slow.sendall(b"GET /metrics HTTP/1.0\r\nX-Slow: ")
+        while monotonic() - started < 0.3:
+            try:
+                slow.sendall(b"a")
+            except OSError:
+                break
+            sleep(0.03)
+        slow.settimeout(0.5)
+        assert slow.recv(1) == b""
+        assert monotonic() - started < 0.6
+        assert _get(f"http://{host}:{port}/metrics")[0] == 200
+    finally:
+        slow.close()
+        server.stop()
+    assert not any(
+        thread.name.startswith("external-worker-metrics")
+        for thread in enumerate_threads()
+    )
+
+
+def test_worker_metrics_server_rejects_connections_when_workers_are_saturated() -> None:
+    server = MetricsHttpServer(
+        OperationalMetrics(),
+        _QueueObserver(),
+        host="127.0.0.1",
+        port=0,
+        max_connections=2,
+        observation_limit=1,
+        accept_queue_size=1,
+        request_timeout_seconds=0.5,
+    )
+    server.start()
+    host, port = server.address
+    slow_connections = [create_connection((host, port), timeout=1) for _ in range(2)]
+    try:
+        for connection in slow_connections:
+            connection.sendall(b"GET /metrics HTTP/1.0\r\nX-Slow: ")
+        sleep(0.05)
+        saturated = create_connection((host, port), timeout=1)
+        try:
+            saturated.sendall(b"GET /metrics HTTP/1.0\r\n\r\n")
+            response = saturated.recv(512)
+            assert b"503 Service Unavailable" in response
+            assert b"metrics unavailable" in response
+        finally:
+            saturated.close()
+    finally:
+        for connection in slow_connections:
+            connection.close()
+        server.stop()
+    assert not any(
+        thread.name.startswith("external-worker-metrics")
+        for thread in enumerate_threads()
+    )
+
+
 @pytest.mark.parametrize(
     ("host", "port"),
     [("", 9464), ("bad host", 9464), ("127.0.0.1", -1), ("127.0.0.1", 65_536)],
@@ -105,3 +231,25 @@ def test_worker_metrics_server_rejects_invalid_bind_configuration(
 ) -> None:
     with pytest.raises(ValueError, match="Metrics bind"):
         MetricsHttpServer(OperationalMetrics(), _QueueObserver(), host=host, port=port)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_connections": 0},
+        {"max_connections": 1, "observation_limit": 2},
+        {"accept_queue_size": 0},
+        {"request_timeout_seconds": float("inf")},
+    ],
+)
+def test_worker_metrics_server_rejects_invalid_resource_limits(
+    limits: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="Metrics server limits"):
+        MetricsHttpServer(
+            OperationalMetrics(),
+            _QueueObserver(),
+            host="127.0.0.1",
+            port=0,
+            **limits,
+        )

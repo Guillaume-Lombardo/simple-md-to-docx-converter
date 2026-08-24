@@ -63,6 +63,12 @@ class Settings(BaseSettings):
         default="127.0.0.1", min_length=1, max_length=255
     )
     worker_metrics_port: int = Field(default=9464, ge=1, le=65_535)
+    worker_metrics_max_connections: int = Field(default=4, gt=0, le=64)
+    worker_metrics_observation_limit: int = Field(default=2, gt=0, le=64)
+    worker_metrics_accept_queue_size: int = Field(default=8, gt=0, le=128)
+    worker_metrics_request_timeout_seconds: float = Field(
+        default=2.0, gt=0, allow_inf_nan=False
+    )
     template_max_archive_bytes: int = Field(gt=0)
     template_request_max_bytes: int = Field(gt=0)
     template_metadata_request_max_bytes: int = Field(gt=0)
@@ -122,6 +128,10 @@ class Settings(BaseSettings):
             for character in self.worker_metrics_bind_host
         ):
             raise ValueError("worker metrics bind host is invalid")
+        if self.worker_metrics_observation_limit > self.worker_metrics_max_connections:
+            raise ValueError(
+                "worker metrics observation limit must not exceed connection limit"
+            )
         self._validate_storage_profile()
         return self
 
