@@ -91,6 +91,7 @@ from md_converter.web import (
     WEB_SECURITY_HEADERS,
     render_conversion_page,
     render_login_page,
+    render_templates_page,
 )
 
 COMPONENT_VERSIONS = (
@@ -278,6 +279,7 @@ class TemplateResponse(BaseModel):
     status: TemplateStatus
     revision: int
     current_version_id: UUID | None
+    owner_username: str
 
 
 class TemplatePageResponse(BaseModel):
@@ -752,7 +754,22 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         return ConversionResponse.model_validate(job)
 
     def template_response(template: TemplateIdentity) -> TemplateResponse:
-        return TemplateResponse.model_validate(template)
+        user_repository = getattr(auth, "users", None)
+        owner = (
+            user_repository.get_by_id(template.owner_id)
+            if user_repository is not None
+            else None
+        )
+        return TemplateResponse(
+            id=template.id,
+            owner_id=template.owner_id,
+            name=template.name,
+            description=template.description,
+            status=template.status,
+            revision=template.revision,
+            current_version_id=template.current_version_id,
+            owner_username=owner.username if owner is not None else "Unknown owner",
+        )
 
     def template_etag(template: TemplateIdentity) -> str:
         return f'"template-{template.id}-{template.revision}"'
@@ -813,6 +830,22 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             headers={**WEB_SECURITY_HEADERS, "Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/static/administration.css", include_in_schema=False)
+    def administration_stylesheet() -> Response:
+        return Response(
+            (STATIC_DIRECTORY / "administration.css").read_bytes(),
+            media_type="text/css",
+            headers={**WEB_SECURITY_HEADERS, "Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/static/administration.js", include_in_schema=False)
+    def administration_javascript() -> Response:
+        return Response(
+            (STATIC_DIRECTORY / "administration.js").read_bytes(),
+            media_type="text/javascript",
+            headers={**WEB_SECURITY_HEADERS, "Cache-Control": "public, max-age=3600"},
+        )
+
     @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
     def login_page() -> HTMLResponse:
         return web_response(render_login_page())
@@ -836,6 +869,26 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 label,
                 recent.items,
                 maximum_upload_bytes=resolved_settings.conversion_upload_max_bytes,
+            )
+        )
+
+    @app.get("/templates", response_class=HTMLResponse, include_in_schema=False)
+    def templates_page(request: Request) -> Response:
+        try:
+            actor = current_user(request)
+        except AuthenticationError:
+            return RedirectResponse("/login", status_code=303)
+        runtime = template_runtime()
+        selected = runtime.resolve(actor)
+        label = (
+            runtime.selection_label(actor, selected) if selected is not None else None
+        )
+        return web_response(
+            render_templates_page(
+                actor,
+                selected,
+                label,
+                maximum_upload_bytes=resolved_settings.template_max_archive_bytes,
             )
         )
 

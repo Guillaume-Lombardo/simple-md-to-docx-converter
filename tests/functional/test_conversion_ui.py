@@ -105,7 +105,7 @@ def test_browser_conversion_shell_uses_real_session_template_and_job_boundaries(
         assert "System fallback template" in page.text
         assert "Accessible default" in page.text
         assert str(template.current_version_id) in page.text
-        assert "Templates" not in page.text
+        assert "Templates" in page.text
         assert client.get("/static/conversion.js").status_code == 200
         assert client.get("/static/conversion.css").status_code == 200
 

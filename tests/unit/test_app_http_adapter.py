@@ -178,6 +178,46 @@ def test_authenticated_conversion_page_and_assets_are_hardened(
 
 
 @pytest.mark.unit
+def test_authenticated_administration_page_and_assets_are_hardened(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, admin, _alice = isolated_client(mocker)
+    templates = mocker.Mock(spec=TemplateService)
+    template = TemplateIdentity(
+        uuid4(),
+        admin.id,
+        "Preferred",
+        "Private description",
+        TemplateStatus.ACTIVE,
+        current_version_id=uuid4(),
+    )
+    templates.resolve.return_value = template
+    templates.selection_label.return_value = "Preferred template"
+    object.__setattr__(client.app.state.components, "templates", templates)
+
+    with client:
+        page = client.get("/templates")
+        script = client.get("/static/administration.js")
+        stylesheet = client.get("/static/administration.css")
+
+    assert page.status_code == 200
+    assert str(template.id) in page.text
+    assert 'data-user-role="admin"' in page.text
+    assert page.headers["Cache-Control"] == "no-store"
+    assert script.headers["X-Content-Type-Options"] == "nosniff"
+    assert script.headers["Content-Type"].startswith("text/javascript")
+    assert stylesheet.headers["Content-Type"].startswith("text/css")
+    templates.resolve.assert_called_once_with(admin)
+    templates.selection_label.assert_called_once_with(admin, template)
+
+    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
+    with client:
+        anonymous = client.get("/templates", follow_redirects=False)
+    assert anonymous.status_code == 303
+    assert anonymous.headers["location"] == "/login"
+
+
+@pytest.mark.unit
 def test_conversion_page_redirects_when_session_is_absent(
     mocker: MockerFixture,
 ) -> None:

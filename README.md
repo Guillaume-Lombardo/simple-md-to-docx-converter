@@ -14,8 +14,10 @@ The versioned API persists owner-scoped conversion requests, exposes determinist
 supports idempotent submission and cancellation, and uses lease-owning embedded or external worker
 loops over SQLite or PostgreSQL. The authenticated server-rendered conversion page now provides
 upload and drag-and-drop, active-template search with preferred/fallback visibility, DOCX/PDF/both
-selection, asynchronous status and cancellation, expiration handling, and safe downloads. Template
-administration UI, resource policy, and final-container features remain under development.
+selection, asynchronous status and cancellation, expiration handling, and safe downloads. The
+template administration page provides owner and administrator lifecycle controls, preferences,
+version history, and an administrator-only local-account tab. Resource policy and final-container
+features remain under development.
 
 ## Requirements
 
@@ -71,6 +73,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
 - `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
+- `docs/administration-ui.md`: template-owner and administrator browser workflows
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
 - `docs/golden-testing.md`: reference corpus and deterministic DOCX/PDF comparison helpers
 - `docs/pandoc-docx.md`: approved Markdown dialect and isolated Pandoc DOCX boundary
