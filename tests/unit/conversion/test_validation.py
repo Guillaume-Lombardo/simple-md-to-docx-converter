@@ -136,10 +136,13 @@ def test_local_images_are_rejected_until_t08_materializes_approved_assets(
     "raw_attribute",
     [
         "`<img src=x>`{=html}",
+        "`unsafe`{=1html}",
+        "`unsafe`{=123}",
         "`unsafe`{=html}suffix",
         "`\\command{unsafe}`{=tex}",
         "```{=html}\n<div>unsafe</div>\n```",
         "```  {=html}  \n<div>unsafe</div>\n```",
+        "```{=123}\nunsafe\n```",
         "~~~{=tex}\n\\command{unsafe}\n~~~",
     ],
 )

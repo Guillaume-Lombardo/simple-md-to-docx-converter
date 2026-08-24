@@ -19,7 +19,7 @@ PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
 )
 _REMOTE_RESOURCE = re.compile(r"(?i)^(?:[a-z][a-z0-9+.-]*(?::|%3a)|//|%2f%2f)")
-_RAW_ATTRIBUTE = re.compile(r"^\{\s*=[a-z][a-z0-9_+.-]*\s*\}", re.IGNORECASE)
+_RAW_ATTRIBUTE = re.compile(r"^\{\s*=[^\s{}]+\s*\}")
 
 
 class _ResourceParser(MarkdownIt):
