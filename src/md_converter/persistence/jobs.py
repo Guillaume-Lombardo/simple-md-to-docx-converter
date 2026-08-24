@@ -56,6 +56,7 @@ def _job(row: ConversionJobRow) -> ConversionJob:
         template_version_id=UUID(row.template_version_id),
         output=JobOutput(row.output),
         component_versions=_component_versions(row.component_versions),
+        correlation_id=row.correlation_id or row.id,
         state=JobState(row.state),
         step=JobStep(row.step),
         progress=row.progress,
@@ -119,6 +120,7 @@ class SqlJobRepository:
             component_versions=json.dumps(
                 submission.component_versions, separators=(",", ":")
             ),
+            correlation_id=submission.correlation_id,
             state=JobState.QUEUED.value,
             step=JobStep.QUEUED.value,
             progress=0,

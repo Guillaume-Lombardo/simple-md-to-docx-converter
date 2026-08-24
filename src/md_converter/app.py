@@ -1,14 +1,17 @@
 """FastAPI application factory and versioned HTTP contract."""
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Lock
 from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import boto3
+from botocore.config import Config
 from fastapi import (
     Depends,
     FastAPI,
@@ -24,6 +27,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import Engine
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -52,7 +56,7 @@ from md_converter.jobs.errors import (
 )
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
 from md_converter.jobs.ports import JobRepository
-from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop
+from md_converter.jobs.runner import EmbeddedWorker, ExternalWorkerRuntime, WorkerLoop
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
 from md_converter.jobs.service import JobService
 from md_converter.jobs.worker import ConversionWorker
@@ -63,9 +67,25 @@ from md_converter.malware import (
     TrustingUploadScanner,
     UploadScanner,
 )
+from md_converter.observability import (
+    CORRELATION_HEADER,
+    AuditReader,
+    AuditRecord,
+    CorrelationMiddleware,
+    MetricsHttpServer,
+    OperationalMetrics,
+    QueueObserver,
+    QueueSnapshot,
+    current_correlation_id,
+    log_event,
+)
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.observability import (
+    SqlAuditReader,
+    SqlOperationalObserver,
+)
 from md_converter.persistence.retention import SqlRetentionRepository
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
@@ -267,6 +287,7 @@ class ConversionResponse(BaseModel):
     template_version_id: UUID
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
+    correlation_id: str
     state: str
     step: str
     progress: int
@@ -326,6 +347,23 @@ class TemplateVersionResponse(BaseModel):
     validation_trace: tuple[str, ...]
 
 
+class AuditRecordResponse(BaseModel):
+    """Administrator-visible content-free immutable audit evidence."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    actor_id: UUID
+    owner_id: UUID
+    operation: str
+    target_id: UUID
+    target_type: str
+    target_version: str | None
+    version_id: UUID | None
+    administrator_intervention: bool
+    created_at: datetime
+
+
 class TemplateMetadataRequest(BaseModel):
     name: str
     description: str
@@ -367,6 +405,31 @@ def error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
         }
         for status_code in status_codes
     }
+
+
+def document_correlation_headers(app: FastAPI) -> None:
+    """Declare the middleware-generated correlation header on every response."""
+
+    schema = app.openapi()
+    header = {
+        "description": "Server-generated request correlation identifier.",
+        "schema": {"type": "string", "format": "uuid"},
+    }
+    for path in schema["paths"].values():
+        for operation_name, operation in path.items():
+            if operation_name not in {
+                "get",
+                "put",
+                "post",
+                "delete",
+                "options",
+                "head",
+                "patch",
+                "trace",
+            }:
+                continue
+            for response in operation["responses"].values():
+                response.setdefault("headers", {})[CORRELATION_HEADER] = header
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -481,6 +544,7 @@ def install_error_handlers(app: FastAPI) -> None:
     def job_user_quota_handler(
         request: Request, _error: JobUserQuotaExceededError
     ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("owner")
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             headers={
@@ -498,6 +562,7 @@ def install_error_handlers(app: FastAPI) -> None:
     def job_queue_capacity_handler(
         request: Request, _error: JobQueueCapacityExceededError
     ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("global")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             headers={
@@ -640,6 +705,37 @@ class AppComponents:
     job_policies: JobPolicies | None = None
     retention: RetentionService | None = None
     job_repository: JobRepository | None = None
+    metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
+    queue_observer: QueueObserver | None = None
+    audit_reader: AuditReader | None = None
+    worker_metrics_bind_host: str = "127.0.0.1"
+    worker_metrics_port: int = 9464
+    worker_metrics_max_connections: int = 4
+    worker_metrics_observation_limit: int = 2
+    worker_metrics_accept_queue_size: int = 8
+    worker_metrics_request_timeout_seconds: float = 2.0
+    owned_engines: tuple[Engine, ...] = field(default=(), repr=False, compare=False)
+    _close_lock: Lock = field(
+        default_factory=Lock, init=False, repr=False, compare=False
+    )
+    _closed: Event = field(default_factory=Event, init=False, repr=False, compare=False)
+
+    def close(self) -> None:
+        """Cancel observations and dispose only application-owned SQL engines."""
+
+        if not self.owned_engines:
+            return
+        with self._close_lock:
+            if self._closed.is_set():
+                return
+            self._closed.set()
+        with ExitStack() as cleanup:
+            for engine in self.owned_engines:
+                cleanup.callback(engine.dispose)
+            if self.queue_observer is not None:
+                self.queue_observer.cancel_observations(
+                    timeout_seconds=self.worker_metrics_request_timeout_seconds
+                )
 
     def build_conversion_worker(
         self,
@@ -668,6 +764,7 @@ class AppComponents:
             policy=self.job_policies.worker,
             maintenance=self.retention,
             monotonic_clock=monotonic_clock,
+            metrics=self.metrics,
         )
 
     def build_external_worker_loop(
@@ -692,6 +789,7 @@ class AppComponents:
             worker,
             self.job_policies.schedule,
             monotonic_clock=monotonic_clock,
+            metrics=self.metrics,
         )
 
     def build_embedded_worker(
@@ -715,11 +813,42 @@ class AppComponents:
             thread_name=thread_name,
         )
 
+    def build_external_worker_runtime(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> ExternalWorkerRuntime:
+        """Assemble the external loop with a process-local scrape listener."""
+
+        if self.queue_observer is None:
+            raise RuntimeError("External worker queue observation is unavailable")
+        return ExternalWorkerRuntime(
+            self.build_external_worker_loop(
+                worker_id=worker_id,
+                processor=processor,
+                clock=clock,
+                monotonic_clock=monotonic_clock,
+            ),
+            MetricsHttpServer(
+                self.metrics,
+                self.queue_observer,
+                host=self.worker_metrics_bind_host,
+                port=self.worker_metrics_port,
+                max_connections=self.worker_metrics_max_connections,
+                observation_limit=self.worker_metrics_observation_limit,
+                accept_queue_size=self.worker_metrics_accept_queue_size,
+                request_timeout_seconds=self.worker_metrics_request_timeout_seconds,
+            ),
+        )
+
 
 class ProfileReadinessProbe:
     """Cheap readiness composition for metadata and object persistence."""
 
-    def __init__(self, database: ReadinessProbe, objects: ObjectStore) -> None:
+    def __init__(self, database: ReadinessProbe, objects: ReadinessProbe) -> None:
         self._database = database
         self._objects = objects
 
@@ -738,6 +867,7 @@ def build_components(settings: Settings) -> AppComponents:
             raise RuntimeError("Validated standalone settings are incomplete")
         database_url = standalone_database_url(data_directory)
         object_store: ObjectStore = FilesystemObjectStore(data_directory)
+        object_readiness: ReadinessProbe = FilesystemObjectStore(data_directory)
     else:
         database_secret = settings.distributed_database_url
         bucket = settings.s3_bucket
@@ -759,66 +889,113 @@ def build_components(settings: Settings) -> AppComponents:
                 else ""
             )
         object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
+        readiness_client_options = {
+            **client_options,
+            "config": Config(
+                connect_timeout=settings.readiness_timeout_seconds,
+                read_timeout=settings.readiness_timeout_seconds,
+                retries={"max_attempts": 0},
+            ),
+        }
+        object_readiness = S3ObjectStore(
+            boto3.client("s3", **readiness_client_options), bucket
+        )
 
-    engine = create_database_engine(database_url)
-    upgrade_database(engine)
-    users = SqlUserRepository(engine)
-    sessions = SqlSessionRepository(engine)
-    hasher = Argon2idPasswordHasher(
-        memory_cost=settings.argon2_memory_cost,
-        time_cost=settings.argon2_time_cost,
-        parallelism=settings.argon2_parallelism,
-    )
-    authentication = AuthenticationService(
-        users=users,
-        sessions=sessions,
-        security=SecurityRuntime(
-            hasher=hasher,
-            tokens=SecretsTokenGenerator(settings.session_token_bytes),
-            clock=SystemClock(),
-        ),
-        policy=SessionPolicy(
-            idle_seconds=settings.session_idle_seconds,
-            absolute_seconds=settings.session_absolute_seconds,
-        ),
-    )
-    job_repository = SqlJobRepository(engine, job_policies.admission)
-    jobs = JobService(job_repository, object_store, job_policies.service)
-    templates = TemplateService(
-        catalog=SqlTemplateCatalogRepository(engine),
-        selections=SqlTemplateSelectionRepository(engine),
-        objects=object_store,
-        validate_content=build_template_validator(settings),
-        recovery_policy=TemplateRecoveryPolicy(
-            settings.template_pending_publication_stale_seconds
-        ),
-    )
-    templates.reclaim_pending()
-    retention = RetentionService(
-        SqlRetentionRepository(engine),
-        object_store,
-        DataRetentionPolicy(
-            template_version_seconds=settings.template_version_retention_seconds,
-            audit_seconds=settings.audit_retention_seconds,
-            minimum_template_versions=settings.template_min_retained_versions,
-            claim_lease_seconds=settings.worker_lease_seconds,
-        ),
-    )
-    return AppComponents(
-        authentication=authentication,
-        readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
-        object_store=object_store,
-        jobs=jobs,
-        scanner=ClamAVUploadScanner(
-            settings.clamav_host,
-            settings.clamav_port,
-            settings.clamav_timeout_seconds,
-        ),
-        templates=templates,
-        job_policies=job_policies,
-        retention=retention,
-        job_repository=job_repository,
-    )
+    with ExitStack() as pending_engines:
+        engine = create_database_engine(database_url)
+        pending_engines.callback(engine.dispose)
+        upgrade_database(engine)
+        readiness_engine = create_database_engine(
+            database_url,
+            timeout_seconds=settings.readiness_timeout_seconds,
+            pool_pre_ping=False,
+        )
+        pending_engines.callback(readiness_engine.dispose)
+        observation_engine = create_database_engine(
+            database_url,
+            timeout_seconds=settings.worker_metrics_request_timeout_seconds,
+            pool_pre_ping=False,
+        )
+        pending_engines.callback(observation_engine.dispose)
+        users = SqlUserRepository(engine)
+        sessions = SqlSessionRepository(engine)
+        hasher = Argon2idPasswordHasher(
+            memory_cost=settings.argon2_memory_cost,
+            time_cost=settings.argon2_time_cost,
+            parallelism=settings.argon2_parallelism,
+        )
+        authentication = AuthenticationService(
+            users=users,
+            sessions=sessions,
+            security=SecurityRuntime(
+                hasher=hasher,
+                tokens=SecretsTokenGenerator(settings.session_token_bytes),
+                clock=SystemClock(),
+            ),
+            policy=SessionPolicy(
+                idle_seconds=settings.session_idle_seconds,
+                absolute_seconds=settings.session_absolute_seconds,
+            ),
+        )
+        job_repository = SqlJobRepository(engine, job_policies.admission)
+        jobs = JobService(job_repository, object_store, job_policies.service)
+        templates = TemplateService(
+            catalog=SqlTemplateCatalogRepository(engine),
+            selections=SqlTemplateSelectionRepository(engine),
+            objects=object_store,
+            validate_content=build_template_validator(settings),
+            recovery_policy=TemplateRecoveryPolicy(
+                settings.template_pending_publication_stale_seconds
+            ),
+        )
+        templates.reclaim_pending()
+        retention = RetentionService(
+            SqlRetentionRepository(engine),
+            object_store,
+            DataRetentionPolicy(
+                template_version_seconds=settings.template_version_retention_seconds,
+                audit_seconds=settings.audit_retention_seconds,
+                minimum_template_versions=settings.template_min_retained_versions,
+                claim_lease_seconds=settings.worker_lease_seconds,
+            ),
+        )
+        metrics = OperationalMetrics()
+        components = AppComponents(
+            authentication=authentication,
+            readiness=ProfileReadinessProbe(
+                DatabaseReadinessProbe(readiness_engine), object_readiness
+            ),
+            object_store=object_store,
+            jobs=jobs,
+            scanner=ClamAVUploadScanner(
+                settings.clamav_host,
+                settings.clamav_port,
+                settings.clamav_timeout_seconds,
+            ),
+            templates=templates,
+            job_policies=job_policies,
+            retention=retention,
+            job_repository=job_repository,
+            metrics=metrics,
+            queue_observer=SqlOperationalObserver(
+                observation_engine,
+                default_timeout_seconds=(
+                    settings.worker_metrics_request_timeout_seconds
+                ),
+            ),
+            audit_reader=SqlAuditReader(engine),
+            worker_metrics_bind_host=settings.worker_metrics_bind_host,
+            worker_metrics_port=settings.worker_metrics_port,
+            worker_metrics_max_connections=settings.worker_metrics_max_connections,
+            worker_metrics_observation_limit=settings.worker_metrics_observation_limit,
+            worker_metrics_accept_queue_size=settings.worker_metrics_accept_queue_size,
+            worker_metrics_request_timeout_seconds=(
+                settings.worker_metrics_request_timeout_seconds
+            ),
+            owned_engines=(engine, readiness_engine, observation_engine),
+        )
+        pending_engines.pop_all()
+        return components
 
 
 def create_app(  # noqa: PLR0915 - the factory keeps route-local security dependencies
@@ -833,16 +1010,31 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     if scanner is not None:
         resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
-    auth.bootstrap_admin(
-        resolved_settings.initial_admin_username,
-        resolved_settings.initial_admin_password.get_secret_value(),
-    )
+    try:
+        auth.bootstrap_admin(
+            resolved_settings.initial_admin_username,
+            resolved_settings.initial_admin_password.get_secret_value(),
+        )
+    except Exception:
+        if components is None:
+            resolved_components.close()
+        raise
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        del _app
+        try:
+            yield
+        finally:
+            if components is None:
+                resolved_components.close()
 
     app = FastAPI(
         title="Markdown Converter API",
         version="0.1.0",
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
     app.add_middleware(
         BoundedRequestBody,
@@ -852,6 +1044,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             resolved_settings.template_metadata_request_max_bytes
         ),
     )
+    app.add_middleware(CorrelationMiddleware, metrics=resolved_components.metrics)
     app.state.components = resolved_components
     app.state.conversion_retry_after_seconds = (
         resolved_settings.conversion_retry_after_seconds
@@ -989,10 +1182,40 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     def ready() -> Response:
         if resolved_components.readiness.is_ready():
             return JSONResponse({"status": "ready"})
+        log_event("readiness_failed")
         return JSONResponse(
             {"error": {"code": "NOT_READY", "message": "The service is not ready."}},
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+    @app.get("/metrics", tags=["health"])
+    def metrics() -> Response:
+        observer = resolved_components.queue_observer
+        queue = (
+            observer.observe_queue(datetime.now(UTC))
+            if observer is not None
+            else QueueSnapshot(0, 0.0, 0)
+        )
+        return Response(
+            resolved_components.metrics.render(queue),
+            media_type="text/plain; version=0.0.4",
+        )
+
+    @app.get(
+        "/api/v1/audit",
+        response_model=tuple[AuditRecordResponse, ...],
+        tags=["administration"],
+        responses=error_responses(401, 403, 422, 503),
+    )
+    def list_audit_records(
+        _actor: Annotated[User, Depends(admin_user)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> tuple[AuditRecord, ...]:
+        reader = resolved_components.audit_reader
+        if reader is None:
+            raise PersistenceError
+        return reader.list_recent(offset=offset, limit=limit)
 
     @app.get("/", include_in_schema=False)
     def browser_root() -> RedirectResponse:
@@ -1231,6 +1454,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                     output=output,
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
+                    correlation_id=current_correlation_id() or uuid4().hex,
                 ),
                 idempotency_key,
             )
@@ -1677,4 +1901,5 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     ) -> None:
         template_runtime().set_system_fallback(actor, template_id)
 
+    document_correlation_headers(app)
     return app

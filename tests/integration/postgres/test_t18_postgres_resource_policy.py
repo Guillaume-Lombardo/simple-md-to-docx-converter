@@ -31,7 +31,6 @@ from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.schema import (
     ConversionJobRow,
-    TemplateAuditRow,
     TemplateRow,
     UserRow,
 )
@@ -120,11 +119,6 @@ def test_distributed_asgi_enforces_owner_and_global_admission(  # noqa: PLR0915
             connection.execute(
                 delete(ConversionJobRow).where(
                     ConversionJobRow.owner_id.in_(str(owner) for owner in owner_ids)
-                )
-            )
-            connection.execute(
-                delete(TemplateAuditRow).where(
-                    TemplateAuditRow.template_id == str(template_id)
                 )
             )
             connection.execute(

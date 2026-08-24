@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid5
 
+from md_converter.observability import require_correlation_id
+
 SHA256_CHARACTERS = 64
 COMPLETE_PROGRESS = 100
 RESULT_OBJECT_NAME_PREFIX = "result-attempt:"
@@ -76,9 +78,14 @@ class JobSubmission:
     request_digest: str
     idempotency_digest: str | None
     created_at: datetime
+    correlation_id: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "created_at", _utc(self.created_at))
+        correlation_id = self.correlation_id or str(self.id)
+        object.__setattr__(
+            self, "correlation_id", require_correlation_id(correlation_id)
+        )
         _validate_component_versions(self.component_versions)
         for digest in (self.request_digest, self.idempotency_digest):
             if digest is not None and (
@@ -106,6 +113,7 @@ class ConversionJob:
     idempotency_digest: str | None
     created_at: datetime
     updated_at: datetime
+    correlation_id: str = ""
     attempt: int = 0
     source_ready: bool = True
     lease_owner: str | None = None
@@ -119,6 +127,10 @@ class ConversionJob:
     expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        correlation_id = self.correlation_id or str(self.id)
+        object.__setattr__(
+            self, "correlation_id", require_correlation_id(correlation_id)
+        )
         self._normalize_timestamps()
         self._validate_progress()
         _validate_component_versions(self.component_versions)
@@ -207,6 +219,11 @@ class JobRequest:
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
     now: datetime
+    correlation_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.correlation_id:
+            require_correlation_id(self.correlation_id)
 
 
 @dataclass(frozen=True, slots=True)

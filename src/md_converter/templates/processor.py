@@ -17,6 +17,7 @@ from md_converter.jobs.worker import (
     WorkerPolicy,
     WorkerRuntime,
 )
+from md_converter.observability import OperationalMetrics
 from md_converter.storage import ObjectStore
 from md_converter.templates.errors import (
     TemplateIntegrityError,
@@ -99,6 +100,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
     policy: WorkerPolicy,
     maintenance: MaintenanceCleaner | None = None,
     monotonic_clock: Callable[[], float] = monotonic,
+    metrics: OperationalMetrics | None = None,
 ) -> ConversionWorker:
     """Compose a worker that cannot bypass frozen-template resolution."""
     return ConversionWorker(
@@ -110,6 +112,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
             clock,
             monotonic_clock=monotonic_clock,
             maintenance=maintenance,
+            metrics=metrics,
         ),
         policy=policy,
     )

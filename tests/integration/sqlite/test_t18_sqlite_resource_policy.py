@@ -144,6 +144,9 @@ def test_standalone_asgi_enforces_owner_and_global_admission(tmp_path: Path) -> 
         assert global_full.json()["error"]["code"] == (
             "CONVERSION_QUEUE_CAPACITY_EXCEEDED"
         )
+        metrics = client.get("/metrics").text
+        assert 'md_converter_job_saturation_total{scope="owner"} 1' in metrics
+        assert 'md_converter_job_saturation_total{scope="global"} 1' in metrics
         admin_login = client.post(
             "/api/v1/login", json={"username": "admin", "password": password}
         ).json()

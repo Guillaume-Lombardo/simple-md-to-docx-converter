@@ -18,6 +18,8 @@ from md_converter.auth.errors import (
     USERNAME_TAKEN,
 )
 from md_converter.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
     LoginResult,
     Role,
     Session,
@@ -175,7 +177,10 @@ class AuthenticationService:
             role=Role.USER,
         )
         try:
-            self.users.create(user)
+            self.users.create(
+                user,
+                audit=self._audit(actor, AuthenticationAuditOperation.CREATE),
+            )
         except KeyError:
             raise USERNAME_TAKEN.new() from None
         return user
@@ -186,7 +191,14 @@ class AuthenticationService:
 
     def set_active(self, actor: User, user_id: UUID, *, active: bool) -> User:
         AuthorizationService.require_admin(actor)
-        user = self.users.update_security(user_id, active=active)
+        operation = (
+            AuthenticationAuditOperation.REACTIVATE
+            if active
+            else AuthenticationAuditOperation.DEACTIVATE
+        )
+        user = self.users.update_security(
+            user_id, active=active, audit=self._audit(actor, operation)
+        )
         if user is None:
             raise USER_NOT_FOUND.new()
         self.sessions.revoke_user(user.id)
@@ -197,11 +209,20 @@ class AuthenticationService:
         if not password:
             raise PASSWORD_INVALID.new()
         user = self.users.update_security(
-            user_id, password_hash=self.hasher.hash(password)
+            user_id,
+            password_hash=self.hasher.hash(password),
+            audit=self._audit(actor, AuthenticationAuditOperation.RESET_PASSWORD),
         )
         if user is None:
             raise USER_NOT_FOUND.new()
         self.sessions.revoke_user(user.id)
+
+    def _audit(
+        self, actor: User, operation: AuthenticationAuditOperation
+    ) -> AuthenticationAuditContext:
+        return AuthenticationAuditContext(
+            uuid4(), actor.id, operation, self.clock.now()
+        )
 
     def _active_session(self, session_token: str | None) -> Session:
         if not session_token:

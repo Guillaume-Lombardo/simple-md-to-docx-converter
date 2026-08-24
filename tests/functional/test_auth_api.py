@@ -249,6 +249,29 @@ def test_admin_lifecycle_csrf_authorization_and_revocation(tmp_path: Path) -> No
         assert login(client, "alice", "new-alice-password")["user"]["id"] == alice_id
         assert old_alice["csrf_token"] != admin["csrf_token"]
 
+        client.cookies.clear()
+        login(client)
+        audits = client.get("/api/v1/audit").json()
+        account_audits = [
+            record for record in audits if record["target_type"] == "user"
+        ]
+        assert [record["operation"] for record in account_audits] == [
+            "user_password_reset",
+            "user_reactivate",
+            "user_deactivate",
+            "user_create",
+            "bootstrap_admin_create",
+        ]
+        assert account_audits[0]["target_id"] == alice_id
+        assert account_audits[0]["target_version"] == "3"
+        assert all(record["version_id"] is None for record in account_audits)
+        assert all(
+            record["administrator_intervention"] for record in account_audits[:-1]
+        )
+        assert not account_audits[-1]["administrator_intervention"]
+        assert "new-alice-password" not in str(audits)
+        assert "alice-password" not in str(audits)
+
 
 @pytest.mark.functional
 def test_csrf_replay_session_rotation_and_logout(tmp_path: Path) -> None:

@@ -156,11 +156,6 @@ def test_distributed_retention_matches_standalone_contract() -> None:
             )
         with DatabaseSession(engine) as database, database.begin():
             database.execute(
-                delete(TemplateAuditRow).where(
-                    TemplateAuditRow.template_id == str(template_id)
-                )
-            )
-            database.execute(
                 delete(TemplateRow).where(TemplateRow.id == str(template_id))
             )
             database.execute(delete(UserRow).where(UserRow.id == str(owner_id)))

@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, literal, select, text, union_all
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.schema import (
+    AuthenticationAuditRow,
     ConversionJobRow,
     RetentionCleanupRunRow,
     TemplateAuditRow,
@@ -144,25 +145,64 @@ class SqlRetentionRepository:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                if self._engine.dialect.name == "postgresql":
+                    database.execute(
+                        text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                        {"lock_id": 1_914_365_011},
+                    )
+                combined = union_all(
+                    select(
+                        TemplateAuditRow.id.label("id"),
+                        TemplateAuditRow.created_at.label("created_at"),
+                        literal("template").label("record_type"),
+                    ).where(TemplateAuditRow.created_at < cutoff_at),
+                    select(
+                        AuthenticationAuditRow.id.label("id"),
+                        AuthenticationAuditRow.created_at.label("created_at"),
+                        literal("authentication").label("record_type"),
+                    ).where(AuthenticationAuditRow.created_at < cutoff_at),
+                ).subquery()
                 candidates = tuple(
-                    database.scalars(
-                        select(TemplateAuditRow.id)
-                        .where(TemplateAuditRow.created_at < cutoff_at)
-                        .order_by(TemplateAuditRow.created_at, TemplateAuditRow.id)
-                        .limit(limit)
-                        .with_for_update(
-                            skip_locked=self._engine.dialect.name == "postgresql"
+                    database.execute(
+                        select(combined)
+                        .order_by(
+                            combined.c.created_at,
+                            combined.c.id,
+                            combined.c.record_type,
                         )
+                        .limit(limit)
                     )
                 )
                 removed = 0
                 if candidates:
-                    result = database.execute(
-                        delete(TemplateAuditRow).where(
-                            TemplateAuditRow.id.in_(candidates)
-                        )
+                    guard_id = str(uuid4())
+                    database.execute(
+                        text("INSERT INTO audit_cleanup_guards (id) VALUES (:id)"),
+                        {"id": guard_id},
                     )
-                    removed = int(getattr(result, "rowcount", 0))
+                    template_ids = [
+                        candidate.id
+                        for candidate in candidates
+                        if candidate.record_type == "template"
+                    ]
+                    authentication_ids = [
+                        candidate.id
+                        for candidate in candidates
+                        if candidate.record_type == "authentication"
+                    ]
+                    for row_type, identifiers in (
+                        (TemplateAuditRow, template_ids),
+                        (AuthenticationAuditRow, authentication_ids),
+                    ):
+                        if identifiers:
+                            result = database.execute(
+                                delete(row_type).where(row_type.id.in_(identifiers))
+                            )
+                            removed += int(getattr(result, "rowcount", 0))
+                    database.execute(
+                        text("DELETE FROM audit_cleanup_guards WHERE id = :id"),
+                        {"id": guard_id},
+                    )
                 database.add(
                     RetentionCleanupRunRow(
                         id=str(uuid4()),
