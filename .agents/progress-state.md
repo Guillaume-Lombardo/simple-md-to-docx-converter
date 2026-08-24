@@ -60,9 +60,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Finish changed-line coverage and independent security/specification/CI re-review on the exact
-   hardened revision.
-2. Rebase, publish, verify protected CI, squash-merge, synchronize T11 to `Done`, and continue T13.
+1. Publish the approved T11 revision and verify protected CI.
+2. Squash-merge, synchronize T11 to `Done`, and continue T13.
 
 ## Validation
 
@@ -87,3 +86,6 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   passes 758 tests and has 34 expected missing-engine failures because Pandoc, LibreOffice,
   Mermaid/Chromium, and the locked Fontconfig inventory are provided by the approved image rather
   than the VM host.
+- Independent security, specification, and CI/toolchain reviewers approve exact implementation
+  revision `9f608e8` with no actionable finding. Changed application coverage is 97.32% and
+  application branch coverage is 91.53%.

@@ -57,7 +57,9 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   pass; 610 unit tests pass at 93.98% coverage, 751 default local tests pass at 95.04%, and all 20
   rootless real-engine tests pass. The unfiltered host run has 34 expected missing-engine failures;
   those exact boundaries pass in the approved image. Exact-revision re-review and changed-line
-  coverage remain before publication.
+  coverage are complete: independent security, specification, and CI/toolchain reviewers approve
+  implementation revision `9f608e8` without an actionable finding; changed application coverage is
+  97.32% and application branch coverage is 91.53%. Publication and protected CI remain.
 
 ## Synchronization
 
