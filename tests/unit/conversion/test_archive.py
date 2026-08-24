@@ -183,6 +183,16 @@ def test_rejects_symbolic_links_and_special_unix_members(file_type: int) -> None
 
 
 @pytest.mark.unit
+def test_rejects_special_unix_member_disguised_as_directory() -> None:
+    disguised = zipfile.ZipInfo("assets/")
+    disguised.create_system = 3
+    disguised.external_attr = (stat.S_IFLNK | 0o755) << 16
+    data = archive_bytes([(disguised, b""), ("document.md", b"# Safe")])
+    with pytest.raises(ConversionError, match="archive is invalid"):
+        prepare_archive(data, LIMITS, IMAGE_LIMITS, image_normalizer=normalize_stub)
+
+
+@pytest.mark.unit
 def test_rejects_disallowed_member_type() -> None:
     data = archive_bytes([("document.md", b"# Safe"), ("secret.txt", b"secret")])
     with pytest.raises(ConversionError, match="archive is invalid"):

@@ -76,7 +76,9 @@ def _normalized_png(image: Image.Image, limits: ImageLimits) -> bytes:
         _reject_image("Animated images are not supported.")
     image.load()
     transposed = ImageOps.exif_transpose(image)
-    mode = "RGBA" if "A" in transposed.getbands() else "RGB"
+    _check_dimensions(*transposed.size, limits)
+    has_transparency = "A" in transposed.getbands() or "transparency" in transposed.info
+    mode = "RGBA" if has_transparency else "RGB"
     normalized = transposed.convert(mode)
     output = io.BytesIO()
     normalized.save(output, format="PNG", compress_level=9, optimize=False)
@@ -144,7 +146,9 @@ def _sanitize_svg_tree(root: ElementTree.Element) -> bytes:
             if (
                 local.startswith("on")
                 or name == _XML_BASE
+                or local == "style"
                 or (local in {"href", "src"} and not value.strip().startswith("#"))
+                or "\\" in value
                 or _has_external_css_reference(value)
             ):
                 del parent.attrib[name]

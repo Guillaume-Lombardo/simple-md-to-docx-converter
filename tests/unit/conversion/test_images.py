@@ -87,6 +87,32 @@ def test_jpeg_orientation_is_applied_and_metadata_is_removed() -> None:
     _assert_png(normalized, (6, 8))
 
 
+def test_dimensions_are_rechecked_after_exif_orientation() -> None:
+    output = io.BytesIO()
+    image = Image.new("RGB", (8, 6), "white")
+    exif = image.getexif()
+    exif[274] = 6
+    image.save(output, format="JPEG", exif=exif)
+    with pytest.raises(ConversionError, match="exceeds configured limits"):
+        normalize_image(
+            PurePosixPath("rotated.jpg"),
+            output.getvalue(),
+            ImageLimits(100_000, 8, 6, 48),
+        )
+
+
+def test_indexed_png_partial_transparency_is_preserved() -> None:
+    source = io.BytesIO()
+    indexed = Image.new("P", (1, 1), 0)
+    indexed.putpalette([255, 0, 0, *([0] * 765)])
+    indexed.info["transparency"] = bytes([128])
+    indexed.save(source, format="PNG")
+    normalized = normalize_image(PurePosixPath("alpha.png"), source.getvalue(), LIMITS)
+    with Image.open(io.BytesIO(normalized)) as result:
+        assert result.mode == "RGBA"
+        assert result.getpixel((0, 0)) == (255, 0, 0, 128)
+
+
 def test_animated_image_is_rejected() -> None:
     output = io.BytesIO()
     frames = [Image.new("RGB", (2, 2), color) for color in ("red", "blue")]
@@ -191,6 +217,24 @@ def test_svg_external_css_references_and_foreign_content_are_removed() -> None:
     assert b"example.invalid" not in sanitized
     assert b"file:///" not in sanitized
     assert b"foreignobject" not in sanitized
+
+
+def test_svg_escaped_css_url_spelling_is_removed_before_renderer() -> None:
+    source = rb"""<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <rect width="10" height="10" style="fill:u\72l(https://example.invalid/a)"
+            stroke="u\72l(file:///etc/passwd)"/>
+    </svg>"""
+    inspected: list[bytes] = []
+
+    def inspect_renderer(svg: bytes, width: int, height: int) -> bytes:
+        inspected.append(svg)
+        return _blank_svg_renderer(svg, width, height)
+
+    normalize_image(PurePosixPath("escaped.svg"), source, LIMITS, inspect_renderer)
+    sanitized = inspected[0].lower()
+    assert b"example.invalid" not in sanitized
+    assert b"file:///" not in sanitized
+    assert b"style=" not in sanitized
 
 
 @pytest.mark.parametrize(

@@ -125,11 +125,11 @@ def _safe_member_path(name: str, *, directory: bool) -> PurePosixPath:
 
 
 def _is_regular_member(info: zipfile.ZipInfo) -> bool:
-    if info.is_dir():
-        return True
     if info.create_system != _ZIP_SYSTEM_UNIX:
         return True
     file_type = stat.S_IFMT(info.external_attr >> 16)
+    if info.is_dir():
+        return file_type in {0, stat.S_IFDIR}
     return file_type in {0, stat.S_IFREG}
 
 
