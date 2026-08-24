@@ -69,6 +69,12 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   race runs pass, and all 3 T15 real-engine tests pass in the arbitrary-UID rootless toolchain.
   K3s remained inactive. The committed Git tree passes 90.05% application branch coverage
   (1,041/1,156) and 91.95% changed executable-line coverage (811/882).
+- 2026-08-24: Three independent specification, security/concurrency, and test/CI reviewers approved
+  exact implementation head `74f5421`, including explicit approval of final-application-image E2E
+  sequencing to T20/T21 as sequencing rather than a waiver. The branch was rebased on unchanged
+  `origin/main` and published as ready pull request
+  [#46](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/46). Awaiting required
+  GitHub checks before the authorized squash merge.
 
 ## Synchronization
 

@@ -12,6 +12,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - `main` at `74dcba5` contains T00-T14. T13/G1L-322 is `Done` locally and in Linear.
 - T15/G1L-323 is implemented on `feat/T15-versioned-template-api`, based on `74dcba5`. Its local
   ticket remains `In Progress` until the change is verified on `main`.
+- Ready pull request #46 publishes the independently approved implementation. Required GitHub
+  checks are pending on the documentation-only publication head that follows reviewed code head
+  `74f5421`.
 - T15 provides immutable template versions, optimistic concurrency, owner-scoped download and
   audit behavior, fenced pending-publication recovery, integrity checks, and frozen template
   resolution in production worker assembly across SQLite/filesystem and PostgreSQL/S3 profiles.
@@ -45,6 +48,6 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Action
 
-Obtain final independent specification, security, and test approval. Once approved, T15 is ready
-for pull-request publication, CI, reviewed squash merge, and exact branch cleanup under the
+Require green CI and final documentation-head confirmation on ready pull request #46, then
+squash-merge, verify on `main`, synchronize T15 to `Done`, and clean the exact branch under the
 standing authorization.
