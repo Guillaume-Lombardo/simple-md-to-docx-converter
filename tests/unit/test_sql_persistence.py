@@ -55,6 +55,9 @@ CORRELATION_REVISION: Any = importlib.import_module(
 AUTH_AUDIT_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_11_authentication_audit"
 )
+JOB_INTEGRITY_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260825_12_job_integrity_metadata"
+)
 
 
 @pytest.mark.unit
@@ -76,6 +79,16 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "templates",
         "users",
     }
+    job_columns = {
+        column["name"] for column in inspect(engine).get_columns("conversion_jobs")
+    }
+    assert {
+        "source_filename",
+        "source_kind",
+        "source_sha256",
+        "source_size",
+        "result_manifest_object_id",
+    } <= job_columns
     assert DatabaseReadinessProbe(engine).is_ready()
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)

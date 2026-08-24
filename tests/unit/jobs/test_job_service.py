@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -53,6 +54,11 @@ def test_submission_persists_source_and_reuses_matching_idempotency(
     assert result is created
     assert not replayed
     objects.put.assert_called_once()
+    submission = repository.create.call_args.args[0]
+    assert submission.source_filename == "source.md"
+    assert submission.source_kind.value == "markdown"
+    assert submission.source_sha256 == hashlib.sha256(b"source").hexdigest()
+    assert submission.source_size == len(b"source")
 
     replay = job(
         owner_id=created.owner_id,
@@ -124,6 +130,7 @@ def test_failed_source_upload_leaves_a_recoverable_durable_reservation(
         )
     repository.create.assert_called_once()
     repository.activate_source.assert_not_called()
+    objects.delete.assert_called_once_with(objects.put.call_args.args[0])
 
     repository.create.side_effect = RuntimeError("database details")
     with pytest.raises(RuntimeError):
@@ -237,3 +244,32 @@ def test_result_download_and_policy_validation(mocker: MockerFixture) -> None:
         with pytest.raises(ValueError):
             JobServicePolicy(invalid)
     assert service(repository, objects).max_job_duration_seconds is None
+
+
+def test_manifest_download_is_owner_bound_and_requires_atomic_publication(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    objects = mocker.Mock(spec=ObjectStore)
+    instance = service(repository, objects)
+    succeeded = job(
+        output=JobOutput.PDF,
+        state=JobState.SUCCEEDED,
+        step=JobStep.COMPLETE,
+        progress=100,
+        result_object_id=uuid4(),
+        result_manifest_object_id=uuid4(),
+    )
+    repository.get.return_value = succeeded
+    objects.get.return_value = b'{"trace":true}'
+
+    assert instance.download_manifest(
+        succeeded.id, actor_id=succeeded.owner_id, actor_is_admin=False
+    ) == (succeeded, b'{"trace":true}')
+    with pytest.raises(JobNotFoundError):
+        instance.download_manifest(succeeded.id, actor_id=uuid4(), actor_is_admin=False)
+    repository.get.return_value = job()
+    with pytest.raises(JobConflictError):
+        instance.download_manifest(
+            succeeded.id, actor_id=succeeded.owner_id, actor_is_admin=True
+        )

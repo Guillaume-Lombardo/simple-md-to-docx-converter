@@ -33,7 +33,14 @@ from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
 from md_converter.conversion.service import DocxConversionService
 from md_converter.conversion.validation import PANDOC_READER
 from md_converter.jobs.errors import JobProcessingCancelled
-from md_converter.jobs.models import ConversionJob, JobOutput, JobProcessResult, JobStep
+from md_converter.jobs.models import (
+    ConversionJob,
+    JobOutput,
+    JobProcessResult,
+    JobStep,
+    SourceKind,
+    source_kind_for_filename,
+)
 from md_converter.jobs.ports import CancellationProbe
 from md_converter.storage import (
     ObjectKey,
@@ -92,6 +99,7 @@ class ProductionTemplateAwareProcessor:
         progress(JobStep.RENDERING, 30)
         docx = self._convert_docx(
             source,
+            job.source_kind,
             template_content,
             deadline_monotonic=deadline_monotonic,
         )
@@ -119,24 +127,42 @@ class ProductionTemplateAwareProcessor:
         )
 
     def _load_source(self, job: ConversionJob) -> bytes:
+        if (
+            job.source_filename is None
+            or job.source_kind is None
+            or job.source_sha256 is None
+            or job.source_size is None
+        ):
+            raise _source_integrity_error()
         try:
-            return self._objects.get(
+            if source_kind_for_filename(job.source_filename) is not job.source_kind:
+                raise _source_integrity_error()
+        except ValueError:
+            raise _source_integrity_error() from None
+        try:
+            source = self._objects.get(
                 ObjectKey(ObjectScope.UPLOAD, job.owner_id, job.source_object_id)
             )
         except ObjectNotFoundError, ObjectStoreError:
-            raise ConversionError(
-                ConversionErrorCode.SOURCE_INTEGRITY,
-                "Frozen source content could not be verified.",
-            ) from None
+            raise _source_integrity_error() from None
+        if (
+            len(source) != job.source_size
+            or hashlib.sha256(source).hexdigest() != job.source_sha256
+        ):
+            raise _source_integrity_error()
+        return source
 
     def _convert_docx(
         self,
         source: bytes,
+        source_kind: SourceKind | None,
         template_content: bytes,
         *,
         deadline_monotonic: float | None,
     ) -> bytes:
-        if source.startswith(b"PK\x03\x04"):
+        if source_kind is SourceKind.ARCHIVE:
+            if source[:4] not in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"}:
+                raise _source_integrity_error()
             return self._docx.convert_archive(
                 source,
                 template_content,
@@ -144,6 +170,8 @@ class ProductionTemplateAwareProcessor:
                 self._image_limits,
                 deadline_monotonic=deadline_monotonic,
             )
+        if source_kind is not SourceKind.MARKDOWN or source.startswith(b"PK"):
+            raise _source_integrity_error()
         try:
             markdown = source.decode("utf-8")
         except UnicodeDecodeError:
@@ -175,6 +203,13 @@ class ProductionTemplateAwareProcessor:
     def _require_active(cancelled: CancellationProbe) -> None:
         if cancelled():
             raise JobProcessingCancelled
+
+
+def _source_integrity_error() -> ConversionError:
+    return ConversionError(
+        ConversionErrorCode.SOURCE_INTEGRITY,
+        "Frozen source content could not be verified.",
+    )
 
 
 def build_production_processor(

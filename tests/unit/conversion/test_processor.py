@@ -32,6 +32,7 @@ from md_converter.jobs.models import (
     JobProcessResult,
     JobState,
     JobStep,
+    SourceKind,
 )
 from md_converter.storage import ObjectKey, ObjectNotFoundError, ObjectScope
 from md_converter.templates.models import TemplateVersion
@@ -50,7 +51,13 @@ class _Cancellation:
         return self._values.pop(0) if self._values else False
 
 
-def _job(output: JobOutput) -> ConversionJob:
+def _job(
+    output: JobOutput,
+    source: bytes = b"# Frozen\n",
+    *,
+    filename: str = "source.md",
+    kind: SourceKind = SourceKind.MARKDOWN,
+) -> ConversionJob:
     now = datetime(2026, 8, 25, tzinfo=UTC)
     return ConversionJob(
         id=uuid4(),
@@ -77,6 +84,10 @@ def _job(output: JobOutput) -> ConversionJob:
         lease_owner="worker-1",
         lease_token=uuid4(),
         lease_expires_at=now + timedelta(minutes=1),
+        source_filename=filename,
+        source_kind=kind,
+        source_sha256=hashlib.sha256(source).hexdigest(),
+        source_size=len(source),
     )
 
 
@@ -180,8 +191,14 @@ def test_processor_uses_frozen_source_template_and_traceability(
 
 
 def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None:
-    job = _job(JobOutput.BOTH)
-    processor, _objects, docx, _pdf = _processor(mocker, b"PK\x03\x04archive")
+    source = b"PK\x03\x04archive"
+    job = _job(
+        JobOutput.BOTH,
+        source,
+        filename="source.zip",
+        kind=SourceKind.ARCHIVE,
+    )
+    processor, _objects, docx, _pdf = _processor(mocker, source)
     template = _template(job, b"template")
     arguments = (job, template, b"template")
     keywords = {
@@ -205,8 +222,9 @@ def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None
 
 
 def test_processor_publishes_docx_without_starting_pdf(mocker) -> None:
-    job = _job(JobOutput.DOCX)
-    processor, _objects, _docx, pdf = _processor(mocker, b"# Document\n")
+    source = b"# Document\n"
+    job = _job(JobOutput.DOCX, source)
+    processor, _objects, _docx, pdf = _processor(mocker, source)
 
     result = processor.process_with_template(
         job,
@@ -222,7 +240,7 @@ def test_processor_publishes_docx_without_starting_pdf(mocker) -> None:
 
 
 def test_processor_rejects_missing_non_utf8_and_cancelled_sources(mocker) -> None:
-    job = _job(JobOutput.DOCX)
+    job = _job(JobOutput.DOCX, b"\xff")
     processor, objects, _docx, _pdf = _processor(mocker, b"\xff")
     template = _template(job, b"template")
     call = {
@@ -248,6 +266,36 @@ def test_processor_rejects_missing_non_utf8_and_cancelled_sources(mocker) -> Non
             deadline_monotonic=None,
             progress=mocker.Mock(),
         )
+
+
+@pytest.mark.parametrize("tamper", ["hash", "size", "filename_kind", "content_kind"])
+def test_processor_rejects_every_frozen_source_integrity_mismatch(
+    mocker, tamper: str
+) -> None:
+    source = b"# Immutable\n"
+    job = _job(JobOutput.DOCX, source)
+    if tamper == "hash":
+        object.__setattr__(job, "source_sha256", "f" * 64)
+    elif tamper == "size":
+        object.__setattr__(job, "source_size", len(source) + 1)
+    elif tamper == "filename_kind":
+        object.__setattr__(job, "source_filename", "source.zip")
+    else:
+        object.__setattr__(job, "source_kind", SourceKind.ARCHIVE)
+        object.__setattr__(job, "source_filename", "source.zip")
+    processor, _objects, _docx, _pdf = _processor(mocker, source)
+
+    with pytest.raises(ConversionError) as caught:
+        processor.process_with_template(
+            job,
+            _template(job, b"template"),
+            b"template",
+            cancelled=_Cancellation(),
+            deadline_monotonic=None,
+            progress=mocker.Mock(),
+        )
+
+    assert caught.value.code is ConversionErrorCode.SOURCE_INTEGRITY
 
 
 def test_production_processor_assembles_locked_adapters_and_manifest(

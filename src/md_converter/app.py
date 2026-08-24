@@ -54,7 +54,13 @@ from md_converter.jobs.errors import (
     JobRequestError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
+from md_converter.jobs.models import (
+    ConversionJob,
+    JobOutput,
+    JobPage,
+    JobRequest,
+    source_kind_for_filename,
+)
 from md_converter.jobs.ports import JobRepository
 from md_converter.jobs.runner import EmbeddedWorker, ExternalWorkerRuntime, WorkerLoop
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
@@ -1449,12 +1455,15 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
-        if source.filename is None or Path(source.filename).suffix.casefold() not in {
-            ".md",
-            ".zip",
-        }:
+        if source.filename is None:
             await source.close()
             raise JobRequestError
+        source_filename = source.filename
+        try:
+            source_kind = source_kind_for_filename(source_filename)
+        except ValueError:
+            await source.close()
+            raise JobRequestError from None
         try:
             content = await source.read(
                 resolved_settings.conversion_upload_max_bytes + 1
@@ -1476,6 +1485,8 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
                     correlation_id=current_correlation_id() or uuid4().hex,
+                    source_filename=source_filename,
+                    source_kind=source_kind,
                 ),
                 idempotency_key,
             )
@@ -1579,6 +1590,38 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
                 "Content-Disposition": (
                     f'attachment; filename="conversion-{job.id}.'
                     f'{extensions[job.output]}"'
+                ),
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.get(
+        "/api/v1/conversions/{job_id}/result/manifest",
+        response_class=Response,
+        tags=["conversions"],
+        responses={
+            200: {
+                "description": "Canonical PDF traceability manifest",
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            },
+            **error_responses(401, 404, 409, 422, 503),
+        },
+    )
+    def download_conversion_manifest(
+        job_id: UUID, actor: Annotated[User, Depends(current_user)]
+    ) -> Response:
+        job, content = resolved_components.jobs.download_manifest(
+            job_id,
+            actor_id=actor.id,
+            actor_is_admin=actor.role is Role.ADMIN,
+        )
+        return Response(
+            content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="conversion-{job.id}-traceability.json"'
                 ),
                 "Cache-Control": "private, no-store",
                 "X-Content-Type-Options": "nosniff",

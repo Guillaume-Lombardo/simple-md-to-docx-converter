@@ -57,21 +57,28 @@ bash scripts/container/supply-chain.sh localhost/md-converter:t20 artifacts/cont
 The smoke harness uses real rootless Podman, an arbitrary UID supported by the host subordinate-ID
 map, the reviewed Chrome seccomp profile, read-only root, no capabilities, `no-new-privileges`, and
 bounded cgroups and writable areas. It executes Pandoc, sandboxed Mermaid/Chrome, and LibreOffice.
-The standalone smoke starts the embedded worker on the image's SQLite 3.34 runtime. The distributed
-smoke starts PostgreSQL, RustFS, an API process, and an external worker; it verifies the worker
-metrics listener and a clean SIGTERM exit. Full three-user, two-profile conversion, recovery, and
-concurrency E2E remains T21 scope.
+The standalone smoke starts the embedded worker on the image's SQLite 3.34 runtime and performs
+real authenticated template publication plus DOCX, PDF, and combined asynchronous conversions. It
+polls jobs, inspects OpenXML/PDF/combined bytes and canonical traceability sidecars, and verifies
+source mismatch and forbidden-suffix failures. The distributed smoke repeats that workflow through
+PostgreSQL, RustFS, a worker-free API, and an external worker; it also verifies the worker metrics
+listener and a clean SIGTERM exit. A protocol-faithful clean-only INSTREAM sidecar permits positive
+uploads; dedicated tests retain clean, malware, unavailable, and malformed ClamAV coverage. Full
+three-user, two-profile recovery and concurrency E2E remains T21 scope.
 
 The supply-chain command downloads SHA-locked Syft and Grype releases, writes CycloneDX and SPDX
-JSON SBOMs, and fails on fixed Critical findings. Scanner databases remain time-varying evidence;
-retain the JSON report with the image digest and scan timestamp. T22 owns release publication,
-provenance, and registry attachment.
+JSON SBOMs, retains the complete fixed and unfixed Grype report, and separately fails on Critical
+findings with an available fix. Unfixed Critical findings remain explicit and require mitigation or
+rollback evidence before release; they are never silently filtered. CI retains both SBOMs, the
+report, and bounded image metadata/digests for 30 days as verification evidence. Scanner databases
+remain time-varying evidence. T22 owns release publication, provenance, and registry attachment.
 
 ## Production conversion runtime
 
-The processor loads the frozen owner-scoped source and the exact verified template version, accepts
-only `.md` or `.zip` submissions, and delegates validation, Mermaid rendering, DOCX creation, and
-PDF creation to the existing bounded adapters. PDF traceability is canonical; `both` output is a
+The processor loads the frozen owner-scoped source and the exact verified template version, verifies
+the persisted filename, kind, size, and digest without inferring source type from content, and
+delegates validation, Mermaid rendering, DOCX creation, and PDF creation to the existing bounded
+adapters. PDF traceability is published as a canonical sidecar; `both` output is also a
 deterministic ZIP containing `document.docx`, `document.pdf`, and `traceability.json`. Embedded
 worker failure makes standalone readiness fail. External workers expose process-local metrics and
 stop on SIGINT or SIGTERM.

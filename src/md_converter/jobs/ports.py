@@ -66,6 +66,7 @@ class JobRepository(Protocol):
         result_object_id: UUID,
         now: datetime,
         expires_at: datetime,
+        result_manifest_object_id: UUID | None = None,
     ) -> ConversionJob: ...
 
     def fail(self, failure: JobFailure) -> ConversionJob: ...

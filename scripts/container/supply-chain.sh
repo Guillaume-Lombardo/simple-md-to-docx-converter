@@ -30,6 +30,7 @@ podman save --format oci-archive --output "$tool_directory/image.tar" "$image"
   --output "spdx-json=$output_directory/sbom.spdx.json"
 GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
   "sbom:$output_directory/sbom.cdx.json" \
-  --fail-on critical \
-  --only-fixed \
   --output json > "$output_directory/vulnerabilities.json"
+uv run python -m scripts.container.summarize_supply_chain \
+  --image "$image" \
+  --artifacts "$output_directory"

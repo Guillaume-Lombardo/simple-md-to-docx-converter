@@ -3,22 +3,50 @@ set -euo pipefail
 
 readonly image="${1:-localhost/md-converter:t20}"
 readonly container_name=md-converter-t20-api-smoke
+readonly clamav_name=md-converter-t20-api-smoke-clamav
+readonly network_name=md-converter-t20-api-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=false
+clamav_created=false
+network_created=false
+template_directory="$(mktemp -d)"
 
 cleanup() {
   if [[ "$created" == true ]]; then
     podman rm --force "$container_name" >/dev/null 2>&1 || true
   fi
+  if [[ "$clamav_created" == true ]]; then
+    podman rm --force "$clamav_name" >/dev/null 2>&1 || true
+  fi
+  if [[ "$network_created" == true ]]; then
+    podman network rm "$network_name" >/dev/null 2>&1 || true
+  fi
+  rm -rf -- "$template_directory"
 }
 trap cleanup EXIT
 
-if podman container exists "$container_name"; then
-  echo "Refusing to replace pre-existing container $container_name." >&2
+for name in "$container_name" "$clamav_name"; do
+  if podman container exists "$name"; then
+    echo "Refusing to replace pre-existing container $name." >&2
+    exit 1
+  fi
+done
+if podman network exists "$network_name"; then
+  echo "Refusing to replace pre-existing network $network_name." >&2
   exit 1
 fi
+podman network create "$network_name" >/dev/null
+network_created=true
+podman run --detach --name "$clamav_name" --network "$network_name" \
+  --network-alias clamav --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
+  --volume "$(pwd)/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" /fake-clamav.py >/dev/null
+clamav_created=true
 
 settings=(
   --env MD_CONVERTER_INITIAL_ADMIN_USERNAME=admin
@@ -87,11 +115,12 @@ settings=(
   --env MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=10
   --env MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=1
   --env MD_CONVERTER_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=60
-  --env MD_CONVERTER_CLAMAV_HOST=clamav.invalid
+  --env MD_CONVERTER_CLAMAV_HOST=clamav
 )
 
 podman run --detach \
   --name "$container_name" \
+  --network "$network_name" \
   --user "$runtime_uid:0" \
   --read-only \
   --cap-drop=all \
@@ -124,5 +153,14 @@ for _ in $(seq 1 60); do
 done
 curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" \
   | grep -Fq '"status":"ready"'
+podman exec "$container_name" /opt/md-converter/venv/bin/python -c \
+  'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
+podman exec "$container_name" pandoc /tmp/t20-template.md \
+  --output=/tmp/t20-template.docx
+podman cp "$container_name:/tmp/t20-template.docx" \
+  "$template_directory/template.docx"
+uv run python -m scripts.container.api_workflow_smoke \
+  --base-url "http://127.0.0.1:$port" \
+  --template "$template_directory/template.docx"
 
-echo "Final-image API smoke passed for $image."
+echo "Final-image standalone conversion workflow smoke passed for $image."

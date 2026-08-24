@@ -53,8 +53,8 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   conversions. The distributed PostgreSQL/RustFS API smoke test passes. CycloneDX and SPDX SBOMs
   were generated, and the fixed-Critical Grype gate passes after removing build-only npm tooling.
   The canonical non-engine suite passes all 997 applicable tests against real PostgreSQL and RustFS
-  with 95.06% coverage; Ruff, ty, ShellCheck, and CI configuration validation also pass. Standalone
-  The initial standalone startup and package-native runtime gaps were carried forward for resolution
+  with 95.06% coverage; Ruff, ty, ShellCheck, and CI configuration validation also pass. The
+  initial standalone startup and package-native runtime gaps were carried forward for resolution
   after T19 integration.
 - 2026-08-25: Integrated verified T19 `main` at `3056736`, implemented all 14 SQLite 3.34 write
   fallbacks while retaining PostgreSQL `RETURNING`, and assembled the production template-aware
@@ -65,6 +65,18 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   worker metrics and graceful termination. CycloneDX and SPDX SBOMs were generated; Grype reports
   28 findings (8 High, 18 Medium, 2 Low) and zero Critical findings, so the fixed Critical gate
   passes without suppressions or threshold changes.
+- 2026-08-25: Addressed independent review findings by freezing and validating the source filename,
+  kind, SHA-256 digest, and byte size; failing historical non-terminal rows closed; publishing PDF
+  traceability manifests atomically beside results; retaining complete Grype evidence while gating
+  fixable Critical findings; and exercising authenticated DOCX, PDF, and combined conversions in
+  both final-image storage profiles. The standalone and distributed rootless workflows pass. The
+  canonical non-engine suite passes all 1,147 tests against real PostgreSQL and RustFS with 95.32%
+  coverage. Two fixed-timestamp builds produced image ID
+  `23fe74cb43abc0a6acd7af8a8f21a16c13995ddb028dcdbdd4a38ea18156635e` and digest
+  `sha256:f12363b0ed23ceab4ca380fdc345b3925cfc0c5de6e7825fa5b2b10260d66601`.
+  The complete 1,502-match Grype report contains no Critical findings; the host-only full suite
+  cannot run its 37 document-engine tests because those binaries and locked fonts are unavailable
+  outside the final image, where the corresponding real workflows pass.
 
 ## Synchronization
 

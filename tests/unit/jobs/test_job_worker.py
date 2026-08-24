@@ -18,6 +18,7 @@ from md_converter.jobs.models import (
     JobProcessResult,
     JobState,
     JobStep,
+    result_manifest_object_id,
     result_object_id,
 )
 from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
@@ -148,6 +149,59 @@ def test_worker_claims_heartbeats_and_publishes_only_after_processing(
     repository.succeed.assert_called_once()
     assert objects.put.call_args.args[0].object_id == result_object_id(claimed.id, 1)
     objects.delete.assert_not_called()
+
+
+def test_worker_atomically_publishes_and_compensates_traceability_sidecar(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    claimed = running_job()
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    processor.process.return_value = JobProcessResult(b"pdf", b'{"trace":true}')
+
+    assert instance.run_once()
+
+    result_key, manifest_key = [call.args[0] for call in objects.put.call_args_list]
+    assert result_key.scope is ObjectScope.RESULT
+    assert manifest_key.scope is ObjectScope.RESULT_MANIFEST
+    assert manifest_key.object_id == result_manifest_object_id(claimed.id, 1)
+    assert (
+        repository.succeed.call_args.kwargs["result_manifest_object_id"]
+        == manifest_key.object_id
+    )
+
+    objects.reset_mock()
+    repository.succeed.reset_mock()
+    objects.put.side_effect = (None, ObjectStoreError())
+    with pytest.raises(ObjectStoreError):
+        instance.run_once()
+    assert [call.args[0] for call in objects.delete.call_args_list] == [
+        result_key,
+        manifest_key,
+    ]
+    repository.succeed.assert_not_called()
+
+
+def test_source_integrity_failure_is_durable_and_worker_accepts_next_job(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, _objects, processor = worker(mocker)
+    claimed = running_job()
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    processor.process.side_effect = (
+        ConversionError(
+            ConversionErrorCode.SOURCE_INTEGRITY,
+            "Frozen source content could not be verified.",
+        ),
+        JobProcessResult(b"next-result"),
+    )
+
+    assert instance.run_once()
+    assert repository.fail.call_args.args[0].code == "source_integrity"
+    assert instance.run_once()
+    repository.succeed.assert_called_once()
 
 
 def test_worker_records_correlated_step_durations(mocker: MockerFixture) -> None:
@@ -337,7 +391,9 @@ def test_cleanup_remains_retryable_until_object_deletion_is_acknowledged(
     mocker: MockerFixture,
 ) -> None:
     instance, repository, objects, _processor = worker(mocker)
-    expired = ExpiredJobObjects(uuid4(), uuid4(), uuid4(), uuid4(), (uuid4(),))
+    expired = ExpiredJobObjects(
+        uuid4(), uuid4(), uuid4(), uuid4(), (uuid4(),), (uuid4(),)
+    )
     repository.expire_terminal.return_value = (expired,)
     objects.delete.side_effect = ObjectStoreError
     with pytest.raises(ObjectStoreError):
@@ -347,6 +403,10 @@ def test_cleanup_remains_retryable_until_object_deletion_is_acknowledged(
     objects.delete.side_effect = None
     repository.complete_cleanup.return_value = True
     assert instance.cleanup(limit=1) == 1
+    assert any(
+        call.args[0].scope is ObjectScope.RESULT_MANIFEST
+        for call in objects.delete.call_args_list
+    )
     repository.complete_cleanup.assert_called_once_with(
         expired.job_id, expired.cleanup_token
     )

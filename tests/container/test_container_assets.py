@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
+
+from scripts.container import summarize_supply_chain
 
 pytestmark = pytest.mark.unit
 
@@ -104,3 +107,72 @@ def test_distributed_test_profile_is_provider_neutral_rustfs() -> None:
     deployment = Path("deploy/rustfs-ci.yaml").read_text(encoding="utf-8")
     assert "ghcr.io/rustfs/rustfs:" in deployment
     assert "minio" not in deployment.casefold()
+
+
+def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(
+        Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    assert "--only-fixed" not in script
+    assert "vulnerabilities.json" in script
+    heavy_steps = workflow["jobs"]["heavy"]["steps"]
+    upload = next(
+        step
+        for step in heavy_steps
+        if step["name"] == "Retain final-image verification evidence"
+    )
+    assert upload["if"] == "${{ always() && matrix.domain == 'container' }}"
+    assert upload["with"]["retention-days"] == 30
+    assert upload["with"]["if-no-files-found"] == "error"
+    for artifact in (
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+        "image-metadata.json",
+    ):
+        assert artifact in upload["with"]["path"]
+    assert workflow["permissions"] == {"contents": "read"}
+
+
+def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
+    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in ("sbom.cdx.json", "sbom.spdx.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    report = {
+        "matches": [
+            {
+                "artifact": {"name": "fixable"},
+                "vulnerability": {
+                    "id": "CVE-FIXED",
+                    "severity": "Critical",
+                    "fix": {"versions": ["2"]},
+                },
+            },
+            {
+                "artifact": {"name": "unfixed"},
+                "vulnerability": {
+                    "id": "CVE-UNFIXED",
+                    "severity": "Critical",
+                    "fix": {"versions": []},
+                },
+            },
+        ]
+    }
+    (tmp_path / "vulnerabilities.json").write_text(json.dumps(report), encoding="utf-8")
+    inspected = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
+    inspected.return_value.stdout = json.dumps(
+        [{"Id": "sha256:image", "Digest": "sha256:digest", "Size": 123}]
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["summary", "--image", "image:test", "--artifacts", str(tmp_path)],
+    )
+
+    assert summarize_supply_chain.main() == 1
+    evidence = json.loads((tmp_path / "image-metadata.json").read_text())
+    assert evidence["vulnerabilities"]["counts_by_severity"] == {"Critical": 2}
+    assert evidence["vulnerabilities"]["critical_with_fix"][0]["id"] == "CVE-FIXED"
+    assert evidence["vulnerabilities"]["critical_without_fix"][0]["id"] == "CVE-UNFIXED"

@@ -5,7 +5,12 @@
 Authenticated clients submit multipart Markdown sources to `POST /api/v1/conversions` with a
 template identity, immutable template-version identity, and `docx`, `pdf`, or `both` output. The
 source filename must end in `.md` or `.zip`; Markdown is decoded as strict UTF-8, while ZIP inputs
-are validated by the secure archive adapter before conversion. The
+are validated by the secure archive adapter before conversion. The validated private leaf filename,
+explicit source kind, byte size, and SHA-256 are persisted with the owner-bound object identifier.
+Workers never infer the kind from magic bytes; they reject missing legacy metadata or any
+filename/kind/content/size/digest mismatch with the safe `source_integrity` failure. Historical
+terminal jobs created before migration `20260825_12` remain readable, while an older non-terminal
+job without source metadata fails closed if claimed. The
 job transaction locks the template identity and accepts only the exact active, published current
 pair, preventing an archive or replacement race from changing the frozen selection. The server
 then reserves a durable job row, atomically stores its source, and activates the queue row
@@ -21,6 +26,11 @@ attempt, template identifiers, and safe functional failures—never paths, SQL, 
 identifiers. Status responses also include result expiration, the immutable template version, and
 the locked converter, Pandoc, Mermaid CLI, Chromium, and LibreOffice versions needed for
 traceability.
+PDF and combined results also expose their canonical external traceability JSON at
+`GET /api/v1/conversions/{job_id}/result/manifest`. The worker writes the result and deterministic
+owner-bound manifest sidecar before publishing both identifiers in the same fenced database
+transition. Publication failure or cancellation compensates both objects; expiration removes every
+attempt from both namespaces. DOCX-only jobs have no manifest result.
 Status also returns the durable correlation identifier accepted at submission. An embedded or
 external worker restores the same identifier when it claims the job; the content-free logging and
 metric contract is documented in [`observability.md`](observability.md).

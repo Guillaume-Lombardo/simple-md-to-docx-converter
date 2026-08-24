@@ -317,6 +317,18 @@ jobs:
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
       - name: Run selected domain suite without a shell
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+      - name: Retain final-image verification evidence
+        if: ${{ always() && matrix.domain == 'container' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: final-image-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/container/sbom.cdx.json
+            artifacts/container/sbom.spdx.json
+            artifacts/container/vulnerabilities.json
+            artifacts/container/image-metadata.json
+          if-no-files-found: error
+          retention-days: 30
 
   gate:
     name: CI / gate

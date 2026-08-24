@@ -31,6 +31,8 @@ from md_converter.jobs.models import (
     JobStep,
     JobSubmission,
     LeaseHeartbeat,
+    SourceKind,
+    result_manifest_object_id,
     result_object_id,
 )
 from md_converter.jobs.policy import JobAdmissionPolicy
@@ -53,6 +55,12 @@ def _job(row: ConversionJobRow) -> ConversionJob:
         id=UUID(row.id),
         owner_id=UUID(row.owner_id),
         source_object_id=UUID(row.source_object_id),
+        source_filename=row.source_filename,
+        source_kind=SourceKind(row.source_kind)
+        if row.source_kind is not None
+        else None,
+        source_sha256=row.source_sha256,
+        source_size=row.source_size,
         template_id=UUID(row.template_id),
         template_version_id=UUID(row.template_version_id),
         output=JobOutput(row.output),
@@ -76,6 +84,12 @@ def _job(row: ConversionJobRow) -> ConversionJob:
             UUID(row.result_object_id)
             if row.state == JobState.SUCCEEDED.value
             and row.result_object_id is not None
+            else None
+        ),
+        result_manifest_object_id=(
+            UUID(row.result_manifest_object_id)
+            if row.state == JobState.SUCCEEDED.value
+            and row.result_manifest_object_id is not None
             else None
         ),
         error_code=row.error_code,
@@ -115,6 +129,10 @@ class SqlJobRepository:
             id=str(submission.id),
             owner_id=str(submission.owner_id),
             source_object_id=str(submission.source_object_id),
+            source_filename=submission.source_filename,
+            source_kind=submission.source_kind.value,
+            source_sha256=submission.source_sha256,
+            source_size=submission.source_size,
             template_id=str(submission.template_id),
             template_version_id=str(submission.template_version_id),
             output=submission.output.value,
@@ -472,12 +490,18 @@ class SqlJobRepository:
         result_object_id: UUID,
         now: datetime,
         expires_at: datetime,
+        result_manifest_object_id: UUID | None = None,
     ) -> ConversionJob:
         values = {
             "state": JobState.SUCCEEDED.value,
             "step": JobStep.COMPLETE.value,
             "progress": 100,
             "result_object_id": str(result_object_id),
+            "result_manifest_object_id": (
+                str(result_manifest_object_id)
+                if result_manifest_object_id is not None
+                else None
+            ),
             "updated_at": now,
             "expires_at": expires_at,
             **self._cleared_lease(),
@@ -680,6 +704,14 @@ class SqlJobRepository:
                         result_object_id(UUID(row.id), attempt)
                         for attempt in range(1, row.attempt + 1)
                     )
+                    derived_manifests = (
+                        tuple(
+                            result_manifest_object_id(UUID(row.id), attempt)
+                            for attempt in range(1, row.attempt + 1)
+                        )
+                        if row.output in {JobOutput.PDF.value, JobOutput.BOTH.value}
+                        else ()
+                    )
                     stored_result = (
                         UUID(row.result_object_id)
                         if row.result_object_id is not None
@@ -688,6 +720,17 @@ class SqlJobRepository:
                     result_ids = derived_results
                     if stored_result is not None and stored_result not in result_ids:
                         result_ids = (*result_ids, stored_result)
+                    stored_manifest = (
+                        UUID(row.result_manifest_object_id)
+                        if row.result_manifest_object_id is not None
+                        else None
+                    )
+                    manifest_ids = derived_manifests
+                    if (
+                        stored_manifest is not None
+                        and stored_manifest not in manifest_ids
+                    ):
+                        manifest_ids = (*manifest_ids, stored_manifest)
                     expired.append(
                         ExpiredJobObjects(
                             UUID(row.id),
@@ -695,6 +738,7 @@ class SqlJobRepository:
                             UUID(row.owner_id),
                             UUID(row.source_object_id),
                             result_ids,
+                            manifest_ids,
                         )
                     )
                 return tuple(expired)
@@ -716,6 +760,7 @@ class SqlJobRepository:
                     .values(
                         cleanup_completed=True,
                         result_object_id=None,
+                        result_manifest_object_id=None,
                         cleanup_owner=None,
                         cleanup_token=None,
                         cleanup_expires_at=None,

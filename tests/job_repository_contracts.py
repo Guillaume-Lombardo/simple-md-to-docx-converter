@@ -15,6 +15,7 @@ from md_converter.jobs.models import (
     JobStep,
     JobSubmission,
     LeaseHeartbeat,
+    SourceKind,
 )
 from md_converter.persistence.jobs import SqlJobRepository
 
@@ -54,6 +55,10 @@ def exercise_job_repository_contract(  # noqa: PLR0915
     assert first.state is JobState.QUEUED
     assert first.step is JobStep.QUEUED
     assert not first.source_ready
+    assert first.source_filename == "source.md"
+    assert first.source_kind is SourceKind.MARKDOWN
+    assert first.source_sha256 == "0" * 64
+    assert first.source_size == 1
     first = repository.activate_source(first.id, NOW)
     assert first.source_ready
 
@@ -167,6 +172,7 @@ def exercise_job_repository_contract(  # noqa: PLR0915
     assert successful_claim is not None and successful_claim.id == successful.id
     assert successful_claim.lease_token is not None
     result_id = uuid4()
+    manifest_id = uuid4()
     succeeded = repository.succeed(
         successful.id,
         "worker-success",
@@ -174,9 +180,11 @@ def exercise_job_repository_contract(  # noqa: PLR0915
         result_id,
         NOW,
         RETENTION_END,
+        result_manifest_object_id=manifest_id,
     )
     assert succeeded.state is JobState.SUCCEEDED
     assert succeeded.result_object_id == result_id
+    assert succeeded.result_manifest_object_id == manifest_id
     with pytest.raises(JobLeaseLostError):
         repository.succeed(
             successful.id,

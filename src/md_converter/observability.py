@@ -73,6 +73,7 @@ _LOG_ERROR_CODES = frozenset(
         "pdf_limit_exceeded",
         "invalid_pdf",
         "template_integrity",
+        "source_integrity",
         "resource_budget_exceeded",
     }
 )

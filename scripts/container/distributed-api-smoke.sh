@@ -7,10 +7,12 @@ readonly postgres_name=md-converter-t20-postgres-smoke
 readonly rustfs_name=md-converter-t20-rustfs-smoke
 readonly application_name=md-converter-t20-distributed-api-smoke
 readonly worker_name=md-converter-t20-distributed-worker-smoke
+readonly clamav_name=md-converter-t20-distributed-clamav-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=()
+template_directory="$(mktemp -d)"
 
 cleanup() {
   local resource
@@ -21,10 +23,11 @@ cleanup() {
       podman rm --force "$resource" >/dev/null 2>&1 || true
     fi
   done
+  rm -rf -- "$template_directory"
 }
 trap cleanup EXIT
 
-for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name"; do
+for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name" "$clamav_name"; do
   if podman container exists "$name"; then
     echo "Refusing to replace pre-existing container $name." >&2
     exit 1
@@ -37,6 +40,14 @@ fi
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
+podman run --detach --name "$clamav_name" --network "$network_name" \
+  --network-alias clamav --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
+  --volume "$(pwd)/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" /fake-clamav.py >/dev/null
+created=("$clamav_name" "${created[@]}")
 podman run --detach --name "$postgres_name" --network "$network_name" \
   --network-alias postgres \
   --env POSTGRES_DB=md_converter_test \
@@ -149,7 +160,7 @@ settings=(
   --env MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=10
   --env MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=1
   --env MD_CONVERTER_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=60
-  --env MD_CONVERTER_CLAMAV_HOST=clamav.invalid
+  --env MD_CONVERTER_CLAMAV_HOST=clamav
 )
 
 podman run --detach --name "$application_name" --network "$network_name" \
@@ -174,14 +185,7 @@ application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 for _ in $(seq 1 80); do
   if curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
       | grep -Fq '"status":"ready"'; then
-    if podman exec "$worker_name" /opt/md-converter/venv/bin/python -c \
-        'from urllib.request import urlopen; print(urlopen("http://127.0.0.1:9464/metrics", timeout=2).read().decode())' \
-        | grep -Fq 'md_converter_'; then
-      podman stop --time 15 "$worker_name" >/dev/null
-      test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
-      echo "Final-image distributed API and external-worker smoke passed for $image."
-      exit 0
-    fi
+    break
   fi
   if [[ "$(podman inspect "$application_name" --format '{{.State.Running}}')" != true ]] || \
      [[ "$(podman inspect "$worker_name" --format '{{.State.Running}}')" != true ]]; then
@@ -191,5 +195,20 @@ for _ in $(seq 1 80); do
   fi
   sleep 0.25
 done
-podman logs "$application_name" >&2
-exit 1
+curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
+  | grep -Fq '"status":"ready"'
+podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
+  'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
+podman exec "$application_name" pandoc /tmp/t20-template.md \
+  --output=/tmp/t20-template.docx
+podman cp "$application_name:/tmp/t20-template.docx" \
+  "$template_directory/template.docx"
+uv run python -m scripts.container.api_workflow_smoke \
+  --base-url "http://127.0.0.1:$application_port" \
+  --template "$template_directory/template.docx"
+podman exec "$worker_name" /opt/md-converter/venv/bin/python -c \
+  'from urllib.request import urlopen; print(urlopen("http://127.0.0.1:9464/metrics", timeout=2).read().decode())' \
+  | grep -Fq 'md_converter_'
+podman stop --time 15 "$worker_name" >/dev/null
+test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
+echo "Final-image distributed conversion workflow and external-worker smoke passed for $image."

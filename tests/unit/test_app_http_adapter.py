@@ -20,7 +20,7 @@ from md_converter.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.models import JobPage, JobState, JobStep
+from md_converter.jobs.models import JobOutput, JobPage, JobState, JobStep
 from md_converter.jobs.runner import EmbeddedWorker
 from md_converter.jobs.service import JobService
 from md_converter.malware import (
@@ -669,16 +669,19 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
     queued = job(owner_id=admin.id)
     succeeded = job(
         owner_id=admin.id,
+        output=JobOutput.PDF,
         state=JobState.SUCCEEDED,
         step=JobStep.COMPLETE,
         progress=100,
         result_object_id=uuid4(),
+        result_manifest_object_id=uuid4(),
     )
     jobs.submit.return_value = (queued, False)
     jobs.list_owner.return_value = JobPage((queued,), 1, 0, 50)
     jobs.get_visible.return_value = queued
     jobs.cancel.return_value = queued
     jobs.download.return_value = (succeeded, b"result")
+    jobs.download_manifest.return_value = (succeeded, b'{"trace":true}')
     headers = {"X-CSRF-Token": "csrf-token", "Idempotency-Key": "request"}
     data = {
         "template_id": str(queued.template_id),
@@ -707,6 +710,10 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         assert f".{succeeded.output.value}" in result.headers["Content-Disposition"]
         assert result.headers["Cache-Control"] == "private, no-store"
         assert result.headers["X-Content-Type-Options"] == "nosniff"
+        manifest = client.get(f"/api/v1/conversions/{queued.id}/result/manifest")
+        assert manifest.json() == {"trace": True}
+        assert manifest.headers["Cache-Control"] == "private, no-store"
+        assert "traceability.json" in manifest.headers["Content-Disposition"]
         assert (
             client.post(
                 "/api/v1/conversions",

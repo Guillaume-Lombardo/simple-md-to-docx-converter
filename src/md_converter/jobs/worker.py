@@ -19,6 +19,7 @@ from md_converter.jobs.models import (
     JobState,
     JobStep,
     LeaseHeartbeat,
+    result_manifest_object_id,
     result_object_id,
 )
 from md_converter.jobs.policy import JobExecutionBudget
@@ -283,8 +284,21 @@ class ConversionWorker:
 
             publication_id = result_object_id(job.id, job.attempt)
             result_key = ObjectKey(ObjectScope.RESULT, job.owner_id, publication_id)
-            self._objects.put(result_key, result.content)
+            manifest = result.progress_manifest
+            manifest_id = (
+                result_manifest_object_id(job.id, job.attempt)
+                if manifest is not None
+                else None
+            )
+            manifest_key = (
+                ObjectKey(ObjectScope.RESULT_MANIFEST, job.owner_id, manifest_id)
+                if manifest_id is not None
+                else None
+            )
             try:
+                self._objects.put(result_key, result.content)
+                if manifest_key is not None and manifest is not None:
+                    self._objects.put(manifest_key, manifest)
                 with heartbeat_operation:
                     if keepalive_errors:
                         raise keepalive_errors[0]
@@ -296,10 +310,13 @@ class ConversionWorker:
                         publication_id,
                         finished_at,
                         self._expires_at(finished_at),
+                        result_manifest_object_id=manifest_id,
                     )
                     keepalive_stop.set()
             except BaseException:
                 self._objects.delete(result_key)
+                if manifest_key is not None:
+                    self._objects.delete(manifest_key)
                 raise
             finished_state = (
                 finished.state
@@ -313,6 +330,8 @@ class ConversionWorker:
             )
             if finished_state is JobState.CANCELLED:
                 self._objects.delete(result_key)
+                if manifest_key is not None:
+                    self._objects.delete(manifest_key)
             log_event(
                 "job_processing_completed",
                 job_id=str(job.id),
@@ -373,6 +392,12 @@ class ConversionWorker:
             for object_id in candidate.result_object_ids:
                 self._objects.delete(
                     ObjectKey(ObjectScope.RESULT, candidate.owner_id, object_id)
+                )
+            for object_id in candidate.result_manifest_object_ids:
+                self._objects.delete(
+                    ObjectKey(
+                        ObjectScope.RESULT_MANIFEST, candidate.owner_id, object_id
+                    )
                 )
             self._repository.complete_cleanup(candidate.job_id, candidate.cleanup_token)
         maintained = (
