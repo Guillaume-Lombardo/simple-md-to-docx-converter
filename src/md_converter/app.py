@@ -1,6 +1,6 @@
 """FastAPI application factory and versioned HTTP contract."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -51,9 +51,17 @@ from md_converter.jobs.errors import (
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
 from md_converter.jobs.service import JobService
+from md_converter.malware import (
+    ClamAVUploadScanner,
+    MalwareDetectedError,
+    MalwareScannerUnavailableError,
+    TrustingUploadScanner,
+    UploadScanner,
+)
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.retention import SqlRetentionRepository
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
@@ -65,6 +73,7 @@ from md_converter.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
+from md_converter.retention import DataRetentionPolicy, RetentionService
 from md_converter.storage import (
     FilesystemObjectStore,
     ObjectStore,
@@ -431,6 +440,34 @@ def install_error_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(MalwareDetectedError)
+    def malware_detected_handler(
+        _request: Request, _error: MalwareDetectedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {
+                    "code": "UPLOAD_MALWARE_DETECTED",
+                    "message": "The upload was rejected by malware scanning.",
+                }
+            },
+        )
+
+    @app.exception_handler(MalwareScannerUnavailableError)
+    def malware_scanner_unavailable_handler(
+        _request: Request, _error: MalwareScannerUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "UPLOAD_SCANNER_UNAVAILABLE",
+                    "message": "Upload malware scanning is unavailable.",
+                }
+            },
+        )
+
     @app.exception_handler(JobUserQuotaExceededError)
     def job_user_quota_handler(
         request: Request, _error: JobUserQuotaExceededError
@@ -589,8 +626,10 @@ class AppComponents:
     readiness: ReadinessProbe
     object_store: ObjectStore
     jobs: JobService
+    scanner: UploadScanner = field(default_factory=TrustingUploadScanner)
     templates: TemplateService | None = None
     job_policies: JobPolicies | None = None
+    retention: RetentionService | None = None
 
 
 class ProfileReadinessProbe:
@@ -674,13 +713,29 @@ def build_components(settings: Settings) -> AppComponents:
         ),
     )
     templates.reclaim_pending()
+    retention = RetentionService(
+        SqlRetentionRepository(engine),
+        object_store,
+        DataRetentionPolicy(
+            template_version_seconds=settings.template_version_retention_seconds,
+            audit_seconds=settings.audit_retention_seconds,
+            minimum_template_versions=settings.template_min_retained_versions,
+            claim_lease_seconds=settings.worker_lease_seconds,
+        ),
+    )
     return AppComponents(
         authentication=authentication,
         readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
         object_store=object_store,
         jobs=jobs,
+        scanner=ClamAVUploadScanner(
+            settings.clamav_host,
+            settings.clamav_port,
+            settings.clamav_timeout_seconds,
+        ),
         templates=templates,
         job_policies=job_policies,
+        retention=retention,
     )
 
 
@@ -688,10 +743,13 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     settings: Settings | None = None,
     *,
     components: AppComponents | None = None,
+    scanner: UploadScanner | None = None,
 ) -> FastAPI:
     """Create a configured application or fail before serving requests."""
     resolved_settings = settings if settings is not None else Settings.load()
     resolved_components = components or build_components(resolved_settings)
+    if scanner is not None:
+        resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
     auth.bootstrap_admin(
         resolved_settings.initial_admin_username,
@@ -1071,9 +1129,15 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
-        content = await source.read(resolved_settings.conversion_upload_max_bytes + 1)
+        try:
+            content = await source.read(
+                resolved_settings.conversion_upload_max_bytes + 1
+            )
+        finally:
+            await source.close()
         if not content or len(content) > resolved_settings.conversion_upload_max_bytes:
             raise JobRequestError
+        await run_in_threadpool(resolved_components.scanner.scan, content)
         try:
             job, _replayed = await run_in_threadpool(
                 resolved_components.jobs.submit,
@@ -1242,7 +1306,10 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         expected_fonts: Annotated[list[str], Form()],
         content: Annotated[UploadFile, File()],
     ) -> TemplateResponse:
-        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        try:
+            data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        finally:
+            await content.close()
         if len(data) > resolved_settings.template_max_archive_bytes:
             raise TemplateValidationError(
                 code=TemplateValidationErrorCode.LIMIT_EXCEEDED,
@@ -1253,6 +1320,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 code=TemplateValidationErrorCode.INVALID_PACKAGE,
                 message="Word template package is invalid.",
             )
+        await run_in_threadpool(resolved_components.scanner.scan, data)
         if (
             len(name) > resolved_settings.template_max_name_characters
             or len(description) > resolved_settings.template_max_description_characters
@@ -1334,7 +1402,10 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         expected_fonts: Annotated[list[str], Form()],
         if_match: Annotated[str | None, Header(alias="If-Match")] = None,
     ) -> TemplateVersionResponse:
-        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        try:
+            data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        finally:
+            await content.close()
         if len(data) > resolved_settings.template_max_archive_bytes:
             raise TemplateValidationError(
                 TemplateValidationErrorCode.LIMIT_EXCEEDED,
@@ -1345,6 +1416,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 TemplateValidationErrorCode.INVALID_PACKAGE,
                 "Word template package is invalid.",
             )
+        await run_in_threadpool(resolved_components.scanner.scan, data)
         template, version = await run_in_threadpool(
             template_runtime().replace,
             actor,

@@ -22,6 +22,11 @@ from md_converter.jobs.errors import (
 )
 from md_converter.jobs.models import JobPage, JobState, JobStep
 from md_converter.jobs.service import JobService
+from md_converter.malware import (
+    MalwareDetectedError,
+    MalwareScannerUnavailableError,
+    UploadScanner,
+)
 from md_converter.persistence.errors import PersistenceError
 from md_converter.templates.models import (
     TemplateIdentity,
@@ -35,7 +40,7 @@ from tests.unit.jobs.test_job_models import job
 
 
 def isolated_client(
-    mocker: MockerFixture, *, ready: bool = True
+    mocker: MockerFixture, *, ready: bool = True, scanner: UploadScanner | None = None
 ) -> tuple[TestClient, Any, User, User]:
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
@@ -69,6 +74,7 @@ def isolated_client(
             readiness=MemoryReadinessProbe(ready=ready),
             object_store=mocker.Mock(),
             jobs=mocker.Mock(spec=JobService),
+            **({"scanner": scanner} if scanner is not None else {}),
         ),
     )
     return TestClient(app, base_url="https://testserver"), auth, admin, alice
@@ -602,6 +608,67 @@ def test_conversion_capacity_errors_are_stable_and_retryable(
             ),
         }
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    (
+        (MalwareDetectedError(), 422, "UPLOAD_MALWARE_DETECTED"),
+        (MalwareScannerUnavailableError(), 503, "UPLOAD_SCANNER_UNAVAILABLE"),
+    ),
+)
+def test_upload_scan_fails_before_conversion_persistence_with_stable_errors(
+    mocker: MockerFixture,
+    error: Exception,
+    status_code: int,
+    code: str,
+) -> None:
+    scanner = mocker.Mock(spec=UploadScanner)
+    scanner.scan.side_effect = error
+    client, _, admin, _ = isolated_client(mocker, scanner=scanner)
+    queued = job(owner_id=admin.id)
+    with client:
+        response = client.post(
+            "/api/v1/conversions",
+            headers={"X-CSRF-Token": "csrf-token"},
+            files={"source": ("private-name.md", b"private content")},
+            data={
+                "template_id": str(queued.template_id),
+                "template_version_id": str(queued.template_version_id),
+                "output": "docx",
+            },
+        )
+    assert response.status_code == status_code
+    assert response.json()["error"]["code"] == code
+    scanner.scan.assert_called_once_with(b"private content")
+    client.app.state.components.jobs.submit.assert_not_called()
+
+
+@pytest.mark.unit
+def test_template_upload_scan_fails_before_validation_or_persistence(
+    mocker: MockerFixture,
+) -> None:
+    scanner = mocker.Mock(spec=UploadScanner)
+    scanner.scan.side_effect = MalwareScannerUnavailableError
+    client, _, _, _ = isolated_client(mocker, scanner=scanner)
+    templates = mocker.Mock(spec=TemplateService)
+    object.__setattr__(client.app.state.components, "templates", templates)
+    with client:
+        response = client.post(
+            "/api/v1/templates",
+            headers={"X-CSRF-Token": "csrf-token"},
+            data={
+                "name": "Template",
+                "description": "Description",
+                "expected_fonts": "Calibri",
+            },
+            files={"content": ("private-name.docx", b"private content")},
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "UPLOAD_SCANNER_UNAVAILABLE"
+    scanner.scan.assert_called_once_with(b"private content")
+    templates.create_versioned.assert_not_called()
 
 
 @pytest.mark.unit

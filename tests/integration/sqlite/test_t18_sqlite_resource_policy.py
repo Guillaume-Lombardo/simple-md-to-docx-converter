@@ -24,6 +24,7 @@ from md_converter.jobs.models import JobOutput, JobProcessResult, JobRequest, Jo
 from md_converter.jobs.policy import JobAdmissionPolicy
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.schema import ConversionJobRow
@@ -85,7 +86,8 @@ def test_standalone_asgi_enforces_owner_and_global_admission(tmp_path: Path) -> 
             conversion_request_max_bytes=2_000,
             conversion_retry_after_seconds=7,
             job_result_retention_seconds=60,
-        )
+        ),
+        scanner=TrustingUploadScanner(),
     )
     with TestClient(app, base_url="https://testserver") as client:
         admin_login = client.post(

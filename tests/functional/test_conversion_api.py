@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from md_converter.app import create_app
 from md_converter.config import Settings
 from md_converter.jobs.models import JobState
+from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.sql import create_database_engine, standalone_database_url
 from md_converter.persistence.templates import SqlTemplateCatalogRepository
@@ -75,7 +76,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         conversion_retry_after_seconds=2,
         job_result_retention_seconds=3_600,
     )
-    app = create_app(settings)
+    app = create_app(settings, scanner=TrustingUploadScanner())
     with TestClient(app, base_url="https://testserver") as client:
         admin = login(client, "admin", admin_password)
         csrf = str(admin["csrf_token"])

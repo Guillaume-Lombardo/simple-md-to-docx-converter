@@ -152,6 +152,7 @@ class SqlJobRepository:
                         == str(submission.template_version_id),
                         TemplateVersionRow.id == str(submission.template_version_id),
                         TemplateVersionRow.publication_state == "published",
+                        TemplateVersionRow.retention_token.is_(None),
                     )
                     .with_for_update()
                 )

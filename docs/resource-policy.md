@@ -58,12 +58,18 @@ Cleanup uses elapsed monotonic time, not processed-job count, with a required in
 batch size. Transient database or object-store failures use the configured backoff and remain
 retryable.
 
-Four PM-owned product decisions remain explicit blockers rather than permissive no-op behavior:
+Superseded template versions are retained for 365 days. Bounded cleanup never claims the current
+version, the ten newest published versions, or a version referenced by retained job metadata.
+Claims use expiring fencing tokens. The object is deleted first and metadata is acknowledged only
+by the claim owner, so a crash remains retryable. Audit rows cannot be updated. After 365 days they
+are deleted in bounded transactions that create immutable content-free cleanup reports.
 
-1. Template-version retention duration and deletion semantics.
-2. Audit-record retention duration and deletion semantics.
-3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
-4. Standalone and distributed RPO/RTO targets and the operational proof required for each.
+Every conversion and template upload is scanned by ClamAV after its bounded read and before any
+validation, processing, database reservation, or object-store write. The adapter uses clamd
+`INSTREAM` over TCP directly from memory and creates no application temporary scan material.
+`FOUND` returns stable `UPLOAD_MALWARE_DETECTED` with HTTP 422. Connection, timeout, scanner error,
+oversized response, or indeterminate protocol output fails closed with stable
+`UPLOAD_SCANNER_UNAVAILABLE` and HTTP 503. No durable quarantine is retained.
 
 All implemented numeric ceilings and schedules remain required operator-supplied configuration;
 this repository deliberately supplies no implicit production values.
@@ -89,6 +95,23 @@ settings, T18 requires:
 - `MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS`
 - `MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS`
 - `MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE`
+- `MD_CONVERTER_TEMPLATE_VERSION_RETENTION_SECONDS=31536000`
+- `MD_CONVERTER_TEMPLATE_MIN_RETAINED_VERSIONS=10`
+- `MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000`
+- `MD_CONVERTER_CLAMAV_HOST` (defaults to loopback; set the deployment service name explicitly)
+- `MD_CONVERTER_CLAMAV_PORT` (standard clamd TCP port `3310` unless deployment requires another)
+- `MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS` (defaults to 5 seconds)
 
 The heartbeat must be shorter than the lease. All durations must be finite and positive. No ordering
 is imposed between upload and decompressed-content ceilings.
+
+## Recovery targets and quarterly proof
+
+Standalone deployments must meet RPO 24 hours and RTO 4 hours. Distributed deployments must meet
+RPO 1 hour and RTO 2 hours. At least once per calendar quarter, schedule
+`uv run python scripts/run_restore_exercise.py` against an isolated restore target. The supplied
+command must restore the named backup, validate representative stable object identifiers, and
+finish only after readiness succeeds. The runner enforces the profile RTO as its subprocess timeout,
+measures backup age and elapsed recovery, suppresses command output, and retains an immutable
+owner-only JSON report. Store that report directory in protected durable operational storage; it is
+not subject to application cleanup.

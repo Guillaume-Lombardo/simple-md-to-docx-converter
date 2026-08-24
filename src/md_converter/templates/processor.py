@@ -10,7 +10,12 @@ from uuid import UUID
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.jobs.models import ConversionJob, JobProcessResult, JobStep
 from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from md_converter.jobs.worker import (
+    ConversionWorker,
+    MaintenanceCleaner,
+    WorkerPolicy,
+    WorkerRuntime,
+)
 from md_converter.storage import ObjectStore
 from md_converter.templates.errors import (
     TemplateIntegrityError,
@@ -91,6 +96,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
     processor: TemplateAwareProcessor,
     clock: Callable[[], datetime],
     policy: WorkerPolicy,
+    maintenance: MaintenanceCleaner | None = None,
 ) -> ConversionWorker:
     """Compose a worker that cannot bypass frozen-template resolution."""
     return ConversionWorker(
@@ -100,6 +106,7 @@ def build_template_conversion_worker(  # noqa: PLR0913
             objects,
             FrozenTemplateJobProcessor(resolver, processor),
             clock,
+            maintenance=maintenance,
         ),
         policy=policy,
     )

@@ -42,6 +42,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
         "conversion_jobs",
+        "retention_cleanup_runs",
         "sessions",
         "system_template_selection",
         "template_audit_records",

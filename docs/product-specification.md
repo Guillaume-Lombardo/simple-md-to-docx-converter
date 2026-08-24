@@ -2,7 +2,7 @@
 
 **Status:** Functional, technical, and autonomous-development specification
 
-**Date:** August 23, 2026
+**Date:** August 24, 2026
 
 **Runtime target:** UBI 9 container, Python 3.14, rootless Podman, and OpenShift
 
@@ -43,6 +43,10 @@ The product includes a conversion page, template administration, local authentic
 | Document fonts | Liberation plus Carlito/Caladea, DejaVu as fallback, and Noto only for explicitly required scripts |
 | Distributed test object store | RustFS for CI and k3s, behind a provider-neutral AWS S3-compatible contract |
 | Repository language | English for code, identifiers, docstrings, UI, errors, logs, documentation, commits, and pull requests |
+| Superseded template retention | 365 days; never delete the active version or ten newest versions per template |
+| Audit retention | Immutable for 365 days, then bounded traceable deletion |
+| Upload malware scanning | ClamAV before processing or durable persistence; fail closed; no durable quarantine |
+| Recovery targets | Standalone RPO 24h/RTO 4h; distributed RPO 1h/RTO 2h; automated quarterly proof |
 
 Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
 
@@ -198,6 +202,24 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - T06 uses temporary in-memory account and session adapters behind persistence ports; T12 replaces
   them with profile implementations without changing the authentication service contract.
 
+### 8.2 Retention, malware scanning, and recovery proof
+
+- Retain superseded template versions for 365 days. Cleanup must never delete the active version,
+  the ten newest versions of a template, or a version referenced by retained conversion metadata.
+  Delete object bytes before fenced metadata acknowledgement so interrupted cleanup is retryable.
+- Keep audit records immutable for 365 days, then delete them in bounded transactions that retain
+  immutable, content-free cleanup evidence.
+- Scan every conversion and template upload through ClamAV after bounded request reading and before
+  validation, processing, database reservation, or object persistence. Scanner unavailability,
+  timeout, protocol error, and indeterminate results fail closed. Infected uploads are rejected;
+  temporary material is securely removed and no durable quarantine is kept. The INSTREAM adapter
+  scans directly from bounded memory and therefore creates no scanner-side application temporary
+  file.
+- The standalone target is RPO 24 hours and RTO 4 hours. The distributed target is RPO 1 hour and
+  RTO 2 hours. Exercise each deployed profile at least quarterly with an automated isolated restore
+  and readiness check. Retain an immutable report containing backup identity, timestamps, measured
+  RPO/RTO, readiness evidence identity, and pass/fail status.
+
 ## 9. Repository and autonomous development
 
 Keep `main` as the only long-lived branch. Every contributor and agent uses a short `<type>/<issue>-<subject>` branch and an isolated worktree when needed. Branch names never identify Codex, another agent, or an automation tool. One pull request normally covers one issue or coherent vertical slice. Draft pull requests run light checks; ready pull requests run the required domain matrix. Squash after required checks, resolved discussions, and an independent agent or GitHub review. Delete the branch and worktree only after verified merge.
@@ -310,9 +332,9 @@ Recommended delivery order: T00 and T01 can start in parallel, and T00 may conti
   and the scripts that explicitly require Noto coverage. The approved font families in section 2
   remain fixed while these implementation details are deferred.
 - T18 owns maximum upload and decompressed sizes; file, image, and diagram counts; active-job and
-  queue-depth limits; worker duration, memory, and ephemeral storage; RPO/RTO; source/result,
-  template-version, and audit retention; quotas; antivirus integration; and cleanup schedules.
-  Keep these production values configurable until T18 records their approval.
+  queue-depth limits; worker duration, memory, and ephemeral storage; source/result retention;
+  quotas; and cleanup schedules. Keep workload-dependent production values configurable. The
+  approved template/audit retention, ClamAV, and recovery contracts are fixed in section 8.2.
 - T22 owns GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
 - PDF/A output and automatic Word or PDF table-of-contents generation are outside the initial
   product scope. Adding either capability requires separately approved future scope.

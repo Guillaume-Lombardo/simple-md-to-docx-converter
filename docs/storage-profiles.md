@@ -27,6 +27,12 @@ MD_CONVERTER_TEMPLATE_LIBREOFFICE_EXECUTABLE=<approved executable path>
 MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=<approved value>
 MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=<approved value>
 MD_CONVERTER_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=<approved value>
+MD_CONVERTER_TEMPLATE_VERSION_RETENTION_SECONDS=31536000
+MD_CONVERTER_TEMPLATE_MIN_RETAINED_VERSIONS=10
+MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000
+MD_CONVERTER_CLAMAV_HOST=<clamd service name>
+MD_CONVERTER_CLAMAV_PORT=3310
+MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS=5
 MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
 ```
 
@@ -125,16 +131,14 @@ Conversion queue rows and their referenced upload/result objects are also one re
 External workers must be stopped or drained during a coordinated backup unless the database and
 bucket platforms provide a consistent cross-service recovery point.
 
-## Operational decisions still open
+## Recovery objectives and exercises
 
-The T18 mechanisms are implemented and all numeric ceilings remain explicit operator-supplied
-configuration without repository defaults. Four PM-owned decisions still block their respective
-contracts:
-
-1. Template-version retention duration and deletion semantics.
-2. Audit-record retention duration and deletion semantics.
-3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
-4. Standalone and distributed RPO/RTO targets and the operational proof required for each.
+Standalone recovery must meet RPO 24 hours and RTO 4 hours; distributed recovery must meet RPO 1
+hour and RTO 2 hours. Run an automated isolated restore for each deployed profile at least once per
+calendar quarter with `scripts/run_restore_exercise.py`. The restore command owns backup restoration,
+stable-object verification, and readiness verification. The runner measures the approved targets
+and writes an immutable, owner-only report containing no document content or credentials. Retain
+reports in protected durable operational storage outside application cleanup.
 
 T12 and T18 verify real SQLite/filesystem and PostgreSQL/RustFS boundaries. Applying the configured
 memory and ephemeral-storage ceilings to the final container and repeating quota workflows against

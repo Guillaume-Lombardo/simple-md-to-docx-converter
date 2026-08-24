@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import Event, Lock, Thread
 from time import monotonic
+from typing import Protocol
 
 from md_converter.conversion.errors import ConversionError
 from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
@@ -25,6 +26,12 @@ from md_converter.jobs.ports import JobProcessor, JobRepository
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
 
 MAX_WORKER_ID_CHARACTERS = 255
+
+
+class MaintenanceCleaner(Protocol):
+    """Additional bounded retention work sharing the periodic worker cadence."""
+
+    def cleanup(self, *, limit: int) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +75,7 @@ class WorkerRuntime:
     processor: JobProcessor
     clock: Callable[[], datetime]
     monotonic_clock: Callable[[], float] = monotonic
+    maintenance: MaintenanceCleaner | None = None
 
 
 @dataclass(slots=True)
@@ -116,6 +124,7 @@ class ConversionWorker:
         self._processor = runtime.processor
         self._clock = runtime.clock
         self._monotonic_clock = runtime.monotonic_clock
+        self._maintenance = runtime.maintenance
         self._policy = policy
 
     def run_once(self) -> bool:  # noqa: PLR0912, PLR0915 - lifecycle is explicit
@@ -310,7 +319,12 @@ class ConversionWorker:
                     ObjectKey(ObjectScope.RESULT, candidate.owner_id, object_id)
                 )
             self._repository.complete_cleanup(candidate.job_id, candidate.cleanup_token)
-        return len(expired)
+        maintained = (
+            self._maintenance.cleanup(limit=limit)
+            if self._maintenance is not None
+            else 0
+        )
+        return len(expired) + maintained
 
     def _finish_cancelled(self, job: ConversionJob) -> None:
         if job.lease_token is None:

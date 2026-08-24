@@ -78,7 +78,13 @@ class Settings(BaseSettings):
     template_engine_timeout_seconds: float = Field(gt=0)
     template_engine_termination_grace_seconds: float = Field(gt=0)
     template_pending_publication_stale_seconds: float = Field(gt=0, allow_inf_nan=False)
+    template_version_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
+    template_min_retained_versions: int = Field(default=10, ge=10)
+    audit_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
     template_engine_workspace_root: Path | None = None
+    clamav_host: str = Field(default="127.0.0.1", min_length=1)
+    clamav_port: int = Field(default=3310, ge=1, le=65_535)
+    clamav_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     storage_profile: StorageProfile
     standalone_data_directory: Path | None = None
     distributed_database_url: SecretStr | None = None

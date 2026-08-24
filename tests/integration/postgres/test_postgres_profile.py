@@ -110,6 +110,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS retention_cleanup_runs CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS template_audit_records CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS template_versions CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS conversion_jobs CASCADE"))
@@ -126,6 +127,9 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         )
         connection.execute(
             text("DROP FUNCTION IF EXISTS reject_template_version_change()")
+        )
+        connection.execute(
+            text("DROP FUNCTION IF EXISTS reject_immutable_retention_update() CASCADE")
         )
         for statement in (
             "DROP FUNCTION IF EXISTS enforce_template_version_integrity()",
@@ -144,6 +148,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         "system_template_selection",
         "template_audit_records",
         "template_preferences",
+        "retention_cleanup_runs",
         "template_versions",
         "templates",
         "users",

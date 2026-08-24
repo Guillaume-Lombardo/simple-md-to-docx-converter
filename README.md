@@ -26,6 +26,7 @@ policy are assembled; final-container features remain under development.
 - Pandoc 3.10.2 for real DOCX conversion, Mermaid CLI 11.16.0 with Chrome 151.0.7922.173 for
   diagram rendering, LibreOffice 26.2.5.2 for PDF conversion, and the Cairo shared library for SVG
   rasterization; the validated UBI toolchain image provides these engines
+- A reachable ClamAV `clamd` service for fail-closed pre-persistence upload scanning
 
 `uv` reads `.python-version`, installs Python 3.14 when needed, and creates the project environment.
 No manually managed virtual environment or direct `pip` invocation is required.

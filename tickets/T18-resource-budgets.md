@@ -71,16 +71,25 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   tests, and the 941-test applicable canonical suite with real PostgreSQL/RustFS. The unrestricted
   suite reached 948 passing tests; its 37 failures are confined to unavailable
   Pandoc/Mermaid/Chromium/LibreOffice/font-engine tests.
+- 2026-08-24: Applied the four approved PM decisions. Superseded template versions use leased,
+  fenced, object-first cleanup after 365 days while protecting the current version, ten newest
+  versions, and retained-job references. Audit records are database-immutable for 365 days and
+  bounded deletion retains immutable cleanup evidence. ClamAV INSTREAM scans every conversion and
+  template upload before validation, reservation, or object persistence; infected content is
+  rejected, scanner uncertainty fails closed, and no quarantine or scan temporary file is kept.
+  Recovery policy fixes standalone RPO 24h/RTO 4h and distributed RPO 1h/RTO 2h, with an automated
+  isolated restore runner and immutable retained quarterly report.
+- 2026-08-24: Added deterministic unit, real clamd TCP protocol, SQLite/filesystem, and live
+  PostgreSQL/RustFS profile-parity coverage for primary and failure paths. Targeted validation is
+  green. Final validation passed Ruff formatting/linting, `ty`, all 22 Web tests, the 780-test unit
+  suite with its independent 90% branch gate, and the 961-test applicable canonical suite with live
+  PostgreSQL/RustFS and 94.95% displayed application coverage. The unrestricted suite reached 966
+  passing tests; its 37 failures are confined to unavailable Pandoc, Mermaid/Chromium,
+  LibreOffice, and font artifacts. A real ClamAV installation is unavailable on this host, so the
+  deterministic real TCP INSTREAM boundary test is the local provider proof. Changed-line coverage
+  is recorded after committing the exact revision.
 
-## Unresolved PM decisions
-
-1. Template-version retention duration and deletion semantics.
-2. Audit-record retention duration and deletion semantics.
-3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
-4. Standalone and distributed RPO/RTO targets and their required operational proof.
-
-All implemented numeric ceilings and schedules remain required operator-supplied configuration
-without repository production defaults. Applying memory and ephemeral-storage ceilings and
+Workload-dependent ceilings and schedules remain required operator-supplied configuration. Applying memory and ephemeral-storage ceilings and
 repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
 a waiver.
 

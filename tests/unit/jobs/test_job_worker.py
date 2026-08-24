@@ -21,7 +21,12 @@ from md_converter.jobs.models import (
     result_object_id,
 )
 from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from md_converter.jobs.worker import (
+    ConversionWorker,
+    MaintenanceCleaner,
+    WorkerPolicy,
+    WorkerRuntime,
+)
 from md_converter.storage import ObjectScope, ObjectStore, ObjectStoreError
 from tests.unit.jobs.test_job_models import job
 
@@ -46,6 +51,28 @@ def worker(mocker: MockerFixture) -> tuple[ConversionWorker, Any, Any, Any]:
         ),
     )
     return instance, repository, objects, processor
+
+
+def test_periodic_cleanup_runs_additional_bounded_retention(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.expire_terminal.return_value = ()
+    maintenance = mocker.Mock(spec=MaintenanceCleaner)
+    maintenance.cleanup.return_value = 2
+    instance = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            mocker.Mock(spec=JobProcessor),
+            mocker.Mock(return_value=NOW),
+            maintenance=maintenance,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30),
+    )
+    assert instance.cleanup(limit=7) == 2
+    maintenance.cleanup.assert_called_once_with(limit=7)
 
 
 def running_job() -> ConversionJob:
