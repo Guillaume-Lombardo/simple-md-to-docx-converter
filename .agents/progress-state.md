@@ -9,17 +9,16 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` delivered T00-T10, T12, and T14. T10 implementation PR #40 was squash-merged as
+- `main` delivered T00-T12 and T14. T10 implementation PR #40 was squash-merged as
   `02e7cc2739d4120260f2c7795b260eeec7c77d66`; its exact main run `32716429800` passed every
   implemented domain and the protected gate. T09 implementation PR #38 and completion PR #39 were
   squash-merged as `4280ca0699d1c80790aa0a7289a8ba8984c97214` and
   `bc1c6fb8a017461651cb1d1d202a2a7017754777`; their exact main runs `32710022591` and
   `32710324116` passed the protected gate. Linear G1L-319 and the local T09 mirror are `Done`.
 - T10/G1L-321 is delivered on `main`; its local and Linear status are `Done`.
-- T11 is the smallest ready critical-path ticket. Its T09 and T10 dependencies are verified `Done`;
-  it blocks T13.
-- T11/G1L-320 is `In Progress` on `feat/T11-pdf-conversion`, based on delivered main
-  `c43b810`; T09 and T10 are verified dependencies.
+- T11/G1L-320 is delivered on `main` as squash `5d4d34c` from PR #42. Its exact main run
+  `32722804067` passed every implemented domain and the protected gate; the local and Linear ticket
+  status are `Done`.
 - T11 now has an isolated LibreOffice adapter, explicit DOCX/PDF bounds, process-group timeout and
   cancellation, strict PDF validation, canonical traceability, locked PDFium rasterization, and a
   reproducible exact golden. The canonical unit selection passes 610 tests at 93.98% coverage, the
@@ -60,8 +59,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Publish the approved T11 revision and verify protected CI.
-2. Squash-merge, synchronize T11 to `Done`, and continue T13.
+1. Publish and merge the T11 tracking closure.
+2. Start T13, the smallest ready critical-path ticket now that T11 and T12 are delivered.
 
 ## Validation
 
@@ -89,3 +88,5 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - Independent security, specification, and CI/toolchain reviewers approve exact implementation
   revision `9f608e8` with no actionable finding. Changed application coverage is 97.32% and
   application branch coverage is 91.53%.
+- T11 implementation PR #42 was squash-merged as `5d4d34cef9c51539a282327e7164231a05db6f69`.
+  Exact main run `32722804067` passed every implemented CI domain and `CI / gate`.
