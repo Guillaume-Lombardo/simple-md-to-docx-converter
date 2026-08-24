@@ -18,9 +18,9 @@ resource fails closed. The original source does not reach Pandoc or appear in er
 ## Explicit limits
 
 `MermaidLimits` provides no production defaults. It bounds diagram count, per-diagram and total
-source bytes, per-diagram and total rendered output bytes, and the maximum displayed width and
-height. `ImageLimits` continues to bound decoded width, height, pixel count, and normalized image
-structure. T18 owns the eventual production values.
+source bytes, both raw and normalized per-diagram and total rendered output bytes, and the maximum
+displayed width and height. `ImageLimits` continues to bound decoded width, height, pixel count,
+and normalized image structure. T18 owns the eventual production values.
 
 Displayed dimensions use Pandoc's pixel unit at its fixed 96 DPI conversion. The preprocessor
 chooses the limiting axis required by the configured width and height caps and emits only that
@@ -41,8 +41,9 @@ the explicit grace period. Output and workspace failures use stable content-free
 
 Chromium renders an untrusted PNG, which is decoded and normalized again by the T08 raster boundary.
 This strips metadata, rejects animation or invalid content, and enforces decoded pixel limits before
-the image is added to the immutable approved-resource manifest. Pandoc revalidates that manifest
-before materialization.
+the image is added to the immutable approved-resource manifest. The adapter opens the CLI output
+once with no-follow and nonblocking semantics, validates that descriptor as a bounded regular file,
+and never reopens the path. Pandoc revalidates the manifest before materialization.
 
 ## Runtime security and verification
 

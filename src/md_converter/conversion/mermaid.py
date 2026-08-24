@@ -164,6 +164,19 @@ def _resource_key(path: PurePosixPath) -> str:
     return unicodedata.normalize("NFC", path.as_posix()).casefold()
 
 
+def _package_paths_are_distinct(paths: tuple[PurePosixPath, ...]) -> bool:
+    keys = {_resource_key(path) for path in paths}
+    if len(keys) != len(paths):
+        return False
+    for path in paths:
+        parent = path.parent
+        while parent.parts not in {(), (".",)}:
+            if _resource_key(parent) in keys:
+                return False
+            parent = parent.parent
+    return True
+
+
 def _display_attribute(width: int, height: int, limits: MermaidLimits) -> str:
     if (
         width <= limits.max_document_width_pixels
@@ -210,12 +223,20 @@ def _normalized_diagram(
         image_limits.max_svg_depth,
     )
     try:
-        return normalize_image(PurePosixPath("diagram.png"), output, output_limits)
+        normalized = normalize_image(
+            PurePosixPath("diagram.png"), output, output_limits
+        )
     except ConversionError:
         raise ConversionError(
             ConversionErrorCode.INVALID_MERMAID_OUTPUT,
             "Mermaid produced an invalid diagram.",
         ) from None
+    if len(normalized) > limits.max_output_bytes:
+        raise ConversionError(
+            ConversionErrorCode.INVALID_MERMAID_OUTPUT,
+            "Mermaid produced an invalid diagram.",
+        )
+    return normalized
 
 
 def render_mermaid(
@@ -251,21 +272,35 @@ def render_mermaid(
     ):
         raise validation_error("Document contains unsupported Mermaid configuration.")
 
+    generated_paths = tuple(
+        markdown.entrypoint.parent / _GENERATED_DIRECTORY / f"{index:04d}.png"
+        for index in range(1, len(blocks) + 1)
+    )
+    package_paths = (
+        markdown.entrypoint,
+        *(resource.path for resource in markdown.resources),
+        *generated_paths,
+    )
+    if not _package_paths_are_distinct(package_paths):
+        raise validation_error("Document package is invalid.")
+
     lines = markdown.text.splitlines(keepends=True)
-    existing_keys = {_resource_key(resource.path) for resource in markdown.resources}
     generated: list[ApprovedResource] = []
     replacements: list[tuple[_Block, str]] = []
-    total_output = 0
-    for index, block in enumerate(blocks, start=1):
-        path = markdown.entrypoint.parent / _GENERATED_DIRECTORY / f"{index:04d}.png"
-        if _resource_key(path) in existing_keys:
-            raise validation_error("Document package is invalid.")
-        existing_keys.add(_resource_key(path))
+    total_raw_output = 0
+    total_normalized_output = 0
+    for index, (block, path) in enumerate(
+        zip(blocks, generated_paths, strict=True), start=1
+    ):
         output = renderer.render(block.source, limits.max_output_bytes)
-        total_output += len(output)
-        if total_output > limits.max_total_output_bytes:
-            raise validation_error("Document exceeds configured Mermaid limits.")
         normalized = _normalized_diagram(output, limits, image_limits)
+        total_raw_output += len(output)
+        total_normalized_output += len(normalized)
+        if (
+            total_raw_output > limits.max_total_output_bytes
+            or total_normalized_output > limits.max_total_output_bytes
+        ):
+            raise validation_error("Document exceeds configured Mermaid limits.")
         width, height = _png_dimensions(normalized)
         display_attribute = _display_attribute(width, height, limits)
         relative_path = path.relative_to(markdown.entrypoint.parent).as_posix()
@@ -422,15 +457,27 @@ class MermaidCliRenderer:
         ]
         process = self._start(arguments, workspace)
         self._wait(process)
+        descriptor = -1
         try:
-            metadata = output_path.lstat()
+            descriptor = os.open(
+                output_path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            )
+            metadata = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or metadata.st_size > max_output_bytes
             ):
                 raise OSError
-            with output_path.open("rb") as output:
-                result = output.read(max_output_bytes + 1)
+            remaining = max_output_bytes + 1
+            chunks: list[bytes] = []
+            while remaining:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            result = b"".join(chunks)
             if len(result) > max_output_bytes:
                 raise OSError
             return result
@@ -439,6 +486,9 @@ class MermaidCliRenderer:
                 ConversionErrorCode.INVALID_MERMAID_OUTPUT,
                 "Mermaid produced an invalid diagram.",
             ) from None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
 
     def _start(self, arguments: list[str], workspace: Path) -> subprocess.Popen[bytes]:
         try:
@@ -499,7 +549,10 @@ class MermaidCliRenderer:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             return
-        process.wait()
+        try:
+            process.wait(timeout=self._config.termination_grace_seconds)
+        except subprocess.TimeoutExpired:
+            return
 
     @staticmethod
     def _workspace_failure() -> ConversionError:

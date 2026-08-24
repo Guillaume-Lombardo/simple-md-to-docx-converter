@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -196,6 +197,29 @@ def test_generated_resource_collision_fails_before_renderer(mocker) -> None:
     renderer.render.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "resource_path",
+    [
+        PurePosixPath(".md-converter-mermaid/0002.png"),
+        PurePosixPath(".md-converter-mermaid/0001.png/child.png"),
+    ],
+)
+def test_all_generated_paths_and_prefixes_are_validated_before_renderer(
+    mocker, resource_path: PurePosixPath
+) -> None:
+    markdown = ApprovedMarkdown(
+        "```mermaid\nflowchart LR\n```\n```mermaid\nflowchart RL\n```",
+        resources=(ApprovedResource(resource_path, _png()),),
+        image_limits=IMAGE_LIMITS,
+    )
+    renderer = mocker.Mock()
+
+    with pytest.raises(ConversionError, match="package is invalid"):
+        render_mermaid(markdown, renderer, LIMITS)
+
+    renderer.render.assert_not_called()
+
+
 @pytest.mark.parametrize("output", [b"", b"x" * 100_001])
 def test_invalid_renderer_output_is_content_free(mocker, output: bytes) -> None:
     renderer = mocker.Mock()
@@ -230,11 +254,47 @@ def test_normalization_failure_is_mapped_to_mermaid_output_error(mocker) -> None
     assert "image detail" not in str(captured.value)
 
 
+def test_normalized_output_must_stay_within_per_diagram_limit(mocker) -> None:
+    mocker.patch(
+        "md_converter.conversion.mermaid.normalize_image", return_value=b"x" * 101
+    )
+    renderer = mocker.Mock()
+    renderer.render.return_value = b"raw"
+    limits = MermaidLimits(1, 100, 100, 100, 200, 10, 10)
+
+    with pytest.raises(ConversionError) as captured:
+        render_mermaid(
+            ApprovedMarkdown("```mermaid\nflowchart LR\n```"),
+            renderer,
+            limits,
+            IMAGE_LIMITS,
+        )
+
+    assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
+
+
 def test_total_raw_output_limit_is_enforced(mocker) -> None:
     _patch_normalization(mocker)
     renderer = mocker.Mock()
     renderer.render.return_value = b"123456"
     limits = MermaidLimits(2, 100, 200, 100_000, 10, 10, 10)
+    with pytest.raises(ConversionError, match="configured Mermaid limits"):
+        render_mermaid(
+            ApprovedMarkdown(
+                "```mermaid\nflowchart LR\n```\n```mermaid\nflowchart RL\n```"
+            ),
+            renderer,
+            limits,
+            IMAGE_LIMITS,
+        )
+
+
+def test_total_normalized_output_limit_is_enforced(mocker) -> None:
+    png = _patch_normalization(mocker)
+    renderer = mocker.Mock()
+    renderer.render.return_value = b"raw"
+    limits = MermaidLimits(2, 100, 200, len(png), len(png), 10, 10)
+
     with pytest.raises(ConversionError, match="configured Mermaid limits"):
         render_mermaid(
             ApprovedMarkdown(
@@ -463,6 +523,24 @@ def test_cli_symlink_output_is_invalid(tmp_path: Path, mocker) -> None:
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
 
 
+def test_cli_fifo_output_is_rejected_without_blocking(tmp_path: Path, mocker) -> None:
+    process = mocker.Mock()
+    process.pid = 4789
+    process.wait.return_value = 0
+    mocker.patch(
+        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+    )
+
+    def fifo(_arguments, **options):
+        os.mkfifo(options["cwd"] / "diagram.png")
+        return process
+
+    mocker.patch("md_converter.conversion.mermaid.subprocess.Popen", side_effect=fifo)
+    with pytest.raises(ConversionError) as captured:
+        MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
+    assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
+
+
 def test_cli_output_read_is_bounded(tmp_path: Path, mocker) -> None:
     process = mocker.Mock()
     process.pid = 5678
@@ -503,6 +581,27 @@ def test_cli_process_disappearance_during_timeout_is_safe(
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert captured.value.code is ConversionErrorCode.MERMAID_TIMEOUT
+
+
+def test_cli_final_wait_after_sigkill_is_bounded(tmp_path: Path, mocker) -> None:
+    process = mocker.Mock()
+    process.pid = 6789
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired("mmdc", 5),
+        subprocess.TimeoutExpired("mmdc", 0.5),
+        subprocess.TimeoutExpired("mmdc", 0.5),
+    ]
+    mocker.patch(
+        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
+    )
+    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+
+    with pytest.raises(ConversionError) as captured:
+        MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
+
+    assert captured.value.code is ConversionErrorCode.MERMAID_TIMEOUT
+    assert [call.args for call in killpg.call_args_list] == [(6789, 15), (6789, 9)]
+    assert process.wait.call_count == 3
 
 
 def test_config_runtime_type_checks_do_not_accept_float_as_integer() -> None:
