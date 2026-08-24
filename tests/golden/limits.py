@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -24,12 +23,16 @@ class ArchiveLimits:
         )
         if any(type(value) is not int or value <= 0 for value in integer_limits):
             raise ValueError("Archive integer limits must be positive integers")
-        if (
-            isinstance(self.max_compression_ratio, bool)
-            or not isinstance(self.max_compression_ratio, Real)
-            or not math.isfinite(self.max_compression_ratio)
-            or self.max_compression_ratio < 1.0
-        ):
+        ratio_is_valid = False
+        if type(self.max_compression_ratio) in {int, float}:
+            try:
+                ratio_is_valid = (
+                    math.isfinite(self.max_compression_ratio)
+                    and self.max_compression_ratio >= 1.0
+                )
+            except OverflowError, TypeError, ValueError:
+                ratio_is_valid = False
+        if not ratio_is_valid:
             raise ValueError(
                 "max_compression_ratio must be a finite non-boolean number at least 1"
             )

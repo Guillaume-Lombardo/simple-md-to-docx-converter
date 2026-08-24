@@ -31,7 +31,7 @@ inputs. Relationship targets are observations only and are never dereferenced. `
 requires the same explicit `ArchiveLimits`; it has no hidden resource defaults. Parts are read in
 bounded chunks while their actual decompressed member and archive totals are counted. Declared-size
 overruns, CRC failures, truncated streams, and decompression failures become `OpenXmlError` rather
-than escaping as backend-specific exceptions.
+than escaping as backend-specific exceptions, including corrupt Deflate, BZIP2, and LZMA streams.
 
 `compare_docx` requires callers to pass `ignored_parts` explicitly. This makes any allowance for a
 volatile OpenXML part visible at each test call; there is no implicit ignore list. ZIP timestamps,

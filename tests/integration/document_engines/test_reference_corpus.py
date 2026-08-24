@@ -7,6 +7,7 @@ import stat
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -113,6 +114,27 @@ def patch_zip_uncompressed_size(data: bytes, member_name: str, size: int) -> byt
             position += len(signature)
     assert matches == 2
     return bytes(changed)
+
+
+def corrupt_zip_member_payload(data: bytes, member_name: str) -> bytes:
+    """Flip one compressed byte while preserving the member's ZIP metadata."""
+
+    changed = bytearray(data)
+    position = 0
+    while (position := changed.find(b"PK\x03\x04", position)) >= 0:
+        compressed_size = int.from_bytes(
+            changed[position + 18 : position + 22], "little"
+        )
+        name_length = int.from_bytes(changed[position + 26 : position + 28], "little")
+        extra_length = int.from_bytes(changed[position + 28 : position + 30], "little")
+        name_start = position + 30
+        name = bytes(changed[name_start : name_start + name_length]).decode()
+        if name == member_name:
+            payload_start = name_start + name_length + extra_length
+            changed[payload_start + compressed_size // 2] ^= 0xFF
+            return bytes(changed)
+        position += 4
+    raise AssertionError(f"ZIP member not found: {member_name}")
 
 
 def copied_manifest(tmp_path: Path) -> tuple[Path, dict[str, object]]:
@@ -374,6 +396,18 @@ def test_archive_compression_ratio_rejects_non_finite_or_non_numeric(
         ArchiveLimits(1, 1, 1, cast("float", invalid))
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    [10**10_000, Fraction(10**10_000, 1)],
+    ids=["huge-int", "huge-fraction"],
+)
+def test_archive_compression_ratio_normalizes_numeric_overflow(
+    invalid: object,
+) -> None:
+    with pytest.raises(ValueError, match="finite non-boolean"):
+        ArchiveLimits(1, 1, 1, cast("float", invalid))
+
+
 def test_docx_rejects_invalid_zip() -> None:
     with pytest.raises(OpenXmlError, match="valid ZIP"):
         inspect_docx(b"not a zip", LIMITS)
@@ -503,6 +537,28 @@ def test_docx_bounded_reader_rejects_forged_uncompressed_size(
         )
     assert read_sizes
     assert all(0 < size <= READ_CHUNK_BYTES for size in read_sizes)
+
+
+@pytest.mark.parametrize(
+    "compression",
+    [zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA],
+)
+def test_docx_normalizes_corrupt_compression_backend_errors(
+    corpus_manifest: CorpusManifest, compression: int
+) -> None:
+    base = build_case_bytes(corpus_manifest.by_id("template-classic"))
+    output = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(base)) as source,
+        zipfile.ZipFile(output, "w") as target,
+    ):
+        for member in source.infolist():
+            info = zipfile.ZipInfo(member.filename)
+            info.compress_type = compression
+            target.writestr(info, source.read(member))
+    corrupted = corrupt_zip_member_payload(output.getvalue(), "word/document.xml")
+    with pytest.raises(OpenXmlError, match="integrity"):
+        inspect_docx(corrupted, LIMITS)
 
 
 def test_unknown_builder_and_non_generated_case_are_rejected(

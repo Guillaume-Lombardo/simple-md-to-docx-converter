@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import lzma
 import stat
 import unicodedata
 import zipfile
@@ -181,7 +182,9 @@ def _read_member_bounded(
     except (
         EOFError,
         NotImplementedError,
+        OSError,
         RuntimeError,
+        lzma.LZMAError,
         zipfile.BadZipFile,
         zlib.error,
     ) as error:
