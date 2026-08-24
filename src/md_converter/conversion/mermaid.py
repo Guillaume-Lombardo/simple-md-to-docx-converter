@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 import unicodedata
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from md_converter.conversion.errors import (
 )
 from md_converter.conversion.images import ImageLimits, normalize_image
 from md_converter.conversion.validation import ApprovedMarkdown, validate_document
+from md_converter.jobs.policy import DiagramResourceBudget
 
 _GENERATED_DIRECTORY = ".md-converter-mermaid"
 _SOURCE_MAP_SIZE = 2
@@ -42,13 +44,25 @@ _CONFIGURATION_DIRECTIVE = re.compile(r"(?i)%%\s*\{")
 class DocumentConverter(Protocol):
     """Downstream document converter contract."""
 
-    def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes: ...
+    def convert(
+        self,
+        markdown: ApprovedMarkdown,
+        reference_docx: bytes,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes: ...
 
 
 class MermaidRenderer(Protocol):
     """Render one bounded Mermaid source to an untrusted raster payload."""
 
-    def render(self, source: str, max_output_bytes: int) -> bytes: ...
+    def render(
+        self,
+        source: str,
+        max_output_bytes: int,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -244,6 +258,8 @@ def render_mermaid(
     renderer: MermaidRenderer,
     limits: MermaidLimits,
     fallback_image_limits: ImageLimits | None = None,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> ApprovedMarkdown:
     """Replace supported Mermaid fences with bounded approved PNG resources."""
 
@@ -292,7 +308,15 @@ def render_mermaid(
     for index, (block, path) in enumerate(
         zip(blocks, generated_paths, strict=True), start=1
     ):
-        output = renderer.render(block.source, limits.max_output_bytes)
+        output = (
+            renderer.render(block.source, limits.max_output_bytes)
+            if deadline_monotonic is None
+            else renderer.render(
+                block.source,
+                limits.max_output_bytes,
+                deadline_monotonic=deadline_monotonic,
+            )
+        )
         normalized = _normalized_diagram(output, limits, image_limits)
         total_raw_output += len(output)
         total_normalized_output += len(normalized)
@@ -331,20 +355,34 @@ class MermaidPreprocessingConverter:
         renderer: MermaidRenderer,
         limits: MermaidLimits,
         fallback_image_limits: ImageLimits | None = None,
+        diagram_budget: DiagramResourceBudget | None = None,
     ) -> None:
         self._converter = converter
         self._renderer = renderer
-        self._limits = limits
+        self._limits = (
+            diagram_budget.constrain(limits) if diagram_budget is not None else limits
+        )
         self._fallback_image_limits = fallback_image_limits
 
-    def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes:
+    def convert(
+        self,
+        markdown: ApprovedMarkdown,
+        reference_docx: bytes,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes:
         rendered = render_mermaid(
             markdown,
             self._renderer,
             self._limits,
             self._fallback_image_limits,
+            deadline_monotonic=deadline_monotonic,
         )
-        return self._converter.convert(rendered, reference_docx)
+        if deadline_monotonic is None:
+            return self._converter.convert(rendered, reference_docx)
+        return self._converter.convert(
+            rendered, reference_docx, deadline_monotonic=deadline_monotonic
+        )
 
 
 class MermaidCliRenderer:
@@ -376,7 +414,13 @@ class MermaidCliRenderer:
             environment["PATH"] = self._host_environment["PATH"]
         return environment
 
-    def render(self, source: str, max_output_bytes: int) -> bytes:
+    def render(
+        self,
+        source: str,
+        max_output_bytes: int,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes:
         if type(max_output_bytes) is not int or max_output_bytes <= 0:
             raise ValueError("Mermaid output limit must be a positive integer")
         try:
@@ -387,7 +431,10 @@ class MermaidCliRenderer:
             raise self._workspace_failure() from None
         try:
             result = self._render_in_workspace(
-                Path(temporary.name), source, max_output_bytes
+                Path(temporary.name),
+                source,
+                max_output_bytes,
+                deadline_monotonic=deadline_monotonic,
             )
         except Exception:
             try:
@@ -402,7 +449,12 @@ class MermaidCliRenderer:
         return result
 
     def _render_in_workspace(
-        self, workspace: Path, source: str, max_output_bytes: int
+        self,
+        workspace: Path,
+        source: str,
+        max_output_bytes: int,
+        *,
+        deadline_monotonic: float | None,
     ) -> bytes:
         input_path = workspace / "diagram.mmd"
         output_path = workspace / "diagram.png"
@@ -456,7 +508,7 @@ class MermaidCliRenderer:
             "1",
         ]
         process = self._start(arguments, workspace)
-        self._wait(process)
+        self._wait(process, deadline_monotonic=deadline_monotonic)
         descriptor = -1
         try:
             descriptor = os.open(
@@ -508,9 +560,17 @@ class MermaidCliRenderer:
                 "Mermaid rendering is unavailable.",
             ) from None
 
-    def _wait(self, process: subprocess.Popen[bytes]) -> None:
+    def _wait(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        deadline_monotonic: float | None,
+    ) -> None:
+        timeout = self._config.timeout_seconds
+        if deadline_monotonic is not None:
+            timeout = min(timeout, max(0.0, deadline_monotonic - time.monotonic()))
         try:
-            return_code = process.wait(timeout=self._config.timeout_seconds)
+            return_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self._terminate_group(process)
             raise ConversionError(

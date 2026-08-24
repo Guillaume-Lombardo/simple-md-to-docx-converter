@@ -15,6 +15,7 @@ from md_converter.auth.models import Role, Session, User
 from md_converter.config import ConfigurationError
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import (
+    downgrade_database,
     run_migration_environment,
     upgrade_database,
 )
@@ -32,6 +33,15 @@ REVISION: Any = importlib.import_module(
 JOB_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_03_conversion_jobs"
 )
+RETENTION_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_07_retention_cleanup"
+)
+IMMUTABILITY_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_08_immutable_retention_records"
+)
+CLEANUP_EVIDENCE_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_09_immutable_cleanup_evidence"
+)
 
 
 @pytest.mark.unit
@@ -42,6 +52,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
         "conversion_jobs",
+        "retention_cleanup_runs",
         "sessions",
         "system_template_selection",
         "template_audit_records",
@@ -251,3 +262,45 @@ def test_alembic_environment_rejects_an_unmanaged_connection(
     context.config.attributes = {"connection": object()}
     with pytest.raises(RuntimeError, match="application-managed"):
         run_migration_environment(context)
+
+    with pytest.raises(ValueError, match="must not be blank"):
+        downgrade_database(create_database_engine("sqlite+pysqlite://"), " ")
+
+
+@pytest.mark.unit
+def test_retention_migrations_cover_schema_and_both_immutability_dialects(
+    mocker: MockerFixture,
+) -> None:
+    retention = mocker.patch.object(RETENTION_REVISION, "op")
+    batch = retention.batch_alter_table.return_value.__enter__.return_value
+    RETENTION_REVISION.upgrade()
+    assert retention.add_column.call_count == 2
+    assert retention.create_index.call_count == 2
+    retention.create_table.assert_called_once()
+    RETENTION_REVISION.downgrade()
+    assert retention.drop_index.call_count == 2
+    assert batch.drop_column.call_count == 2
+
+    immutable = mocker.patch.object(IMMUTABILITY_REVISION, "op")
+    immutable.get_bind.return_value.dialect.name = "sqlite"
+    IMMUTABILITY_REVISION.upgrade()
+    IMMUTABILITY_REVISION.downgrade()
+    assert immutable.execute.call_count == 4
+
+    immutable.reset_mock()
+    immutable.get_bind.return_value.dialect.name = "postgresql"
+    IMMUTABILITY_REVISION.upgrade()
+    IMMUTABILITY_REVISION.downgrade()
+    assert immutable.execute.call_count == 6
+
+    cleanup_evidence = mocker.patch.object(CLEANUP_EVIDENCE_REVISION, "op")
+    cleanup_evidence.get_bind.return_value.dialect.name = "sqlite"
+    CLEANUP_EVIDENCE_REVISION.upgrade()
+    CLEANUP_EVIDENCE_REVISION.downgrade()
+    assert cleanup_evidence.execute.call_count == 3
+
+    cleanup_evidence.reset_mock()
+    cleanup_evidence.get_bind.return_value.dialect.name = "postgresql"
+    CLEANUP_EVIDENCE_REVISION.upgrade()
+    CLEANUP_EVIDENCE_REVISION.downgrade()
+    assert cleanup_evidence.execute.call_count == 3

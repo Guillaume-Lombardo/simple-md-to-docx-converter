@@ -33,6 +33,11 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.session_token_bytes == 32
     assert settings.session_idle_seconds == 1_800
     assert settings.session_absolute_seconds == 28_800
+    assert settings.template_version_retention_seconds == 31_536_000
+    assert settings.template_min_retained_versions == 10
+    assert settings.audit_retention_seconds == 31_536_000
+    assert (settings.clamav_host, settings.clamav_port) == ("127.0.0.1", 3310)
+    assert settings.clamav_timeout_seconds == 5
     assert secret not in repr(settings)
 
 
@@ -48,6 +53,11 @@ def test_security_defaults_and_secret_redaction() -> None:
         {"conversion_request_max_bytes": 1_000_000},
         {"conversion_retry_after_seconds": 0},
         {"job_result_retention_seconds": 0},
+        {"template_version_retention_seconds": 0},
+        {"template_min_retained_versions": 9},
+        {"audit_retention_seconds": 0},
+        {"clamav_port": 65_536},
+        {"clamav_timeout_seconds": float("inf")},
     ],
 )
 def test_invalid_security_configuration_is_rejected(

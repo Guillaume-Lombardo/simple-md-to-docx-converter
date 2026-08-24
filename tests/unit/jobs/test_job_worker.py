@@ -20,8 +20,13 @@ from md_converter.jobs.models import (
     JobStep,
     result_object_id,
 )
-from md_converter.jobs.ports import JobProcessor, JobRepository
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
+from md_converter.jobs.worker import (
+    ConversionWorker,
+    MaintenanceCleaner,
+    WorkerPolicy,
+    WorkerRuntime,
+)
 from md_converter.storage import ObjectScope, ObjectStore, ObjectStoreError
 from tests.unit.jobs.test_job_models import job
 
@@ -31,6 +36,7 @@ NOW = datetime(2026, 8, 24, tzinfo=UTC)
 
 def worker(mocker: MockerFixture) -> tuple[ConversionWorker, Any, Any, Any]:
     repository = mocker.Mock(spec=JobRepository)
+    repository.cancellation_requested.return_value = False
     objects = mocker.Mock(spec=ObjectStore)
     processor = mocker.Mock(spec=JobProcessor)
     clock = mocker.Mock(return_value=NOW)
@@ -45,6 +51,28 @@ def worker(mocker: MockerFixture) -> tuple[ConversionWorker, Any, Any, Any]:
         ),
     )
     return instance, repository, objects, processor
+
+
+def test_periodic_cleanup_runs_additional_bounded_retention(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.expire_terminal.return_value = ()
+    maintenance = mocker.Mock(spec=MaintenanceCleaner)
+    maintenance.cleanup.return_value = 2
+    instance = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            mocker.Mock(spec=JobProcessor),
+            mocker.Mock(return_value=NOW),
+            maintenance=maintenance,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30),
+    )
+    assert instance.cleanup(limit=7) == 2
+    maintenance.cleanup.assert_called_once_with(limit=7)
 
 
 def running_job() -> ConversionJob:
@@ -254,3 +282,156 @@ def test_worker_configuration_is_explicit_and_bounded(
             runtime=runtime,
             policy=WorkerPolicy(lease, heartbeat, retention, incomplete),
         )
+
+
+def test_monotonic_budget_is_visible_and_ignores_wall_clock_jumps(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.claim.return_value = running_job()
+    repository.cancellation_requested.return_value = False
+    objects = mocker.Mock(spec=ObjectStore)
+    processor = mocker.Mock(spec=JobProcessor)
+    wall_clock = mocker.Mock(
+        side_effect=(NOW, NOW + timedelta(days=30), NOW + timedelta(days=30))
+    )
+    monotonic_clock = mocker.Mock(side_effect=(10.0, 10.5, 10.5, 10.5))
+
+    def process(
+        _job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        del progress
+        assert cancelled.budget is not None
+        assert cancelled.budget.started_monotonic == 10.0
+        assert cancelled.budget.deadline_monotonic == 11.0
+        assert cancelled.budget.remaining_seconds(10.25) == 0.75
+        assert not cancelled()
+        return JobProcessResult(b"result")
+
+    processor.process.side_effect = process
+    worker = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            objects,
+            processor,
+            wall_clock,
+            monotonic_clock,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30, max_job_duration_seconds=1),
+    )
+    assert worker.run_once()
+    repository.succeed.assert_called_once()
+    repository.fail.assert_not_called()
+    repository.finish_cancelled.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("durable_cancelled", "expected_transition"),
+    ((False, "failed"), (True, "cancelled")),
+)
+def test_durable_cancellation_precedes_duration_and_duration_precedes_error(
+    mocker: MockerFixture,
+    durable_cancelled: bool,
+    expected_transition: str,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.claim.return_value = running_job()
+    repository.cancellation_requested.return_value = durable_cancelled
+    processor = mocker.Mock(spec=JobProcessor)
+    processor.process.side_effect = ConversionError(
+        ConversionErrorCode.INVALID_DOCX, "Conversion output is invalid."
+    )
+    worker = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            processor,
+            mocker.Mock(return_value=NOW),
+            mocker.Mock(side_effect=(0.0, 2.0)),
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30, max_job_duration_seconds=1),
+    )
+    assert worker.run_once()
+    if expected_transition == "cancelled":
+        repository.finish_cancelled.assert_called_once()
+        repository.fail.assert_not_called()
+    else:
+        failure = repository.fail.call_args.args[0]
+        assert failure.code == "resource_budget_exceeded"
+        repository.finish_cancelled.assert_not_called()
+
+
+def test_duration_precedes_unexpected_error_but_not_lease_loss(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.claim.return_value = running_job()
+    repository.cancellation_requested.return_value = False
+    processor = mocker.Mock(spec=JobProcessor)
+    processor.process.side_effect = RuntimeError("processor defect")
+    monotonic_clock = mocker.Mock(side_effect=(0.0, 2.0))
+    runtime = WorkerRuntime(
+        repository,
+        mocker.Mock(spec=ObjectStore),
+        processor,
+        mocker.Mock(return_value=NOW),
+        monotonic_clock,
+    )
+    worker = ConversionWorker(
+        worker_id="worker-1",
+        runtime=runtime,
+        policy=WorkerPolicy(10, 1, 100, 30, max_job_duration_seconds=1),
+    )
+    assert worker.run_once()
+    assert repository.fail.call_args.args[0].code == "resource_budget_exceeded"
+
+    repository.reset_mock()
+    repository.claim.return_value = running_job()
+    repository.heartbeat.return_value = False
+
+    def lose_lease(
+        _job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        del cancelled
+        progress(JobStep.DOCX, 50)
+        return JobProcessResult(b"result")
+
+    processor.process.side_effect = lose_lease
+    monotonic_clock.side_effect = (0.0, 2.0)
+    with pytest.raises(JobLeaseLostError):
+        worker.run_once()
+    repository.fail.assert_not_called()
+    repository.finish_cancelled.assert_not_called()
+
+
+def test_unexpected_error_before_deadline_remains_visible(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.claim.return_value = running_job()
+    repository.cancellation_requested.return_value = False
+    processor = mocker.Mock(spec=JobProcessor)
+    processor.process.side_effect = RuntimeError("processor defect")
+    worker = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            processor,
+            mocker.Mock(return_value=NOW),
+            mocker.Mock(side_effect=(0.0, 0.5)),
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30, max_job_duration_seconds=1),
+    )
+    with pytest.raises(RuntimeError, match="processor defect"):
+        worker.run_once()
+    repository.fail.assert_not_called()
+    repository.finish_cancelled.assert_not_called()

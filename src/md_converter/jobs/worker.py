@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import Event, Lock, Thread
+from time import monotonic
+from typing import Protocol
 
 from md_converter.conversion.errors import ConversionError
 from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
@@ -18,10 +21,17 @@ from md_converter.jobs.models import (
     LeaseHeartbeat,
     result_object_id,
 )
+from md_converter.jobs.policy import JobExecutionBudget
 from md_converter.jobs.ports import JobProcessor, JobRepository
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
 
 MAX_WORKER_ID_CHARACTERS = 255
+
+
+class MaintenanceCleaner(Protocol):
+    """Additional bounded retention work sharing the periodic worker cadence."""
+
+    def cleanup(self, *, limit: int) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +42,7 @@ class WorkerPolicy:
     heartbeat_seconds: float
     result_retention_seconds: float
     incomplete_submission_seconds: float
+    max_job_duration_seconds: float | None = None
 
     def __post_init__(self) -> None:
         values = (
@@ -40,8 +51,17 @@ class WorkerPolicy:
             self.result_retention_seconds,
             self.incomplete_submission_seconds,
         )
-        if any(isinstance(value, bool) or value <= 0 for value in values):
+        if any(
+            isinstance(value, bool) or not math.isfinite(value) or value <= 0
+            for value in values
+        ):
             raise ValueError("Worker policy durations must be positive")
+        if self.max_job_duration_seconds is not None and (
+            isinstance(self.max_job_duration_seconds, bool)
+            or not math.isfinite(self.max_job_duration_seconds)
+            or self.max_job_duration_seconds <= 0
+        ):
+            raise ValueError("Worker job duration budget must be positive")
         if self.heartbeat_seconds >= self.lease_seconds:
             raise ValueError("Worker heartbeat must be shorter than its lease")
 
@@ -54,6 +74,8 @@ class WorkerRuntime:
     objects: ObjectStore
     processor: JobProcessor
     clock: Callable[[], datetime]
+    monotonic_clock: Callable[[], float] = monotonic
+    maintenance: MaintenanceCleaner | None = None
 
 
 @dataclass(slots=True)
@@ -62,6 +84,26 @@ class _ProgressState:
 
     step: JobStep
     percentage: int
+
+
+@dataclass(frozen=True, slots=True)
+class _BudgetCancellationProbe:
+    """Worker-owned cancellation probe visible to the processor boundary."""
+
+    budget: JobExecutionBudget | None
+    lease_lost: Event
+    duration_exhausted: Event
+    monotonic_clock: Callable[[], float]
+    durable_requested: Callable[[], bool]
+
+    def __call__(self) -> bool:
+        if self.budget is not None and self.budget.exhausted(self.monotonic_clock()):
+            self.duration_exhausted.set()
+        return (
+            self.lease_lost.is_set()
+            or self.duration_exhausted.is_set()
+            or self.durable_requested()
+        )
 
 
 class ConversionWorker:
@@ -81,6 +123,8 @@ class ConversionWorker:
         self._objects = runtime.objects
         self._processor = runtime.processor
         self._clock = runtime.clock
+        self._monotonic_clock = runtime.monotonic_clock
+        self._maintenance = runtime.maintenance
         self._policy = policy
 
     def run_once(self) -> bool:  # noqa: PLR0912, PLR0915 - lifecycle is explicit
@@ -95,12 +139,25 @@ class ConversionWorker:
         if job.lease_token is None:  # guarded by the domain model
             raise JobLeaseLostError("Conversion job lease token is missing")
         lease_token = job.lease_token
+        started_monotonic = self._monotonic_clock()
+        budget = (
+            None
+            if self._policy.max_job_duration_seconds is None
+            else JobExecutionBudget(
+                duration_seconds=self._policy.max_job_duration_seconds,
+                started_monotonic=started_monotonic,
+                deadline_monotonic=(
+                    started_monotonic + self._policy.max_job_duration_seconds
+                ),
+            )
+        )
 
         progress_state = _ProgressState(job.step, job.progress)
         progress_lock = Lock()
         heartbeat_operation = Lock()
         keepalive_stop = Event()
         lease_lost = Event()
+        duration_exhausted = Event()
         keepalive_errors: list[BaseException] = []
 
         def heartbeat() -> None:
@@ -132,10 +189,15 @@ class ConversionWorker:
                         lease_lost.set()
                         return
 
-        def cancelled() -> bool:
-            return lease_lost.is_set() or self._repository.cancellation_requested(
+        cancelled = _BudgetCancellationProbe(
+            budget=budget,
+            lease_lost=lease_lost,
+            duration_exhausted=duration_exhausted,
+            monotonic_clock=self._monotonic_clock,
+            durable_requested=lambda: self._repository.cancellation_requested(
                 job.id, self._worker_id, lease_token
-            )
+            ),
+        )
 
         def progress(step: JobStep, percentage: int) -> None:
             with progress_lock:
@@ -167,6 +229,21 @@ class ConversionWorker:
             with heartbeat_operation:
                 if keepalive_errors:
                     raise keepalive_errors[0]
+                if isinstance(processing_error, JobLeaseLostError):
+                    raise processing_error
+                if budget is not None and budget.exhausted(self._monotonic_clock()):
+                    duration_exhausted.set()
+                durable_cancelled = self._repository.cancellation_requested(
+                    job.id, self._worker_id, lease_token
+                )
+                if durable_cancelled:
+                    self._finish_cancelled(job)
+                    keepalive_stop.set()
+                    return True
+                if duration_exhausted.is_set():
+                    self._finish_budget_exceeded(job)
+                    keepalive_stop.set()
+                    return True
                 if isinstance(processing_error, JobProcessingCancelled):
                     self._finish_cancelled(job)
                     keepalive_stop.set()
@@ -242,7 +319,12 @@ class ConversionWorker:
                     ObjectKey(ObjectScope.RESULT, candidate.owner_id, object_id)
                 )
             self._repository.complete_cleanup(candidate.job_id, candidate.cleanup_token)
-        return len(expired)
+        maintained = (
+            self._maintenance.cleanup(limit=limit)
+            if self._maintenance is not None
+            else 0
+        )
+        return len(expired) + maintained
 
     def _finish_cancelled(self, job: ConversionJob) -> None:
         if job.lease_token is None:
@@ -267,6 +349,22 @@ class ConversionWorker:
                 lease_token=job.lease_token,
                 code=error.code.value,
                 message=str(error),
+                now=finished_at,
+                expires_at=self._expires_at(finished_at),
+            )
+        )
+
+    def _finish_budget_exceeded(self, job: ConversionJob) -> None:
+        if job.lease_token is None:
+            raise JobLeaseLostError("Conversion job lease token is missing")
+        finished_at = self._clock()
+        self._repository.fail(
+            JobFailure(
+                job_id=job.id,
+                worker_id=self._worker_id,
+                lease_token=job.lease_token,
+                code="resource_budget_exceeded",
+                message="Conversion exceeded its configured duration budget.",
                 now=finished_at,
                 expires_at=self._expires_at(finished_at),
             )

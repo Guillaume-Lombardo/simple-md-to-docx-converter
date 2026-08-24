@@ -59,6 +59,24 @@ def test_raw_html_is_rejected_before_converter_call(mocker, raw_html: str) -> No
 
 
 @pytest.mark.unit
+def test_service_propagates_worker_deadline_to_docx_engine(mocker) -> None:
+    converter = mocker.Mock()
+    converter.convert.return_value = b"docx"
+
+    assert (
+        DocxConversionService(converter).convert(
+            "# Safe", b"reference", deadline_monotonic=123.5
+        )
+        == b"docx"
+    )
+    converter.convert.assert_called_once_with(
+        mocker.ANY,
+        b"reference",
+        deadline_monotonic=123.5,
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "raw_html",
     [

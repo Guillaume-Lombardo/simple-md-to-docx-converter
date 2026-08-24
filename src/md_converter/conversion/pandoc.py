@@ -9,6 +9,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -102,7 +103,13 @@ class PandocDocxConverter:
         )
         return environment
 
-    def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes:
+    def convert(
+        self,
+        markdown: ApprovedMarkdown,
+        reference_docx: bytes,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes:
         validated = validate_document(
             ApprovedDocument(
                 markdown.text,
@@ -119,7 +126,10 @@ class PandocDocxConverter:
             raise self._workspace_failure() from None
         try:
             result = self._convert_in_workspace(
-                Path(temporary.name), validated, reference_docx
+                Path(temporary.name),
+                validated,
+                reference_docx,
+                deadline_monotonic=deadline_monotonic,
             )
         except Exception:
             try:
@@ -138,6 +148,8 @@ class PandocDocxConverter:
         workspace: Path,
         markdown: ApprovedMarkdown,
         reference_docx: bytes,
+        *,
+        deadline_monotonic: float | None,
     ) -> bytes:
         try:
             for directory in ("home", "tmp", "cache", "config", "data"):
@@ -168,7 +180,7 @@ class PandocDocxConverter:
             str(markdown_path),
         ]
         process = self._start(arguments, workspace)
-        self._wait(process)
+        self._wait(process, deadline_monotonic=deadline_monotonic)
         try:
             if output_path.is_symlink():
                 raise OSError
@@ -207,9 +219,17 @@ class PandocDocxConverter:
                 "Pandoc is unavailable.",
             ) from None
 
-    def _wait(self, process: subprocess.Popen[bytes]) -> None:
+    def _wait(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        deadline_monotonic: float | None,
+    ) -> None:
+        timeout = self._config.timeout_seconds
+        if deadline_monotonic is not None:
+            timeout = min(timeout, max(0.0, deadline_monotonic - time.monotonic()))
         try:
-            return_code = process.wait(timeout=self._config.timeout_seconds)
+            return_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self._terminate_group(process)
             raise ConversionError(

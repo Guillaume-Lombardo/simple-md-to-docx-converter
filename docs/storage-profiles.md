@@ -27,12 +27,49 @@ MD_CONVERTER_TEMPLATE_LIBREOFFICE_EXECUTABLE=<approved executable path>
 MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=<approved value>
 MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=<approved value>
 MD_CONVERTER_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=<approved value>
+MD_CONVERTER_TEMPLATE_VERSION_RETENTION_SECONDS=31536000
+MD_CONVERTER_TEMPLATE_MIN_RETAINED_VERSIONS=10
+MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000
+MD_CONVERTER_CLAMAV_HOST=<clamd service name>
+MD_CONVERTER_CLAMAV_PORT=3310
+MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS=5
 MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
 ```
 
 Template activation invokes both configured document engines synchronously inside a bounded worker
 thread, so request handlers do not block the ASGI event loop. Startup also retries durable hidden
 publication reservations and deletion tombstones before accepting traffic.
+
+Both profiles also require the complete T18 resource policy below. Placeholders intentionally do
+not establish production values:
+
+```text
+MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved positive value>
+MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
+MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_FILES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_IMAGES=<approved positive value>
+MD_CONVERTER_CONVERSION_MAX_DIAGRAMS=<approved positive value>
+MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved positive value>
+MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved positive value>
+MD_CONVERTER_JOB_ACTIVE_LIMIT_PER_USER=<approved positive value>
+MD_CONVERTER_JOB_GLOBAL_QUEUE_CAPACITY=<approved positive value>
+MD_CONVERTER_JOB_MAX_DURATION_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES=<approved positive value>
+MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES=<approved positive value>
+MD_CONVERTER_WORKER_LEASE_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_HEARTBEAT_SECONDS=<approved finite value shorter than lease>
+MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_IDLE_POLL_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
+```
+
+Upload and decompressed-content limits are independent. A standalone Markdown upload can make the
+upload ceiling larger than the decompressed archive ceiling, while another approved policy may do
+the reverse. Configuration therefore validates each as positive without imposing an unsupported
+ordering.
 
 ## Standalone
 
@@ -41,10 +78,7 @@ Set:
 ```text
 MD_CONVERTER_STORAGE_PROFILE=standalone
 MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
-MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
-MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
-MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
+# plus every shared T18 resource-policy variable listed above
 ```
 
 Metadata is stored in `/data/metadata.sqlite3`. Object bytes are stored below `/data/objects`;
@@ -75,10 +109,7 @@ Set:
 MD_CONVERTER_STORAGE_PROFILE=distributed
 MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
 MD_CONVERTER_S3_BUCKET=...
-MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
-MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
-MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
-MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
+# plus every shared T18 resource-policy variable listed above
 ```
 
 `MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.
@@ -100,11 +131,16 @@ Conversion queue rows and their referenced upload/result objects are also one re
 External workers must be stopped or drained during a coordinated backup unless the database and
 bucket platforms provide a consistent cross-service recovery point.
 
-## Operational decisions still open
+## Recovery objectives and exercises
 
-No production retention, cleanup schedule, quota, antivirus policy, RPO, or RTO is fixed here.
-Request-body size, upload size, polling advice, and result retention must be supplied explicitly;
-their approved production values remain T18 work. Operators must keep those values configurable
-until they receive separate product approval. T12 verifies real
-SQLite/filesystem and PostgreSQL/RustFS boundaries. Final hardened-image rootless storage E2E is
-the explicitly approved T20/T21 sequencing debt and is not an integration-test waiver.
+Standalone recovery must meet RPO 24 hours and RTO 4 hours; distributed recovery must meet RPO 1
+hour and RTO 2 hours. Run an automated isolated restore for each deployed profile at least once per
+calendar quarter with `scripts/run_restore_exercise.py`. The restore command owns backup restoration,
+stable-object verification, and readiness verification. The runner measures RTO with an elapsed
+monotonic clock, records UTC timestamps, and writes an immutable, owner-only report containing no
+document content or credentials. Retain
+reports in protected durable operational storage outside application cleanup.
+
+T12 and T18 verify real SQLite/filesystem and PostgreSQL/RustFS boundaries. Applying the configured
+memory and ephemeral-storage ceilings to the final container and repeating quota workflows against
+the hardened rootless image remain T20/T21 sequencing debt, not integration-test waivers.

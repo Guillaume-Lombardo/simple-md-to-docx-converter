@@ -7,15 +7,17 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, and_, case, func, or_, select, update
+from sqlalchemy import Engine, and_, case, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from md_converter.jobs.errors import (
     JobLeaseLostError,
+    JobQueueCapacityExceededError,
     JobRepositoryError,
     JobRequestError,
+    JobUserQuotaExceededError,
 )
 from md_converter.jobs.models import (
     TERMINAL_JOB_STATES,
@@ -30,6 +32,7 @@ from md_converter.jobs.models import (
     LeaseHeartbeat,
     result_object_id,
 )
+from md_converter.jobs.policy import JobAdmissionPolicy
 from md_converter.persistence.schema import (
     ConversionJobRow,
     TemplateRow,
@@ -97,10 +100,13 @@ def _required_utc(value: datetime) -> datetime:
 class SqlJobRepository:
     """Atomic lifecycle transitions with dialect-specific queue locking."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(
+        self, engine: Engine, admission_policy: JobAdmissionPolicy | None = None
+    ) -> None:
         if engine.dialect.name not in {"sqlite", "postgresql"}:
             raise ValueError("Job repository requires SQLite or PostgreSQL")
         self._engine = engine
+        self._admission_policy = admission_policy
 
     def create(self, submission: JobSubmission) -> tuple[ConversionJob, bool]:
         row = ConversionJobRow(
@@ -128,6 +134,10 @@ class SqlJobRepository:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                self._lock_admission(database)
+                replay = self._find_idempotent(database, submission)
+                if replay is not None:
+                    return replay, True
                 frozen = database.scalar(
                     select(TemplateRow.id)
                     .join(
@@ -142,15 +152,19 @@ class SqlJobRepository:
                         == str(submission.template_version_id),
                         TemplateVersionRow.id == str(submission.template_version_id),
                         TemplateVersionRow.publication_state == "published",
+                        TemplateVersionRow.retention_token.is_(None),
                     )
                     .with_for_update()
                 )
                 if frozen is None:
                     raise JobRequestError
+                self._enforce_admission(database, submission.owner_id)
                 database.add(row)
                 database.flush()
                 return _job(row), False
         except JobRequestError:
+            raise
+        except JobUserQuotaExceededError, JobQueueCapacityExceededError:
             raise
         except IntegrityError:
             if submission.idempotency_digest is None:
@@ -163,6 +177,51 @@ class SqlJobRepository:
             return replay, True
         except SQLAlchemyError:
             raise JobRepositoryError from None
+
+    def _lock_admission(self, database: DatabaseSession) -> None:
+        if (
+            self._admission_policy is not None
+            and self._engine.dialect.name == "postgresql"
+        ):
+            # One transaction-scoped lock serializes the two coupled capacity counts.
+            database.execute(text("SELECT pg_advisory_xact_lock(1830285106)"))
+
+    @staticmethod
+    def _find_idempotent(
+        database: DatabaseSession, submission: JobSubmission
+    ) -> ConversionJob | None:
+        if submission.idempotency_digest is None:
+            return None
+        row = database.scalar(
+            select(ConversionJobRow).where(
+                ConversionJobRow.owner_id == str(submission.owner_id),
+                ConversionJobRow.idempotency_digest == submission.idempotency_digest,
+            )
+        )
+        return _job(row) if row is not None else None
+
+    def _enforce_admission(self, database: DatabaseSession, owner_id: UUID) -> None:
+        policy = self._admission_policy
+        if policy is None:
+            return
+        active_states = (JobState.QUEUED.value, JobState.RUNNING.value)
+        owner_active = database.scalar(
+            select(func.count())
+            .select_from(ConversionJobRow)
+            .where(
+                ConversionJobRow.owner_id == str(owner_id),
+                ConversionJobRow.state.in_(active_states),
+            )
+        )
+        if int(owner_active or 0) >= policy.active_jobs_per_user:
+            raise JobUserQuotaExceededError("Active conversion-job quota exceeded")
+        queue_depth = database.scalar(
+            select(func.count())
+            .select_from(ConversionJobRow)
+            .where(ConversionJobRow.state.in_(active_states))
+        )
+        if int(queue_depth or 0) >= policy.global_queue_capacity:
+            raise JobQueueCapacityExceededError("Conversion queue capacity exceeded")
 
     def activate_source(self, job_id: UUID, now: datetime) -> ConversionJob:
         try:

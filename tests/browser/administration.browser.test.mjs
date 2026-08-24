@@ -139,7 +139,12 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await page.type('#create-template-form textarea[name="description"]', "Rejected safely");
   await page.type('#create-template-form input[name="expected_fonts"]', "Calibri");
   await (await page.$('#create-template-form input[name="content"]')).uploadFile(invalidTemplateFile);
+  const invalidResponsePromise = page.waitForResponse((response) => response.url() === `${baseUrl}/api/v1/templates`
+    && response.request().method() === "POST");
   await page.click('#create-template-form button[type="submit"]');
+  const invalidResponse = await invalidResponsePromise;
+  assert.equal(invalidResponse.status(), 422);
+  assert.equal((await invalidResponse.json()).error.code, "TEMPLATE_INVALID_PACKAGE");
   await waitForText(page, "#administration-alert", "Word template package is invalid.");
   await page.$eval("#create-template-form", (form) => form.reset());
   await page.type('#create-template-form input[name="name"]', "Alice report");

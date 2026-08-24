@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from md_converter.app import create_app
 from md_converter.config import Settings
+from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.sql import create_database_engine, standalone_database_url
 from md_converter.persistence.templates import (
     SqlTemplateCatalogRepository,
@@ -83,7 +84,8 @@ def test_browser_conversion_shell_uses_real_session_template_and_job_boundaries(
             conversion_request_max_bytes=2_000,
             conversion_retry_after_seconds=1,
             job_result_retention_seconds=3_600,
-        )
+        ),
+        scanner=TrustingUploadScanner(),
     )
     with TestClient(app, base_url="https://testserver") as client:
         assert (

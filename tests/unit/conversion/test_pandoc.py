@@ -302,6 +302,30 @@ def test_timeout_terminates_then_kills_the_process_group(
 
 
 @pytest.mark.unit
+def test_worker_deadline_caps_pandoc_engine_timeout(tmp_path: Path, mocker) -> None:
+    reference = minimal_docx()
+    process = mocker.Mock()
+    process.wait.return_value = 0
+
+    def start(_arguments, **options):
+        (options["cwd"] / "output.docx").write_bytes(reference)
+        return process
+
+    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("md_converter.conversion.pandoc.time.monotonic", return_value=10.0)
+
+    assert (
+        converter(tmp_path).convert(
+            ApprovedMarkdown("# Safe"),
+            reference,
+            deadline_monotonic=11.25,
+        )
+        == reference
+    )
+    process.wait.assert_called_once_with(timeout=1.25)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "config",
     [

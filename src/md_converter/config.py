@@ -41,8 +41,24 @@ class Settings(BaseSettings):
     session_cookie_name: str = Field(default="md_converter_session", min_length=1)
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
+    conversion_max_decompressed_bytes: int = Field(gt=0)
+    conversion_max_files: int = Field(gt=0)
+    conversion_max_images: int = Field(gt=0)
+    conversion_max_diagrams: int = Field(gt=0)
     conversion_retry_after_seconds: int = Field(gt=0)
     job_result_retention_seconds: int = Field(gt=0)
+    job_active_limit_per_user: int = Field(gt=0)
+    job_global_queue_capacity: int = Field(gt=0)
+    job_max_duration_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_memory_budget_bytes: int = Field(gt=0)
+    worker_ephemeral_storage_budget_bytes: int = Field(gt=0)
+    worker_lease_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_heartbeat_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_incomplete_submission_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_idle_poll_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_error_backoff_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_cleanup_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
+    worker_cleanup_batch_size: int = Field(gt=0)
     template_max_archive_bytes: int = Field(gt=0)
     template_request_max_bytes: int = Field(gt=0)
     template_metadata_request_max_bytes: int = Field(gt=0)
@@ -62,7 +78,13 @@ class Settings(BaseSettings):
     template_engine_timeout_seconds: float = Field(gt=0)
     template_engine_termination_grace_seconds: float = Field(gt=0)
     template_pending_publication_stale_seconds: float = Field(gt=0, allow_inf_nan=False)
+    template_version_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
+    template_min_retained_versions: int = Field(default=10, ge=10)
+    audit_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
     template_engine_workspace_root: Path | None = None
+    clamav_host: str = Field(default="127.0.0.1", min_length=1)
+    clamav_port: int = Field(default=3310, ge=1, le=65_535)
+    clamav_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     storage_profile: StorageProfile
     standalone_data_directory: Path | None = None
     distributed_database_url: SecretStr | None = None
@@ -85,6 +107,8 @@ class Settings(BaseSettings):
             raise ValueError("conversion request limit must exceed the source limit")
         if self.template_request_max_bytes <= self.template_max_archive_bytes:
             raise ValueError("template request limit must exceed the archive limit")
+        if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
+            raise ValueError("worker heartbeat must be shorter than its lease")
         self._validate_storage_profile()
         return self
 

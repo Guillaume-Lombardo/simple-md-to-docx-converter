@@ -602,6 +602,8 @@ class LibreOfficePdfConverter:
         docx: bytes,
         traceability: PdfTraceabilityContext,
         cancellation_requested: Callable[[], bool] | None = None,
+        *,
+        deadline_monotonic: float | None = None,
     ) -> PdfArtifact:
         """Convert once; T13 later owns durable cancellation and publication races."""
 
@@ -625,7 +627,11 @@ class LibreOfficePdfConverter:
             self._workspace_error()
         try:
             result = self._convert_in_workspace(
-                Path(temporary.name), docx, traceability, cancelled
+                Path(temporary.name),
+                docx,
+                traceability,
+                cancelled,
+                deadline_monotonic=deadline_monotonic,
             )
         except Exception:
             try:
@@ -672,6 +678,8 @@ class LibreOfficePdfConverter:
         docx: bytes,
         traceability: PdfTraceabilityContext,
         cancelled: Callable[[], bool],
+        *,
+        deadline_monotonic: float | None,
     ) -> PdfArtifact:
         try:
             for directory in (
@@ -702,7 +710,11 @@ class LibreOfficePdfConverter:
             str(source),
         ]
         process = self._start(arguments, workspace)
-        self._wait(process, cancelled)
+        self._wait(
+            process,
+            cancelled,
+            deadline_monotonic=deadline_monotonic,
+        )
         if self._cancelled(cancelled):
             self._cancelled_error()
         pdf = _read_pdf(workspace / "output" / "source.pdf", self._limits.max_pdf_bytes)
@@ -748,9 +760,15 @@ class LibreOfficePdfConverter:
             )
 
     def _wait(
-        self, process: subprocess.Popen[bytes], cancelled: Callable[[], bool]
+        self,
+        process: subprocess.Popen[bytes],
+        cancelled: Callable[[], bool],
+        *,
+        deadline_monotonic: float | None,
     ) -> None:
         deadline = time.monotonic() + self._config.timeout_seconds
+        if deadline_monotonic is not None:
+            deadline = min(deadline, deadline_monotonic)
         while True:
             try:
                 cancellation_requested = self._cancelled(cancelled)

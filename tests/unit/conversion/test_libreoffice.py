@@ -385,6 +385,21 @@ def test_timeout_and_nonzero_exit_are_distinct(
     terminate.assert_called_once_with(process, 0.2)
 
 
+def test_worker_deadline_caps_libreoffice_poll_timeout(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process, _popen = _successful_process(mocker)
+    mocker.patch.object(libreoffice.time, "monotonic", side_effect=(10.0, 10.0))
+
+    _converter(tmp_path).convert(
+        _docx(),
+        TRACE,
+        deadline_monotonic=10.01,
+    )
+
+    process.wait.assert_called_once_with(timeout=pytest.approx(0.01))
+
+
 def test_unavailable_engine_is_content_free(
     mocker: MockerFixture, tmp_path: Path
 ) -> None:

@@ -16,6 +16,7 @@ from sqlalchemy.exc import OperationalError
 
 from md_converter.app import AppComponents, build_components, create_app
 from md_converter.config import Settings
+from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.schema import (
     TemplateAuditRow,
     TemplatePreferenceRow,
@@ -83,7 +84,7 @@ def _app(settings: Settings) -> tuple[FastAPI, AppComponents]:
         validate_content=_validated,
         recovery_policy=TemplateRecoveryPolicy(60),
     )
-    components = replace(built, templates=templates)
+    components = replace(built, templates=templates, scanner=TrustingUploadScanner())
     return create_app(settings, components=components), components
 
 

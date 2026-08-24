@@ -1,8 +1,10 @@
 """FastAPI application factory and versioned HTTP contract."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -43,14 +45,28 @@ from md_converter.config import Settings, StorageProfile
 from md_converter.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
+    JobQueueCapacityExceededError,
     JobRepositoryError,
     JobRequestError,
+    JobUserQuotaExceededError,
 )
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
-from md_converter.jobs.service import JobService, JobServicePolicy
+from md_converter.jobs.ports import JobRepository
+from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop
+from md_converter.jobs.runtime import JobPolicies, build_job_policies
+from md_converter.jobs.service import JobService
+from md_converter.jobs.worker import ConversionWorker
+from md_converter.malware import (
+    ClamAVUploadScanner,
+    MalwareDetectedError,
+    MalwareScannerUnavailableError,
+    TrustingUploadScanner,
+    UploadScanner,
+)
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.retention import SqlRetentionRepository
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
@@ -62,6 +78,7 @@ from md_converter.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
+from md_converter.retention import DataRetentionPolicy, RetentionService
 from md_converter.storage import (
     FilesystemObjectStore,
     ObjectStore,
@@ -84,6 +101,10 @@ from md_converter.templates.models import (
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
+)
+from md_converter.templates.processor import (
+    TemplateAwareProcessor,
+    build_template_conversion_worker,
 )
 from md_converter.templates.runtime import build_template_validator
 from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
@@ -332,6 +353,7 @@ ERROR_DESCRIPTIONS = {
     413: "The request body is too large",
     422: "The request is invalid",
     428: "The request requires a precondition",
+    429: "The caller has exceeded a configured quota",
     503: "The service is not ready",
 }
 
@@ -423,6 +445,68 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "CONVERSION_REQUEST_INVALID",
                     "message": "The conversion request is invalid.",
+                }
+            },
+        )
+
+    @app.exception_handler(MalwareDetectedError)
+    def malware_detected_handler(
+        _request: Request, _error: MalwareDetectedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {
+                    "code": "UPLOAD_MALWARE_DETECTED",
+                    "message": "The upload was rejected by malware scanning.",
+                }
+            },
+        )
+
+    @app.exception_handler(MalwareScannerUnavailableError)
+    def malware_scanner_unavailable_handler(
+        _request: Request, _error: MalwareScannerUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "UPLOAD_SCANNER_UNAVAILABLE",
+                    "message": "Upload malware scanning is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(JobUserQuotaExceededError)
+    def job_user_quota_handler(
+        request: Request, _error: JobUserQuotaExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={
+                "Retry-After": str(request.app.state.conversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "CONVERSION_USER_QUOTA_EXCEEDED",
+                    "message": "The active conversion quota is exhausted.",
+                }
+            },
+        )
+
+    @app.exception_handler(JobQueueCapacityExceededError)
+    def job_queue_capacity_handler(
+        request: Request, _error: JobQueueCapacityExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Retry-After": str(request.app.state.conversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "CONVERSION_QUEUE_CAPACITY_EXCEEDED",
+                    "message": "The conversion queue is at capacity.",
                 }
             },
         )
@@ -551,7 +635,85 @@ class AppComponents:
     readiness: ReadinessProbe
     object_store: ObjectStore
     jobs: JobService
+    scanner: UploadScanner = field(default_factory=TrustingUploadScanner)
     templates: TemplateService | None = None
+    job_policies: JobPolicies | None = None
+    retention: RetentionService | None = None
+    job_repository: JobRepository | None = None
+
+    def build_conversion_worker(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> ConversionWorker:
+        """Assemble the production worker with all persistent maintenance."""
+
+        if (
+            self.templates is None
+            or self.job_policies is None
+            or self.retention is None
+            or self.job_repository is None
+        ):
+            raise RuntimeError("Production worker components are incomplete")
+        return build_template_conversion_worker(
+            worker_id=worker_id,
+            repository=self.job_repository,
+            objects=self.object_store,
+            resolver=self.templates,
+            processor=processor,
+            clock=clock,
+            policy=self.job_policies.worker,
+            maintenance=self.retention,
+            monotonic_clock=monotonic_clock,
+        )
+
+    def build_external_worker_loop(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> WorkerLoop:
+        """Assemble the shared production loop for an external worker process."""
+
+        if self.job_policies is None:
+            raise RuntimeError("Production worker policies are unavailable")
+        worker = self.build_conversion_worker(
+            worker_id=worker_id,
+            processor=processor,
+            clock=clock,
+            monotonic_clock=monotonic_clock,
+        )
+        return WorkerLoop(
+            worker,
+            self.job_policies.schedule,
+            monotonic_clock=monotonic_clock,
+        )
+
+    def build_embedded_worker(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        thread_name: str,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> EmbeddedWorker:
+        """Assemble the standalone lifecycle from the same production loop."""
+
+        return EmbeddedWorker(
+            self.build_external_worker_loop(
+                worker_id=worker_id,
+                processor=processor,
+                clock=clock,
+                monotonic_clock=monotonic_clock,
+            ),
+            thread_name=thread_name,
+        )
 
 
 class ProfileReadinessProbe:
@@ -567,6 +729,7 @@ class ProfileReadinessProbe:
 
 def build_components(settings: Settings) -> AppComponents:
     """Assemble the selected coherent persistent storage profile."""
+    job_policies = build_job_policies(settings)
     if settings.storage_profile is StorageProfile.STANDALONE:
         data_directory = settings.standalone_data_directory
         if (
@@ -619,11 +782,8 @@ def build_components(settings: Settings) -> AppComponents:
             absolute_seconds=settings.session_absolute_seconds,
         ),
     )
-    jobs = JobService(
-        SqlJobRepository(engine),
-        object_store,
-        JobServicePolicy(settings.job_result_retention_seconds),
-    )
+    job_repository = SqlJobRepository(engine, job_policies.admission)
+    jobs = JobService(job_repository, object_store, job_policies.service)
     templates = TemplateService(
         catalog=SqlTemplateCatalogRepository(engine),
         selections=SqlTemplateSelectionRepository(engine),
@@ -634,12 +794,30 @@ def build_components(settings: Settings) -> AppComponents:
         ),
     )
     templates.reclaim_pending()
+    retention = RetentionService(
+        SqlRetentionRepository(engine),
+        object_store,
+        DataRetentionPolicy(
+            template_version_seconds=settings.template_version_retention_seconds,
+            audit_seconds=settings.audit_retention_seconds,
+            minimum_template_versions=settings.template_min_retained_versions,
+            claim_lease_seconds=settings.worker_lease_seconds,
+        ),
+    )
     return AppComponents(
         authentication=authentication,
         readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
         object_store=object_store,
         jobs=jobs,
+        scanner=ClamAVUploadScanner(
+            settings.clamav_host,
+            settings.clamav_port,
+            settings.clamav_timeout_seconds,
+        ),
         templates=templates,
+        job_policies=job_policies,
+        retention=retention,
+        job_repository=job_repository,
     )
 
 
@@ -647,10 +825,13 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     settings: Settings | None = None,
     *,
     components: AppComponents | None = None,
+    scanner: UploadScanner | None = None,
 ) -> FastAPI:
     """Create a configured application or fail before serving requests."""
     resolved_settings = settings if settings is not None else Settings.load()
     resolved_components = components or build_components(resolved_settings)
+    if scanner is not None:
+        resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
     auth.bootstrap_admin(
         resolved_settings.initial_admin_username,
@@ -672,6 +853,9 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         ),
     )
     app.state.components = resolved_components
+    app.state.conversion_retry_after_seconds = (
+        resolved_settings.conversion_retry_after_seconds
+    )
     install_error_handlers(app)
 
     def session_token(request: Request) -> str | None:
@@ -1016,7 +1200,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         response_model=ConversionResponse,
         status_code=status.HTTP_202_ACCEPTED,
         tags=["conversions"],
-        responses=error_responses(401, 403, 409, 413, 422, 503),
+        responses=error_responses(401, 403, 409, 413, 422, 429, 503),
     )
     async def create_conversion(  # noqa: PLR0913, PLR0917 - FastAPI fields
         response: Response,
@@ -1027,9 +1211,15 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
-        content = await source.read(resolved_settings.conversion_upload_max_bytes + 1)
+        try:
+            content = await source.read(
+                resolved_settings.conversion_upload_max_bytes + 1
+            )
+        finally:
+            await source.close()
         if not content or len(content) > resolved_settings.conversion_upload_max_bytes:
             raise JobRequestError
+        await run_in_threadpool(resolved_components.scanner.scan, content)
         try:
             job, _replayed = await run_in_threadpool(
                 resolved_components.jobs.submit,
@@ -1198,7 +1388,10 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         expected_fonts: Annotated[list[str], Form()],
         content: Annotated[UploadFile, File()],
     ) -> TemplateResponse:
-        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        try:
+            data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        finally:
+            await content.close()
         if len(data) > resolved_settings.template_max_archive_bytes:
             raise TemplateValidationError(
                 code=TemplateValidationErrorCode.LIMIT_EXCEEDED,
@@ -1209,6 +1402,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 code=TemplateValidationErrorCode.INVALID_PACKAGE,
                 message="Word template package is invalid.",
             )
+        await run_in_threadpool(resolved_components.scanner.scan, data)
         if (
             len(name) > resolved_settings.template_max_name_characters
             or len(description) > resolved_settings.template_max_description_characters
@@ -1290,7 +1484,10 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         expected_fonts: Annotated[list[str], Form()],
         if_match: Annotated[str | None, Header(alias="If-Match")] = None,
     ) -> TemplateVersionResponse:
-        data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        try:
+            data = await content.read(resolved_settings.template_max_archive_bytes + 1)
+        finally:
+            await content.close()
         if len(data) > resolved_settings.template_max_archive_bytes:
             raise TemplateValidationError(
                 TemplateValidationErrorCode.LIMIT_EXCEEDED,
@@ -1301,6 +1498,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 TemplateValidationErrorCode.INVALID_PACKAGE,
                 "Word template package is invalid.",
             )
+        await run_in_threadpool(resolved_components.scanner.scan, data)
         template, version = await run_in_threadpool(
             template_runtime().replace,
             actor,

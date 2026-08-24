@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
@@ -32,13 +33,21 @@ class JobServicePolicy:
     """Caller-owned terminal retention whose production value belongs to T18."""
 
     result_retention_seconds: float
+    max_job_duration_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if (
             isinstance(self.result_retention_seconds, bool)
+            or not math.isfinite(self.result_retention_seconds)
             or self.result_retention_seconds <= 0
         ):
             raise ValueError("Job service retention must be positive")
+        if self.max_job_duration_seconds is not None and (
+            isinstance(self.max_job_duration_seconds, bool)
+            or not math.isfinite(self.max_job_duration_seconds)
+            or self.max_job_duration_seconds <= 0
+        ):
+            raise ValueError("Job service duration budget must be positive")
 
 
 def _digest(value: bytes) -> str:
@@ -57,6 +66,12 @@ class JobService:
         self._repository = repository
         self._objects = objects
         self._policy = policy
+
+    @property
+    def max_job_duration_seconds(self) -> float | None:
+        """Expose the configured processing budget to transport composition."""
+
+        return self._policy.max_job_duration_seconds
 
     def submit(
         self, request: JobRequest, idempotency_key: str | None

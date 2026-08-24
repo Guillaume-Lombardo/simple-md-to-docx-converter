@@ -52,16 +52,18 @@ from tests.template_records import publish_template_pair
 class DistributedTemplateProcessor:
     """Return evidence of the exact frozen bytes supplied by composition."""
 
-    def process_with_template(
+    def process_with_template(  # noqa: PLR0913 - explicit worker boundary
         self,
         job: ConversionJob,
         template: TemplateVersion,
         template_content: bytes,
         *,
         cancelled: Callable[[], bool],
+        deadline_monotonic: float | None,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult:
         assert template.id == job.template_version_id
+        assert deadline_monotonic is None
         assert not cancelled()
         progress(JobStep.PUBLISHING, 90)
         return JobProcessResult(b"used:" + template_content)

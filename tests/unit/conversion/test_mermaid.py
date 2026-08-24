@@ -24,6 +24,7 @@ from md_converter.conversion.mermaid import (
     render_mermaid,
 )
 from md_converter.conversion.validation import ApprovedMarkdown
+from md_converter.jobs.policy import DiagramResourceBudget
 
 pytestmark = pytest.mark.unit
 
@@ -88,6 +89,61 @@ def test_multiple_nested_fences_keep_container_prefixes_and_order(mocker) -> Non
         PurePosixPath("docs/.md-converter-mermaid/0002.png"),
     ]
     assert renderer.render.call_count == 2
+
+
+def test_preprocessor_applies_shared_diagram_budget_before_rendering(mocker) -> None:
+    renderer = mocker.Mock()
+    downstream = mocker.Mock()
+    converter = MermaidPreprocessingConverter(
+        downstream,
+        renderer,
+        LIMITS,
+        IMAGE_LIMITS,
+        DiagramResourceBudget(1),
+    )
+
+    with pytest.raises(ConversionError, match="configured Mermaid limits"):
+        converter.convert(
+            ApprovedMarkdown(
+                "```mermaid\nflowchart LR\n```\n```mermaid\nflowchart RL\n```"
+            ),
+            b"reference",
+        )
+
+    renderer.render.assert_not_called()
+    downstream.convert.assert_not_called()
+
+
+def test_preprocessor_propagates_worker_deadline_to_renderer_and_engine(mocker) -> None:
+    _patch_normalization(mocker)
+    renderer = mocker.Mock()
+    renderer.render.return_value = RAW_OUTPUT
+    downstream = mocker.Mock()
+    downstream.convert.return_value = b"docx"
+    converter = MermaidPreprocessingConverter(
+        downstream,
+        renderer,
+        LIMITS,
+        IMAGE_LIMITS,
+    )
+
+    result = converter.convert(
+        ApprovedMarkdown("```mermaid\nflowchart LR\n```"),
+        b"reference",
+        deadline_monotonic=42.0,
+    )
+
+    assert result == b"docx"
+    renderer.render.assert_called_once_with(
+        "flowchart LR\n",
+        LIMITS.max_output_bytes,
+        deadline_monotonic=42.0,
+    )
+    downstream.convert.assert_called_once_with(
+        mocker.ANY,
+        b"reference",
+        deadline_monotonic=42.0,
+    )
 
 
 def test_document_height_is_the_only_attribute_for_portrait_scaling(mocker) -> None:
@@ -482,6 +538,31 @@ def test_cli_timeout_terminates_then_kills_process_group(
     assert captured.value.code is ConversionErrorCode.MERMAID_TIMEOUT
     assert [call.args for call in killpg.call_args_list] == [(1234, 15), (1234, 9)]
     assert process.wait.call_count == 3
+
+
+def test_worker_deadline_caps_mermaid_engine_timeout(tmp_path: Path, mocker) -> None:
+    process = mocker.Mock(pid=1234)
+    process.wait.return_value = 0
+
+    def start(_arguments, **options):
+        (options["cwd"] / "diagram.png").write_bytes(RAW_OUTPUT)
+        return process
+
+    mocker.patch("md_converter.conversion.mermaid.subprocess.Popen", side_effect=start)
+    mocker.patch("md_converter.conversion.mermaid.time.monotonic", return_value=20.0)
+    mocker.patch(
+        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+    )
+
+    assert (
+        MermaidCliRenderer(_config(tmp_path), {}).render(
+            "flowchart LR",
+            100_000,
+            deadline_monotonic=21.5,
+        )
+        == RAW_OUTPUT
+    )
+    process.wait.assert_called_once_with(timeout=1.5)
 
 
 def test_cli_missing_output_is_invalid(tmp_path: Path, mocker) -> None:

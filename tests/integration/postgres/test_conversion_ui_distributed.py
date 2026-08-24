@@ -9,6 +9,7 @@ from sqlalchemy import delete, select, update
 
 from md_converter.app import create_app
 from md_converter.config import Settings
+from md_converter.malware import TrustingUploadScanner
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.schema import (
     ConversionJobRow,
@@ -52,7 +53,8 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
             conversion_request_max_bytes=2_000,
             conversion_retry_after_seconds=1,
             job_result_retention_seconds=60,
-        )
+        ),
+        scanner=TrustingUploadScanner(),
     )
     with TestClient(app, base_url="https://testserver") as client:
         login = client.post(

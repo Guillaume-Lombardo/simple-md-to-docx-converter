@@ -236,3 +236,4 @@ def test_result_download_and_policy_validation(mocker: MockerFixture) -> None:
     for invalid in (0, True):
         with pytest.raises(ValueError):
             JobServicePolicy(invalid)
+    assert service(repository, objects).max_job_duration_seconds is None

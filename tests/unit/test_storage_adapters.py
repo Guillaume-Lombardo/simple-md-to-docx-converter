@@ -216,6 +216,8 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     s3_client.assert_called_once_with("s3")
     reclaim.assert_called_once_with()
     assert components.object_store is not None
+    assert components.job_repository is not None
+    assert components.retention is not None
 
 
 @pytest.mark.unit

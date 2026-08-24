@@ -142,6 +142,10 @@ class TemplateVersionRow(Base):
     publication_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    retention_token: Mapped[str | None] = mapped_column(String(36))
+    retention_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class TemplateAuditRow(Base):
@@ -157,6 +161,20 @@ class TemplateAuditRow(Base):
     version_id: Mapped[str | None] = mapped_column(String(36))
     administrator_intervention: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class RetentionCleanupRunRow(Base):
+    """Content-free durable evidence for one bounded retention transaction."""
+
+    __tablename__ = "retention_cleanup_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    cutoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    removed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
 
@@ -203,6 +221,12 @@ Index(
     "ix_template_audit_target",
     TemplateAuditRow.template_id,
     TemplateAuditRow.created_at,
+)
+Index("ix_template_audit_retention", TemplateAuditRow.created_at, TemplateAuditRow.id)
+Index(
+    "ix_template_version_retention",
+    TemplateVersionRow.created_at,
+    TemplateVersionRow.retention_lease_expires_at,
 )
 
 

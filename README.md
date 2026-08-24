@@ -16,8 +16,8 @@ loops over SQLite or PostgreSQL. The authenticated server-rendered conversion pa
 upload and drag-and-drop, active-template search with preferred/fallback visibility, DOCX/PDF/both
 selection, asynchronous status and cancellation, expiration handling, and safe downloads. The
 template administration page provides owner and administrator lifecycle controls, preferences,
-version history, and an administrator-only local-account tab. Resource policy and final-container
-features remain under development.
+version history, and an administrator-only local-account tab. Configurable quotas and resource
+policy are assembled; final-container features remain under development.
 
 ## Requirements
 
@@ -26,6 +26,7 @@ features remain under development.
 - Pandoc 3.10.2 for real DOCX conversion, Mermaid CLI 11.16.0 with Chrome 151.0.7922.173 for
   diagram rendering, LibreOffice 26.2.5.2 for PDF conversion, and the Cairo shared library for SVG
   rasterization; the validated UBI toolchain image provides these engines
+- A reachable ClamAV `clamd` service for fail-closed pre-persistence upload scanning
 
 `uv` reads `.python-version`, installs Python 3.14 when needed, and creates the project environment.
 No manually managed virtual environment or direct `pip` invocation is required.
@@ -72,6 +73,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
 - `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
+- `docs/resource-policy.md`: quotas, budgets, retention, recovery, and cleanup configuration
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
 - `docs/administration-ui.md`: template-owner and administrator browser workflows
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
