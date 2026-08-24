@@ -35,6 +35,8 @@ regenerate `build-constraints.txt` using the command in the local development gu
 uv run ruff format .
 uv run ruff check .
 uv run ty check
+npm ci --ignore-scripts
+npm run test:web
 uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
 uv run pytest
 ```

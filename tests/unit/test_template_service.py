@@ -68,6 +68,7 @@ def test_template_service_visibility_selection_and_audit_context(
     catalog.get.side_effect = {active.id: active, archived.id: archived}.get
     selections = mocker.Mock()
     selections.resolve.return_value = active
+    selections.preferred_id.return_value = active.id
     service = TemplateService(catalog=catalog, selections=selections)
 
     assert service.get_visible(outsider, active.id) == active
@@ -87,6 +88,9 @@ def test_template_service_visibility_selection_and_audit_context(
     service.set_preferred(owner, active.id)
     service.clear_preferred(owner)
     assert service.resolve(owner) == active
+    assert service.selection_label(owner, active) == "Preferred template"
+    selections.preferred_id.return_value = None
+    assert service.selection_label(owner, active) == "System fallback template"
     with pytest.raises(AuthenticationError):
         service.set_system_fallback(owner, active.id)
     authorization = service.set_system_fallback(admin, active.id)

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -86,6 +87,11 @@ from md_converter.templates.models import (
 )
 from md_converter.templates.runtime import build_template_validator
 from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
+from md_converter.web import (
+    WEB_SECURITY_HEADERS,
+    render_conversion_page,
+    render_login_page,
+)
 
 COMPONENT_VERSIONS = (
     ("chromium", "151.0.7922.173"),
@@ -94,6 +100,8 @@ COMPONENT_VERSIONS = (
     ("mermaid-cli", "11.16.0"),
     ("pandoc", "3.10.2"),
 )
+STATIC_DIRECTORY = Path(__file__).with_name("static")
+CSRF_COOKIE_NAME = "__Host-md_converter_csrf"
 
 
 class BoundedRequestBody:
@@ -218,7 +226,11 @@ class LoginResponse(BaseModel):
 
     user: UserResponse
     csrf_token: str = Field(
-        description="Send as X-CSRF-Token for authenticated mutations."
+        description=(
+            "Send as X-CSRF-Token for authenticated mutations. Browser clients also "
+            "receive the same value in the Secure, SameSite=Lax "
+            "__Host-md_converter_csrf cookie."
+        )
     )
 
 
@@ -702,6 +714,17 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             max_age=resolved_settings.session_absolute_seconds,
         )
 
+    def set_csrf_cookie(response: Response, token: str) -> None:
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            token,
+            httponly=False,
+            secure=True,
+            samesite="lax",
+            path="/",
+            max_age=resolved_settings.session_absolute_seconds,
+        )
+
     def clear_session_cookie(response: Response) -> None:
         response.delete_cookie(
             resolved_settings.session_cookie_name,
@@ -709,6 +732,20 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             secure=True,
             samesite="lax",
             path="/",
+        )
+        response.delete_cookie(
+            CSRF_COOKIE_NAME,
+            httponly=False,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+
+    def web_response(content: str, *, status_code: int = 200) -> HTMLResponse:
+        return HTMLResponse(
+            content,
+            status_code=status_code,
+            headers={**WEB_SECURITY_HEADERS, "Cache-Control": "no-store"},
         )
 
     def conversion_response(job: ConversionJob) -> ConversionResponse:
@@ -756,16 +793,51 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
+    @app.get("/", include_in_schema=False)
+    def browser_root() -> RedirectResponse:
+        return RedirectResponse("/convert", status_code=303)
+
+    @app.get("/static/conversion.css", include_in_schema=False)
+    def conversion_stylesheet() -> Response:
+        return Response(
+            (STATIC_DIRECTORY / "conversion.css").read_bytes(),
+            media_type="text/css",
+            headers={**WEB_SECURITY_HEADERS, "Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/static/conversion.js", include_in_schema=False)
+    def conversion_javascript() -> Response:
+        return Response(
+            (STATIC_DIRECTORY / "conversion.js").read_bytes(),
+            media_type="text/javascript",
+            headers={**WEB_SECURITY_HEADERS, "Cache-Control": "public, max-age=3600"},
+        )
+
     @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
-    def login_page() -> str:
-        return """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Sign in</title></head>
-<body><main><h1>Sign in</h1>
-<form method="post" action="/login">
-<label>Username <input name="username" autocomplete="username" required></label>
-<label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-<button type="submit">Sign in</button>
-</form></main></body></html>"""
+    def login_page() -> HTMLResponse:
+        return web_response(render_login_page())
+
+    @app.get("/convert", response_class=HTMLResponse, include_in_schema=False)
+    def conversion_page(request: Request) -> Response:
+        try:
+            actor = current_user(request)
+        except AuthenticationError:
+            return RedirectResponse("/login", status_code=303)
+        runtime = template_runtime()
+        selected = runtime.resolve(actor)
+        label = (
+            runtime.selection_label(actor, selected) if selected is not None else None
+        )
+        recent = resolved_components.jobs.list_owner(actor.id, offset=0, limit=10)
+        return web_response(
+            render_conversion_page(
+                actor,
+                selected,
+                label,
+                recent.items,
+                maximum_upload_bytes=resolved_settings.conversion_upload_max_bytes,
+            )
+        )
 
     @app.post("/login", include_in_schema=False)
     def browser_login(
@@ -781,14 +853,10 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 previous_session_token=session_token(request),
             )
         except AuthenticationError:
-            return HTMLResponse(
-                '<!doctype html><html lang="en"><body><main>'
-                '<h1>Sign in</h1><p role="alert">The username or password is incorrect.</p>'
-                "</main></body></html>",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-            )
-        response = RedirectResponse("/docs", status_code=status.HTTP_303_SEE_OTHER)
+            return web_response(render_login_page(invalid=True), status_code=401)
+        response = RedirectResponse("/convert", status_code=status.HTTP_303_SEE_OTHER)
         set_session_cookie(response, result.session_token)
+        set_csrf_cookie(response, result.csrf_token)
         return response
 
     @app.post(
@@ -809,6 +877,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             previous_session_token=session_token(request),
         )
         set_session_cookie(response, result.session_token)
+        set_csrf_cookie(response, result.csrf_token)
         return LoginResponse(
             user=UserResponse.model_validate(result.user),
             csrf_token=result.csrf_token,
@@ -1022,7 +1091,9 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 "Content-Disposition": (
                     f'attachment; filename="conversion-{job.id}.'
                     f'{extensions[job.output]}"'
-                )
+                ),
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 

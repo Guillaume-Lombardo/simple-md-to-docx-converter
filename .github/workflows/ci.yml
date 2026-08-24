@@ -85,6 +85,11 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: false
+      - name: Set up pinned Node for browser-module tests
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+          check-latest: false
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -101,6 +106,10 @@ jobs:
         run: uv run ruff check .
       - name: Check types
         run: uv run ty check
+      - name: Run native browser-module tests with coverage gates
+        run: |
+          npm ci --ignore-scripts
+          npm run test:web
       - name: Run unit tests with branch coverage
         run: >-
           uv run pytest -m unit

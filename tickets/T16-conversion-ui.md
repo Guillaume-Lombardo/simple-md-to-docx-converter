@@ -39,6 +39,25 @@ Build template search, job submission, progressive polling, cancellation, expira
   selection, output choice, job submission, progressive status polling, cancellation, expiration,
   download, and stable English errors. T17 retains template/account administration UI, while
   T20/T21 retain final-application-image browser E2E execution.
+- 2026-08-24: Implemented the authenticated `/convert` page with external native JavaScript and
+  CSS, strict browser security headers, a session-bound `__Host-` CSRF cookie, accessible file
+  choice and drag-and-drop, preferred/system-fallback visibility, active-template search,
+  DOCX/PDF/both choice, stable idempotency reuse, progressive polling with transient recovery,
+  safe step/progress/failure/expiration states, recent-job reopening, cancellation, and guarded
+  downloads. T17 administration controls are absent and T18 production limits remain configurable.
+- 2026-08-24: Added rendering and HTTP unit coverage, native JavaScript behavior tests with blocking
+  coverage gates, a real authentication/SQLite/filesystem functional workflow, and a live
+  PostgreSQL/RustFS integration workflow with isolated cleanup. The pinned Node 22.23.1 gate passes
+  5 tests at 100.00% lines, 96.40% branches, and 96.55% functions. The applicable host suite passes
+  866 tests at 94.62% application coverage with the existing PostgreSQL and RustFS containers.
+  The unfiltered host suite passes 873 tests and has the same 37 expected engine-marked failures
+  because Pandoc, Mermaid/Chromium, LibreOffice, and locked fonts are absent from the host.
+- 2026-08-24: Final hardened-image Playwright E2E remains sequenced to T20/T21 because T20 has not
+  yet delivered that image. T21 must repeat both-profile submission, polling, cancellation,
+  expiration, download, authorization, recovery, and concurrency paths. This sequencing exception
+  requires explicit pull-request reviewer approval and is not a waiver. Linear was not mutated in
+  this implementation handoff as explicitly directed; the local mirror remains `In Progress` until
+  verification on `main`.
 
 ## Synchronization
 

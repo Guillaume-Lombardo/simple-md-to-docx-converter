@@ -61,3 +61,11 @@ process-mode wiring. Final rootless-image E2E
 coverage therefore remains sequenced to T20/T21; T13 covers the
 HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
 PostgreSQL/S3-compatible storage.
+
+## Browser workflow
+
+The authenticated `/convert` page consumes this API without weakening its ownership, CSRF,
+idempotency, or frozen-template rules. It submits a unique key with the multipart request, uses the
+returned `Retry-After` value before progressively backing off status requests, and offers cancel or
+download actions only for appropriate states. Recent owner-scoped jobs can be reopened. See
+`docs/conversion-ui.md` for the user-facing behavior and its T20/T21 final-image E2E sequencing.

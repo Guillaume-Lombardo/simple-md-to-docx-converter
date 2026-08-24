@@ -86,12 +86,23 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
             follow_redirects=False,
         )
         assert browser.status_code == 303
+        assert browser.headers["location"] == "/convert"
+        browser_cookies = browser.headers.get_list("set-cookie")
+        assert "__Host-md_converter_csrf=csrf-token" in browser_cookies[-1]
+        assert "Secure" in browser_cookies[-1]
+        assert "SameSite=lax" in browser_cookies[-1]
+        assert "HttpOnly" not in browser_cookies[-1]
+        assert any("HttpOnly" in cookie for cookie in browser_cookies)
 
         logged_in = client.post(
             "/api/v1/login",
             json={"username": "admin", "password": "admin-password"},
         )
         assert logged_in.status_code == 200
+        assert any(
+            "__Host-md_converter_csrf=csrf-token" in cookie
+            for cookie in logged_in.headers.get_list("set-cookie")
+        )
         assert "hash" not in logged_in.text
         headers = {"X-CSRF-Token": "csrf-token"}
         assert client.get("/api/v1/session").json()["id"] == str(admin.id)
@@ -117,11 +128,65 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
             ).status_code
             == 204
         )
-        assert client.post("/api/v1/logout", headers=headers).status_code == 204
+        logout = client.post("/api/v1/logout", headers=headers)
+        assert logout.status_code == 204
+        assert any(
+            "__Host-md_converter_csrf=" in cookie and "Max-Age=0" in cookie
+            for cookie in logout.headers.get_list("set-cookie")
+        )
 
     auth.validate_csrf.assert_called()
     auth.reset_password.assert_called_once_with(admin, alice.id, "replacement-password")
     auth.logout.assert_called()
+
+
+@pytest.mark.unit
+def test_authenticated_conversion_page_and_assets_are_hardened(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, admin, _alice = isolated_client(mocker)
+    templates = mocker.Mock(spec=TemplateService)
+    template = TemplateIdentity(
+        uuid4(),
+        admin.id,
+        "Default",
+        "Shared",
+        TemplateStatus.ACTIVE,
+        current_version_id=uuid4(),
+    )
+    templates.resolve.return_value = template
+    templates.selection_label.return_value = "System fallback template"
+    object.__setattr__(client.app.state.components, "templates", templates)
+    client.app.state.components.jobs.list_owner.return_value = JobPage((), 0, 0, 10)
+
+    with client:
+        root = client.get("/", follow_redirects=False)
+        page = client.get("/convert")
+        script = client.get("/static/conversion.js")
+        stylesheet = client.get("/static/conversion.css")
+    assert page.status_code == 200
+    assert root.status_code == 303 and root.headers["location"] == "/convert"
+    assert "System fallback template" in page.text
+    assert str(template.current_version_id) in page.text
+    assert "default-src 'none'" in page.headers["Content-Security-Policy"]
+    assert page.headers["Cache-Control"] == "no-store"
+    assert script.headers["X-Content-Type-Options"] == "nosniff"
+    assert script.headers["Content-Type"].startswith("text/javascript")
+    assert stylesheet.headers["Content-Type"].startswith("text/css")
+    templates.resolve.assert_called_once_with(admin)
+    auth.authenticate.assert_called()
+
+
+@pytest.mark.unit
+def test_conversion_page_redirects_when_session_is_absent(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _admin, _alice = isolated_client(mocker)
+    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
+    with client:
+        response = client.get("/convert", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
 
 
 @pytest.mark.unit
@@ -410,6 +475,8 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         result = client.get(f"/api/v1/conversions/{queued.id}/result")
         assert result.content == b"result"
         assert f".{succeeded.output.value}" in result.headers["Content-Disposition"]
+        assert result.headers["Cache-Control"] == "private, no-store"
+        assert result.headers["X-Content-Type-Options"] == "nosniff"
         assert (
             client.post(
                 "/api/v1/conversions",

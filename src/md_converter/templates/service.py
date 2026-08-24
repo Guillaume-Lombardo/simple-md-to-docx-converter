@@ -405,6 +405,12 @@ class TemplateService:
     def resolve(self, actor: User) -> TemplateIdentity | None:
         return self._selections.resolve(actor.id)
 
+    def selection_label(self, actor: User, template: TemplateIdentity) -> str:
+        """Describe whether the resolved active template is personal or system-wide."""
+        if self._selections.preferred_id(actor.id) == template.id:
+            return "Preferred template"
+        return "System fallback template"
+
     @staticmethod
     def _is_visible(actor: User, template: TemplateIdentity) -> bool:
         return (
