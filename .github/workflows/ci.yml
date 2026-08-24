@@ -240,6 +240,9 @@ jobs:
           sudo install --directory --mode=0755 /opt/md-converter/fontconfig/cache
           sudo install --mode=0444 spikes/toolchain/fonts/fonts.conf \
             /opt/md-converter/fontconfig/fonts.conf
+          sudo install --directory --mode=0755 /opt/toolchain/evidence
+          sudo install --mode=0444 spikes/toolchain/fonts/manifest.json \
+            /opt/toolchain/evidence/font-manifest.json
           sudo env FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf fc-cache --force
           echo "FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf" >> "$GITHUB_ENV"
 
