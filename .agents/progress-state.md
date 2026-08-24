@@ -24,6 +24,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   reproducible exact golden. The canonical unit selection passes 610 tests at 93.98% coverage, the
   default local suite passes 751 tests at 95.04% coverage, and the hardened rootless UBI harness
   passes all 20 real Pandoc/LibreOffice/PDFium tests.
+- T13/G1L-322 is `In Progress` on `feat/T13-persistent-queue-workers`, based on delivered main
+  `80974b3`. Its T11 and T12 dependencies are verified `Done` locally and in Linear.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
 ## Delivered T10 Scope
@@ -59,8 +61,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Publish and merge the T11 tracking closure.
-2. Start T13, the smallest ready critical-path ticket now that T11 and T12 are delivered.
+1. Define the T13 storage-neutral job state machine, repository, worker, and HTTP contracts without
+   resolving T18-owned production values.
+2. Implement contract tests first, then SQLite/PostgreSQL persistence, worker recovery, and API
+   behavior with real-boundary coverage for both profiles.
 
 ## Validation
 

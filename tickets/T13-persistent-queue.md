@@ -2,7 +2,7 @@
 ticket: T13
 linear_id: G1L-322
 linear_url: https://linear.app/g1lom/issue/G1L-322/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,13 @@ Implement the persistent queue, job API, state machine, idempotency, workers, le
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T11 and T12 are verified `Done` in both the repository and Linear. Implementation
+  started on `feat/T13-persistent-queue-workers` from delivered main `80974b3`. Scope is the shared
+  durable job state machine and repository contract, SQLite/PostgreSQL claim and lease semantics,
+  idempotent owner-scoped submission, embedded/external worker coordination, heartbeat, restart
+  recovery, cancellation, atomic result publication, and safe job HTTP endpoints. T18 retains all
+  unresolved production limits, quotas, retention, and cleanup schedules; T20/T21 retain final-image
+  E2E and T15 retains versioned template mutation APIs.
 
 ## Synchronization
 
