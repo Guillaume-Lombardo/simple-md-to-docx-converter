@@ -46,6 +46,7 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
     assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
     assert "mmdc --version" in workflow
     assert "google-chrome-stable --version" in workflow
+    assert "awk '{$1=$1; print}'" in workflow
 
 
 @pytest.mark.unit

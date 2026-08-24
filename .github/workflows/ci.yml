@@ -256,7 +256,8 @@ jobs:
           echo "$GITHUB_WORKSPACE/spikes/toolchain/node_modules/.bin" >> "$GITHUB_PATH"
           test "$(node --version)" = "v22.23.1"
           test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.16.0"
-          test "$(google-chrome-stable --version)" = "Google Chrome 151.0.7922.173"
+          test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
+            = "Google Chrome 151.0.7922.173"
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
