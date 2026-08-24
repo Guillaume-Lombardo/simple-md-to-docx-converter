@@ -17,6 +17,14 @@ class JobRequestError(JobError, ValueError):
     """A conversion request violates the stable input contract."""
 
 
+class JobUserQuotaExceededError(JobError):
+    """The owner already has the configured number of active jobs."""
+
+
+class JobQueueCapacityExceededError(JobError):
+    """The global persistent queue has reached its configured capacity."""
+
+
 class JobLeaseLostError(JobError):
     """A worker no longer owns the claimed job lease."""
 

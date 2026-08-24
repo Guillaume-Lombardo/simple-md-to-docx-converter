@@ -22,7 +22,12 @@ def test_external_loop_recovers_processes_cleans_and_waits(
     stop = mocker.Mock()
     stop.is_set.side_effect = (False, False, False, True)
     stop.wait.side_effect = (False, True)
-    WorkerLoop(worker, WorkerSchedule(0.1, 2, 5, 0.2)).run(stop)
+    clock = mocker.Mock(side_effect=(0.0, 1.0, 2.0, 2.5))
+    WorkerLoop(
+        worker,
+        WorkerSchedule(0.1, 2, 5, 0.2),
+        monotonic_clock=clock,
+    ).run(stop)
     assert worker.recover.call_count == 3
     assert worker.run_once.call_count == 3
     worker.cleanup.assert_called_once_with(limit=5)

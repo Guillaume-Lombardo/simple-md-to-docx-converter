@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -32,6 +33,7 @@ class WorkerPolicy:
     heartbeat_seconds: float
     result_retention_seconds: float
     incomplete_submission_seconds: float
+    max_job_duration_seconds: float | None = None
 
     def __post_init__(self) -> None:
         values = (
@@ -40,8 +42,17 @@ class WorkerPolicy:
             self.result_retention_seconds,
             self.incomplete_submission_seconds,
         )
-        if any(isinstance(value, bool) or value <= 0 for value in values):
+        if any(
+            isinstance(value, bool) or not math.isfinite(value) or value <= 0
+            for value in values
+        ):
             raise ValueError("Worker policy durations must be positive")
+        if self.max_job_duration_seconds is not None and (
+            isinstance(self.max_job_duration_seconds, bool)
+            or not math.isfinite(self.max_job_duration_seconds)
+            or self.max_job_duration_seconds <= 0
+        ):
+            raise ValueError("Worker job duration budget must be positive")
         if self.heartbeat_seconds >= self.lease_seconds:
             raise ValueError("Worker heartbeat must be shorter than its lease")
 
@@ -95,12 +106,18 @@ class ConversionWorker:
         if job.lease_token is None:  # guarded by the domain model
             raise JobLeaseLostError("Conversion job lease token is missing")
         lease_token = job.lease_token
+        deadline = (
+            None
+            if self._policy.max_job_duration_seconds is None
+            else now + timedelta(seconds=self._policy.max_job_duration_seconds)
+        )
 
         progress_state = _ProgressState(job.step, job.progress)
         progress_lock = Lock()
         heartbeat_operation = Lock()
         keepalive_stop = Event()
         lease_lost = Event()
+        duration_exhausted = Event()
         keepalive_errors: list[BaseException] = []
 
         def heartbeat() -> None:
@@ -133,8 +150,14 @@ class ConversionWorker:
                         return
 
         def cancelled() -> bool:
-            return lease_lost.is_set() or self._repository.cancellation_requested(
-                job.id, self._worker_id, lease_token
+            if deadline is not None and self._clock() >= deadline:
+                duration_exhausted.set()
+            return (
+                lease_lost.is_set()
+                or duration_exhausted.is_set()
+                or self._repository.cancellation_requested(
+                    job.id, self._worker_id, lease_token
+                )
             )
 
         def progress(step: JobStep, percentage: int) -> None:
@@ -168,7 +191,14 @@ class ConversionWorker:
                 if keepalive_errors:
                     raise keepalive_errors[0]
                 if isinstance(processing_error, JobProcessingCancelled):
-                    self._finish_cancelled(job)
+                    if duration_exhausted.is_set() and not (
+                        self._repository.cancellation_requested(
+                            job.id, self._worker_id, lease_token
+                        )
+                    ):
+                        self._finish_budget_exceeded(job)
+                    else:
+                        self._finish_cancelled(job)
                     keepalive_stop.set()
                     return True
                 if isinstance(processing_error, ConversionError):
@@ -267,6 +297,22 @@ class ConversionWorker:
                 lease_token=job.lease_token,
                 code=error.code.value,
                 message=str(error),
+                now=finished_at,
+                expires_at=self._expires_at(finished_at),
+            )
+        )
+
+    def _finish_budget_exceeded(self, job: ConversionJob) -> None:
+        if job.lease_token is None:
+            raise JobLeaseLostError("Conversion job lease token is missing")
+        finished_at = self._clock()
+        self._repository.fail(
+            JobFailure(
+                job_id=job.id,
+                worker_id=self._worker_id,
+                lease_token=job.lease_token,
+                code="resource_budget_exceeded",
+                message="Conversion exceeded its configured duration budget.",
                 now=finished_at,
                 expires_at=self._expires_at(finished_at),
             )

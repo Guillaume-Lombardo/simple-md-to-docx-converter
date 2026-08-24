@@ -25,6 +25,8 @@ The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS`, and
 `MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS` settings deliberately have no production defaults.
 T18 owns their approved values and the associated quotas and schedules.
+The complete typed admission, budget, retention, and cleanup contract is documented in
+[`resource-policy.md`](resource-policy.md).
 
 ## Durable lifecycle
 
@@ -51,7 +53,9 @@ recovers expired leases and abandoned uploads continuously, processes one claim 
 sanitized transient repository and object-store failures with bounded backoff, waits without busy
 looping, and performs bounded periodic cleanup. The embedded lifecycle exposes unexpected terminal
 failures to its readiness owner. Polling, lease, heartbeat, recovery, cleanup, retention,
-concurrency, and stop values are caller-owned and remain production policy for T18.
+concurrency, and stop values are caller-owned and have no implicit production defaults. Cleanup is
+scheduled from elapsed monotonic time rather than loop iterations, so queue activity cannot make it
+run too frequently or prevent an idle worker from running it.
 
 The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
 exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored

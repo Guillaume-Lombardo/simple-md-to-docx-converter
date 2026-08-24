@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Lock, Thread
+from time import monotonic
 from typing import Protocol
 
 from md_converter.jobs.errors import JobLeaseLostError, JobRepositoryError
@@ -24,19 +27,22 @@ class WorkerSchedule:
     """Caller-owned polling and cleanup schedule whose values belong to T18."""
 
     idle_poll_seconds: float
-    cleanup_every_iterations: int
+    cleanup_interval_seconds: float
     cleanup_limit: int
     error_backoff_seconds: float
 
     def __post_init__(self) -> None:
         if (
             isinstance(self.idle_poll_seconds, bool)
+            or not math.isfinite(self.idle_poll_seconds)
             or self.idle_poll_seconds <= 0
-            or isinstance(self.cleanup_every_iterations, bool)
-            or self.cleanup_every_iterations <= 0
+            or isinstance(self.cleanup_interval_seconds, bool)
+            or not math.isfinite(self.cleanup_interval_seconds)
+            or self.cleanup_interval_seconds <= 0
             or isinstance(self.cleanup_limit, bool)
             or self.cleanup_limit <= 0
             or isinstance(self.error_backoff_seconds, bool)
+            or not math.isfinite(self.error_backoff_seconds)
             or self.error_backoff_seconds <= 0
         ):
             raise ValueError("Worker schedule values must be positive")
@@ -45,19 +51,27 @@ class WorkerSchedule:
 class WorkerLoop:
     """Recover continuously, process serially, and run bounded periodic cleanup."""
 
-    def __init__(self, worker: ConversionWorker, schedule: WorkerSchedule) -> None:
+    def __init__(
+        self,
+        worker: ConversionWorker,
+        schedule: WorkerSchedule,
+        *,
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> None:
         self._worker = worker
         self._schedule = schedule
+        self._monotonic_clock = monotonic_clock
 
     def run(self, stop: StopSignal) -> None:
-        iteration = 0
+        next_cleanup = self._monotonic_clock() + self._schedule.cleanup_interval_seconds
         while not stop.is_set():
             try:
                 self._worker.recover()
                 processed = self._worker.run_once()
-                iteration += 1
-                if iteration % self._schedule.cleanup_every_iterations == 0:
+                now = self._monotonic_clock()
+                if now >= next_cleanup:
                     self._worker.cleanup(limit=self._schedule.cleanup_limit)
+                    next_cleanup = now + self._schedule.cleanup_interval_seconds
                 if not processed:
                     stop.wait(self._schedule.idle_poll_seconds)
             except JobLeaseLostError, JobRepositoryError, ObjectStoreError:

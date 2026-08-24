@@ -70,6 +70,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
 - `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
+- `docs/resource-policy.md`: quotas, budgets, retention, recovery, and cleanup configuration
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
 - `docs/golden-testing.md`: reference corpus and deterministic DOCX/PDF comparison helpers

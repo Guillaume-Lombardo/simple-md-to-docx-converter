@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
@@ -36,6 +37,7 @@ class JobServicePolicy:
     def __post_init__(self) -> None:
         if (
             isinstance(self.result_retention_seconds, bool)
+            or not math.isfinite(self.result_retention_seconds)
             or self.result_retention_seconds <= 0
         ):
             raise ValueError("Job service retention must be positive")
