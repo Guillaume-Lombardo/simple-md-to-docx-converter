@@ -9,16 +9,13 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- `main` at `1635c17` contains T00-T15. T15 implementation PR #46 and completion PR #47 were
-  squash-merged after green CI and independent review; their exact local and remote branches were
-  removed. T15/G1L-323 is `Done` locally and in Linear.
-- T16/G1L-327 is implemented, locally verified, and independently approved on
-  `feat/T16-conversion-ui`, based on delivered main `1635c17`; it remains `In Progress` until
-  verification on `main`.
-- Ready pull request #48 publishes the approved implementation. Its first CI run passed the real
-  browser workflow and found a `/proc` disappearance race in an existing process-cleanup assertion;
-  the corrected head is awaiting required GitHub checks and independent confirmation.
-  Its T13, T14, and T15 dependencies are verified `Done` locally and in Linear.
+- `main` at `45fc9e8` contains T00-T16. T16 implementation PR #48 was squash-merged after green CI
+  and independent review; its exact implementation branch was removed locally and remotely.
+- T16/G1L-327 is verified `Done` locally and in Linear. Its T13, T14, and T15 dependencies are also
+  verified `Done` locally and in Linear.
+- PR #48 CI run 32752143779 passed every selected stage. The document-engine job passed the real
+  authenticated browser workflow and 143 engine tests after the existing `/proc` disappearance
+  assertion was hardened for both Linux missing-process outcomes.
 - T16 provides the authenticated server-rendered conversion page, restricted external native
   JavaScript/CSS, preferred/fallback template selection and search, idempotent submission,
   progressive polling, recent-job status, cancellation, expiration, accessible safe errors, and
@@ -75,5 +72,6 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Action
 
-Require green CI and final corrected-head confirmation on ready pull request #48, then
-squash-merge, verify on `main`, synchronize T16 to `Done`, and clean the exact branch.
+Stop this orchestration run after the T16 completion record is merged and cleaned, as requested by
+the user. Do not start T17 here. The next conversation should re-read the repository state, verify
+T16 remains delivered, and then select T17.

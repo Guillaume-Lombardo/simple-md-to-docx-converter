@@ -2,7 +2,7 @@
 ticket: T16
 linear_id: G1L-327
 linear_url: https://linear.app/g1lom/issue/G1L-327/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -92,6 +92,12 @@ Build template search, job submission, progressive polling, cancellation, expira
   treats both observable missing-process outcomes as stopped; the affected case passes 20
   consecutive local executions, and Ruff plus `ty` remain green. Awaiting CI and independent
   confirmation of the corrected pull-request head.
+- 2026-08-24: Corrected head `5306bc5` received independent approval and CI run 32752143779 passed
+  every selected stage, including 143 document-engine tests, the authenticated pinned-Chrome
+  workflow, both storage profiles, and the final gate. Ready PR #48 was squash-merged as
+  `45fc9e86`; local `main` was fast-forwarded to the same commit, and the exact implementation
+  branch was removed locally and remotely. Linear G1L-327 is verified `Done`. Final-application-
+  image browser E2E remains mandatory in T20/T21 under the explicitly approved sequencing.
 
 ## Synchronization
 
