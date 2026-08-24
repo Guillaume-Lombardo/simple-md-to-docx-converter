@@ -9,10 +9,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean and matches `origin/main`; delivered history through T07 completion PR #35 is
+- `main` is clean and matches `origin/main`; delivered history through T08 PR #36 is
   verified below.
-- T00, T01, T02, T03, T04, T05, T06, T07, T12, and T14 are delivered. Linear G1L-310, G1L-314,
-  and G1L-317 are synchronized as `Done`. T08/G1L-318 is the active ticket.
+- T00, T01, T02, T03, T04, T05, T06, T07, T08, T12, and T14 are delivered. Linear G1L-310,
+  G1L-314, G1L-317, and G1L-318 are synchronized as `Done`. T09/G1L-319 is next.
 - PR #32 delivered the complete manifest-owned corpus, provenance-pinned generated
   DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
   RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
@@ -83,6 +83,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T07 completion tracking is delivered by PR #35 as squash
   `ff5df18ca0ac8262601b9d5f953791f08c65d136`; exact-main run `32700928103` passed and Linear
   G1L-317 is `Done` with both PRs attached.
+- T08 is delivered by PR #36 as squash `ca46aabe4864b8b1dc5e85a03f584abc834d2dce`:
+  bounded ZIP preflight and reads, deterministic raster normalization, bounded hostile SVG/CSS
+  sanitization, immutable local-resource binding, normalized-PNG manifest revalidation, and
+  isolated Pandoc materialization. Exact-main run `32705438253` passed every active CI domain and
+  the protected gate.
 
 ## Blockers and Risks
 
@@ -99,8 +104,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Deliver T08 image/archive security without absorbing T09 Mermaid, T10 template/font, T11 PDF,
-   or T18 production-limit responsibilities. T13 still waits for T11.
+1. Deliver T09 local Mermaid rendering without absorbing T10 template/font, T11 PDF, or T18
+   production-limit responsibilities. T13 still waits for T11.
 2. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 3. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -129,8 +134,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310, G1L-314, and G1L-317 report `Done` and match their local mirrors. T08/G1L-318 is
-  unblocked because its T04 and T07 dependencies are verified `Done`.
+- Linear G1L-310, G1L-314, G1L-317, and G1L-318 report `Done` and match their local mirrors.
+  T09/G1L-319 is unblocked because T08 is verified on `main`.
 - T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
   coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
   tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
@@ -153,6 +158,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and was squash-merged as `ff5df18ca0ac8262601b9d5f953791f08c65d136`. Exact-main run
   `32700928103` passed light checks and the protected gate; Linear G1L-317 was then transitioned to
   `Done`.
+- PR #36 exact head `375709d8da99258e64d020dc4f68316e144c3fe5` received two independent
+  approvals with no findings, passed run `32705309467`, and was squash-merged as
+  `ca46aabe4864b8b1dc5e85a03f584abc834d2dce`. Exact-main run `32705438253` passed light,
+  CI infrastructure, functional, document-engine, standalone-storage, distributed-storage, and
+  protected-gate jobs.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
