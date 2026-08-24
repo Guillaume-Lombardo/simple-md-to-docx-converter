@@ -2,7 +2,7 @@
 ticket: T11
 linear_id: G1L-320
 linear_url: https://linear.app/g1lom/issue/G1L-320/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,11 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T09 and T10 are verified `Done` in the repository and Linear. Implementation started
+  on `feat/T11-pdf-conversion`. Scope is deterministic DOCX-to-PDF conversion through an isolated
+  LibreOffice profile, bounded shell-free execution with whole-group timeout/cancellation,
+  reproducibility metadata, structural/raster golden validation, and real rootless engine failure
+  coverage. T13 owns asynchronous job-state cancellation wiring; T20/T21 retain final-image E2E.
 
 ## Synchronization
 

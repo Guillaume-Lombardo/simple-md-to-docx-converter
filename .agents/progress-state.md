@@ -18,6 +18,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T10/G1L-321 is delivered on `main`; its local and Linear status are `Done`.
 - T11 is the smallest ready critical-path ticket. Its T09 and T10 dependencies are verified `Done`;
   it blocks T13.
+- T11/G1L-320 is `In Progress` on `feat/T11-pdf-conversion`, based on delivered main
+  `c43b810`; T09 and T10 are verified dependencies.
 - Three read-only independent analyses cover official font artifacts, bounded OOXML architecture,
   and the security/integration test matrix. No implementation ownership overlaps.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
@@ -55,8 +57,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Close T10 tracking through the protected documentation PR and verify its exact main CI.
-2. Start T11 PDF production and synchronize its local mirror with Linear.
+1. Define the bounded PDF result/traceability and cancellation contracts without absorbing T13.
+2. Implement isolated LibreOffice conversion with unit and real rootless integration coverage.
+3. Add deterministic PDF structural and raster golden validation, then run canonical checks and
+   independent review.
 
 ## Validation
 
