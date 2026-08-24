@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -19,7 +20,7 @@ PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
 )
 _REMOTE_RESOURCE = re.compile(r"(?i)^(?:[a-z][a-z0-9+.-]*(?::|%3a)|//|%2f%2f)")
-_RAW_ATTRIBUTE = re.compile(r"^\{\s*=[^\s{}]+\s*\}")
+_RAW_ATTRIBUTE = re.compile(r"^\{\s*=([^\s{}]+)\s*\}")
 
 
 class _ResourceParser(MarkdownIt):
@@ -77,9 +78,16 @@ def _metadata_scalars(metadata: str) -> Iterator[str]:
                 pending.extend((key, value))
 
 
+def _is_raw_attribute(value: str, *, complete: bool) -> bool:
+    match = _RAW_ATTRIBUTE.fullmatch(value) if complete else _RAW_ATTRIBUTE.match(value)
+    return match is not None and unicodedata.normalize("NFC", match.group(1)).isalnum()
+
+
 def _validate_tokens(tokens: tuple[Token, ...]) -> None:
     for token in tokens:
-        if token.type == "fence" and _RAW_ATTRIBUTE.fullmatch(token.info.strip()):
+        if token.type == "fence" and _is_raw_attribute(
+            token.info.strip(), complete=True
+        ):
             raise validation_error("Markdown input contains a raw attribute.")
         if token.type != "inline" or not token.children:
             continue
@@ -88,7 +96,7 @@ def _validate_tokens(tokens: tuple[Token, ...]) -> None:
                 current.type == "code_inline"
                 and following.type == "text"
                 and following.info != "escape"
-                and _RAW_ATTRIBUTE.match(following.content)
+                and _is_raw_attribute(following.content, complete=False)
             ):
                 raise validation_error("Markdown input contains a raw attribute.")
     if any(token.type in {"html_block", "html_inline"} for token in tokens):
