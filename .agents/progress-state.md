@@ -15,8 +15,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T16/G1L-327 is implemented, locally verified, and independently approved on
   `feat/T16-conversion-ui`, based on delivered main `1635c17`; it remains `In Progress` until
   verification on `main`.
-- Ready pull request #48 publishes the approved implementation. Required GitHub checks are pending
-  on the documentation-only publication head above reviewed code head `e5e2fb8`.
+- Ready pull request #48 publishes the approved implementation. Its first CI run passed the real
+  browser workflow and found a `/proc` disappearance race in an existing process-cleanup assertion;
+  the corrected head is awaiting required GitHub checks and independent confirmation.
   Its T13, T14, and T15 dependencies are verified `Done` locally and in Linear.
 - T16 provides the authenticated server-rendered conversion page, restricted external native
   JavaScript/CSS, preferred/fallback template selection and search, idempotent submission,
@@ -74,5 +75,5 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Action
 
-Require green CI and final documentation-head confirmation on ready pull request #48, then
+Require green CI and final corrected-head confirmation on ready pull request #48, then
 squash-merge, verify on `main`, synchronize T16 to `Done`, and clean the exact branch.

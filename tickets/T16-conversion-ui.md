@@ -87,6 +87,11 @@ Build template search, job submission, progressive polling, cancellation, expira
 - 2026-08-24: The branch was rebased on unchanged `origin/main` and published as ready pull request
   [#48](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/48). Awaiting required
   GitHub checks before the authorized squash merge.
+- 2026-08-24: The first pull-request run passed the authenticated Chrome workflow but exposed a
+  `/proc` disappearance race in an existing LibreOffice descendant-cleanup assertion. The test now
+  treats both observable missing-process outcomes as stopped; the affected case passes 20
+  consecutive local executions, and Ruff plus `ty` remain green. Awaiting CI and independent
+  confirmation of the corrected pull-request head.
 
 ## Synchronization
 
