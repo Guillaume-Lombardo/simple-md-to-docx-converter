@@ -2,7 +2,7 @@
 ticket: T18
 linear_id: G1L-328
 linear_url: https://linear.app/g1lom/issue/G1L-328/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -114,6 +114,14 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   `878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd`). Final local validation
   passed the 31-test standalone storage domain, Ruff formatting/linting, `ty`, 786 unit tests, and
   978 applicable tests with live PostgreSQL/RustFS and 95.06% application coverage.
+- 2026-08-24: Independently approved head `9b600da` passed exact-head CI run 32769890696 across
+  light, functional, standalone, distributed, document-engine, authenticated browser, and final
+  gate stages. Ready pull request
+  [#52](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/52) was squash-merged
+  as `747acf2`; the exact implementation branch was confirmed absent remotely and its local branch
+  and worktree were removed. Exact-main CI run 32770246087 then passed the same complete matrix.
+  Final rootless-image application of memory/ephemeral-storage limits and both-profile E2E remain
+  mandatory T20/T21 sequencing work under the independently approved exception.
 
 Workload-dependent ceilings and schedules remain required operator-supplied configuration. Applying memory and ephemeral-storage ceilings and
 repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
