@@ -11,8 +11,13 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 - `main` is clean and matches `origin/main`; delivered history through T00 k3s PR #30 is verified
   below.
-- T00, T01, T02, T03, T05, T06, T12, and T14 are delivered. T04 is dependency-ready once the
-  final Linear G1L-310 synchronization completes.
+- T00, T01, T02, T03, T05, T06, T12, and T14 are delivered. Linear G1L-310 is synchronized as
+  `Done`, and T04 implementation is active on `feat/T04-golden-infrastructure`.
+- T04 implementation now includes the complete manifest-owned corpus, provenance-pinned generated
+  DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
+  RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
+  CI domain, and documentation. It remains `In Progress` pending independent review and
+  verification on `main`.
 - PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
   stays enabled, `--no-sandbox` is forbidden, and OpenShift proof remains deferred.
 - PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
@@ -85,9 +90,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Synchronize Linear G1L-310 as `Done`, then select T04 as the next dependency-ready ticket.
-   OpenShift validation remains deferred and must not be claimed.
-2. Re-read Linear before starting T04 and preserve all dependency and acceptance-criteria truth;
+1. Implement T04's reference corpus, reusable fixtures, deterministic DOCX/OpenXML and PDF-raster
+   comparison infrastructure, marker coverage, and tests without absorbing downstream conversion
+   behavior from T07-T11; implementation is ready for independent review.
+2. Obtain independent review, verify T04 on `main`, synchronize Linear G1L-314, and unblock T07/T08.
    T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
@@ -113,9 +119,15 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310 was fetched by identifier before this completion sync. It still reports
-  `In Progress` and lacks the PR #30 completion entry; its final progress and `Done` transition
-  follow this durable repository update.
+- Linear G1L-310 reports `Done`, contains the PR #30 completion evidence and attachment, and matches
+  the local T00 mirror. Linear G1L-314 reports `In Progress`; its T00 and T01 dependencies are both
+  verified `Done`.
+- T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
+  coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
+  tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
+  commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
+  environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
+  so final-image E2E coverage is not applicable.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.

@@ -119,6 +119,44 @@ def test_auth_integration_change_selects_functional_domain() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/corpus/manifest.json",
+        "tests/conftest.py",
+        "tests/golden/openxml.py",
+        "tests/unit/test_golden_raster.py",
+        "tests/integration/document_engines/test_reference_corpus.py",
+    ],
+)
+def test_golden_infrastructure_selects_active_document_engine_domain(
+    path: str,
+) -> None:
+    assert select_domains([path]) == ["document-engines"]
+
+
+@pytest.mark.unit
+def test_t04_document_engine_domain_runs_current_integration_boundaries() -> None:
+    registry = load_registry(Path(".github/ci/domains.json"))
+    planned, runnable = classify_domains(["document-engines"], registry)
+    assert planned == []
+    assert runnable == ["document-engines"]
+    assert registry["document-engines"] == {
+        "activation_ticket": "T04",
+        "command": [
+            "uv",
+            "run",
+            "pytest",
+            "tests/integration/document_engines",
+            "-m",
+            "integration",
+            "--no-cov",
+        ],
+        "status": "active",
+    }
+
+
+@pytest.mark.unit
 def test_draft_suppresses_only_runnable_heavy_domains() -> None:
     """Drafts retain visible planned gaps but do not run active heavy suites."""
     registry = {

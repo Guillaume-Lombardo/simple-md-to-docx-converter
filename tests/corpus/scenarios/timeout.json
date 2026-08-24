@@ -1,0 +1,6 @@
+{
+  "operation": "document_engine",
+  "simulated_duration_ms": 2000,
+  "configured_timeout_ms": 1000,
+  "expected_result": "timeout"
+}
