@@ -2,7 +2,10 @@
 
 import pytest
 
+from tests.golden.limits import RasterLimits
 from tests.golden.raster import RasterPage, RasterTolerance, compare_pdf_rasters
+
+LIMITS = RasterLimits(10, 1_000, 10_000)
 
 
 def page(
@@ -19,6 +22,7 @@ def test_one_changed_rgba_pixel_reports_exact_metrics_and_failing_page() -> None
         (expected,),
         (actual,),
         RasterTolerance(2, 0.5, 0.5),
+        LIMITS,
     )
     assert result.failing_pages == (0,)
     assert result.pages[0].changed_pixels == 1
@@ -35,6 +39,7 @@ def test_thresholds_are_inclusive_and_alpha_is_compared() -> None:
         (expected,),
         (actual,),
         RasterTolerance(4, 0.5, 0.5),
+        LIMITS,
     )
     assert result.matches
 
@@ -52,7 +57,7 @@ def test_page_count_dimensions_and_dpi_are_strict(
     actual: tuple[RasterPage, ...], attribute: str
 ) -> None:
     result = compare_pdf_rasters(
-        (page(bytes(8)),), actual, RasterTolerance(255, 1.0, 255.0)
+        (page(bytes(8)),), actual, RasterTolerance(255, 1.0, 255.0), LIMITS
     )
     assert not result.matches
     assert getattr(result, attribute)
@@ -61,7 +66,42 @@ def test_page_count_dimensions_and_dpi_are_strict(
 
 @pytest.mark.unit
 def test_rgba_length_and_tolerance_ranges_are_validated() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        RasterPage(0, 1, 72, b"")
     with pytest.raises(ValueError, match="RGBA"):
         RasterPage(1, 1, 72, b"\0")
     with pytest.raises(ValueError, match="between 0 and 255"):
         RasterTolerance(256, 0, 0)
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        RasterTolerance(0, 1.1, 0)
+    with pytest.raises(ValueError, match="between 0 and 255"):
+        RasterTolerance(0, 0, 256)
+
+
+@pytest.mark.unit
+def test_empty_raster_sequences_are_invalid() -> None:
+    with pytest.raises(ValueError, match="at least one page"):
+        compare_pdf_rasters((), (), RasterTolerance(0, 0, 0), LIMITS)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("limits", "message"),
+    [
+        (RasterLimits(1, 10, 20), "page count"),
+        (RasterLimits(2, 1, 20), "per-page"),
+        (RasterLimits(2, 10, 3), "total pixel"),
+    ],
+)
+def test_caller_supplied_raster_limits_are_enforced(
+    limits: RasterLimits, message: str
+) -> None:
+    pages = (page(bytes(8)), page(bytes(8)))
+    with pytest.raises(ValueError, match=message):
+        compare_pdf_rasters(pages, pages, RasterTolerance(0, 0, 0), limits)
+
+
+@pytest.mark.unit
+def test_raster_limits_require_positive_values() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        RasterLimits(0, 1, 1)

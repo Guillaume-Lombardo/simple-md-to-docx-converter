@@ -2,14 +2,16 @@
 title: "Deterministic Unicode résumé"
 ---
 
-# Héading level 1 — Ελληνικά — 日本語 — العربية
+# Héading level 1 — résumé and résumé
 
 ## Heading level 2
 
 | Name | Value |
 | --- | ---: |
 | café | 42 |
-| emoji | 🧪 |
+| naïve “quoted” text | 7 |
+
+Unicode normalization pair: café / café. Latin punctuation: en dash – and ellipsis ….
 
 A footnote reference.[^stable]
 

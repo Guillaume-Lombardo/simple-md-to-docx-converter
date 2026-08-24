@@ -1,7 +1,6 @@
 """Reusable reference-corpus and golden-comparison test infrastructure."""
 
 from tests.golden.corpus import (
-    ArchiveInspectionLimits,
     CorpusCase,
     CorpusManifest,
     CorpusManifestError,
@@ -10,6 +9,7 @@ from tests.golden.corpus import (
     materialize_case,
     read_manifest,
 )
+from tests.golden.limits import ArchiveLimits, RasterLimits
 from tests.golden.openxml import (
     DocxSnapshot,
     OpenXmlError,
@@ -24,13 +24,14 @@ from tests.golden.raster import (
 )
 
 __all__ = [
-    "ArchiveInspectionLimits",
+    "ArchiveLimits",
     "CorpusCase",
     "CorpusManifest",
     "CorpusManifestError",
     "DocxSnapshot",
     "OpenXmlError",
     "RasterComparison",
+    "RasterLimits",
     "RasterPage",
     "RasterTolerance",
     "build_case_bytes",

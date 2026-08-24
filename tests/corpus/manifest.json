@@ -11,7 +11,7 @@
       "files": ["archive-path-traversal.zip"],
       "builder": "path_traversal_zip",
       "expected": {"unsafe_member": "../escape.txt"},
-      "provenance": {"generator": "tests.golden.corpus:path_traversal_zip", "license": "CC0-1.0", "sha256": "311a6bfe6c77e869b751ad20f5e13cc05281d753e712ba429f95de465bf0cdda", "size_bytes": 265}
+      "provenance": {"generator": "tests.golden.corpus.BUILDERS[path_traversal_zip]", "license": "CC0-1.0", "sha256": "311a6bfe6c77e869b751ad20f5e13cc05281d753e712ba429f95de465bf0cdda", "size_bytes": 265}
     },
     {
       "id": "archive-symlink",
@@ -23,7 +23,7 @@
       "files": ["archive-symlink.zip"],
       "builder": "symlink_zip",
       "expected": {"symlink_member": "assets/link"},
-      "provenance": {"generator": "tests.golden.corpus:symlink_zip", "license": "CC0-1.0", "sha256": "8d7b4318699ccdd338a4f1d9d9e5a7d2f8ecda4da7b0f527eb0066a0fa81929a", "size_bytes": 253}
+      "provenance": {"generator": "tests.golden.corpus.BUILDERS[symlink_zip]", "license": "CC0-1.0", "sha256": "8d7b4318699ccdd338a4f1d9d9e5a7d2f8ecda4da7b0f527eb0066a0fa81929a", "size_bytes": 253}
     },
     {
       "id": "concurrency-two-jobs", "categories": ["concurrency"], "kind": "scenario",
@@ -90,14 +90,14 @@
       "purpose": "Provide a deterministic classic-style OpenXML template fixture.", "future_owner": "T10",
       "entrypoint": "template-classic.docx", "files": ["template-classic.docx"], "builder": "minimal_reference_docx",
       "expected": {"style_id": "ClassicBody", "label": "Classic template"},
-      "provenance": {"generator": "tests.golden.corpus:minimal_reference_docx", "license": "CC0-1.0", "sha256": "a388f478c2f2cd9f49be85511ab13ad49883ad68a0d3f04957b0bc2036607fa1", "size_bytes": 1219}
+      "provenance": {"generator": "tests.golden.corpus.BUILDERS[minimal_reference_docx]", "license": "CC0-1.0", "sha256": "a388f478c2f2cd9f49be85511ab13ad49883ad68a0d3f04957b0bc2036607fa1", "size_bytes": 1219}
     },
     {
       "id": "template-modern", "categories": ["multiple_templates"], "kind": "generated_docx",
       "purpose": "Provide a distinct deterministic modern-style OpenXML template fixture.", "future_owner": "T10",
       "entrypoint": "template-modern.docx", "files": ["template-modern.docx"], "builder": "minimal_reference_docx",
       "expected": {"style_id": "ModernBody", "label": "Modern template"},
-      "provenance": {"generator": "tests.golden.corpus:minimal_reference_docx", "license": "CC0-1.0", "sha256": "7290b3fff358eaa3e02d9e27b99fc17d033936885d6e02476148549e9b57c895", "size_bytes": 1221}
+      "provenance": {"generator": "tests.golden.corpus.BUILDERS[minimal_reference_docx]", "license": "CC0-1.0", "sha256": "7290b3fff358eaa3e02d9e27b99fc17d033936885d6e02476148549e9b57c895", "size_bytes": 1221}
     },
     {
       "id": "timeout-engine", "categories": ["timeouts"], "kind": "scenario",

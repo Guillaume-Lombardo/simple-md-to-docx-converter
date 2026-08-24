@@ -18,8 +18,17 @@
     "status": "active"
   },
   "document-engines": {
-    "activation_ticket": "T07",
-    "status": "planned"
+    "activation_ticket": "T04",
+    "command": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/integration/document_engines",
+      "-m",
+      "integration",
+      "--no-cov"
+    ],
+    "status": "active"
   },
   "e2e-distributed": {
     "activation_ticket": "T21",

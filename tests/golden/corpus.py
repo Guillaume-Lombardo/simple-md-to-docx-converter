@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from tests.golden.limits import ArchiveLimits
 from tests.golden.openxml import WORD_NAMESPACE
 
 CORPUS_CATEGORIES = frozenset(
@@ -70,26 +71,6 @@ class CorpusManifest:
             if case.case_id == case_id:
                 return case
         raise KeyError(case_id)
-
-
-@dataclass(frozen=True)
-class ArchiveInspectionLimits:
-    """Test-harness-only ZIP caps; these are not T18 production limits."""
-
-    max_entries: int
-    max_member_uncompressed_bytes: int
-    max_total_uncompressed_bytes: int
-
-    def __post_init__(self) -> None:
-        if (
-            min(
-                self.max_entries,
-                self.max_member_uncompressed_bytes,
-                self.max_total_uncompressed_bytes,
-            )
-            <= 0
-        ):
-            raise ValueError("Archive inspection limits must be positive")
 
 
 def safe_corpus_path(value: object, field: str) -> PurePosixPath:
@@ -187,6 +168,12 @@ def _parse_case(raw: object) -> CorpusCase:  # noqa: PLR0912 - schema checks sta
     ):
         raise CorpusManifestError(
             f"Case {case_id} must declare generator and license provenance"
+        )
+    if builder is not None and provenance["generator"] != (
+        f"tests.golden.corpus.BUILDERS[{builder}]"
+    ):
+        raise CorpusManifestError(
+            f"Generated case {case_id} provenance must identify its BUILDERS entry"
         )
     return CorpusCase(
         case_id,
@@ -345,9 +332,7 @@ def build_case_bytes(case: CorpusCase) -> bytes:
         ) from error
 
 
-def inspect_archive_fixture(
-    data: bytes, limits: ArchiveInspectionLimits
-) -> tuple[str, ...]:
+def inspect_archive_fixture(data: bytes, limits: ArchiveLimits) -> tuple[str, ...]:
     """Validate ZIP metadata without extraction; caps apply only to this test helper."""
 
     try:
@@ -381,6 +366,9 @@ def inspect_archive_fixture(
                 raise CorpusManifestError(
                     "Fixture member exceeds the uncompressed-size cap"
                 )
+            compressed_size = max(member.compress_size, 1)
+            if member.file_size / compressed_size > limits.max_compression_ratio:
+                raise CorpusManifestError("Fixture exceeds the compression-ratio cap")
             total += member.file_size
             if total > limits.max_total_uncompressed_bytes:
                 raise CorpusManifestError(

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import chain
+
+from tests.golden.limits import RasterLimits
 
 
 @dataclass(frozen=True)
@@ -87,9 +90,22 @@ def compare_pdf_rasters(
     expected: tuple[RasterPage, ...],
     actual: tuple[RasterPage, ...],
     tolerance: RasterTolerance,
+    limits: RasterLimits,
 ) -> RasterComparison:
     """Compare pre-rasterized pages; this helper never selects or invokes a renderer."""
 
+    if not expected or not actual:
+        raise ValueError("Raster comparisons require at least one page on each side")
+    if max(len(expected), len(actual)) > limits.max_pages:
+        raise ValueError("Raster page count exceeds the test-harness limit")
+    total_pixels = 0
+    for page in chain(expected, actual):
+        page_pixels = page.width * page.height
+        if page_pixels > limits.max_pixels_per_page:
+            raise ValueError("Raster page exceeds the per-page pixel limit")
+        total_pixels += page_pixels
+        if total_pixels > limits.max_total_pixels:
+            raise ValueError("Raster pages exceed the total pixel limit")
     dimensions: list[int] = []
     dpis: list[int] = []
     results: list[RasterPageComparison] = []
@@ -100,16 +116,22 @@ def compare_pdf_rasters(
         if left.dpi != right.dpi:
             dpis.append(index)
             continue
-        channel_deltas = tuple(
-            abs(a - b) for a, b in zip(left.pixels_rgba, right.pixels_rgba, strict=True)
-        )
-        changed_pixels = sum(
-            any(channel_deltas[offset + channel] > 0 for channel in range(4))
-            for offset in range(0, len(channel_deltas), 4)
-        )
+        changed_pixels = 0
+        maximum = 0
+        delta_sum = 0
+        for offset in range(0, len(left.pixels_rgba), 4):
+            pixel_changed = False
+            for channel in range(4):
+                delta = abs(
+                    left.pixels_rgba[offset + channel]
+                    - right.pixels_rgba[offset + channel]
+                )
+                delta_sum += delta
+                maximum = max(maximum, delta)
+                pixel_changed = pixel_changed or delta > 0
+            changed_pixels += pixel_changed
         pixel_count = left.width * left.height
-        maximum = max(channel_deltas, default=0)
-        mean = sum(channel_deltas) / len(channel_deltas)
+        mean = delta_sum / (pixel_count * 4)
         ratio = changed_pixels / pixel_count
         results.append(
             RasterPageComparison(

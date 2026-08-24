@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from xml.etree import ElementTree
 
+from tests.golden.limits import ArchiveLimits
+
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships"
 XML_PART_SUFFIXES = (".xml", ".rels")
@@ -102,7 +104,37 @@ def _canonical_xml(data: bytes, part_name: str) -> tuple[str, ElementTree.Elemen
     return canonical, root
 
 
-def inspect_docx(data: bytes) -> DocxSnapshot:  # noqa: PLR0912 - package checks are explicit
+def _preflight_members(
+    members: list[zipfile.ZipInfo], limits: ArchiveLimits
+) -> list[str]:
+    if len(members) > limits.max_entries:
+        raise OpenXmlError("DOCX exceeds the archive entry cap")
+    keys: set[str] = set()
+    total_uncompressed = 0
+    for member in members:
+        inspected_name = (
+            member.filename.removesuffix("/") if member.is_dir() else member.filename
+        )
+        key = _part_key(inspected_name)
+        if key in keys:
+            raise OpenXmlError("DOCX contains duplicate normalized part names")
+        keys.add(key)
+        if member.flag_bits & 1:
+            raise OpenXmlError("DOCX contains an encrypted part")
+        if stat.S_ISLNK(member.external_attr >> 16):
+            raise OpenXmlError("DOCX contains a symbolic-link part")
+        if member.file_size > limits.max_member_uncompressed_bytes:
+            raise OpenXmlError("DOCX part exceeds the uncompressed-size cap")
+        total_uncompressed += member.file_size
+        if total_uncompressed > limits.max_total_uncompressed_bytes:
+            raise OpenXmlError("DOCX exceeds the total uncompressed-size cap")
+        compressed_size = max(member.compress_size, 1)
+        if member.file_size / compressed_size > limits.max_compression_ratio:
+            raise OpenXmlError("DOCX exceeds the compression-ratio cap")
+    return [member.filename for member in members if not member.is_dir()]
+
+
+def inspect_docx(data: bytes, limits: ArchiveLimits) -> DocxSnapshot:
     """Inspect DOCX bytes without extraction or relationship dereferencing."""
 
     try:
@@ -110,23 +142,7 @@ def inspect_docx(data: bytes) -> DocxSnapshot:  # noqa: PLR0912 - package checks
     except zipfile.BadZipFile as error:
         raise OpenXmlError("DOCX is not a valid ZIP archive") from error
     with archive:
-        members = archive.infolist()
-        keys: set[str] = set()
-        for member in members:
-            inspected_name = (
-                member.filename.removesuffix("/")
-                if member.is_dir()
-                else member.filename
-            )
-            key = _part_key(inspected_name)
-            if key in keys:
-                raise OpenXmlError("DOCX contains duplicate normalized part names")
-            keys.add(key)
-            if member.flag_bits & 1:
-                raise OpenXmlError("DOCX contains an encrypted part")
-            if stat.S_ISLNK(member.external_attr >> 16):
-                raise OpenXmlError("DOCX contains a symbolic-link part")
-        names = [member.filename for member in members if not member.is_dir()]
+        names = _preflight_members(archive.infolist(), limits)
         required = {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
         missing = sorted(required - set(names))
         if missing:
