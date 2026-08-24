@@ -2,7 +2,7 @@
 ticket: T17
 linear_id: G1L-326
 linear_url: https://linear.app/g1lom/issue/G1L-326/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -72,6 +72,13 @@ Build owner and administrator template management and local-account management w
   increasing timeouts. The scenario tracks Alice's reset credential explicitly while still proving
   that her prior session is revoked. Each browser correction passed three consecutive pinned runs;
   the pre-existing SQLite heartbeat timing test also passed ten consecutive local runs.
+- 2026-08-24: Independently approved head `40035d9` passed exact-head CI run 32759487917 and ready
+  pull request [#50](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/50)
+  was squash-merged as `0f6d4d5`. Local `main` was fast-forwarded to the same commit, and the exact
+  implementation branch and worktree were removed after the remote branch was confirmed absent.
+  Main CI run 32759858141 then passed every stage, including the authenticated pinned-Chrome
+  workflow, both storage profiles, document engines, and the final gate. Final hardened-image and
+  two-profile E2E verification remains mandatory in T20/T21 under the approved sequencing.
 
 ## Synchronization
 
