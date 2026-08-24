@@ -77,6 +77,13 @@ Build template search, job submission, progressive polling, cancellation, expira
   reads are generation-fenced before changing the page. Selective CI now maps `package.json` and
   `tests/browser/**` changes to the Chrome-provisioned document-engine job, and the CI validator
   requires the real-browser command. Linear was not mutated as explicitly directed.
+- 2026-08-24: Final validation passes 10 pinned-Node tests at 100.00% line, 91.43% branch, and
+  97.30% function coverage; 707 Python unit tests at 90.07% application branch coverage; 100% of
+  the 56 changed executable Python lines; and 870 applicable tests at 94.64% application coverage
+  with live PostgreSQL/RustFS. The real Chrome 151 sandboxed browser workflow passes. Independent
+  specification and security reviews approve the exact implementation; the test review approves
+  all code and checks pending this mechanical progress-count correction. All reviewers explicitly
+  approve T20/T21 final-image E2E sequencing as sequencing, not a waiver.
 
 ## Synchronization
 
