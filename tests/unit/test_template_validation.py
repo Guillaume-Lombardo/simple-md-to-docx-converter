@@ -280,7 +280,9 @@ def test_unknown_relationship_target_mode_is_rejected(
     )
 
 
-@pytest.mark.parametrize("signal", ("content_type", "relationship", "part"))
+@pytest.mark.parametrize(
+    "signal", ("content_type", "default_content_type", "relationship", "part")
+)
 def test_independent_macro_signals_are_rejected(
     signal: str,
     limits: TemplateLimits,
@@ -295,6 +297,14 @@ def test_independent_macro_signals_are_rejected(
             b"wordprocessingml.document.main+xml",
             b"wordprocessingml.document.macroEnabled.main+xml",
         )
+    elif signal == "default_content_type":
+        replacements["[Content_Types].xml"] = _base_entries()[
+            "[Content_Types].xml"
+        ].replace(
+            b"</Types>",
+            b'<Default Extension="dat" ContentType="application/vnd.ms-office.vbaProject"/></Types>',
+        )
+        replacements["word/payload.dat"] = b"opaque"
     elif signal == "relationship":
         replacements["word/_rels/document.xml.rels"] = (
             f'<?xml version="1.0"?><Relationships xmlns="{REL_NS}">'
@@ -449,6 +459,10 @@ def test_font_policy_resolves_exact_family_and_rejects_duplicate_alias() -> None
             ("Carlito",),
             (("Calibri", "Carlito"), ("\uff23alibri", "Carlito")),
         )
+    with pytest.raises(ValueError):
+        FontPolicy(("Carlito",), (), ("Latn", "\uff2catn"))
+    with pytest.raises(ValueError):
+        FontPolicy(("Carlito",), (), ())
 
 
 @pytest.mark.parametrize(
@@ -517,6 +531,24 @@ def test_invalid_relationship_part_location_and_dangling_id_are_rejected() -> No
         )
 
 
+def test_relationship_part_requires_its_source_part(
+    limits: TemplateLimits,
+    declaration: TemplateFontDeclaration,
+    font_policy: FontPolicy,
+) -> None:
+    orphan = (
+        f'<Relationships xmlns="{REL_NS}"><Relationship Id="rId1" '
+        f'Type="{STYLE_REL}" Target="styles.xml"/></Relationships>'
+    ).encode()
+    _assert_code(
+        _docx({"word/_rels/ghost.xml.rels": orphan}),
+        TemplateValidationErrorCode.INVALID_PACKAGE,
+        limits,
+        declaration,
+        font_policy,
+    )
+
+
 @pytest.mark.parametrize(
     "limits_override",
     (
@@ -538,14 +570,31 @@ def test_each_xml_complexity_limit_is_enforced(
 
 def test_theme_and_font_table_references_are_inventory_observations() -> None:
     root = ElementTree.fromstring(  # noqa: S314 - fixed test literal
-        f'<root xmlns:w="{WORD_NS}"><w:font w:name="Carlito"/>'
-        '<latin typeface="Caladea"/><ea typeface=""/><cs typeface="DejaVu Serif"/></root>'
+        f'<root xmlns:w="{WORD_NS}" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<w:font w:name="Carlito"/><latin typeface="Caladea"/><ea typeface=""/>'
+        '<cs typeface="DejaVu Serif"/><a:font script="Grek" typeface="Carlito"/></root>'
     )
-    assert template_validation._referenced_fonts({"theme.xml": root}) == (
-        "Caladea",
-        "Carlito",
-        "DejaVu Serif",
+    assert template_validation._referenced_fonts(
+        {"theme.xml": root}, FontPolicy(("Carlito",), ())
+    ) == (
+        ("Caladea", "Carlito", "DejaVu Serif"),
+        ("Grek",),
     )
+
+
+@pytest.mark.parametrize("script", ("Jpan", ""))
+def test_unsupported_drawingml_script_font_is_rejected(
+    script: str,
+    font_policy: FontPolicy,
+) -> None:
+    root = ElementTree.fromstring(  # noqa: S314 - fixed test literal
+        '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        f'<a:font script="{script}" typeface="Yu Mincho"/></a:theme>'
+    )
+    with pytest.raises(TemplateValidationError) as captured:
+        template_validation._referenced_fonts({"theme.xml": root}, font_policy)
+    assert captured.value.code is TemplateValidationErrorCode.FONT_CONTRACT
 
 
 def test_duplicate_style_name_and_missing_name_are_rejected() -> None:

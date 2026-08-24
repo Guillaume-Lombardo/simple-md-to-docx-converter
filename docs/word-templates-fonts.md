@@ -50,6 +50,11 @@ corpus currently requires Latin and Greek only, so no Noto family is installed. 
 new script requirements fail activation until an administrator-approved pinned font image is built
 and reviewed.
 
+DrawingML supplementary font declarations are part of the source font contract. Any non-empty
+mapping for a script outside the approved Latin and Greek set fails activation. Administrators must
+remove dormant Office theme mappings for unsupported scripts when preparing a candidate template;
+they must add a reviewed pinned family before retaining a mapping that the template actually needs.
+
 T10 introduces no upload or activation HTTP workflow and no final application image. T15 must call
 this validator before atomic activation; T20/T21 retain final-image E2E coverage for valid activation
 and macro, external-relationship, missing-style, and unsupported-font rejection.

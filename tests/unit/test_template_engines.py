@@ -92,6 +92,15 @@ def test_bounded_output_requires_a_nonempty_regular_file(tmp_path: Path) -> None
     output.write_bytes(b"too-large")
     with pytest.raises(TemplateValidationError):
         engines._bounded_regular_file(output, 5)
+    output.write_bytes(b"valid")
+    link = tmp_path / "output-link.docx"
+    link.symlink_to(output)
+    with pytest.raises(TemplateValidationError):
+        engines._bounded_regular_file(link, 5)
+    empty = tmp_path / "empty.docx"
+    empty.touch()
+    with pytest.raises(TemplateValidationError):
+        engines._bounded_regular_file(empty, 5)
 
 
 @dataclass(frozen=True)
@@ -159,22 +168,54 @@ def test_run_success_uses_shell_free_isolated_process(
     assert popen.call_args.kwargs["stdin"] is subprocess.DEVNULL
 
 
-def test_terminate_group_escalates_only_a_live_process(
+def test_terminate_group_checks_the_whole_group_before_escalating(
     mocker: MockerFixture,
 ) -> None:
     process = mocker.Mock(pid=321)
-    process.poll.return_value = None
-    process.wait.side_effect = [subprocess.TimeoutExpired("engine", 0.1), 0]
+    process.poll.return_value = 0
+    group_exists = mocker.patch.object(
+        engines, "_process_group_exists", side_effect=(True, True)
+    )
+    mocker.patch.object(engines.time, "monotonic", side_effect=(0.0, 0.1))
     killpg = mocker.patch.object(engines.os, "killpg")
     engines._terminate_group(process, 0.1)
     assert killpg.call_args_list == [
         mocker.call(321, engines.signal.SIGTERM),
         mocker.call(321, engines.signal.SIGKILL),
     ]
-    process.poll.return_value = 0
-    killpg.reset_mock()
+    assert group_exists.call_count == 2
+    process.wait.assert_called_once_with()
+
+
+def test_terminate_group_accepts_an_already_absent_group(
+    mocker: MockerFixture,
+) -> None:
+    process = mocker.Mock(pid=321)
+    killpg = mocker.patch.object(engines.os, "killpg", side_effect=ProcessLookupError)
     engines._terminate_group(process, 0.1)
-    killpg.assert_not_called()
+    killpg.assert_called_once_with(321, engines.signal.SIGTERM)
+    process.wait.assert_not_called()
+
+
+def test_process_group_probe_and_graceful_termination(
+    mocker: MockerFixture,
+) -> None:
+    killpg = mocker.patch.object(engines.os, "killpg")
+    assert engines._process_group_exists(123) is True
+    killpg.side_effect = ProcessLookupError
+    assert engines._process_group_exists(123) is False
+
+    process = mocker.Mock(pid=321)
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    mocker.patch.object(
+        engines, "_process_group_exists", side_effect=(True, False, False)
+    )
+    mocker.patch.object(engines.time, "monotonic", side_effect=(0.0, 0.05))
+    killpg.side_effect = None
+    engines._terminate_group(process, 0.1)
+    killpg.assert_called_with(321, engines.signal.SIGTERM)
+    process.wait.assert_called_once_with(timeout=0.05)
 
 
 def test_activation_runs_static_pandoc_and_libreoffice_checks_in_order(

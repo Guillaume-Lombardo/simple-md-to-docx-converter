@@ -6,14 +6,18 @@ import hashlib
 import io
 import json
 import os
+import signal
 import subprocess
 import textwrap
+import time
 import zipfile
+from contextlib import suppress
 from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
 
+from md_converter.templates import engines as template_engines
 from md_converter.templates.engines import (
     TemplateActivationContext,
     TemplateEngineConfig,
@@ -67,13 +71,14 @@ def _default_reference() -> bytes:
 
 
 def _candidate_reference() -> bytes:
-    """Rewrite Pandoc's sample links to package-internal relationships."""
+    """Remove Pandoc sample links and unsupported dormant script mappings."""
 
     source_data = _default_reference()
     output = io.BytesIO()
     relationship_namespace = (
         "http://schemas.openxmlformats.org/package/2006/relationships"
     )
+    drawing_namespace = "http://schemas.openxmlformats.org/drawingml/2006/main"
     with (
         zipfile.ZipFile(io.BytesIO(source_data)) as source,
         zipfile.ZipFile(output, "w") as target,
@@ -95,6 +100,17 @@ def _candidate_reference() -> bytes:
                 payloads[name] = ElementTree.tostring(
                     root, encoding="utf-8", xml_declaration=True
                 )
+        theme_name = "word/theme/theme1.xml"
+        theme = ElementTree.fromstring(  # noqa: S314 - approved Pandoc data
+            payloads[theme_name]
+        )
+        for parent in theme.iter():
+            for child in tuple(parent):
+                if child.tag == f"{{{drawing_namespace}}}font":
+                    parent.remove(child)
+        payloads[theme_name] = ElementTree.tostring(
+            theme, encoding="utf-8", xml_declaration=True
+        )
         for member in source.infolist():
             target.writestr(member, payloads[member.filename])
     return output.getvalue()
@@ -306,6 +322,62 @@ def test_engine_boundaries_normalize_failure_timeout_and_missing_output(
             _candidate_reference(), DEFAULT_REFERENCE_FONTS, context
         )
     assert captured.value.code is expected
+
+
+@pytest.mark.requires_pandoc
+def test_timeout_kills_a_descendant_that_ignores_sigterm(tmp_path: Path) -> None:
+    fixture_root = (
+        Path(os.environ.get("ENGINE_FIXTURE_ROOT", str(tmp_path))) / tmp_path.name
+    )
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    pid_file = fixture_root / "descendant.pid"
+    ready_file = fixture_root / "descendant.ready"
+    child_program = (
+        "import signal,time,pathlib; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(ready_file)!r}).write_text('ready'); "
+        "time.sleep(30)"
+    )
+    engine = _executable(
+        fixture_root,
+        "descendant-engine",
+        f"""
+        import pathlib, subprocess, sys, time
+        child = subprocess.Popen([sys.executable, "-c", {child_program!r}])
+        ready = pathlib.Path({str(ready_file)!r})
+        while not ready.exists():
+            time.sleep(0.005)
+        pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))
+        time.sleep(30)
+        """,
+    )
+    config = TemplateEngineConfig(str(engine), "unused", 0.1, 0.2, tmp_path)
+    with pytest.raises(TemplateValidationError) as captured:
+        template_engines._run((str(engine),), tmp_path, os.environ, config)
+    assert captured.value.code is TemplateValidationErrorCode.ENGINE_TIMEOUT
+    descendant_pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 2.0
+
+    def descendant_is_running() -> bool:
+        try:
+            state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
+        except FileNotFoundError:
+            return False
+        # Pytest is PID 1 in this isolated test container, so a killed orphan can
+        # remain as a zombie until container exit. A zombie cannot execute code.
+        return state != "Z"
+
+    try:
+        while time.monotonic() < deadline:
+            if not descendant_is_running():
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("Timed-out engine descendant survived process-group cleanup")
+    finally:
+        if descendant_is_running():
+            with suppress(ProcessLookupError):
+                os.kill(descendant_pid, signal.SIGKILL)
 
 
 @pytest.mark.requires_pandoc

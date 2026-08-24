@@ -8,7 +8,9 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,20 +74,34 @@ def _engine_error(code: TemplateValidationErrorCode, message: str) -> None:
     raise TemplateValidationError(code, message)
 
 
-def _terminate_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-    if process.poll() is not None:
-        return
+def _process_group_exists(process_group: int) -> bool:
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _terminate_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
+    process_group = process.pid
+    try:
+        os.killpg(process_group, signal.SIGTERM)
     except ProcessLookupError:
         return
-    try:
-        process.wait(timeout=grace_seconds)
+    deadline = time.monotonic() + grace_seconds
+    while _process_group_exists(process_group):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if process.poll() is None:
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=remaining)
+        else:
+            time.sleep(min(0.01, remaining))
+    if not _process_group_exists(process_group):
         return
-    except subprocess.TimeoutExpired:
-        pass
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process_group, signal.SIGKILL)
     except ProcessLookupError:
         return
     process.wait()
@@ -150,21 +166,37 @@ def _environment(workspace: Path, host: Mapping[str, str]) -> dict[str, str]:
 
 
 def _bounded_regular_file(path: Path, limit: int) -> bytes:
+    descriptor = -1
     try:
-        metadata = path.lstat()
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+        )
+        metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_size <= 0
             or metadata.st_size > limit
         ):
             raise OSError
-        data = path.read_bytes()
+        chunks: list[bytes] = []
+        total = 0
+        while total <= limit:
+            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
     except OSError:
         _engine_error(
             TemplateValidationErrorCode.ENGINE_FAILURE,
             "Template validation engine produced invalid output.",
         )
-    if len(data) != metadata.st_size:
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    data = b"".join(chunks)
+    if len(data) != metadata.st_size or len(data) > limit:
         _engine_error(
             TemplateValidationErrorCode.ENGINE_FAILURE,
             "Template validation engine produced invalid output.",

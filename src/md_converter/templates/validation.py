@@ -28,6 +28,7 @@ _WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _TYPE_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _OFFICE_DOCUMENT_REL = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
 )
@@ -105,6 +106,7 @@ class FontPolicy:
 
     approved_families: tuple[str, ...]
     substitutions: tuple[tuple[str, str], ...]
+    supported_scripts: tuple[str, ...] = ("Latn", "Grek")
 
     def __post_init__(self) -> None:
         approved_keys = tuple(_font_key(value) for value in self.approved_families)
@@ -121,6 +123,11 @@ class FontPolicy:
             if target_key not in approved:
                 raise ValueError("Font substitutions must target approved families")
             sources.add(source_key)
+        script_keys = tuple(_font_key(value) for value in self.supported_scripts)
+        if not script_keys or any(not key for key in script_keys):
+            raise ValueError("Supported font scripts must be non-empty")
+        if len(set(script_keys)) != len(script_keys):
+            raise ValueError("Supported font scripts must be normalized-unique")
 
     def resolve(self, family: str) -> str | None:
         """Resolve one source family to its installed approved family."""
@@ -460,6 +467,11 @@ def _inspect_relationships(
         if root.tag != f"{{{_REL_NS}}}Relationships":
             _invalid_package()
         source = _relationship_source(part_name)
+        if (
+            source != PurePosixPath("/")
+            and _part_key(source.as_posix()) not in part_keys
+        ):
+            _invalid_package()
         identifiers: set[str] = set()
         for node in root.iter(f"{{{_REL_NS}}}Relationship"):
             identifier = node.attrib.get("Id", "")
@@ -517,15 +529,17 @@ def _inspect_relationship_references(
 
 def _inspect_content_types(root: ElementTree.Element) -> None:
     main_parts: list[str] = []
+    for kind in ("Default", "Override"):
+        for node in root.iter(f"{{{_TYPE_NS}}}{kind}"):
+            lowered = node.attrib.get("ContentType", "").casefold()
+            if "macroenabled" in lowered or "vba" in lowered or "activex" in lowered:
+                _error(
+                    TemplateValidationErrorCode.ACTIVE_CONTENT,
+                    "Word template contains active content.",
+                )
     for node in root.iter(f"{{{_TYPE_NS}}}Override"):
         part_name = node.attrib.get("PartName", "")
         content_type = node.attrib.get("ContentType", "")
-        lowered = content_type.casefold()
-        if "macroenabled" in lowered or "vba" in lowered or "activex" in lowered:
-            _error(
-                TemplateValidationErrorCode.ACTIVE_CONTENT,
-                "Word template contains active content.",
-            )
         if content_type == _DOCX_MAIN_TYPE:
             main_parts.append(part_name)
     if main_parts != ["/word/document.xml"]:
@@ -572,8 +586,12 @@ def _inspect_styles(root: ElementTree.Element) -> None:
             )
 
 
-def _referenced_fonts(roots: dict[str, ElementTree.Element]) -> tuple[str, ...]:
+def _referenced_fonts(
+    roots: dict[str, ElementTree.Element], policy: FontPolicy
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     fonts: dict[str, str] = {}
+    scripts: dict[str, str] = {}
+    supported_scripts = {_font_key(value) for value in policy.supported_scripts}
     for root in roots.values():
         for node in root.iter():
             local_name = node.tag.rsplit("}", 1)[-1]
@@ -589,7 +607,19 @@ def _referenced_fonts(roots: dict[str, ElementTree.Element]) -> tuple[str, ...]:
                 value = node.attrib.get("typeface")
                 if value:
                     fonts.setdefault(_font_key(value), value)
-    return tuple(fonts[key] for key in sorted(fonts))
+            if node.tag == f"{{{_DRAWING_NS}}}font":
+                family = node.attrib.get("typeface", "")
+                script = node.attrib.get("script", "")
+                if family:
+                    script_key = _font_key(script)
+                    if not script_key or script_key not in supported_scripts:
+                        _font_contract()
+                    fonts.setdefault(_font_key(family), family)
+                    scripts.setdefault(script_key, script)
+    return (
+        tuple(fonts[key] for key in sorted(fonts)),
+        tuple(scripts[key] for key in sorted(scripts)),
+    )
 
 
 def _validate_template(
@@ -651,7 +681,7 @@ def _validate_template(
     )
     _inspect_relationship_references(roots, relationship_ids)
     _inspect_styles(roots["word/styles.xml"])
-    referenced = _referenced_fonts(roots)
+    referenced, _ = _referenced_fonts(roots, policy)
     declared_keys = {_font_key(family) for family in declared}
     resolved_keys = {
         _font_key(resolved)
