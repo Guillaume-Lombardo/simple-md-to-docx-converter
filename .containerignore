@@ -1,0 +1,13 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.ty
+coverage.json
+htmlcov
+tests
+tickets
+docs
+spikes/toolchain/node_modules
+**/__pycache__
+**/*.pyc

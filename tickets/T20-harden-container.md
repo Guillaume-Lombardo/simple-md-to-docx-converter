@@ -2,7 +2,7 @@
 ticket: T20
 linear_id: G1L-330
 linear_url: https://linear.app/g1lom/issue/G1L-330/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -43,6 +43,20 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
 - 2026-08-24: Scope now also records T11's approved sequencing debt. The final image must carry the
   verified Pandoc, LibreOffice, PDFium test, and font contracts needed for T21's final asynchronous
   PDF workflow E2E.
+- 2026-08-24: Started implementation on `feat/T20-harden-container` from verified `main` at
+  `375abd7` after T11, T12, T13, and T18 were confirmed `Done`. This workstream owns the final image,
+  rootless runtime modes, build/deployment assets, SBOM and vulnerability scans, smoke/container
+  tests, and operational documentation. T19 owns application source observability and readiness;
+  T20 will report rather than edit `src/md_converter/**` if an application change is required.
+- 2026-08-24: Built the final UBI 9/Python 3.14 image twice with an identical image ID and verified
+  its rootless, read-only, capability-free runtime plus Pandoc, Mermaid/Chromium, and LibreOffice
+  conversions. The distributed PostgreSQL/RustFS API smoke test passes. CycloneDX and SPDX SBOMs
+  were generated, and the fixed-Critical Grype gate passes after removing build-only npm tooling.
+  The canonical non-engine suite passes all 997 applicable tests against real PostgreSQL and RustFS
+  with 95.06% coverage; Ruff, ty, ShellCheck, and CI configuration validation also pass. Standalone
+  API startup remains blocked by SQLite 3.34 incompatibility with source-level `RETURNING` queries;
+  worker modes also await the package-native runtime assembly owned by T19 before final T20
+  verification.
 
 ## Synchronization
 

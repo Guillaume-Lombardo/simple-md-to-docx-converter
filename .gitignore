@@ -17,4 +17,5 @@ coverage.json
 htmlcov/
 dist/
 build/
+artifacts/
 *.egg-info/
