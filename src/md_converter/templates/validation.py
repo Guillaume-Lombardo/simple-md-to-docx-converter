@@ -48,6 +48,14 @@ _PROHIBITED_REL_SUFFIXES = (
     "/vbaproject",
 )
 _PROHIBITED_PART_SEGMENTS = frozenset({"activex", "customui", "embeddings"})
+_PROHIBITED_CONTENT_TYPE_MARKERS = (
+    "macroenabled",
+    "vba",
+    "activex",
+    "oleobject",
+    "embeddedpackage",
+    "controlproperties",
+)
 
 
 @dataclass(frozen=True)
@@ -532,7 +540,7 @@ def _inspect_content_types(root: ElementTree.Element) -> None:
     for kind in ("Default", "Override"):
         for node in root.iter(f"{{{_TYPE_NS}}}{kind}"):
             lowered = node.attrib.get("ContentType", "").casefold()
-            if "macroenabled" in lowered or "vba" in lowered or "activex" in lowered:
+            if any(marker in lowered for marker in _PROHIBITED_CONTENT_TYPE_MARKERS):
                 _error(
                     TemplateValidationErrorCode.ACTIVE_CONTENT,
                     "Word template contains active content.",

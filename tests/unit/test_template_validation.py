@@ -323,6 +323,38 @@ def test_independent_macro_signals_are_rejected(
 
 
 @pytest.mark.parametrize(
+    "content_type",
+    (
+        "application/vnd.openxmlformats-officedocument.oleObject",
+        "application/vnd.openxmlformats-officedocument.embeddedPackage",
+        "application/vnd.openxmlformats-officedocument.controlProperties+xml",
+    ),
+)
+def test_every_active_default_content_type_is_rejected(
+    content_type: str,
+    limits: TemplateLimits,
+    declaration: TemplateFontDeclaration,
+    font_policy: FontPolicy,
+) -> None:
+    content_types = _base_entries()["[Content_Types].xml"].replace(
+        b"</Types>",
+        (f'<Default Extension="dat" ContentType="{content_type}"/></Types>').encode(),
+    )
+    _assert_code(
+        _docx(
+            {
+                "[Content_Types].xml": content_types,
+                "word/payload.dat": b"opaque",
+            }
+        ),
+        TemplateValidationErrorCode.ACTIVE_CONTENT,
+        limits,
+        declaration,
+        font_policy,
+    )
+
+
+@pytest.mark.parametrize(
     ("data", "expected"),
     (
         (b"not-a-zip", TemplateValidationErrorCode.INVALID_PACKAGE),

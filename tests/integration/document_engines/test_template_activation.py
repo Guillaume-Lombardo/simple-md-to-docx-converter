@@ -351,7 +351,7 @@ def test_timeout_kills_a_descendant_that_ignores_sigterm(tmp_path: Path) -> None
         time.sleep(30)
         """,
     )
-    config = TemplateEngineConfig(str(engine), "unused", 0.1, 0.2, tmp_path)
+    config = TemplateEngineConfig(str(engine), "unused", 1.0, 0.2, tmp_path)
     with pytest.raises(TemplateValidationError) as captured:
         template_engines._run((str(engine),), tmp_path, os.environ, config)
     assert captured.value.code is TemplateValidationErrorCode.ENGINE_TIMEOUT

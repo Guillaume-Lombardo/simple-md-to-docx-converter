@@ -65,8 +65,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   canonical selection passed 555 tests at 95.34% coverage; independent security/spec/CI reviews
   approved the exact revision and the explicit T20/T21 final-image E2E deferral.
 - The delivered T09 squashes passed every applicable GitHub Actions domain and `CI / gate`.
-- T10 currently adds 107 passing unit tests and 17 passing rootless real-engine integration tests.
-  The unit suite passes 537 tests at 93.63% application coverage. The final T10 rootless image
+- T10 currently adds 116 passing unit tests and 18 passing rootless real-engine integration tests.
+  The unit suite passes 546 tests at 93.74% application coverage. The final T10 rootless image
   passes the T00 document-engine harness with the exact Pandoc, LibreOffice, Chromium, font,
   rootless, read-only-root, no-network, and dropped-capability contract.
 - A fresh T00 K3s rerun reached an environment-specific network control failure before workload
