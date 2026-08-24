@@ -62,8 +62,8 @@ Build template search, job submission, progressive polling, cancellation, expira
   late responses cannot replace newer UI state; assigns an accepted job before cancellation can be
   requested; retains idempotency keys only across ambiguous transport failures; resets them after a
   confirmed response or request-changing input; and continues polling queued/running cancellation
-  requests through a terminal state. Nine native JavaScript tests pass the pinned Node 22.23.1
-  coverage gates at 100.00% lines, 91.03% branches, and 97.06% functions.
+  requests through a terminal state. Ten native JavaScript tests pass the pinned Node 22.23.1
+  coverage gates at 100.00% lines, 91.43% branches, and 97.30% functions.
 - 2026-08-24: Added a real-browser integration workflow using the already pinned Puppeteer and
   Chrome 151 toolchain with no runtime download or sandbox-disable flag. In the rootless T00 runtime
   it passes authenticated cookie/CSRF and CSP behavior, external script loading, keyboard search,
@@ -71,6 +71,12 @@ Build template search, job submission, progressive polling, cancellation, expira
   retry, polling backoff, queued/running cancellation to terminal cancellation, expiration, safe
   download headers, and accessible errors. CI runs it in the existing document-engine environment.
   Linear remains intentionally untouched as directed.
+- 2026-08-24: Final correction preserves an idempotency key for transport failures, 5xx responses,
+  unexpected success statuses, and unreadable or invalid `202 Accepted` bodies; only a validated
+  accepted job, a definitive 4xx response, or request-defining input clears it. Deferred error-body
+  reads are generation-fenced before changing the page. Selective CI now maps `package.json` and
+  `tests/browser/**` changes to the Chrome-provisioned document-engine job, and the CI validator
+  requires the real-browser command. Linear was not mutated as explicitly directed.
 
 ## Synchronization
 

@@ -189,13 +189,20 @@ test("template search renders empty, failure, and safe selectable results", asyn
 test("submission renews acknowledged keys and reuses only ambiguous requests", async () => {
   const h = harness([
     new Error("network"),
+    response(503, { error: { message: "Submission temporarily unavailable." } }),
+    response(202, new Error("truncated accepted body")),
     response(202, job({ id: "job-1" }), { "Retry-After": "2" }),
     response(200, job({ id: "job-1", state: "succeeded", step: "complete", progress: 100 })),
     response(202, job({ id: "job-2" }), { "Retry-After": "1" }),
     response(200, job({ id: "job-2", state: "succeeded", step: "complete", progress: 100 })),
-    new Error("network"),
-    response(202, job({ id: "job-3", output: "pdf" })),
     response(422, { error: { message: "Confirmed rejection." } }),
+    response(202, job({ id: "job-3" })),
+    response(200, job({ id: "job-3", state: "succeeded", step: "complete", progress: 100 })),
+    new Error("network"),
+    response(399, {}),
+    response(200, job({ id: "unexpected-status" })),
+    response(202, { id: "" }),
+    response(202, job({ id: "job-4", output: "pdf" })),
   ]);
   const source = h.doc.querySelector("#source");
   const selected = h.doc.querySelector("#selected-template");
@@ -211,8 +218,17 @@ test("submission renews acknowledged keys and reuses only ambiguous requests", a
   await h.doc.querySelector("#conversion-form").dispatch("submit");
   assert.match(h.doc.querySelector("#page-alert").textContent, /same request key/);
   await h.doc.querySelector("#conversion-form").dispatch("submit");
+  assert.match(h.doc.querySelector("#page-alert").textContent, /temporarily unavailable/);
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
+  assert.match(h.doc.querySelector("#page-alert").textContent, /response could not be confirmed/);
+  assert.equal(h.doc.querySelector("#submit-conversion").disabled, false);
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
   assert.equal(h.scheduled.at(-1).delay, 2000);
   await h.scheduled.at(-1).callback();
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
+  await h.scheduled.at(-1).callback();
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
+  assert.equal(h.doc.querySelector("#page-alert").textContent, "Confirmed rejection.");
   await h.doc.querySelector("#conversion-form").dispatch("submit");
   await h.scheduled.at(-1).callback();
   await h.doc.querySelector("#conversion-form").dispatch("submit");
@@ -220,11 +236,49 @@ test("submission renews acknowledged keys and reuses only ambiguous requests", a
   h.doc.querySelector("#conversion-form").outputValue = "pdf";
   await h.doc.outputs[1].dispatch("change");
   await h.doc.querySelector("#conversion-form").dispatch("submit");
+  assert.match(h.doc.querySelector("#page-alert").textContent, /same request key/);
   await h.doc.querySelector("#conversion-form").dispatch("submit");
-  assert.equal(h.doc.querySelector("#page-alert").textContent, "Confirmed rejection.");
+  assert.match(h.doc.querySelector("#page-alert").textContent, /response could not be confirmed/);
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
+  assert.match(h.doc.querySelector("#page-alert").textContent, /response could not be confirmed/);
+  await h.doc.querySelector("#conversion-form").dispatch("submit");
   const keys = h.requests.map(([, options]) => options?.headers?.["Idempotency-Key"]).filter(Boolean);
-  assert.deepEqual(keys, ["key-1", "key-1", "key-2", "key-3", "key-4", "key-5"]);
+  assert.deepEqual(keys, [
+    "key-1", "key-1", "key-1", "key-1", "key-2", "key-3", "key-4", "key-5",
+    "key-6", "key-6", "key-6", "key-6",
+  ]);
   await source.dispatch("change");
+});
+
+test("late submission error bodies cannot overwrite newer request state", async () => {
+  const errorBody = deferred();
+  const doc = new FakeDocument();
+  let requestSignal;
+  const controller = createConversionController(doc, {
+    fetch: async (_url, options) => {
+      requestSignal = options.signal;
+      return {
+        ok: false,
+        status: 422,
+        json: () => errorBody.promise,
+        headers: { get: () => null },
+      };
+    },
+    setTimeout() { return 1; }, clearTimeout() {}, randomUUID: () => "key",
+    FormData: FakeFormData,
+  });
+  doc.querySelector("#source").files = [{ name: "source.md", size: 10 }];
+  doc.querySelector("#selected-template").dataset.templateId = "template";
+  doc.querySelector("#selected-template").dataset.versionId = "version";
+
+  const submission = controller.submitConversion({ preventDefault() {} });
+  doc.querySelector("#page-alert").textContent = "Newer request state";
+  await doc.outputs[0].dispatch("change");
+  assert.equal(requestSignal.aborted, true);
+  errorBody.resolve({ error: { message: "Stale rejection." } });
+  await submission;
+  assert.equal(doc.querySelector("#page-alert").textContent, "Newer request state");
+  assert.equal(doc.querySelector("#submit-conversion").disabled, false);
 });
 
 test("polling progresses, exposes downloads, reports errors, and cancels", async () => {

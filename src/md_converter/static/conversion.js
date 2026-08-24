@@ -57,6 +57,17 @@ function replaceChildren(element) {
   while (element.firstChild) element.removeChild(element.firstChild);
 }
 
+function validAcceptedJob(job) {
+  return Boolean(
+    job &&
+    typeof job.id === "string" &&
+    job.id.length > 0 &&
+    typeof job.state === "string" &&
+    typeof job.step === "string" &&
+    Number.isFinite(job.progress),
+  );
+}
+
 export function createConversionController(doc, dependencies = {}) {
   const fetchRequest = dependencies.fetch || globalThis.fetch.bind(globalThis);
   const schedule = dependencies.setTimeout || globalThis.setTimeout.bind(globalThis);
@@ -115,11 +126,21 @@ export function createConversionController(doc, dependencies = {}) {
     pollTimer = null;
   }
 
+  function restoreSubmit() {
+    submit.disabled = !selected.dataset.versionId;
+  }
+
+  function showAmbiguousSubmission(message = "The conversion response could not be confirmed.") {
+    restoreSubmit();
+    showError(`${message} Retrying will reuse the same request key.`);
+  }
+
   function invalidateSubmission() {
     submissionGeneration += 1;
     abort(submissionAbort);
     submissionAbort = null;
     submissionKey = null;
+    restoreSubmit();
   }
 
   function invalidateSearch() {
@@ -300,19 +321,38 @@ export function createConversionController(doc, dependencies = {}) {
       });
     } catch {
       if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
-      submit.disabled = false;
-      showError("The conversion could not be submitted. Retrying will reuse the same request key.");
+      showAmbiguousSubmission("The conversion could not be submitted.");
       return;
     }
-    if (generation !== submissionGeneration) return;
-    submissionKey = null;
+    if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
     if (!response.ok) {
-      submit.disabled = false;
-      showError(await responseError(response));
+      const message = await responseError(response);
+      if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
+      if (response.status >= 400 && response.status < 500) {
+        submissionKey = null;
+        restoreSubmit();
+        showError(message);
+      } else showAmbiguousSubmission(message);
       return;
     }
-    const job = await response.json();
-    if (generation !== submissionGeneration) return;
+    if (response.status !== 202) {
+      showAmbiguousSubmission();
+      return;
+    }
+    let job;
+    try {
+      job = await response.json();
+    } catch {
+      if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
+      showAmbiguousSubmission();
+      return;
+    }
+    if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
+    if (!validAcceptedJob(job)) {
+      showAmbiguousSubmission();
+      return;
+    }
+    submissionKey = null;
     const retryAfter = Number(response.headers.get("Retry-After"));
     const activeGeneration = activateJob(job.id);
     currentDelay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000;
