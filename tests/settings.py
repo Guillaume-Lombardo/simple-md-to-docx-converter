@@ -23,6 +23,7 @@ def template_settings(**overrides: Any) -> dict[str, Any]:
         "template_libreoffice_executable": "/bin/true",
         "template_engine_timeout_seconds": 10.0,
         "template_engine_termination_grace_seconds": 1.0,
+        "template_pending_publication_stale_seconds": 60.0,
     }
     values.update(overrides)
     return values

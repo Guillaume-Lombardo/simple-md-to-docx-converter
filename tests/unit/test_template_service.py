@@ -15,16 +15,22 @@ from md_converter.persistence.errors import PersistenceError
 from md_converter.storage import ObjectNotFoundError, ObjectStore, ObjectStoreError
 from md_converter.templates.errors import (
     TemplateConflictError,
+    TemplateIntegrityError,
     TemplateStorageError,
     TemplateUnavailableError,
 )
 from md_converter.templates.models import (
     TemplateCreate,
     TemplateIdentity,
+    TemplatePublicationState,
     TemplateStatus,
     TemplateVersion,
 )
-from md_converter.templates.service import TemplateOperation, TemplateService
+from md_converter.templates.service import (
+    TemplateOperation,
+    TemplateRecoveryPolicy,
+    TemplateService,
+)
 from md_converter.templates.validation import ValidatedTemplate
 
 
@@ -36,6 +42,13 @@ def _validated(data: bytes) -> ValidatedTemplate:
         ("Calibri",),
         (("Calibri", "Carlito"),),
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("duration", [0, -1, True])
+def test_template_recovery_policy_rejects_invalid_duration(duration: float) -> None:
+    with pytest.raises(ValueError):
+        TemplateRecoveryPolicy(duration)
 
 
 @pytest.mark.unit
@@ -127,6 +140,7 @@ def test_versioned_service_delegates_complete_immutable_lifecycle(
         objects=objects,
         validate_content=lambda data, _declaration: _validated(data),
         clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        recovery_policy=TemplateRecoveryPolicy(60),
     )
     catalog.reserve_create.return_value = None
     catalog.finalize_version.side_effect = lambda _template_id, **values: (
@@ -228,7 +242,20 @@ def test_versioned_service_compensates_and_sanitizes_storage_failures(  # noqa: 
         selections=selections,
         objects=objects,
         validate_content=lambda data, _declaration: _validated(data),
+        recovery_policy=TemplateRecoveryPolicy(60),
     )
+    catalog.reserve_create.return_value = None
+    catalog.finalize_version.side_effect = PersistenceError
+    with pytest.raises(PersistenceError):
+        service.create_versioned(
+            owner,
+            TemplateCreate(uuid4(), "Create", "Compensation"),
+            b"content",
+            ("Calibri",),
+        )
+    catalog.abort_pending.assert_called_once()
+    catalog.abort_pending.reset_mock()
+    objects.reset_mock()
     catalog.reserve_version.side_effect = lambda _template_id, **values: values[
         "version"
     ]
@@ -271,14 +298,34 @@ def test_versioned_service_compensates_and_sanitizes_storage_failures(  # noqa: 
     with pytest.raises(TemplateStorageError):
         service.download(owner, template.id, version.id)
 
+    objects.get.side_effect = None
+    objects.get.return_value = b"x"
+    with pytest.raises(TemplateIntegrityError):
+        service.resolve_frozen_version(template.id, version.id)
+
     unconfigured = TemplateService(catalog=catalog, selections=mocker.Mock())
     with pytest.raises(RuntimeError, match="not configured"):
         unconfigured.download(owner, template.id)
+    configured_without_policy = TemplateService(
+        catalog=catalog,
+        selections=mocker.Mock(),
+        objects=objects,
+        validate_content=lambda data, _declaration: _validated(data),
+    )
+    with pytest.raises(RuntimeError, match="recovery policy"):
+        configured_without_policy.create_versioned(
+            owner,
+            TemplateCreate(uuid4(), "Name", "Description"),
+            b"content",
+            ("Calibri",),
+        )
     catalog.get_version.return_value = None
     with pytest.raises(TemplateUnavailableError):
         service.resolve_frozen_version(template.id, uuid4())
 
     catalog.get.return_value = replace(template, status=TemplateStatus.ARCHIVED)
+    with pytest.raises(TemplateUnavailableError):
+        service.set_preferred(owner, template.id)
     with pytest.raises(TemplateConflictError):
         service.replace(
             owner,
@@ -334,7 +381,9 @@ def test_pending_object_and_deletion_failures_remain_retryable(
     )
     catalog = mocker.Mock()
     catalog.get.return_value = replace(template, status=TemplateStatus.ACTIVE)
-    catalog.reserve_version.return_value = replace(version, publication_state="pending")
+    catalog.reserve_version.side_effect = lambda _template_id, **values: values[
+        "version"
+    ]
     catalog.finalize_version.side_effect = PersistenceError
     objects = mocker.Mock(spec=ObjectStore)
     objects.delete.side_effect = ObjectStoreError
@@ -343,6 +392,7 @@ def test_pending_object_and_deletion_failures_remain_retryable(
         selections=mocker.Mock(),
         objects=objects,
         validate_content=lambda data, _declaration: _validated(data),
+        recovery_policy=TemplateRecoveryPolicy(60),
     )
 
     with pytest.raises(PersistenceError):
@@ -355,11 +405,25 @@ def test_pending_object_and_deletion_failures_remain_retryable(
         )
     catalog.abort_pending.assert_not_called()
 
-    catalog.pending_versions.return_value = (version,)
+    pending = replace(
+        version,
+        publication_state=TemplatePublicationState.PENDING,
+        publication_token=uuid4(),
+        publication_lease_expires_at=datetime.now(UTC),
+    )
+    catalog.claim_stale_pending.return_value = (pending,)
     catalog.pending_deletions.return_value = ()
+    catalog.abort_pending.return_value = True
+    objects.delete.side_effect = ObjectStoreError
+    assert service.reclaim_pending() == 0
+    catalog.release_pending_claim.assert_called_once()
+
+    catalog.release_pending_claim.reset_mock()
     objects.delete.side_effect = None
     assert service.reclaim_pending() == 1
-    catalog.abort_pending.assert_called_once_with(template.id, version.id)
+    assert catalog.abort_pending.call_args.args[:2] == (template.id, version.id)
+    catalog.abort_pending.return_value = False
+    assert service.reclaim_pending() == 0
 
     catalog.reset_mock()
     objects.reset_mock()
@@ -371,7 +435,14 @@ def test_pending_object_and_deletion_failures_remain_retryable(
     catalog.finalize_delete.assert_not_called()
 
     objects.delete.side_effect = None
-    catalog.pending_versions.return_value = ()
+    catalog.claim_stale_pending.return_value = ()
     catalog.pending_deletions.return_value = ((template.id, (version,)),)
+    objects.delete.side_effect = ObjectStoreError
+    assert service.reclaim_pending() == 0
+    catalog.finalize_delete.assert_not_called()
+    objects.delete.side_effect = None
     assert service.reclaim_pending() == 1
     catalog.finalize_delete.assert_called_once_with(template.id)
+
+    with pytest.raises(TemplateConflictError):
+        service._publication_token(version)

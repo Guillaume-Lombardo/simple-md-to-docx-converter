@@ -93,6 +93,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             TemplateStatus.ACTIVE,
             current_version_id=template_version_id,
         )
+        publication_token = uuid4()
         version = TemplateVersion(
             template_version_id,
             template_id,
@@ -106,12 +107,15 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             resolved_fonts=(("Calibri", "Carlito"),),
             validation_trace=("static_ooxml",),
             publication_state=TemplatePublicationState.PENDING,
+            publication_token=publication_token,
+            publication_lease_expires_at=now,
         )
         catalog.reserve_create(template, version)
         catalog.finalize_version(
             template_id,
             expected_revision=1,
             version_id=template_version_id,
+            publication_token=publication_token,
             audit=TemplateAuditRecord(
                 uuid4(),
                 owner_id,

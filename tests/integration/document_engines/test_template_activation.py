@@ -40,7 +40,7 @@ from md_converter.templates.errors import (
     TemplateValidationErrorCode,
 )
 from md_converter.templates.models import TemplateCreate, TemplateSearch
-from md_converter.templates.service import TemplateService
+from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
 from md_converter.templates.validation import (
     APPROVED_FONT_POLICY,
     TemplateFontDeclaration,
@@ -103,6 +103,7 @@ def _versioned_service(
         validate_content=lambda data, declaration: validate_template_for_activation(
             data, declaration, context
         ),
+        recovery_policy=TemplateRecoveryPolicy(60),
     )
     return service, catalog, owner, engine
 

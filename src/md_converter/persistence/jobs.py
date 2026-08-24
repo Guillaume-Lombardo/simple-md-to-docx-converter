@@ -35,6 +35,7 @@ from md_converter.persistence.schema import (
     TemplateRow,
     TemplateVersionRow,
 )
+from md_converter.persistence.sql import serialize_sqlite_write
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -126,6 +127,7 @@ class SqlJobRepository:
         )
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 frozen = database.scalar(
                     select(TemplateRow.id)
                     .join(

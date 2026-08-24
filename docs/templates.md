@@ -64,9 +64,10 @@ global administrators.
 Replacement always creates the next immutable version. Restoration reads a historical object and
 creates a new copy-forward version recording `restored_from_version_id`; it never rewrites
 history. Conversion submission locks and verifies one active, current, published template/version
-pair in the same transaction that freezes those identifiers on the job. `FrozenTemplateJobProcessor`
-then uses `TemplateService.resolve_frozen_version` to give the conversion processor exactly those
-validated bytes after later replacements or restorations.
+pair in the same transaction that freezes those identifiers on the job. Production workers are
+assembled through `build_template_conversion_worker`, which always installs
+`FrozenTemplateJobProcessor`; it uses `TemplateService.resolve_frozen_version` to give the
+conversion processor exactly those validated bytes after later replacements or restorations.
 
 ## Authorization, audit, archive, and deletion
 
@@ -80,10 +81,13 @@ Deletion requires an archived identity and its current ETag. It is rejected whil
 system fallback, or conversion job references the identity. The repository first commits a durable
 `deleting` tombstone, then object deletions use idempotent store operations, and only a fully cleaned
 identity is removed. Creation and replacement likewise reserve hidden `pending` rows before bytes
-are written and publish the current pair only after the object succeeds. Application startup retries
-both pending-object compensation and deletion tombstones, so a process or object-store failure
-cannot expose a partial version or permanently lose cleanup work. Archive preserves history and
-preferences; selection resolution ignores archived identities.
+are written and publish the current pair only after the object succeeds. Pending publications carry
+a unique fencing token and caller-configured lease expiry. Reconcilers atomically claim only expired
+rows, and finalization, abort, and retry release require the current token, so multiple replicas
+cannot clean up a live upload. Application startup retries those stale claims and deletion
+tombstones, so a process or object-store failure cannot expose a partial version or permanently lose
+cleanup work. Archive preserves history and preferences; selection resolution ignores archived
+identities.
 
 SQLite/filesystem and PostgreSQL/S3 share the service and repository contracts. Filesystem writes
 use fsync plus atomic replacement; S3 and filesystem keys are stable immutable version UUIDs.

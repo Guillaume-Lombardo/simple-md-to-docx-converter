@@ -1,5 +1,6 @@
 """Real PostgreSQL durable queue and concurrent claim coverage."""
 
+import hashlib
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +13,7 @@ import pytest
 from sqlalchemy import delete
 
 from md_converter.auth.models import Role, User
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
+from md_converter.conversion.errors import ConversionErrorCode
 from md_converter.jobs.models import (
     ConversionJob,
     JobOutput,
@@ -22,12 +23,20 @@ from md_converter.jobs.models import (
     JobStep,
 )
 from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from md_converter.jobs.worker import WorkerPolicy
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.schema import ConversionJobRow, TemplateRow, UserRow
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
+from md_converter.persistence.templates import (
+    SqlTemplateCatalogRepository,
+    SqlTemplateSelectionRepository,
+)
 from md_converter.storage import ObjectKey, ObjectScope, S3ObjectStore
+from md_converter.templates.models import TemplateVersion
+from md_converter.templates.processor import build_template_conversion_worker
+from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
+from md_converter.templates.validation import ValidatedTemplate
 from tests.job_repository_contracts import (
     LEASE_END,
     NOW,
@@ -40,36 +49,22 @@ from tests.job_repository_contracts import (
 from tests.template_records import publish_template_pair
 
 
-class DistributedProcessor:
-    """Deterministic processor used to cross the real distributed boundaries."""
+class DistributedTemplateProcessor:
+    """Return evidence of the exact frozen bytes supplied by composition."""
 
-    def process(
+    def process_with_template(
         self,
         job: ConversionJob,
+        template: TemplateVersion,
+        template_content: bytes,
         *,
         cancelled: Callable[[], bool],
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult:
-        assert job.state is JobState.RUNNING
+        assert template.id == job.template_version_id
         assert not cancelled()
         progress(JobStep.PUBLISHING, 90)
-        return JobProcessResult(b"distributed-worker-result")
-
-
-class DistributedFailingProcessor(DistributedProcessor):
-    """Safe processor failure crossing real PostgreSQL and S3 boundaries."""
-
-    def process(
-        self,
-        job: ConversionJob,
-        *,
-        cancelled: Callable[[], bool],
-        progress: Callable[[JobStep, int], None],
-    ) -> JobProcessResult:
-        assert job.state is JobState.RUNNING
-        raise ConversionError(
-            ConversionErrorCode.INVALID_PDF, "Conversion output is invalid."
-        )
+        return JobProcessResult(b"used:" + template_content)
 
 
 def race_cancel(
@@ -188,7 +183,15 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"worker-{unique}", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
-    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
+    frozen_content = b"distributed-frozen-template"
+    publish_template_pair(
+        engine,
+        owner.id,
+        TEMPLATE_ID,
+        TEMPLATE_VERSION_ID,
+        sha256=hashlib.sha256(frozen_content).hexdigest(),
+        size=len(frozen_content),
+    )
     repository = SqlJobRepository(engine)
     client = boto3.client(
         "s3",
@@ -198,6 +201,19 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         aws_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
     )
     objects = S3ObjectStore(client, os.environ["MD_CONVERTER_TEST_S3_BUCKET"])
+    template_key = ObjectKey(
+        ObjectScope.TEMPLATE_VERSION, owner.id, TEMPLATE_VERSION_ID
+    )
+    objects.put(template_key, frozen_content)
+    resolver = TemplateService(
+        catalog=SqlTemplateCatalogRepository(engine),
+        selections=SqlTemplateSelectionRepository(engine),
+        objects=objects,
+        validate_content=lambda data, _declaration: ValidatedTemplate(
+            hashlib.sha256(data).hexdigest(), (), (), (), ()
+        ),
+        recovery_policy=TemplateRecoveryPolicy(60),
+    )
     service = JobService(repository, objects, JobServicePolicy(60))
     queued, _ = service.submit(
         JobRequest(
@@ -212,11 +228,13 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         f"distributed-{unique}",
     )
     source_object_ids = [queued.source_object_id]
-    worker = ConversionWorker(
+    worker = build_template_conversion_worker(
         worker_id=f"distributed-{unique}",
-        runtime=WorkerRuntime(
-            repository, objects, DistributedProcessor(), lambda: datetime.now(UTC)
-        ),
+        repository=repository,
+        objects=objects,
+        resolver=resolver,
+        processor=DistributedTemplateProcessor(),
+        clock=lambda: datetime.now(UTC),
         policy=WorkerPolicy(1, 0.05, 60, 1),
     )
     try:
@@ -225,7 +243,7 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
             queued.id, actor_id=owner.id, actor_is_admin=False
         )
         assert finished.state is JobState.SUCCEEDED
-        assert content == b"distributed-worker-result"
+        assert content == b"used:" + frozen_content
         failed_job, _ = service.submit(
             JobRequest(
                 owner.id,
@@ -239,21 +257,22 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
             f"distributed-failure-{unique}",
         )
         source_object_ids.append(failed_job.source_object_id)
-        failing_worker = ConversionWorker(
+        objects.put(template_key, b"tampered")
+        failing_worker = build_template_conversion_worker(
             worker_id=f"distributed-failure-{unique}",
-            runtime=WorkerRuntime(
-                repository,
-                objects,
-                DistributedFailingProcessor(),
-                lambda: datetime.now(UTC),
-            ),
+            repository=repository,
+            objects=objects,
+            resolver=resolver,
+            processor=DistributedTemplateProcessor(),
+            clock=lambda: datetime.now(UTC),
             policy=WorkerPolicy(1, 0.05, 60, 1),
         )
         assert failing_worker.run_once()
         failed = repository.get(failed_job.id)
         assert failed is not None and failed.state is JobState.FAILED
-        assert failed.error_code == ConversionErrorCode.INVALID_PDF.value
+        assert failed.error_code == ConversionErrorCode.TEMPLATE_INTEGRITY.value
     finally:
+        objects.delete(template_key)
         current = repository.get(queued.id)
         for source_object_id in source_object_ids:
             objects.delete(ObjectKey(ObjectScope.UPLOAD, owner.id, source_object_id))

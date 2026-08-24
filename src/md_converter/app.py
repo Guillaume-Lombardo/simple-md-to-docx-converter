@@ -85,7 +85,7 @@ from md_converter.templates.models import (
     TemplateStatus,
 )
 from md_converter.templates.runtime import build_template_validator
-from md_converter.templates.service import TemplateService
+from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
 
 COMPONENT_VERSIONS = (
     ("chromium", "151.0.7922.173"),
@@ -615,6 +615,9 @@ def build_components(settings: Settings) -> AppComponents:
         selections=SqlTemplateSelectionRepository(engine),
         objects=object_store,
         validate_content=build_template_validator(settings),
+        recovery_policy=TemplateRecoveryPolicy(
+            settings.template_pending_publication_stale_seconds
+        ),
     )
     templates.reclaim_pending()
     return AppComponents(

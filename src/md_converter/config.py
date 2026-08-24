@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     template_libreoffice_executable: str = Field(min_length=1)
     template_engine_timeout_seconds: float = Field(gt=0)
     template_engine_termination_grace_seconds: float = Field(gt=0)
+    template_pending_publication_stale_seconds: float = Field(gt=0)
     template_engine_workspace_root: Path | None = None
     storage_profile: StorageProfile
     standalone_data_directory: Path | None = None

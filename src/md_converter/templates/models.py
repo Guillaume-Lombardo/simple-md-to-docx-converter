@@ -113,6 +113,8 @@ class TemplateVersion:
     resolved_fonts: tuple[tuple[str, str], ...] = ()
     validation_trace: tuple[str, ...] = ()
     publication_state: TemplatePublicationState = TemplatePublicationState.PUBLISHED
+    publication_token: UUID | None = None
+    publication_lease_expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.number <= 0 or self.size <= 0:
@@ -124,6 +126,18 @@ class TemplateVersion:
         if self.created_at.tzinfo is None:
             raise ValueError("Template version timestamp must include a timezone")
         object.__setattr__(self, "created_at", self.created_at.astimezone(UTC))
+        if self.publication_lease_expires_at is not None:
+            if self.publication_lease_expires_at.tzinfo is None:
+                raise ValueError("Publication lease timestamp must include a timezone")
+            object.__setattr__(
+                self,
+                "publication_lease_expires_at",
+                self.publication_lease_expires_at.astimezone(UTC),
+            )
+        if self.publication_state is TemplatePublicationState.PENDING and (
+            self.publication_token is None or self.publication_lease_expires_at is None
+        ):
+            raise ValueError("Pending template versions require a publication lease")
 
 
 @dataclass(frozen=True, slots=True)

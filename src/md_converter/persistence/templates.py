@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 from sqlalchemy.sql.base import Executable
 
@@ -23,6 +23,7 @@ from md_converter.persistence.schema import (
     TemplateRow,
     TemplateVersionRow,
 )
+from md_converter.persistence.sql import serialize_sqlite_write
 from md_converter.templates.errors import (
     TemplateConflictError,
     TemplateUnavailableError,
@@ -77,6 +78,15 @@ def _version(row: TemplateVersionRow) -> TemplateVersion:
         resolved_fonts=tuple(tuple(item) for item in json.loads(row.resolved_fonts)),
         validation_trace=tuple(json.loads(row.validation_trace)),
         publication_state=TemplatePublicationState(row.publication_state),
+        publication_token=(
+            UUID(row.publication_token) if row.publication_token else None
+        ),
+        publication_lease_expires_at=(
+            row.publication_lease_expires_at.replace(tzinfo=UTC)
+            if row.publication_lease_expires_at is not None
+            and row.publication_lease_expires_at.tzinfo is None
+            else row.publication_lease_expires_at
+        ),
     )
 
 
@@ -99,6 +109,10 @@ def _version_row(version: TemplateVersion) -> TemplateVersionRow:
         resolved_fonts=json.dumps(version.resolved_fonts, separators=(",", ":")),
         validation_trace=json.dumps(version.validation_trace, separators=(",", ":")),
         publication_state=version.publication_state.value,
+        publication_token=(
+            str(version.publication_token) if version.publication_token else None
+        ),
+        publication_lease_expires_at=version.publication_lease_expires_at,
     )
 
 
@@ -151,12 +165,20 @@ class SqlTemplateCatalogRepository:
         version: TemplateVersion,
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity:
-        pending = replace(version, publication_state=TemplatePublicationState.PENDING)
+        pending = replace(
+            version,
+            publication_state=TemplatePublicationState.PENDING,
+            publication_token=version.publication_token or uuid4(),
+            publication_lease_expires_at=(
+                version.publication_lease_expires_at or version.created_at
+            ),
+        )
         self.reserve_create(template, pending)
         return self.finalize_version(
             template.id,
             expected_revision=1,
             version_id=version.id,
+            publication_token=self._publication_token(pending),
             audit=audit,
         )
 
@@ -166,6 +188,7 @@ class SqlTemplateCatalogRepository:
         """Persist a hidden identity and pending object row before writing bytes."""
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 database.add(
                     TemplateRow(
                         id=str(template.id),
@@ -190,6 +213,7 @@ class SqlTemplateCatalogRepository:
         """Serialize version numbering and persist a retry-visible pending object."""
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 template = database.scalar(
                     select(TemplateRow)
                     .where(
@@ -229,12 +253,16 @@ class SqlTemplateCatalogRepository:
                     resolved_fonts=version.resolved_fonts,
                     validation_trace=version.validation_trace,
                     publication_state=TemplatePublicationState.PENDING,
+                    publication_token=version.publication_token,
+                    publication_lease_expires_at=version.publication_lease_expires_at,
                 )
                 database.add(_version_row(reserved))
                 database.flush()
                 return reserved
         except TemplateConflictError:
             raise
+        except IntegrityError:
+            raise TemplateConflictError from None
         except SQLAlchemyError:
             raise PersistenceError from None
 
@@ -244,21 +272,26 @@ class SqlTemplateCatalogRepository:
         *,
         expected_revision: int,
         version_id: UUID,
+        publication_token: UUID,
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity:
         """Publish one reserved object and CAS the current version atomically."""
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 version = database.scalar(
                     select(TemplateVersionRow).where(
                         TemplateVersionRow.id == str(version_id),
                         TemplateVersionRow.template_id == str(template_id),
                         TemplateVersionRow.publication_state == "pending",
+                        TemplateVersionRow.publication_token == str(publication_token),
                     )
                 )
                 if version is None:
                     raise TemplateConflictError
                 version.publication_state = "published"
+                version.publication_token = None
+                version.publication_lease_expires_at = None
                 database.flush()
                 result = database.execute(
                     update(TemplateRow)
@@ -292,33 +325,87 @@ class SqlTemplateCatalogRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
-    def abort_pending(self, template_id: UUID, version_id: UUID) -> None:
+    def abort_pending(
+        self, template_id: UUID, version_id: UUID, publication_token: UUID
+    ) -> bool:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
-                database.execute(
+                result = database.execute(
                     delete(TemplateVersionRow).where(
                         TemplateVersionRow.id == str(version_id),
                         TemplateVersionRow.template_id == str(template_id),
                         TemplateVersionRow.publication_state == "pending",
+                        TemplateVersionRow.publication_token == str(publication_token),
                     )
                 )
+                removed = getattr(result, "rowcount", 0) == 1
                 template = database.get(TemplateRow, str(template_id))
-                if template is not None and template.publication_state == "pending":
+                if (
+                    removed
+                    and template is not None
+                    and template.publication_state == "pending"
+                ):
                     database.delete(template)
+                return removed
         except SQLAlchemyError:
             raise PersistenceError from None
 
-    def pending_versions(self) -> tuple[TemplateVersion, ...]:
+    def claim_stale_pending(
+        self,
+        *,
+        stale_before: datetime,
+        lease_expires_at: datetime,
+        publication_token: UUID,
+    ) -> tuple[TemplateVersion, ...]:
         try:
-            with DatabaseSession(self._engine) as database:
+            with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                candidates = (
+                    select(TemplateVersionRow.id)
+                    .where(
+                        TemplateVersionRow.publication_state == "pending",
+                        TemplateVersionRow.publication_lease_expires_at <= stale_before,
+                    )
+                    .with_for_update(
+                        skip_locked=self._engine.dialect.name == "postgresql"
+                    )
+                )
                 return tuple(
                     _version(row)
                     for row in database.scalars(
-                        select(TemplateVersionRow).where(
-                            TemplateVersionRow.publication_state == "pending"
+                        update(TemplateVersionRow)
+                        .where(TemplateVersionRow.id.in_(candidates))
+                        .values(
+                            publication_token=str(publication_token),
+                            publication_lease_expires_at=lease_expires_at,
                         )
+                        .returning(TemplateVersionRow)
                     )
                 )
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def release_pending_claim(
+        self,
+        template_id: UUID,
+        version_id: UUID,
+        publication_token: UUID,
+        *,
+        retry_at: datetime,
+    ) -> bool:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                result = database.execute(
+                    update(TemplateVersionRow)
+                    .where(
+                        TemplateVersionRow.id == str(version_id),
+                        TemplateVersionRow.template_id == str(template_id),
+                        TemplateVersionRow.publication_state == "pending",
+                        TemplateVersionRow.publication_token == str(publication_token),
+                    )
+                    .values(publication_lease_expires_at=retry_at)
+                )
+                return getattr(result, "rowcount", 0) == 1
         except SQLAlchemyError:
             raise PersistenceError from None
 
@@ -384,15 +471,27 @@ class SqlTemplateCatalogRepository:
             template_id,
             expected_revision=expected_revision,
             version=replace(
-                version, publication_state=TemplatePublicationState.PENDING
+                version,
+                publication_state=TemplatePublicationState.PENDING,
+                publication_token=version.publication_token or uuid4(),
+                publication_lease_expires_at=(
+                    version.publication_lease_expires_at or version.created_at
+                ),
             ),
         )
         return self.finalize_version(
             template_id,
             expected_revision=expected_revision,
             version_id=reserved.id,
+            publication_token=self._publication_token(reserved),
             audit=audit,
         )
+
+    @staticmethod
+    def _publication_token(version: TemplateVersion) -> UUID:
+        if version.publication_token is None:  # guarded by the domain model
+            raise TemplateConflictError
+        return version.publication_token
 
     def set_status(
         self,
@@ -474,6 +573,7 @@ class SqlTemplateCatalogRepository:
         """Commit a durable tombstone before any object is removed."""
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 row = database.scalar(
                     select(TemplateRow)
                     .where(TemplateRow.id == str(template_id))
@@ -538,6 +638,7 @@ class SqlTemplateCatalogRepository:
     def finalize_delete(self, template_id: UUID) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 row = database.get(TemplateRow, str(template_id))
                 if row is None:
                     return
@@ -591,6 +692,7 @@ class SqlTemplateCatalogRepository:
     ) -> TemplateIdentity:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 changed = database.execute(
                     update(TemplateRow)
                     .where(

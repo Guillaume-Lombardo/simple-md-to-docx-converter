@@ -9,8 +9,14 @@ from sqlalchemy.orm import Session
 from md_converter.persistence.schema import TemplateRow, TemplateVersionRow
 
 
-def publish_template_pair(
-    engine: Engine, owner_id: UUID, template_id: UUID, version_id: UUID
+def publish_template_pair(  # noqa: PLR0913
+    engine: Engine,
+    owner_id: UUID,
+    template_id: UUID,
+    version_id: UUID,
+    *,
+    sha256: str = "0" * 64,
+    size: int = 1,
 ) -> None:
     """Create one active current pair without crossing the T10 engine boundary."""
     with Session(engine) as database, database.begin():
@@ -34,8 +40,8 @@ def publish_template_pair(
                 template_id=str(template_id),
                 version_number=1,
                 object_owner_id=str(owner_id),
-                sha256="0" * 64,
-                size=1,
+                sha256=sha256,
+                size=size,
                 created_at=datetime.now(UTC),
                 created_by=str(owner_id),
                 restored_from_version_id=None,

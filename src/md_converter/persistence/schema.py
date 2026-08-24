@@ -111,6 +111,12 @@ class TemplateVersionRow(Base):
             "publication_state IN ('pending', 'published')",
             name="ck_template_versions_publication_state",
         ),
+        CheckConstraint(
+            "publication_state = 'published' OR "
+            "(publication_token IS NOT NULL AND "
+            "publication_lease_expires_at IS NOT NULL)",
+            name="ck_template_versions_pending_lease",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -131,6 +137,10 @@ class TemplateVersionRow(Base):
     validation_trace: Mapped[str] = mapped_column(String(), nullable=False)
     publication_state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending"
+    )
+    publication_token: Mapped[str | None] = mapped_column(String(36))
+    publication_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
 
 

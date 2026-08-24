@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -50,12 +51,30 @@ class TemplateCatalogRepository(Protocol):
         *,
         expected_revision: int,
         version_id: UUID,
+        publication_token: UUID,
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity: ...
 
-    def abort_pending(self, template_id: UUID, version_id: UUID) -> None: ...
+    def abort_pending(
+        self, template_id: UUID, version_id: UUID, publication_token: UUID
+    ) -> bool: ...
 
-    def pending_versions(self) -> tuple[TemplateVersion, ...]: ...
+    def claim_stale_pending(
+        self,
+        *,
+        stale_before: datetime,
+        lease_expires_at: datetime,
+        publication_token: UUID,
+    ) -> tuple[TemplateVersion, ...]: ...
+
+    def release_pending_claim(
+        self,
+        template_id: UUID,
+        version_id: UUID,
+        publication_token: UUID,
+        *,
+        retry_at: datetime,
+    ) -> bool: ...
 
     def pending_deletions(
         self,

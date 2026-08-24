@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from uuid import UUID, uuid4
 
@@ -67,6 +67,20 @@ class TemplateAuthorization:
     administrator_intervention: bool
 
 
+@dataclass(frozen=True, slots=True)
+class TemplateRecoveryPolicy:
+    """Caller-owned publication lease duration assigned to T18 configuration."""
+
+    pending_publication_stale_seconds: float
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.pending_publication_stale_seconds, bool)
+            or self.pending_publication_stale_seconds <= 0
+        ):
+            raise ValueError("Template publication lease duration must be positive")
+
+
 class TemplateService:
     """Application service without T15 content or version mutation behavior."""
 
@@ -80,6 +94,8 @@ class TemplateService:
         | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         new_id: Callable[[], UUID] = uuid4,
+        new_token: Callable[[], UUID] = uuid4,
+        recovery_policy: TemplateRecoveryPolicy | None = None,
     ) -> None:
         self._catalog = catalog
         self._selections = selections
@@ -87,6 +103,8 @@ class TemplateService:
         self._validate_content = validate_content
         self._clock = clock
         self._new_id = new_id
+        self._new_token = new_token
+        self._recovery_policy = recovery_policy
 
     def create(self, actor: User, request: TemplateCreate) -> TemplateIdentity:
         """Create an identity whose immutable owner is always the authenticated actor."""
@@ -136,6 +154,7 @@ class TemplateService:
                 template.id,
                 expected_revision=1,
                 version_id=version.id,
+                publication_token=self._publication_token(version),
                 audit=self._audit(
                     actor, template, TemplateOperation.CREATE, version.id
                 ),
@@ -144,7 +163,10 @@ class TemplateService:
             self._compensate_pending(objects, version)
             raise
         return persisted, replace(
-            version, publication_state=TemplatePublicationState.PUBLISHED
+            version,
+            publication_state=TemplatePublicationState.PUBLISHED,
+            publication_token=None,
+            publication_lease_expires_at=None,
         )
 
     def update_metadata(
@@ -234,6 +256,12 @@ class TemplateService:
             created_at=self._clock(),
             created_by=actor.id,
             restored_from_version_id=source.id,
+            publication_state=TemplatePublicationState.PENDING,
+            publication_token=self._new_token(),
+            publication_lease_expires_at=self._clock()
+            + timedelta(
+                seconds=self._required_recovery_policy().pending_publication_stale_seconds
+            ),
         )
         version = self._catalog.reserve_version(
             template_id, expected_revision=expected_revision, version=version
@@ -414,6 +442,11 @@ class TemplateService:
             raise RuntimeError("Template version runtime is not configured")
         return self._objects, self._validate_content
 
+    def _required_recovery_policy(self) -> TemplateRecoveryPolicy:
+        if self._recovery_policy is None:
+            raise RuntimeError("Template recovery policy is not configured")
+        return self._recovery_policy
+
     def _new_version(  # noqa: PLR0913 - immutable version fields are explicit
         self,
         actor: User,
@@ -424,6 +457,8 @@ class TemplateService:
         *,
         number: int,
     ) -> TemplateVersion:
+        policy = self._required_recovery_policy()
+        created_at = self._clock()
         return TemplateVersion(
             version_id,
             template.id,
@@ -431,7 +466,7 @@ class TemplateService:
             template.owner_id,
             validated.sha256,
             len(content),
-            self._clock(),
+            created_at,
             actor.id,
             None,
             validated.declared_fonts,
@@ -442,6 +477,8 @@ class TemplateService:
                 "libreoffice_open_save",
             ),
             TemplatePublicationState.PENDING,
+            self._new_token(),
+            created_at + timedelta(seconds=policy.pending_publication_stale_seconds),
         )
 
     @staticmethod
@@ -466,26 +503,44 @@ class TemplateService:
                 template.id,
                 expected_revision=expected_revision,
                 version_id=version.id,
+                publication_token=self._publication_token(version),
                 audit=audit,
             )
         except BaseException:
             self._compensate_pending(objects, version)
             raise
         return updated, replace(
-            version, publication_state=TemplatePublicationState.PUBLISHED
+            version,
+            publication_state=TemplatePublicationState.PUBLISHED,
+            publication_token=None,
+            publication_lease_expires_at=None,
         )
 
     def reclaim_pending(self) -> int:
-        """Retry every DB-tracked unpublished object and deletion tombstone."""
+        """Claim and retry stale unpublished objects plus deletion tombstones."""
         objects, _validator = self._runtime()
+        policy = self._required_recovery_policy()
+        now = self._clock()
+        token = self._new_token()
         reclaimed = 0
-        for version in self._catalog.pending_versions():
+        for version in self._catalog.claim_stale_pending(
+            stale_before=now,
+            lease_expires_at=now
+            + timedelta(seconds=policy.pending_publication_stale_seconds),
+            publication_token=token,
+        ):
             try:
                 objects.delete(self._key(version))
             except ObjectStoreError:
+                self._catalog.release_pending_claim(
+                    version.template_id,
+                    version.id,
+                    token,
+                    retry_at=now,
+                )
                 continue
-            self._catalog.abort_pending(version.template_id, version.id)
-            reclaimed += 1
+            if self._catalog.abort_pending(version.template_id, version.id, token):
+                reclaimed += 1
         for template_id, versions in self._catalog.pending_deletions():
             try:
                 for version in versions:
@@ -503,7 +558,17 @@ class TemplateService:
             objects.delete(self._key(version))
         except ObjectStoreError:
             return
-        self._catalog.abort_pending(version.template_id, version.id)
+        self._catalog.abort_pending(
+            version.template_id,
+            version.id,
+            self._publication_token(version),
+        )
+
+    @staticmethod
+    def _publication_token(version: TemplateVersion) -> UUID:
+        if version.publication_token is None:  # guarded by the domain model
+            raise TemplateConflictError
+        return version.publication_token
 
     def _audit(
         self,

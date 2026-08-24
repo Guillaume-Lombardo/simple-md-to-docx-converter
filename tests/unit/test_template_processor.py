@@ -7,8 +7,13 @@ import pytest
 from pytest_mock import MockerFixture
 
 from md_converter.jobs.models import JobProcessResult
+from md_converter.jobs.worker import ConversionWorker, WorkerPolicy
+from md_converter.templates.errors import TemplateIntegrityError
 from md_converter.templates.models import TemplateVersion
-from md_converter.templates.processor import FrozenTemplateJobProcessor
+from md_converter.templates.processor import (
+    FrozenTemplateJobProcessor,
+    build_template_conversion_worker,
+)
 from tests.unit.jobs.test_job_models import job
 
 
@@ -52,3 +57,27 @@ def test_processor_resolves_and_passes_exact_frozen_version(
         cancelled=cancelled,
         progress=progress,
     )
+
+
+@pytest.mark.unit
+def test_processor_sanitizes_integrity_failure_and_factory_wraps(
+    mocker: MockerFixture,
+) -> None:
+    resolver = mocker.Mock()
+    resolver.resolve_frozen_version.side_effect = TemplateIntegrityError
+    with pytest.raises(Exception) as raised:
+        FrozenTemplateJobProcessor(resolver, mocker.Mock()).process(
+            job(), cancelled=lambda: False, progress=lambda _step, _value: None
+        )
+    assert getattr(raised.value, "code", None) == "template_integrity"
+
+    worker = build_template_conversion_worker(
+        worker_id="worker",
+        repository=mocker.Mock(),
+        objects=mocker.Mock(),
+        resolver=resolver,
+        processor=mocker.Mock(),
+        clock=lambda: datetime.now(UTC),
+        policy=WorkerPolicy(2, 1, 60, 1),
+    )
+    assert isinstance(worker, ConversionWorker)

@@ -19,14 +19,19 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   and cleanup fencing, periodic heartbeat and recovery, cancellation-wins transitions, safe source
   staging and result publication, request bounds, retry-safe cleanup, and embedded/external workers.
 - T15 owns immutable template mutation, download, audit, and processor-version resolution. Required
-  production-policy values remain configurable for T18, while T20/T21 retain final runtime wiring
-  and rootless-image E2E.
+  production-policy values remain configurable for T18. Pending publication cleanup now uses
+  expiring ownership tokens and atomic fencing across replicas; worker assembly always injects the
+  exact frozen template version. T20/T21 retain final application-image E2E.
 - K3s is stopped. The existing `t12-postgres-v2` and `t12-rustfs-v2` containers remain running and
   were used without modification for real profile tests.
 
 ## Validation
 
 - `uv sync --all-groups`, formatting, Ruff, and `ty` pass.
+- The T15 correction tree passes 699 unit tests with the exact 90% branch threshold, 860 applicable
+  host tests with live PostgreSQL/RustFS, 20 repeated SQLite submission/mutation race runs, and the
+  3 T15 activation/publication tests in the arbitrary-UID rootless toolchain image. K3s remained
+  inactive. Changed-line coverage is pending the committed-tree check.
 - Canonical unit selection passed 655 tests at 93.55% overall application coverage and more than
   90% branch coverage.
 - Canonical default selection passed 805 tests at 94.73% overall coverage, including real

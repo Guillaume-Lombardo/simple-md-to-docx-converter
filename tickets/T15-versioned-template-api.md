@@ -59,6 +59,15 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   command remains unable to execute engine
   tests because those binaries are intentionally supplied by the toolchain image; full legacy
   image-suite validation remains owned by its existing T10/T20 environment rather than this ticket.
+- 2026-08-24: The second correction pass added configurable, expiring publication leases with
+  atomic SQLite/PostgreSQL claims and token-fenced finalization, abort, and retry release; SQLite
+  immediate-write serialization for template mutation versus job submission; concrete production
+  worker composition that cannot bypass frozen-version integrity verification; PostgreSQL coverage
+  for every migration-05 relational invariant; and submission races against replacement, archive,
+  and deletion on both profiles. The exact unit gate passes 699 tests with the required 90% branch
+  threshold, the applicable live PostgreSQL/RustFS host suite passes 860 tests, 20 repeated SQLite
+  race runs pass, and all 3 T15 real-engine tests pass in the arbitrary-UID rootless toolchain.
+  K3s remained inactive. Changed-line coverage will be recorded from the committed Git tree.
 
 ## Synchronization
 

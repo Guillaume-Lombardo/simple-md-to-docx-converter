@@ -1,7 +1,7 @@
 """Unit coverage for template SQL failures and Alembic structure."""
 
 import importlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,6 +24,7 @@ from md_converter.templates.errors import (
 from md_converter.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
+    TemplatePublicationState,
     TemplateSearch,
     TemplateStatus,
     TemplateVersion,
@@ -37,6 +38,9 @@ VERSION_REVISION: Any = importlib.import_module(
 )
 INTEGRITY_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_05_template_integrity"
+)
+LEASE_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_06_template_publication_leases"
 )
 
 
@@ -212,6 +216,152 @@ def test_inprocess_versioned_template_compare_and_swap_and_guards() -> None:
 
 
 @pytest.mark.unit
+def test_pending_publication_claims_are_atomic_and_fenced() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "lease-owner", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    now = datetime.now(UTC)
+    template = TemplateIdentity(
+        uuid4(), owner.id, "Pending", "Lease", TemplateStatus.ACTIVE
+    )
+    original_token = uuid4()
+    version = TemplateVersion(
+        uuid4(),
+        template.id,
+        1,
+        owner.id,
+        "c" * 64,
+        1,
+        now,
+        owner.id,
+        publication_state=TemplatePublicationState.PENDING,
+        publication_token=original_token,
+        publication_lease_expires_at=now + timedelta(seconds=10),
+    )
+    catalog.reserve_create(template, version)
+    assert catalog.get(template.id) is None
+    assert (
+        catalog.claim_stale_pending(
+            stale_before=now,
+            lease_expires_at=now + timedelta(seconds=20),
+            publication_token=uuid4(),
+        )
+        == ()
+    )
+
+    claim_token = uuid4()
+    claimed = catalog.claim_stale_pending(
+        stale_before=now + timedelta(seconds=10),
+        lease_expires_at=now + timedelta(seconds=30),
+        publication_token=claim_token,
+    )
+    assert len(claimed) == 1
+    assert claimed[0].publication_token == claim_token
+    assert (
+        catalog.claim_stale_pending(
+            stale_before=now + timedelta(seconds=10),
+            lease_expires_at=now + timedelta(seconds=30),
+            publication_token=uuid4(),
+        )
+        == ()
+    )
+    assert not catalog.release_pending_claim(
+        template.id, version.id, uuid4(), retry_at=now
+    )
+    assert catalog.release_pending_claim(
+        template.id, version.id, claim_token, retry_at=now
+    )
+    reclaim_token = uuid4()
+    assert catalog.claim_stale_pending(
+        stale_before=now,
+        lease_expires_at=now + timedelta(seconds=30),
+        publication_token=reclaim_token,
+    )
+    assert not catalog.abort_pending(template.id, version.id, uuid4())
+    assert catalog.abort_pending(template.id, version.id, reclaim_token)
+    assert not catalog.abort_pending(template.id, version.id, reclaim_token)
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_delete_tombstone_retry_and_reference_branches() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "delete-owner", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    selections = SqlTemplateSelectionRepository(engine)
+    template_id = uuid4()
+    version_id = uuid4()
+    template = TemplateIdentity(
+        template_id,
+        owner.id,
+        "Delete",
+        "Tombstone",
+        TemplateStatus.ACTIVE,
+        current_version_id=version_id,
+    )
+    version = TemplateVersion(
+        version_id,
+        template_id,
+        1,
+        owner.id,
+        "d" * 64,
+        1,
+        datetime.now(UTC),
+        owner.id,
+    )
+
+    def audit(operation: str) -> TemplateAuditRecord:
+        return TemplateAuditRecord(
+            uuid4(),
+            owner.id,
+            owner.id,
+            template_id,
+            operation,
+            None,
+            False,
+            datetime.now(UTC),
+        )
+
+    catalog.create_versioned(template, version, audit("create"))
+    with pytest.raises(TemplateConflictError):
+        catalog.begin_delete(template_id, expected_revision=1, audit=audit("delete"))
+    selections.set_preferred(owner.id, template_id)
+    catalog.set_status(
+        template_id,
+        expected_revision=1,
+        status=TemplateStatus.ARCHIVED.value,
+        audit=audit("archive"),
+    )
+    with pytest.raises(TemplateConflictError):
+        catalog.begin_delete(template_id, expected_revision=2, audit=audit("delete"))
+    selections.clear_preferred(owner.id)
+    assert catalog.begin_delete(
+        template_id, expected_revision=2, audit=audit("delete")
+    ) == (version,)
+    assert catalog.pending_deletions() == ((template_id, (version,)),)
+    assert catalog.begin_delete(
+        template_id, expected_revision=2, audit=audit("delete")
+    ) == (version,)
+    catalog.finalize_delete(template_id)
+    catalog.finalize_delete(template_id)
+    assert catalog.pending_deletions() == ()
+    with pytest.raises(TemplateConflictError):
+        catalog.begin_delete(template_id, expected_revision=2, audit=audit("delete"))
+
+    other = TemplateIdentity(
+        uuid4(), owner.id, "Other", "Published", TemplateStatus.ACTIVE
+    )
+    catalog.add(other)
+    with pytest.raises(TemplateConflictError):
+        catalog.finalize_delete(other.id)
+    engine.dispose()
+
+
+@pytest.mark.unit
 def test_template_repositories_sanitize_every_sqlalchemy_failure(
     mocker: MockerFixture,
 ) -> None:
@@ -315,3 +465,28 @@ def test_integrity_migration_adds_publication_evidence_and_triggers(
     INTEGRITY_REVISION.downgrade()
     assert operations.batch_alter_table.call_count == 2
     assert operations.execute.called
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dialect", ["sqlite", "postgresql"])
+def test_publication_lease_migration_is_reversible(
+    mocker: MockerFixture, dialect: str
+) -> None:
+    operations = mocker.patch.object(LEASE_REVISION, "op")
+    operations.get_bind.return_value.dialect.name = dialect
+
+    LEASE_REVISION.upgrade()
+
+    assert operations.add_column.call_count == 2
+    if dialect == "sqlite":
+        assert any(
+            "template_versions_pending_lease_insert" in call.args[0]
+            for call in operations.execute.call_args_list
+        )
+    else:
+        assert operations.batch_alter_table.called
+
+    operations.reset_mock()
+    operations.get_bind.return_value.dialect.name = dialect
+    LEASE_REVISION.downgrade()
+    assert operations.batch_alter_table.called

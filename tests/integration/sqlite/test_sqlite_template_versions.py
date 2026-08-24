@@ -2,18 +2,22 @@
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Engine, func, select, update
+from sqlalchemy import Engine, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from md_converter.auth.models import Role, User
+from md_converter.jobs.errors import JobRequestError
+from md_converter.jobs.models import JobOutput, JobSubmission
+from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.schema import (
+    ConversionJobRow,
     TemplateAuditRow,
     TemplateRow,
     TemplateVersionRow,
@@ -30,8 +34,14 @@ from md_converter.templates.errors import (
     TemplateIntegrityError,
     TemplateUnavailableError,
 )
-from md_converter.templates.models import TemplateCreate, TemplateStatus
-from md_converter.templates.service import TemplateService
+from md_converter.templates.models import (
+    TemplateCreate,
+    TemplateIdentity,
+    TemplatePublicationState,
+    TemplateStatus,
+    TemplateVersion,
+)
+from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
 from md_converter.templates.validation import ValidatedTemplate
 
 pytestmark = pytest.mark.integration
@@ -78,6 +88,7 @@ def _service(tmp_path: Path) -> tuple[TemplateService, Engine, User, User, User]
         objects=FilesystemObjectStore(tmp_path),
         validate_content=lambda data, _declaration: _validated(data),
         clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        recovery_policy=TemplateRecoveryPolicy(60),
     )
     return service, engine, owner, other, admin
 
@@ -318,3 +329,144 @@ def test_concurrent_filesystem_replacement_has_one_winner_and_no_loser_object(
     assert service.reclaim_pending() == 0
     object_files = tuple((tmp_path / "objects" / "template-versions").rglob("*"))
     assert sum(path.is_file() for path in object_files) == 2
+
+
+def test_submission_races_template_mutations_without_dangling_pairs(
+    tmp_path: Path,
+) -> None:
+    service, engine, owner, _other, _admin = _service(tmp_path)
+    jobs = SqlJobRepository(engine)
+
+    def submission(template_id: UUID, version_id: UUID) -> JobSubmission:
+        return JobSubmission(
+            uuid4(),
+            owner.id,
+            uuid4(),
+            template_id,
+            version_id,
+            JobOutput.DOCX,
+            (("md-converter", "0.1.0"),),
+            "a" * 64,
+            None,
+            datetime.now(UTC),
+        )
+
+    template, first = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Race replace", "Frozen pair"),
+        b"first",
+        ("Calibri",),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        submitted = executor.submit(jobs.create, submission(template.id, first.id))
+        replaced = executor.submit(
+            service.replace,
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"second",
+            expected_fonts=("Calibri",),
+        )
+    try:
+        job, _ = submitted.result()
+    except JobRequestError:
+        job = None
+    replaced.result()
+    if job is not None:
+        persisted = jobs.get(job.id)
+        assert persisted is not None
+        assert persisted.template_version_id == first.id
+        with engine.begin() as connection:
+            connection.execute(
+                delete(ConversionJobRow).where(ConversionJobRow.id == str(job.id))
+            )
+
+    template, first = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Race archive", "Frozen pair"),
+        b"first",
+        ("Calibri",),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        submitted = executor.submit(jobs.create, submission(template.id, first.id))
+        archived = executor.submit(
+            service.archive, owner, template.id, expected_revision=1
+        )
+    archived.result()
+    try:
+        job, _ = submitted.result()
+    except JobRequestError:
+        job = None
+    if job is not None:
+        persisted = jobs.get(job.id)
+        assert persisted is not None
+        assert persisted.template_version_id == first.id
+        with engine.begin() as connection:
+            connection.execute(
+                delete(ConversionJobRow).where(ConversionJobRow.id == str(job.id))
+            )
+
+    template, first = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Race delete", "Archived pair"),
+        b"first",
+        ("Calibri",),
+    )
+    service.archive(owner, template.id, expected_revision=1)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        submitted = executor.submit(jobs.create, submission(template.id, first.id))
+        deleted = executor.submit(
+            service.delete, owner, template.id, expected_revision=2
+        )
+    deleted.result()
+    with pytest.raises(JobRequestError):
+        submitted.result()
+    with Session(engine) as database:
+        assert (
+            database.scalar(
+                select(func.count())
+                .select_from(ConversionJobRow)
+                .where(ConversionJobRow.template_id == str(template.id))
+            )
+            == 0
+        )
+    engine.dispose()
+
+
+def test_concurrent_reconcilers_claim_one_expired_publication(tmp_path: Path) -> None:
+    service, engine, owner, _other, _admin = _service(tmp_path)
+    now = datetime(2026, 8, 24, tzinfo=UTC)
+    template = TemplateIdentity(
+        uuid4(), owner.id, "Expired", "Publication lease", TemplateStatus.ACTIVE
+    )
+    version = TemplateVersion(
+        uuid4(),
+        template.id,
+        1,
+        owner.id,
+        "a" * 64,
+        1,
+        now,
+        owner.id,
+        publication_state=TemplatePublicationState.PENDING,
+        publication_token=uuid4(),
+        publication_lease_expires_at=now - timedelta(seconds=1),
+    )
+    SqlTemplateCatalogRepository(engine).reserve_create(template, version)
+    other = TemplateService(
+        catalog=SqlTemplateCatalogRepository(engine),
+        selections=SqlTemplateSelectionRepository(engine),
+        objects=FilesystemObjectStore(tmp_path),
+        validate_content=lambda data, _declaration: _validated(data),
+        clock=lambda: now,
+        recovery_policy=TemplateRecoveryPolicy(60),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(
+            executor.map(
+                lambda candidate: candidate.reclaim_pending(), (service, other)
+            )
+        )
+    assert sorted(outcomes) == [0, 1]
+    assert SqlTemplateCatalogRepository(engine).get(template.id) is None
+    engine.dispose()

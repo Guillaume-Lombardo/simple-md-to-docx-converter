@@ -7,6 +7,7 @@ import pytest
 
 from md_converter.templates.models import (
     TemplateIdentity,
+    TemplatePublicationState,
     TemplateSearch,
     TemplateStatus,
     TemplateVersion,
@@ -66,4 +67,30 @@ def test_template_versions_reject_invalid_immutable_metadata(
             size,
             created_at,
             uuid4(),
+        )
+
+
+@pytest.mark.unit
+def test_pending_template_version_requires_timezone_aware_complete_lease() -> None:
+    values = (
+        uuid4(),
+        uuid4(),
+        1,
+        uuid4(),
+        "a" * 64,
+        1,
+        datetime.now(UTC),
+        uuid4(),
+    )
+    with pytest.raises(ValueError, match="require a publication lease"):
+        TemplateVersion(
+            *values,
+            publication_state=TemplatePublicationState.PENDING,
+        )
+    with pytest.raises(ValueError, match="lease timestamp"):
+        TemplateVersion(
+            *values,
+            publication_state=TemplatePublicationState.PENDING,
+            publication_token=uuid4(),
+            publication_lease_expires_at=datetime.now(UTC).replace(tzinfo=None),
         )
