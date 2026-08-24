@@ -471,6 +471,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
+    { name = "tinycss2" },
     { name = "uvicorn" },
 ]
 
@@ -502,6 +503,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
+    { name = "tinycss2", specifier = ">=1.5,<2" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
 

@@ -31,6 +31,8 @@ LIMITS = ImageLimits(
     max_width_pixels=256,
     max_height_pixels=256,
     max_pixels=65_536,
+    max_svg_elements=1_000,
+    max_svg_depth=100,
 )
 
 
@@ -97,7 +99,7 @@ def test_dimensions_are_rechecked_after_exif_orientation() -> None:
         normalize_image(
             PurePosixPath("rotated.jpg"),
             output.getvalue(),
-            ImageLimits(100_000, 8, 6, 48),
+            ImageLimits(100_000, 8, 6, 48, 1_000, 100),
         )
 
 
@@ -153,7 +155,7 @@ def test_raster_dimension_limits_are_checked_before_decode() -> None:
         normalize_image(
             PurePosixPath("wide.png"),
             _image_bytes("PNG"),
-            ImageLimits(100_000, 7, 256, 65_536),
+            ImageLimits(100_000, 7, 256, 65_536, 1_000, 100),
         )
     assert str(captured.value) == "Document image exceeds configured limits."
 
@@ -237,6 +239,46 @@ def test_svg_escaped_css_url_spelling_is_removed_before_renderer() -> None:
     assert b"style=" not in sanitized
 
 
+def test_svg_safe_inline_style_is_preserved() -> None:
+    source = b"""<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <rect width="10" height="10" style="fill:#ff0000;stroke:#00ff00"/>
+    </svg>"""
+    inspected: list[bytes] = []
+
+    def inspect_renderer(svg: bytes, width: int, height: int) -> bytes:
+        inspected.append(svg)
+        return _blank_svg_renderer(svg, width, height)
+
+    normalize_image(PurePosixPath("styled.svg"), source, LIMITS, inspect_renderer)
+    sanitized = inspected[0].lower()
+    assert b"fill:#ff0000" in sanitized
+    assert b"stroke:#00ff00" in sanitized
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">'
+            + b"<g>" * 101
+            + b"</g>" * 101
+            + b"</svg>"
+        ),
+        (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">'
+            + b"<g/>" * 1_000
+            + b"</svg>"
+        ),
+    ],
+    ids=["depth", "element-count"],
+)
+def test_svg_tree_complexity_is_bounded_before_serialization(source: bytes) -> None:
+    with pytest.raises(ConversionError, match="exceeds configured limits"):
+        normalize_image(
+            PurePosixPath("complex.svg"), source, LIMITS, _blank_svg_renderer
+        )
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -310,14 +352,16 @@ def test_cairo_boundary_maps_engine_failure_to_content_free_error(mocker) -> Non
 @pytest.mark.parametrize(
     "limits",
     [
-        (0, 1, 1, 1),
-        (1, True, 1, 1),
-        (1, cast("int", 1.0), 1, 1),
-        (1, 1, -1, 1),
+        (0, 1, 1, 1, 1, 1),
+        (1, True, 1, 1, 1, 1),
+        (1, cast("int", 1.0), 1, 1, 1, 1),
+        (1, 1, -1, 1, 1, 1),
+        (1, 1, 1, 1, 0, 1),
+        (1, 1, 1, 1, 1, 0),
     ],
 )
 def test_image_limits_require_positive_integers(
-    limits: tuple[int, int, int, int],
+    limits: tuple[int, int, int, int, int, int],
 ) -> None:
     with pytest.raises(ValueError, match="positive integers"):
         ImageLimits(*limits)

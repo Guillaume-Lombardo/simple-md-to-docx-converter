@@ -14,6 +14,17 @@ from xml.etree import ElementTree
 from defusedxml import ElementTree as DefusedElementTree
 from defusedxml.common import DefusedXmlException
 from PIL import Image, ImageOps, UnidentifiedImageError
+from tinycss2 import parse_declaration_list
+from tinycss2.ast import (
+    CurlyBracketsBlock,
+    Declaration,
+    FunctionBlock,
+    Node,
+    ParenthesesBlock,
+    ParseError,
+    SquareBracketsBlock,
+    URLToken,
+)
 
 from md_converter.conversion.errors import ConversionError, validation_error
 
@@ -43,6 +54,8 @@ class ImageLimits:
     max_width_pixels: int
     max_height_pixels: int
     max_pixels: int
+    max_svg_elements: int
+    max_svg_depth: int
 
     def __post_init__(self) -> None:
         for value in (
@@ -50,6 +63,8 @@ class ImageLimits:
             self.max_width_pixels,
             self.max_height_pixels,
             self.max_pixels,
+            self.max_svg_elements,
+            self.max_svg_depth,
         ):
             if type(value) is not int or value <= 0:
                 raise ValueError("Image limits must be positive integers")
@@ -117,7 +132,43 @@ def _has_external_css_reference(value: str) -> bool:
     )
 
 
-def _sanitize_svg_tree(root: ElementTree.Element) -> bytes:
+def _is_local_css_url(value: str) -> bool:
+    return value.strip().strip("'\"").strip().startswith("#")
+
+
+def _css_tokens_are_safe(tokens: list[Node]) -> bool:
+    block_types = (CurlyBracketsBlock, ParenthesesBlock, SquareBracketsBlock)
+    for token in tokens:
+        if isinstance(token, URLToken) and not _is_local_css_url(token.value):
+            return False
+        if isinstance(token, FunctionBlock):
+            if token.lower_name == "url":
+                value = "".join(argument.serialize() for argument in token.arguments)
+                if not _is_local_css_url(value):
+                    return False
+            elif not _css_tokens_are_safe(token.arguments):
+                return False
+        if isinstance(token, block_types) and not _css_tokens_are_safe(token.content):
+            return False
+        if isinstance(token, ParseError):
+            return False
+    return True
+
+
+def _sanitize_inline_style(value: str) -> str:
+    declarations = parse_declaration_list(
+        value, skip_comments=True, skip_whitespace=True
+    )
+    safe = [
+        declaration.serialize()
+        for declaration in declarations
+        if isinstance(declaration, Declaration)
+        and _css_tokens_are_safe(declaration.value)
+    ]
+    return ";".join(safe)
+
+
+def _sanitize_svg_tree(root: ElementTree.Element, limits: ImageLimits) -> bytes:
     if root.tag != f"{{{_SVG_NAMESPACE}}}svg":
         _reject_image()
     forbidden_elements = {
@@ -125,9 +176,14 @@ def _sanitize_svg_tree(root: ElementTree.Element) -> bytes:
         "script",
         "style",
     }
-    pending = [root]
+    element_count = 1
+    pending = [(root, 1)]
     while pending:
-        parent = pending.pop()
+        parent, depth = pending.pop()
+        children = list(parent)
+        element_count += len(children)
+        if element_count > limits.max_svg_elements:
+            _reject_image("Document image exceeds configured limits.")
         for child in list(parent):
             if (
                 not isinstance(child.tag, str)
@@ -140,13 +196,22 @@ def _sanitize_svg_tree(root: ElementTree.Element) -> bytes:
             if href is not None and not href.strip().startswith("#"):
                 parent.remove(child)
                 continue
-            pending.append(child)
+            child_depth = depth + 1
+            if child_depth > limits.max_svg_depth:
+                _reject_image("Document image exceeds configured limits.")
+            pending.append((child, child_depth))
         for name, value in tuple(parent.attrib.items()):
             local = _local_name(name).casefold()
+            if local == "style":
+                sanitized_style = _sanitize_inline_style(value)
+                if sanitized_style:
+                    parent.attrib[name] = sanitized_style
+                else:
+                    del parent.attrib[name]
+                continue
             if (
                 local.startswith("on")
                 or name == _XML_BASE
-                or local == "style"
                 or (local in {"href", "src"} and not value.strip().startswith("#"))
                 or "\\" in value
                 or _has_external_css_reference(value)
@@ -210,7 +275,7 @@ def _normalize_svg(source: bytes, limits: ImageLimits, renderer: SvgRenderer) ->
         _reject_image()
     width, height = _svg_dimensions(root)
     _check_dimensions(width, height, limits)
-    sanitized = _sanitize_svg_tree(root)
+    sanitized = _sanitize_svg_tree(root, limits)
     try:
         rendered = renderer(sanitized, width, height)
         with Image.open(io.BytesIO(rendered)) as image:

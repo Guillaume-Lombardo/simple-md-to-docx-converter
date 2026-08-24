@@ -20,7 +20,7 @@ from md_converter.conversion.images import ImageLimits
 from md_converter.conversion.service import DocxConversionService
 
 LIMITS = ArchiveLimits(200_000, 20, 100_000, 150_000, 100.0, 50_000, 5)
-IMAGE_LIMITS = ImageLimits(100_000, 1_000, 1_000, 1_000_000)
+IMAGE_LIMITS = ImageLimits(100_000, 1_000, 1_000, 1_000_000, 10_000, 256)
 
 
 def archive_bytes(

@@ -11,7 +11,8 @@ contain Markdown plus PNG, JPEG, SVG, static GIF, and WebP images. The package s
 strict UTF-8.
 
 Every ZIP limit is supplied explicitly through `ArchiveLimits`, and every image limit is supplied
-through `ImageLimits`. The code intentionally provides no production defaults because T18 owns the
+through `ImageLimits`. Image limits cover source bytes, dimensions, pixels, SVG element count, and
+SVG nesting depth. The code intentionally provides no production defaults because T18 owns the
 approved upload, decompression, file-count, image-count, and resource values.
 
 ## Archive boundary
@@ -38,10 +39,11 @@ Animated inputs are rejected. EXIF orientation is applied; metadata is removed; 
 deterministic PNG bounded by configured width, height, pixel, and source-byte limits.
 
 SVG is parsed as untrusted XML. DTD and entity declarations are rejected. Scripts, event handlers,
-foreign XML, style blocks, external `href`/`xlink:href`, `xml:base`, and external CSS `url()`
-references are removed before the sanitized tree reaches CairoSVG. Rasterization uses fixed pixel
-dimensions, `unsafe=False`, and the locally installed Cairo engine. No remote or host-file resource
-is passed to the renderer.
+foreign XML, style blocks, external `href`/`xlink:href`, `xml:base`, and unsafe CSS declarations are
+removed before the sanitized tree reaches CairoSVG. Safe inline presentation declarations and
+local fragment references are preserved. Element count and nesting depth are bounded before XML
+serialization. Rasterization uses fixed pixel dimensions, `unsafe=False`, and the locally installed
+Cairo engine. No remote or host-file resource is passed to the renderer.
 
 ## Markdown and Pandoc binding
 

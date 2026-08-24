@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart>=0.0.20,<1",
     "pyyaml>=6,<7",
     "sqlalchemy>=2.0,<3",
+    "tinycss2>=1.5,<2",
     "uvicorn>=0.35,<1",
 ]
 
