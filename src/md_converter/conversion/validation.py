@@ -80,7 +80,13 @@ def _metadata_scalars(metadata: str) -> Iterator[str]:
 
 def _is_raw_attribute(value: str, *, complete: bool) -> bool:
     match = _RAW_ATTRIBUTE.fullmatch(value) if complete else _RAW_ATTRIBUTE.match(value)
-    return match is not None and unicodedata.normalize("NFC", match.group(1)).isalnum()
+    if match is None:
+        return False
+    format_name = unicodedata.normalize("NFC", match.group(1))
+    return bool(format_name) and all(
+        character.isalnum() or unicodedata.category(character).startswith("M")
+        for character in format_name
+    )
 
 
 def _validate_tokens(tokens: tuple[Token, ...]) -> None:
