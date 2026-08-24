@@ -142,6 +142,18 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   branch gate passes 857 tests with 93.41% coverage. Ruff, `ty`, and `git diff --check` pass. T19
   remains `In Progress` pending CI
   confirmation, independent review, merge, final-image evidence, and verification on `main`.
+- 2026-08-25: Follow-up review found that application shutdown ownership began only after
+  `build_components` returned, so migration or later assembly failures could leak engines created
+  before the exception. Component assembly now registers each database engine for immediate
+  reverse-order cleanup and transfers those callbacks only after the complete `AppComponents`
+  object is ready. Unit tests cover failure while creating each of the three engines, migration,
+  template-validator construction, pending-publication reclamation, final component construction,
+  and a failing disposal while proving every registered engine is still attempted. Injected
+  components remain caller-owned. The targeted lifecycle suite passes 54 tests; the unit branch
+  gate passes 865 tests with 93.42% coverage; and the correct-environment canonical covered and
+  no-coverage suites each pass 1,080 tests, with 95.43% coverage in the covered run. Ruff, `ty`, and
+  `git diff --check` pass. T19 remains `In Progress` pending CI confirmation, independent review,
+  merge, final-image evidence, and verification on `main`.
 
 ## Synchronization
 

@@ -186,6 +186,109 @@ def test_profile_readiness_short_circuits_failed_metadata(
     assert ProfileReadinessProbe(database, objects).is_ready()
 
 
+def _standalone_component_settings() -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        storage_profile="standalone",
+        standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failure_stage", "created_count"),
+    [
+        ("main_engine", 0),
+        ("migration", 1),
+        ("readiness_engine", 1),
+        ("observation_engine", 2),
+        ("validator", 3),
+        ("reclaim", 3),
+        ("components", 3),
+    ],
+)
+def test_component_assembly_disposes_each_created_engine_on_failure(
+    mocker: MockerFixture, failure_stage: str, created_count: int
+) -> None:
+    mocker.patch("md_converter.app.FilesystemObjectStore", return_value=mocker.Mock())
+    disposed: list[str] = []
+    engines = tuple(
+        mocker.MagicMock(name=name) for name in ("main", "readiness", "observation")
+    )
+    for engine in engines:
+        engine.dialect.name = "sqlite"
+        name = engine._mock_name
+        engine.dispose.side_effect = lambda name=name: disposed.append(name)
+
+    created = list(engines[:created_count])
+    if failure_stage in {"main_engine", "readiness_engine", "observation_engine"}:
+        created.append(RuntimeError(f"{failure_stage} failed"))
+    create_engine = mocker.patch(
+        "md_converter.app.create_database_engine", side_effect=created
+    )
+    upgrade = mocker.patch("md_converter.app.upgrade_database")
+    validator = mocker.patch("md_converter.app.build_template_validator")
+    reclaim = mocker.patch("md_converter.app.TemplateService.reclaim_pending")
+    components = mocker.patch("md_converter.app.AppComponents", wraps=None)
+    if failure_stage == "migration":
+        upgrade.side_effect = RuntimeError("migration failed")
+    elif failure_stage == "validator":
+        validator.side_effect = RuntimeError("validator failed")
+    elif failure_stage == "reclaim":
+        reclaim.side_effect = RuntimeError("reclaim failed")
+    elif failure_stage == "components":
+        components.side_effect = RuntimeError("components failed")
+
+    with pytest.raises(RuntimeError, match=rf"{failure_stage} failed"):
+        build_components(_standalone_component_settings())
+
+    assert create_engine.call_count == created_count + (
+        failure_stage in {"main_engine", "readiness_engine", "observation_engine"}
+    )
+    assert disposed == [
+        engine._mock_name for engine in reversed(engines[:created_count])
+    ]
+
+
+@pytest.mark.unit
+def test_component_assembly_attempts_every_engine_disposal_when_one_fails(
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch("md_converter.app.FilesystemObjectStore", return_value=mocker.Mock())
+    disposed: list[str] = []
+    engines = tuple(
+        mocker.MagicMock(name=name) for name in ("main", "readiness", "observation")
+    )
+    for engine in engines:
+        engine.dialect.name = "sqlite"
+        name = engine._mock_name
+        engine.dispose.side_effect = lambda name=name: disposed.append(name)
+
+    def fail_readiness_disposal() -> None:
+        disposed.append("readiness")
+        raise RuntimeError("dispose failed")
+
+    engines[1].dispose.side_effect = fail_readiness_disposal
+    mocker.patch("md_converter.app.create_database_engine", side_effect=engines)
+    mocker.patch("md_converter.app.upgrade_database")
+    mocker.patch("md_converter.app.TemplateService.reclaim_pending")
+    mocker.patch(
+        "md_converter.app.AppComponents",
+        side_effect=RuntimeError("components failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="dispose failed"):
+        build_components(_standalone_component_settings())
+
+    assert disposed == ["observation", "readiness", "main"]
+
+
 @pytest.mark.unit
 def test_distributed_wiring_allows_aws_credential_provider_defaults(
     mocker: MockerFixture,

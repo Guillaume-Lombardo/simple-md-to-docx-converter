@@ -901,93 +901,101 @@ def build_components(settings: Settings) -> AppComponents:
             boto3.client("s3", **readiness_client_options), bucket
         )
 
-    engine = create_database_engine(database_url)
-    upgrade_database(engine)
-    readiness_engine = create_database_engine(
-        database_url,
-        timeout_seconds=settings.readiness_timeout_seconds,
-        pool_pre_ping=False,
-    )
-    observation_engine = create_database_engine(
-        database_url,
-        timeout_seconds=settings.worker_metrics_request_timeout_seconds,
-        pool_pre_ping=False,
-    )
-    users = SqlUserRepository(engine)
-    sessions = SqlSessionRepository(engine)
-    hasher = Argon2idPasswordHasher(
-        memory_cost=settings.argon2_memory_cost,
-        time_cost=settings.argon2_time_cost,
-        parallelism=settings.argon2_parallelism,
-    )
-    authentication = AuthenticationService(
-        users=users,
-        sessions=sessions,
-        security=SecurityRuntime(
-            hasher=hasher,
-            tokens=SecretsTokenGenerator(settings.session_token_bytes),
-            clock=SystemClock(),
-        ),
-        policy=SessionPolicy(
-            idle_seconds=settings.session_idle_seconds,
-            absolute_seconds=settings.session_absolute_seconds,
-        ),
-    )
-    job_repository = SqlJobRepository(engine, job_policies.admission)
-    jobs = JobService(job_repository, object_store, job_policies.service)
-    templates = TemplateService(
-        catalog=SqlTemplateCatalogRepository(engine),
-        selections=SqlTemplateSelectionRepository(engine),
-        objects=object_store,
-        validate_content=build_template_validator(settings),
-        recovery_policy=TemplateRecoveryPolicy(
-            settings.template_pending_publication_stale_seconds
-        ),
-    )
-    templates.reclaim_pending()
-    retention = RetentionService(
-        SqlRetentionRepository(engine),
-        object_store,
-        DataRetentionPolicy(
-            template_version_seconds=settings.template_version_retention_seconds,
-            audit_seconds=settings.audit_retention_seconds,
-            minimum_template_versions=settings.template_min_retained_versions,
-            claim_lease_seconds=settings.worker_lease_seconds,
-        ),
-    )
-    metrics = OperationalMetrics()
-    return AppComponents(
-        authentication=authentication,
-        readiness=ProfileReadinessProbe(
-            DatabaseReadinessProbe(readiness_engine), object_readiness
-        ),
-        object_store=object_store,
-        jobs=jobs,
-        scanner=ClamAVUploadScanner(
-            settings.clamav_host,
-            settings.clamav_port,
-            settings.clamav_timeout_seconds,
-        ),
-        templates=templates,
-        job_policies=job_policies,
-        retention=retention,
-        job_repository=job_repository,
-        metrics=metrics,
-        queue_observer=SqlOperationalObserver(
-            observation_engine,
-            default_timeout_seconds=settings.worker_metrics_request_timeout_seconds,
-        ),
-        audit_reader=SqlAuditReader(engine),
-        worker_metrics_bind_host=settings.worker_metrics_bind_host,
-        worker_metrics_port=settings.worker_metrics_port,
-        worker_metrics_max_connections=settings.worker_metrics_max_connections,
-        worker_metrics_observation_limit=settings.worker_metrics_observation_limit,
-        worker_metrics_accept_queue_size=settings.worker_metrics_accept_queue_size,
-        worker_metrics_request_timeout_seconds=(
-            settings.worker_metrics_request_timeout_seconds
-        ),
-        owned_engines=(engine, readiness_engine, observation_engine),
-    )
+    with ExitStack() as pending_engines:
+        engine = create_database_engine(database_url)
+        pending_engines.callback(engine.dispose)
+        upgrade_database(engine)
+        readiness_engine = create_database_engine(
+            database_url,
+            timeout_seconds=settings.readiness_timeout_seconds,
+            pool_pre_ping=False,
+        )
+        pending_engines.callback(readiness_engine.dispose)
+        observation_engine = create_database_engine(
+            database_url,
+            timeout_seconds=settings.worker_metrics_request_timeout_seconds,
+            pool_pre_ping=False,
+        )
+        pending_engines.callback(observation_engine.dispose)
+        users = SqlUserRepository(engine)
+        sessions = SqlSessionRepository(engine)
+        hasher = Argon2idPasswordHasher(
+            memory_cost=settings.argon2_memory_cost,
+            time_cost=settings.argon2_time_cost,
+            parallelism=settings.argon2_parallelism,
+        )
+        authentication = AuthenticationService(
+            users=users,
+            sessions=sessions,
+            security=SecurityRuntime(
+                hasher=hasher,
+                tokens=SecretsTokenGenerator(settings.session_token_bytes),
+                clock=SystemClock(),
+            ),
+            policy=SessionPolicy(
+                idle_seconds=settings.session_idle_seconds,
+                absolute_seconds=settings.session_absolute_seconds,
+            ),
+        )
+        job_repository = SqlJobRepository(engine, job_policies.admission)
+        jobs = JobService(job_repository, object_store, job_policies.service)
+        templates = TemplateService(
+            catalog=SqlTemplateCatalogRepository(engine),
+            selections=SqlTemplateSelectionRepository(engine),
+            objects=object_store,
+            validate_content=build_template_validator(settings),
+            recovery_policy=TemplateRecoveryPolicy(
+                settings.template_pending_publication_stale_seconds
+            ),
+        )
+        templates.reclaim_pending()
+        retention = RetentionService(
+            SqlRetentionRepository(engine),
+            object_store,
+            DataRetentionPolicy(
+                template_version_seconds=settings.template_version_retention_seconds,
+                audit_seconds=settings.audit_retention_seconds,
+                minimum_template_versions=settings.template_min_retained_versions,
+                claim_lease_seconds=settings.worker_lease_seconds,
+            ),
+        )
+        metrics = OperationalMetrics()
+        components = AppComponents(
+            authentication=authentication,
+            readiness=ProfileReadinessProbe(
+                DatabaseReadinessProbe(readiness_engine), object_readiness
+            ),
+            object_store=object_store,
+            jobs=jobs,
+            scanner=ClamAVUploadScanner(
+                settings.clamav_host,
+                settings.clamav_port,
+                settings.clamav_timeout_seconds,
+            ),
+            templates=templates,
+            job_policies=job_policies,
+            retention=retention,
+            job_repository=job_repository,
+            metrics=metrics,
+            queue_observer=SqlOperationalObserver(
+                observation_engine,
+                default_timeout_seconds=(
+                    settings.worker_metrics_request_timeout_seconds
+                ),
+            ),
+            audit_reader=SqlAuditReader(engine),
+            worker_metrics_bind_host=settings.worker_metrics_bind_host,
+            worker_metrics_port=settings.worker_metrics_port,
+            worker_metrics_max_connections=settings.worker_metrics_max_connections,
+            worker_metrics_observation_limit=settings.worker_metrics_observation_limit,
+            worker_metrics_accept_queue_size=settings.worker_metrics_accept_queue_size,
+            worker_metrics_request_timeout_seconds=(
+                settings.worker_metrics_request_timeout_seconds
+            ),
+            owned_engines=(engine, readiness_engine, observation_engine),
+        )
+        pending_engines.pop_all()
+        return components
 
 
 def create_app(  # noqa: PLR0915 - the factory keeps route-local security dependencies

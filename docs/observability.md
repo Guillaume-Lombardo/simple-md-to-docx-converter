@@ -61,6 +61,9 @@ claim in-process or cross-replica aggregation. T20 must connect the external-wor
 lifecycle.
 
 The application factory owns the main, readiness, and observation database engines it constructs.
+Assembly registers each engine for reverse-order cleanup immediately and transfers ownership only
+after every component is ready, so migration, validation, reclamation, or later construction
+failures cannot leak a partially assembled engine set.
 On shutdown it first cancels active observations, then disposes all three engines exactly once;
 components supplied by an embedding caller remain caller-owned. PostgreSQL installs its session
 statement timeout outside a transaction and restores the driver's prior autocommit mode, so pool
