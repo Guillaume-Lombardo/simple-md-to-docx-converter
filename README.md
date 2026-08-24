@@ -65,6 +65,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/pandoc-docx.md`: approved Markdown dialect and isolated Pandoc DOCX boundary
 - `docs/archive-images.md`: secure archive and local-image preparation contract
 - `docs/mermaid.md`: bounded local Mermaid/Chromium preprocessing contract
+- `docs/word-templates-fonts.md`: bounded template activation and pinned font contract
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 

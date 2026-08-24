@@ -1,9 +1,11 @@
-# Font coverage candidates
+# Approved font coverage
 
-Liberation Sans: office-compatible sans serif.
+Liberation Sans, Liberation Serif, and Liberation Mono provide office-compatible base families.
 
-Carlito and Caladea: metrically compatible candidates.
+Carlito and Caladea provide metrically compatible substitutions for Microsoft Office families.
 
-DejaVu Sans: fallback text — café — Ελληνικά.
+DejaVu Sans, DejaVu Serif, and DejaVu Sans Mono provide deterministic Latin and Greek fallback:
+café — Ελληνικά.
 
-Exact artifacts, substitutions, and additional Noto scripts remain T10 decisions.
+The exact artifacts and substitutions are recorded in `spikes/toolchain/fonts/manifest.json`.
+The approved corpus requires Latin and Greek only, so no Noto family is installed.

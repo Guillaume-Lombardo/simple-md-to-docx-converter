@@ -9,179 +9,67 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean and matches `origin/main`; delivered history through T08 PR #36 is
-  verified below.
-- T00, T01, T02, T03, T04, T05, T06, T07, T08, T12, and T14 are delivered. Linear G1L-310,
-  G1L-314, G1L-317, and G1L-318 are synchronized as `Done`. T09/G1L-319 is next.
-- PR #32 delivered the complete manifest-owned corpus, provenance-pinned generated
-  DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
-  RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
-  CI domain, and documentation. Its exact squash passed all active domains and the protected gate.
-- PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
-  stays enabled, `--no-sandbox` is forbidden, and OpenShift proof remains deferred.
-- PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
-  fallback foundations as squash `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. The local ticket
-  and Linear G1L-325 are fully synchronized as `Done`.
-- PR #28 delivered the approved T00 scope and synchronized orchestration and ticket state as squash
-  `b2e5b3965ad05448c56d6fd857191489f8a94173`; its main validation passed the protected gate.
-- The PM-authorized local k3s T00 validation passed with the checksum-locked Chrome seccomp profile
-  and fail-closed controls. The exact namespace, Localhost profile, and imported image were removed
-  and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
-- PR #30 delivered the independently approved T00 k3s proof: cluster-global names are unique and
-  collision-checked,
-  installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
-  negative probes cover collision, tampering, acquisition failure, and proxy lifecycle. The proxy
-  is terminated as a complete process group. Exact PID/start-time baselining catches survivors even
-  after k3s rewrites argv; baseline identities are excluded from token signaling, and an existing
-  token collision blocks launch. Namespace deletion requires this run's valid create receipt and
-  captured UID rather than public metadata alone. Hardened live run `reviewfix06` removed every
-  exact run resource; the added failure paths are verified offline. The exact squash and its
-  protected main gate passed.
+- `main` delivered T00-T09, T12, and T14. T09 implementation PR #38 and completion PR #39 were
+  squash-merged as `4280ca0699d1c80790aa0a7289a8ba8984c97214` and
+  `bc1c6fb8a017461651cb1d1d202a2a7017754777`; their exact main runs `32710022591` and
+  `32710324116` passed the protected gate. Linear G1L-319 and the local T09 mirror are `Done`.
+- T10/G1L-321 is `In Progress` on `feat/T10-template-font-validation`, based on clean delivered
+  main. Start commit: `874ee15`.
+- T10 is the smallest ready critical-path ticket. T00 and T07 are verified dependencies; T10 blocks
+  T11 and T15.
+- Three read-only independent analyses cover official font artifacts, bounded OOXML architecture,
+  and the security/integration test matrix. No implementation ownership overlaps.
+- K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
-## Approved Product Decisions
+## T10 Scope
 
-- Use official publisher artifacts, verify signatures or attestations when available, lock every
-  accepted digest/checksum, accept Pandoc SHA-256 where no detached signature exists, review CVEs
-  weekly, and handle Critical findings urgently.
-- Use `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html` and reject raw
-  HTML before Pandoc.
-- Package Liberation plus Carlito/Caladea, use DejaVu as fallback, and add Noto only for explicitly
-  required scripts. T10 owns exact artifacts, licenses, substitutions, and script coverage.
-- Keep the distributed object-store adapter provider-neutral and AWS S3-compatible. Use RustFS,
-  never MinIO, for CI and k3s.
-- T12 must include shared storage contracts and real PostgreSQL/RustFS integration success and
-  failure coverage. Only final-image rootless E2E is deferred to T20/T21, with explicit PR
-  justification and independent reviewer approval.
-- Keep production limits, RPO/RTO, retention, quotas, antivirus integration, and cleanup
-  configurable until T18.
-- PDF/A output and automatic Word/PDF table-of-contents generation are outside the initial scope.
+- Pin official Liberation, Carlito, Caladea, and DejaVu artifacts and notices; record exact
+  Fontconfig aliases and deterministic substitution order.
+- The approved corpus currently requires Latin and Greek. Add Noto only if an approved template
+  contract explicitly introduces another script not covered by the fixed families.
+- Implement bounded DOCX/OOXML validation with explicit T18-owned limits; reject unsafe archives,
+  macros, active content, and external relationships; require the Pandoc style contract and declared
+  expected fonts.
+- Before activation, verify a blank canonical Pandoc conversion and real LibreOffice opening.
+- T11 owns PDF generation, T15 owns versioned API/storage mutations, and T20/T21 own final-rootless-
+  image E2E. Those concerns must not be absorbed into T10.
 
-## Delivered Foundation
+## Approved Decisions
 
-- Python 3.14/`uv` packaging, repository conventions, durable orchestration memory, protected
-  `main`, selective GitHub Actions with the strict `CI / gate`, Ruff/ty/Pytest quality gates, and
-  90% coverage enforcement.
-- FastAPI configuration and health endpoints, local account administration, revocable sessions,
-  authorization contracts, stable errors, and durable SQLite/PostgreSQL authentication persistence.
-- Coherent standalone SQLite/atomic-file and distributed PostgreSQL/AWS-S3-compatible storage
-  profiles, with Alembic migrations, shared contracts, real RustFS integration, cheap readiness,
-  and documented backup/restore mechanics.
-- Immutable template ownership derived from the authenticated actor, global active-template
-  visibility, deterministic search, owner/administrator authorization, preferred templates, and a
-  system fallback, with shared real SQLite/PostgreSQL service contracts.
-- Reproducible T00 compatibility evidence for Pandoc, Mermaid/Chrome, Fontconfig, LibreOffice,
-  arbitrary UID, read-only root, no network, dropped capabilities, writable areas, and cgroup
-  envelopes on Docker, rootless Podman, and local k3s, with deferred OpenShift compatibility stated
-  explicitly.
-- A manifest-owned reference corpus with deterministic synthetic fixtures, bounded OpenXML and
-  raster comparison helpers, reusable Pytest fixtures, and an active document-engine CI domain.
-- T07 is delivered by PR #34 as squash `14acfe20d6ee2e4c8fef852134802e203becd4c3`:
-  extension-aware raw-HTML/raw-format and URI rejection, fixed Pandoc DOCX invocation, isolated
-  workspaces and deterministic environment, process-group timeout cleanup, stable content-free
-  failures, minimum generated-DOCX validation, and exact Pandoc 3.10.2 OpenXML integration
-  coverage. Its exact squash passed every active CI domain on `main`.
-- T07 completion tracking is delivered by PR #35 as squash
-  `ff5df18ca0ac8262601b9d5f953791f08c65d136`; exact-main run `32700928103` passed and Linear
-  G1L-317 is `Done` with both PRs attached.
-- T08 is delivered by PR #36 as squash `ca46aabe4864b8b1dc5e85a03f584abc834d2dce`:
-  bounded ZIP preflight and reads, deterministic raster normalization, bounded hostile SVG/CSS
-  sanitization, immutable local-resource binding, normalized-PNG manifest revalidation, and
-  isolated Pandoc materialization. Exact-main run `32705438253` passed every active CI domain and
-  the protected gate.
+- Official publisher artifacts are checksum locked; signatures or attestations are verified where
+  available. The fixed font families are Liberation plus Carlito/Caladea with DejaVu fallback.
+- Use `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`; reject raw HTML
+  before Pandoc. Production limits remain explicit configuration until T18.
+- The standing PM authorization permits publishing, squash-merging after green CI and independent
+  review, and cleaning the exact merged branch without another pause.
 
 ## Blockers and Risks
 
-- Chrome/Mermaid is proven on rootless Podman and local k3s. OpenShift compatibility cannot be
-  claimed until the deferred target proof runs.
-- Exact font artifacts/substitution order and explicit Noto scripts remain T10 work.
-- Production limits, RPO/RTO, retention, quotas, antivirus, and cleanup remain configurable T18
-  work. GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget remain T22 work.
-- Git SSH transport is not usable on this VM because the configured identity resolves to the public
-  `~/.ssh/codex-dev.pub` file. Read-only `gh` API access works; future Git transport must use an
-  approved authenticated path without exposing credentials or silently changing SSH configuration.
-- GitHub merge queue is unavailable for this user-owned public repository, so merges remain
-  serialized by the orchestrator.
+- No PM-only blocker exists.
+- OpenShift compatibility remains deferred and must not be claimed.
+- The full legacy document-engine suite still requires its established writable/noexec and Chrome
+  sandbox harness. T10-specific rootless integration and the canonical toolchain harness pass.
+- Git SSH transport is unusable on this VM; authorized GitHub publication uses the authenticated
+  `gh` HTTPS credential helper without exposing or persisting tokens.
 
 ## Next Actions
 
-1. Deliver T09 local Mermaid rendering without absorbing T10 template/font, T11 PDF, or T18
-   production-limit responsibilities. T13 still waits for T11.
-2. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
-3. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
-   as current state rather than a chronology.
+1. Rebase, publish, and squash-merge after green CI.
+2. Synchronize T10/Linear to `Done`, verify main CI, then immediately select the next ready ticket.
 
 ## Validation
 
-- PR #26 head `329fd96631b13f2cb13180fcad7176e9697e24f7` passed run `32668812723`;
-  squash `4758cbf7682ea815e797e78b871384247a72f884` passed main run `32668864601`,
-  including the protected `CI / gate`.
-- PR #27 exact rebased head `22fcf501ca5e0079e27cd46711fc499cf92ea7e3` passed run
-  `32669541287`, received independent approval with no findings and 100% changed-line coverage
-  (299/299), and was squash-merged as `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. Exact-main run
-  `32669621800` passed functional, standalone-storage, distributed-storage, and protected-gate
-  jobs. T14 final-image E2E is genuinely not applicable; the existing Starlette warning is
-  non-blocking.
-- PR #28 head `3f102ee668c95e719e8c22baf20ca944334a4994` was squash-merged as
-  `b2e5b3965ad05448c56d6fd857191489f8a94173`; that exact squash passed main run `32669940608`,
-  including the protected `CI / gate`.
-- PR #30 exact head `7b673ae18ea0e9ce3f6c02eda0ba1e2af1e89fc3` received independent
-  security approval with no findings, passed run `32675125046`, and was squash-merged as
-  `b927d060d60b6eacdabb872e627768defcd58126`. That exact squash passed main run `32675177329`,
-  including the protected `CI / gate`.
-- PR #32 exact head `29c2ecae0eb36d26883459c71382b0de170d7583` received independent
-  approval with no findings, passed run `32678015088`, and was squash-merged as
-  `c2b84478282beb1c3ce1e231d107610e8ec65b82`. That exact squash passed main run `32678078658`,
-  including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
-- Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
-  delivery entry matching the local `Done` ticket.
-- Linear G1L-310, G1L-314, G1L-317, and G1L-318 report `Done` and match their local mirrors.
-  T09/G1L-319 is unblocked because T08 is verified on `main`.
-- T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
-  coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
-  tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
-  commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
-  environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
-  so final-image E2E coverage is not applicable.
-- T07 formatting, Ruff, and ty checks pass. Its conversion/Pandoc-focused selection passes 96 tests,
-  including 6 exact Pandoc 3.10.2 integration tests; the service-independent selection plus real
-  Pandoc passes 396 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
-  LibreOffice suites were intentionally left to orchestrated environments; the two canonical
-  external-service commands were not claimed. T07 has no delivered user-visible or operational
-  workflow, so final-image E2E is not applicable and remains with T20/T21.
-- PR #34 exact head `72d43180da90b7f648d2b3616870e230a08b9198` received independent
-  approval with no findings, passed run `32700356579`, and was squash-merged as
-  `14acfe20d6ee2e4c8fef852134802e203becd4c3`. Exact-main run `32700452055` passed light,
-  CI infrastructure, functional, document-engine, standalone-storage, distributed-storage, and
-  protected-gate jobs. The real Pandoc 3.10.2 suite and both real storage profiles are therefore
-  verified on the delivered squash.
-- PR #35 exact head `01014cce096f7a724840d9e36a57692f0c1b8c3a` passed run `32700852098`
-  and was squash-merged as `ff5df18ca0ac8262601b9d5f953791f08c65d136`. Exact-main run
-  `32700928103` passed light checks and the protected gate; Linear G1L-317 was then transitioned to
-  `Done`.
-- PR #36 exact head `375709d8da99258e64d020dc4f68316e144c3fe5` received two independent
-  approvals with no findings, passed run `32705309467`, and was squash-merged as
-  `ca46aabe4864b8b1dc5e85a03f584abc834d2dce`. Exact-main run `32705438253` passed light,
-  CI infrastructure, functional, document-engine, standalone-storage, distributed-storage, and
-  protected-gate jobs.
-- T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
-  Chrome renders successfully in the locked minimum Podman profile while runtime-default and
-  forbidden relaxations fail closed.
-- T00 local k3s `v1.35.5+k3s1` passes the target Chrome/Mermaid, network-policy, security, and
-  fail-closed probes with containerd `2.2.3-k3s1`. The exact test namespace, Localhost profile, and
-  imported image were removed and verified absent after the run.
-- The hardened T00 k3s wrapper's offline collision, ownership-change, installed-profile-tampering,
-  namespace-UID, image-digest, acquisition-failure, and proxy success/failure/interruption probes
-  pass. The orchestrator found and identity-checked two argv-rewritten proxy orphans from legacy
-  `reviewfix04`/`reviewfix05`, terminated only those PIDs, and verified no `kubectl` remained. The
-  new regression detects argv/token disappearance and preserves a baseline `kubectl`. Live run
-  `reviewfix06` passes all workload probes,
-  verifies installed profile SHA-256 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`,
-  and verifies its namespace, profile, marker, containerd image, and Podman tag absent afterward.
-- Final offline regressions prove that a baseline `kubectl` carrying the same operator-supplied run
-  token survives and blocks launch, and that create collisions or invalid namespace receipts
-  preserve identically labeled namespaces without attempting deletion. A valid receipt still
-  supports cleanup after the injected post-create API failure.
-- The T00 Podman regression, Ruff, and ty checks pass. The service-independent Pytest selection
-  passes 175 tests at 98% coverage; both canonical Pytest commands report the same 10 PostgreSQL/
-  RustFS integration failures because this worktree has no test-service environment variables.
-- Final product validation has not run; the product is incomplete.
+- T09 contains 46 Mermaid unit tests and 12 real-engine integration tests. The local applicable
+  canonical selection passed 555 tests at 95.34% coverage; independent security/spec/CI reviews
+  approved the exact revision and the explicit T20/T21 final-image E2E deferral.
+- The delivered T09 squashes passed every applicable GitHub Actions domain and `CI / gate`.
+- T10 currently adds 116 passing unit tests and 18 passing rootless real-engine integration tests.
+  The unit suite passes 546 tests at 93.74% application coverage. The final T10 rootless image
+  passes the T00 document-engine harness with the exact Pandoc, LibreOffice, Chromium, font,
+  rootless, read-only-root, no-network, and dropped-capability contract.
+- Independent security, specification, and CI/toolchain reviewers approved exact code revision
+  `153bca4` without a remaining actionable finding.
+- A fresh T00 K3s rerun reached an environment-specific network control failure before workload
+  validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
+  K3s proof remains valid and no VM networking was modified.
+- Final product validation has not run; the product remains incomplete.

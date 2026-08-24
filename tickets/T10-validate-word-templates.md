@@ -2,7 +2,7 @@
 ticket: T10
 linear_id: G1L-321
 linear_url: https://linear.app/g1lom/issue/G1L-321/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,26 @@ Inventory fonts and licenses; validate OOXML, templates, required styles, substi
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T00 and T07 are verified `Done` in the repository and Linear. Implementation started
+  on `feat/T10-template-font-validation`. Scope is exact official font artifacts and notices,
+  deterministic Fontconfig substitutions, expected-font declarations, bounded OOXML template
+  validation, required Pandoc styles, macros and external-relationship rejection, blank canonical
+  Pandoc conversion, and real LibreOffice opening. T11 PDF and T15 versioned HTTP workflows remain
+  downstream; T20/T21 retain final-image E2E.
+- 2026-08-24: Implemented checksum-pinned Liberation 2.1.5, Carlito 1.104, Caladea 1.001, and
+  DejaVu 2.37 artifacts with license evidence, an isolated deterministic Fontconfig contract, and
+  an explicit Latin/Greek inventory with no Noto dependency. Implemented bounded OOXML package,
+  relationship, active-content, required-style, and expected-font validation plus shell-free,
+  time-bounded Pandoc and LibreOffice activation checks. Added 116 unit tests and 18 rootless
+  real-engine integration tests. The unit suite passes 546 tests at 93.74% application coverage;
+  the final T10 rootless toolchain image passes the T00 document-engine harness and all 18 T10
+  integration tests. Canonical checks, independent review, and CI publication remain in progress.
+- 2026-08-24: Independent security and specification review reproduced process-descendant,
+  output-file TOCTOU, default content-type, orphan relationship, and DrawingML supplementary-font
+  bypasses before publication. The corrected revision closes all five plus adjacent OLE, embedded
+  package, and control-properties content-type variants with unit regressions and a real rootless
+  descendant-termination proof. Independent security, specification, and CI/toolchain reviewers
+  approved exact code revision `153bca4` with no remaining finding.
 
 ## Synchronization
 
