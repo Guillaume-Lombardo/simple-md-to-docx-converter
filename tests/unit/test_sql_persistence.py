@@ -29,6 +29,9 @@ from md_converter.persistence.sql import (
 REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260823_01_auth_tables"
 )
+JOB_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_03_conversion_jobs"
+)
 
 
 @pytest.mark.unit
@@ -38,6 +41,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
     upgrade_database(engine)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
+        "conversion_jobs",
         "sessions",
         "system_template_selection",
         "template_preferences",
@@ -226,6 +230,14 @@ def test_alembic_environment_and_revision_are_directly_verifiable(
     REVISION.downgrade()
     operations.drop_index.assert_called_once()
     assert operations.drop_table.call_count == 2
+
+    job_operations = mocker.patch.object(JOB_REVISION, "op")
+    JOB_REVISION.upgrade()
+    job_operations.create_table.assert_called_once()
+    assert job_operations.create_index.call_count == 5
+    JOB_REVISION.downgrade()
+    assert job_operations.drop_index.call_count == 5
+    job_operations.drop_table.assert_called_once_with("conversion_jobs")
     engine.dispose()
 
 

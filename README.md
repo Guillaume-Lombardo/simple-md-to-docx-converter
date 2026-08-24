@@ -8,7 +8,10 @@ foundations. The internal conversion component now validates standalone Markdown
 packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG,
 renders bounded Mermaid diagrams through local sandboxed Chromium, runs Pandoc in an isolated
 workspace, and converts validated DOCX to bounded PDF through an isolated LibreOffice profile.
-Queue, worker, versioned template APIs, UI, and final-container features remain under development.
+The versioned API persists owner-scoped conversion requests, exposes deterministic job state,
+supports idempotent submission and cancellation, and uses lease-owning embedded or external worker
+loops over SQLite or PostgreSQL. Versioned template content, UI, resource policy, and final-container
+features remain under development.
 
 ## Requirements
 
@@ -60,6 +63,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/architecture.md`: target architecture and component boundaries
 - `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
+- `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
 - `docs/golden-testing.md`: reference corpus and deterministic DOCX/PDF comparison helpers
 - `docs/pandoc-docx.md`: approved Markdown dialect and isolated Pandoc DOCX boundary

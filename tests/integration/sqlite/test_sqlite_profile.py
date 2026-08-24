@@ -110,6 +110,10 @@ def test_standalone_restart_preserves_admin_password_and_sessions(
         argon2_time_cost=1,
         storage_profile="standalone",
         standalone_data_directory=data_directory,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     first = create_app(first_settings)
     login = first.state.components.authentication.login("admin", original_password)
@@ -124,6 +128,10 @@ def test_standalone_restart_preserves_admin_password_and_sessions(
         argon2_time_cost=1,
         storage_profile="standalone",
         standalone_data_directory=data_directory,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     second = create_app(second_settings)
     authentication = second.state.components.authentication

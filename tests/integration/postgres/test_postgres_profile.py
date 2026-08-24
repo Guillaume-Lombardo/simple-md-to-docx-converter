@@ -109,6 +109,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS conversion_jobs CASCADE"))
         connection.execute(
             text("DROP TABLE IF EXISTS system_template_selection CASCADE")
         )
@@ -225,6 +226,10 @@ def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
         s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
         s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
         s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     app = create_app(settings)
     assert app.state.components.readiness.is_ready()

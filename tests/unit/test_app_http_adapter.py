@@ -15,7 +15,10 @@ from md_converter.auth.memory import MemoryReadinessProbe
 from md_converter.auth.models import LoginResult, Role, User
 from md_converter.auth.service import AuthenticationService
 from md_converter.config import Settings
+from md_converter.jobs.models import JobPage, JobState, JobStep
+from md_converter.jobs.service import JobService
 from md_converter.persistence.errors import PersistenceError
+from tests.unit.jobs.test_job_models import job
 
 
 def isolated_client(
@@ -28,6 +31,10 @@ def isolated_client(
         initial_admin_password=password,
         storage_profile="standalone",
         standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     admin = User(uuid4(), "admin", "admin", "admin-hash", Role.ADMIN)
     alice = User(uuid4(), "Alice", "alice", "alice-hash", Role.USER)
@@ -44,6 +51,7 @@ def isolated_client(
             authentication=auth,
             readiness=MemoryReadinessProbe(ready=ready),
             object_store=mocker.Mock(),
+            jobs=mocker.Mock(spec=JobService),
         ),
     )
     return TestClient(app, base_url="https://testserver"), auth, admin, alice
@@ -241,13 +249,141 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "404",
             "422",
         },
+        ("/api/v1/conversions", "post"): {
+            "202",
+            "401",
+            "403",
+            "409",
+            "413",
+            "422",
+            "503",
+        },
+        ("/api/v1/conversions", "get"): {"200", "401", "422", "503"},
+        ("/api/v1/conversions/{job_id}", "get"): {
+            "200",
+            "401",
+            "404",
+            "422",
+            "503",
+        },
+        ("/api/v1/conversions/{job_id}", "delete"): {
+            "200",
+            "401",
+            "403",
+            "404",
+            "422",
+            "503",
+        },
+        ("/api/v1/conversions/{job_id}/result", "get"): {
+            "200",
+            "401",
+            "404",
+            "409",
+            "422",
+            "503",
+        },
     }
     for (path, method), statuses in expected.items():
         responses = paths[path][method]["responses"]
         assert set(responses) == statuses
-        for status_code in statuses - {"200", "201", "204"}:
+        for status_code in statuses - {"200", "201", "202", "204"}:
             reference = responses[status_code]["content"]["application/json"]["schema"][
                 "$ref"
             ]
             assert reference.endswith("/ErrorResponse")
     assert error_responses(422)[422]["model"] is ErrorResponse
+    result_schema = paths["/api/v1/conversions/{job_id}/result"]["get"]["responses"][
+        "200"
+    ]["content"]["application/octet-stream"]["schema"]
+    assert result_schema == {"type": "string", "format": "binary"}
+
+
+@pytest.mark.unit
+def test_conversion_body_is_bounded_before_authentication_and_multipart_parsing(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _, _ = isolated_client(mocker)
+    with client:
+        response = client.post(
+            "/api/v1/conversions",
+            content=b"x" * 1_100_001,
+            headers={"Content-Type": "multipart/form-data; boundary=private"},
+        )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "CONVERSION_REQUEST_TOO_LARGE"
+    auth.authenticate.assert_not_called()
+
+
+@pytest.mark.unit
+def test_conversion_http_adapter_delegates_all_safe_routes(
+    mocker: MockerFixture,
+) -> None:
+    client, _, admin, _ = isolated_client(mocker)
+    jobs = client.app.state.components.jobs
+    queued = job(owner_id=admin.id)
+    succeeded = job(
+        owner_id=admin.id,
+        state=JobState.SUCCEEDED,
+        step=JobStep.COMPLETE,
+        progress=100,
+        result_object_id=uuid4(),
+    )
+    jobs.submit.return_value = (queued, False)
+    jobs.list_owner.return_value = JobPage((queued,), 1, 0, 50)
+    jobs.get_visible.return_value = queued
+    jobs.cancel.return_value = queued
+    jobs.download.return_value = (succeeded, b"result")
+    headers = {"X-CSRF-Token": "csrf-token", "Idempotency-Key": "request"}
+    data = {
+        "template_id": str(queued.template_id),
+        "template_version_id": str(queued.template_version_id),
+        "output": queued.output.value,
+    }
+    with client:
+        created = client.post(
+            "/api/v1/conversions",
+            headers=headers,
+            files={"source": ("source.md", b"# source")},
+            data=data,
+        )
+        assert created.status_code == 202
+        assert created.headers["Retry-After"] == "1"
+        assert client.get("/api/v1/conversions").json()["total"] == 1
+        assert client.get(f"/api/v1/conversions/{queued.id}").status_code == 200
+        assert (
+            client.delete(
+                f"/api/v1/conversions/{queued.id}", headers=headers
+            ).status_code
+            == 200
+        )
+        result = client.get(f"/api/v1/conversions/{queued.id}/result")
+        assert result.content == b"result"
+        assert f".{succeeded.output.value}" in result.headers["Content-Disposition"]
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files={"source": ("source.md", b"")},
+                data=data,
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files={"source": ("source.md", b"x" * 1_000_001)},
+                data=data,
+            ).status_code
+            == 422
+        )
+        jobs.submit.side_effect = ValueError
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files={"source": ("source.md", b"valid")},
+                data=data,
+            ).status_code
+            == 422
+        )

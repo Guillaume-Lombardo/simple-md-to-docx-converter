@@ -195,8 +195,13 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
         storage_profile="distributed",
         distributed_database_url=database_url,
         s3_bucket="objects",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     engine = mocker.Mock()
+    engine.dialect.name = "postgresql"
     create_engine = mocker.patch(
         "md_converter.app.create_database_engine", return_value=engine
     )
@@ -214,6 +219,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker: MockerFixture,
 ) -> None:
     engine = mocker.Mock()
+    engine.dialect.name = "sqlite"
     mocker.patch("md_converter.app.create_database_engine", return_value=engine)
     mocker.patch("md_converter.app.upgrade_database")
     files = mocker.patch("md_converter.app.FilesystemObjectStore")
@@ -222,6 +228,10 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         initial_admin_password="admin-" + "password",
         storage_profile="standalone",
         standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     assert build_components(standalone).object_store is files.return_value
     files.assert_called_once_with(Path("/data"))
@@ -237,6 +247,10 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         s3_region="test-region",
         s3_access_key_id="access",
         s3_secret_access_key="secret-" + "key",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     build_components(distributed)
     s3_client.assert_called_once_with(
