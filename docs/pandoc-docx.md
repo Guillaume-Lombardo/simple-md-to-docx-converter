@@ -33,8 +33,9 @@ the approved local-resource behavior that T08 must implement and test.
 ## Process boundary
 
 Each conversion uses a new temporary workspace containing only the Markdown input, T08-approved
-normalized resources, opaque reference DOCX, isolated home/cache/config/data/temp directories, and
-generated output. Pandoc receives no shell, no standard input or captured document output, a
+normalized resources, T09-generated normalized Mermaid PNG resources, opaque reference DOCX,
+isolated home/cache/config/data/temp directories, and generated output. Pandoc receives no shell,
+no standard input or captured document output, a
 process group of its own, and only the explicitly supplied `PATH`, fixed `LANG=C.UTF-8`,
 `LC_ALL=C.UTF-8`, and `TZ=UTC`, plus workspace-local directory variables. Host locale, timezone,
 and unrelated environment values are not inherited.
@@ -68,7 +69,8 @@ safe ZIP member names and the minimum required OpenXML parts; it is not a substi
 
 The real integration suite uses the exact approved Pandoc 3.10.2 artifact, converts the T04 corpus,
 and inspects the resulting OpenXML for headings, lists, links, tables, footnotes, code styles,
-attributes, Unicode text, and reference-document style propagation. CI downloads the official
-release and verifies its locked SHA-256 before extraction. Final-image E2E is not applicable to this
+attributes, Unicode text, Mermaid media, and reference-document style propagation. CI downloads the
+official Pandoc and Chrome artifacts, verifies their locked SHA-256 values, and installs Mermaid
+from the T00 lock with Puppeteer downloads disabled. Final-image E2E is not applicable to this
 internal component; the user-visible asynchronous conversion workflow and its rootless-image E2E
 coverage belong to T20/T21.

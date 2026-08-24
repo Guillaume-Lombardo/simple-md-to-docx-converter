@@ -6,15 +6,17 @@ revocable sessions, health endpoints, and durable standalone or distributed stor
 It also provides template ownership, visibility-aware search, preference, and fallback persistence
 foundations. The internal conversion component now validates standalone Markdown or bounded ZIP
 packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG, and
-runs Pandoc in an isolated workspace. Queue, worker, versioned template APIs, UI, and final-container
-features remain under development.
+renders bounded Mermaid diagrams through local sandboxed Chromium before running Pandoc in an
+isolated workspace. Queue, worker, versioned template APIs, UI, and final-container features remain
+under development.
 
 ## Requirements
 
 - [`uv`](https://docs.astral.sh/uv/)
 - A platform supported by the Python 3.14 distribution managed by `uv`
-- Pandoc 3.10.2 for real DOCX conversion and the Cairo shared library for SVG rasterization; the
-  validated T00 UBI toolchain image provides both
+- Pandoc 3.10.2 for real DOCX conversion, Mermaid CLI 11.16.0 with Chrome 151.0.7922.173 for
+  diagram rendering, and the Cairo shared library for SVG rasterization; the validated T00 UBI
+  toolchain image provides these engines
 
 `uv` reads `.python-version`, installs Python 3.14 when needed, and creates the project environment.
 No manually managed virtual environment or direct `pip` invocation is required.
@@ -62,6 +64,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/golden-testing.md`: reference corpus and deterministic DOCX/PDF comparison helpers
 - `docs/pandoc-docx.md`: approved Markdown dialect and isolated Pandoc DOCX boundary
 - `docs/archive-images.md`: secure archive and local-image preparation contract
+- `docs/mermaid.md`: bounded local Mermaid/Chromium preprocessing contract
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 

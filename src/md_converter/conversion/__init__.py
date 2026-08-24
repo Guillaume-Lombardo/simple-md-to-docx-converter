@@ -7,6 +7,12 @@ from md_converter.conversion.archive import (
 )
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.images import ImageLimits
+from md_converter.conversion.mermaid import (
+    MermaidCliRenderer,
+    MermaidConfig,
+    MermaidLimits,
+    MermaidPreprocessingConverter,
+)
 from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
 from md_converter.conversion.service import DocxConversionService
 
@@ -18,6 +24,10 @@ __all__ = [
     "ConversionErrorCode",
     "DocxConversionService",
     "ImageLimits",
+    "MermaidCliRenderer",
+    "MermaidConfig",
+    "MermaidLimits",
+    "MermaidPreprocessingConverter",
     "PandocConfig",
     "PandocDocxConverter",
 ]

@@ -37,6 +37,16 @@ Render Mermaid through local Chromium under arbitrary UID, bounded resources, ro
   replacement before Pandoc, bounded source/output/dimensions/process execution, stable failures,
   and rootless/no-network integration evidence. T10 fonts, T11 PDF, T13 asynchronous cancellation,
   T18 production limit values, and T20/T21 final-image E2E remain outside this ticket.
+- 2026-08-24: The Mermaid preprocessor, bounded CLI adapter, Pandoc composition, stable failures,
+  CI engine provisioning, documentation, 40 unit tests, and four real-engine integration tests are
+  implemented. The real suite passes in the T00 UBI image with arbitrary UID, read-only root,
+  zero capabilities, `no-new-privileges`, the approved Chrome seccomp profile, bounded resources,
+  active Chrome sandbox, and `--network none`.
+- 2026-08-24: Two fresh local k3s harness runs cleaned up safely but were inconclusive because the
+  unselected network-control pod could not reach its Service, including after the node and CoreDNS
+  reported ready. The Mermaid/Chrome target pod did not report a failure before that control gate.
+  K3s was stopped and verified free of test namespaces, seccomp profiles, proxies, and containers.
+  No VM network configuration was changed; the established T00 k3s sandbox proof remains valid.
 
 ## Synchronization
 
