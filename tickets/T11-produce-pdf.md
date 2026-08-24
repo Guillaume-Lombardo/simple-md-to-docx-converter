@@ -45,6 +45,16 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   harness passes 18 real Pandoc/LibreOffice/PDFium tests under an arbitrary UID, read-only root,
   no network, no capabilities, and bounded resources. Canonical full-suite validation and
   independent review remain before publication.
+- 2026-08-24: Resolved independent security, specification, and CI review findings: cancellation
+  probe failures now terminate the whole process group; final waits and decoded streams are
+  bounded; all standard unsafe PDF actions and parser failures are normalized; the golden verifies
+  engine, font, provenance, dimensions, and deterministic uncompressed reference bytes; and a
+  committed rootless harness reproduces the real boundary suite. T20/T21 and Linear now retain the
+  explicitly approved final-image asynchronous E2E debt. Formatting, Ruff, and `ty` pass; 603 unit
+  tests pass at 93.99% coverage, 744 default local tests pass at 95.05%, and all 20 rootless real-
+  engine tests pass. The unfiltered host run has 34 expected missing-engine failures; those exact
+  boundaries pass in the approved image. Exact-revision re-review and changed-line coverage remain
+  before publication.
 
 ## Synchronization
 

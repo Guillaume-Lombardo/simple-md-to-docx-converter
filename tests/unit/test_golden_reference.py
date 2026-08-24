@@ -30,3 +30,6 @@ def test_reference_normalization_removes_zip_time_and_order_variance() -> None:
         assert {member.date_time for member in archive.infolist()} == {
             (1980, 1, 1, 0, 0, 0)
         }
+        assert {member.compress_type for member in archive.infolist()} == {
+            zipfile.ZIP_STORED
+        }

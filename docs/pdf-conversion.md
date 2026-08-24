@@ -12,8 +12,8 @@ shell, with a fixed `pdf:writer_pdf_Export` argument vector, a minimal environme
 standard-input channel, and a new process session.
 
 The caller must configure DOCX bytes, ZIP entries, member and total uncompressed bytes,
-compression ratio, PDF bytes, page count, PDF object count, and object depth. T18 owns the eventual
-production values. T11 deliberately defines no production defaults.
+compression ratio, PDF bytes, decoded PDF stream bytes, page count, PDF object count, and object
+depth. T18 owns the eventual production values. T11 deliberately defines no production defaults.
 
 Timeout, cancellation, non-zero exit, missing engine, unsafe input, invalid output, and limit
 violations have distinct stable error codes. Timeout and cancellation terminate the complete
@@ -39,6 +39,17 @@ logic. Real tests run Pandoc, LibreOffice 26.2.5.2, and PDFium 5.13.0 under an a
 read-only root filesystem, no capabilities, `no-new-privileges`, no network, bounded memory/CPU/
 PIDs, and bounded writable mounts. They cover success, concurrent isolated profiles, output
 failures, timeout, cancellation, descendant cleanup, and exact raster golden comparison.
+
+Build the current toolchain and reproduce that focused rootless suite with:
+
+```bash
+podman build --pull=false --file spikes/toolchain/Containerfile \
+  --tag localhost/simple-md-toolchain:t11 spikes/toolchain
+spikes/toolchain/run-t11-tests.sh
+```
+
+The harness stages a read-only source copy, installs only the locked dependency graph, disables
+network access for test execution, and removes its exact temporary volumes on every exit.
 
 T11 cannot exercise the final application image or asynchronous API because T13 and T20 do not yet
 exist. The approved sequencing exception keeps that final-image success, authorization,

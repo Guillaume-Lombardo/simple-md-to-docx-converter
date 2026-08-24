@@ -26,6 +26,8 @@ from tests.golden.pdf import render_pdf
 from tests.golden.reference import normalize_reference_docx
 
 LIBREOFFICE_VERSION = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
+PANDOC_VERSION = "3.10.2"
+PDFIUM_VERSION = "5.13.0"
 DPI = 96
 PDF_LIMITS = PdfLimits(
     max_docx_bytes=20_000_000,
@@ -34,6 +36,7 @@ PDF_LIMITS = PdfLimits(
     max_docx_total_uncompressed_bytes=50_000_000,
     max_docx_compression_ratio=200.0,
     max_pdf_bytes=20_000_000,
+    max_pdf_decoded_stream_bytes=20_000_000,
     max_pages=20,
     max_pdf_objects=100_000,
     max_pdf_object_depth=100,
@@ -58,6 +61,27 @@ def generate(output: Path, workspace: Path) -> None:
     soffice = shutil.which("soffice")
     if pandoc is None or soffice is None:
         raise RuntimeError("The approved Pandoc and LibreOffice engines are required")
+    detected_pandoc = subprocess.run(  # noqa: S603 - approved engine from PATH
+        [pandoc, "--version"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout.splitlines()[0]
+    detected_libreoffice = subprocess.run(  # noqa: S603 - approved engine from PATH
+        [soffice, "--version"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout.strip()
+    detected_pdfium = version("pypdfium2")
+    if detected_pandoc != f"pandoc {PANDOC_VERSION}":
+        raise RuntimeError("The approved Pandoc version is required")
+    if detected_libreoffice != LIBREOFFICE_VERSION:
+        raise RuntimeError("The approved LibreOffice version is required")
+    if detected_pdfium != PDFIUM_VERSION:
+        raise RuntimeError("The approved PDFium version is required")
     reference = normalize_reference_docx(
         subprocess.run(  # noqa: S603 - approved engine resolved from PATH
             [pandoc, "--print-default-data-file", "reference.docx"],
@@ -76,7 +100,7 @@ def generate(output: Path, workspace: Path) -> None:
         template_id="t11-golden-template",
         template_version="1",
         template_sha256=_sha256(reference),
-        pandoc_version="3.10.2",
+        pandoc_version=PANDOC_VERSION,
         pandoc_reader=(
             "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
         ),
@@ -114,8 +138,8 @@ def generate(output: Path, workspace: Path) -> None:
         "font_manifest_sha256": _sha256(font_manifest),
         "libreoffice_version": LIBREOFFICE_VERSION,
         "pages": page_metadata,
-        "pandoc_version": "3.10.2",
-        "pdfium_version": version("pypdfium2"),
+        "pandoc_version": PANDOC_VERSION,
+        "pdfium_version": PDFIUM_VERSION,
         "reference_docx_sha256": _sha256(reference),
         "schema_version": 1,
         "source_markdown_sha256": _sha256(markdown),

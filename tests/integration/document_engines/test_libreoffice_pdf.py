@@ -42,6 +42,7 @@ LIMITS = PdfLimits(
     max_docx_total_uncompressed_bytes=50_000_000,
     max_docx_compression_ratio=200.0,
     max_pdf_bytes=20_000_000,
+    max_pdf_decoded_stream_bytes=20_000_000,
     max_pages=20,
     max_pdf_objects=100_000,
     max_pdf_object_depth=100,
@@ -176,10 +177,28 @@ def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> Non
     )
     golden_root = Path("tests/corpus/pdf/golden")
     manifest = json.loads((golden_root / "manifest.json").read_text(encoding="utf-8"))
+    assert set(manifest) == {
+        "dpi",
+        "font_manifest_sha256",
+        "libreoffice_version",
+        "pages",
+        "pandoc_version",
+        "pdfium_version",
+        "reference_docx_sha256",
+        "schema_version",
+        "source_markdown_sha256",
+    }
     assert manifest["schema_version"] == 1
     assert manifest["source_markdown_sha256"] == hashlib.sha256(markdown).hexdigest()
     assert manifest["reference_docx_sha256"] == hashlib.sha256(reference).hexdigest()
+    assert (
+        manifest["font_manifest_sha256"]
+        == hashlib.sha256(
+            Path("spikes/toolchain/fonts/manifest.json").read_bytes()
+        ).hexdigest()
+    )
     assert manifest["libreoffice_version"] == LIBREOFFICE_VERSION
+    assert manifest["pandoc_version"] == "3.10.2"
     assert manifest["pdfium_version"] == "5.13.0"
     dpi = manifest["dpi"]
     expected = []
@@ -188,6 +207,10 @@ def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> Non
         assert hashlib.sha256(payload).hexdigest() == page_metadata["sha256"]
         with Image.open(io.BytesIO(payload)) as image:
             rgba = image.convert("RGBA")
+            assert (rgba.width, rgba.height) == (
+                page_metadata["width"],
+                page_metadata["height"],
+            )
             expected.append(RasterPage(rgba.width, rgba.height, dpi, rgba.tobytes()))
     actual = render_pdf(
         artifact.pdf,
@@ -221,7 +244,16 @@ def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> Non
             "out=Path(sys.argv[sys.argv.index('--outdir')+1]); "
             "(out/'source.pdf').write_bytes(b'x'*1000)",
             PdfLimits(
-                20_000_000, 2_000, 10_000_000, 50_000_000, 200.0, 100, 20, 100_000, 100
+                max_docx_bytes=20_000_000,
+                max_docx_entries=2_000,
+                max_docx_member_uncompressed_bytes=10_000_000,
+                max_docx_total_uncompressed_bytes=50_000_000,
+                max_docx_compression_ratio=200.0,
+                max_pdf_bytes=100,
+                max_pdf_decoded_stream_bytes=20_000_000,
+                max_pages=20,
+                max_pdf_objects=100_000,
+                max_pdf_object_depth=100,
             ),
             ConversionErrorCode.PDF_LIMIT_EXCEEDED,
         ),
@@ -257,13 +289,13 @@ def _minimal_docx() -> bytes:
     return output.getvalue()
 
 
-@pytest.mark.parametrize("cancel", (False, True))
+@pytest.mark.parametrize("mode", ("timeout", "cancel", "probe-failure"))
 def test_timeout_and_cancellation_kill_process_group_descendants(
-    tmp_path: Path, cancel: bool
+    tmp_path: Path, mode: str
 ) -> None:
     workspace = _workspace(tmp_path)
-    pid_file = workspace / f"descendant-{cancel}.pid"
-    ready_file = workspace / f"descendant-{cancel}.ready"
+    pid_file = workspace / f"descendant-{mode}.pid"
+    ready_file = workspace / f"descendant-{mode}.ready"
     child_program = (
         "import signal,time,pathlib; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
@@ -272,7 +304,7 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
     )
     executable = _executable(
         workspace,
-        f"libreoffice-descendant-{cancel}",
+        f"libreoffice-descendant-{mode}",
         "import pathlib,subprocess,sys,time\n"
         f"child=subprocess.Popen([sys.executable,'-c',{child_program!r}])\n"
         f"ready=pathlib.Path({str(ready_file)!r})\n"
@@ -280,15 +312,28 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
         "time.sleep(30)",
     )
-    probe: Callable[[], bool] | None = pid_file.exists if cancel else None
-    expected = (
-        ConversionErrorCode.PDF_CANCELLED if cancel else ConversionErrorCode.PDF_TIMEOUT
-    )
+
+    def probe_failure() -> bool:
+        if pid_file.exists():
+            raise RuntimeError("sensitive")
+        return False
+
+    probes: dict[str, Callable[[], bool] | None] = {
+        "timeout": None,
+        "cancel": pid_file.exists,
+        "probe-failure": probe_failure,
+    }
+    expected_codes = {
+        "timeout": ConversionErrorCode.PDF_TIMEOUT,
+        "cancel": ConversionErrorCode.PDF_CANCELLED,
+        "probe-failure": ConversionErrorCode.PDF_FAILURE,
+    }
     with pytest.raises(ConversionError) as captured:
         _converter(workspace, executable=str(executable), timeout=0.3).convert(
-            _minimal_docx(), _trace(_minimal_docx()), probe
+            _minimal_docx(), _trace(_minimal_docx()), probes[mode]
         )
-    assert captured.value.code is expected
+    assert captured.value.code is expected_codes[mode]
+    assert "sensitive" not in str(captured.value)
     descendant_pid = int(pid_file.read_text(encoding="utf-8"))
 
     def descendant_is_running() -> bool:

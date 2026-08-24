@@ -22,8 +22,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   `c43b810`; T09 and T10 are verified dependencies.
 - T11 now has an isolated LibreOffice adapter, explicit DOCX/PDF bounds, process-group timeout and
   cancellation, strict PDF validation, canonical traceability, locked PDFium rasterization, and a
-  reproducible exact golden. Focused local checks pass 85 tests and the hardened rootless UBI
-  harness passes all 18 real Pandoc/LibreOffice/PDFium tests.
+  reproducible exact golden. The canonical unit selection passes 603 tests at 93.99% coverage, the
+  default local suite passes 744 tests at 95.05% coverage, and the hardened rootless UBI harness
+  passes all 20 real Pandoc/LibreOffice/PDFium tests.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
 ## Delivered T10 Scope
@@ -59,10 +60,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Run every canonical and applicable document-engine check, including coverage and changed-line
-   coverage.
-2. Resolve findings from independent security/specification/CI reviews on the exact revision.
-3. Rebase, publish, verify protected CI, squash-merge, synchronize T11 to `Done`, and continue T13.
+1. Finish changed-line coverage and independent security/specification/CI re-review on the exact
+   hardened revision.
+2. Rebase, publish, verify protected CI, squash-merge, synchronize T11 to `Done`, and continue T13.
 
 ## Validation
 
@@ -80,6 +80,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
   K3s proof remains valid and no VM networking was modified.
 - Final product validation has not run; the product remains incomplete.
-- T11 focused validation: Ruff and `ty` pass; unit coverage passes with 517 tests and 93.84%
-  application coverage; the rootless T11 boundary suite passes 18 tests including exact raster
-  golden, concurrent profiles, failure outputs, timeout, cancellation, and descendant cleanup.
+- T11 validation: formatting, Ruff, and `ty` pass; the unit selection passes 603 tests at 93.99%
+  application coverage; the default local selection passes 744 tests at 95.05%; and the rootless
+  T11 boundary suite passes 20 tests including exact raster golden, concurrent profiles, failure
+  outputs, timeout, cancellation, probe failure, and descendant cleanup. The unfiltered host run
+  passes 751 tests and has 34 expected missing-engine failures because Pandoc, LibreOffice,
+  Mermaid/Chromium, and the locked Fontconfig inventory are provided by the approved image rather
+  than the VM host.

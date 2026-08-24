@@ -11,17 +11,19 @@ import signal
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import unicodedata
 import zipfile
-from collections.abc import Callable, Mapping
-from contextlib import suppress
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf import filters as pypdf_filters
+from pypdf.errors import LimitReachedError, PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
 
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
@@ -44,10 +46,42 @@ _PROHIBITED_PDF_KEYS = frozenset(
         "/XFA",
     }
 )
-_PROHIBITED_ACTIONS = frozenset({"/GoToR", "/JavaScript", "/Launch"})
+_PROHIBITED_ACTIONS = frozenset(
+    {
+        "/GoTo3DView",
+        "/GoToE",
+        "/GoToR",
+        "/Hide",
+        "/ImportData",
+        "/JavaScript",
+        "/Launch",
+        "/Movie",
+        "/Named",
+        "/Rendition",
+        "/ResetForm",
+        "/RichMediaExecute",
+        "/SetOCGState",
+        "/Sound",
+        "/SubmitForm",
+        "/Thread",
+        "/Trans",
+    }
+)
+_SAFE_PDF_ACTIONS = frozenset({"/GoTo", "/URI"})
 _HEX_DIGITS = frozenset("0123456789abcdef")
 _MAX_METADATA_CHARACTERS = 256
 _SHA256_CHARACTERS = 64
+_PDF_FILTER_LIMIT_NAMES = (
+    "FLATE_MAX_BUFFER_SIZE",
+    "JBIG2_MAX_OUTPUT_LENGTH",
+    "LZW_MAX_OUTPUT_LENGTH",
+    "MAX_ARRAY_BASED_STREAM_OUTPUT_LENGTH",
+    "MAX_DECLARED_STREAM_LENGTH",
+    "RUN_LENGTH_MAX_OUTPUT_LENGTH",
+    "ZLIB_MAX_OUTPUT_LENGTH",
+    "ZLIB_MAX_RECOVERY_INPUT_LENGTH",
+)
+_PDF_PARSE_LOCK = threading.Lock()
 _REQUIRED_DOCX_PARTS = frozenset(
     {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
 )
@@ -77,6 +111,7 @@ class PdfLimits:
     max_docx_total_uncompressed_bytes: int
     max_docx_compression_ratio: float
     max_pdf_bytes: int
+    max_pdf_decoded_stream_bytes: int
     max_pages: int
     max_pdf_objects: int
     max_pdf_object_depth: int
@@ -90,6 +125,7 @@ class PdfLimits:
                 self.max_docx_member_uncompressed_bytes,
                 self.max_docx_total_uncompressed_bytes,
                 self.max_pdf_bytes,
+                self.max_pdf_decoded_stream_bytes,
                 self.max_pages,
                 self.max_pdf_objects,
                 self.max_pdf_object_depth,
@@ -321,7 +357,8 @@ def _terminate_group(process: subprocess.Popen[bytes], grace_seconds: float) -> 
         return
     with suppress(ProcessLookupError):
         os.killpg(process_group, signal.SIGKILL)
-    process.wait()
+    with suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=grace_seconds)
 
 
 def _read_pdf(path: Path, limit: int) -> bytes:
@@ -381,8 +418,25 @@ class _PdfWalkState:
 
 
 def _walk_pdf_dictionary(
-    value: DictionaryObject, state: _PdfWalkState, depth: int
+    value: DictionaryObject,
+    state: _PdfWalkState,
+    depth: int,
 ) -> None:
+    action_value = value.get("/S")
+    action = (
+        action_value.get_object()
+        if isinstance(action_value, IndirectObject)
+        else action_value
+    )
+    action_name = str(action) if action is not None else ""
+    dictionary_type = str(value.get("/Type", ""))
+    if action_name in _PROHIBITED_ACTIONS or (
+        dictionary_type == "/Action" and action_name not in _SAFE_PDF_ACTIONS
+    ):
+        _error(
+            ConversionErrorCode.INVALID_PDF,
+            "LibreOffice produced an unsafe PDF.",
+        )
     for key, child in value.items():
         name = str(key)
         if name in _PROHIBITED_PDF_KEYS:
@@ -390,16 +444,14 @@ def _walk_pdf_dictionary(
                 ConversionErrorCode.INVALID_PDF,
                 "LibreOffice produced an unsafe PDF.",
             )
-        action = child.get_object() if isinstance(child, IndirectObject) else child
-        if name == "/S" and str(action) in _PROHIBITED_ACTIONS:
-            _error(
-                ConversionErrorCode.INVALID_PDF,
-                "LibreOffice produced an unsafe PDF.",
-            )
         _walk_pdf_object(child, state, depth + 1)
 
 
-def _walk_pdf_object(value: object, state: _PdfWalkState, depth: int) -> None:
+def _walk_pdf_object(
+    value: object,
+    state: _PdfWalkState,
+    depth: int,
+) -> None:
     if depth > state.limits.max_pdf_object_depth:
         _error(ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits.")
     if isinstance(value, IndirectObject):
@@ -424,34 +476,57 @@ def _walk_pdf_object(value: object, state: _PdfWalkState, depth: int) -> None:
             _walk_pdf_object(child, state, depth + 1)
 
 
+@contextmanager
+def _bounded_pdf_parser(limits: PdfLimits) -> Iterator[None]:
+    """Serialize pypdf while applying this call's decoded-stream bounds."""
+
+    with _PDF_PARSE_LOCK:
+        previous = {
+            name: getattr(pypdf_filters, name) for name in _PDF_FILTER_LIMIT_NAMES
+        }
+        try:
+            for name in _PDF_FILTER_LIMIT_NAMES:
+                setattr(pypdf_filters, name, limits.max_pdf_decoded_stream_bytes)
+            yield
+        finally:
+            for name, value in previous.items():
+                setattr(pypdf_filters, name, value)
+
+
 def _validate_pdf(data: bytes, limits: PdfLimits) -> tuple[PdfPage, ...]:
     if not data.startswith(b"%PDF-") or not data.rstrip().endswith(b"%%EOF"):
         _error(ConversionErrorCode.INVALID_PDF, "LibreOffice produced an invalid PDF.")
     try:
-        reader = PdfReader(io.BytesIO(data), strict=True)
-        if reader.is_encrypted:
-            _error(
-                ConversionErrorCode.INVALID_PDF,
-                "LibreOffice produced an encrypted PDF.",
-            )
-        if not reader.pages or len(reader.pages) > limits.max_pages:
-            _error(
-                ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits."
-            )
-        pages: list[PdfPage] = []
-        for page in reader.pages:
-            width = float(page.mediabox.width)
-            height = float(page.mediabox.height)
-            if not all(math.isfinite(value) and value > 0 for value in (width, height)):
+        with _bounded_pdf_parser(limits):
+            reader = PdfReader(io.BytesIO(data), strict=True)
+            if reader.is_encrypted:
                 _error(
                     ConversionErrorCode.INVALID_PDF,
-                    "LibreOffice produced an invalid PDF.",
+                    "LibreOffice produced an encrypted PDF.",
                 )
-            pages.append(PdfPage(width, height))
-        _walk_pdf_object(reader.trailer, _PdfWalkState(limits), 0)
+            _walk_pdf_object(reader.trailer, _PdfWalkState(limits), 0)
+            if not reader.pages or len(reader.pages) > limits.max_pages:
+                _error(
+                    ConversionErrorCode.PDF_LIMIT_EXCEEDED,
+                    "PDF exceeds configured limits.",
+                )
+            pages: list[PdfPage] = []
+            for page in reader.pages:
+                width = float(page.mediabox.width)
+                height = float(page.mediabox.height)
+                if not all(
+                    math.isfinite(value) and value > 0 for value in (width, height)
+                ):
+                    _error(
+                        ConversionErrorCode.INVALID_PDF,
+                        "LibreOffice produced an invalid PDF.",
+                    )
+                pages.append(PdfPage(width, height))
     except ConversionError:
         raise
-    except OSError, PdfReadError, RecursionError, TypeError, ValueError:
+    except LimitReachedError:
+        _error(ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits.")
+    except AssertionError, OSError, PyPdfError, RecursionError, TypeError, ValueError:
         _error(ConversionErrorCode.INVALID_PDF, "LibreOffice produced an invalid PDF.")
     return tuple(pages)
 
@@ -624,7 +699,12 @@ class LibreOfficePdfConverter:
     ) -> None:
         deadline = time.monotonic() + self._config.timeout_seconds
         while True:
-            if self._cancelled(cancelled):
+            try:
+                cancellation_requested = self._cancelled(cancelled)
+            except ConversionError:
+                _terminate_group(process, self._config.termination_grace_seconds)
+                raise
+            if cancellation_requested:
                 _terminate_group(process, self._config.termination_grace_seconds)
                 self._cancelled_error()
             remaining = deadline - time.monotonic()

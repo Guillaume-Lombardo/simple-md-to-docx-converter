@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 from pypdf import PdfWriter
+from pypdf.errors import LimitReachedError, PyPdfError
 from pypdf.generic import DictionaryObject, NameObject, TextStringObject
 from pytest_mock import MockerFixture
 
@@ -33,6 +34,7 @@ LIMITS = PdfLimits(
     max_docx_total_uncompressed_bytes=2_000_000,
     max_docx_compression_ratio=100.0,
     max_pdf_bytes=1_000_000,
+    max_pdf_decoded_stream_bytes=1_000_000,
     max_pages=10,
     max_pdf_objects=1_000,
     max_pdf_object_depth=40,
@@ -139,6 +141,7 @@ def test_configuration_rejects_unsafe_or_unbounded_values(
         ("max_docx_member_uncompressed_bytes", 0),
         ("max_docx_total_uncompressed_bytes", 0),
         ("max_pdf_bytes", True),
+        ("max_pdf_decoded_stream_bytes", 0),
         ("max_pages", -1),
         ("max_pdf_objects", 0),
         ("max_pdf_object_depth", 0),
@@ -327,6 +330,29 @@ def test_cancellation_during_wait_terminates_the_group(
     terminate.assert_called_once_with(process, 0.2)
 
 
+def test_cancellation_probe_failure_during_wait_terminates_the_group(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process = mocker.Mock(pid=321)
+    mocker.patch.object(libreoffice.subprocess, "Popen", return_value=process)
+    terminate = mocker.patch.object(libreoffice, "_terminate_group")
+
+    probe_calls = 0
+
+    def broken_probe() -> bool:
+        nonlocal probe_calls
+        probe_calls += 1
+        if probe_calls > 1:
+            raise RuntimeError("sensitive")
+        return False
+
+    with pytest.raises(ConversionError) as captured:
+        _converter(tmp_path).convert(_docx(), TRACE, broken_probe)
+    assert captured.value.code is ConversionErrorCode.PDF_FAILURE
+    assert "sensitive" not in str(captured.value)
+    terminate.assert_called_once_with(process, 0.2)
+
+
 def test_cancellation_after_success_prevents_output_publication(
     mocker: MockerFixture, tmp_path: Path
 ) -> None:
@@ -424,15 +450,78 @@ def test_pdf_structure_rejects_encryption_active_features_and_limits() -> None:
     assert objects.value.code is ConversionErrorCode.PDF_LIMIT_EXCEEDED
 
 
-def test_pdf_structure_rejects_indirect_active_action_name() -> None:
+@pytest.mark.parametrize("action_name", ("/Launch", "/SubmitForm", "/ImportData"))
+def test_pdf_structure_rejects_indirect_active_action_name(
+    action_name: str,
+) -> None:
     writer = PdfWriter()
-    action = writer._add_object(NameObject("/Launch"))
+    action = writer._add_object(NameObject(action_name))
     dictionary = DictionaryObject({NameObject("/S"): action})
     with pytest.raises(ConversionError) as captured:
         libreoffice._walk_pdf_dictionary(
             dictionary, libreoffice._PdfWalkState(LIMITS), 0
         )
     assert captured.value.code is ConversionErrorCode.INVALID_PDF
+
+
+def test_pdf_structure_allows_only_navigation_and_uri_actions() -> None:
+    for action_name in ("/GoTo", "/URI"):
+        dictionary = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Action"),
+                NameObject("/S"): NameObject(action_name),
+            }
+        )
+        libreoffice._walk_pdf_dictionary(
+            dictionary,
+            libreoffice._PdfWalkState(LIMITS),
+            0,
+        )
+    unknown = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Action"),
+            NameObject("/S"): NameObject("/UnknownAction"),
+        }
+    )
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._walk_pdf_dictionary(
+            unknown,
+            libreoffice._PdfWalkState(LIMITS),
+            0,
+        )
+    assert captured.value.code is ConversionErrorCode.INVALID_PDF
+
+
+def test_pdf_structure_does_not_treat_every_a_key_as_an_action() -> None:
+    graphical_value = DictionaryObject(
+        {NameObject("/S"): NameObject("/ValidGraphicalSubtype")}
+    )
+    dictionary = DictionaryObject({NameObject("/A"): graphical_value})
+    libreoffice._walk_pdf_dictionary(
+        dictionary,
+        libreoffice._PdfWalkState(LIMITS),
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("parser_error", "expected"),
+    (
+        (LimitReachedError("limit"), ConversionErrorCode.PDF_LIMIT_EXCEEDED),
+        (PyPdfError("invalid"), ConversionErrorCode.INVALID_PDF),
+    ),
+)
+def test_pdf_parser_errors_are_stable_and_filter_limits_are_restored(
+    mocker: MockerFixture,
+    parser_error: PyPdfError,
+    expected: ConversionErrorCode,
+) -> None:
+    original = libreoffice.pypdf_filters.ZLIB_MAX_OUTPUT_LENGTH
+    mocker.patch.object(libreoffice, "PdfReader", side_effect=parser_error)
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._validate_pdf(_pdf(), LIMITS)
+    assert captured.value.code is expected
+    assert original == libreoffice.pypdf_filters.ZLIB_MAX_OUTPUT_LENGTH
 
 
 def test_process_group_termination_checks_descendants(

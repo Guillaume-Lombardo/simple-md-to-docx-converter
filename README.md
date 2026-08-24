@@ -15,8 +15,8 @@ Queue, worker, versioned template APIs, UI, and final-container features remain 
 - [`uv`](https://docs.astral.sh/uv/)
 - A platform supported by the Python 3.14 distribution managed by `uv`
 - Pandoc 3.10.2 for real DOCX conversion, Mermaid CLI 11.16.0 with Chrome 151.0.7922.173 for
-  diagram rendering, and the Cairo shared library for SVG rasterization; the validated T00 UBI
-  toolchain image provides these engines
+  diagram rendering, LibreOffice 26.2.5.2 for PDF conversion, and the Cairo shared library for SVG
+  rasterization; the validated UBI toolchain image provides these engines
 
 `uv` reads `.python-version`, installs Python 3.14 when needed, and creates the project environment.
 No manually managed virtual environment or direct `pip` invocation is required.
