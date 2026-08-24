@@ -9,13 +9,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean and matches `origin/main`; delivered history through documentation sync PR #28
-  is verified below.
-- T01, T02, T03, T05, T06, T12, and T14 are delivered. T00 remains `In Progress`; T04 remains
-  dependent on completion of T00 evidence.
+- `main` is clean and matches `origin/main`; delivered history through T00 k3s PR #30 is verified
+  below.
+- T00, T01, T02, T03, T05, T06, T12, and T14 are delivered. T04 is dependency-ready once the
+  final Linear G1L-310 synchronization completes.
 - PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
-  stays enabled, `--no-sandbox` is forbidden, k3s validation is next, and OpenShift proof remains
-  deferred.
+  stays enabled, `--no-sandbox` is forbidden, and OpenShift proof remains deferred.
 - PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
   fallback foundations as squash `c296d458b2d64c3ee1d9cfbb6f65e8f86ff440b9`. The local ticket
   and Linear G1L-325 are fully synchronized as `Done`.
@@ -24,15 +23,16 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - The PM-authorized local k3s T00 validation passed with the checksum-locked Chrome seccomp profile
   and fail-closed controls. The exact namespace, Localhost profile, and imported image were removed
   and verified absent. The cluster is no longer needed, and the orchestrator stopped k3s.
-- T00 review blockers are corrected locally: cluster-global names are unique and collision-checked,
+- PR #30 delivered the independently approved T00 k3s proof: cluster-global names are unique and
+  collision-checked,
   installed profile integrity is verified, cleanup is ownership- and UID-preconditioned, and offline
   negative probes cover collision, tampering, acquisition failure, and proxy lifecycle. The proxy
   is terminated as a complete process group. Exact PID/start-time baselining catches survivors even
   after k3s rewrites argv; baseline identities are excluded from token signaling, and an existing
   token collision blocks launch. Namespace deletion requires this run's valid create receipt and
   captured UID rather than public metadata alone. Hardened live run `reviewfix06` removed every
-  exact run resource; the added failure paths are verified offline. Publication and independent
-  approval remain pending.
+  exact run resource; the added failure paths are verified offline. The exact squash and its
+  protected main gate passed.
 
 ## Approved Product Decisions
 
@@ -67,7 +67,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   system fallback, with shared real SQLite/PostgreSQL service contracts.
 - Reproducible T00 compatibility evidence for Pandoc, Mermaid/Chrome, Fontconfig, LibreOffice,
   arbitrary UID, read-only root, no network, dropped capabilities, writable areas, and cgroup
-  envelopes, with the remaining sandbox/runtime gaps stated explicitly.
+  envelopes on Docker, rootless Podman, and local k3s, with deferred OpenShift compatibility stated
+  explicitly.
 
 ## Blockers and Risks
 
@@ -84,11 +85,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Commit the corrected T00 k3s proof, publish it only after explicit approval, obtain independent
-   approval, and verify it on `main`; then synchronize T00/Linear and unblock T04. OpenShift
-   validation remains deferred.
-2. Re-read Linear and select only a ready ticket whose dependencies are verified `Done`; T04 still
-   waits for T00 and T13 still waits for T11.
+1. Synchronize Linear G1L-310 as `Done`, then select T04 as the next dependency-ready ticket.
+   OpenShift validation remains deferred and must not be claimed.
+2. Re-read Linear before starting T04 and preserve all dependency and acceptance-criteria truth;
+   T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -107,11 +107,15 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - PR #28 head `3f102ee668c95e719e8c22baf20ca944334a4994` was squash-merged as
   `b2e5b3965ad05448c56d6fd857191489f8a94173`; that exact squash passed main run `32669940608`,
   including the protected `CI / gate`.
+- PR #30 exact head `7b673ae18ea0e9ce3f6c02eda0ba1e2af1e89fc3` received independent
+  security approval with no findings, passed run `32675125046`, and was squash-merged as
+  `b927d060d60b6eacdabb872e627768defcd58126`. That exact squash passed main run `32675177329`,
+  including the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310 was fetched by identifier and matches the local title, project, team, priority,
-  status, acceptance criteria, dependencies, and all local progress entries, including PR #26 and
-  the approved scope allocations and exclusions. It remains `In Progress`.
+- Linear G1L-310 was fetched by identifier before this completion sync. It still reports
+  `In Progress` and lacks the PR #30 completion entry; its final progress and `Done` transition
+  follow this durable repository update.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.
