@@ -6,10 +6,11 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import Engine
 
 from md_converter.auth.models import Role, User
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
@@ -20,6 +21,7 @@ from md_converter.jobs.models import (
     JobRequest,
     JobState,
     JobStep,
+    LeaseHeartbeat,
 )
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
@@ -53,6 +55,40 @@ from tests.job_repository_contracts import (
 from tests.template_records import publish_template_pair
 
 COMPONENT_VERSIONS = (("md-converter", "0.1.0"),)
+
+
+class ControlledClock:
+    """Thread-safe logical clock for deterministic lease integration tests."""
+
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+        self._lock = Lock()
+
+    def __call__(self) -> datetime:
+        with self._lock:
+            return self._now
+
+    def advance(self, seconds: float) -> datetime:
+        with self._lock:
+            self._now += timedelta(seconds=seconds)
+            return self._now
+
+
+class ObservedHeartbeatRepository(SqlJobRepository):
+    """Signal only after a real heartbeat uses the requested logical time."""
+
+    def __init__(
+        self, engine: Engine, observed: Event, minimum_observed_at: datetime
+    ) -> None:
+        super().__init__(engine)
+        self._observed = observed
+        self._minimum_observed_at = minimum_observed_at
+
+    def heartbeat(self, heartbeat: LeaseHeartbeat) -> bool:
+        renewed = super().heartbeat(heartbeat)
+        if renewed and heartbeat.now >= self._minimum_observed_at:
+            self._observed.set()
+        return renewed
 
 
 class DeterministicProcessor:
@@ -263,7 +299,14 @@ def test_periodic_heartbeat_prevents_long_sqlite_stage_recovery(tmp_path: Path) 
     owner = User(uuid4(), "Owner", "heartbeat-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
     publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
-    repository = SqlJobRepository(engine)
+    initial_time = datetime(2026, 8, 24, tzinfo=UTC)
+    clock = ControlledClock(initial_time)
+    heartbeat_observed = Event()
+    repository = ObservedHeartbeatRepository(
+        engine,
+        heartbeat_observed,
+        initial_time + timedelta(seconds=0.06),
+    )
     objects = FilesystemObjectStore(tmp_path)
     service = JobService(repository, objects, JobServicePolicy(60))
     queued, _ = service.submit(
@@ -289,22 +332,29 @@ def test_periodic_heartbeat_prevents_long_sqlite_stage_recovery(tmp_path: Path) 
         ) -> JobProcessResult:
             assert job.state is JobState.RUNNING
             assert not cancelled()
-            time.sleep(0.16)
+            processor_entered.set()
+            assert processor_release.wait(2)
             return JobProcessResult(b"slow-result")
 
+    processor_entered = Event()
+    processor_release = Event()
     worker = ConversionWorker(
         worker_id="heartbeat-worker",
-        runtime=WorkerRuntime(
-            repository, objects, SlowProcessor(), lambda: datetime.now(UTC)
-        ),
+        runtime=WorkerRuntime(repository, objects, SlowProcessor(), clock),
         policy=WorkerPolicy(0.08, 0.02, 60, 1),
     )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(worker.run_once)
-        time.sleep(0.11)
-        now = datetime.now(UTC)
-        assert repository.recover_expired_leases(now, now, now) == 0
-        assert repository.claim("duplicate-worker", now, now) is None
+        try:
+            assert processor_entered.wait(1)
+            clock.advance(0.06)
+            assert heartbeat_observed.wait(1)
+            now = clock.advance(0.04)
+            assert now > initial_time + timedelta(seconds=0.08)
+            assert repository.recover_expired_leases(now, now, now) == 0
+            assert repository.claim("duplicate-worker", now, now) is None
+        finally:
+            processor_release.set()
         assert future.result()
     finished = repository.get(queued.id)
     assert finished is not None and finished.state is JobState.SUCCEEDED

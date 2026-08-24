@@ -10,6 +10,7 @@ import uvicorn
 
 from md_converter.app import create_app
 from md_converter.config import Settings
+from md_converter.malware import TrustingUploadScanner
 from tests.settings import template_settings
 
 
@@ -45,7 +46,8 @@ def build_app(data_directory: Path):
             conversion_request_max_bytes=1_100_000,
             conversion_retry_after_seconds=1,
             job_result_retention_seconds=3_600,
-        )
+        ),
+        scanner=TrustingUploadScanner(),
     )
 
 

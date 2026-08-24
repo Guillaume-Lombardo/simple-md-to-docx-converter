@@ -101,6 +101,19 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   `ty`, all 22 Web tests, 786 unit tests with the branch gate, and 978 applicable tests with live
   PostgreSQL/RustFS and 95.06% application coverage. Changed application coverage is 98.67%
   (669/678 lines) at commit `5f7e6b3`.
+- 2026-08-24: Diagnosed the two failures in pull-request CI run `32768243621`. The standalone
+  SQLite heartbeat failure was a timing race in an 80 ms test lease, not a production lease-loss
+  defect; the integration test now uses a thread-safe logical clock and observes a real database
+  heartbeat before testing recovery past the original lease. The administration browser failure
+  was deterministic harness drift after ClamAV integration: without clamd, the harness returned
+  `UPLOAD_SCANNER_UNAVAILABLE` before invalid-template validation. The browser harness now injects
+  the explicit trusting test scanner and asserts the exact 422 response and
+  `TEMPLATE_INVALID_PACKAGE` code before checking the rendered alert. No blanket timeout was
+  increased. The heartbeat regression passed 30 consecutive runs; the full browser suite passed
+  six consecutive runs with pinned Chrome 151.0.7922.173 (SHA-256
+  `878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd`). Final local validation
+  passed the 31-test standalone storage domain, Ruff formatting/linting, `ty`, 786 unit tests, and
+  978 applicable tests with live PostgreSQL/RustFS and 95.06% application coverage.
 
 Workload-dependent ceilings and schedules remain required operator-supplied configuration. Applying memory and ephemeral-storage ceilings and
 repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
