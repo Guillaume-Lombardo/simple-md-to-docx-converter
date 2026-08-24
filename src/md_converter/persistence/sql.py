@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import math
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -51,15 +52,7 @@ def create_database_engine(
                 connect_args["timeout"] = timeout_seconds
             else:
                 engine_options["pool_timeout"] = timeout_seconds
-                connect_args.update(
-                    {
-                        "connect_timeout": max(1, math.ceil(timeout_seconds)),
-                        "options": (
-                            "-c statement_timeout="
-                            f"{max(1, math.ceil(timeout_seconds * 1000))}"
-                        ),
-                    }
-                )
+                connect_args["connect_timeout"] = max(1, math.ceil(timeout_seconds))
         engine = create_engine(
             resolved_url,
             connect_args=connect_args,
@@ -69,6 +62,15 @@ def create_database_engine(
         )
         if sqlite:
             event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+        elif timeout_seconds is not None:
+            event.listen(
+                engine,
+                "connect",
+                partial(
+                    _enable_postgresql_statement_timeout,
+                    milliseconds=max(1, math.ceil(timeout_seconds * 1000)),
+                ),
+            )
         return engine
     except SQLAlchemyError:
         raise PersistenceError from None
@@ -84,6 +86,24 @@ def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) 
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
+
+def _enable_postgresql_statement_timeout(
+    dbapi_connection: Any,
+    _connection_record: Any,
+    *,
+    milliseconds: int,
+) -> None:
+    """Add a bounded statement budget without rewriting existing libpq options."""
+
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(
+            "SELECT set_config('statement_timeout', %s, false)",
+            (f"{milliseconds}ms",),
+        )
     finally:
         cursor.close()
 

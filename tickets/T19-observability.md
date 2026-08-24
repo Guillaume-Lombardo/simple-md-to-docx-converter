@@ -111,6 +111,21 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   1,064 tests and 95.43% total coverage plus a matching 1,064-test no-coverage run. The unrestricted
   document-engine suite remains unavailable locally. T19 remains `In Progress` pending T20/T21
   final-image validation, independent review, merge, and verification on `main`.
+- 2026-08-24: PR #54 CI run `32781621531`, job `97604757297`, exposed a distributed isolation
+  regression: the metrics endpoint returned `503` and PostgreSQL reported `relation
+  conversion_jobs does not exist`. The bounded engine's `connect_args` had replaced the fixture's
+  URL-level `options=-csearch_path=<unique schema>` with `statement_timeout`. Engine creation now
+  preserves URL/libpq options verbatim and installs the bounded PostgreSQL statement timeout through
+  a parameterized connection hook, avoiding ambiguous string composition. Unit coverage proves the
+  existing search path survives unchanged, and real PostgreSQL proves both the isolated current
+  schema and `500ms` timeout while queue metrics query the migrated table. The exact CI distributed
+  matrix passes 28 tests; the unit gate passes 850 tests with 93.41% total coverage; and the full
+  no-coverage suite passes 1,065 tests. Two full covered reruns each passed 1,064 tests with 95.38%
+  coverage but retained one unrelated pre-existing wall-clock failure in
+  `test_heartbeat_covers_blocked_real_result_publication` (`entered.wait(1)`); that unchanged test
+  passes three no-coverage isolated reruns and one covered isolated rerun. No unrelated timing scope
+  was added. T19 remains `In Progress` pending CI confirmation, independent review, merge, final
+  image evidence, and verification on `main`.
 
 ## Synchronization
 

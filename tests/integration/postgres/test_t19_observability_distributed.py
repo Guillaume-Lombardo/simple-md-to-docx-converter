@@ -136,6 +136,25 @@ def test_postgresql_queue_observation_statement_timeout_is_bounded() -> None:
 
 @pytest.mark.integration
 @pytest.mark.requires_postgres
+def test_postgresql_observation_engine_preserves_isolated_search_path() -> None:
+    engine = create_database_engine(
+        os.environ["MD_CONVERTER_TEST_POSTGRES_URL"], timeout_seconds=0.5
+    )
+    try:
+        upgrade_database(engine)
+        with engine.connect() as connection:
+            schema = connection.scalar(text("SELECT current_schema()"))
+            assert isinstance(schema, str) and schema.startswith("test_")
+            assert connection.scalar(text("SHOW statement_timeout")) == "500ms"
+        assert (
+            SqlOperationalObserver(engine).observe_queue(datetime.now(UTC)).depth == 0
+        )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_missing_bucket_then_healthy_distributed_contract_is_isolated() -> None:
     suffix = uuid4().hex

@@ -158,11 +158,21 @@ def test_database_engine_applies_profile_bounded_timeouts(
     }
     listen.assert_called_once()
 
-    create_database_engine("postgresql+psycopg://database/app", timeout_seconds=0.5)
-    assert created.call_args.kwargs["connect_args"] == {
-        "connect_timeout": 1,
-        "options": "-c statement_timeout=500",
-    }
+    create_database_engine(
+        "postgresql+psycopg://database/app?options=-csearch_path%3Disolated",
+        timeout_seconds=0.5,
+    )
+    assert created.call_args.args[0].query["options"] == "-csearch_path=isolated"
+    assert created.call_args.kwargs["connect_args"] == {"connect_timeout": 1}
+    assert created.call_args.kwargs["pool_timeout"] == 0.5
+    timeout_listener = listen.call_args.args[2]
+    postgres_connection = mocker.Mock()
+    timeout_listener(postgres_connection, mocker.Mock())
+    postgres_cursor = postgres_connection.cursor.return_value
+    postgres_cursor.execute.assert_called_once_with(
+        "SELECT set_config('statement_timeout', %s, false)", ("500ms",)
+    )
+    postgres_cursor.close.assert_called_once_with()
     with pytest.raises(ValueError, match="timeout"):
         create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
 
