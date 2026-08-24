@@ -42,6 +42,9 @@ IMMUTABILITY_REVISION: Any = importlib.import_module(
 CLEANUP_EVIDENCE_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_09_immutable_cleanup_evidence"
 )
+CORRELATION_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_10_job_correlation"
+)
 
 
 @pytest.mark.unit
@@ -124,6 +127,32 @@ def test_inprocess_sql_repository_control_flow() -> None:
     sessions.revoke_user(regular.id)
     assert sessions.get(session.token_digest) is None
     engine.dispose()
+
+
+@pytest.mark.unit
+def test_database_engine_applies_profile_bounded_timeouts(
+    mocker: MockerFixture,
+) -> None:
+    created = mocker.patch("md_converter.persistence.sql.create_engine")
+    listen = mocker.patch("md_converter.persistence.sql.event.listen")
+
+    sqlite_engine = create_database_engine(
+        "sqlite+pysqlite:///:memory:", timeout_seconds=0.5
+    )
+    assert sqlite_engine is created.return_value
+    assert created.call_args.kwargs["connect_args"] == {
+        "check_same_thread": False,
+        "timeout": 0.5,
+    }
+    listen.assert_called_once()
+
+    create_database_engine("postgresql+psycopg://database/app", timeout_seconds=0.5)
+    assert created.call_args.kwargs["connect_args"] == {
+        "connect_timeout": 1,
+        "options": "-c statement_timeout=500",
+    }
+    with pytest.raises(ValueError, match="timeout"):
+        create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
 
 
 @pytest.mark.unit
@@ -304,3 +333,12 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     CLEANUP_EVIDENCE_REVISION.upgrade()
     CLEANUP_EVIDENCE_REVISION.downgrade()
     assert cleanup_evidence.execute.call_count == 3
+
+    correlation = mocker.patch.object(CORRELATION_REVISION, "op")
+    CORRELATION_REVISION.upgrade()
+    correlation.add_column.assert_called_once()
+    correlation.execute.assert_called_once_with(
+        "UPDATE conversion_jobs SET correlation_id = id WHERE correlation_id IS NULL"
+    )
+    CORRELATION_REVISION.downgrade()
+    correlation.drop_column.assert_called_once_with("conversion_jobs", "correlation_id")

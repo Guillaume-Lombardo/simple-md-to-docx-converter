@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,9 @@ from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.schema import SessionRow, UserRow
 
 
-def create_database_engine(database_url: str | URL) -> Engine:
+def create_database_engine(
+    database_url: str | URL, *, timeout_seconds: float | None = None
+) -> Engine:
     """Create a profile-neutral synchronous SQLAlchemy engine."""
     try:
         if isinstance(database_url, str) and database_url.startswith("postgresql://"):
@@ -30,9 +33,25 @@ def create_database_engine(database_url: str | URL) -> Engine:
             make_url(database_url) if isinstance(database_url, str) else database_url
         )
         sqlite = resolved_url.get_backend_name() == "sqlite"
+        connect_args: dict[str, object] = {"check_same_thread": False} if sqlite else {}
+        if timeout_seconds is not None:
+            if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
+                raise ValueError("Database timeout must be positive and finite")
+            if sqlite:
+                connect_args["timeout"] = timeout_seconds
+            else:
+                connect_args.update(
+                    {
+                        "connect_timeout": max(1, math.ceil(timeout_seconds)),
+                        "options": (
+                            "-c statement_timeout="
+                            f"{max(1, math.ceil(timeout_seconds * 1000))}"
+                        ),
+                    }
+                )
         engine = create_engine(
             resolved_url,
-            connect_args={"check_same_thread": False} if sqlite else {},
+            connect_args=connect_args,
             hide_parameters=True,
             pool_pre_ping=True,
         )

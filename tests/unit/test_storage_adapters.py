@@ -211,9 +211,12 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     upgrade = mocker.patch("md_converter.app.upgrade_database")
     s3_client = mocker.patch("md_converter.app.boto3.client")
     components = build_components(settings)
-    create_engine.assert_called_once_with(database_url)
+    create_engine.assert_called_once_with(database_url, timeout_seconds=2.0)
     upgrade.assert_called_once_with(engine)
-    s3_client.assert_called_once_with("s3")
+    s3_client.assert_called_once_with("s3", config=mocker.ANY)
+    bounded = s3_client.call_args.kwargs["config"]
+    assert bounded.connect_timeout == bounded.read_timeout == 2.0
+    assert bounded.retries["max_attempts"] == 0
     reclaim.assert_called_once_with()
     assert components.object_store is not None
     assert components.job_repository is not None
@@ -269,6 +272,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         region_name="test-region",
         aws_access_key_id="access",
         aws_secret_access_key="secret-" + "key",
+        config=mocker.ANY,
     )
 
 

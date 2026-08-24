@@ -27,6 +27,11 @@ from md_converter.jobs.worker import (
     WorkerPolicy,
     WorkerRuntime,
 )
+from md_converter.observability import (
+    OperationalMetrics,
+    QueueSnapshot,
+    current_correlation_id,
+)
 from md_converter.storage import ObjectScope, ObjectStore, ObjectStoreError
 from tests.unit.jobs.test_job_models import job
 
@@ -75,6 +80,32 @@ def test_periodic_cleanup_runs_additional_bounded_retention(
     maintenance.cleanup.assert_called_once_with(limit=7)
 
 
+def test_worker_records_recovery_and_expiration_counts(mocker: MockerFixture) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.recover_expired_leases.return_value = 3
+    repository.expire_terminal.return_value = (
+        ExpiredJobObjects(uuid4(), uuid4(), uuid4(), uuid4(), (uuid4(),)),
+    )
+    metrics = OperationalMetrics()
+    instance = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            mocker.Mock(spec=JobProcessor),
+            mocker.Mock(return_value=NOW),
+            metrics=metrics,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30),
+    )
+
+    assert instance.recover() == 3
+    assert instance.cleanup(limit=2) == 1
+    rendered = metrics.render(QueueSnapshot(0, 0, 0))
+    assert "md_converter_job_recoveries_total 3" in rendered
+    assert "md_converter_job_expirations_total 1" in rendered
+
+
 def running_job() -> ConversionJob:
     return job(
         state=JobState.RUNNING,
@@ -117,6 +148,75 @@ def test_worker_claims_heartbeats_and_publishes_only_after_processing(
     repository.succeed.assert_called_once()
     assert objects.put.call_args.args[0].object_id == result_object_id(claimed.id, 1)
     objects.delete.assert_not_called()
+
+
+def test_worker_records_correlated_step_durations(mocker: MockerFixture) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.cancellation_requested.return_value = False
+    claimed = running_job()
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    objects = mocker.Mock(spec=ObjectStore)
+    processor = mocker.Mock(spec=JobProcessor)
+    processor.process.side_effect = lambda _job, *, cancelled, progress: (
+        progress(JobStep.DOCX, 70) or JobProcessResult(b"result")
+    )
+    clock_values = iter((0.0, 1.0, 2.0))
+    metrics = OperationalMetrics()
+    observed_correlations: list[str | None] = []
+    emitted = mocker.patch("md_converter.jobs.worker.log_event")
+    emitted.side_effect = lambda *_args, **_kwargs: observed_correlations.append(
+        current_correlation_id()
+    )
+    instance = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            objects,
+            processor,
+            mocker.Mock(return_value=NOW),
+            monotonic_clock=lambda: next(clock_values),
+            metrics=metrics,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30),
+    )
+
+    assert instance.run_once()
+    assert observed_correlations == [claimed.correlation_id, claimed.correlation_id]
+    assert current_correlation_id() is None
+    rendered = metrics.render(QueueSnapshot(0, 0, 0))
+    assert 'md_converter_job_step_duration_seconds_sum{step="validating"} 1' in rendered
+    assert 'md_converter_job_step_duration_seconds_sum{step="docx"} 1' in rendered
+
+
+def test_worker_records_safe_failure_metric(mocker: MockerFixture) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    repository.claim.return_value = running_job()
+    repository.cancellation_requested.return_value = False
+    processor = mocker.Mock(spec=JobProcessor)
+    processor.process.side_effect = ConversionError(
+        ConversionErrorCode.INVALID_PDF, "Conversion output is invalid."
+    )
+    metrics = OperationalMetrics()
+    clock_values = iter((0.0, 1.0))
+    mocker.patch("md_converter.jobs.worker.log_event")
+    instance = ConversionWorker(
+        worker_id="worker-1",
+        runtime=WorkerRuntime(
+            repository,
+            mocker.Mock(spec=ObjectStore),
+            processor,
+            mocker.Mock(return_value=NOW),
+            monotonic_clock=lambda: next(clock_values),
+            metrics=metrics,
+        ),
+        policy=WorkerPolicy(10, 1, 100, 30),
+    )
+
+    assert instance.run_once()
+    assert 'md_converter_job_failures_total{code="invalid_pdf"} 1' in metrics.render(
+        QueueSnapshot(0, 0, 0)
+    )
 
 
 def test_worker_handles_empty_queue_cancellation_and_safe_conversion_failure(

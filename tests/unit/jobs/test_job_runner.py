@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 from md_converter.jobs.errors import JobRepositoryError
 from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop, WorkerSchedule
 from md_converter.jobs.worker import ConversionWorker
+from md_converter.observability import OperationalMetrics, QueueSnapshot
 from md_converter.persistence.errors import PersistenceError
 
 pytestmark = pytest.mark.unit
@@ -76,9 +77,14 @@ def test_loop_retries_transient_failure_and_embedded_worker_exposes_fatal_error(
     worker.run_once.return_value = False
     stop = mocker.Mock()
     stop.is_set.side_effect = (False, False, True)
-    WorkerLoop(worker, WorkerSchedule(0.1, 2, 5, 0.2)).run(stop)
+    metrics = OperationalMetrics()
+    WorkerLoop(worker, WorkerSchedule(0.1, 2, 5, 0.2), metrics=metrics).run(stop)
     worker.run_once.assert_called_once()
     assert [call.args[0] for call in stop.wait.call_args_list] == [0.2, 0.1]
+    assert (
+        'md_converter_worker_retries_total{operation="worker_loop"} 1'
+        in metrics.render(QueueSnapshot(0, 0, 0))
+    )
 
     loop = mocker.Mock(spec=WorkerLoop)
     failure = RuntimeError("fatal loop failure")

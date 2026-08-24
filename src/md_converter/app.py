@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import boto3
+from botocore.config import Config
 from fastapi import (
     Depends,
     FastAPI,
@@ -63,9 +64,23 @@ from md_converter.malware import (
     TrustingUploadScanner,
     UploadScanner,
 )
+from md_converter.observability import (
+    AuditReader,
+    AuditRecord,
+    CorrelationMiddleware,
+    OperationalMetrics,
+    QueueObserver,
+    QueueSnapshot,
+    current_correlation_id,
+    log_event,
+)
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.observability import (
+    SqlAuditReader,
+    SqlOperationalObserver,
+)
 from md_converter.persistence.retention import SqlRetentionRepository
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
@@ -267,6 +282,7 @@ class ConversionResponse(BaseModel):
     template_version_id: UUID
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
+    correlation_id: str
     state: str
     step: str
     progress: int
@@ -324,6 +340,21 @@ class TemplateVersionResponse(BaseModel):
     declared_fonts: tuple[str, ...]
     resolved_fonts: tuple[tuple[str, str], ...]
     validation_trace: tuple[str, ...]
+
+
+class AuditRecordResponse(BaseModel):
+    """Administrator-visible content-free immutable audit evidence."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    actor_id: UUID
+    owner_id: UUID
+    operation: str
+    target_id: UUID
+    version_id: UUID | None
+    administrator_intervention: bool
+    created_at: datetime
 
 
 class TemplateMetadataRequest(BaseModel):
@@ -481,6 +512,7 @@ def install_error_handlers(app: FastAPI) -> None:
     def job_user_quota_handler(
         request: Request, _error: JobUserQuotaExceededError
     ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("owner")
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             headers={
@@ -498,6 +530,7 @@ def install_error_handlers(app: FastAPI) -> None:
     def job_queue_capacity_handler(
         request: Request, _error: JobQueueCapacityExceededError
     ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("global")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             headers={
@@ -640,6 +673,9 @@ class AppComponents:
     job_policies: JobPolicies | None = None
     retention: RetentionService | None = None
     job_repository: JobRepository | None = None
+    metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
+    queue_observer: QueueObserver | None = None
+    audit_reader: AuditReader | None = None
 
     def build_conversion_worker(
         self,
@@ -668,6 +704,7 @@ class AppComponents:
             policy=self.job_policies.worker,
             maintenance=self.retention,
             monotonic_clock=monotonic_clock,
+            metrics=self.metrics,
         )
 
     def build_external_worker_loop(
@@ -692,6 +729,7 @@ class AppComponents:
             worker,
             self.job_policies.schedule,
             monotonic_clock=monotonic_clock,
+            metrics=self.metrics,
         )
 
     def build_embedded_worker(
@@ -758,9 +796,16 @@ def build_components(settings: Settings) -> AppComponents:
                 if settings.s3_secret_access_key is not None
                 else ""
             )
+        client_options["config"] = Config(
+            connect_timeout=settings.readiness_timeout_seconds,
+            read_timeout=settings.readiness_timeout_seconds,
+            retries={"max_attempts": 0},
+        )
         object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
 
-    engine = create_database_engine(database_url)
+    engine = create_database_engine(
+        database_url, timeout_seconds=settings.readiness_timeout_seconds
+    )
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
@@ -804,6 +849,7 @@ def build_components(settings: Settings) -> AppComponents:
             claim_lease_seconds=settings.worker_lease_seconds,
         ),
     )
+    metrics = OperationalMetrics()
     return AppComponents(
         authentication=authentication,
         readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
@@ -818,6 +864,9 @@ def build_components(settings: Settings) -> AppComponents:
         job_policies=job_policies,
         retention=retention,
         job_repository=job_repository,
+        metrics=metrics,
+        queue_observer=SqlOperationalObserver(engine),
+        audit_reader=SqlAuditReader(engine),
     )
 
 
@@ -852,6 +901,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             resolved_settings.template_metadata_request_max_bytes
         ),
     )
+    app.add_middleware(CorrelationMiddleware, metrics=resolved_components.metrics)
     app.state.components = resolved_components
     app.state.conversion_retry_after_seconds = (
         resolved_settings.conversion_retry_after_seconds
@@ -989,10 +1039,40 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     def ready() -> Response:
         if resolved_components.readiness.is_ready():
             return JSONResponse({"status": "ready"})
+        log_event("readiness_failed")
         return JSONResponse(
             {"error": {"code": "NOT_READY", "message": "The service is not ready."}},
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+    @app.get("/metrics", tags=["health"])
+    def metrics() -> Response:
+        observer = resolved_components.queue_observer
+        queue = (
+            observer.observe_queue(datetime.now(UTC))
+            if observer is not None
+            else QueueSnapshot(0, 0.0, 0)
+        )
+        return Response(
+            resolved_components.metrics.render(queue),
+            media_type="text/plain; version=0.0.4",
+        )
+
+    @app.get(
+        "/api/v1/audit",
+        response_model=tuple[AuditRecordResponse, ...],
+        tags=["administration"],
+        responses=error_responses(401, 403, 422, 503),
+    )
+    def list_audit_records(
+        _actor: Annotated[User, Depends(admin_user)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> tuple[AuditRecord, ...]:
+        reader = resolved_components.audit_reader
+        if reader is None:
+            raise PersistenceError
+        return reader.list_recent(offset=offset, limit=limit)
 
     @app.get("/", include_in_schema=False)
     def browser_root() -> RedirectResponse:
@@ -1231,6 +1311,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                     output=output,
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
+                    correlation_id=current_correlation_id() or uuid4().hex,
                 ),
                 idempotency_key,
             )

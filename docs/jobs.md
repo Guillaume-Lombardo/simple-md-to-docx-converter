@@ -19,6 +19,9 @@ attempt, template identifiers, and safe functional failures—never paths, SQL, 
 identifiers. Status responses also include result expiration, the immutable template version, and
 the locked converter, Pandoc, Mermaid CLI, Chromium, and LibreOffice versions needed for
 traceability.
+Status also returns the durable correlation identifier accepted at submission. An embedded or
+external worker restores the same identifier when it claims the job; the content-free logging and
+metric contract is documented in [`observability.md`](observability.md).
 
 The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES`,

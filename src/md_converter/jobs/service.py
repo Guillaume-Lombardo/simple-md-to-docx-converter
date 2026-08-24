@@ -102,6 +102,7 @@ class JobService:
                 request_digest=request_digest,
                 idempotency_digest=idempotency_digest,
                 created_at=request.now,
+                correlation_id=request.correlation_id or str(job_id),
             )
         )
         if replayed:

@@ -40,12 +40,15 @@ def submit(  # noqa: PLR0913 - explicit HTTP form helper
     *,
     content: bytes = b"# Durable conversion",
     idempotency_key: str | None = None,
+    correlation_id: str | None = None,
     template_id: UUID,
     template_version_id: UUID,
 ) -> Any:
     headers = {"X-CSRF-Token": csrf_token}
     if idempotency_key is not None:
         headers["Idempotency-Key"] = idempotency_key
+    if correlation_id is not None:
+        headers["X-Correlation-ID"] = correlation_id
     return client.post(
         "/api/v1/conversions",
         headers=headers,
@@ -140,15 +143,38 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             client,
             csrf,
             idempotency_key="stable-request",
+            correlation_id="edge-request-42",
             template_id=template_id,
             template_version_id=template_version_id,
         )
         assert first.status_code == 202
         assert first.headers["Location"].endswith(first.json()["id"])
         assert first.headers["Retry-After"] == "2"
+        assert first.headers["X-Correlation-ID"] == "edge-request-42"
+        assert first.json()["correlation_id"] == "edge-request-42"
         assert first.json()["component_versions"]
         assert first.json()["expires_at"] is None
         first_id = UUID(first.json()["id"])
+        persisted = SqlJobRepository(
+            create_database_engine(standalone_database_url(tmp_path))
+        ).get(first_id)
+        assert persisted is not None
+        assert persisted.correlation_id == "edge-request-42"
+        metrics = client.get("/metrics")
+        assert metrics.status_code == 200
+        assert "md_converter_queue_depth 1" in metrics.text
+        audits = client.get("/api/v1/audit")
+        assert audits.status_code == 200
+        assert audits.json()[0] == {
+            "id": str(audits.json()[0]["id"]),
+            "actor_id": str(owner_id),
+            "owner_id": str(owner_id),
+            "operation": "create",
+            "target_id": str(template_id),
+            "version_id": str(template_version_id),
+            "administrator_intervention": False,
+            "created_at": audits.json()[0]["created_at"],
+        }
 
         replay = client.post(
             "/api/v1/conversions",
@@ -193,6 +219,12 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         assert created_user.status_code == 201
         login(client, "alice", "alice-password")
         assert client.get(f"/api/v1/conversions/{first_id}").status_code == 404
+        assert client.get("/api/v1/audit").status_code == 403
+
+        hostile = client.get(
+            "/health/live", headers={"X-Correlation-ID": "../../private.md"}
+        )
+        assert hostile.headers["X-Correlation-ID"] != "../../private.md"
 
         admin = login(client, "admin", admin_password)
         csrf = str(admin["csrf_token"])

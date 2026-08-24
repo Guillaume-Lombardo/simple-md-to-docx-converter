@@ -269,6 +269,7 @@ class ConversionJobRow(Base):
     template_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     output: Mapped[str] = mapped_column(String(16), nullable=False)
     component_versions: Mapped[str] = mapped_column(String(), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(128))
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     step: Mapped[str] = mapped_column(String(32), nullable=False)
     progress: Mapped[int] = mapped_column(Integer, nullable=False)
