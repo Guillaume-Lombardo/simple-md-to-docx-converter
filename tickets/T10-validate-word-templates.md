@@ -2,7 +2,7 @@
 ticket: T10
 linear_id: G1L-321
 linear_url: https://linear.app/g1lom/issue/G1L-321/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,6 +52,9 @@ Inventory fonts and licenses; validate OOXML, templates, required styles, substi
   package, and control-properties content-type variants with unit regressions and a real rootless
   descendant-termination proof. Independent security, specification, and CI/toolchain reviewers
   approved exact code revision `153bca4` with no remaining finding.
+- 2026-08-24: PR #40 was squash-merged to `main` as `02e7cc2`. Exact main CI run
+  `32716429800` passed every implemented domain and the protected gate. T10 is delivered; T11 and
+  T15 may now consume its template and font validation boundary.
 
 ## Synchronization
 
