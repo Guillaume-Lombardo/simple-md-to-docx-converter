@@ -119,6 +119,22 @@ def test_auth_integration_change_selects_functional_domain() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/corpus/manifest.json",
+        "tests/golden/openxml.py",
+        "tests/unit/test_golden_raster.py",
+        "tests/integration/document_engines/test_reference_corpus.py",
+    ],
+)
+def test_golden_infrastructure_selects_planned_document_engine_domain(
+    path: str,
+) -> None:
+    assert select_domains([path]) == ["document-engines"]
+
+
+@pytest.mark.unit
 def test_draft_suppresses_only_runnable_heavy_domains() -> None:
     """Drafts retain visible planned gaps but do not run active heavy suites."""
     registry = {

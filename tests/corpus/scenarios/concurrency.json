@@ -1,0 +1,6 @@
+{
+  "jobs": ["job-a", "job-b"],
+  "release_order": ["job-b", "job-a"],
+  "expected_isolation": true,
+  "expected_duplicate_execution": false
+}

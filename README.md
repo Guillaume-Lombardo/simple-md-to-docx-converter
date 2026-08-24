@@ -55,6 +55,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/authentication.md`: local accounts, sessions, configuration, and current limitations
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries
+- `docs/golden-testing.md`: reference corpus and deterministic DOCX/PDF comparison helpers
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 
