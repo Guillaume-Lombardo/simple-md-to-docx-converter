@@ -32,6 +32,8 @@ _SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 _XML_BASE = "{http://www.w3.org/XML/1998/namespace}base"
 _MAX_SAFE_SVG_DEPTH = 64
+_MAX_SAFE_CSS_DEPTH = 64
+_MAX_SAFE_CSS_NODES = 10_000
 _FORBIDDEN_XML = re.compile(rb"(?is)<!\s*(?:doctype|entity)\b")
 _LENGTH = re.compile(r"^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$")
 _URL = re.compile(r"(?is)url\(\s*(['\"]?)(.*?)\1\s*\)")
@@ -139,35 +141,57 @@ def _is_local_css_url(value: str) -> bool:
     return value.strip().strip("'\"").strip().startswith("#")
 
 
+def _function_has_local_css_url(token: FunctionBlock) -> bool:
+    try:
+        value = "".join(argument.serialize() for argument in token.arguments)
+    except RecursionError:
+        return False
+    return _is_local_css_url(value)
+
+
 def _css_tokens_are_safe(tokens: list[Node]) -> bool:
     block_types = (CurlyBracketsBlock, ParenthesesBlock, SquareBracketsBlock)
-    for token in tokens:
-        if isinstance(token, URLToken) and not _is_local_css_url(token.value):
-            return False
-        if isinstance(token, FunctionBlock):
-            if token.lower_name == "url":
-                value = "".join(argument.serialize() for argument in token.arguments)
-                if not _is_local_css_url(value):
-                    return False
-            elif not _css_tokens_are_safe(token.arguments):
+    pending = [(tokens, 1)]
+    node_count = 0
+    while pending:
+        current, depth = pending.pop()
+        for token in current:
+            node_count += 1
+            if (
+                node_count > _MAX_SAFE_CSS_NODES
+                or isinstance(token, ParseError)
+                or (isinstance(token, URLToken) and not _is_local_css_url(token.value))
+            ):
                 return False
-        if isinstance(token, block_types) and not _css_tokens_are_safe(token.content):
-            return False
-        if isinstance(token, ParseError):
-            return False
+            if isinstance(token, FunctionBlock):
+                if token.lower_name == "url":
+                    if not _function_has_local_css_url(token):
+                        return False
+                    continue
+                nested = token.arguments
+            elif isinstance(token, block_types):
+                nested = token.content
+            else:
+                continue
+            if depth >= _MAX_SAFE_CSS_DEPTH:
+                return False
+            pending.append((nested, depth + 1))
     return True
 
 
 def _sanitize_inline_style(value: str) -> str:
-    declarations = parse_declaration_list(
-        value, skip_comments=True, skip_whitespace=True
-    )
-    safe = [
-        declaration.serialize()
-        for declaration in declarations
-        if isinstance(declaration, Declaration)
-        and _css_tokens_are_safe(declaration.value)
-    ]
+    try:
+        declarations = parse_declaration_list(
+            value, skip_comments=True, skip_whitespace=True
+        )
+        safe = [
+            declaration.serialize()
+            for declaration in declarations
+            if isinstance(declaration, Declaration)
+            and _css_tokens_are_safe(declaration.value)
+        ]
+    except RecursionError:
+        return ""
     return ";".join(safe)
 
 
@@ -312,3 +336,28 @@ def normalize_image(
     if suffix == ".svg":
         return _normalize_svg(source, limits, svg_renderer)
     return _normalize_raster(source, suffix, limits)
+
+
+def validate_normalized_png(source: bytes, limits: ImageLimits) -> None:
+    """Defensively prove that manifest bytes are bounded normalized PNG output."""
+
+    if type(source) is not bytes or not source:
+        _reject_image()
+    try:
+        with Image.open(io.BytesIO(source)) as image:
+            if image.format != "PNG" or image.info:
+                _reject_image()
+            normalized = _normalized_png(image, limits)
+    except ConversionError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        TypeError,
+        ValueError,
+    ):
+        _reject_image()
+    if normalized != source:
+        _reject_image()

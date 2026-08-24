@@ -80,6 +80,7 @@ class ApprovedDocument:
     markdown: str
     entrypoint: PurePosixPath
     resources: tuple[ApprovedResource, ...]
+    image_limits: ImageLimits | None = None
 
 
 ImageNormalizer = Callable[[PurePosixPath, bytes, ImageLimits], bytes]
@@ -314,4 +315,4 @@ def prepare_archive(
         if type(normalized) is not bytes or not normalized:
             raise validation_error("Document contains an invalid image.")
         resources.append(ApprovedResource(path, normalized))
-    return ApprovedDocument(markdown, entrypoint, tuple(resources))
+    return ApprovedDocument(markdown, entrypoint, tuple(resources), image_limits)

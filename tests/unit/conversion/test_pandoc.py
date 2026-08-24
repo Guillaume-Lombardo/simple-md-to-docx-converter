@@ -8,11 +8,15 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 import pytest
+from PIL import Image
 
 from md_converter.conversion.archive import ApprovedResource
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
+from md_converter.conversion.images import ImageLimits, normalize_image
 from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
 from md_converter.conversion.validation import PANDOC_READER, ApprovedMarkdown
+
+IMAGE_LIMITS = ImageLimits(100_000, 256, 256, 65_536, 1_000, 64)
 
 
 def minimal_docx() -> bytes:
@@ -118,7 +122,9 @@ def test_adapter_materializes_only_approved_package_resources(
     tmp_path: Path, mocker
 ) -> None:
     reference = minimal_docx()
-    png = b"\x89PNG\r\n\x1a\nnormalized"
+    source = io.BytesIO()
+    Image.new("RGB", (2, 2), "blue").save(source, format="PNG")
+    png = normalize_image(PurePosixPath("image.png"), source.getvalue(), IMAGE_LIMITS)
     process = mocker.Mock()
     process.wait.return_value = 0
 
@@ -138,6 +144,7 @@ def test_adapter_materializes_only_approved_package_resources(
         "![safe](../assets/image.svg)",
         entrypoint=PurePosixPath("docs/readme.md"),
         resources=(ApprovedResource(PurePosixPath("assets/image.svg"), png),),
+        image_limits=IMAGE_LIMITS,
     )
     assert converter(tmp_path).convert(approved, reference) == reference
     assert list(tmp_path.iterdir()) == []

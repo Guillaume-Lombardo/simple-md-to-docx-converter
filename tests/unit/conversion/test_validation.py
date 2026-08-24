@@ -1,11 +1,15 @@
 """Unit tests for pre-Pandoc Markdown validation."""
 
+import io
 from pathlib import PurePosixPath
+from typing import cast
 
 import pytest
+from PIL import Image
 
 from md_converter.conversion.archive import ApprovedDocument, ApprovedResource
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
+from md_converter.conversion.images import ImageLimits, normalize_image
 from md_converter.conversion.service import DocxConversionService
 from md_converter.conversion.validation import (
     PANDOC_READER,
@@ -13,7 +17,16 @@ from md_converter.conversion.validation import (
     validate_markdown,
 )
 
-PNG = b"\x89PNG\r\n\x1a\nnormalized"
+IMAGE_LIMITS = ImageLimits(100_000, 256, 256, 65_536, 1_000, 64)
+
+
+def _normalized_png() -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), "blue").save(output, format="PNG")
+    return normalize_image(PurePosixPath("image.png"), output.getvalue(), IMAGE_LIMITS)
+
+
+PNG = _normalized_png()
 
 
 @pytest.mark.unit
@@ -158,6 +171,7 @@ def test_archive_images_must_bind_to_approved_normalized_resources(
         markdown,
         PurePosixPath("docs/readme.md"),
         (ApprovedResource(PurePosixPath("assets/image.png"), PNG),),
+        IMAGE_LIMITS,
     )
     service.convert_document(document, b"reference")
     approved = converter.convert.call_args.args[0]
@@ -186,6 +200,7 @@ def test_invalid_archive_image_references_fail_before_converter(
         image,
         PurePosixPath("docs/readme.md"),
         (ApprovedResource(PurePosixPath("assets/image.png"), PNG),),
+        IMAGE_LIMITS,
     )
     with pytest.raises(ConversionError, match=message):
         DocxConversionService(converter).convert_document(document, b"reference")
@@ -198,19 +213,33 @@ def test_invalid_archive_image_references_fail_before_converter(
     [
         ApprovedDocument("# Safe", PurePosixPath("../escape.md"), ()),
         ApprovedDocument(
-            "![x](x.png)",
+            "# Safe",
             PurePosixPath("document.md"),
-            (ApprovedResource(PurePosixPath("../x.png"), PNG),),
+            (),
+            image_limits=cast("ImageLimits", "invalid"),
         ),
         ApprovedDocument(
             "![x](x.png)",
             PurePosixPath("document.md"),
-            (ApprovedResource(PurePosixPath("x.png"), b"not png"),),
+            (ApprovedResource(PurePosixPath("../x.png"), PNG),),
+            IMAGE_LIMITS,
+        ),
+        ApprovedDocument(
+            "![x](x.png)",
+            PurePosixPath("document.md"),
+            (ApprovedResource(PurePosixPath("x.png"), b"\x89PNG\r\n\x1a\nnot-a-png"),),
+            IMAGE_LIMITS,
+        ),
+        ApprovedDocument(
+            "![x](x.png)",
+            PurePosixPath("document.md"),
+            (ApprovedResource(PurePosixPath("x.png"), PNG),),
         ),
         ApprovedDocument(
             "![x](DOCUMENT.MD)",
             PurePosixPath("document.md"),
             (ApprovedResource(PurePosixPath("DOCUMENT.MD"), PNG),),
+            IMAGE_LIMITS,
         ),
         ApprovedDocument(
             "![x](assets/x.png)",
@@ -219,6 +248,7 @@ def test_invalid_archive_image_references_fail_before_converter(
                 ApprovedResource(PurePosixPath("assets"), PNG),
                 ApprovedResource(PurePosixPath("assets/x.png"), PNG),
             ),
+            IMAGE_LIMITS,
         ),
     ],
 )

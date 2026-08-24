@@ -104,7 +104,12 @@ class PandocDocxConverter:
 
     def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes:
         validated = validate_document(
-            ApprovedDocument(markdown.text, markdown.entrypoint, markdown.resources)
+            ApprovedDocument(
+                markdown.text,
+                markdown.entrypoint,
+                markdown.resources,
+                markdown.image_limits,
+            )
         )
         try:
             temporary = tempfile.TemporaryDirectory(

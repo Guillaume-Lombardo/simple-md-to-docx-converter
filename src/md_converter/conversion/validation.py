@@ -17,8 +17,12 @@ from mdit_py_plugins.front_matter import front_matter_plugin
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from md_converter.conversion.archive import ApprovedDocument, ApprovedResource
-from md_converter.conversion.errors import validation_error
-from md_converter.conversion.images import SUPPORTED_IMAGE_SUFFIXES
+from md_converter.conversion.errors import ConversionError, validation_error
+from md_converter.conversion.images import (
+    SUPPORTED_IMAGE_SUFFIXES,
+    ImageLimits,
+    validate_normalized_png,
+)
 
 PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
@@ -49,6 +53,7 @@ class ApprovedMarkdown:
     text: str
     entrypoint: PurePosixPath = field(default_factory=lambda: PurePosixPath("input.md"))
     resources: tuple[ApprovedResource, ...] = ()
+    image_limits: ImageLimits | None = None
 
 
 def _walk(tokens: list[Token]) -> Iterator[Token]:
@@ -251,10 +256,21 @@ def validate_document(document: ApprovedDocument) -> ApprovedMarkdown:
         or resource.path.suffix.casefold() not in SUPPORTED_IMAGE_SUFFIXES
         or resource.media_type != "image/png"
         or type(resource.content) is not bytes
-        or not resource.content.startswith(b"\x89PNG\r\n\x1a\n")
         for resource in document.resources
     ):
         raise validation_error("Document package is invalid.")
+    if document.image_limits is not None and not isinstance(
+        document.image_limits, ImageLimits
+    ):
+        raise validation_error("Document package is invalid.")
+    if document.resources and document.image_limits is None:
+        raise validation_error("Document package is invalid.")
+    if document.image_limits is not None:
+        try:
+            for resource in document.resources:
+                validate_normalized_png(resource.content, document.image_limits)
+        except ConversionError:
+            raise validation_error("Document package is invalid.") from None
     approved_paths = frozenset(resource.path for resource in document.resources)
     package_paths = (document.entrypoint, *approved_paths)
     if len(approved_paths) != len(
@@ -280,4 +296,5 @@ def validate_document(document: ApprovedDocument) -> ApprovedMarkdown:
         document.markdown,
         entrypoint=document.entrypoint,
         resources=document.resources,
+        image_limits=document.image_limits,
     )

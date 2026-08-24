@@ -17,6 +17,7 @@ from md_converter.conversion.images import (
     ImageLimits,
     normalize_image,
     render_svg_with_cairo,
+    validate_normalized_png,
 )
 
 pytestmark = pytest.mark.unit
@@ -241,7 +242,8 @@ def test_svg_escaped_css_url_spelling_is_removed_before_renderer() -> None:
 
 def test_svg_safe_inline_style_is_preserved() -> None:
     source = b"""<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
-      <rect width="10" height="10" style="fill:#ff0000;stroke:#00ff00"/>
+      <linearGradient id="paint"><stop offset="1" stop-color="#ff0000"/></linearGradient>
+      <rect width="10" height="10" style="fill:url(#paint);stroke:#00ff00"/>
     </svg>"""
     inspected: list[bytes] = []
 
@@ -251,8 +253,33 @@ def test_svg_safe_inline_style_is_preserved() -> None:
 
     normalize_image(PurePosixPath("styled.svg"), source, LIMITS, inspect_renderer)
     sanitized = inspected[0].lower()
-    assert b"fill:#ff0000" in sanitized
+    assert b"fill:url(#paint)" in sanitized
     assert b"stroke:#00ff00" in sanitized
+
+
+def test_deeply_nested_inline_css_is_removed_without_recursion_failure() -> None:
+    style = "fill:" + "f(" * 1_500 + "1" + ")" * 1_500
+    source = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+        f'<rect width="10" height="10" style="{style}"/>'
+        "</svg>"
+    ).encode()
+    inspected: list[bytes] = []
+
+    def inspect_renderer(svg: bytes, width: int, height: int) -> bytes:
+        inspected.append(svg)
+        return _blank_svg_renderer(svg, width, height)
+
+    normalize_image(PurePosixPath("nested-css.svg"), source, LIMITS, inspect_renderer)
+    assert b"style=" not in inspected[0].lower()
+
+
+def test_normalized_png_validation_does_not_reuse_source_byte_limit() -> None:
+    normalized = normalize_image(
+        PurePosixPath("image.png"), _image_bytes("PNG"), LIMITS
+    )
+    output_limits = ImageLimits(1, 256, 256, 65_536, 1_000, 64)
+    validate_normalized_png(normalized, output_limits)
 
 
 @pytest.mark.parametrize(
