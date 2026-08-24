@@ -92,6 +92,37 @@ def test_external_worker_assembly_runs_component_retention_on_schedule(
     assert retention.limits == [7]
 
 
+def test_owned_database_engines_close_once_after_observation_cancellation(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    engines = (mocker.Mock(), mocker.Mock(), mocker.Mock())
+    observer = mocker.Mock(spec=QueueObserver)
+    owned = replace(components, owned_engines=engines, queue_observer=observer)
+
+    owned.close()
+    owned.close()
+
+    observer.cancel_observations.assert_called_once_with(timeout_seconds=2.0)
+    for engine in engines:
+        engine.dispose.assert_called_once_with()
+
+
+def test_owned_database_engine_cleanup_continues_after_one_dispose_failure(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    engines = (mocker.Mock(), mocker.Mock(), mocker.Mock())
+    engines[1].dispose.side_effect = RuntimeError("dispose failed")
+    owned = replace(components, owned_engines=engines)
+
+    with pytest.raises(RuntimeError, match="dispose failed"):
+        owned.close()
+
+    for engine in engines:
+        engine.dispose.assert_called_once_with()
+
+
 def test_embedded_worker_uses_the_same_complete_production_assembly(
     mocker: MockerFixture,
 ) -> None:

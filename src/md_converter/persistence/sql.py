@@ -98,14 +98,19 @@ def _enable_postgresql_statement_timeout(
 ) -> None:
     """Add a bounded statement budget without rewriting existing libpq options."""
 
-    cursor = dbapi_connection.cursor()
+    previous_autocommit = dbapi_connection.autocommit
     try:
-        cursor.execute(
-            "SELECT set_config('statement_timeout', %s, false)",
-            (f"{milliseconds}ms",),
-        )
+        dbapi_connection.autocommit = True
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT set_config('statement_timeout', %s, false)",
+                (f"{milliseconds}ms",),
+            )
+        finally:
+            cursor.close()
     finally:
-        cursor.close()
+        dbapi_connection.autocommit = previous_autocommit
 
 
 def standalone_database_url(data_directory: Path) -> URL:

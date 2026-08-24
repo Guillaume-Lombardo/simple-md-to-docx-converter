@@ -1,9 +1,11 @@
 """FastAPI application factory and versioned HTTP contract."""
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Lock
 from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -25,6 +27,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import Engine
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -711,6 +714,28 @@ class AppComponents:
     worker_metrics_observation_limit: int = 2
     worker_metrics_accept_queue_size: int = 8
     worker_metrics_request_timeout_seconds: float = 2.0
+    owned_engines: tuple[Engine, ...] = field(default=(), repr=False, compare=False)
+    _close_lock: Lock = field(
+        default_factory=Lock, init=False, repr=False, compare=False
+    )
+    _closed: Event = field(default_factory=Event, init=False, repr=False, compare=False)
+
+    def close(self) -> None:
+        """Cancel observations and dispose only application-owned SQL engines."""
+
+        if not self.owned_engines:
+            return
+        with self._close_lock:
+            if self._closed.is_set():
+                return
+            self._closed.set()
+        with ExitStack() as cleanup:
+            for engine in self.owned_engines:
+                cleanup.callback(engine.dispose)
+            if self.queue_observer is not None:
+                self.queue_observer.cancel_observations(
+                    timeout_seconds=self.worker_metrics_request_timeout_seconds
+                )
 
     def build_conversion_worker(
         self,
@@ -961,6 +986,7 @@ def build_components(settings: Settings) -> AppComponents:
         worker_metrics_request_timeout_seconds=(
             settings.worker_metrics_request_timeout_seconds
         ),
+        owned_engines=(engine, readiness_engine, observation_engine),
     )
 
 
@@ -976,16 +1002,31 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
     if scanner is not None:
         resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
-    auth.bootstrap_admin(
-        resolved_settings.initial_admin_username,
-        resolved_settings.initial_admin_password.get_secret_value(),
-    )
+    try:
+        auth.bootstrap_admin(
+            resolved_settings.initial_admin_username,
+            resolved_settings.initial_admin_password.get_secret_value(),
+        )
+    except Exception:
+        if components is None:
+            resolved_components.close()
+        raise
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        del _app
+        try:
+            yield
+        finally:
+            if components is None:
+                resolved_components.close()
 
     app = FastAPI(
         title="Markdown Converter API",
         version="0.1.0",
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
     app.add_middleware(
         BoundedRequestBody,

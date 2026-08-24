@@ -143,8 +143,12 @@ def test_postgresql_observation_engine_preserves_isolated_search_path() -> None:
     try:
         upgrade_database(engine)
         with engine.connect() as connection:
+            driver_id = id(connection.connection.driver_connection)
             schema = connection.scalar(text("SELECT current_schema()"))
             assert isinstance(schema, str) and schema.startswith("test_")
+            assert connection.scalar(text("SHOW statement_timeout")) == "500ms"
+        with engine.connect() as connection:
+            assert id(connection.connection.driver_connection) == driver_id
             assert connection.scalar(text("SHOW statement_timeout")) == "500ms"
         assert (
             SqlOperationalObserver(engine).observe_queue(datetime.now(UTC)).depth == 0

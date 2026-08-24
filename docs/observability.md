@@ -60,6 +60,12 @@ details. API and worker counters are intentionally separate process series; this
 claim in-process or cross-replica aggregation. T20 must connect the external-worker command to this
 lifecycle.
 
+The application factory owns the main, readiness, and observation database engines it constructs.
+On shutdown it first cancels active observations, then disposes all three engines exactly once;
+components supplied by an embedding caller remain caller-owned. PostgreSQL installs its session
+statement timeout outside a transaction and restores the driver's prior autocommit mode, so pool
+rollback cannot remove the bound and URL-level libpq options such as `search_path` remain intact.
+
 ## Audit and version traceability
 
 `GET /api/v1/audit?offset=0&limit=50` is restricted to administrators and returns one bounded,

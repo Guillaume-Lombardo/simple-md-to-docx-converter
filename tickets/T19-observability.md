@@ -126,6 +126,22 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   passes three no-coverage isolated reruns and one covered isolated rerun. No unrelated timing scope
   was added. T19 remains `In Progress` pending CI confirmation, independent review, merge, final
   image evidence, and verification on `main`.
+- 2026-08-25: Review of `0267d17` found that the parameterized PostgreSQL connection hook still ran
+  inside an implicit psycopg transaction, allowing pool rollback to remove the session timeout.
+  The hook now temporarily enables autocommit, applies `set_config`, and restores the previous mode.
+  Real PostgreSQL verifies the same DBAPI connection reports `500ms` on its first checkout and after
+  pool return/recheckout while retaining the isolated `search_path`. The review also traced the two
+  prior covered-suite heartbeat timing failures to a real T19 lifecycle leak: the main, readiness,
+  and observation engines constructed by the app had no shutdown owner. App-owned components now
+  cancel observations and dispose all three engines exactly once after successful or failed
+  requests or startup; injected components remain caller-owned, and cleanup continues across a
+  disposal failure. No heartbeat timeout or T13/T18 behavior changed. Two consecutive covered full
+  suites first passed 1,070 tests with 95.42% coverage; after adding explicit startup-failure
+  ownership coverage, the final covered and no-coverage suites each pass 1,072 tests, with the
+  covered suite retaining 95.42%. The exact distributed CI matrix passes 28 tests, and the unit
+  branch gate passes 857 tests with 93.41% coverage. Ruff, `ty`, and `git diff --check` pass. T19
+  remains `In Progress` pending CI
+  confirmation, independent review, merge, final-image evidence, and verification on `main`.
 
 ## Synchronization
 

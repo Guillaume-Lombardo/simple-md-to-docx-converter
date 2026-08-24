@@ -167,12 +167,14 @@ def test_database_engine_applies_profile_bounded_timeouts(
     assert created.call_args.kwargs["pool_timeout"] == 0.5
     timeout_listener = listen.call_args.args[2]
     postgres_connection = mocker.Mock()
+    postgres_connection.autocommit = False
     timeout_listener(postgres_connection, mocker.Mock())
     postgres_cursor = postgres_connection.cursor.return_value
     postgres_cursor.execute.assert_called_once_with(
         "SELECT set_config('statement_timeout', %s, false)", ("500ms",)
     )
     postgres_cursor.close.assert_called_once_with()
+    assert postgres_connection.autocommit is False
     with pytest.raises(ValueError, match="timeout"):
         create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
 
