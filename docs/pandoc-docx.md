@@ -21,6 +21,8 @@ front matter and footnote continuations, where extension syntax could otherwise 
 a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual code spans and code
 blocks. All image tokens, including relative and absolute local paths, are rejected until T08 can
 materialize a typed approved asset inside the workspace; T07 does not read document-selected files.
+Pandoc raw-code attributes such as `{=html}` and `{=tex}` are also rejected when attached to inline
+code or used as a fence info string. The same characters remain valid as literal code content.
 
 This validation prevents Pandoc from fetching a remote destination supplied by a document. T07
 does not claim operating-system network isolation; final runtime network policy belongs to the
@@ -46,8 +48,8 @@ terminated and then killed after its configured grace period.
 
 The component exposes content-free categories suitable for later API/job translation:
 
-- `validation`: empty input, invalid YAML metadata, raw HTML, forbidden resource destination, or
-  an image not materialized and approved by T08;
+- `validation`: empty input, invalid YAML metadata, raw HTML, a Pandoc raw-code attribute, forbidden
+  resource destination, or an image not materialized and approved by T08;
 - `workspace_failure`: workspace creation, preparation, output read, or cleanup failure;
 - `pandoc_unavailable`: the configured executable cannot start;
 - `pandoc_timeout`: conversion exceeds its configured deadline;

@@ -135,7 +135,7 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
   environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
   so final-image E2E coverage is not applicable.
-- T07 formatting, Ruff, and ty checks pass. Its conversion/CI-focused selection passes 74 tests,
+- T07 formatting, Ruff, and ty checks pass. Its conversion/CI-focused selection passes 87 tests,
   the exact Pandoc 3.10.2 integration module passes 6 tests, and the service-independent selection
   passes 365 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
   LibreOffice suites were intentionally left to orchestrated environments; the two canonical

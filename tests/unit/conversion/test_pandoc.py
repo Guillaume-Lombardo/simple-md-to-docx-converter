@@ -223,6 +223,25 @@ def test_workspace_failures_have_stable_content_free_error(
 
 
 @pytest.mark.unit
+def test_cleanup_failure_replaces_conversion_failure_with_workspace_error(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock()
+    process.wait.return_value = 23
+    mocker.patch(
+        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
+    )
+    mocker.patch(
+        "md_converter.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
+        side_effect=OSError("sensitive cleanup path"),
+    )
+    with pytest.raises(ConversionError) as captured:
+        converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
+    assert captured.value.code is ConversionErrorCode.WORKSPACE_FAILURE
+    assert str(captured.value) == "The conversion workspace failed."
+
+
+@pytest.mark.unit
 def test_timeout_terminates_then_kills_the_process_group(
     tmp_path: Path, mocker
 ) -> None:

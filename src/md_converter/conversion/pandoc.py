@@ -11,7 +11,6 @@ import subprocess
 import tempfile
 import zipfile
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -115,8 +114,10 @@ class PandocDocxConverter:
                 Path(temporary.name), validated, reference_docx
             )
         except Exception:
-            with suppress(OSError):
+            try:
                 temporary.cleanup()
+            except OSError:
+                raise self._workspace_failure() from None
             raise
         try:
             temporary.cleanup()

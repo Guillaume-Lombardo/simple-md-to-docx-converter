@@ -132,6 +132,45 @@ def test_local_images_are_rejected_until_t08_materializes_approved_assets(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw_attribute",
+    [
+        "`<img src=x>`{=html}",
+        "`unsafe`{=html}suffix",
+        "`\\command{unsafe}`{=tex}",
+        "```{=html}\n<div>unsafe</div>\n```",
+        "```  {=html}  \n<div>unsafe</div>\n```",
+        "~~~{=tex}\n\\command{unsafe}\n~~~",
+    ],
+)
+def test_pandoc_raw_attributes_are_rejected_before_converter_call(
+    mocker, raw_attribute: str
+) -> None:
+    converter = mocker.Mock()
+    service = DocxConversionService(converter)
+    with pytest.raises(ConversionError) as captured:
+        service.convert(raw_attribute, b"reference")
+    assert captured.value.code is ConversionErrorCode.VALIDATION
+    assert str(captured.value) == "Markdown input contains a raw attribute."
+    converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "`{=html}`",
+        r"`literal`\{=html}",
+        "`literal` {=html}",
+        "```text\n{=html}\n```",
+        "    `{=tex}`",
+    ],
+)
+def test_raw_attribute_text_remains_allowed_inside_real_code(literal: str) -> None:
+    assert validate_markdown(literal).text == literal
+
+
+@pytest.mark.unit
 def test_code_can_show_html_and_urls_as_literal_examples() -> None:
     markdown = """Inline `<span>
 https://example.test</span>`.

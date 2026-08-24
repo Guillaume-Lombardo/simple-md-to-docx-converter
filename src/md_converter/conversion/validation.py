@@ -19,6 +19,7 @@ PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
 )
 _REMOTE_RESOURCE = re.compile(r"(?i)^(?:[a-z][a-z0-9+.-]*(?::|%3a)|//|%2f%2f)")
+_RAW_ATTRIBUTE = re.compile(r"^\{\s*=[a-z][a-z0-9_+.-]*\s*\}", re.IGNORECASE)
 
 
 class _ResourceParser(MarkdownIt):
@@ -77,6 +78,19 @@ def _metadata_scalars(metadata: str) -> Iterator[str]:
 
 
 def _validate_tokens(tokens: tuple[Token, ...]) -> None:
+    for token in tokens:
+        if token.type == "fence" and _RAW_ATTRIBUTE.fullmatch(token.info.strip()):
+            raise validation_error("Markdown input contains a raw attribute.")
+        if token.type != "inline" or not token.children:
+            continue
+        for current, following in zip(token.children, token.children[1:], strict=False):
+            if (
+                current.type == "code_inline"
+                and following.type == "text"
+                and following.info != "escape"
+                and _RAW_ATTRIBUTE.match(following.content)
+            ):
+                raise validation_error("Markdown input contains a raw attribute.")
     if any(token.type in {"html_block", "html_inline"} for token in tokens):
         raise validation_error("Markdown input contains raw HTML.")
     for token in tokens:
