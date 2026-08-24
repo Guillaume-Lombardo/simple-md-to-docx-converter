@@ -37,6 +37,14 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   LibreOffice profile, bounded shell-free execution with whole-group timeout/cancellation,
   reproducibility metadata, structural/raster golden validation, and real rootless engine failure
   coverage. T13 owns asynchronous job-state cancellation wiring; T20/T21 retain final-image E2E.
+- 2026-08-24: Implemented the isolated, shell-free LibreOffice adapter with explicit DOCX/PDF
+  archive and structure limits, whole-process-group timeout/cancellation, fail-closed output reads,
+  strict PDF parsing, safe canonical traceability, and stable error categories. Added locked pypdf
+  and PDFium dependencies, deterministic reference normalization, a reproducible PNG golden, and
+  unit/real-engine failure coverage. The focused suite passes 85 local tests; the rootless UBI
+  harness passes 18 real Pandoc/LibreOffice/PDFium tests under an arbitrary UID, read-only root,
+  no network, no capabilities, and bounded resources. Canonical full-suite validation and
+  independent review remain before publication.
 
 ## Synchronization
 

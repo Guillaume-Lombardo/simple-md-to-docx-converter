@@ -20,8 +20,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   it blocks T13.
 - T11/G1L-320 is `In Progress` on `feat/T11-pdf-conversion`, based on delivered main
   `c43b810`; T09 and T10 are verified dependencies.
-- Three read-only independent analyses cover official font artifacts, bounded OOXML architecture,
-  and the security/integration test matrix. No implementation ownership overlaps.
+- T11 now has an isolated LibreOffice adapter, explicit DOCX/PDF bounds, process-group timeout and
+  cancellation, strict PDF validation, canonical traceability, locked PDFium rasterization, and a
+  reproducible exact golden. Focused local checks pass 85 tests and the hardened rootless UBI
+  harness passes all 18 real Pandoc/LibreOffice/PDFium tests.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
 ## Delivered T10 Scope
@@ -57,10 +59,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Define the bounded PDF result/traceability and cancellation contracts without absorbing T13.
-2. Implement isolated LibreOffice conversion with unit and real rootless integration coverage.
-3. Add deterministic PDF structural and raster golden validation, then run canonical checks and
-   independent review.
+1. Run every canonical and applicable document-engine check, including coverage and changed-line
+   coverage.
+2. Resolve findings from independent security/specification/CI reviews on the exact revision.
+3. Rebase, publish, verify protected CI, squash-merge, synchronize T11 to `Done`, and continue T13.
 
 ## Validation
 
@@ -78,3 +80,6 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
   K3s proof remains valid and no VM networking was modified.
 - Final product validation has not run; the product remains incomplete.
+- T11 focused validation: Ruff and `ty` pass; unit coverage passes with 517 tests and 93.84%
+  application coverage; the rootless T11 boundary suite passes 18 tests including exact raster
+  golden, concurrent profiles, failure outputs, timeout, cancellation, and descendant cleanup.

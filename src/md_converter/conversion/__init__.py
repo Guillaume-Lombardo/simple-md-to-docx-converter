@@ -7,6 +7,14 @@ from md_converter.conversion.archive import (
 )
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.images import ImageLimits
+from md_converter.conversion.libreoffice import (
+    LibreOfficeConfig,
+    LibreOfficePdfConverter,
+    PdfArtifact,
+    PdfLimits,
+    PdfTraceabilityContext,
+    PdfTraceabilityManifest,
+)
 from md_converter.conversion.mermaid import (
     MermaidCliRenderer,
     MermaidConfig,
@@ -24,10 +32,16 @@ __all__ = [
     "ConversionErrorCode",
     "DocxConversionService",
     "ImageLimits",
+    "LibreOfficeConfig",
+    "LibreOfficePdfConverter",
     "MermaidCliRenderer",
     "MermaidConfig",
     "MermaidLimits",
     "MermaidPreprocessingConverter",
     "PandocConfig",
     "PandocDocxConverter",
+    "PdfArtifact",
+    "PdfLimits",
+    "PdfTraceabilityContext",
+    "PdfTraceabilityManifest",
 ]

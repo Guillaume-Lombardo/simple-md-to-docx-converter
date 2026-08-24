@@ -5,10 +5,10 @@ DOCX and PDF. It currently provides local authentication, administrative account
 revocable sessions, health endpoints, and durable standalone or distributed storage profiles.
 It also provides template ownership, visibility-aware search, preference, and fallback persistence
 foundations. The internal conversion component now validates standalone Markdown or bounded ZIP
-packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG, and
-renders bounded Mermaid diagrams through local sandboxed Chromium before running Pandoc in an
-isolated workspace. Queue, worker, versioned template APIs, UI, and final-container features remain
-under development.
+packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG,
+renders bounded Mermaid diagrams through local sandboxed Chromium, runs Pandoc in an isolated
+workspace, and converts validated DOCX to bounded PDF through an isolated LibreOffice profile.
+Queue, worker, versioned template APIs, UI, and final-container features remain under development.
 
 ## Requirements
 
@@ -66,6 +66,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/archive-images.md`: secure archive and local-image preparation contract
 - `docs/mermaid.md`: bounded local Mermaid/Chromium preprocessing contract
 - `docs/word-templates-fonts.md`: bounded template activation and pinned font contract
+- `docs/pdf-conversion.md`: isolated LibreOffice PDF and traceability contract
 - `docs/local-development.md`: detailed local workflow
 - `tickets/`: repository-reviewed project ticket mirrors
 

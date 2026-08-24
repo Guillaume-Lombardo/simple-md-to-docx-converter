@@ -47,6 +47,20 @@ a changed pixel. Empty page sequences are invalid. Callers must also provide `Ra
 page count, per-page pixels, and total pixels; channel metrics are accumulated in one pass without
 allocating a second full-size delta buffer.
 
+T11 adds `render_pdf`, which uses the locked PDFium binding to render only after caller-supplied
+PDF-byte, page-count, per-page-pixel, and total-pixel limits pass. The T11 corpus stores one
+canonical PNG page and a canonical provenance manifest that pins the source, reference DOCX,
+font manifest, Pandoc, LibreOffice, PDFium, DPI, dimensions, and PNG digest. Regenerate it only in
+the approved rootless toolchain with:
+
+```bash
+uv run python -m scripts.generate_t11_pdf_golden OUTPUT_DIRECTORY WORKSPACE_DIRECTORY
+```
+
+The integration comparison is exact because the renderer, document engines, reference archive,
+font artifacts, locale, and DPI are locked. The reference DOCX ZIP metadata is normalized before
+hashing so Pandoc's extraction timestamps cannot create false provenance changes.
+
 ## Test classification
 
 Pure raster arithmetic is marked `unit`. Real filesystem materialization, ZIP inspection, and XML

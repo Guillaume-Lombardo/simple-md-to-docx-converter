@@ -7,8 +7,9 @@ FastAPI application shell. Local authentication and authorization use persistent
 selected by an explicit storage profile. Stable-identifier object-store ports use atomic files or
 AWS S3-compatible operations. Template identity, ownership, visibility-aware search, user
 preferences, fallback selection, and future-mutation authorization now have storage-neutral domain
-and persistence boundaries. There is still no template content/version API, conversion engine,
-queue, worker, or deployment implementation.
+and persistence boundaries. Isolated adapters validate Markdown and resources, render Mermaid,
+produce DOCX with Pandoc, and produce bounded PDF with LibreOffice. There is still no template
+content/version API, queue, worker, or deployment implementation.
 
 ## Target system
 
@@ -47,10 +48,11 @@ not satisfy the contract.
 
 ## Security and runtime
 
-Document-controlled network access is forbidden. Future engine adapters must use fixed arguments,
-isolated workspaces, bounded resources, deadlines, cancellation, and explicit environment
-allowlists. The final UBI 9 image must run rootlessly with an arbitrary UID and a read-only root
-filesystem. Runtime validation belongs to the dedicated toolchain and container tickets.
+Document-controlled network access is forbidden. Delivered engine adapters use fixed arguments,
+isolated workspaces, bounded resources, deadlines, cancellation where applicable, and explicit
+environment allowlists. The PDF adapter terminates the complete LibreOffice process group and
+validates the output structurally before publication. The final UBI 9 image must run rootlessly
+with an arbitrary UID and a read-only root filesystem. Final-image validation belongs to T20/T21.
 
 Values that remain unresolved in section 14 of the product specification are deliberately not
 encoded here.

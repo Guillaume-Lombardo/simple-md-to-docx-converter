@@ -16,6 +16,12 @@ class ConversionErrorCode(StrEnum):
     MERMAID_TIMEOUT = "mermaid_timeout"
     MERMAID_FAILURE = "mermaid_failure"
     INVALID_MERMAID_OUTPUT = "invalid_mermaid_output"
+    LIBREOFFICE_UNAVAILABLE = "libreoffice_unavailable"
+    PDF_TIMEOUT = "pdf_timeout"
+    PDF_CANCELLED = "pdf_cancelled"
+    PDF_FAILURE = "pdf_failure"
+    PDF_LIMIT_EXCEEDED = "pdf_limit_exceeded"
+    INVALID_PDF = "invalid_pdf"
 
 
 class ConversionError(RuntimeError):

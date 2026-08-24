@@ -123,6 +123,7 @@ def test_auth_integration_change_selects_functional_domain() -> None:
     "path",
     [
         "tests/corpus/manifest.json",
+        "scripts/generate_t11_pdf_golden.py",
         "tests/conftest.py",
         "tests/golden/openxml.py",
         "tests/unit/test_golden_raster.py",
