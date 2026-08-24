@@ -137,6 +137,20 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "package.json",
+        "tests/browser/conversion.browser.test.mjs",
+        "tests/browser/server.py",
+    ],
+)
+def test_browser_workflow_changes_select_document_engine_domain(path: str) -> None:
+    """Browser scripts and tests cannot skip the Chrome-provisioned heavy job."""
+    assert select_domains([path]) == ["document-engines"]
+
+
+@pytest.mark.unit
 def test_t04_document_engine_domain_runs_current_integration_boundaries() -> None:
     registry = load_registry(Path(".github/ci/domains.json"))
     planned, runnable = classify_domains(["document-engines"], registry)

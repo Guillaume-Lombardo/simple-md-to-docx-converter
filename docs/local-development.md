@@ -58,6 +58,14 @@ uv run ruff check .
 uv run ty check
 ```
 
+Verify the native browser module with the locked, dependency-free Node test package. Its command
+blocks below 90% line, branch, or function coverage:
+
+```bash
+npm ci --ignore-scripts
+npm run test:web
+```
+
 Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or
 LibreOffice:
 
@@ -93,10 +101,10 @@ tests. `ty` checks `src`, `scripts`, and `tests` explicitly against Python 3.14.
 
 `.github/workflows/ci.yml` exposes the single stable required result `CI / gate`. It runs on pull
 requests, merge-group candidates, pushes to `main`, published releases, manual dispatches, and a
-provisional weekly schedule. Pull requests always run formatting, linting, type checking, unit
-tests with blocking overall application coverage, an explicit branch-only JSON check, changed
-application line coverage, lock validation, and cheap workflow security checks. Draft pull requests
-do not run activated heavy domains.
+provisional weekly schedule. Pull requests always run formatting, linting, type checking, native
+browser-module tests with independent coverage gates, unit tests with blocking overall application
+coverage, an explicit branch-only JSON check, changed application line coverage, lock validation,
+and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
 
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least

@@ -289,7 +289,7 @@ def test_browser_login_has_stable_failure_and_redirect_success(tmp_path: Path) -
             follow_redirects=False,
         )
         assert success.status_code == 303
-        assert success.headers["location"] == "/docs"
+        assert success.headers["location"] == "/convert"
 
 
 @pytest.mark.functional

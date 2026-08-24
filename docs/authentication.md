@@ -62,13 +62,20 @@ browser into the attacker's account.
 
 ## HTTP surface
 
-- `GET /login` and `POST /login`: minimal browser login and redirect to interactive API docs
+- `GET /login` and `POST /login`: browser login and redirect to the conversion interface
 - `POST /api/v1/login`, `POST /api/v1/logout`, `GET /api/v1/session`: session lifecycle
 - `GET /api/v1/admin/users`, `POST /api/v1/admin/users`: account list and creation
 - `PATCH /api/v1/admin/users/{id}/active`: activation and deactivation
 - `POST /api/v1/admin/users/{id}/password`: administrative password reset
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
+- `GET /convert`: authenticated server-rendered conversion interface
+
+Browser and JSON login responses set the opaque session cookie as HttpOnly. They also set the
+session-bound CSRF value in the Secure, SameSite=Lax `__Host-md_converter_csrf` cookie so the external
+same-origin conversion module can copy it into `X-CSRF-Token`. The `__Host-` prefix prevents a
+subdomain from replacing that cookie; the server still verifies the value against the digest stored
+with the session for every mutation.
 
 There is intentionally no signup endpoint.
 

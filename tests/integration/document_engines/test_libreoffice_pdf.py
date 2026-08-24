@@ -339,7 +339,7 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
     def descendant_is_running() -> bool:
         try:
             state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
-        except FileNotFoundError:
+        except FileNotFoundError, ProcessLookupError:
             return False
         return state != "Z"
 

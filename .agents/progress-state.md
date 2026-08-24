@@ -9,11 +9,20 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Current State
 
-- `main` at `201116a` contains T00-T15. T15 implementation PR #46 was squash-merged after green CI
-  and independent specification, security/concurrency, and test/CI approval; its exact local and
-  remote source branch was removed.
-- T15/G1L-323 is `Done` in Linear. Its local completion mirror is being published on
-  `docs/T15-close-versioned-template-api` before the next critical-path ticket starts.
+- `main` at `1635c17` contains T00-T15. T15 implementation PR #46 and completion PR #47 were
+  squash-merged after green CI and independent review; their exact local and remote branches were
+  removed. T15/G1L-323 is `Done` locally and in Linear.
+- T16/G1L-327 is implemented, locally verified, and independently approved on
+  `feat/T16-conversion-ui`, based on delivered main `1635c17`; it remains `In Progress` until
+  verification on `main`.
+- Ready pull request #48 publishes the approved implementation. Its first CI run passed the real
+  browser workflow and found a `/proc` disappearance race in an existing process-cleanup assertion;
+  the corrected head is awaiting required GitHub checks and independent confirmation.
+  Its T13, T14, and T15 dependencies are verified `Done` locally and in Linear.
+- T16 provides the authenticated server-rendered conversion page, restricted external native
+  JavaScript/CSS, preferred/fallback template selection and search, idempotent submission,
+  progressive polling, recent-job status, cancellation, expiration, accessible safe errors, and
+  guarded downloads without crossing the T17 administration or T18 production-policy boundaries.
 - T15 provides immutable template versions, optimistic concurrency, owner-scoped download and
   audit behavior, fenced pending-publication recovery, integrity checks, and frozen template
   resolution in production worker assembly across SQLite/filesystem and PostgreSQL/S3 profiles.
@@ -38,14 +47,33 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - Historical T13 validation counts are intentionally omitted; all counts above describe the
   current T15 tree.
 
+## T16 Validation
+
+- `uv sync --all-groups`, Ruff formatting and linting, `ty`, the locked npm install, and committed
+  CI validation pass.
+- The pinned Node 22.23.1 native-module gate passes 10 tests with 100.00% line, 91.43% branch, and
+  97.30% function coverage; the existing light CI job runs the same blocking thresholds.
+- The exact Python unit selection passes 707 tests with 90.07% application branch coverage; all 56
+  changed executable Python lines are covered.
+- The applicable host suite passes 870 tests with the existing live PostgreSQL and RustFS
+  containers and reaches 94.64% application coverage. The focused distributed UI boundary passes
+  against both services and restores/removes its shared test state.
+- The prior unfiltered host run passed 873 tests with 37 expected marked engine failures before the
+  four final non-engine tests were added; the host still lacks Pandoc, Mermaid/Chromium,
+  LibreOffice, and locked fonts.
+- The real-browser workflow passes with pinned Puppeteer/Chrome 151 under arbitrary UID, read-only
+  mounts, disabled network, dropped capabilities, `no-new-privileges`, and the validated sandbox.
+- The built wheel contains `web.py` and both static conversion assets.
+
 ## Remaining Scope and Risks
 
-- T20/T21 still own final application-image E2E coverage; the toolchain-image run does not claim
-  that later acceptance gate.
+- T20/T21 still own final application-image Playwright E2E coverage. All independent reviewers
+  explicitly approved this sequencing exception; it does not waive the mandatory final
+  two-profile gate.
 - No PM-only implementation blocker is known. Production policy values remain explicit
   configuration for T18.
 
 ## Next Action
 
-Merge the T15 completion synchronization after its required checks, then select and start T16,
-whose T13, T14, and T15 dependencies are verified delivered.
+Require green CI and final corrected-head confirmation on ready pull request #48, then
+squash-merge, verify on `main`, synchronize T16 to `Done`, and clean the exact branch.

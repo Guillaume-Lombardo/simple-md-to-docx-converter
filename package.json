@@ -1,0 +1,9 @@
+{
+  "name": "md-converter-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:web": "node --test --experimental-test-coverage --test-coverage-include=src/md_converter/static/conversion.js --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 tests/javascript/*.test.js",
+    "test:web-browser": "node --test tests/browser/*.browser.test.mjs"
+  }
+}

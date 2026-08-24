@@ -1,0 +1,28 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f2f5f8; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.topbar { display: flex; justify-content: space-between; padding: 1rem 5vw; background: #172033; color: white; }
+.brand { color: white; font-weight: 750; text-decoration: none; }
+.layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); gap: 1.5rem; max-width: 72rem; margin: 2rem auto; padding: 0 1rem; }
+.auth-shell { max-width: 28rem; margin: 12vh auto; padding: 1rem; }
+.panel { background: white; border: 1px solid #d8dee8; border-radius: .75rem; padding: 1.5rem; box-shadow: 0 .25rem 1rem #1720330d; }
+.stack { display: grid; gap: 1rem; }
+.eyebrow { color: #3157a3; font-size: .8rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+label, legend { font-weight: 650; }
+input[type="text"], input[type="search"], input[type="password"], input:not([type]) { width: 100%; margin-top: .35rem; padding: .7rem; border: 1px solid #9aa8bc; border-radius: .35rem; font: inherit; }
+button, .button { border: 0; border-radius: .35rem; padding: .7rem 1rem; background: #3157a3; color: white; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+fieldset { display: flex; flex-wrap: wrap; gap: 1rem; border: 1px solid #d8dee8; border-radius: .4rem; }
+.drop-zone { display: grid; gap: .6rem; padding: 2rem; border: 2px dashed #8190a6; border-radius: .6rem; text-align: center; }
+.drop-zone.dragging { border-color: #3157a3; background: #eef4ff; }
+.selection { display: flex; gap: .5rem; margin: .75rem 0; }
+.selection span { color: #536175; }
+.results { list-style: none; margin: 0; padding: 0; }
+.results li + li { border-top: 1px solid #e3e8ef; }
+.results button { width: 100%; border-radius: 0; background: transparent; color: #172033; text-align: left; }
+.results button:hover, .results button:focus { background: #eef4ff; }
+.alert { margin: 1rem 0; padding: .8rem; border-left: .3rem solid #b42318; background: #fff0ee; }
+.muted { color: #647084; }
+.actions { display: flex; gap: .75rem; margin-top: 1rem; }
+progress { width: 100%; }
+@media (max-width: 48rem) { .layout { grid-template-columns: 1fr; } .topbar { gap: .5rem; flex-direction: column; } }
