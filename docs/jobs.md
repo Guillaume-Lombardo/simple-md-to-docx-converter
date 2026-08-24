@@ -61,6 +61,10 @@ concurrency, and stop values are caller-owned and have no implicit production de
 scheduled from elapsed monotonic time rather than loop iterations, so queue activity cannot make it
 run too frequently or prevent an idle worker from running it.
 
+Distributed entrypoints use `AppComponents.build_external_worker_runtime`. That lifecycle wraps
+the shared loop with the independently bound process-local metrics listener documented in
+`docs/observability.md`; calling the bare external loop does not satisfy the runtime contract.
+
 The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
 exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored
 size and SHA-256, and passes the immutable version metadata and bytes to the document processor;

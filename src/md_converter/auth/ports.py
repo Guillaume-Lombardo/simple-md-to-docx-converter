@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from md_converter.auth.models import Session, User
+    from md_converter.auth.models import AuthenticationAuditContext, Session, User
 
 
 class UserRepository(Protocol):
@@ -19,7 +19,9 @@ class UserRepository(Protocol):
         self, username: str, normalized_username: str, password_hash: str
     ) -> User: ...
 
-    def create(self, user: User) -> None: ...
+    def create(
+        self, user: User, *, audit: AuthenticationAuditContext | None = None
+    ) -> None: ...
 
     def get_by_id(self, user_id: UUID) -> User | None: ...
 
@@ -42,6 +44,7 @@ class UserRepository(Protocol):
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         """Atomically mutate security state and increment its revocation version."""
         ...

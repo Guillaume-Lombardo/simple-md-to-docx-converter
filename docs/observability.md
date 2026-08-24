@@ -14,6 +14,11 @@ logger does not accept document content, uploaded filenames, credentials, arbitr
 exception text, storage keys, SQL parameters, or local paths. Request-completion logs include only
 method, status, duration, and correlation. Job lifecycle logs may include job, owner, immutable
 template-version, and worker identifiers so an authorized operator can follow durable execution.
+Event names are fixed. UUID fields must be canonical UUID strings; worker identifiers are limited
+to 64 ASCII letters, digits, underscores, or hyphens; methods, states, steps, operations, and error
+codes use fixed vocabularies; and numeric fields are finite and bounded. Unsafe direct logging
+values are omitted and an unsafe event is replaced, while the application logging API rejects an
+invalid value before it reaches a handler.
 
 ## Metrics
 
@@ -35,14 +40,26 @@ queue depth, age, and active-job gauges are recomputed from the selected SQLite 
 profile for every scrape. Distributed deployments aggregate process-local counters in the metrics
 backend and must not sum the database-derived gauges across API replicas.
 
+Each external-worker process must run the lifecycle returned by
+`AppComponents.build_external_worker_runtime`, not the bare loop. It binds a process-local HTTP
+listener at `MD_CONVERTER_WORKER_METRICS_BIND_HOST` and
+`MD_CONVERTER_WORKER_METRICS_PORT`, serves only `GET /metrics`, and starts and stops with the worker
+loop. Bind and scrape failures are content-free and never expose provider details. API and worker
+counters are intentionally separate process series; this surface does not claim in-process or
+cross-replica aggregation. T20 must connect the external-worker command to this lifecycle.
+
 ## Audit and version traceability
 
-`GET /api/v1/audit?offset=0&limit=50` is restricted to administrators and returns a bounded newest-
-first view of the existing immutable, content-free audit records. Each record includes actor,
-owner, operation, stable target identifier, optional immutable template-version identifier,
-administrator-intervention flag, and UTC timestamp. It contains no template names, descriptions,
-filenames, document bytes, or credentials. The existing 365-day audit retention and immutable
-cleanup-evidence policy remains unchanged.
+`GET /api/v1/audit?offset=0&limit=50` is restricted to administrators and returns one bounded,
+deterministically ordered newest-first view across immutable template and authentication audit
+records. Each record includes actor, owner, operation, stable target identifier and type, target
+version, optional immutable template-version identifier, administrator-intervention flag, and UTC
+timestamp. Account creation, deactivation, reactivation, and password reset are committed in the
+same database transaction as their content-free audit record; failed and unauthorized mutations
+create no record. Bootstrap administrator creation is recorded once without being classified as
+an administrator intervention. Audit data contains no usernames, template names, descriptions,
+filenames, hashes, passwords, document bytes, or credentials. Both audit tables share the existing
+365-day bounded retention ordering and immutable cleanup-evidence policy.
 
 Conversion status continues to expose its immutable `template_version_id` and the sorted converter,
 Pandoc, Mermaid CLI, Chromium, and LibreOffice versions. It now also exposes the durable correlation
@@ -53,8 +70,22 @@ content or storage locations.
 
 `GET /health/ready` never runs a conversion, reads an upload, or invokes a document engine. The
 standalone profile performs one `SELECT 1` and one local object-root access check. The distributed
-profile performs one `SELECT 1` and one S3-compatible `HeadBucket`. Database connect/statement and
-S3 connect/read operations use the required positive finite
+profile performs one `SELECT 1` and one S3-compatible `HeadBucket`. Readiness owns separate database
+and S3 clients: migrations and normal SQL/object operations retain their normal pool, timeout, and
+retry behavior. Only the readiness database client disables pool pre-ping and applies a bounded
+connect/statement budget; only the readiness S3 client disables retries and applies bounded
+connect/read budgets. These probe-only clients use the required positive finite
 `MD_CONVERTER_READINESS_TIMEOUT_SECONDS`; S3 readiness disables retries so one probe remains one
 bounded provider operation. Any component failure returns the stable content-free `NOT_READY`
 response. Liveness remains independent at `GET /health/live`.
+
+## Final-image E2E sequencing
+
+The source contract is complete in T19, but final-rootless-image validation is sequenced rather
+than waived. T20 must run both standalone and distributed final images and verify API metrics,
+isolated readiness success/failure, all account audit mutations plus authorization failures, and an
+external worker whose independently bound metrics listener is concurrently scrapeable and stops
+with the worker. It must also prove API and worker counters remain distinct. T21 must repeat both
+profiles through the published deployment/restore path, scrape every API/worker process, and verify
+authentication and template audit ordering/retention survives backup and restore. Results require
+independent review before T19 is marked done.

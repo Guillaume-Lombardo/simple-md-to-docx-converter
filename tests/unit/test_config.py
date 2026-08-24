@@ -57,6 +57,8 @@ def test_security_defaults_and_secret_redaction() -> None:
         {"template_min_retained_versions": 9},
         {"audit_retention_seconds": 0},
         {"readiness_timeout_seconds": float("inf")},
+        {"worker_metrics_bind_host": "bad host/private"},
+        {"worker_metrics_port": 0},
         {"clamav_port": 65_536},
         {"clamav_timeout_seconds": float("inf")},
     ],

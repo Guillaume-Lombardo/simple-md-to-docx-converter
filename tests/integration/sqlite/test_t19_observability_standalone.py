@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import insert
+from sqlalchemy import func, insert, select
 
 from md_converter.auth.models import Role, User
 from md_converter.jobs.errors import JobRepositoryError
@@ -18,7 +18,8 @@ from md_converter.persistence.observability import (
     SqlAuditReader,
     SqlOperationalObserver,
 )
-from md_converter.persistence.schema import TemplateAuditRow
+from md_converter.persistence.retention import SqlRetentionRepository
+from md_converter.persistence.schema import AuthenticationAuditRow, TemplateAuditRow
 from md_converter.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
@@ -116,3 +117,81 @@ def test_sqlite_observation_failure_is_sanitized() -> None:
         SqlAuditReader(engine).list_recent(offset=0, limit=10)
     with pytest.raises(ValueError, match="pagination"):
         SqlAuditReader(engine).list_recent(offset=-1, limit=10)
+
+
+def test_sqlite_authentication_audit_shares_bounded_retention_order(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    now = datetime(2026, 8, 24, 20, tzinfo=UTC)
+    stable_id = uuid4()
+    with engine.begin() as connection:
+        connection.execute(
+            insert(AuthenticationAuditRow),
+            [
+                {
+                    "id": str(uuid4()),
+                    "actor_id": str(stable_id),
+                    "owner_id": str(stable_id),
+                    "operation": "user_create",
+                    "target_id": str(stable_id),
+                    "auth_version": 0,
+                    "administrator_intervention": True,
+                    "created_at": now - timedelta(days=3),
+                },
+                {
+                    "id": str(uuid4()),
+                    "actor_id": str(stable_id),
+                    "owner_id": str(stable_id),
+                    "operation": "user_password_reset",
+                    "target_id": str(stable_id),
+                    "auth_version": 1,
+                    "administrator_intervention": True,
+                    "created_at": now,
+                },
+            ],
+        )
+        connection.execute(
+            insert(TemplateAuditRow).values(
+                id=str(uuid4()),
+                actor_id=str(stable_id),
+                owner_id=str(stable_id),
+                template_id=str(uuid4()),
+                operation="replace",
+                version_id=None,
+                administrator_intervention=False,
+                created_at=now - timedelta(days=2),
+            )
+        )
+
+    retention = SqlRetentionRepository(engine)
+    assert (
+        retention.cleanup_audits(
+            cutoff_at=now - timedelta(days=1), completed_at=now, limit=1
+        )
+        == 1
+    )
+    with engine.connect() as connection:
+        assert (
+            connection.scalar(select(func.count()).select_from(AuthenticationAuditRow))
+            == 1
+        )
+        assert (
+            connection.scalar(select(func.count()).select_from(TemplateAuditRow)) == 1
+        )
+    assert (
+        retention.cleanup_audits(
+            cutoff_at=now - timedelta(days=1), completed_at=now, limit=10
+        )
+        == 1
+    )
+    with engine.connect() as connection:
+        assert (
+            connection.scalar(select(func.count()).select_from(AuthenticationAuditRow))
+            == 1
+        )
+        assert (
+            connection.scalar(select(func.count()).select_from(TemplateAuditRow)) == 0
+        )
+    engine.dispose()

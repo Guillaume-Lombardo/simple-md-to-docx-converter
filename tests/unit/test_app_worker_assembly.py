@@ -11,10 +11,15 @@ from md_converter.app import AppComponents
 from md_converter.auth.ports import ReadinessProbe
 from md_converter.auth.service import AuthenticationService
 from md_converter.jobs.ports import JobProcessor, JobRepository
-from md_converter.jobs.runner import EmbeddedWorker, WorkerSchedule
+from md_converter.jobs.runner import (
+    EmbeddedWorker,
+    ExternalWorkerRuntime,
+    WorkerSchedule,
+)
 from md_converter.jobs.runtime import JobPolicies
 from md_converter.jobs.service import JobService
 from md_converter.jobs.worker import WorkerPolicy
+from md_converter.observability import QueueObserver
 from md_converter.retention import RetentionService
 from md_converter.storage import ObjectStore
 from md_converter.templates.processor import TemplateAwareProcessor
@@ -65,6 +70,8 @@ def _components(
         job_policies=policies,
         retention=cast(RetentionService, retention),
         job_repository=repository,
+        queue_observer=mocker.Mock(spec=QueueObserver),
+        worker_metrics_port=0,
     ), retention
 
 
@@ -110,5 +117,16 @@ def test_embedded_worker_uses_the_same_complete_production_assembly(
     with pytest.raises(RuntimeError, match="components"):
         replace(components, retention=None).build_conversion_worker(
             worker_id="worker-incomplete",
+            processor=mocker.Mock(spec=TemplateAwareProcessor),
+        )
+
+    runtime = components.build_external_worker_runtime(
+        worker_id="external-metrics",
+        processor=mocker.Mock(spec=TemplateAwareProcessor),
+    )
+    assert isinstance(runtime, ExternalWorkerRuntime)
+    with pytest.raises(RuntimeError, match="queue observation"):
+        replace(components, queue_observer=None).build_external_worker_runtime(
+            worker_id="external-metrics",
             processor=mocker.Mock(spec=TemplateAwareProcessor),
         )

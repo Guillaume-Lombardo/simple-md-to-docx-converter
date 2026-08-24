@@ -53,7 +53,7 @@ from md_converter.jobs.errors import (
 )
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
 from md_converter.jobs.ports import JobRepository
-from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop
+from md_converter.jobs.runner import EmbeddedWorker, ExternalWorkerRuntime, WorkerLoop
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
 from md_converter.jobs.service import JobService
 from md_converter.jobs.worker import ConversionWorker
@@ -68,6 +68,7 @@ from md_converter.observability import (
     AuditReader,
     AuditRecord,
     CorrelationMiddleware,
+    MetricsHttpServer,
     OperationalMetrics,
     QueueObserver,
     QueueSnapshot,
@@ -352,6 +353,8 @@ class AuditRecordResponse(BaseModel):
     owner_id: UUID
     operation: str
     target_id: UUID
+    target_type: str
+    target_version: str | None
     version_id: UUID | None
     administrator_intervention: bool
     created_at: datetime
@@ -676,6 +679,8 @@ class AppComponents:
     metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
     queue_observer: QueueObserver | None = None
     audit_reader: AuditReader | None = None
+    worker_metrics_bind_host: str = "127.0.0.1"
+    worker_metrics_port: int = 9464
 
     def build_conversion_worker(
         self,
@@ -753,11 +758,38 @@ class AppComponents:
             thread_name=thread_name,
         )
 
+    def build_external_worker_runtime(
+        self,
+        *,
+        worker_id: str,
+        processor: TemplateAwareProcessor,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> ExternalWorkerRuntime:
+        """Assemble the external loop with a process-local scrape listener."""
+
+        if self.queue_observer is None:
+            raise RuntimeError("External worker queue observation is unavailable")
+        return ExternalWorkerRuntime(
+            self.build_external_worker_loop(
+                worker_id=worker_id,
+                processor=processor,
+                clock=clock,
+                monotonic_clock=monotonic_clock,
+            ),
+            MetricsHttpServer(
+                self.metrics,
+                self.queue_observer,
+                host=self.worker_metrics_bind_host,
+                port=self.worker_metrics_port,
+            ),
+        )
+
 
 class ProfileReadinessProbe:
     """Cheap readiness composition for metadata and object persistence."""
 
-    def __init__(self, database: ReadinessProbe, objects: ObjectStore) -> None:
+    def __init__(self, database: ReadinessProbe, objects: ReadinessProbe) -> None:
         self._database = database
         self._objects = objects
 
@@ -776,6 +808,7 @@ def build_components(settings: Settings) -> AppComponents:
             raise RuntimeError("Validated standalone settings are incomplete")
         database_url = standalone_database_url(data_directory)
         object_store: ObjectStore = FilesystemObjectStore(data_directory)
+        object_readiness: ReadinessProbe = FilesystemObjectStore(data_directory)
     else:
         database_secret = settings.distributed_database_url
         bucket = settings.s3_bucket
@@ -796,17 +829,26 @@ def build_components(settings: Settings) -> AppComponents:
                 if settings.s3_secret_access_key is not None
                 else ""
             )
-        client_options["config"] = Config(
-            connect_timeout=settings.readiness_timeout_seconds,
-            read_timeout=settings.readiness_timeout_seconds,
-            retries={"max_attempts": 0},
-        )
         object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
+        readiness_client_options = {
+            **client_options,
+            "config": Config(
+                connect_timeout=settings.readiness_timeout_seconds,
+                read_timeout=settings.readiness_timeout_seconds,
+                retries={"max_attempts": 0},
+            ),
+        }
+        object_readiness = S3ObjectStore(
+            boto3.client("s3", **readiness_client_options), bucket
+        )
 
-    engine = create_database_engine(
-        database_url, timeout_seconds=settings.readiness_timeout_seconds
-    )
+    engine = create_database_engine(database_url)
     upgrade_database(engine)
+    readiness_engine = create_database_engine(
+        database_url,
+        timeout_seconds=settings.readiness_timeout_seconds,
+        pool_pre_ping=False,
+    )
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
     hasher = Argon2idPasswordHasher(
@@ -852,7 +894,9 @@ def build_components(settings: Settings) -> AppComponents:
     metrics = OperationalMetrics()
     return AppComponents(
         authentication=authentication,
-        readiness=ProfileReadinessProbe(DatabaseReadinessProbe(engine), object_store),
+        readiness=ProfileReadinessProbe(
+            DatabaseReadinessProbe(readiness_engine), object_readiness
+        ),
         object_store=object_store,
         jobs=jobs,
         scanner=ClamAVUploadScanner(
@@ -867,6 +911,8 @@ def build_components(settings: Settings) -> AppComponents:
         metrics=metrics,
         queue_observer=SqlOperationalObserver(engine),
         audit_reader=SqlAuditReader(engine),
+        worker_metrics_bind_host=settings.worker_metrics_bind_host,
+        worker_metrics_port=settings.worker_metrics_port,
     )
 
 

@@ -14,14 +14,23 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
-from md_converter.auth.models import Role, Session, User
+from md_converter.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    Role,
+    Session,
+    User,
+)
 from md_converter.config import ConfigurationError
 from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.schema import SessionRow, UserRow
+from md_converter.persistence.schema import AuthenticationAuditRow, SessionRow, UserRow
 
 
 def create_database_engine(
-    database_url: str | URL, *, timeout_seconds: float | None = None
+    database_url: str | URL,
+    *,
+    timeout_seconds: float | None = None,
+    pool_pre_ping: bool = True,
 ) -> Engine:
     """Create a profile-neutral synchronous SQLAlchemy engine."""
     try:
@@ -53,7 +62,7 @@ def create_database_engine(
             resolved_url,
             connect_args=connect_args,
             hide_parameters=True,
-            pool_pre_ping=True,
+            pool_pre_ping=pool_pre_ping,
         )
         if sqlite:
             event.listen(engine, "connect", _enable_sqlite_foreign_keys)
@@ -130,7 +139,15 @@ class SqlUserRepository:
             role=Role.ADMIN,
         )
         try:
-            self.create(user)
+            self.create(
+                user,
+                audit=AuthenticationAuditContext(
+                    uuid4(),
+                    user.id,
+                    AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE,
+                    datetime.now(UTC),
+                ),
+            )
             return user
         except KeyError:
             existing = self.get_by_normalized_username(normalized_username)
@@ -140,7 +157,9 @@ class SqlUserRepository:
                 ) from None
             return existing
 
-    def create(self, user: User) -> None:
+    def create(
+        self, user: User, *, audit: AuthenticationAuditContext | None = None
+    ) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 database.add(
@@ -154,6 +173,8 @@ class SqlUserRepository:
                         auth_version=user.auth_version,
                     )
                 )
+                if audit is not None:
+                    database.add(self._audit_row(user, audit))
         except IntegrityError:
             raise KeyError(user.normalized_username) from None
         except SQLAlchemyError:
@@ -220,6 +241,7 @@ class SqlUserRepository:
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         values: dict[str, object] = {"auth_version": UserRow.auth_version + 1}
         if active is not None:
@@ -234,9 +256,29 @@ class SqlUserRepository:
                     .values(**values)
                     .returning(UserRow)
                 ).scalar_one_or_none()
+                if result is not None and audit is not None:
+                    database.add(self._audit_row(_user(result), audit))
                 return _user(result) if result is not None else None
         except SQLAlchemyError:
             raise PersistenceError from None
+
+    @staticmethod
+    def _audit_row(
+        user: User, audit: AuthenticationAuditContext
+    ) -> AuthenticationAuditRow:
+        return AuthenticationAuditRow(
+            id=str(audit.id),
+            actor_id=str(audit.actor_id),
+            owner_id=str(user.id),
+            operation=audit.operation.value,
+            target_id=str(user.id),
+            auth_version=user.auth_version,
+            administrator_intervention=(
+                audit.operation
+                is not AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE
+            ),
+            created_at=audit.created_at,
+        )
 
 
 class SqlSessionRepository:

@@ -34,6 +34,8 @@ MD_CONVERTER_CLAMAV_HOST=<clamd service name>
 MD_CONVERTER_CLAMAV_PORT=3310
 MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS=5
 MD_CONVERTER_READINESS_TIMEOUT_SECONDS=<approved positive finite value>
+MD_CONVERTER_WORKER_METRICS_BIND_HOST=<external-worker metrics bind host>
+MD_CONVERTER_WORKER_METRICS_PORT=<external-worker metrics bind port>
 MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
 ```
 

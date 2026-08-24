@@ -8,9 +8,18 @@ import pytest
 from pytest_mock import MockerFixture
 
 from md_converter.jobs.errors import JobRepositoryError
-from md_converter.jobs.runner import EmbeddedWorker, WorkerLoop, WorkerSchedule
+from md_converter.jobs.runner import (
+    EmbeddedWorker,
+    ExternalWorkerRuntime,
+    WorkerLoop,
+    WorkerSchedule,
+)
 from md_converter.jobs.worker import ConversionWorker
-from md_converter.observability import OperationalMetrics, QueueSnapshot
+from md_converter.observability import (
+    MetricsHttpServer,
+    OperationalMetrics,
+    QueueSnapshot,
+)
 from md_converter.persistence.errors import PersistenceError
 
 pytestmark = pytest.mark.unit
@@ -115,6 +124,27 @@ def test_cleanup_failure_advances_cadence_before_transient_backoff(
 
     assert worker.cleanup.call_count == 2
     assert [call.args[0] for call in stop.wait.call_args_list] == [0.2, 0.1, 0.1]
+
+
+def test_external_runtime_owns_metrics_lifecycle_even_when_loop_fails(
+    mocker: MockerFixture,
+) -> None:
+    loop = mocker.Mock(spec=WorkerLoop)
+    metrics = mocker.Mock(spec=MetricsHttpServer)
+    runtime = ExternalWorkerRuntime(loop, metrics)
+    stop = mocker.Mock()
+
+    runtime.run(stop)
+    metrics.start.assert_called_once_with()
+    loop.run.assert_called_once_with(stop)
+    metrics.stop.assert_called_once_with()
+
+    metrics.reset_mock()
+    loop.run.side_effect = RuntimeError("worker failed")
+    with pytest.raises(RuntimeError, match="worker failed"):
+        runtime.run(stop)
+    metrics.start.assert_called_once_with()
+    metrics.stop.assert_called_once_with()
 
 
 @pytest.mark.parametrize(

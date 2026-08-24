@@ -114,6 +114,9 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE IF EXISTS retention_cleanup_runs CASCADE"))
+        connection.execute(
+            text("DROP TABLE IF EXISTS authentication_audit_records CASCADE")
+        )
         connection.execute(text("DROP TABLE IF EXISTS template_audit_records CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS template_versions CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS conversion_jobs CASCADE"))
@@ -147,6 +150,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
             migration.result(timeout=10)
     assert set(inspect(engine).get_table_names()) >= {
         "alembic_version",
+        "authentication_audit_records",
         "sessions",
         "system_template_selection",
         "template_audit_records",

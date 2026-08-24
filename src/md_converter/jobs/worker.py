@@ -27,11 +27,10 @@ from md_converter.observability import (
     OperationalMetrics,
     bind_correlation_id,
     log_event,
+    require_worker_id,
     reset_correlation_id,
 )
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
-
-MAX_WORKER_ID_CHARACTERS = 255
 
 
 class MaintenanceCleaner(Protocol):
@@ -123,9 +122,7 @@ class ConversionWorker:
         runtime: WorkerRuntime,
         policy: WorkerPolicy,
     ) -> None:
-        if not worker_id or len(worker_id) > MAX_WORKER_ID_CHARACTERS:
-            raise ValueError("Worker identifier is invalid")
-        self._worker_id = worker_id
+        self._worker_id = require_worker_id(worker_id)
         self._repository = runtime.repository
         self._objects = runtime.objects
         self._processor = runtime.processor

@@ -8,10 +8,16 @@ from uuid import uuid4
 
 import pytest
 from pytest_mock import MockerFixture
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from md_converter.auth.models import Role, Session, User
+from md_converter.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    Role,
+    Session,
+    User,
+)
 from md_converter.config import ConfigurationError
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.migrations import (
@@ -19,6 +25,7 @@ from md_converter.persistence.migrations import (
     run_migration_environment,
     upgrade_database,
 )
+from md_converter.persistence.schema import AuthenticationAuditRow
 from md_converter.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
@@ -45,6 +52,9 @@ CLEANUP_EVIDENCE_REVISION: Any = importlib.import_module(
 CORRELATION_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_10_job_correlation"
 )
+AUTH_AUDIT_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_11_authentication_audit"
+)
 
 
 @pytest.mark.unit
@@ -54,6 +64,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
     upgrade_database(engine)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
+        "authentication_audit_records",
         "conversion_jobs",
         "retention_cleanup_runs",
         "sessions",
@@ -153,6 +164,58 @@ def test_database_engine_applies_profile_bounded_timeouts(
     }
     with pytest.raises(ValueError, match="timeout"):
         create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
+
+
+@pytest.mark.unit
+def test_sqlite_account_audits_are_atomic_immutable_and_content_free() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    admin = users.bootstrap_admin("Admin", "admin", "hash:private-admin")
+    user = User(uuid4(), "Alice", "alice", "hash:private-user", Role.USER)
+    now = datetime(2026, 8, 24, tzinfo=UTC)
+
+    def audit(operation: AuthenticationAuditOperation) -> AuthenticationAuditContext:
+        return AuthenticationAuditContext(uuid4(), admin.id, operation, now)
+
+    users.create(user, audit=audit(AuthenticationAuditOperation.CREATE))
+    with pytest.raises(KeyError):
+        users.create(
+            User(uuid4(), "ALICE", "alice", "hash:must-not-leak", Role.USER),
+            audit=audit(AuthenticationAuditOperation.CREATE),
+        )
+    assert (
+        users.update_security(
+            uuid4(),
+            active=False,
+            audit=audit(AuthenticationAuditOperation.DEACTIVATE),
+        )
+        is None
+    )
+    users.update_security(
+        user.id,
+        password_hash="hash:" + "new-private-value",
+        audit=audit(AuthenticationAuditOperation.RESET_PASSWORD),
+    )
+    with engine.connect() as connection:
+        rows = tuple(
+            connection.execute(
+                select(AuthenticationAuditRow).order_by(
+                    AuthenticationAuditRow.created_at
+                )
+            ).mappings()
+        )
+    assert {row["operation"] for row in rows} == {
+        "bootstrap_admin_create",
+        "user_create",
+        "user_password_reset",
+    }
+    reset = next(row for row in rows if row["operation"] == "user_password_reset")
+    assert reset["auth_version"] == 1
+    assert "private" not in repr(rows)
+    with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+        connection.execute(update(AuthenticationAuditRow).values(operation="tampered"))
+    engine.dispose()
 
 
 @pytest.mark.unit
@@ -327,6 +390,21 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     CLEANUP_EVIDENCE_REVISION.upgrade()
     CLEANUP_EVIDENCE_REVISION.downgrade()
     assert cleanup_evidence.execute.call_count == 3
+
+    auth_audit = mocker.patch.object(AUTH_AUDIT_REVISION, "op")
+    auth_audit.get_bind.return_value.dialect.name = "sqlite"
+    AUTH_AUDIT_REVISION.upgrade()
+    AUTH_AUDIT_REVISION.downgrade()
+    auth_audit.create_table.assert_called_once()
+    assert auth_audit.create_index.call_count == 2
+    assert auth_audit.execute.call_count == 2
+    auth_audit.drop_table.assert_called_once_with("authentication_audit_records")
+
+    auth_audit.reset_mock()
+    auth_audit.get_bind.return_value.dialect.name = "postgresql"
+    AUTH_AUDIT_REVISION.upgrade()
+    AUTH_AUDIT_REVISION.downgrade()
+    assert auth_audit.execute.call_count == 2
 
     cleanup_evidence.reset_mock()
     cleanup_evidence.get_bind.return_value.dialect.name = "postgresql"

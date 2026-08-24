@@ -59,7 +59,9 @@ def test_audit_reader_maps_optional_version_and_sanitizes_failure(
             id=str(uuid4()),
             actor_id=str(actor_id),
             owner_id=str(owner_id),
-            template_id=str(target_id),
+            target_id=str(target_id),
+            target_type="template",
+            target_version=str(version_id),
             operation="replace",
             version_id=str(version_id),
             administrator_intervention=True,
@@ -69,28 +71,32 @@ def test_audit_reader_maps_optional_version_and_sanitizes_failure(
             id=str(uuid4()),
             actor_id=str(actor_id),
             owner_id=str(owner_id),
-            template_id=str(target_id),
-            operation="archive",
+            target_id=str(target_id),
+            target_type="user",
+            target_version="3",
+            operation="user_password_reset",
             version_id=None,
             administrator_intervention=False,
             created_at=now.replace(tzinfo=None),
         ),
     )
-    database.scalars.return_value = rows
+    database.execute.return_value = rows
     reader = SqlAuditReader(engine)
 
     records = reader.list_recent(offset=0, limit=2)
     assert records[0].version_id == version_id
     assert records[1].version_id is None
+    assert records[1].target_type == "user"
+    assert records[1].target_version == "3"
     assert records[1].created_at.tzinfo is UTC
     with pytest.raises(ValueError, match="pagination"):
         reader.list_recent(offset=0, limit=0)
 
-    database.scalars.side_effect = SQLAlchemyError()
+    database.execute.side_effect = SQLAlchemyError()
     with pytest.raises(PersistenceError):
         reader.list_recent(offset=0, limit=1)
 
-    database.scalars.side_effect = None
-    database.scalars.return_value = (SimpleNamespace(**{**vars(rows[0]), "id": "bad"}),)
+    database.execute.side_effect = None
+    database.execute.return_value = (SimpleNamespace(**{**vars(rows[0]), "id": "bad"}),)
     with pytest.raises(PersistenceError):
         reader.list_recent(offset=0, limit=1)

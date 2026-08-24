@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -203,20 +204,42 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
-    engine = mocker.Mock()
+    engine = mocker.MagicMock()
     engine.dialect.name = "postgresql"
+    readiness_engine = mocker.MagicMock()
+    readiness_engine.dialect.name = "postgresql"
     create_engine = mocker.patch(
-        "md_converter.app.create_database_engine", return_value=engine
+        "md_converter.app.create_database_engine",
+        side_effect=(engine, readiness_engine),
     )
     upgrade = mocker.patch("md_converter.app.upgrade_database")
-    s3_client = mocker.patch("md_converter.app.boto3.client")
+    normal_s3 = mocker.Mock()
+    readiness_s3 = mocker.Mock()
+    s3_client = mocker.patch(
+        "md_converter.app.boto3.client", side_effect=(normal_s3, readiness_s3)
+    )
     components = build_components(settings)
-    create_engine.assert_called_once_with(database_url, timeout_seconds=2.0)
+    assert create_engine.call_args_list == [
+        mocker.call(database_url),
+        mocker.call(database_url, timeout_seconds=2.0, pool_pre_ping=False),
+    ]
     upgrade.assert_called_once_with(engine)
-    s3_client.assert_called_once_with("s3", config=mocker.ANY)
-    bounded = s3_client.call_args.kwargs["config"]
+    assert s3_client.call_count == 2
+    assert s3_client.call_args_list[0] == mocker.call("s3")
+    bounded = s3_client.call_args_list[1].kwargs["config"]
     assert bounded.connect_timeout == bounded.read_timeout == 2.0
     assert bounded.retries["max_attempts"] == 0
+    object_store = cast(S3ObjectStore, components.object_store)
+    readiness = cast(ProfileReadinessProbe, components.readiness)
+    assert object_store._client is normal_s3
+    assert cast(S3ObjectStore, readiness._objects)._client is readiness_s3
+    assert cast(DatabaseReadinessProbe, readiness._database)._engine is readiness_engine
+    assert components.readiness.is_ready()
+    readiness_engine.connect.assert_called_once_with()
+    readiness_engine.connect.return_value.__enter__.return_value.execute.assert_called_once()
+    readiness_s3.head_bucket.assert_called_once_with(Bucket="objects")
+    engine.connect.assert_not_called()
+    normal_s3.head_bucket.assert_not_called()
     reclaim.assert_called_once_with()
     assert components.object_store is not None
     assert components.job_repository is not None
@@ -232,7 +255,12 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     engine.dialect.name = "sqlite"
     mocker.patch("md_converter.app.create_database_engine", return_value=engine)
     mocker.patch("md_converter.app.upgrade_database")
-    files = mocker.patch("md_converter.app.FilesystemObjectStore")
+    normal_files = mocker.Mock()
+    readiness_files = mocker.Mock()
+    files = mocker.patch(
+        "md_converter.app.FilesystemObjectStore",
+        side_effect=(normal_files, readiness_files),
+    )
     standalone = Settings(
         **template_settings(),
         initial_admin_username="admin",
@@ -244,8 +272,11 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
-    assert build_components(standalone).object_store is files.return_value
-    files.assert_called_once_with(Path("/data"))
+    standalone_components = build_components(standalone)
+    assert standalone_components.object_store is normal_files
+    standalone_readiness = cast(ProfileReadinessProbe, standalone_components.readiness)
+    assert standalone_readiness._objects is readiness_files
+    assert files.call_args_list == [mocker.call(Path("/data"))] * 2
 
     s3_client = mocker.patch("md_converter.app.boto3.client")
     distributed = Settings(
@@ -266,14 +297,16 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     )
     build_components(distributed)
     assert reclaim.call_count == 2
-    s3_client.assert_called_once_with(
-        "s3",
-        endpoint_url="http://s3.test",
-        region_name="test-region",
-        aws_access_key_id="access",
-        aws_secret_access_key="secret-" + "key",
-        config=mocker.ANY,
-    )
+    common = {
+        "endpoint_url": "http://s3.test",
+        "region_name": "test-region",
+        "aws_access_key_id": "access",
+        "aws_secret_access_key": "secret-" + "key",
+    }
+    assert s3_client.call_args_list == [
+        mocker.call("s3", **common),
+        mocker.call("s3", **common, config=mocker.ANY),
+    ]
 
 
 @pytest.mark.unit

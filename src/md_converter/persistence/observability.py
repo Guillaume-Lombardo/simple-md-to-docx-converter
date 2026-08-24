@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import Engine, case, func, select
+from sqlalchemy import Engine, String, case, cast, func, literal, select, union_all
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -13,7 +13,11 @@ from md_converter.jobs.errors import JobRepositoryError
 from md_converter.jobs.models import JobState
 from md_converter.observability import AuditRecord, QueueSnapshot
 from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.schema import ConversionJobRow, TemplateAuditRow
+from md_converter.persistence.schema import (
+    AuthenticationAuditRow,
+    ConversionJobRow,
+    TemplateAuditRow,
+)
 
 
 class SqlOperationalObserver:
@@ -71,12 +75,41 @@ class SqlAuditReader:
             raise ValueError("Audit pagination values are invalid")
         try:
             with DatabaseSession(self._engine) as database:
-                rows = database.scalars(
-                    select(TemplateAuditRow)
-                    .order_by(
-                        TemplateAuditRow.created_at.desc(),
-                        TemplateAuditRow.id.desc(),
-                    )
+                combined = union_all(
+                    select(
+                        TemplateAuditRow.id.label("id"),
+                        TemplateAuditRow.actor_id.label("actor_id"),
+                        TemplateAuditRow.owner_id.label("owner_id"),
+                        TemplateAuditRow.operation.label("operation"),
+                        TemplateAuditRow.template_id.label("target_id"),
+                        literal("template").label("target_type"),
+                        TemplateAuditRow.version_id.label("target_version"),
+                        TemplateAuditRow.version_id.label("version_id"),
+                        TemplateAuditRow.administrator_intervention.label(
+                            "administrator_intervention"
+                        ),
+                        TemplateAuditRow.created_at.label("created_at"),
+                    ),
+                    select(
+                        AuthenticationAuditRow.id.label("id"),
+                        AuthenticationAuditRow.actor_id.label("actor_id"),
+                        AuthenticationAuditRow.owner_id.label("owner_id"),
+                        AuthenticationAuditRow.operation.label("operation"),
+                        AuthenticationAuditRow.target_id.label("target_id"),
+                        literal("user").label("target_type"),
+                        cast(AuthenticationAuditRow.auth_version, String).label(
+                            "target_version"
+                        ),
+                        literal(None, type_=String).label("version_id"),
+                        AuthenticationAuditRow.administrator_intervention.label(
+                            "administrator_intervention"
+                        ),
+                        AuthenticationAuditRow.created_at.label("created_at"),
+                    ),
+                ).subquery()
+                rows = database.execute(
+                    select(combined)
+                    .order_by(combined.c.created_at.desc(), combined.c.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )
@@ -86,7 +119,9 @@ class SqlAuditReader:
                         actor_id=UUID(row.actor_id),
                         owner_id=UUID(row.owner_id),
                         operation=row.operation,
-                        target_id=UUID(row.template_id),
+                        target_id=UUID(row.target_id),
+                        target_type=row.target_type,
+                        target_version=row.target_version,
                         version_id=UUID(row.version_id) if row.version_id else None,
                         administrator_intervention=row.administrator_intervention,
                         created_at=_required_utc(row.created_at),

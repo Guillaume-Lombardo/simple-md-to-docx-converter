@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session as DatabaseSession
 
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.schema import (
+    AuthenticationAuditRow,
     ConversionJobRow,
     RetentionCleanupRunRow,
     TemplateAuditRow,
@@ -144,9 +145,9 @@ class SqlRetentionRepository:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
-                candidates = tuple(
-                    database.scalars(
-                        select(TemplateAuditRow.id)
+                template_candidates = tuple(
+                    database.execute(
+                        select(TemplateAuditRow.id, TemplateAuditRow.created_at)
                         .where(TemplateAuditRow.created_at < cutoff_at)
                         .order_by(TemplateAuditRow.created_at, TemplateAuditRow.id)
                         .limit(limit)
@@ -155,14 +156,54 @@ class SqlRetentionRepository:
                         )
                     )
                 )
-                removed = 0
-                if candidates:
-                    result = database.execute(
-                        delete(TemplateAuditRow).where(
-                            TemplateAuditRow.id.in_(candidates)
+                authentication_candidates = tuple(
+                    database.execute(
+                        select(
+                            AuthenticationAuditRow.id,
+                            AuthenticationAuditRow.created_at,
+                        )
+                        .where(AuthenticationAuditRow.created_at < cutoff_at)
+                        .order_by(
+                            AuthenticationAuditRow.created_at,
+                            AuthenticationAuditRow.id,
+                        )
+                        .limit(limit)
+                        .with_for_update(
+                            skip_locked=self._engine.dialect.name == "postgresql"
                         )
                     )
-                    removed = int(getattr(result, "rowcount", 0))
+                )
+                candidates = sorted(
+                    [
+                        (self._utc(row.created_at), row.id, "template")
+                        for row in template_candidates
+                    ]
+                    + [
+                        (self._utc(row.created_at), row.id, "authentication")
+                        for row in authentication_candidates
+                    ]
+                )[:limit]
+                removed = 0
+                if candidates:
+                    template_ids = [
+                        candidate[1]
+                        for candidate in candidates
+                        if candidate[2] == "template"
+                    ]
+                    authentication_ids = [
+                        candidate[1]
+                        for candidate in candidates
+                        if candidate[2] == "authentication"
+                    ]
+                    for row_type, identifiers in (
+                        (TemplateAuditRow, template_ids),
+                        (AuthenticationAuditRow, authentication_ids),
+                    ):
+                        if identifiers:
+                            result = database.execute(
+                                delete(row_type).where(row_type.id.in_(identifiers))
+                            )
+                            removed += int(getattr(result, "rowcount", 0))
                 database.add(
                     RetentionCleanupRunRow(
                         id=str(uuid4()),

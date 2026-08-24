@@ -10,13 +10,21 @@ from sqlalchemy import delete, text
 from sqlalchemy.engine import make_url
 
 from md_converter.app import create_app
-from md_converter.auth.models import Role, User
+from md_converter.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    Role,
+    User,
+)
 from md_converter.config import Settings
 from md_converter.jobs.models import JobOutput, JobRequest
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.observability import SqlOperationalObserver
+from md_converter.persistence.observability import (
+    SqlAuditReader,
+    SqlOperationalObserver,
+)
 from md_converter.persistence.schema import UserRow
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
 from md_converter.storage import FilesystemObjectStore
@@ -36,12 +44,42 @@ def test_postgresql_queue_observation_matches_standalone_contract(tmp_path) -> N
     engine = create_database_engine(isolated_url)
     try:
         upgrade_database(engine)
+        now = datetime(2026, 8, 24, 20, tzinfo=UTC)
         owner = User(uuid4(), "Owner", "owner", "hash:owner", Role.USER)
-        SqlUserRepository(engine).create(owner)
+        users = SqlUserRepository(engine)
+        users.create(
+            owner,
+            audit=AuthenticationAuditContext(
+                uuid4(), owner.id, AuthenticationAuditOperation.CREATE, now
+            ),
+        )
+        users.update_security(
+            owner.id,
+            active=False,
+            audit=AuthenticationAuditContext(
+                uuid4(),
+                owner.id,
+                AuthenticationAuditOperation.DEACTIVATE,
+                now + timedelta(seconds=1),
+            ),
+        )
+        with pytest.raises(KeyError):
+            users.create(
+                User(uuid4(), "OWNER", "owner", "private-duplicate", Role.USER),
+                audit=AuthenticationAuditContext(
+                    uuid4(), owner.id, AuthenticationAuditOperation.CREATE, now
+                ),
+            )
+        audits = SqlAuditReader(engine).list_recent(offset=0, limit=10)
+        assert [record.operation for record in audits] == [
+            "user_deactivate",
+            "user_create",
+        ]
+        assert audits[0].target_type == "user"
+        assert audits[0].target_version == "1"
         template_id, version_id = uuid4(), uuid4()
         publish_template_pair(engine, owner.id, template_id, version_id)
         repository = SqlJobRepository(engine)
-        now = datetime(2026, 8, 24, 20, tzinfo=UTC)
         job, _ = JobService(
             repository, FilesystemObjectStore(tmp_path), JobServicePolicy(3_600)
         ).submit(

@@ -171,6 +171,8 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             "owner_id": str(owner_id),
             "operation": "create",
             "target_id": str(template_id),
+            "target_type": "template",
+            "target_version": str(template_version_id),
             "version_id": str(template_version_id),
             "administrator_intervention": False,
             "created_at": audits.json()[0]["created_at"],
