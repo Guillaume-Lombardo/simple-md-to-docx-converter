@@ -2,7 +2,7 @@
 ticket: T13
 linear_id: G1L-322
 linear_url: https://linear.app/g1lom/issue/G1L-322/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -64,6 +64,11 @@ Implement the persistent queue, job API, state machine, idempotency, workers, le
 - 2026-08-24: Published ready pull request
   [#44](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/44) after the branch
   was rebased on `origin/main`. Awaiting required GitHub checks before authorized squash merge.
+- 2026-08-24: Pull request #44 passed every required GitHub check, including the document-engine,
+  functional, standalone-storage, distributed-storage, and protected gate jobs. It was
+  squash-merged as `bb5c1d0` and verified on `main`; the exact source branch was removed locally
+  and remotely. The approved final-image E2E sequencing remains tracked by T20/T21 and is not a
+  waiver of that validation.
 
 ## Synchronization
 
