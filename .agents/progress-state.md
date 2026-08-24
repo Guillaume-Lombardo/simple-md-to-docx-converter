@@ -9,9 +9,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean and matches `origin/main`; delivered history through T04 PR #32 is verified below.
-- T00, T01, T02, T03, T04, T05, T06, T12, and T14 are delivered. Linear G1L-310 and G1L-314 are
-  synchronized as `Done`; T07 is active on `feat/T07-pandoc-docx`.
+- `main` is clean and matches `origin/main`; delivered history through T07 PR #34 is verified below.
+- T00, T01, T02, T03, T04, T05, T06, T07, T12, and T14 are delivered. Linear G1L-310 and G1L-314
+  are synchronized as `Done`; G1L-317 remains `In Progress` until this T07 completion sync reaches
+  `main`.
 - PR #32 delivered the complete manifest-owned corpus, provenance-pinned generated
   DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
   RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
@@ -74,12 +75,11 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   explicitly.
 - A manifest-owned reference corpus with deterministic synthetic fixtures, bounded OpenXML and
   raster comparison helpers, reusable Pytest fixtures, and an active document-engine CI domain.
-- T07 is implemented locally on `feat/T07-pandoc-docx`: extension-aware raw-HTML and URI rejection,
-  fixed Pandoc DOCX invocation, isolated workspaces and environment, process-group timeout cleanup,
-  stable content-free failures, minimum generated-DOCX validation, and exact Pandoc 3.10.2
-  OpenXML integration coverage. Exact implementation head
-  `7a4acaf3dd26ed4c1750fe9730ffa91345e94631` received independent approval with no findings; it is
-  not delivered until its pull request and exact squash are verified on `main`.
+- T07 is delivered by PR #34 as squash `14acfe20d6ee2e4c8fef852134802e203becd4c3`:
+  extension-aware raw-HTML/raw-format and URI rejection, fixed Pandoc DOCX invocation, isolated
+  workspaces and deterministic environment, process-group timeout cleanup, stable content-free
+  failures, minimum generated-DOCX validation, and exact Pandoc 3.10.2 OpenXML integration
+  coverage. Its exact squash passed every active CI domain on `main`.
 
 ## Blockers and Risks
 
@@ -96,9 +96,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Complete independent review and main verification of T07 without absorbing T08 image/archive
-   security, T09 Mermaid, T10 template/font, T11 PDF, or T18 production-limit responsibilities.
-   T08 still waits for T07, and T13 still waits for T11.
+1. Publish and verify the T07 completion sync, transition Linear G1L-317 to `Done`, then start T08
+   image/archive security without absorbing T09 Mermaid, T10 template/font, T11 PDF, or T18
+   production-limit responsibilities. T13 still waits for T11.
 2. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 3. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -127,9 +127,9 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310 and G1L-314 report `Done` and match their local mirrors. T07/G1L-317 is tracked as
-  `In Progress`; its T04 and T06 dependencies are both verified `Done`, and its local implementation
-  commit is under independent review.
+- Linear G1L-310 and G1L-314 report `Done` and match their local mirrors. T07/G1L-317 remains
+  `In Progress` only until this verified completion sync reaches `main`; its T04 and T06
+  dependencies are both verified `Done`.
 - T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
   coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
   tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
@@ -142,6 +142,12 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   LibreOffice suites were intentionally left to orchestrated environments; the two canonical
   external-service commands were not claimed. T07 has no delivered user-visible or operational
   workflow, so final-image E2E is not applicable and remains with T20/T21.
+- PR #34 exact head `72d43180da90b7f648d2b3616870e230a08b9198` received independent
+  approval with no findings, passed run `32700356579`, and was squash-merged as
+  `14acfe20d6ee2e4c8fef852134802e203becd4c3`. Exact-main run `32700452055` passed light,
+  CI infrastructure, functional, document-engine, standalone-storage, distributed-storage, and
+  protected-gate jobs. The real Pandoc 3.10.2 suite and both real storage profiles are therefore
+  verified on the delivered squash.
 - T00 Docker and rootless Podman harnesses pass tmpfs, disk-backed, security, and failure probes;
   Chrome renders successfully in the locked minimum Podman profile while runtime-default and
   forbidden relaxations fail closed.

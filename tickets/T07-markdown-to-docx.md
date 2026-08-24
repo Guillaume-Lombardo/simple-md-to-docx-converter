@@ -2,7 +2,7 @@
 ticket: T07
 linear_id: G1L-317
 linear_url: https://linear.app/g1lom/issue/G1L-317/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -35,6 +35,7 @@ Convert the fixed Markdown dialect to DOCX with fixed Pandoc arguments, isolated
 - 2026-08-24: T04 and T06 are verified `Done` in the repository and Linear. T07 implementation started on `feat/T07-pandoc-docx` to add the fixed Markdown dialect, mandatory pre-Pandoc raw-HTML rejection, an isolated-workspace Pandoc adapter with fixed arguments and an explicit environment, reference-document support, stable errors, and real Pandoc/OpenXML integration coverage. T08 archive/image security, T09 Mermaid, T10 font/template validation, T11 PDF, and T18 production limits remain outside this ticket.
 - 2026-08-24: Implemented the fixed reader, extension-aware pre-engine validation for raw HTML, Pandoc raw-code attributes, and URI destinations, rejection of all image tokens until T08 supplies workspace-confined approved assets, isolated subprocess and process-group lifecycle, stable content-free failures, minimum generated-DOCX checks, documentation, and exact Pandoc 3.10.2 OpenXML integration coverage. CI now installs the checksum-locked official Pandoc artifact only for the document-engine domain. Final-image E2E is not applicable to this internal synchronous component; T20/T21 own the delivered asynchronous workflow. The ticket remains `In Progress` until the change is independently reviewed, merged, and verified on `main`. Linear was intentionally not mutated during this authorized local-only implementation pass.
 - 2026-08-24: Independent review approved exact implementation head `7a4acaf3dd26ed4c1750fe9730ffa91345e94631` with no remaining findings after differential Pandoc 3.10.2 checks covered raw HTML/TeX attributes, Unicode raw-format names, YAML recursion and escapes, URI/image rejection, and cleanup failures. The reviewer explicitly approved the final-image E2E exception for this internal synchronous component; T20/T21 retain the final rootless asynchronous workflow. T07 remains `In Progress` until the pull request is merged and its exact squash is verified on `main`.
+- 2026-08-24: GitHub PR #34 exact head `72d43180da90b7f648d2b3616870e230a08b9198` passed run `32700356579`, including the real Pandoc 3.10.2 document-engine suite, both storage profiles, changed-line and branch coverage, and the protected gate. It was squash-merged as `14acfe20d6ee2e4c8fef852134802e203becd4c3`; exact-main run `32700452055` passed every active domain and the protected gate. T07 is verified `Done` on `main`; Linear transitions to `Done` after this durable completion sync reaches `main`.
 
 ## Synchronization
 
