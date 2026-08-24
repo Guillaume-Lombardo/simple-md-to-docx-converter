@@ -126,17 +126,18 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
-- Linear G1L-310 and G1L-314 report `Done` and match their local mirrors. Linear G1L-317 reports
-  `Backlog` before this start sync; its T04 and T06 dependencies are both verified `Done`.
+- Linear G1L-310 and G1L-314 report `Done` and match their local mirrors. T07/G1L-317 is tracked as
+  `In Progress`; its T04 and T06 dependencies are both verified `Done`, and its local implementation
+  commit is under independent review.
 - T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
   coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
   tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
   commands reach the expected 10 PostgreSQL/RustFS failures because this worktree has no test-service
   environment variables; all other 298 tests pass. T04 has no user-visible or operational workflow,
   so final-image E2E coverage is not applicable.
-- T07 formatting, Ruff, and ty checks pass. Its conversion/CI-focused selection passes 69 tests,
+- T07 formatting, Ruff, and ty checks pass. Its conversion/CI-focused selection passes 74 tests,
   the exact Pandoc 3.10.2 integration module passes 6 tests, and the service-independent selection
-  passes 360 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
+  passes 365 tests at 97% application coverage. PostgreSQL, RustFS, Mermaid/Chromium, and
   LibreOffice suites were intentionally left to orchestrated environments; the two canonical
   external-service commands were not claimed. T07 has no delivered user-visible or operational
   workflow, so final-image E2E is not applicable and remains with T20/T21.

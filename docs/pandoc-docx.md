@@ -19,7 +19,8 @@ rejected. The validator rejects raw HTML and every link or image destination tha
 protocol-relative form, or encoded equivalent. The same conservative checks apply inside YAML
 front matter and footnote continuations, where extension syntax could otherwise hide content from
 a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual code spans and code
-blocks.
+blocks. All image tokens, including relative and absolute local paths, are rejected until T08 can
+materialize a typed approved asset inside the workspace; T07 does not read document-selected files.
 
 This validation prevents Pandoc from fetching a remote destination supplied by a document. T07
 does not claim operating-system network isolation; final runtime network policy belongs to the
@@ -31,8 +32,9 @@ the approved local-resource behavior that T08 must implement and test.
 Each conversion uses a new temporary workspace containing only the Markdown input, opaque reference
 DOCX, isolated home/cache/config/data/temp directories, and generated output. Pandoc receives no
 shell, no standard input or captured document output, a process group of its own, and only the
-allowlisted `LANG`, `LC_ALL`, `PATH`, and `TZ` host variables plus workspace-local directory
-variables.
+explicitly supplied `PATH`, fixed `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `TZ=UTC`, plus
+workspace-local directory variables. Host locale, timezone, and unrelated environment values are
+not inherited.
 
 The arguments are fixed to the approved reader, DOCX writer, workspace reference document,
 workspace resource path, and fixed input/output names. There are no user-controlled options,
@@ -44,7 +46,8 @@ terminated and then killed after its configured grace period.
 
 The component exposes content-free categories suitable for later API/job translation:
 
-- `validation`: empty input, invalid YAML metadata, raw HTML, or forbidden resource destination;
+- `validation`: empty input, invalid YAML metadata, raw HTML, forbidden resource destination, or
+  an image not materialized and approved by T08;
 - `workspace_failure`: workspace creation, preparation, output read, or cleanup failure;
 - `pandoc_unavailable`: the configured executable cannot start;
 - `pandoc_timeout`: conversion exceeds its configured deadline;

@@ -110,6 +110,28 @@ def test_extension_context_cannot_hide_resource_destination(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "image",
+    [
+        "![absolute](/etc/private.png)",
+        "![escaping](../private.png)",
+        "![relative](assets/local.png)",
+        "![fragment](#local-image)",
+    ],
+)
+def test_local_images_are_rejected_until_t08_materializes_approved_assets(
+    mocker, image: str
+) -> None:
+    converter = mocker.Mock()
+    service = DocxConversionService(converter)
+    with pytest.raises(ConversionError) as captured:
+        service.convert(image, b"reference")
+    assert captured.value.code is ConversionErrorCode.VALIDATION
+    assert str(captured.value) == "Markdown input contains an unapproved image."
+    converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
 def test_code_can_show_html_and_urls_as_literal_examples() -> None:
     markdown = """Inline `<span>
 https://example.test</span>`.

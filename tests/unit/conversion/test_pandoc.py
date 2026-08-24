@@ -27,8 +27,10 @@ def converter(tmp_path: Path) -> PandocDocxConverter:
     return PandocDocxConverter(
         PandocConfig("pandoc", 5.0, 0.5, tmp_path),
         {
-            "LANG": "C.UTF-8",
+            "LANG": "host-dependent",
+            "LC_ALL": "host-dependent",
             "PATH": "/approved/bin",
+            "TZ": "host-dependent",
             "SECRET_VALUE": "must-not-pass",
         },
     )
@@ -63,13 +65,18 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
         assert set(options["env"]) == {
             "HOME",
             "LANG",
+            "LC_ALL",
             "PATH",
             "TMPDIR",
+            "TZ",
             "XDG_CACHE_HOME",
             "XDG_CONFIG_HOME",
             "XDG_DATA_HOME",
         }
         assert "SECRET_VALUE" not in options["env"]
+        assert options["env"]["LANG"] == "C.UTF-8"
+        assert options["env"]["LC_ALL"] == "C.UTF-8"
+        assert options["env"]["TZ"] == "UTC"
         return process
 
     popen = mocker.patch(
@@ -78,6 +85,30 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
     result = converter(tmp_path).convert(ApprovedMarkdown("# Safe"), reference)
     assert result == reference
     assert popen.call_count == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.unit
+def test_each_conversion_uses_a_distinct_cleaned_workspace(
+    tmp_path: Path, mocker
+) -> None:
+    reference = minimal_docx()
+    workspaces: list[Path] = []
+    process = mocker.Mock()
+    process.wait.return_value = 0
+
+    def start(_arguments, **options):
+        workspace = options["cwd"]
+        workspaces.append(workspace)
+        (workspace / "output.docx").write_bytes(reference)
+        return process
+
+    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    adapter = converter(tmp_path)
+    adapter.convert(ApprovedMarkdown("# First"), reference)
+    adapter.convert(ApprovedMarkdown("# Second"), reference)
+    assert len(set(workspaces)) == 2
+    assert all(not workspace.exists() for workspace in workspaces)
     assert list(tmp_path.iterdir()) == []
 
 

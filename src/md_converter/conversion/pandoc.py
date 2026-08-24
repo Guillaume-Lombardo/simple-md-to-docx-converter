@@ -22,7 +22,6 @@ from md_converter.conversion.validation import (
     validate_markdown,
 )
 
-_ALLOWED_ENVIRONMENT = frozenset({"LANG", "LC_ALL", "PATH", "TZ"})
 _REQUIRED_DOCX_PARTS = frozenset(
     {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
 )
@@ -89,11 +88,9 @@ class PandocDocxConverter:
         self._host_environment = dict(host_environment)
 
     def _environment(self, workspace: Path) -> dict[str, str]:
-        environment = {
-            key: value
-            for key, value in self._host_environment.items()
-            if key in _ALLOWED_ENVIRONMENT
-        }
+        environment = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"}
+        if "PATH" in self._host_environment:
+            environment["PATH"] = self._host_environment["PATH"]
         environment.update(
             {
                 "HOME": str(workspace / "home"),

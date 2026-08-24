@@ -85,6 +85,8 @@ def _validate_tokens(tokens: tuple[Token, ...]) -> None:
         resource = token.attrGet("src") or token.attrGet("href")
         if isinstance(resource, str) and _REMOTE_RESOURCE.search(resource):
             raise validation_error("Markdown input contains a remote resource.")
+        if token.type == "image":
+            raise validation_error("Markdown input contains an unapproved image.")
 
 
 def validate_markdown(markdown: str) -> ApprovedMarkdown:
