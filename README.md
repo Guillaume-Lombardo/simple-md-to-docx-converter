@@ -4,6 +4,7 @@ This repository contains the foundation for a service that will convert Markdown
 DOCX and PDF. It currently provides local authentication, administrative account management,
 revocable sessions, health endpoints, and durable standalone or distributed storage profiles.
 It also provides a versioned template API with ownership, visibility-aware search, preferences,
+full T10 Pandoc/LibreOffice activation, immutable font-validation evidence,
 safe downloads, optimistic concurrency, immutable history, restoration, audit, and guarded
 deletion across both storage profiles. The internal conversion component now validates standalone Markdown or bounded ZIP
 packages, binds and normalizes approved local images, sanitizes and rasterizes untrusted SVG,

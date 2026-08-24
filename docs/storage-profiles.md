@@ -5,6 +5,34 @@ rejects mixed or incomplete profile settings before adapters are constructed. Al
 when the application components are assembled; the standalone profile has one replica, while the
 distributed migration runner uses the same schema history for PostgreSQL.
 
+Both profiles require explicit template activation policy; there are no production defaults:
+
+```text
+MD_CONVERTER_TEMPLATE_MAX_ARCHIVE_BYTES=<approved value>
+MD_CONVERTER_TEMPLATE_REQUEST_MAX_BYTES=<approved value greater than archive limit>
+MD_CONVERTER_TEMPLATE_METADATA_REQUEST_MAX_BYTES=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_NAME_CHARACTERS=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_DESCRIPTION_CHARACTERS=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_ENTRIES=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_MEMBER_BYTES=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_TOTAL_BYTES=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_COMPRESSION_RATIO=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_XML_ELEMENTS=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_XML_DEPTH=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_XML_ATTRIBUTES=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_DECLARED_FONTS=<approved value>
+MD_CONVERTER_TEMPLATE_MAX_FONT_NAME_CHARACTERS=<approved value>
+MD_CONVERTER_TEMPLATE_PANDOC_EXECUTABLE=<approved executable path>
+MD_CONVERTER_TEMPLATE_LIBREOFFICE_EXECUTABLE=<approved executable path>
+MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=<approved value>
+MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=<approved value>
+MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
+```
+
+Template activation invokes both configured document engines synchronously inside a bounded worker
+thread, so request handlers do not block the ASGI event loop. Startup also retries durable hidden
+publication reservations and deletion tombstones before accepting traffic.
+
 ## Standalone
 
 Set:
@@ -16,8 +44,6 @@ MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
 MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
 MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
 MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_ARCHIVE_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_REQUEST_MAX_BYTES=<approved value greater than archive limit>
 ```
 
 Metadata is stored in `/data/metadata.sqlite3`. Object bytes are stored below `/data/objects`;
@@ -52,8 +78,6 @@ MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
 MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
 MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
 MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_ARCHIVE_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_REQUEST_MAX_BYTES=<approved value greater than archive limit>
 ```
 
 `MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.

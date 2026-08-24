@@ -1,5 +1,6 @@
 """Functional ASGI coverage for the versioned template HTTP contract."""
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -7,15 +8,33 @@ from fastapi.testclient import TestClient
 
 from md_converter.app import create_app
 from md_converter.config import Settings
+from tests.settings import template_settings
 from tests.unit.test_template_validation import _docx
 
 pytestmark = pytest.mark.functional
 
 
 def _client(tmp_path: Path) -> TestClient:
+    engine = tmp_path / "template-engine"
+    engine.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, shutil, sys\n"
+        "args=sys.argv[1:]\n"
+        "reference=next((x.split('=',1)[1] for x in args if x.startswith('--reference-doc=')), None)\n"
+        "output=next((x.split('=',1)[1] for x in args if x.startswith('--output=')), None)\n"
+        "if reference and output: shutil.copyfile(reference, output)\n"
+        "elif '--outdir' in args:\n"
+        " source=pathlib.Path(args[-1]); target=pathlib.Path(args[args.index('--outdir')+1])/source.name; shutil.copyfile(source,target)\n",
+        encoding="utf-8",
+    )
+    engine.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     return TestClient(
         create_app(
             Settings(
+                **template_settings(
+                    template_pandoc_executable=str(engine),
+                    template_libreoffice_executable=str(engine),
+                ),
                 initial_admin_username="Admin",
                 initial_admin_password="admin-" + "password",
                 argon2_memory_cost=8,
@@ -55,7 +74,11 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
         created = admin.post(
             "/api/v1/templates",
             headers={"X-CSRF-Token": admin_csrf},
-            data={"name": "Finance", "description": "Quarterly"},
+            data={
+                "name": "Finance",
+                "description": "Quarterly",
+                "expected_fonts": ["Calibri", "Cambria", "Courier New"],
+            },
             files={
                 "content": ("hostile-name.docx", _docx(), "application/octet-stream")
             },
@@ -97,6 +120,7 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
             files={
                 "content": ("replacement.docx", _docx(), "application/octet-stream")
             },
+            data={"expected_fonts": ["Calibri", "Cambria", "Courier New"]},
         )
         assert replaced.status_code == 201
         versions = admin.get(f"/api/v1/templates/{template_id}/versions").json()
@@ -148,7 +172,11 @@ def test_invalid_template_is_sanitized_and_never_published(tmp_path: Path) -> No
         response = client.post(
             "/api/v1/templates",
             headers={"X-CSRF-Token": csrf},
-            data={"name": "Unsafe", "description": "Rejected"},
+            data={
+                "name": "Unsafe",
+                "description": "Rejected",
+                "expected_fonts": "Calibri",
+            },
             files={
                 "content": ("secret.docx", b"not-a-docx", "application/octet-stream")
             },
@@ -159,7 +187,11 @@ def test_invalid_template_is_sanitized_and_never_published(tmp_path: Path) -> No
         blank = client.post(
             "/api/v1/templates",
             headers={"X-CSRF-Token": csrf},
-            data={"name": "   ", "description": "Rejected"},
+            data={
+                "name": "   ",
+                "description": "Rejected",
+                "expected_fonts": "Calibri",
+            },
             files={"content": ("safe.docx", _docx(), "application/octet-stream")},
         )
         assert blank.status_code == 422

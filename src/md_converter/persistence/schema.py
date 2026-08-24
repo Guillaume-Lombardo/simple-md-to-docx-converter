@@ -72,6 +72,10 @@ class TemplateRow(Base):
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_templates_status"),
         CheckConstraint(
+            "publication_state IN ('pending', 'published', 'deleting')",
+            name="ck_templates_publication_state",
+        ),
+        CheckConstraint(
             "normalized_name <> ''", name="ck_templates_normalized_name_nonempty"
         ),
     )
@@ -87,6 +91,9 @@ class TemplateRow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     current_version_id: Mapped[str | None] = mapped_column(String(36))
+    publication_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="published"
+    )
 
 
 class TemplateVersionRow(Base):
@@ -98,6 +105,11 @@ class TemplateVersionRow(Base):
         CheckConstraint("size > 0", name="ck_template_versions_size"),
         UniqueConstraint(
             "template_id", "version_number", name="uq_template_versions_number"
+        ),
+        UniqueConstraint("template_id", "id", name="uq_template_versions_pair"),
+        CheckConstraint(
+            "publication_state IN ('pending', 'published')",
+            name="ck_template_versions_publication_state",
         ),
     )
 
@@ -114,6 +126,12 @@ class TemplateVersionRow(Base):
     )
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     restored_from_version_id: Mapped[str | None] = mapped_column(String(36))
+    declared_fonts: Mapped[str] = mapped_column(String(), nullable=False)
+    resolved_fonts: Mapped[str] = mapped_column(String(), nullable=False)
+    validation_trace: Mapped[str] = mapped_column(String(), nullable=False)
+    publication_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
 
 
 class TemplateAuditRow(Base):

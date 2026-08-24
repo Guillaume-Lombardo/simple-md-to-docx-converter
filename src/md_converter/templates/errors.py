@@ -22,6 +22,10 @@ class TemplateStorageError(RuntimeError):
     """Template metadata or content storage failed without leaking details."""
 
 
+class TemplateIntegrityError(RuntimeError):
+    """Persisted bytes do not match immutable template metadata."""
+
+
 class TemplateRequestError(ValueError):
     """User-supplied template metadata is invalid."""
 

@@ -25,6 +25,17 @@ from md_converter.templates.models import (
     TemplateVersion,
 )
 from md_converter.templates.service import TemplateOperation, TemplateService
+from md_converter.templates.validation import ValidatedTemplate
+
+
+def _validated(data: bytes) -> ValidatedTemplate:
+    return ValidatedTemplate(
+        hashlib.sha256(data).hexdigest(),
+        ("word/document.xml",),
+        ("Calibri",),
+        ("Calibri",),
+        (("Calibri", "Carlito"),),
+    )
 
 
 @pytest.mark.unit
@@ -114,25 +125,46 @@ def test_versioned_service_delegates_complete_immutable_lifecycle(
         catalog=catalog,
         selections=selections,
         objects=objects,
-        validate_content=lambda data: hashlib.sha256(data).hexdigest(),
+        validate_content=lambda data, _declaration: _validated(data),
         clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
     )
-    catalog.create_versioned.side_effect = lambda template, _version, _audit: template
+    catalog.reserve_create.return_value = None
+    catalog.finalize_version.side_effect = lambda _template_id, **values: (
+        TemplateIdentity(
+            template_id,
+            owner.id,
+            "Name",
+            "Description",
+            TemplateStatus.ACTIVE,
+            current_version_id=values["version_id"],
+        )
+    )
     created, first = service.create_versioned(
-        owner, TemplateCreate(template_id, "Name", "Description"), b"first"
+        owner,
+        TemplateCreate(template_id, "Name", "Description"),
+        b"first",
+        ("Calibri",),
     )
     assert created.current_version_id == first.id
     assert first.number == 1
 
     catalog.get.return_value = created
     catalog.list_versions.return_value = (first,)
-    catalog.publish_version.side_effect = lambda _template_id, **values: replace(
+    catalog.reserve_version.side_effect = lambda _template_id, **values: replace(
+        values["version"],
+        number=3 if values["version"].restored_from_version_id else 2,
+    )
+    catalog.finalize_version.side_effect = lambda _template_id, **values: replace(
         created,
         revision=values["expected_revision"] + 1,
-        current_version_id=values["version"].id,
+        current_version_id=values["version_id"],
     )
     replaced, second = service.replace(
-        owner, template_id, expected_revision=1, content=b"second"
+        owner,
+        template_id,
+        expected_revision=1,
+        content=b"second",
+        expected_fonts=("Calibri",),
     )
     assert replaced.revision == 2
     assert second.number == 2
@@ -169,10 +201,11 @@ def test_versioned_service_delegates_complete_immutable_lifecycle(
     catalog.list_versions.return_value = (third, second, first)
     assert service.list_versions(owner, template_id)[0] == third
     catalog.get_version.return_value = second
-    assert service.download(owner, template_id, second.id)[2] == b"first"
+    objects.get.return_value = b"second"
+    assert service.download(owner, template_id, second.id)[2] == b"second"
     assert service.resolve_frozen_version(template_id, second.id)[0] == second
 
-    catalog.delete_guarded.return_value = (first, second, third)
+    catalog.begin_delete.return_value = (first, second, third)
     service.delete(owner, template_id, expected_revision=5)
     assert objects.delete.call_count >= 3
 
@@ -194,17 +227,32 @@ def test_versioned_service_compensates_and_sanitizes_storage_failures(  # noqa: 
         catalog=catalog,
         selections=selections,
         objects=objects,
-        validate_content=lambda data: hashlib.sha256(data).hexdigest(),
+        validate_content=lambda data, _declaration: _validated(data),
     )
-    catalog.publish_version.side_effect = PersistenceError
+    catalog.reserve_version.side_effect = lambda _template_id, **values: values[
+        "version"
+    ]
+    catalog.finalize_version.side_effect = PersistenceError
     with pytest.raises(PersistenceError):
-        service.replace(owner, template.id, expected_revision=1, content=b"content")
+        service.replace(
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"content",
+            expected_fonts=("Calibri",),
+        )
     objects.delete.assert_called_once()
 
     objects.reset_mock()
     objects.put.side_effect = ObjectStoreError("private marker")
     with pytest.raises(TemplateStorageError) as caught:
-        service.replace(owner, template.id, expected_revision=1, content=b"secret")
+        service.replace(
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"secret",
+            expected_fonts=("Calibri",),
+        )
     assert "private" not in repr(caught.value)
 
     objects.put.side_effect = None
@@ -232,7 +280,13 @@ def test_versioned_service_compensates_and_sanitizes_storage_failures(  # noqa: 
 
     catalog.get.return_value = replace(template, status=TemplateStatus.ARCHIVED)
     with pytest.raises(TemplateConflictError):
-        service.replace(owner, template.id, expected_revision=1, content=b"content")
+        service.replace(
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"content",
+            expected_fonts=("Calibri",),
+        )
 
     catalog.get.return_value = template
     catalog.get_version.return_value = None
@@ -255,3 +309,69 @@ def test_versioned_service_compensates_and_sanitizes_storage_failures(  # noqa: 
     catalog.get.return_value = template
     service.set_system_fallback(admin, template.id)
     selections.set_system_fallback_audited.assert_called_once()
+
+
+@pytest.mark.unit
+def test_pending_object_and_deletion_failures_remain_retryable(
+    mocker: MockerFixture,
+) -> None:
+    owner = User(uuid4(), "Owner", "owner", "hash", Role.USER)
+    template = TemplateIdentity(
+        uuid4(), owner.id, "Name", "Description", TemplateStatus.ARCHIVED, 2, uuid4()
+    )
+    version = TemplateVersion(
+        template.current_version_id or uuid4(),
+        template.id,
+        1,
+        owner.id,
+        hashlib.sha256(b"content").hexdigest(),
+        len(b"content"),
+        datetime.now(UTC),
+        owner.id,
+        declared_fonts=("Calibri",),
+        resolved_fonts=(("Calibri", "Carlito"),),
+        validation_trace=("static_ooxml",),
+    )
+    catalog = mocker.Mock()
+    catalog.get.return_value = replace(template, status=TemplateStatus.ACTIVE)
+    catalog.reserve_version.return_value = replace(version, publication_state="pending")
+    catalog.finalize_version.side_effect = PersistenceError
+    objects = mocker.Mock(spec=ObjectStore)
+    objects.delete.side_effect = ObjectStoreError
+    service = TemplateService(
+        catalog=catalog,
+        selections=mocker.Mock(),
+        objects=objects,
+        validate_content=lambda data, _declaration: _validated(data),
+    )
+
+    with pytest.raises(PersistenceError):
+        service.replace(
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"content",
+            expected_fonts=("Calibri",),
+        )
+    catalog.abort_pending.assert_not_called()
+
+    catalog.pending_versions.return_value = (version,)
+    catalog.pending_deletions.return_value = ()
+    objects.delete.side_effect = None
+    assert service.reclaim_pending() == 1
+    catalog.abort_pending.assert_called_once_with(template.id, version.id)
+
+    catalog.reset_mock()
+    objects.reset_mock()
+    catalog.get.return_value = template
+    catalog.begin_delete.return_value = (version,)
+    objects.delete.side_effect = ObjectStoreError
+    with pytest.raises(TemplateStorageError):
+        service.delete(owner, template.id, expected_revision=2)
+    catalog.finalize_delete.assert_not_called()
+
+    objects.delete.side_effect = None
+    catalog.pending_versions.return_value = ()
+    catalog.pending_deletions.return_value = ((template.id, (version,)),)
+    assert service.reclaim_pending() == 1
+    catalog.finalize_delete.assert_called_once_with(template.id)

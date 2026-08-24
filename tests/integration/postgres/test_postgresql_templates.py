@@ -36,6 +36,7 @@ from md_converter.templates.models import (
     TemplateStatus,
 )
 from md_converter.templates.service import TemplateService
+from md_converter.templates.validation import ValidatedTemplate
 from tests.storage_contracts import (
     exercise_template_repository_contract,
     exercise_template_service_contract,
@@ -156,12 +157,21 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:
         catalog=SqlTemplateCatalogRepository(engine),
         selections=SqlTemplateSelectionRepository(engine),
         objects=objects,
-        validate_content=lambda data: hashlib.sha256(data).hexdigest(),
+        validate_content=lambda data, _declaration: ValidatedTemplate(
+            hashlib.sha256(data).hexdigest(),
+            ("word/document.xml",),
+            ("Calibri",),
+            ("Calibri",),
+            (("Calibri", "Carlito"),),
+        ),
         clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
     )
     try:
         template, first = service.create_versioned(
-            owner, TemplateCreate(uuid4(), "Distributed", "RustFS"), b"first"
+            owner,
+            TemplateCreate(uuid4(), "Distributed", "RustFS"),
+            b"first",
+            ("Calibri",),
         )
         with pytest.raises(SQLAlchemyError), engine.begin() as connection:
             connection.execute(
@@ -169,11 +179,27 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:
                 .where(TemplateVersionRow.id == str(first.id))
                 .values(sha256="f" * 64)
             )
+        with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+            connection.execute(
+                update(TemplateVersionRow)
+                .where(TemplateVersionRow.id == str(first.id))
+                .values(publication_state="pending")
+            )
+        with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+            connection.execute(
+                update(TemplateRow)
+                .where(TemplateRow.id == str(template.id))
+                .values(publication_state="pending")
+            )
 
         def replace(content: bytes) -> object:
             try:
                 return service.replace(
-                    owner, template.id, expected_revision=1, content=content
+                    owner,
+                    template.id,
+                    expected_revision=1,
+                    content=content,
+                    expected_fonts=("Calibri",),
                 )
             except TemplateConflictError:
                 return None
@@ -186,6 +212,11 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:
         assert service.download(owner, template.id, first.id)[2] == b"first"
         current = service.download(owner, template.id)[2]
         assert current in {b"second-a", b"second-b"}
+        listed = objects._client.list_objects_v2(
+            Bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
+            Prefix=f"template-versions/{owner.id}/",
+        )
+        assert listed.get("KeyCount") == 2
         service.archive(owner, template.id, expected_revision=2)
         service.delete(owner, template.id, expected_revision=3)
         assert all(

@@ -35,6 +35,9 @@ REVISION: Any = importlib.import_module(
 VERSION_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_04_template_versions"
 )
+INTEGRITY_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260824_05_template_integrity"
+)
 
 
 @pytest.mark.unit
@@ -288,4 +291,27 @@ def test_version_migration_defines_immutable_history_and_audit(
     assert operations.drop_table.call_count == 2
     assert operations.drop_index.call_count == 2
     assert operations.drop_column.call_count == 2
+    assert operations.execute.called
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dialect", ["sqlite", "postgresql"])
+def test_integrity_migration_adds_publication_evidence_and_triggers(
+    mocker: MockerFixture, dialect: str
+) -> None:
+    operations = mocker.patch.object(INTEGRITY_REVISION, "op")
+    operations.get_bind.return_value.dialect.name = dialect
+
+    INTEGRITY_REVISION.upgrade()
+
+    assert operations.add_column.call_count == 5
+    assert operations.batch_alter_table.call_count == 2
+    executed = "\n".join(call.args[0] for call in operations.execute.call_args_list)
+    assert "template_versions_immutable" in executed
+    assert "conversion_template_integrity" in executed
+
+    operations.reset_mock()
+    operations.get_bind.return_value.dialect.name = dialect
+    INTEGRITY_REVISION.downgrade()
+    assert operations.batch_alter_table.call_count == 2
     assert operations.execute.called

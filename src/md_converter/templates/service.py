@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from md_converter.storage import (
 )
 from md_converter.templates.errors import (
     TemplateConflictError,
+    TemplateIntegrityError,
     TemplateStorageError,
     TemplateUnavailableError,
 )
@@ -27,6 +29,7 @@ from md_converter.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplatePage,
+    TemplatePublicationState,
     TemplateSearch,
     TemplateStatus,
     TemplateVersion,
@@ -35,6 +38,7 @@ from md_converter.templates.ports import (
     TemplateCatalogRepository,
     TemplateSelectionRepository,
 )
+from md_converter.templates.validation import TemplateFontDeclaration, ValidatedTemplate
 
 
 class TemplateOperation(StrEnum):
@@ -48,6 +52,8 @@ class TemplateOperation(StrEnum):
     RESTORE = "restore"
     ARCHIVE = "archive"
     DELETE = "delete"
+    SET_PREFERRED = "set_preferred"
+    CLEAR_PREFERRED = "clear_preferred"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +76,8 @@ class TemplateService:
         catalog: TemplateCatalogRepository,
         selections: TemplateSelectionRepository,
         objects: ObjectStore | None = None,
-        validate_content: Callable[[bytes], str] | None = None,
+        validate_content: Callable[[bytes, TemplateFontDeclaration], ValidatedTemplate]
+        | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         new_id: Callable[[], UUID] = uuid4,
     ) -> None:
@@ -94,11 +101,14 @@ class TemplateService:
         return template
 
     def create_versioned(
-        self, actor: User, request: TemplateCreate, content: bytes
+        self,
+        actor: User,
+        request: TemplateCreate,
+        content: bytes,
+        expected_fonts: tuple[str, ...],
     ) -> tuple[TemplateIdentity, TemplateVersion]:
         """Validate and atomically publish the initial immutable content version."""
         objects, validator = self._runtime()
-        digest = validator(content)
         version_id = self._new_id()
         template = TemplateIdentity(
             request.id,
@@ -109,21 +119,33 @@ class TemplateService:
             1,
             version_id,
         )
+        validated = validator(content, TemplateFontDeclaration(expected_fonts))
         version = self._new_version(
-            actor, template, version_id, content, digest, number=1
+            actor,
+            template,
+            version_id,
+            content,
+            validated,
+            number=1,
         )
         key = self._key(version)
-        self._put(objects, key, content)
+        self._catalog.reserve_create(template, version)
         try:
-            persisted = self._catalog.create_versioned(
-                template,
-                version,
-                self._audit(actor, template, TemplateOperation.CREATE, version.id),
+            self._put(objects, key, content)
+            persisted = self._catalog.finalize_version(
+                template.id,
+                expected_revision=1,
+                version_id=version.id,
+                audit=self._audit(
+                    actor, template, TemplateOperation.CREATE, version.id
+                ),
             )
         except BaseException:
-            self._delete(objects, key)
+            self._compensate_pending(objects, version)
             raise
-        return persisted, version
+        return persisted, replace(
+            version, publication_state=TemplatePublicationState.PUBLISHED
+        )
 
     def update_metadata(
         self,
@@ -159,23 +181,26 @@ class TemplateService:
         *,
         expected_revision: int,
         content: bytes,
+        expected_fonts: tuple[str, ...],
     ) -> tuple[TemplateIdentity, TemplateVersion]:
         objects, validator = self._runtime()
         template = self.get_visible(actor, template_id)
         authorization = self.authorize_mutation(actor, template_id)
         if template.status is not TemplateStatus.ACTIVE:
             raise TemplateConflictError
-        digest = validator(content)
-        versions = self._catalog.list_versions(template_id)
+        validated = validator(content, TemplateFontDeclaration(expected_fonts))
         version = self._new_version(
             actor,
             template,
             self._new_id(),
             content,
-            digest,
-            number=max((item.number for item in versions), default=0) + 1,
+            validated,
+            number=1,
         )
-        return self._publish(
+        version = self._catalog.reserve_version(
+            template_id, expected_revision=expected_revision, version=version
+        )
+        return self._publish_reserved(
             objects,
             template,
             version,
@@ -200,18 +225,20 @@ class TemplateService:
         source = self._catalog.get_version(template_id, source_version_id)
         if source is None or template.status is not TemplateStatus.ACTIVE:
             raise TemplateUnavailableError
-        content = self._get(objects, self._key(source))
-        versions = self._catalog.list_versions(template_id)
+        content = self._verified_get(objects, source)
         version = replace(
             source,
             id=self._new_id(),
-            number=max(item.number for item in versions) + 1,
+            number=1,
             object_owner_id=template.owner_id,
             created_at=self._clock(),
             created_by=actor.id,
             restored_from_version_id=source.id,
         )
-        return self._publish(
+        version = self._catalog.reserve_version(
+            template_id, expected_revision=expected_revision, version=version
+        )
+        return self._publish_reserved(
             objects,
             template,
             version,
@@ -238,7 +265,7 @@ class TemplateService:
     def delete(self, actor: User, template_id: UUID, *, expected_revision: int) -> None:
         objects, _validator = self._runtime()
         authorization = self.authorize_mutation(actor, template_id)
-        versions = self._catalog.delete_guarded(
+        versions = self._catalog.begin_delete(
             template_id,
             expected_revision=expected_revision,
             audit=self._audit_from_authorization(
@@ -247,6 +274,7 @@ class TemplateService:
         )
         for version in versions:
             self._delete(objects, self._key(version))
+        self._catalog.finalize_delete(template_id)
 
     def list_versions(
         self, actor: User, template_id: UUID
@@ -265,7 +293,7 @@ class TemplateService:
         version = self._catalog.get_version(template_id, selected_id)
         if version is None:
             raise TemplateUnavailableError
-        return template, version, self._get(objects, self._key(version))
+        return template, version, self._verified_get(objects, version)
 
     def resolve_frozen_version(
         self, template_id: UUID, version_id: UUID
@@ -275,7 +303,7 @@ class TemplateService:
         version = self._catalog.get_version(template_id, version_id)
         if version is None:
             raise TemplateUnavailableError
-        return version, self._get(objects, self._key(version))
+        return version, self._verified_get(objects, version)
 
     def search(self, actor: User, query: TemplateSearch) -> TemplatePage:
         return self._catalog.search(
@@ -300,10 +328,29 @@ class TemplateService:
         return self._authorization(actor, template, TemplateOperation.MUTATE)
 
     def set_preferred(self, actor: User, template_id: UUID) -> None:
-        self._selections.set_preferred(actor.id, template_id)
+        template = self.get_visible(actor, template_id)
+        if template.status is not TemplateStatus.ACTIVE:
+            raise TemplateUnavailableError
+        self._selections.set_preferred_audited(
+            actor.id,
+            template_id,
+            self._audit(actor, template, TemplateOperation.SET_PREFERRED),
+        )
 
     def clear_preferred(self, actor: User) -> None:
-        self._selections.clear_preferred(actor.id)
+        self._selections.clear_preferred_audited(
+            actor.id,
+            TemplateAuditRecord(
+                self._new_id(),
+                actor.id,
+                actor.id,
+                UUID(int=0),
+                TemplateOperation.CLEAR_PREFERRED.value,
+                None,
+                False,
+                self._clock(),
+            ),
+        )
 
     def set_system_fallback(
         self, actor: User, template_id: UUID
@@ -357,7 +404,12 @@ class TemplateService:
             ),
         )
 
-    def _runtime(self) -> tuple[ObjectStore, Callable[[bytes], str]]:
+    def _runtime(
+        self,
+    ) -> tuple[
+        ObjectStore,
+        Callable[[bytes, TemplateFontDeclaration], ValidatedTemplate],
+    ]:
         if self._objects is None or self._validate_content is None:
             raise RuntimeError("Template version runtime is not configured")
         return self._objects, self._validate_content
@@ -368,7 +420,7 @@ class TemplateService:
         template: TemplateIdentity,
         version_id: UUID,
         content: bytes,
-        digest: str,
+        validated: ValidatedTemplate,
         *,
         number: int,
     ) -> TemplateVersion:
@@ -377,10 +429,19 @@ class TemplateService:
             template.id,
             number,
             template.owner_id,
-            digest,
+            validated.sha256,
             len(content),
             self._clock(),
             actor.id,
+            None,
+            validated.declared_fonts,
+            validated.resolved_fonts,
+            (
+                "static_ooxml",
+                "pandoc_blank_conversion",
+                "libreoffice_open_save",
+            ),
+            TemplatePublicationState.PENDING,
         )
 
     @staticmethod
@@ -389,7 +450,7 @@ class TemplateService:
             ObjectScope.TEMPLATE_VERSION, version.object_owner_id, version.id
         )
 
-    def _publish(  # noqa: PLR0913, PLR0917 - compensation boundary is explicit
+    def _publish_reserved(  # noqa: PLR0913, PLR0917
         self,
         objects: ObjectStore,
         template: TemplateIdentity,
@@ -399,18 +460,50 @@ class TemplateService:
         audit: TemplateAuditRecord,
     ) -> tuple[TemplateIdentity, TemplateVersion]:
         key = self._key(version)
-        self._put(objects, key, content)
         try:
-            updated = self._catalog.publish_version(
+            self._put(objects, key, content)
+            updated = self._catalog.finalize_version(
                 template.id,
                 expected_revision=expected_revision,
-                version=version,
+                version_id=version.id,
                 audit=audit,
             )
         except BaseException:
-            self._delete(objects, key)
+            self._compensate_pending(objects, version)
             raise
-        return updated, version
+        return updated, replace(
+            version, publication_state=TemplatePublicationState.PUBLISHED
+        )
+
+    def reclaim_pending(self) -> int:
+        """Retry every DB-tracked unpublished object and deletion tombstone."""
+        objects, _validator = self._runtime()
+        reclaimed = 0
+        for version in self._catalog.pending_versions():
+            try:
+                objects.delete(self._key(version))
+            except ObjectStoreError:
+                continue
+            self._catalog.abort_pending(version.template_id, version.id)
+            reclaimed += 1
+        for template_id, versions in self._catalog.pending_deletions():
+            try:
+                for version in versions:
+                    objects.delete(self._key(version))
+            except ObjectStoreError:
+                continue
+            self._catalog.finalize_delete(template_id)
+            reclaimed += 1
+        return reclaimed
+
+    def _compensate_pending(
+        self, objects: ObjectStore, version: TemplateVersion
+    ) -> None:
+        try:
+            objects.delete(self._key(version))
+        except ObjectStoreError:
+            return
+        self._catalog.abort_pending(version.template_id, version.id)
 
     def _audit(
         self,
@@ -452,6 +545,15 @@ class TemplateService:
             return objects.get(key)
         except ObjectNotFoundError, ObjectStoreError:
             raise TemplateStorageError from None
+
+    def _verified_get(self, objects: ObjectStore, version: TemplateVersion) -> bytes:
+        content = self._get(objects, self._key(version))
+        if (
+            len(content) != version.size
+            or hashlib.sha256(content).hexdigest() != version.sha256
+        ):
+            raise TemplateIntegrityError from None
+        return content
 
     @staticmethod
     def _delete(objects: ObjectStore, key: ObjectKey) -> None:

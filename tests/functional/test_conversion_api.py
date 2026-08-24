@@ -13,7 +13,16 @@ from md_converter.config import Settings
 from md_converter.jobs.models import JobState
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.sql import create_database_engine, standalone_database_url
+from md_converter.persistence.templates import SqlTemplateCatalogRepository
 from md_converter.storage import ObjectKey, ObjectScope
+from md_converter.templates.models import (
+    TemplateAuditRecord,
+    TemplateIdentity,
+    TemplatePublicationState,
+    TemplateStatus,
+    TemplateVersion,
+)
+from tests.settings import template_settings
 
 
 def login(client: TestClient, username: str, password: str) -> dict[str, Any]:
@@ -24,12 +33,14 @@ def login(client: TestClient, username: str, password: str) -> dict[str, Any]:
     return response.json()
 
 
-def submit(
+def submit(  # noqa: PLR0913 - explicit HTTP form helper
     client: TestClient,
     csrf_token: str,
     *,
     content: bytes = b"# Durable conversion",
     idempotency_key: str | None = None,
+    template_id: UUID,
+    template_version_id: UUID,
 ) -> Any:
     headers = {"X-CSRF-Token": csrf_token}
     if idempotency_key is not None:
@@ -39,19 +50,20 @@ def submit(
         headers=headers,
         files={"source": ("source.md", content, "text/markdown")},
         data={
-            "template_id": str(uuid4()),
-            "template_version_id": str(uuid4()),
+            "template_id": str(template_id),
+            "template_version_id": str(template_version_id),
             "output": "docx",
         },
     )
 
 
 @pytest.mark.functional
-def test_conversion_api_idempotency_authorization_cancellation_and_result(
+def test_conversion_api_idempotency_authorization_cancellation_and_result(  # noqa: PLR0915
     tmp_path: Path,
 ) -> None:
     admin_password = "admin-" + "password"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=admin_password,
         argon2_memory_cost=8,
@@ -67,7 +79,65 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(
     with TestClient(app, base_url="https://testserver") as client:
         admin = login(client, "admin", admin_password)
         csrf = str(admin["csrf_token"])
-        first = submit(client, csrf, idempotency_key="stable-request")
+        template_id, template_version_id = uuid4(), uuid4()
+        owner_id = UUID(admin["user"]["id"])
+        now = datetime.now(UTC)
+        catalog = SqlTemplateCatalogRepository(
+            create_database_engine(standalone_database_url(tmp_path))
+        )
+        template = TemplateIdentity(
+            template_id,
+            owner_id,
+            "Job template",
+            "Visible",
+            TemplateStatus.ACTIVE,
+            current_version_id=template_version_id,
+        )
+        version = TemplateVersion(
+            template_version_id,
+            template_id,
+            1,
+            owner_id,
+            "0" * 64,
+            1,
+            now,
+            owner_id,
+            declared_fonts=("Calibri",),
+            resolved_fonts=(("Calibri", "Carlito"),),
+            validation_trace=("static_ooxml",),
+            publication_state=TemplatePublicationState.PENDING,
+        )
+        catalog.reserve_create(template, version)
+        catalog.finalize_version(
+            template_id,
+            expected_revision=1,
+            version_id=template_version_id,
+            audit=TemplateAuditRecord(
+                uuid4(),
+                owner_id,
+                owner_id,
+                template_id,
+                "create",
+                template_version_id,
+                False,
+                now,
+            ),
+        )
+        arbitrary = submit(
+            client,
+            csrf,
+            template_id=uuid4(),
+            template_version_id=uuid4(),
+        )
+        assert arbitrary.status_code == 422
+        assert arbitrary.json()["error"]["code"] == "CONVERSION_REQUEST_INVALID"
+        first = submit(
+            client,
+            csrf,
+            idempotency_key="stable-request",
+            template_id=template_id,
+            template_version_id=template_version_id,
+        )
         assert first.status_code == 202
         assert first.headers["Location"].endswith(first.json()["id"])
         assert first.headers["Retry-After"] == "2"
@@ -128,7 +198,12 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(
         assert cancelled.status_code == 200
         assert cancelled.json()["state"] == JobState.CANCELLED.value
 
-        successful = submit(client, csrf)
+        successful = submit(
+            client,
+            csrf,
+            template_id=template_id,
+            template_version_id=template_version_id,
+        )
         assert successful.status_code == 202
         successful_id = UUID(successful.json()["id"])
         owner_id = UUID(successful.json()["owner_id"])
@@ -160,5 +235,23 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(
             f"conversion-{successful_id}.docx" in result.headers["Content-Disposition"]
         )
 
-        assert submit(client, csrf, content=b"").status_code == 422
-        assert submit(client, csrf, content=b"x" * 65).status_code == 422
+        assert (
+            submit(
+                client,
+                csrf,
+                content=b"",
+                template_id=template_id,
+                template_version_id=template_version_id,
+            ).status_code
+            == 422
+        )
+        assert (
+            submit(
+                client,
+                csrf,
+                content=b"x" * 65,
+                template_id=template_id,
+                template_version_id=template_version_id,
+            ).status_code
+            == 422
+        )

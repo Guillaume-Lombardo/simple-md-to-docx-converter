@@ -1,6 +1,7 @@
 """Real SQLite/filesystem coverage for versioned template transactions."""
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -14,6 +15,7 @@ from md_converter.auth.models import Role, User
 from md_converter.persistence.migrations import upgrade_database
 from md_converter.persistence.schema import (
     TemplateAuditRow,
+    TemplateRow,
     TemplateVersionRow,
     UserRow,
 )
@@ -22,15 +24,27 @@ from md_converter.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.storage import FilesystemObjectStore
+from md_converter.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 from md_converter.templates.errors import (
     TemplateConflictError,
+    TemplateIntegrityError,
     TemplateUnavailableError,
 )
 from md_converter.templates.models import TemplateCreate, TemplateStatus
 from md_converter.templates.service import TemplateService
+from md_converter.templates.validation import ValidatedTemplate
 
 pytestmark = pytest.mark.integration
+
+
+def _validated(data: bytes) -> ValidatedTemplate:
+    return ValidatedTemplate(
+        hashlib.sha256(data).hexdigest(),
+        ("word/document.xml",),
+        ("Calibri",),
+        ("Calibri",),
+        (("Calibri", "Carlito"),),
+    )
 
 
 def _user(role: Role, name: str) -> User:
@@ -62,7 +76,7 @@ def _service(tmp_path: Path) -> tuple[TemplateService, Engine, User, User, User]
         catalog=SqlTemplateCatalogRepository(engine),
         selections=SqlTemplateSelectionRepository(engine),
         objects=FilesystemObjectStore(tmp_path),
-        validate_content=lambda data: hashlib.sha256(data).hexdigest(),
+        validate_content=lambda data, _declaration: _validated(data),
         clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
     )
     return service, engine, owner, other, admin
@@ -73,12 +87,19 @@ def test_version_lifecycle_is_immutable_atomic_audited_and_guarded(
 ) -> None:
     service, engine, owner, other, admin = _service(tmp_path)
     template, first = service.create_versioned(
-        owner, TemplateCreate(uuid4(), "Finance", "Quarterly"), b"version-one"
+        owner,
+        TemplateCreate(uuid4(), "Finance", "Quarterly"),
+        b"version-one",
+        ("Calibri",),
     )
     assert service.download(other, template.id)[2] == b"version-one"
 
     updated, second = service.replace(
-        owner, template.id, expected_revision=1, content=b"version-two"
+        owner,
+        template.id,
+        expected_revision=1,
+        content=b"version-two",
+        expected_fonts=("Calibri",),
     )
     assert updated.revision == 2
     assert service.download(other, template.id, first.id)[2] == b"version-one"
@@ -90,7 +111,11 @@ def test_version_lifecycle_is_immutable_atomic_audited_and_guarded(
         )
     with pytest.raises(TemplateConflictError):
         service.replace(
-            owner, template.id, expected_revision=1, content=b"losing-write"
+            owner,
+            template.id,
+            expected_revision=1,
+            content=b"losing-write",
+            expected_fonts=("Calibri",),
         )
 
     restored, third = service.restore(admin, template.id, first.id, expected_revision=2)
@@ -136,7 +161,10 @@ def test_version_lifecycle_is_immutable_atomic_audited_and_guarded(
 def test_delete_is_guarded_by_preference_and_archive_state(tmp_path: Path) -> None:
     service, _engine, owner, _other, _admin = _service(tmp_path)
     template, _version = service.create_versioned(
-        owner, TemplateCreate(uuid4(), "Guarded", "Selected"), b"content"
+        owner,
+        TemplateCreate(uuid4(), "Guarded", "Selected"),
+        b"content",
+        ("Calibri",),
     )
     with pytest.raises(TemplateConflictError):
         service.delete(owner, template.id, expected_revision=1)
@@ -144,3 +172,149 @@ def test_delete_is_guarded_by_preference_and_archive_state(tmp_path: Path) -> No
     service.archive(owner, template.id, expected_revision=1)
     with pytest.raises(TemplateConflictError):
         service.delete(owner, template.id, expected_revision=2)
+
+
+def test_template_reads_detect_tampering_before_download_restore_or_processing(
+    tmp_path: Path,
+) -> None:
+    service, _engine, owner, _other, _admin = _service(tmp_path)
+    template, version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Integrity", "Verified"),
+        b"original",
+        ("Calibri",),
+    )
+    FilesystemObjectStore(tmp_path).put(
+        ObjectKey(ObjectScope.TEMPLATE_VERSION, owner.id, version.id), b"tampered"
+    )
+
+    with pytest.raises(TemplateIntegrityError):
+        service.download(owner, template.id, version.id)
+    with pytest.raises(TemplateIntegrityError):
+        service.restore(owner, template.id, version.id, expected_revision=1)
+    with pytest.raises(TemplateIntegrityError):
+        service.resolve_frozen_version(template.id, version.id)
+
+
+def test_database_rejects_owner_restore_and_current_template_corruption(
+    tmp_path: Path,
+) -> None:
+    service, engine, owner, other, _admin = _service(tmp_path)
+    first, first_version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "First", "Owner"),
+        b"first",
+        ("Calibri",),
+    )
+    second, _second_version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Second", "Owner"),
+        b"second",
+        ("Calibri",),
+    )
+
+    def row(
+        *, object_owner: User = owner, restored_from: str | None = None
+    ) -> TemplateVersionRow:
+        return TemplateVersionRow(
+            id=str(uuid4()),
+            template_id=str(second.id),
+            version_number=2,
+            object_owner_id=str(object_owner.id),
+            sha256="a" * 64,
+            size=1,
+            created_at=datetime.now(UTC),
+            created_by=str(owner.id),
+            restored_from_version_id=restored_from,
+            declared_fonts='["Calibri"]',
+            resolved_fonts='[["Calibri","Carlito"]]',
+            validation_trace='["static_ooxml"]',
+            publication_state="pending",
+        )
+
+    with pytest.raises(SQLAlchemyError), Session(engine) as database, database.begin():
+        database.add(row(object_owner=other))
+        database.flush()
+    with pytest.raises(SQLAlchemyError), Session(engine) as database, database.begin():
+        database.add(row(restored_from=str(first_version.id)))
+        database.flush()
+    with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+        connection.execute(
+            update(TemplateRow)
+            .where(TemplateRow.id == str(second.id))
+            .values(current_version_id=str(first.current_version_id))
+        )
+    with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+        connection.execute(
+            update(TemplateVersionRow)
+            .where(TemplateVersionRow.id == str(first_version.id))
+            .values(publication_state="pending")
+        )
+    with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+        connection.execute(
+            update(TemplateRow)
+            .where(TemplateRow.id == str(first.id))
+            .values(publication_state="pending")
+        )
+
+
+def test_preference_set_and_clear_are_audited_with_prior_target(tmp_path: Path) -> None:
+    service, engine, owner, _other, _admin = _service(tmp_path)
+    template, _version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Preferred", "Audited"),
+        b"preferred",
+        ("Calibri",),
+    )
+    service.set_preferred(owner, template.id)
+    service.clear_preferred(owner)
+
+    with Session(engine) as database:
+        records = tuple(
+            database.scalars(
+                select(TemplateAuditRow)
+                .where(
+                    TemplateAuditRow.operation.in_(("set_preferred", "clear_preferred"))
+                )
+                .order_by(TemplateAuditRow.created_at, TemplateAuditRow.id)
+            )
+        )
+    assert {record.operation for record in records} == {
+        "set_preferred",
+        "clear_preferred",
+    }
+    assert all(record.template_id == str(template.id) for record in records)
+    assert all(record.owner_id == str(owner.id) for record in records)
+
+
+def test_concurrent_filesystem_replacement_has_one_winner_and_no_loser_object(
+    tmp_path: Path,
+) -> None:
+    service, _engine, owner, _other, _admin = _service(tmp_path)
+    template, _version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Concurrent", "CAS"),
+        b"first",
+        ("Calibri",),
+    )
+
+    def replace_content(content: bytes) -> object:
+        try:
+            return service.replace(
+                owner,
+                template.id,
+                expected_revision=1,
+                content=content,
+                expected_fonts=("Calibri",),
+            )
+        except TemplateConflictError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(executor.map(replace_content, (b"second-a", b"second-b")))
+
+    assert sum(outcome is not None for outcome in outcomes) == 1
+    assert len(service.list_versions(owner, template.id)) == 2
+    assert service.reclaim_pending() == 0
+    object_files = tuple((tmp_path / "objects" / "template-versions").rglob("*"))
+    assert sum(path.is_file() for path in object_files) == 2

@@ -36,7 +36,12 @@ from md_converter.storage import (
     ObjectStore,
     ObjectStoreError,
 )
-from tests.job_repository_contracts import exercise_job_repository_contract
+from tests.job_repository_contracts import (
+    TEMPLATE_ID,
+    TEMPLATE_VERSION_ID,
+    exercise_job_repository_contract,
+)
+from tests.template_records import publish_template_pair
 
 COMPONENT_VERSIONS = (("md-converter", "0.1.0"),)
 
@@ -125,6 +130,7 @@ def test_sqlite_job_repository_contract_and_restart(tmp_path: Path) -> None:
     other = User(uuid4(), "Other", "other", "hash:other", Role.USER)
     users.create(owner)
     users.create(other)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     exercise_job_repository_contract(SqlJobRepository(engine), owner.id, other.id)
     engine.dispose()
 
@@ -143,6 +149,7 @@ def test_sqlite_worker_crosses_real_database_and_filesystem_boundaries(
     upgrade_database(engine)
     owner = User(uuid4(), "Owner", "worker-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     objects = FilesystemObjectStore(tmp_path)
     service = JobService(repository, objects, JobServicePolicy(60))
@@ -150,8 +157,8 @@ def test_sqlite_worker_crosses_real_database_and_filesystem_boundaries(
         JobRequest(
             owner.id,
             b"# Real worker",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.DOCX,
             COMPONENT_VERSIONS,
             datetime.now(UTC),
@@ -181,6 +188,7 @@ def test_periodic_heartbeat_prevents_long_sqlite_stage_recovery(tmp_path: Path) 
     upgrade_database(engine)
     owner = User(uuid4(), "Owner", "heartbeat-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     objects = FilesystemObjectStore(tmp_path)
     service = JobService(repository, objects, JobServicePolicy(60))
@@ -188,8 +196,8 @@ def test_periodic_heartbeat_prevents_long_sqlite_stage_recovery(tmp_path: Path) 
         JobRequest(
             owner.id,
             b"# Slow stage",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.DOCX,
             COMPONENT_VERSIONS,
             datetime.now(UTC),
@@ -235,6 +243,7 @@ def test_heartbeat_covers_blocked_real_result_publication(tmp_path: Path) -> Non
     upgrade_database(engine)
     owner = User(uuid4(), "Owner", "publish-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     files = FilesystemObjectStore(tmp_path)
     entered = Event()
@@ -244,8 +253,8 @@ def test_heartbeat_covers_blocked_real_result_publication(tmp_path: Path) -> Non
         JobRequest(
             owner.id,
             b"# Blocked publication",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.DOCX,
             COMPONENT_VERSIONS,
             datetime.now(UTC),
@@ -284,6 +293,7 @@ def test_real_sqlite_worker_failures_are_durable_and_recoverable(
     upgrade_database(engine)
     owner = User(uuid4(), "Owner", "failure-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     files = FilesystemObjectStore(tmp_path)
     service = JobService(repository, files, JobServicePolicy(60))
@@ -292,8 +302,8 @@ def test_real_sqlite_worker_failures_are_durable_and_recoverable(
         JobRequest(
             owner.id,
             b"# Conversion failure",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.DOCX,
             COMPONENT_VERSIONS,
             now,
@@ -314,8 +324,8 @@ def test_real_sqlite_worker_failures_are_durable_and_recoverable(
         JobRequest(
             owner.id,
             b"# Publication failure",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.DOCX,
             COMPONENT_VERSIONS,
             now,
@@ -346,6 +356,7 @@ def test_sqlite_job_service_idempotency_is_concurrent(tmp_path: Path) -> None:
     upgrade_database(engine)
     owner = User(uuid4(), "Owner", "idempotent-owner", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     service = JobService(
         repository, FilesystemObjectStore(tmp_path), JobServicePolicy(60)
@@ -353,8 +364,8 @@ def test_sqlite_job_service_idempotency_is_concurrent(tmp_path: Path) -> None:
     request = JobRequest(
         owner.id,
         b"# Concurrent idempotency",
-        uuid4(),
-        uuid4(),
+        TEMPLATE_ID,
+        TEMPLATE_VERSION_ID,
         JobOutput.DOCX,
         COMPONENT_VERSIONS,
         datetime.now(UTC),

@@ -25,16 +25,19 @@ from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import ConversionJobRow, UserRow
+from md_converter.persistence.schema import ConversionJobRow, TemplateRow, UserRow
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
 from md_converter.storage import ObjectKey, ObjectScope, S3ObjectStore
 from tests.job_repository_contracts import (
     LEASE_END,
     NOW,
     RETENTION_END,
+    TEMPLATE_ID,
+    TEMPLATE_VERSION_ID,
     exercise_job_repository_contract,
     submission,
 )
+from tests.template_records import publish_template_pair
 
 
 class DistributedProcessor:
@@ -99,6 +102,7 @@ def test_postgresql_job_contract_and_skip_locked_claims() -> None:
     users = SqlUserRepository(engine)
     users.create(owner)
     users.create(other)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     try:
         exercise_job_repository_contract(repository, owner.id, other.id)
@@ -167,6 +171,9 @@ def test_postgresql_job_contract_and_skip_locked_claims() -> None:
                 )
             )
             connection.execute(
+                delete(TemplateRow).where(TemplateRow.id == str(TEMPLATE_ID))
+            )
+            connection.execute(
                 delete(UserRow).where(UserRow.id.in_((str(owner.id), str(other.id))))
             )
         engine.dispose()
@@ -181,6 +188,7 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"worker-{unique}", "hash:owner", Role.USER)
     SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, TEMPLATE_ID, TEMPLATE_VERSION_ID)
     repository = SqlJobRepository(engine)
     client = boto3.client(
         "s3",
@@ -195,8 +203,8 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         JobRequest(
             owner.id,
             b"# Distributed worker",
-            uuid4(),
-            uuid4(),
+            TEMPLATE_ID,
+            TEMPLATE_VERSION_ID,
             JobOutput.PDF,
             (("md-converter", "0.1.0"),),
             datetime.now(UTC),
@@ -222,8 +230,8 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
             JobRequest(
                 owner.id,
                 b"# Distributed failure",
-                uuid4(),
-                uuid4(),
+                TEMPLATE_ID,
+                TEMPLATE_VERSION_ID,
                 JobOutput.PDF,
                 (("md-converter", "0.1.0"),),
                 datetime.now(UTC),
@@ -258,6 +266,9 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
                 delete(ConversionJobRow).where(
                     ConversionJobRow.owner_id == str(owner.id)
                 )
+            )
+            connection.execute(
+                delete(TemplateRow).where(TemplateRow.id == str(TEMPLATE_ID))
             )
             connection.execute(delete(UserRow).where(UserRow.id == str(owner.id)))
         engine.dispose()

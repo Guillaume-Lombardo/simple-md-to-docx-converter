@@ -18,6 +18,14 @@ class TemplateStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class TemplatePublicationState(StrEnum):
+    """Internal crash-recovery state for template content."""
+
+    PENDING = "pending"
+    PUBLISHED = "published"
+    DELETING = "deleting"
+
+
 def normalize_template_text(value: str) -> str:
     """Normalize searchable text consistently across SQLite and PostgreSQL."""
     return unicodedata.normalize("NFKC", value).strip().casefold()
@@ -101,6 +109,10 @@ class TemplateVersion:
     created_at: datetime
     created_by: UUID
     restored_from_version_id: UUID | None = None
+    declared_fonts: tuple[str, ...] = ()
+    resolved_fonts: tuple[tuple[str, str], ...] = ()
+    validation_trace: tuple[str, ...] = ()
+    publication_state: TemplatePublicationState = TemplatePublicationState.PUBLISHED
 
     def __post_init__(self) -> None:
         if self.number <= 0 or self.size <= 0:

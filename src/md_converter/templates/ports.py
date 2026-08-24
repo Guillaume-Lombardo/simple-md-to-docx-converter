@@ -36,6 +36,41 @@ class TemplateCatalogRepository(Protocol):
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity: ...
 
+    def reserve_create(
+        self, template: TemplateIdentity, version: TemplateVersion
+    ) -> None: ...
+
+    def reserve_version(
+        self, template_id: UUID, *, expected_revision: int, version: TemplateVersion
+    ) -> TemplateVersion: ...
+
+    def finalize_version(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        version_id: UUID,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def abort_pending(self, template_id: UUID, version_id: UUID) -> None: ...
+
+    def pending_versions(self) -> tuple[TemplateVersion, ...]: ...
+
+    def pending_deletions(
+        self,
+    ) -> tuple[tuple[UUID, tuple[TemplateVersion, ...]], ...]: ...
+
+    def begin_delete(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        audit: TemplateAuditRecord,
+    ) -> tuple[TemplateVersion, ...]: ...
+
+    def finalize_delete(self, template_id: UUID) -> None: ...
+
     def update_metadata(
         self,
         template_id: UUID,
@@ -84,7 +119,15 @@ class TemplateSelectionRepository(Protocol):
 
     def set_preferred(self, user_id: UUID, template_id: UUID) -> None: ...
 
+    def set_preferred_audited(
+        self, user_id: UUID, template_id: UUID, audit: TemplateAuditRecord
+    ) -> None: ...
+
     def clear_preferred(self, user_id: UUID) -> None: ...
+
+    def clear_preferred_audited(
+        self, user_id: UUID, audit: TemplateAuditRecord
+    ) -> None: ...
 
     def preferred_id(self, user_id: UUID) -> UUID | None: ...
 

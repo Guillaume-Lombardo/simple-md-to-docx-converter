@@ -46,6 +46,19 @@ Implement downloads, ETag and If-Match, atomic replacement, copy-forward restora
   ASGI coverage, real standalone and distributed boundary/concurrency coverage, and English API,
   template, storage, and job documentation. Final rootless-image E2E remains T20/T21 sequencing
   debt and is not claimed by T15.
+- 2026-08-24: Addressed independent-review findings by invoking the complete T10 activation
+  boundary with caller-declared fonts and immutable validation evidence; freezing only an active,
+  current, published template/version pair during job submission; verifying stored size and SHA-256
+  for downloads, restore, and processing; and adding durable pending-publication and deletion
+  tombstones reclaimed at startup. Added database owner/pair/current/deletion invariants, audited
+  preference set/clear, required T18-owned bounds and engine configuration, async HTTP offload,
+  stable 413/422 and integrity errors, binary OpenAPI responses, and the exact frozen-version
+  processor adapter. Verification completed with 689 unit tests, 848 applicable default tests at
+  94.24% total coverage and 92.41% changed-Python-line coverage, 13 live PostgreSQL/RustFS tests,
+  and 3 T15 real Pandoc/LibreOffice tests in the rootless toolchain image. The host-only unfiltered
+  command remains unable to execute engine
+  tests because those binaries are intentionally supplied by the toolchain image; full legacy
+  image-suite validation remains owned by its existing T10/T20 environment rather than this ticket.
 
 ## Synchronization
 

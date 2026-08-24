@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from datetime import UTC
 from uuid import UUID
 
@@ -29,6 +31,7 @@ from md_converter.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
     TemplatePage,
+    TemplatePublicationState,
     TemplateSearch,
     TemplateStatus,
     TemplateVersion,
@@ -70,6 +73,10 @@ def _version(row: TemplateVersionRow) -> TemplateVersion:
         restored_from_version_id=(
             UUID(row.restored_from_version_id) if row.restored_from_version_id else None
         ),
+        declared_fonts=tuple(json.loads(row.declared_fonts)),
+        resolved_fonts=tuple(tuple(item) for item in json.loads(row.resolved_fonts)),
+        validation_trace=tuple(json.loads(row.validation_trace)),
+        publication_state=TemplatePublicationState(row.publication_state),
     )
 
 
@@ -88,6 +95,10 @@ def _version_row(version: TemplateVersion) -> TemplateVersionRow:
             if version.restored_from_version_id
             else None
         ),
+        declared_fonts=json.dumps(version.declared_fonts, separators=(",", ":")),
+        resolved_fonts=json.dumps(version.resolved_fonts, separators=(",", ":")),
+        validation_trace=json.dumps(version.validation_trace, separators=(",", ":")),
+        publication_state=version.publication_state.value,
     )
 
 
@@ -128,6 +139,7 @@ class SqlTemplateCatalogRepository:
                             if template.current_version_id
                             else None
                         ),
+                        publication_state="published",
                     )
                 )
         except SQLAlchemyError:
@@ -139,6 +151,19 @@ class SqlTemplateCatalogRepository:
         version: TemplateVersion,
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity:
+        pending = replace(version, publication_state=TemplatePublicationState.PENDING)
+        self.reserve_create(template, pending)
+        return self.finalize_version(
+            template.id,
+            expected_revision=1,
+            version_id=version.id,
+            audit=audit,
+        )
+
+    def reserve_create(
+        self, template: TemplateIdentity, version: TemplateVersion
+    ) -> None:
+        """Persist a hidden identity and pending object row before writing bytes."""
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 database.add(
@@ -151,12 +176,178 @@ class SqlTemplateCatalogRepository:
                         normalized_description=template.normalized_description,
                         status=template.status.value,
                         revision=template.revision,
-                        current_version_id=str(version.id),
+                        current_version_id=None,
+                        publication_state="pending",
                     )
                 )
                 database.add(_version_row(version))
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def reserve_version(
+        self, template_id: UUID, *, expected_revision: int, version: TemplateVersion
+    ) -> TemplateVersion:
+        """Serialize version numbering and persist a retry-visible pending object."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                template = database.scalar(
+                    select(TemplateRow)
+                    .where(
+                        TemplateRow.id == str(template_id),
+                        TemplateRow.revision == expected_revision,
+                        TemplateRow.status == TemplateStatus.ACTIVE.value,
+                        TemplateRow.publication_state == "published",
+                    )
+                    .with_for_update()
+                )
+                if template is None:
+                    raise TemplateConflictError
+                next_number = (
+                    int(
+                        database.scalar(
+                            select(
+                                func.coalesce(
+                                    func.max(TemplateVersionRow.version_number), 0
+                                )
+                            ).where(TemplateVersionRow.template_id == str(template_id))
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+                reserved = TemplateVersion(
+                    id=version.id,
+                    template_id=version.template_id,
+                    number=next_number,
+                    object_owner_id=version.object_owner_id,
+                    sha256=version.sha256,
+                    size=version.size,
+                    created_at=version.created_at,
+                    created_by=version.created_by,
+                    restored_from_version_id=version.restored_from_version_id,
+                    declared_fonts=version.declared_fonts,
+                    resolved_fonts=version.resolved_fonts,
+                    validation_trace=version.validation_trace,
+                    publication_state=TemplatePublicationState.PENDING,
+                )
+                database.add(_version_row(reserved))
+                database.flush()
+                return reserved
+        except TemplateConflictError:
+            raise
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def finalize_version(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        version_id: UUID,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity:
+        """Publish one reserved object and CAS the current version atomically."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                version = database.scalar(
+                    select(TemplateVersionRow).where(
+                        TemplateVersionRow.id == str(version_id),
+                        TemplateVersionRow.template_id == str(template_id),
+                        TemplateVersionRow.publication_state == "pending",
+                    )
+                )
+                if version is None:
+                    raise TemplateConflictError
+                version.publication_state = "published"
+                database.flush()
+                result = database.execute(
+                    update(TemplateRow)
+                    .where(
+                        TemplateRow.id == str(template_id),
+                        TemplateRow.revision == expected_revision,
+                        TemplateRow.status == TemplateStatus.ACTIVE.value,
+                        TemplateRow.publication_state.in_(("pending", "published")),
+                    )
+                    .values(
+                        current_version_id=str(version_id),
+                        publication_state="published",
+                        revision=TemplateRow.revision
+                        + (
+                            0
+                            if expected_revision == 1 and version.version_number == 1
+                            else 1
+                        ),
+                    )
+                )
+                if getattr(result, "rowcount", 0) != 1:
+                    raise TemplateConflictError
+                changed = database.get(TemplateRow, str(template_id))
+                if changed is None:  # pragma: no cover - guarded by rowcount
+                    raise PersistenceError
                 database.add(_audit_row(audit))
-            return template
+                database.flush()
+                return _template(changed)
+        except TemplateConflictError:
+            raise
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def abort_pending(self, template_id: UUID, version_id: UUID) -> None:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                database.execute(
+                    delete(TemplateVersionRow).where(
+                        TemplateVersionRow.id == str(version_id),
+                        TemplateVersionRow.template_id == str(template_id),
+                        TemplateVersionRow.publication_state == "pending",
+                    )
+                )
+                template = database.get(TemplateRow, str(template_id))
+                if template is not None and template.publication_state == "pending":
+                    database.delete(template)
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def pending_versions(self) -> tuple[TemplateVersion, ...]:
+        try:
+            with DatabaseSession(self._engine) as database:
+                return tuple(
+                    _version(row)
+                    for row in database.scalars(
+                        select(TemplateVersionRow).where(
+                            TemplateVersionRow.publication_state == "pending"
+                        )
+                    )
+                )
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def pending_deletions(
+        self,
+    ) -> tuple[tuple[UUID, tuple[TemplateVersion, ...]], ...]:
+        try:
+            with DatabaseSession(self._engine) as database:
+                template_ids = tuple(
+                    database.scalars(
+                        select(TemplateRow.id).where(
+                            TemplateRow.publication_state == "deleting"
+                        )
+                    )
+                )
+                return tuple(
+                    (
+                        UUID(template_id),
+                        tuple(
+                            _version(row)
+                            for row in database.scalars(
+                                select(TemplateVersionRow).where(
+                                    TemplateVersionRow.template_id == template_id
+                                )
+                            )
+                        ),
+                    )
+                    for template_id in template_ids
+                )
         except SQLAlchemyError:
             raise PersistenceError from None
 
@@ -189,31 +380,19 @@ class SqlTemplateCatalogRepository:
         version: TemplateVersion,
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity:
-        try:
-            with DatabaseSession(self._engine) as database, database.begin():
-                changed = database.execute(
-                    update(TemplateRow)
-                    .where(
-                        TemplateRow.id == str(template_id),
-                        TemplateRow.revision == expected_revision,
-                        TemplateRow.status == TemplateStatus.ACTIVE.value,
-                    )
-                    .values(
-                        current_version_id=str(version.id),
-                        revision=TemplateRow.revision + 1,
-                    )
-                    .returning(TemplateRow)
-                ).scalar_one_or_none()
-                if changed is None:
-                    raise TemplateConflictError
-                database.add(_version_row(version))
-                database.add(_audit_row(audit))
-                database.flush()
-                return _template(changed)
-        except TemplateConflictError:
-            raise
-        except SQLAlchemyError:
-            raise PersistenceError from None
+        reserved = self.reserve_version(
+            template_id,
+            expected_revision=expected_revision,
+            version=replace(
+                version, publication_state=TemplatePublicationState.PENDING
+            ),
+        )
+        return self.finalize_version(
+            template_id,
+            expected_revision=expected_revision,
+            version_id=reserved.id,
+            audit=audit,
+        )
 
     def set_status(
         self,
@@ -285,6 +464,91 @@ class SqlTemplateCatalogRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def begin_delete(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        audit: TemplateAuditRecord,
+    ) -> tuple[TemplateVersion, ...]:
+        """Commit a durable tombstone before any object is removed."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                row = database.scalar(
+                    select(TemplateRow)
+                    .where(TemplateRow.id == str(template_id))
+                    .with_for_update()
+                )
+                if row is None:
+                    raise TemplateConflictError
+                retry = (
+                    row.publication_state == "deleting"
+                    and row.revision == expected_revision + 1
+                )
+                if not retry:
+                    if (
+                        row.revision != expected_revision
+                        or row.status != TemplateStatus.ARCHIVED.value
+                        or row.publication_state != "published"
+                    ):
+                        raise TemplateConflictError
+                    referenced = any(
+                        (
+                            database.scalar(
+                                select(TemplatePreferenceRow.user_id)
+                                .where(
+                                    TemplatePreferenceRow.template_id
+                                    == str(template_id)
+                                )
+                                .limit(1)
+                            ),
+                            database.scalar(
+                                select(SystemTemplateSelectionRow.id)
+                                .where(
+                                    SystemTemplateSelectionRow.fallback_template_id
+                                    == str(template_id)
+                                )
+                                .limit(1)
+                            ),
+                            database.scalar(
+                                select(ConversionJobRow.id)
+                                .where(ConversionJobRow.template_id == str(template_id))
+                                .limit(1)
+                            ),
+                        )
+                    )
+                    if referenced:
+                        raise TemplateConflictError
+                    row.publication_state = "deleting"
+                    row.revision += 1
+                    database.add(_audit_row(audit))
+                return tuple(
+                    _version(item)
+                    for item in database.scalars(
+                        select(TemplateVersionRow)
+                        .where(TemplateVersionRow.template_id == str(template_id))
+                        .order_by(TemplateVersionRow.version_number)
+                    )
+                )
+        except TemplateConflictError:
+            raise
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def finalize_delete(self, template_id: UUID) -> None:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                row = database.get(TemplateRow, str(template_id))
+                if row is None:
+                    return
+                if row.publication_state != "deleting":
+                    raise TemplateConflictError
+                database.delete(row)
+        except TemplateConflictError:
+            raise
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def get_version(
         self, template_id: UUID, version_id: UUID
     ) -> TemplateVersion | None:
@@ -294,6 +558,7 @@ class SqlTemplateCatalogRepository:
                     select(TemplateVersionRow).where(
                         TemplateVersionRow.id == str(version_id),
                         TemplateVersionRow.template_id == str(template_id),
+                        TemplateVersionRow.publication_state == "published",
                     )
                 )
                 return _version(row) if row is not None else None
@@ -307,7 +572,10 @@ class SqlTemplateCatalogRepository:
                     _version(row)
                     for row in database.scalars(
                         select(TemplateVersionRow)
-                        .where(TemplateVersionRow.template_id == str(template_id))
+                        .where(
+                            TemplateVersionRow.template_id == str(template_id),
+                            TemplateVersionRow.publication_state == "published",
+                        )
                         .order_by(TemplateVersionRow.version_number.desc())
                     )
                 )
@@ -346,7 +614,11 @@ class SqlTemplateCatalogRepository:
         try:
             with DatabaseSession(self._engine) as database:
                 row = database.get(TemplateRow, str(template_id))
-                return _template(row) if row is not None else None
+                return (
+                    _template(row)
+                    if row is not None and row.publication_state == "published"
+                    else None
+                )
         except SQLAlchemyError:
             raise PersistenceError from None
 
@@ -358,6 +630,7 @@ class SqlTemplateCatalogRepository:
         viewer_is_admin: bool,
     ) -> TemplatePage:
         conditions = []
+        conditions.append(TemplateRow.publication_state == "published")
         if not viewer_is_admin:
             conditions.append(
                 or_(
@@ -418,12 +691,56 @@ class SqlTemplateSelectionRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def set_preferred_audited(
+        self, user_id: UUID, template_id: UUID, audit: TemplateAuditRecord
+    ) -> None:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                self._require_active(database, template_id)
+                database.execute(self._preference_upsert(user_id, template_id))
+                database.add(_audit_row(audit))
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def clear_preferred(self, user_id: UUID) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 database.execute(
                     delete(TemplatePreferenceRow).where(
                         TemplatePreferenceRow.user_id == str(user_id)
+                    )
+                )
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def clear_preferred_audited(
+        self, user_id: UUID, audit: TemplateAuditRecord
+    ) -> None:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                selected = database.scalar(
+                    select(TemplateRow)
+                    .join(
+                        TemplatePreferenceRow,
+                        TemplatePreferenceRow.template_id == TemplateRow.id,
+                    )
+                    .where(TemplatePreferenceRow.user_id == str(user_id))
+                    .with_for_update()
+                )
+                if selected is None:
+                    return
+                database.execute(
+                    delete(TemplatePreferenceRow).where(
+                        TemplatePreferenceRow.user_id == str(user_id)
+                    )
+                )
+                database.add(
+                    _audit_row(
+                        replace(
+                            audit,
+                            owner_id=UUID(selected.owner_id),
+                            template_id=UUID(selected.id),
+                        )
                     )
                 )
         except SQLAlchemyError:
@@ -484,6 +801,7 @@ class SqlTemplateSelectionRepository:
                     .where(
                         TemplatePreferenceRow.user_id == str(user_id),
                         TemplateRow.status == TemplateStatus.ACTIVE.value,
+                        TemplateRow.publication_state == "published",
                     )
                 )
                 if preferred is not None:
@@ -498,6 +816,7 @@ class SqlTemplateSelectionRepository:
                     .where(
                         SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID,
                         TemplateRow.status == TemplateStatus.ACTIVE.value,
+                        TemplateRow.publication_state == "published",
                     )
                 )
                 return _template(fallback) if fallback is not None else None
@@ -535,6 +854,7 @@ class SqlTemplateSelectionRepository:
             select(TemplateRow.id).where(
                 TemplateRow.id == str(template_id),
                 TemplateRow.status == TemplateStatus.ACTIVE.value,
+                TemplateRow.publication_state == "published",
             )
         )
         if active is None:

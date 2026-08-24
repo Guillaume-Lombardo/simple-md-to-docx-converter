@@ -24,8 +24,9 @@ page size. T14 does not choose a product page-size limit.
 
 ## Preferences and fallback
 
-Each account has at most one preferred template. Setting a preference or the singleton system
-fallback transactionally requires an active template. Selection resolves an active user
+Each account has at most one preferred template. Setting or clearing a preference and setting the
+singleton system fallback are recorded in the content-free audit trail. Setting a preference or
+fallback transactionally requires an active, published template. Selection resolves an active user
 preference first, then an active system fallback, and otherwise returns no template. An archived
 preference remains recorded but is ignored during resolution, allowing T15 to define archive and
 restoration behavior without silently changing ownership or preference history.
@@ -35,11 +36,16 @@ records actor, owner, target, operation, and whether the action is an administra
 
 ## HTTP lifecycle and concurrency
 
-Authenticated clients use `/api/v1/templates` to search or create templates. Creation accepts a
-multipart DOCX and validates bounded OpenXML structure, required Pandoc styles, relationships,
-active-content exclusions, and the approved font contract before publishing version 1. The safety
-ceilings are configurable `MD_CONVERTER_TEMPLATE_*` settings; T18 retains approval of production
-values.
+Authenticated clients use `/api/v1/templates` to search or create templates. Creation and content
+replacement accept a multipart DOCX plus one or more `expected_fonts` declarations. Before a
+version can become visible, the service invokes the complete T10 activation boundary: bounded
+OpenXML and relationship checks, required Pandoc styles, active-content exclusions, declared-font
+resolution against the pinned manifest, a blank Pandoc conversion using the candidate as
+`reference.docx`, and an isolated LibreOffice rewrite. The immutable version row records declared
+fonts, resolved substitutions, and the successful validation-stage trace. Missing or unsupported
+font declarations and engine failures return sanitized validation errors and publish neither
+metadata nor bytes. All safety ceilings and engine paths/timeouts are required
+`MD_CONVERTER_TEMPLATE_*` settings; T18 retains approval of their production values.
 
 Every identity response carries an `ETag` of the form
 `"template-<template UUID>-<revision>"`. Metadata updates, replacements, restorations, archive, and
@@ -48,15 +54,19 @@ malformed, or disallowed mutation returns `412`. Concurrent replacements may val
 independently, but only one compare-and-swap transaction publishes a new current version. The
 losing unpublished object is removed.
 
-Content routes use stable download names, the DOCX media type, `nosniff`, and a SHA-256 ETag. They
+Content routes use stable download names, the DOCX media type, `nosniff`, and a SHA-256 ETag. Every
+download, restore, and worker resolution recomputes both byte length and SHA-256 before returning
+content; a mismatch is a sanitized service-integrity failure rather than corrupted output. They
 never reflect an uploaded filename. Active content and every immutable prior version are visible
 to all authenticated users; archived content and history remain visible only to the owner and
 global administrators.
 
 Replacement always creates the next immutable version. Restoration reads a historical object and
 creates a new copy-forward version recording `restored_from_version_id`; it never rewrites
-history. `TemplateService.resolve_frozen_version` gives a processor the exact `template_id` and
-`template_version_id` frozen on a conversion job after later replacements.
+history. Conversion submission locks and verifies one active, current, published template/version
+pair in the same transaction that freezes those identifiers on the job. `FrozenTemplateJobProcessor`
+then uses `TemplateService.resolve_frozen_version` to give the conversion processor exactly those
+validated bytes after later replacements or restorations.
 
 ## Authorization, audit, archive, and deletion
 
@@ -67,14 +77,19 @@ same database transaction as the metadata change. Administrator fallback selecti
 the same transaction as the singleton update.
 
 Deletion requires an archived identity and its current ETag. It is rejected while a preference,
-system fallback, or conversion job references the identity. After the guarded metadata transaction
-succeeds, object deletions use idempotent store operations; an object-store failure is returned as a
-sanitized service error and later orphan reclamation remains part of T18 cleanup policy. Archive
-preserves history and preferences; selection resolution ignores archived identities.
+system fallback, or conversion job references the identity. The repository first commits a durable
+`deleting` tombstone, then object deletions use idempotent store operations, and only a fully cleaned
+identity is removed. Creation and replacement likewise reserve hidden `pending` rows before bytes
+are written and publish the current pair only after the object succeeds. Application startup retries
+both pending-object compensation and deletion tombstones, so a process or object-store failure
+cannot expose a partial version or permanently lose cleanup work. Archive preserves history and
+preferences; selection resolution ignores archived identities.
 
 SQLite/filesystem and PostgreSQL/S3 share the service and repository contracts. Filesystem writes
 use fsync plus atomic replacement; S3 and filesystem keys are stable immutable version UUIDs.
-Database publication failure compensates by deleting an unpublished object.
+Database constraints and triggers enforce owner/pair integrity, immutable version evidence,
+current-version membership, active/current job submission, and deletion restrictions in addition
+to the application-level transactions.
 
 T16 and T17 retain browser interfaces. T20/T21 retain final rootless-image E2E for both profiles;
 T15 supplies functional ASGI and real SQLite/filesystem plus PostgreSQL/RustFS boundary coverage

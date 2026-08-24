@@ -66,11 +66,13 @@ def test_template_service_enforces_two_user_and_administrator_boundaries(
         service.authorize_mutation(admin, uuid4())
 
     service.set_preferred(bob, active.id)
-    selections.set_preferred.assert_called_once_with(bob.id, active.id)
+    selections.set_preferred_audited.assert_called_once()
+    assert selections.set_preferred_audited.call_args.args[:2] == (bob.id, active.id)
     assert service.resolve(bob) == active
     selections.resolve.assert_called_once_with(bob.id)
     service.clear_preferred(bob)
-    selections.clear_preferred.assert_called_once_with(bob.id)
+    selections.clear_preferred_audited.assert_called_once()
+    assert selections.clear_preferred_audited.call_args.args[0] == bob.id
 
     with pytest.raises(AuthenticationError):
         service.set_system_fallback(bob, active.id)

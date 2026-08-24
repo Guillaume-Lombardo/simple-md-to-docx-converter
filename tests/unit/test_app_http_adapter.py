@@ -26,6 +26,7 @@ from md_converter.templates.models import (
     TemplateVersion,
 )
 from md_converter.templates.service import TemplateService
+from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 
@@ -35,6 +36,10 @@ def isolated_client(
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
     settings = Settings(
+        **template_settings(
+            template_max_archive_bytes=1_000,
+            template_request_max_bytes=5_000,
+        ),
         initial_admin_username="admin",
         initial_admin_password=password,
         storage_profile="standalone",
@@ -43,8 +48,6 @@ def isolated_client(
         conversion_request_max_bytes=1_100_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
-        template_max_archive_bytes=1_000,
-        template_request_max_bytes=1_100,
     )
     admin = User(uuid4(), "admin", "admin", "admin-hash", Role.ADMIN)
     alice = User(uuid4(), "Alice", "alice", "alice-hash", Role.USER)
@@ -306,6 +309,19 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
         "200"
     ]["content"]["application/octet-stream"]["schema"]
     assert result_schema == {"type": "string", "format": "binary"}
+    docx_type = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    for path in (
+        "/api/v1/templates/{template_id}/content",
+        "/api/v1/templates/{template_id}/versions/{version_id}/content",
+    ):
+        responses = paths[path]["get"]["responses"]
+        assert responses["200"]["content"][docx_type]["schema"] == {
+            "type": "string",
+            "format": "binary",
+        }
+        assert {"401", "404", "422", "503"} <= responses.keys()
 
 
 @pytest.mark.unit
@@ -332,12 +348,21 @@ def test_template_body_is_bounded_before_authentication_and_multipart_parsing(
     with client:
         response = client.post(
             "/api/v1/templates",
-            content=b"x" * 1_101,
+            content=b"x" * 5_001,
             headers={"Content-Type": "multipart/form-data; boundary=private"},
         )
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "TEMPLATE_REQUEST_TOO_LARGE"
     auth.authenticate.assert_not_called()
+
+    with client:
+        patch_response = client.patch(
+            f"/api/v1/templates/{uuid4()}",
+            content=b"x" * 4_097,
+            headers={"Content-Type": "application/json"},
+        )
+    assert patch_response.status_code == 413
+    assert patch_response.json()["error"]["code"] == "TEMPLATE_REQUEST_TOO_LARGE"
 
 
 @pytest.mark.unit
@@ -467,7 +492,11 @@ def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
         created = client.post(
             "/api/v1/templates",
             headers=csrf,
-            data={"name": "Name", "description": "Description"},
+            data={
+                "name": "Name",
+                "description": "Description",
+                "expected_fonts": "Calibri",
+            },
             files={"content": ("template.docx", b"docx")},
         )
         assert created.status_code == 201
@@ -497,8 +526,31 @@ def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
             f"/api/v1/templates/{template.id}/content",
             headers={**csrf, "If-Match": etag},
             files={"content": ("template.docx", b"docx")},
+            data={"expected_fonts": "Calibri"},
         )
         assert replaced.status_code == 201
+        empty = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("empty.docx", b"")},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert empty.status_code == 422
+        assert empty.json()["error"]["code"] == "TEMPLATE_INVALID_PACKAGE"
+        exact_limit = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("limit.docx", b"x" * 1_000)},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert exact_limit.status_code == 201
+        oversized = client.put(
+            f"/api/v1/templates/{template.id}/content",
+            headers={**csrf, "If-Match": etag},
+            files={"content": ("large.docx", b"x" * 1_001)},
+            data={"expected_fonts": "Calibri"},
+        )
+        assert oversized.status_code == 413
         assert (
             client.get(f"/api/v1/templates/{template.id}/versions").status_code == 200
         )

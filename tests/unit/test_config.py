@@ -8,12 +8,16 @@ import pytest
 from pydantic import ValidationError
 
 from md_converter.config import ConfigurationError, Settings
+from tests.settings import template_settings
+
+TEMPLATE_REQUIRED_FIELDS = tuple(template_settings())
 
 
 @pytest.mark.unit
 def test_security_defaults_and_secret_redaction() -> None:
     secret = "do-not-" + "print"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=secret,
         storage_profile="standalone",
@@ -50,6 +54,7 @@ def test_invalid_security_configuration_is_rejected(
     overrides: dict[str, object],
 ) -> None:
     values: dict[str, object] = {
+        **template_settings(),
         "initial_admin_username": "admin",
         "initial_admin_password": "secret",
         "storage_profile": "standalone",
@@ -60,6 +65,27 @@ def test_invalid_security_configuration_is_rejected(
         "job_result_retention_seconds": 3_600,
     }
     values.update(overrides)
+    with pytest.raises(ValidationError):
+        Settings.model_validate(values)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing", TEMPLATE_REQUIRED_FIELDS)
+def test_template_runtime_configuration_has_no_implicit_defaults(
+    missing: str,
+) -> None:
+    values: dict[str, object] = {
+        **template_settings(),
+        "initial_admin_username": "admin",
+        "initial_admin_password": "secret",
+        "storage_profile": "standalone",
+        "standalone_data_directory": "/data",
+        "conversion_upload_max_bytes": 1_000_000,
+        "conversion_request_max_bytes": 1_100_000,
+        "conversion_retry_after_seconds": 1,
+        "job_result_retention_seconds": 3_600,
+    }
+    del values[missing]
     with pytest.raises(ValidationError):
         Settings.model_validate(values)
 
@@ -138,6 +164,7 @@ def test_mixed_or_incomplete_storage_profiles_fail_fast(
     with pytest.raises(ValidationError):
         Settings.model_validate(
             {
+                **template_settings(),
                 "initial_admin_username": "admin",
                 "initial_admin_password": "secret",
                 "conversion_upload_max_bytes": 1_000_000,
@@ -154,6 +181,7 @@ def test_distributed_profile_accepts_aws_or_s3_compatible_credentials() -> None:
     admin_secret = "sec" + "ret"
     s3_secret = "secret" + "-key"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=admin_secret,
         storage_profile="distributed",

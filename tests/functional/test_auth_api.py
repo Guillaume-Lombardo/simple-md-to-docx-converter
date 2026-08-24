@@ -11,12 +11,14 @@ from fastapi.testclient import TestClient
 from md_converter.app import AppComponents, build_components, create_app
 from md_converter.auth.memory import MemoryReadinessProbe
 from md_converter.config import Settings
+from tests.settings import template_settings
 
 
 def make_client(data_directory: Path) -> TestClient:
     """Build an HTTPS ASGI client with intentionally cheap test-only Argon2 settings."""
     password = "admin-" + "password"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="Admin",
         initial_admin_password=password,
         argon2_memory_cost=8,
@@ -78,6 +80,7 @@ def test_health_login_page_docs_and_openapi_contract(tmp_path: Path) -> None:
 def test_readiness_failure_is_cheap_and_stable(tmp_path: Path) -> None:
     password = "admin-" + "password"
     settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=password,
         argon2_memory_cost=8,

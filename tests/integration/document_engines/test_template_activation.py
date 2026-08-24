@@ -13,10 +13,22 @@ import time
 import zipfile
 from contextlib import suppress
 from pathlib import Path
+from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
+from sqlalchemy import Engine, func, select
+from sqlalchemy.orm import Session
 
+from md_converter.auth.models import Role, User
+from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.schema import TemplateVersionRow, UserRow
+from md_converter.persistence.sql import create_database_engine
+from md_converter.persistence.templates import (
+    SqlTemplateCatalogRepository,
+    SqlTemplateSelectionRepository,
+)
+from md_converter.storage import FilesystemObjectStore
 from md_converter.templates import engines as template_engines
 from md_converter.templates.engines import (
     TemplateActivationContext,
@@ -27,6 +39,8 @@ from md_converter.templates.errors import (
     TemplateValidationError,
     TemplateValidationErrorCode,
 )
+from md_converter.templates.models import TemplateCreate, TemplateSearch
+from md_converter.templates.service import TemplateService
 from md_converter.templates.validation import (
     APPROVED_FONT_POLICY,
     TemplateFontDeclaration,
@@ -59,6 +73,38 @@ DEFAULT_REFERENCE_FONTS = TemplateFontDeclaration(
         "Times New Roman",
     )
 )
+
+
+def _versioned_service(
+    tmp_path: Path, context: TemplateActivationContext
+) -> tuple[TemplateService, SqlTemplateCatalogRepository, User, Engine]:
+    engine = create_database_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'metadata.sqlite3'}"
+    )
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "engine-owner", "hash", Role.USER)
+    with Session(engine) as database, database.begin():
+        database.add(
+            UserRow(
+                id=str(owner.id),
+                username=owner.username,
+                normalized_username=owner.normalized_username,
+                password_hash=owner.password_hash,
+                role=owner.role.value,
+                active=True,
+                auth_version=0,
+            )
+        )
+    catalog = SqlTemplateCatalogRepository(engine)
+    service = TemplateService(
+        catalog=catalog,
+        selections=SqlTemplateSelectionRepository(engine),
+        objects=FilesystemObjectStore(tmp_path),
+        validate_content=lambda data, declaration: validate_template_for_activation(
+            data, declaration, context
+        ),
+    )
+    return service, catalog, owner, engine
 
 
 def _default_reference() -> bytes:
@@ -396,3 +442,75 @@ def test_unavailable_engine_is_content_free(tmp_path: Path) -> None:
         )
     assert captured.value.code is TemplateValidationErrorCode.ENGINE_UNAVAILABLE
     assert str(tmp_path) not in str(captured.value)
+
+
+@pytest.mark.requires_pandoc
+@pytest.mark.requires_libreoffice
+def test_versioned_api_service_publishes_only_after_real_engine_activation(
+    tmp_path: Path,
+) -> None:
+    context = TemplateActivationContext(
+        LIMITS,
+        APPROVED_FONT_POLICY,
+        TemplateEngineConfig("pandoc", "soffice", 30.0, 2.0, tmp_path),
+        os.environ,
+    )
+    service, _catalog, owner, _engine = _versioned_service(tmp_path, context)
+
+    template, version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Real activation", "T15 boundary"),
+        _candidate_reference(),
+        DEFAULT_REFERENCE_FONTS.families,
+    )
+
+    assert template.current_version_id == version.id
+    assert version.declared_fonts == DEFAULT_REFERENCE_FONTS.families
+    assert version.validation_trace == (
+        "static_ooxml",
+        "pandoc_blank_conversion",
+        "libreoffice_open_save",
+    )
+    assert service.download(owner, template.id)[2] == _candidate_reference()
+
+
+@pytest.mark.parametrize("failed_engine", ["pandoc", "libreoffice"])
+@pytest.mark.requires_pandoc
+@pytest.mark.requires_libreoffice
+def test_real_activation_engine_failure_never_publishes_template_or_object(
+    tmp_path: Path, failed_engine: str
+) -> None:
+    engines = {
+        "pandoc": "/bin/false" if failed_engine == "pandoc" else "pandoc",
+        "libreoffice": ("/bin/false" if failed_engine == "libreoffice" else "soffice"),
+    }
+    context = TemplateActivationContext(
+        LIMITS,
+        APPROVED_FONT_POLICY,
+        TemplateEngineConfig(
+            engines["pandoc"], engines["libreoffice"], 30.0, 2.0, tmp_path
+        ),
+        os.environ,
+    )
+    service, catalog, owner, engine = _versioned_service(tmp_path, context)
+
+    with pytest.raises(TemplateValidationError):
+        service.create_versioned(
+            owner,
+            TemplateCreate(uuid4(), "Rejected", "Engine failure"),
+            _candidate_reference(),
+            DEFAULT_REFERENCE_FONTS.families,
+        )
+
+    assert (
+        catalog.search(
+            TemplateSearch(), viewer_id=owner.id, viewer_is_admin=False
+        ).total
+        == 0
+    )
+    with Session(engine) as database:
+        assert (
+            database.scalar(select(func.count()).select_from(TemplateVersionRow)) == 0
+        )
+    object_root = tmp_path / "objects" / "template-versions"
+    assert not object_root.exists() or not any(object_root.rglob("*"))

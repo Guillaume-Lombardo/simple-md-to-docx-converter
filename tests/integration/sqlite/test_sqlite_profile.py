@@ -28,6 +28,7 @@ from md_converter.storage import (
     ObjectScope,
     ObjectStoreError,
 )
+from tests.settings import template_settings
 from tests.storage_contracts import (
     exercise_auth_repository_contract,
     exercise_object_store_contract,
@@ -104,6 +105,7 @@ def test_standalone_restart_preserves_admin_password_and_sessions(
     original_password = "original-" + "password"
     replacement_password = "replacement-" + "password"
     first_settings = Settings(
+        **template_settings(),
         initial_admin_username="admin",
         initial_admin_password=original_password,
         argon2_memory_cost=8,
@@ -122,6 +124,7 @@ def test_standalone_restart_preserves_admin_password_and_sessions(
     assert set(tmp_path.iterdir()) == {data_directory}
 
     second_settings = Settings(
+        **template_settings(),
         initial_admin_username="ADMIN",
         initial_admin_password=replacement_password,
         argon2_memory_cost=8,
