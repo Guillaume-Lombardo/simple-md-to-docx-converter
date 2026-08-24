@@ -2,7 +2,7 @@
 ticket: T09
 linear_id: G1L-319
 linear_url: https://linear.app/g1lom/issue/G1L-319/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,11 @@ Render Mermaid through local Chromium under arbitrary UID, bounded resources, ro
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T00 and T08 are verified `Done` in the repository and Linear. Implementation started
+  on `feat/T09-local-mermaid`. Scope is local Mermaid CLI/Chromium rendering, deterministic diagram
+  replacement before Pandoc, bounded source/output/dimensions/process execution, stable failures,
+  and rootless/no-network integration evidence. T10 fonts, T11 PDF, T13 asynchronous cancellation,
+  T18 production limit values, and T20/T21 final-image E2E remain outside this ticket.
 
 ## Synchronization
 
