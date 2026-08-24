@@ -529,6 +529,38 @@ def test_pdf_structure_rejects_unknown_action_without_optional_type() -> None:
     assert captured.value.code is ConversionErrorCode.INVALID_PDF
 
 
+@pytest.mark.parametrize(
+    "action",
+    (
+        DictionaryObject({NameObject("/S"): NameObject("/UnknownAction")}),
+        DictionaryObject(
+            {
+                NameObject("/S"): NameObject("/URI"),
+                NameObject("/URI"): TextStringObject("file:///etc/passwd"),
+            }
+        ),
+    ),
+)
+def test_pdf_structure_revalidates_shared_indirect_objects_as_actions(
+    action: DictionaryObject,
+) -> None:
+    writer = PdfWriter()
+    shared = writer._add_object(action)
+    annotation = DictionaryObject(
+        {
+            NameObject("/X"): shared,
+            NameObject("/A"): shared,
+        }
+    )
+    with pytest.raises(ConversionError) as captured:
+        libreoffice._walk_pdf_dictionary(
+            annotation,
+            libreoffice._PdfWalkState(LIMITS),
+            0,
+        )
+    assert captured.value.code is ConversionErrorCode.INVALID_PDF
+
+
 def test_pdf_structure_allows_structure_attributes_named_a() -> None:
     attributes = DictionaryObject(
         {

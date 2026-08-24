@@ -405,8 +405,10 @@ def _read_pdf(path: Path, limit: int) -> bytes:
 @dataclass
 class _PdfWalkState:
     limits: PdfLimits
-    seen_indirect: set[tuple[int, int]] = field(default_factory=set)
-    seen_direct: set[int] = field(default_factory=set)
+    seen_indirect: set[tuple[int, int, bool]] = field(default_factory=set)
+    seen_direct: set[tuple[int, bool]] = field(default_factory=set)
+    claimed_indirect: set[tuple[int, int]] = field(default_factory=set)
+    claimed_direct: set[int] = field(default_factory=set)
     count: int = 0
 
     def claim(self) -> None:
@@ -489,11 +491,14 @@ def _walk_pdf_object(
     if depth > state.limits.max_pdf_object_depth:
         _error(ConversionErrorCode.PDF_LIMIT_EXCEEDED, "PDF exceeds configured limits.")
     if isinstance(value, IndirectObject):
-        key = (value.idnum, value.generation)
-        if key in state.seen_indirect:
+        identity = (value.idnum, value.generation)
+        visit = (*identity, action_context)
+        if visit in state.seen_indirect:
             return
-        state.seen_indirect.add(key)
-        state.claim()
+        state.seen_indirect.add(visit)
+        if identity not in state.claimed_indirect:
+            state.claimed_indirect.add(identity)
+            state.claim()
         _walk_pdf_object(
             value.get_object(), state, depth + 1, action_context=action_context
         )
@@ -501,10 +506,13 @@ def _walk_pdf_object(
     if not isinstance(value, (DictionaryObject, ArrayObject)):
         return
     identity = id(value)
-    if identity in state.seen_direct:
+    visit = (identity, action_context)
+    if visit in state.seen_direct:
         return
-    state.seen_direct.add(identity)
-    state.claim()
+    state.seen_direct.add(visit)
+    if identity not in state.claimed_direct:
+        state.claimed_direct.add(identity)
+        state.claim()
     if isinstance(value, DictionaryObject):
         _walk_pdf_dictionary(value, state, depth, action_context=action_context)
     else:

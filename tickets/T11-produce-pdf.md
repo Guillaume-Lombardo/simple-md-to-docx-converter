@@ -52,11 +52,12 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   committed rootless harness reproduces the real boundary suite. T20/T21 and Linear now retain the
   explicitly approved final-image asynchronous E2E debt. The final security pass also rejects
   unknown typeless actions and non-HTTP(S) URI actions, normalizes malformed page trees, and bounds
-  the executable rootless workspace to a 512 MiB tmpfs. Formatting, Ruff, and `ty` pass; 608 unit
-  tests pass at 93.97% coverage, 749 default local tests pass at 95.02%, and all 20 rootless real-
-  engine tests pass. The unfiltered host run has 34 expected missing-engine failures; those exact
-  boundaries pass in the approved image. Exact-revision re-review and changed-line coverage remain
-  before publication.
+  the executable rootless workspace to a 512 MiB tmpfs. Context-sensitive visit tracking also
+  prevents shared indirect objects from bypassing action validation. Formatting, Ruff, and `ty`
+  pass; 610 unit tests pass at 93.98% coverage, 751 default local tests pass at 95.04%, and all 20
+  rootless real-engine tests pass. The unfiltered host run has 34 expected missing-engine failures;
+  those exact boundaries pass in the approved image. Exact-revision re-review and changed-line
+  coverage remain before publication.
 
 ## Synchronization
 
