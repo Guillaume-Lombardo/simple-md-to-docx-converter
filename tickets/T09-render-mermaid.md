@@ -2,7 +2,7 @@
 ticket: T09
 linear_id: G1L-319
 linear_url: https://linear.app/g1lom/issue/G1L-319/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,6 +52,12 @@ Render Mermaid through local Chromium under arbitrary UID, bounded resources, ro
   final process reap, prevalidating all generated paths before rendering, adding real failure and
   descendant-cleanup tests, and checking landscape and portrait OpenXML extents. The reviewer
   explicitly approved deferring final-image E2E to T20/T21.
+- 2026-08-24: GitHub PR #38 exact head `ab5a4ff972964d7435d3dc4d7e727dd8645560cd`
+  passed run `32709864900`, including the document-engine domain and protected gate, and was
+  squash-merged into `main` as `4280ca0699d1c80790aa0a7289a8ba8984c97214`. That exact squash
+  passed main run `32710022591`, including the protected gate. T09 is delivered and verified on
+  `main`; final-image E2E remains explicitly assigned to T20/T21 and OpenShift proof remains
+  deferred without a compatibility claim.
 
 ## Synchronization
 
