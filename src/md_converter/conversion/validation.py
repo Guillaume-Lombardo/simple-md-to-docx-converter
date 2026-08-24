@@ -53,7 +53,7 @@ def _walk(tokens: list[Token]) -> Iterator[Token]:
 def _metadata_scalars(metadata: str) -> Iterator[str]:
     try:
         root = yaml.compose(metadata, Loader=yaml.SafeLoader)
-    except yaml.YAMLError:
+    except yaml.YAMLError, RecursionError:
         raise validation_error(
             "Markdown input contains invalid YAML metadata."
         ) from None

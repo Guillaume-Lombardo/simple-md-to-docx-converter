@@ -195,6 +195,20 @@ def test_invalid_yaml_metadata_has_stable_validation_error(mocker) -> None:
 
 
 @pytest.mark.unit
+def test_excessively_nested_yaml_has_stable_validation_error(mocker) -> None:
+    converter = mocker.Mock()
+    service = DocxConversionService(converter)
+    depth = 500
+    nested_value = "[" * depth + "safe" + "]" * depth
+    markdown = f"---\nvalue: {nested_value}\n---\n# Safe"
+    with pytest.raises(ConversionError) as captured:
+        service.convert(markdown, b"reference")
+    assert captured.value.code is ConversionErrorCode.VALIDATION
+    assert str(captured.value) == "Markdown input contains invalid YAML metadata."
+    converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("empty", ["", "  \n"])
 def test_empty_markdown_has_stable_validation_error(empty: str) -> None:
     with pytest.raises(ConversionError) as captured:
