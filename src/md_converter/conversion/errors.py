@@ -12,6 +12,10 @@ class ConversionErrorCode(StrEnum):
     PANDOC_TIMEOUT = "pandoc_timeout"
     PANDOC_FAILURE = "pandoc_failure"
     INVALID_DOCX = "invalid_docx"
+    MERMAID_UNAVAILABLE = "mermaid_unavailable"
+    MERMAID_TIMEOUT = "mermaid_timeout"
+    MERMAID_FAILURE = "mermaid_failure"
+    INVALID_MERMAID_OUTPUT = "invalid_mermaid_output"
 
 
 class ConversionError(RuntimeError):

@@ -22,7 +22,7 @@ def test_committed_workflow_satisfies_local_security_policy() -> None:
 
 
 @pytest.mark.unit
-def test_document_engine_job_installs_only_checksum_locked_pandoc() -> None:
+def test_document_engine_job_installs_checksum_locked_document_engines() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "if: ${{ matrix.domain == 'document-engines' }}" in workflow
     assert (
@@ -33,6 +33,20 @@ def test_document_engine_job_installs_only_checksum_locked_pandoc() -> None:
         "c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a" in workflow
     )
     assert "sha256sum --check --strict" in workflow
+    assert (
+        "878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd" in workflow
+    )
+    assert (
+        "6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f" in workflow
+    )
+    assert 'PUPPETEER_SKIP_DOWNLOAD: "true"' in workflow
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
+    assert "node-version: 22.23.1" in workflow
+    assert 'test "$(node --version)" = "v22.23.1"' in workflow
+    assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
+    assert "mmdc --version" in workflow
+    assert "google-chrome-stable --version" in workflow
+    assert "awk '{$1=$1; print}'" in workflow
 
 
 @pytest.mark.unit
