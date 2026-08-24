@@ -63,6 +63,13 @@ Build owner and administrator template management and local-account management w
   tests. The unfiltered suite still has 37 expected host failures because Pandoc,
   Mermaid/Chromium, LibreOffice, and the pinned font inventory are not installed on the host.
   Final-image engine and both-profile E2E verification remain T20/T21 sequencing debt.
+- 2026-08-24: Corrected PR CI evidence by adding unit coverage for the authenticated administration
+  page, its immutable assets, and its unauthenticated redirect. The exact light selection now passes
+  710 tests with 90.09% application branch coverage and 100% changed application coverage (28/28
+  executable lines) against `6c222ec`. The pinned-Chromium account workflow now waits for the
+  re-rendered, enabled `Reactivate` control before clicking it; this removes the lost-click race
+  without increasing timeouts. The administration scenario passed three consecutive pinned-browser
+  runs, followed by the complete two-scenario browser suite.
 
 ## Synchronization
 

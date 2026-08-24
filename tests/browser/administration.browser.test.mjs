@@ -112,8 +112,14 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   await waitForText(page, "#user-list", "Alice");
   await page.$eval("#user-list .management-card .danger", (button) => button.click());
   await waitForText(page, "#administration-alert", "Alice is now inactive.");
-  await page.$eval("#user-list .management-card button", (button) => button.click());
+  await page.waitForFunction(() => [...document.querySelectorAll("#user-list .management-card button")]
+    .some((button) => button.textContent === "Reactivate" && !button.disabled));
+  await page.$$eval("#user-list .management-card button", (buttons) => {
+    buttons.find((button) => button.textContent === "Reactivate").click();
+  });
   await waitForText(page, "#administration-alert", "Alice is now active.");
+  await page.waitForFunction(() => [...document.querySelectorAll("#user-list .management-card")]
+    .some((card) => card.textContent.includes("user · active")));
 
   await clearSession(page);
   await login(page, baseUrl, "alice", "alice-password");
