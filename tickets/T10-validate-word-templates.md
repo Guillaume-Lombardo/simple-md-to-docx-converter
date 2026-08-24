@@ -2,7 +2,7 @@
 ticket: T10
 linear_id: G1L-321
 linear_url: https://linear.app/g1lom/issue/G1L-321/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,12 @@ Inventory fonts and licenses; validate OOXML, templates, required styles, substi
 
 ## Progress
 
-- No implementation work started.
+- 2026-08-24: T00 and T07 are verified `Done` in the repository and Linear. Implementation started
+  on `feat/T10-template-font-validation`. Scope is exact official font artifacts and notices,
+  deterministic Fontconfig substitutions, expected-font declarations, bounded OOXML template
+  validation, required Pandoc styles, macros and external-relationship rejection, blank canonical
+  Pandoc conversion, and real LibreOffice opening. T11 PDF and T15 versioned HTTP workflows remain
+  downstream; T20/T21 retain final-image E2E.
 
 ## Synchronization
 
