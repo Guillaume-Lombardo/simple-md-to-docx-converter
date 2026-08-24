@@ -2,7 +2,7 @@
 ticket: T11
 linear_id: G1L-320
 linear_url: https://linear.app/g1lom/issue/G1L-320/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -59,7 +59,11 @@ Produce PDF with isolated LibreOffice profiles, traceability metadata, timeout a
   those exact boundaries pass in the approved image. Exact-revision re-review and changed-line
   coverage are complete: independent security, specification, and CI/toolchain reviewers approve
   implementation revision `9f608e8` without an actionable finding; changed application coverage is
-  97.32% and application branch coverage is 91.53%. Publication and protected CI remain.
+  97.32% and application branch coverage is 91.53%.
+- 2026-08-24: PR #42 was squash-merged to `main` as
+  `5d4d34cef9c51539a282327e7164231a05db6f69`. Exact main run `32722804067` passed every
+  implemented CI domain and the protected gate. T11 is verified delivered and marked `Done`; its
+  explicitly approved final-image E2E debt remains tracked in T20/T21.
 
 ## Synchronization
 
