@@ -18,6 +18,10 @@ def test_security_defaults_and_secret_redaction() -> None:
         initial_admin_password=secret,
         storage_profile="standalone",
         standalone_data_directory=Path("/data"),
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     assert settings.argon2_memory_cost == 19_456
     assert settings.argon2_time_cost == 2
@@ -36,6 +40,10 @@ def test_security_defaults_and_secret_redaction() -> None:
         {"initial_admin_password": ""},
         {"session_token_bytes": 15},
         {"session_idle_seconds": 20, "session_absolute_seconds": 10},
+        {"conversion_upload_max_bytes": 0},
+        {"conversion_request_max_bytes": 1_000_000},
+        {"conversion_retry_after_seconds": 0},
+        {"job_result_retention_seconds": 0},
     ],
 )
 def test_invalid_security_configuration_is_rejected(
@@ -46,6 +54,10 @@ def test_invalid_security_configuration_is_rejected(
         "initial_admin_password": "secret",
         "storage_profile": "standalone",
         "standalone_data_directory": "/data",
+        "conversion_upload_max_bytes": 1_000_000,
+        "conversion_request_max_bytes": 1_100_000,
+        "conversion_retry_after_seconds": 1,
+        "job_result_retention_seconds": 3_600,
     }
     values.update(overrides)
     with pytest.raises(ValidationError):
@@ -128,6 +140,10 @@ def test_mixed_or_incomplete_storage_profiles_fail_fast(
             {
                 "initial_admin_username": "admin",
                 "initial_admin_password": "secret",
+                "conversion_upload_max_bytes": 1_000_000,
+                "conversion_request_max_bytes": 1_100_000,
+                "conversion_retry_after_seconds": 1,
+                "job_result_retention_seconds": 3_600,
                 **values,
             }
         )
@@ -146,6 +162,10 @@ def test_distributed_profile_accepts_aws_or_s3_compatible_credentials() -> None:
         s3_endpoint_url="https://s3.example.test",
         s3_access_key_id="access",
         s3_secret_access_key=s3_secret,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     assert settings.standalone_data_directory is None
     assert s3_secret not in repr(settings)

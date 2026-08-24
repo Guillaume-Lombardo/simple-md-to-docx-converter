@@ -27,8 +27,17 @@ read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_STORAGE_PROFILE=standalone
 export MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
+export MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=1048576
+export MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=1114112
+export MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=1
+export MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=3600
 uv run uvicorn md_converter:create_app --factory --host 127.0.0.1 --port 8000
 ```
+
+The four numeric values above are disposable development examples, not approved production policy.
+They are mandatory so an operator cannot unknowingly inherit request-body, upload, polling, or
+retention limits. The request-body limit must exceed the source limit to allow bounded multipart
+metadata. T18 owns their production values together with quota and cleanup schedules.
 
 The session cookie is always `Secure`, so use an HTTPS endpoint for browser or API authentication.
 Do not commit bootstrap credentials or place production secrets in shell history; deployment

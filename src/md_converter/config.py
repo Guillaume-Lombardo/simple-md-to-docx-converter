@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=30 * 60, ge=1)
     session_absolute_seconds: int = Field(default=8 * 60 * 60, ge=1)
     session_cookie_name: str = Field(default="md_converter_session", min_length=1)
+    conversion_upload_max_bytes: int = Field(gt=0)
+    conversion_request_max_bytes: int = Field(gt=0)
+    conversion_retry_after_seconds: int = Field(gt=0)
+    job_result_retention_seconds: int = Field(gt=0)
     storage_profile: StorageProfile
     standalone_data_directory: Path | None = None
     distributed_database_url: SecretStr | None = None
@@ -57,6 +61,8 @@ class Settings(BaseSettings):
             raise ValueError("initial administrator username must not be blank")
         if not self.initial_admin_password.get_secret_value():
             raise ValueError("initial administrator password must not be blank")
+        if self.conversion_request_max_bytes <= self.conversion_upload_max_bytes:
+            raise ValueError("conversion request limit must exceed the source limit")
         self._validate_storage_profile()
         return self
 

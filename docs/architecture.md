@@ -8,8 +8,11 @@ selected by an explicit storage profile. Stable-identifier object-store ports us
 AWS S3-compatible operations. Template identity, ownership, visibility-aware search, user
 preferences, fallback selection, and future-mutation authorization now have storage-neutral domain
 and persistence boundaries. Isolated adapters validate Markdown and resources, render Mermaid,
-produce DOCX with Pandoc, and produce bounded PDF with LibreOffice. There is still no template
-content/version API, queue, worker, or deployment implementation.
+produce DOCX with Pandoc, and produce bounded PDF with LibreOffice. Conversion submissions now use
+an owner-scoped idempotent API, a durable state machine, transactional SQLite/PostgreSQL claims,
+leases, heartbeats, deterministic recovery, cancellation, atomic result publication, and bounded
+embedded/external worker loops. Template content/version APIs and deployment wiring remain future
+work.
 
 ## Target system
 
@@ -26,15 +29,18 @@ The intended boundaries are:
 - adapters isolate document engines, repositories, object storage, and the filesystem;
 - workers claim persisted jobs, enforce resource limits, and publish results atomically.
 
-The HTTP authentication and storage boundaries now exist. Remaining boundaries describe the
-delivery direction and will be introduced by their corresponding tickets.
+The HTTP authentication, conversion-job, worker orchestration, and storage boundaries now exist.
+T15 will connect the worker processor to immutable template versions and the delivered document
+engines. T18 will supply approved operational values, and T20 will wire final runtime modes.
 
 ## Storage profiles
 
-The standalone profile will use SQLite, atomic files under `/data`, one application replica, and an
-embedded worker. The distributed profile will use PostgreSQL, S3-compatible object storage, and
-separately scalable workers. Shared repository and object-store interfaces must receive the same
-contract tests when they are introduced. T06 defines storage-neutral account and session
+The standalone profile uses SQLite, atomic files under `/data`, one application replica, and the
+delivered single embedded-worker lifecycle. The distributed profile uses PostgreSQL,
+S3-compatible object storage, and the same worker loop in separately scalable processes.
+Transactional PostgreSQL claims use `FOR UPDATE SKIP LOCKED`; SQLite remains restricted to one
+application replica. Shared repository and object-store interfaces receive the same contract tests
+for both profiles. T06 defines storage-neutral account and session
 repository ports are implemented by one transactional SQL adapter contract-tested against SQLite
 and PostgreSQL. The object-store contract is shared by atomic files and the AWS S3-compatible
 adapter; RustFS exercises that contract in CI without entering application interfaces.

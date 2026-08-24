@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -119,3 +120,104 @@ Index("ix_templates_owner_id", TemplateRow.owner_id)
 Index("ix_templates_status", TemplateRow.status)
 Index("ix_templates_search_order", TemplateRow.normalized_name, TemplateRow.id)
 Index("ix_template_preferences_template_id", TemplatePreferenceRow.template_id)
+
+
+class ConversionJobRow(Base):
+    """Durable queue row shared by embedded and external workers."""
+
+    __tablename__ = "conversion_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "output IN ('docx', 'pdf', 'both')", name="ck_conversion_jobs_output"
+        ),
+        CheckConstraint(
+            "state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', "
+            "'expired')",
+            name="ck_conversion_jobs_state",
+        ),
+        CheckConstraint(
+            "step IN ('queued', 'validating', 'rendering', 'docx', 'pdf', "
+            "'publishing', 'complete')",
+            name="ck_conversion_jobs_step",
+        ),
+        CheckConstraint(
+            "progress >= 0 AND progress <= 100",
+            name="ck_conversion_jobs_progress",
+        ),
+        CheckConstraint("attempt >= 0", name="ck_conversion_jobs_attempt"),
+        UniqueConstraint(
+            "owner_id",
+            "idempotency_digest",
+            name="uq_conversion_jobs_owner_idempotency",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    template_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    template_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    output: Mapped[str] = mapped_column(String(16), nullable=False)
+    component_versions: Mapped[str] = mapped_column(String(), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    step: Mapped[str] = mapped_column(String(32), nullable=False)
+    progress: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_digest: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    result_object_id: Mapped[str | None] = mapped_column(String(36))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(String(1024))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_completed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    cleanup_owner: Mapped[str | None] = mapped_column(String(255))
+    cleanup_token: Mapped[str | None] = mapped_column(String(36))
+    cleanup_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+Index(
+    "ix_conversion_jobs_queue",
+    ConversionJobRow.state,
+    ConversionJobRow.created_at,
+    ConversionJobRow.id,
+)
+Index(
+    "ix_conversion_jobs_owner_created",
+    ConversionJobRow.owner_id,
+    ConversionJobRow.created_at,
+    ConversionJobRow.id,
+)
+Index(
+    "ix_conversion_jobs_lease_expiry",
+    ConversionJobRow.state,
+    ConversionJobRow.lease_expires_at,
+)
+Index(
+    "ix_conversion_jobs_terminal_expiry",
+    ConversionJobRow.state,
+    ConversionJobRow.expires_at,
+)
+Index(
+    "ix_conversion_jobs_cleanup",
+    ConversionJobRow.state,
+    ConversionJobRow.cleanup_completed,
+    ConversionJobRow.cleanup_expires_at,
+)

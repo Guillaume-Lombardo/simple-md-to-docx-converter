@@ -12,6 +12,10 @@ Set:
 ```text
 MD_CONVERTER_STORAGE_PROFILE=standalone
 MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
+MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
+MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
+MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
+MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
 ```
 
 Metadata is stored in `/data/metadata.sqlite3`. Object bytes are stored below `/data/objects`;
@@ -23,6 +27,9 @@ SQLite database from multiple pods.
 Template identities, immutable owners, search fields, preferences, and the system fallback are
 metadata in the same database. T14 stores no template-version content object; T15 must use the
 existing stable-UUID object-store namespace when it adds that content.
+Conversion inputs and results use the `uploads` and `results` namespaces. Durable queue state,
+leases, heartbeats, cancellation flags, attempts, safe failures, and expiration metadata remain in
+the same SQLite database and therefore belong to the same coordinated recovery set.
 
 For a consistent backup, stop application and worker writes or use SQLite's online backup API,
 then copy both the database and the complete objects directory as one recovery set. Preserve file
@@ -38,6 +45,10 @@ Set:
 MD_CONVERTER_STORAGE_PROFILE=distributed
 MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
 MD_CONVERTER_S3_BUCKET=...
+MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved value>
+MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
+MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved value>
+MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved value>
 ```
 
 `MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.
@@ -53,10 +64,15 @@ database and bucket targets first, run the application migration against the res
 verify representative stable object identifiers, and require readiness before switching traffic.
 Do not rewrite object keys from usernames, filenames, or template names during backup or restore.
 Template identities, preferences, and fallback selection are part of the PostgreSQL recovery set.
+Conversion queue rows and their referenced upload/result objects are also one recovery unit.
+External workers must be stopped or drained during a coordinated backup unless the database and
+bucket platforms provide a consistent cross-service recovery point.
 
 ## Operational decisions still open
 
-No retention, cleanup schedule, quota, antivirus policy, RPO, or RTO is fixed here. Operators must
-keep those values configurable until they receive separate product approval. T12 verifies real
+No production retention, cleanup schedule, quota, antivirus policy, RPO, or RTO is fixed here.
+Request-body size, upload size, polling advice, and result retention must be supplied explicitly;
+their approved production values remain T18 work. Operators must keep those values configurable
+until they receive separate product approval. T12 verifies real
 SQLite/filesystem and PostgreSQL/RustFS boundaries. Final hardened-image rootless storage E2E is
 the explicitly approved T20/T21 sequencing debt and is not an integration-test waiver.

@@ -56,6 +56,10 @@ def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
         initial_admin_password=password,
         storage_profile="standalone",
         standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     with (
         running_server(settings) as base_url,

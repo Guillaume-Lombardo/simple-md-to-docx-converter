@@ -26,6 +26,10 @@ def make_client(data_directory: Path) -> TestClient:
         session_absolute_seconds=300,
         storage_profile="standalone",
         standalone_data_directory=data_directory,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     return TestClient(create_app(settings), base_url="https://testserver")
 
@@ -80,12 +84,17 @@ def test_readiness_failure_is_cheap_and_stable(tmp_path: Path) -> None:
         argon2_time_cost=1,
         storage_profile="standalone",
         standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
     )
     built = build_components(settings)
     components = AppComponents(
         authentication=built.authentication,
         readiness=MemoryReadinessProbe(ready=False),
         object_store=built.object_store,
+        jobs=built.jobs,
     )
     with TestClient(
         create_app(settings, components=components), base_url="https://testserver"

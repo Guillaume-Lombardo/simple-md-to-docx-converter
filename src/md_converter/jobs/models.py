@@ -1,0 +1,256 @@
+"""Storage-neutral conversion job models and invariants."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
+from uuid import UUID, uuid5
+
+SHA256_CHARACTERS = 64
+COMPLETE_PROGRESS = 100
+RESULT_OBJECT_NAME_PREFIX = "result-attempt:"
+
+
+def result_object_id(job_id: UUID, attempt: int) -> UUID:
+    """Derive a fenced, retry-cleanable object identifier for one attempt."""
+
+    if attempt <= 0:
+        raise ValueError("Result attempts must be positive")
+    return uuid5(job_id, f"{RESULT_OBJECT_NAME_PREFIX}{attempt}")
+
+
+class JobState(StrEnum):
+    """Persisted conversion lifecycle."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class JobStep(StrEnum):
+    """Safe current-step vocabulary exposed to clients."""
+
+    QUEUED = "queued"
+    VALIDATING = "validating"
+    RENDERING = "rendering"
+    DOCX = "docx"
+    PDF = "pdf"
+    PUBLISHING = "publishing"
+    COMPLETE = "complete"
+
+
+class JobOutput(StrEnum):
+    """Requested immutable result format."""
+
+    DOCX = "docx"
+    PDF = "pdf"
+    BOTH = "both"
+
+
+TERMINAL_JOB_STATES = frozenset(
+    {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.EXPIRED}
+)
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("Job timestamps must include a timezone")
+    return value.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class JobSubmission:
+    """Validated owner-bound input used to create one durable job."""
+
+    id: UUID
+    owner_id: UUID
+    source_object_id: UUID
+    template_id: UUID
+    template_version_id: UUID
+    output: JobOutput
+    component_versions: tuple[tuple[str, str], ...]
+    request_digest: str
+    idempotency_digest: str | None
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "created_at", _utc(self.created_at))
+        _validate_component_versions(self.component_versions)
+        for digest in (self.request_digest, self.idempotency_digest):
+            if digest is not None and (
+                len(digest) != SHA256_CHARACTERS
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ValueError("Job digests must be lowercase SHA-256")
+
+
+@dataclass(frozen=True, slots=True)
+class ConversionJob:
+    """Complete persistent job snapshot."""
+
+    id: UUID
+    owner_id: UUID
+    source_object_id: UUID
+    template_id: UUID
+    template_version_id: UUID
+    output: JobOutput
+    component_versions: tuple[tuple[str, str], ...]
+    state: JobState
+    step: JobStep
+    progress: int
+    request_digest: str
+    idempotency_digest: str | None
+    created_at: datetime
+    updated_at: datetime
+    attempt: int = 0
+    source_ready: bool = True
+    lease_owner: str | None = None
+    lease_token: UUID | None = None
+    lease_expires_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    cancel_requested: bool = False
+    result_object_id: UUID | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        self._normalize_timestamps()
+        self._validate_progress()
+        _validate_component_versions(self.component_versions)
+        self._validate_lease()
+        self._validate_result()
+        self._validate_error()
+
+    def _normalize_timestamps(self) -> None:
+        object.__setattr__(self, "created_at", _utc(self.created_at))
+        object.__setattr__(self, "updated_at", _utc(self.updated_at))
+        for field_name in ("lease_expires_at", "heartbeat_at", "expires_at"):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(self, field_name, _utc(value))
+
+    def _validate_progress(self) -> None:
+        if not 0 <= self.progress <= COMPLETE_PROGRESS:
+            raise ValueError("Job progress must be between zero and one hundred")
+        if self.attempt < 0:
+            raise ValueError("Job attempt must not be negative")
+
+    def _validate_lease(self) -> None:
+        if self.state is JobState.RUNNING:
+            if (
+                self.lease_owner is None
+                or self.lease_token is None
+                or self.lease_expires_at is None
+            ):
+                raise ValueError("Running jobs require an active lease")
+        elif any(
+            value is not None
+            for value in (
+                self.lease_owner,
+                self.lease_token,
+                self.lease_expires_at,
+                self.heartbeat_at,
+            )
+        ):
+            raise ValueError("Only running jobs may carry lease state")
+
+    def _validate_result(self) -> None:
+        if self.state is JobState.SUCCEEDED:
+            if self.result_object_id is None or self.progress != COMPLETE_PROGRESS:
+                raise ValueError("Succeeded jobs require a complete result")
+        elif self.result_object_id is not None:
+            raise ValueError("Only succeeded jobs may expose a result")
+
+    def _validate_error(self) -> None:
+        if self.state is JobState.FAILED:
+            if self.error_code is None or self.error_message is None:
+                raise ValueError("Failed jobs require a safe error")
+        elif self.error_code is not None or self.error_message is not None:
+            raise ValueError("Only failed jobs may expose an error")
+
+    @property
+    def terminal(self) -> bool:
+        return self.state in TERMINAL_JOB_STATES
+
+
+@dataclass(frozen=True, slots=True)
+class JobPage:
+    """Deterministic owner-visible page."""
+
+    items: tuple[ConversionJob, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+@dataclass(frozen=True, slots=True)
+class JobProcessResult:
+    """Immutable worker output awaiting atomic publication."""
+
+    content: bytes
+    progress_manifest: bytes | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class JobRequest:
+    """Application input before stable job and source object identifiers exist."""
+
+    owner_id: UUID
+    source: bytes
+    template_id: UUID
+    template_version_id: UUID
+    output: JobOutput
+    component_versions: tuple[tuple[str, str], ...]
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class LeaseHeartbeat:
+    """Atomic lease extension and safe progress update."""
+
+    job_id: UUID
+    worker_id: str
+    lease_token: UUID
+    now: datetime
+    lease_expires_at: datetime
+    step: JobStep
+    progress: int
+
+
+@dataclass(frozen=True, slots=True)
+class JobFailure:
+    """Safe terminal failure transition owned by one worker."""
+
+    job_id: UUID
+    worker_id: str
+    lease_token: UUID
+    code: str
+    message: str
+    now: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ExpiredJobObjects:
+    """Stable object identifiers returned by an atomic expiration transition."""
+
+    job_id: UUID
+    cleanup_token: UUID
+    owner_id: UUID
+    source_object_id: UUID
+    result_object_ids: tuple[UUID, ...]
+
+
+def _validate_component_versions(values: tuple[tuple[str, str], ...]) -> None:
+    if not values or tuple(sorted(values)) != values:
+        raise ValueError("Component versions must be non-empty and sorted")
+    names = [name for name, _version in values]
+    if len(set(names)) != len(names) or any(
+        not name or not version for name, version in values
+    ):
+        raise ValueError("Component versions must be unique and non-empty")
