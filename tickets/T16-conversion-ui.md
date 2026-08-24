@@ -58,6 +58,19 @@ Build template search, job submission, progressive polling, cancellation, expira
   requires explicit pull-request reviewer approval and is not a waiver. Linear was not mutated in
   this implementation handoff as explicitly directed; the local mirror remains `In Progress` until
   verification on `main`.
+- 2026-08-24: Review hardening fences template searches, submissions, polling, and cancellation so
+  late responses cannot replace newer UI state; assigns an accepted job before cancellation can be
+  requested; retains idempotency keys only across ambiguous transport failures; resets them after a
+  confirmed response or request-changing input; and continues polling queued/running cancellation
+  requests through a terminal state. Nine native JavaScript tests pass the pinned Node 22.23.1
+  coverage gates at 100.00% lines, 91.03% branches, and 97.06% functions.
+- 2026-08-24: Added a real-browser integration workflow using the already pinned Puppeteer and
+  Chrome 151 toolchain with no runtime download or sandbox-disable flag. In the rootless T00 runtime
+  it passes authenticated cookie/CSRF and CSP behavior, external script loading, keyboard search,
+  file choice and drag/drop, all output choices, response-stage network ambiguity and idempotent
+  retry, polling backoff, queued/running cancellation to terminal cancellation, expiration, safe
+  download headers, and accessible errors. CI runs it in the existing document-engine environment.
+  Linear remains intentionally untouched as directed.
 
 ## Synchronization
 

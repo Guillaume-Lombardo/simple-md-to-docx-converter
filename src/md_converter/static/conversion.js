@@ -37,6 +37,7 @@ export function statusPresentation(job) {
   if (state === "cancelled") return { message: "The conversion was cancelled.", terminal: true };
   if (state === "expired") return { message: "This conversion has expired and its files are no longer available.", terminal: true };
   if (state === "succeeded") return { message: "Your conversion is ready to download.", terminal: true };
+  if (job.cancel_requested) return { message: "Cancellation requested. Waiting for the worker to stop.", terminal: false };
   if (state === "queued") return { message: "Your conversion is queued.", terminal: false };
   return { message: `${step} (${job.progress}%).`, terminal: false };
 }
@@ -62,6 +63,7 @@ export function createConversionController(doc, dependencies = {}) {
   const cancelSchedule = dependencies.clearTimeout || globalThis.clearTimeout.bind(globalThis);
   const newKey = dependencies.randomUUID || (() => globalThis.crypto.randomUUID());
   const FormDataClass = dependencies.FormData || globalThis.FormData;
+  const AbortControllerClass = dependencies.AbortController || globalThis.AbortController;
   const form = doc.querySelector("#conversion-form");
   if (!form) return null;
   const source = doc.querySelector("#source");
@@ -81,6 +83,13 @@ export function createConversionController(doc, dependencies = {}) {
   let currentJobId = null;
   let currentDelay = 1000;
   let submissionKey = null;
+  let searchGeneration = 0;
+  let submissionGeneration = 0;
+  let jobGeneration = 0;
+  let searchAbort = null;
+  let submissionAbort = null;
+  let pollAbort = null;
+  let cancelAbort = null;
 
   function showError(message) {
     alert.textContent = message;
@@ -97,6 +106,47 @@ export function createConversionController(doc, dependencies = {}) {
     return token ? { "X-CSRF-Token": token } : {};
   }
 
+  function abort(controller) {
+    if (controller !== null) controller.abort();
+  }
+
+  function clearPollTimer() {
+    if (pollTimer !== null) cancelSchedule(pollTimer);
+    pollTimer = null;
+  }
+
+  function invalidateSubmission() {
+    submissionGeneration += 1;
+    abort(submissionAbort);
+    submissionAbort = null;
+    submissionKey = null;
+  }
+
+  function invalidateSearch() {
+    searchGeneration += 1;
+    abort(searchAbort);
+    searchAbort = null;
+    return searchGeneration;
+  }
+
+  function activateJob(jobId) {
+    jobGeneration += 1;
+    clearPollTimer();
+    abort(pollAbort);
+    abort(cancelAbort);
+    pollAbort = null;
+    cancelAbort = null;
+    currentJobId = jobId;
+    currentDelay = 1000;
+    return jobGeneration;
+  }
+
+  function schedulePoll(jobId, generation) {
+    if (generation !== jobGeneration || jobId !== currentJobId) return;
+    clearPollTimer();
+    pollTimer = schedule(() => pollActiveJob(jobId, generation), currentDelay);
+  }
+
   function chooseTemplate(template, label = "Selected template") {
     selected.dataset.templateId = template.id;
     selected.dataset.versionId = template.current_version_id || "";
@@ -104,25 +154,33 @@ export function createConversionController(doc, dependencies = {}) {
     selected.querySelector("strong").textContent = template.name;
     submit.disabled = !template.current_version_id;
     replaceChildren(results);
-    submissionKey = null;
+    invalidateSubmission();
   }
 
-  async function searchTemplates() {
+  async function searchTemplatesForGeneration(generation) {
     const query = search.value.trim();
     const parameters = new URLSearchParams({ status: "active", limit: "20" });
     if (query) parameters.set("name", query);
     let response;
+    const requestAbort = new AbortControllerClass();
+    searchAbort = requestAbort;
     try {
-      response = await fetchRequest(`/api/v1/templates?${parameters}`);
-    } catch {
+      response = await fetchRequest(`/api/v1/templates?${parameters}`, {
+        signal: requestAbort.signal,
+      });
+    } catch (error) {
+      if (generation !== searchGeneration || requestAbort.signal.aborted) return;
       showError("Templates could not be loaded. Try the search again.");
       return;
     }
+    if (generation !== searchGeneration) return;
     if (!response.ok) {
-      showError(await responseError(response));
+      const message = await responseError(response);
+      if (generation === searchGeneration) showError(message);
       return;
     }
     const page = await response.json();
+    if (generation !== searchGeneration) return;
     replaceChildren(results);
     if (page.items.length === 0) {
       const item = doc.createElement("li");
@@ -141,6 +199,10 @@ export function createConversionController(doc, dependencies = {}) {
     }
   }
 
+  function searchTemplates() {
+    return searchTemplatesForGeneration(invalidateSearch());
+  }
+
   function renderJob(job) {
     const view = statusPresentation(job);
     status.textContent = view.message;
@@ -155,35 +217,50 @@ export function createConversionController(doc, dependencies = {}) {
     return view.terminal;
   }
 
-  async function pollJob(jobId) {
-    if (pollTimer !== null) cancelSchedule(pollTimer);
-    currentJobId = jobId;
+  async function pollActiveJob(jobId, generation) {
+    if (generation !== jobGeneration || jobId !== currentJobId) return;
+    clearPollTimer();
+    abort(pollAbort);
+    const requestAbort = new AbortControllerClass();
+    pollAbort = requestAbort;
     let response;
     try {
-      response = await fetchRequest(`/api/v1/conversions/${jobId}`);
+      response = await fetchRequest(`/api/v1/conversions/${jobId}`, {
+        signal: requestAbort.signal,
+      });
     } catch {
+      if (generation !== jobGeneration || requestAbort.signal.aborted) return;
       showError("Status is temporarily unavailable. Polling will continue.");
       currentDelay = nextPollDelay(currentDelay);
-      pollTimer = schedule(() => pollJob(jobId), currentDelay);
+      schedulePoll(jobId, generation);
       return;
     }
+    if (generation !== jobGeneration) return;
     if (!response.ok) {
-      showError(await responseError(response));
+      const message = await responseError(response);
+      if (generation !== jobGeneration) return;
+      showError(message);
       if (response.status !== 401 && response.status !== 404) {
         currentDelay = nextPollDelay(currentDelay);
-        pollTimer = schedule(() => pollJob(jobId), currentDelay);
+        schedulePoll(jobId, generation);
       }
       return;
     }
-    clearError();
     const job = await response.json();
+    if (generation !== jobGeneration) return;
+    clearError();
     if (!renderJob(job)) {
       currentDelay = nextPollDelay(currentDelay);
-      pollTimer = schedule(() => pollJob(jobId), currentDelay);
+      schedulePoll(jobId, generation);
     } else {
-      pollTimer = null;
+      clearPollTimer();
       submit.disabled = !selected.dataset.versionId;
     }
+  }
+
+  function pollJob(jobId) {
+    const generation = activateJob(jobId);
+    return pollActiveJob(jobId, generation);
   }
 
   async function submitConversion(event) {
@@ -199,7 +276,13 @@ export function createConversionController(doc, dependencies = {}) {
       showError("Choose an active template before starting the conversion.");
       return;
     }
+    submissionGeneration += 1;
+    const generation = submissionGeneration;
+    abort(submissionAbort);
+    const requestAbort = new AbortControllerClass();
+    submissionAbort = requestAbort;
     submissionKey ||= newKey();
+    const requestKey = submissionKey;
     const data = new FormDataClass();
     data.append("source", file);
     data.append("template_id", selected.dataset.templateId);
@@ -211,58 +294,83 @@ export function createConversionController(doc, dependencies = {}) {
     try {
       response = await fetchRequest("/api/v1/conversions", {
         method: "POST",
-        headers: { ...csrfHeaders(), "Idempotency-Key": submissionKey },
+        headers: { ...csrfHeaders(), "Idempotency-Key": requestKey },
         body: data,
+        signal: requestAbort.signal,
       });
     } catch {
+      if (generation !== submissionGeneration || requestAbort.signal.aborted) return;
       submit.disabled = false;
       showError("The conversion could not be submitted. Retrying will reuse the same request key.");
       return;
     }
+    if (generation !== submissionGeneration) return;
+    submissionKey = null;
     if (!response.ok) {
       submit.disabled = false;
       showError(await responseError(response));
       return;
     }
     const job = await response.json();
+    if (generation !== submissionGeneration) return;
     const retryAfter = Number(response.headers.get("Retry-After"));
+    const activeGeneration = activateJob(job.id);
     currentDelay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000;
     renderJob(job);
-    pollTimer = schedule(() => pollJob(job.id), currentDelay);
+    schedulePoll(job.id, activeGeneration);
   }
 
   async function cancelJob() {
     if (!currentJobId) return;
+    const jobId = currentJobId;
+    const generation = jobGeneration;
+    clearPollTimer();
+    abort(pollAbort);
+    abort(cancelAbort);
+    const requestAbort = new AbortControllerClass();
+    cancelAbort = requestAbort;
     cancel.disabled = true;
     let response;
     try {
-      response = await fetchRequest(`/api/v1/conversions/${currentJobId}`, {
+      response = await fetchRequest(`/api/v1/conversions/${jobId}`, {
         method: "DELETE",
         headers: csrfHeaders(),
+        signal: requestAbort.signal,
       });
     } catch {
+      if (generation !== jobGeneration || requestAbort.signal.aborted) return;
       cancel.disabled = false;
       showError("Cancellation could not be requested. Try again.");
+      schedulePoll(jobId, generation);
       return;
     }
+    if (generation !== jobGeneration || jobId !== currentJobId) return;
     if (!response.ok) {
+      const message = await responseError(response);
+      if (generation !== jobGeneration) return;
       cancel.disabled = false;
-      showError(await responseError(response));
+      showError(message);
+      schedulePoll(jobId, generation);
       return;
     }
+    const job = await response.json();
+    if (generation !== jobGeneration) return;
     clearError();
-    renderJob(await response.json());
-    if (pollTimer !== null) cancelSchedule(pollTimer);
-    pollTimer = null;
+    if (!renderJob(job)) schedulePoll(jobId, generation);
+    else clearPollTimer();
   }
 
   form.addEventListener("submit", submitConversion);
   cancel.addEventListener("click", cancelJob);
   search.addEventListener("input", () => {
     if (searchTimer !== null) cancelSchedule(searchTimer);
-    searchTimer = schedule(searchTemplates, 250);
+    const generation = invalidateSearch();
+    searchTimer = schedule(() => searchTemplatesForGeneration(generation), 250);
   });
-  source.addEventListener("change", () => { submissionKey = null; });
+  source.addEventListener("change", invalidateSubmission);
+  for (const output of doc.querySelectorAll('input[name="output"]')) {
+    output.addEventListener("change", invalidateSubmission);
+  }
   for (const eventName of ["dragenter", "dragover"]) {
     dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
@@ -279,13 +387,13 @@ export function createConversionController(doc, dependencies = {}) {
     const files = event.dataTransfer && event.dataTransfer.files;
     if (files && files.length === 1) {
       source.files = files;
-      submissionKey = null;
+      invalidateSubmission();
     } else showError("Drop exactly one Markdown or ZIP file.");
   });
   for (const button of doc.querySelectorAll(".job-link")) {
     button.addEventListener("click", () => {
-      currentDelay = 1000;
-      pollJob(button.dataset.jobId);
+      const generation = activateJob(button.dataset.jobId);
+      pollActiveJob(button.dataset.jobId, generation);
     });
   }
 

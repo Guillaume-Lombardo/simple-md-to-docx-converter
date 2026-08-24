@@ -299,6 +299,12 @@ jobs:
           test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.16.0"
           test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
             = "Google Chrome 151.0.7922.173"
+      - name: Run authenticated conversion workflow in pinned Chrome
+        if: ${{ matrix.domain == 'document-engines' }}
+        env:
+          MD_CONVERTER_TEST_CHROMIUM: /usr/bin/google-chrome-stable
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: npm run test:web-browser
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
