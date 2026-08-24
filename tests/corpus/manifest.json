@@ -34,7 +34,7 @@
     },
     {
       "id": "font-families", "categories": ["fonts"], "kind": "file",
-      "purpose": "Provide representative family names without defining T10 font artifacts or substitutions.", "future_owner": "T10",
+      "purpose": "Record the approved T10 families, script coverage, and deterministic artifact contract.", "future_owner": "T10",
       "entrypoint": "fonts/families.md", "files": ["fonts/families.md"],
       "expected": {"families": ["Liberation", "Carlito", "Caladea", "DejaVu"]},
       "provenance": {"generator": "project-authored Markdown", "license": "CC0-1.0"}

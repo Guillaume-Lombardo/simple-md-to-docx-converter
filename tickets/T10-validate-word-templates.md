@@ -38,6 +38,14 @@ Inventory fonts and licenses; validate OOXML, templates, required styles, substi
   validation, required Pandoc styles, macros and external-relationship rejection, blank canonical
   Pandoc conversion, and real LibreOffice opening. T11 PDF and T15 versioned HTTP workflows remain
   downstream; T20/T21 retain final-image E2E.
+- 2026-08-24: Implemented checksum-pinned Liberation 2.1.5, Carlito 1.104, Caladea 1.001, and
+  DejaVu 2.37 artifacts with license evidence, an isolated deterministic Fontconfig contract, and
+  an explicit Latin/Greek inventory with no Noto dependency. Implemented bounded OOXML package,
+  relationship, active-content, required-style, and expected-font validation plus shell-free,
+  time-bounded Pandoc and LibreOffice activation checks. Added 107 unit tests and 17 rootless
+  real-engine integration tests. The unit suite passes 537 tests at 93.63% application coverage;
+  the final T10 rootless toolchain image passes the T00 document-engine harness and all 17 T10
+  integration tests. Canonical checks, independent review, and CI publication remain in progress.
 
 ## Synchronization
 

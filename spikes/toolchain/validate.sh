@@ -161,6 +161,40 @@ require_writable_directory "${XDG_DATA_HOME}"
 require_writable_directory "${XDG_RUNTIME_DIR}"
 chmod 0700 "${XDG_RUNTIME_DIR}"
 
+[[ "$(fc-list --format '%{file}\n' | wc -l)" == "32" ]] \
+    || fail "the approved font inventory is not exactly 32 files"
+if fc-list --format '%{file}|%{family}\n' | grep -Fiv '/opt/md-converter/fonts/' >/dev/null; then
+    fail "Fontconfig exposed a font outside the approved directory"
+fi
+if fc-list --format '%{family}\n' | grep -Fiq noto; then
+    fail "Noto must remain absent until an approved script requires it"
+fi
+while IFS='|' read -r requested expected; do
+    [[ "$(fc-match --sort --format '%{family}\n' "${requested}" | head -1)" == "${expected}" ]] \
+        || fail "font substitution changed for ${requested}"
+done <<'EOF'
+Arial|Liberation Sans
+Times New Roman|Liberation Serif
+Courier New|Liberation Mono
+Consolas|Liberation Mono
+Calibri|Carlito
+Aptos|Carlito
+Aptos Display|Carlito
+Cambria|Caladea
+Cambria Math|DejaVu Serif
+sans-serif|Liberation Sans
+serif|Liberation Serif
+monospace|Liberation Mono
+EOF
+fc-match --sort --format '%{family}\n' 'sans-serif:lang=el' | grep -Fxq 'DejaVu Sans' \
+    || fail "the Greek fallback chain does not contain DejaVu Sans"
+[[ "$(find /usr/share/licenses/md-converter-fonts -maxdepth 1 -type f | wc -l)" == "4" ]] \
+    || fail "font license notices are incomplete"
+[[ -d "${XDG_CACHE_HOME}/fontconfig" ]] \
+    || fail "Fontconfig did not use its isolated writable XDG cache"
+
+printf 'font_contract=passed\n'
+
 cp -R "${FIXTURES}/." /work/
 python3 - <<'PY'
 from base64 import b64decode

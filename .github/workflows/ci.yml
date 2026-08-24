@@ -229,6 +229,35 @@ jobs:
           pandoc_bin="$install_root/pandoc-3.10.2/bin"
           [[ -x "$pandoc_bin/pandoc" ]]
           echo "$pandoc_bin" >> "$GITHUB_PATH"
+      - name: Install verified fonts and LibreOffice for document-engine tests
+        if: ${{ matrix.domain == 'document-engines' }}
+        env:
+          LIBREOFFICE_SHA256: 2f03bfb2ac9f33ea7c77331b4b7a23300fb0ed7443566046bf8b5bc51c1bed1e
+          LIBREOFFICE_URL: https://download.documentfoundation.org/libreoffice/stable/26.2.5/deb/x86_64/LibreOffice_26.2.5_Linux_x86-64_deb.tar.gz
+        run: |
+          set -euo pipefail
+          sudo bash spikes/toolchain/fonts/install-fonts.sh
+          sudo install --directory --mode=0755 /opt/md-converter/fontconfig/cache
+          sudo install --mode=0444 spikes/toolchain/fonts/fonts.conf \
+            /opt/md-converter/fontconfig/fonts.conf
+          sudo env FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf fc-cache --force
+          echo "FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf" >> "$GITHUB_ENV"
+
+          archive="$RUNNER_TEMP/LibreOffice_26.2.5_Linux_x86-64_deb.tar.gz"
+          install_root="$RUNNER_TEMP/libreoffice-install"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --connect-timeout 20 --max-time 300 --retry 3 --retry-all-errors \
+            --output "$archive" "$LIBREOFFICE_URL"
+          echo "$LIBREOFFICE_SHA256  $archive" | sha256sum --check --strict
+          mkdir --mode=0700 "$install_root"
+          tar --extract --gzip --file="$archive" --directory="$install_root" \
+            --no-same-owner --no-same-permissions
+          sudo apt-get install --yes "$install_root"/LibreOffice_26.2.5.2_Linux_x86-64_deb/DEBS/*.deb
+          echo "/opt/libreoffice26.2/program" >> "$GITHUB_PATH"
+          test "$(FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf \
+            fc-list --format '%{file}\n' | wc -l)" -eq 32
+          test "$(/opt/libreoffice26.2/program/soffice --version | awk '{$1=$1; print}')" \
+            = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
       - name: Set up the pinned Node runtime for Mermaid tests
         if: ${{ matrix.domain == 'document-engines' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

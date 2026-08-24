@@ -12,12 +12,8 @@ ARG LIBREOFFICE_SHA256=f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6
 
 RUN dnf install -y \
         curl-minimal \
-        dejavu-sans-fonts \
-        dejavu-sans-mono-fonts \
-        dejavu-serif-fonts \
         findutils \
         fontconfig \
-        liberation-mono-fonts \
         alsa-lib \
         at-spi2-atk \
         at-spi2-core \
@@ -35,6 +31,14 @@ RUN dnf install -y \
         tar \
         unzip \
     && dnf clean all
+
+COPY --chmod=0555 fonts/install-fonts.sh /usr/local/bin/install-md-converter-fonts
+COPY --chmod=0444 fonts/fonts.conf /opt/md-converter/fontconfig/fonts.conf
+RUN install-md-converter-fonts \
+    && mkdir -p /opt/md-converter/fontconfig/cache \
+    && FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf fc-cache --force \
+    && test "$(find /opt/md-converter/fonts -type f -name '*.ttf' | wc -l)" -eq 32 \
+    && rm -rf /tmp/md-converter-fonts
 
 RUN curl --fail --location --silent --show-error \
         "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" \
@@ -69,9 +73,11 @@ RUN dnf install -y libXinerama \
 RUN mkdir -p /opt/toolchain/evidence \
     && rpm -qa --qf '%{NAME}|%{EPOCHNUM}:%{VERSION}-%{RELEASE}|%{ARCH}|%{LICENSE}\n' \
         | LC_ALL=C sort > /opt/toolchain/evidence/rpm-inventory.txt
+COPY --chmod=0444 fonts/manifest.json /opt/toolchain/evidence/font-manifest.json
 
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
+    FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf
 
 WORKDIR /opt/toolchain/node
 COPY package.json package-lock.json ./
