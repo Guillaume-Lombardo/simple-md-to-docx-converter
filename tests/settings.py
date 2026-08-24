@@ -17,6 +17,7 @@ def template_settings(**overrides: Any) -> dict[str, Any]:
         "worker_error_backoff_seconds": 1.0,
         "worker_cleanup_interval_seconds": 60.0,
         "worker_cleanup_batch_size": 100,
+        "readiness_timeout_seconds": 2.0,
         "conversion_max_decompressed_bytes": 10_000_000,
         "conversion_max_files": 100,
         "conversion_max_images": 50,

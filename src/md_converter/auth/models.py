@@ -16,6 +16,16 @@ class Role(StrEnum):
     ADMIN = "admin"
 
 
+class AuthenticationAuditOperation(StrEnum):
+    """Stable sensitive local-account mutation vocabulary."""
+
+    BOOTSTRAP_ADMIN_CREATE = "bootstrap_admin_create"
+    CREATE = "user_create"
+    DEACTIVATE = "user_deactivate"
+    REACTIVATE = "user_reactivate"
+    RESET_PASSWORD = "user_password_reset"  # noqa: S105 - audit operation, not a secret
+
+
 def normalize_username(username: str) -> str:
     """Normalize usernames with NFKC, surrounding-space removal, and case folding."""
     return unicodedata.normalize("NFKC", username).strip().casefold()
@@ -32,6 +42,16 @@ class User:
     role: Role
     active: bool = True
     auth_version: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticationAuditContext:
+    """Content-free audit context committed atomically with one account mutation."""
+
+    id: UUID
+    actor_id: UUID
+    operation: AuthenticationAuditOperation
+    created_at: datetime
 
 
 @dataclass(slots=True)

@@ -17,7 +17,9 @@ upload and drag-and-drop, active-template search with preferred/fallback visibil
 selection, asynchronous status and cancellation, expiration handling, and safe downloads. The
 template administration page provides owner and administrator lifecycle controls, preferences,
 version history, and an administrator-only local-account tab. Configurable quotas and resource
-policy are assembled; final-container features remain under development.
+policy are assembled. Structured JSON logs, durable request-to-worker correlation, low-cardinality
+queue and worker metrics, bounded immutable-audit reads, version traceability, and cheap profile
+readiness are available; final-container features remain under development.
 
 ## Requirements
 
@@ -75,6 +77,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
 - `docs/resource-policy.md`: quotas, budgets, retention, recovery, and cleanup configuration
 - `docs/container-deployment.md`: final-image build, hardening, runtime profiles, and SBOM scans
+- `docs/observability.md`: JSON logging, correlation, metrics, audit, and readiness contracts
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
 - `docs/administration-ui.md`: template-owner and administrator browser workflows
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries

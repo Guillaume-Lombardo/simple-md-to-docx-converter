@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import builtins
+import math
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -13,13 +15,24 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
-from md_converter.auth.models import Role, Session, User
+from md_converter.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    Role,
+    Session,
+    User,
+)
 from md_converter.config import ConfigurationError
 from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.schema import SessionRow, UserRow
+from md_converter.persistence.schema import AuthenticationAuditRow, SessionRow, UserRow
 
 
-def create_database_engine(database_url: str | URL) -> Engine:
+def create_database_engine(
+    database_url: str | URL,
+    *,
+    timeout_seconds: float | None = None,
+    pool_pre_ping: bool = True,
+) -> Engine:
     """Create a profile-neutral synchronous SQLAlchemy engine."""
     try:
         if isinstance(database_url, str) and database_url.startswith("postgresql://"):
@@ -30,14 +43,34 @@ def create_database_engine(database_url: str | URL) -> Engine:
             make_url(database_url) if isinstance(database_url, str) else database_url
         )
         sqlite = resolved_url.get_backend_name() == "sqlite"
+        connect_args: dict[str, object] = {"check_same_thread": False} if sqlite else {}
+        engine_options: dict[str, object] = {}
+        if timeout_seconds is not None:
+            if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
+                raise ValueError("Database timeout must be positive and finite")
+            if sqlite:
+                connect_args["timeout"] = timeout_seconds
+            else:
+                engine_options["pool_timeout"] = timeout_seconds
+                connect_args["connect_timeout"] = max(1, math.ceil(timeout_seconds))
         engine = create_engine(
             resolved_url,
-            connect_args={"check_same_thread": False} if sqlite else {},
+            connect_args=connect_args,
             hide_parameters=True,
-            pool_pre_ping=True,
+            pool_pre_ping=pool_pre_ping,
+            **engine_options,
         )
         if sqlite:
             event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+        elif timeout_seconds is not None:
+            event.listen(
+                engine,
+                "connect",
+                partial(
+                    _enable_postgresql_statement_timeout,
+                    milliseconds=max(1, math.ceil(timeout_seconds * 1000)),
+                ),
+            )
         return engine
     except SQLAlchemyError:
         raise PersistenceError from None
@@ -55,6 +88,29 @@ def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) 
         cursor.execute("PRAGMA foreign_keys=ON")
     finally:
         cursor.close()
+
+
+def _enable_postgresql_statement_timeout(
+    dbapi_connection: Any,
+    _connection_record: Any,
+    *,
+    milliseconds: int,
+) -> None:
+    """Add a bounded statement budget without rewriting existing libpq options."""
+
+    previous_autocommit = dbapi_connection.autocommit
+    try:
+        dbapi_connection.autocommit = True
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT set_config('statement_timeout', %s, false)",
+                (f"{milliseconds}ms",),
+            )
+        finally:
+            cursor.close()
+    finally:
+        dbapi_connection.autocommit = previous_autocommit
 
 
 def standalone_database_url(data_directory: Path) -> URL:
@@ -111,7 +167,15 @@ class SqlUserRepository:
             role=Role.ADMIN,
         )
         try:
-            self.create(user)
+            self.create(
+                user,
+                audit=AuthenticationAuditContext(
+                    uuid4(),
+                    user.id,
+                    AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE,
+                    datetime.now(UTC),
+                ),
+            )
             return user
         except KeyError:
             existing = self.get_by_normalized_username(normalized_username)
@@ -121,7 +185,9 @@ class SqlUserRepository:
                 ) from None
             return existing
 
-    def create(self, user: User) -> None:
+    def create(
+        self, user: User, *, audit: AuthenticationAuditContext | None = None
+    ) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 database.add(
@@ -135,6 +201,8 @@ class SqlUserRepository:
                         auth_version=user.auth_version,
                     )
                 )
+                if audit is not None:
+                    database.add(self._audit_row(user, audit))
         except IntegrityError:
             raise KeyError(user.normalized_username) from None
         except SQLAlchemyError:
@@ -201,6 +269,7 @@ class SqlUserRepository:
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         values: dict[str, object] = {"auth_version": UserRow.auth_version + 1}
         if active is not None:
@@ -215,9 +284,29 @@ class SqlUserRepository:
                     .values(**values)
                     .returning(UserRow)
                 ).scalar_one_or_none()
+                if result is not None and audit is not None:
+                    database.add(self._audit_row(_user(result), audit))
                 return _user(result) if result is not None else None
         except SQLAlchemyError:
             raise PersistenceError from None
+
+    @staticmethod
+    def _audit_row(
+        user: User, audit: AuthenticationAuditContext
+    ) -> AuthenticationAuditRow:
+        return AuthenticationAuditRow(
+            id=str(audit.id),
+            actor_id=str(audit.actor_id),
+            owner_id=str(user.id),
+            operation=audit.operation.value,
+            target_id=str(user.id),
+            auth_version=user.auth_version,
+            administrator_intervention=(
+                audit.operation
+                is not AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE
+            ),
+            created_at=audit.created_at,
+        )
 
 
 class SqlSessionRepository:

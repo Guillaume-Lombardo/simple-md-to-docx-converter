@@ -68,6 +68,10 @@ browser into the attacker's account.
 - `PATCH /api/v1/admin/users/{id}/active`: activation and deactivation
 - `POST /api/v1/admin/users/{id}/password`: administrative password reset
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
+
+Every successful administrator account creation, deactivation, reactivation, and password reset is
+committed atomically with a content-free immutable audit record. `GET /api/v1/audit` merges those
+records deterministically with template audits; failed or unauthorized requests create no audit.
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
 - `GET /convert`: authenticated server-rendered conversion interface
 - `GET /templates`: authenticated template interface and administrator-only account tab

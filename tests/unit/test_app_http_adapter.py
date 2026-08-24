@@ -27,6 +27,7 @@ from md_converter.malware import (
     MalwareScannerUnavailableError,
     UploadScanner,
 )
+from md_converter.observability import QueueObserver
 from md_converter.persistence.errors import PersistenceError
 from md_converter.templates.models import (
     TemplateIdentity,
@@ -78,6 +79,114 @@ def isolated_client(
         ),
     )
     return TestClient(app, base_url="https://testserver"), auth, admin, alice
+
+
+def _lifecycle_settings() -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        storage_profile="standalone",
+        standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+
+
+def _lifecycle_components(mocker: MockerFixture, engine: Any) -> AppComponents:
+    auth = mocker.Mock(spec=AuthenticationService)
+    auth.bootstrap_admin.return_value = User(
+        uuid4(), "Admin", "admin", "hash", Role.ADMIN
+    )
+    return AppComponents(
+        authentication=auth,
+        readiness=MemoryReadinessProbe(),
+        object_store=mocker.Mock(),
+        jobs=mocker.Mock(spec=JobService),
+        queue_observer=mocker.Mock(spec=QueueObserver),
+        owned_engines=(engine,),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_fails", [False, True])
+def test_application_lifespan_closes_owned_engines_after_success_or_failure(
+    mocker: MockerFixture, request_fails: bool
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+    mocker.patch("md_converter.app.build_components", return_value=components)
+    app = create_app(_lifecycle_settings())
+    if request_fails:
+
+        def fail() -> None:
+            raise RuntimeError("request failed")
+
+        app.add_api_route("/failure", fail)
+
+    with TestClient(app, base_url="https://testserver") as client:
+        if request_fails:
+            with pytest.raises(RuntimeError, match="request failed"):
+                client.get("/failure")
+        else:
+            assert client.get("/health/live").status_code == 200
+
+    engine.dispose.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_application_lifespan_does_not_close_injected_components(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+
+    with TestClient(
+        create_app(_lifecycle_settings(), components=components),
+        base_url="https://testserver",
+    ) as client:
+        assert client.get("/health/live").status_code == 200
+
+    engine.dispose.assert_not_called()
+
+
+@pytest.mark.unit
+def test_application_factory_closes_owned_engines_on_startup_failure(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+    mocker.patch.object(
+        components.authentication,
+        "bootstrap_admin",
+        side_effect=RuntimeError("startup failed"),
+    )
+    mocker.patch("md_converter.app.build_components", return_value=components)
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        create_app(_lifecycle_settings())
+
+    engine.dispose.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_application_factory_does_not_close_injected_engines_on_startup_failure(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    components = _lifecycle_components(mocker, engine)
+    mocker.patch.object(
+        components.authentication,
+        "bootstrap_admin",
+        side_effect=RuntimeError("startup failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        create_app(_lifecycle_settings(), components=components)
+
+    engine.dispose.assert_not_called()
 
 
 @pytest.mark.unit
@@ -356,6 +465,24 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
     assert readiness.json()["error"]["code"] == "NOT_READY"
     paths = schema["paths"]
+    for path in paths.values():
+        for operation_name, operation in path.items():
+            if operation_name not in {
+                "get",
+                "put",
+                "post",
+                "delete",
+                "options",
+                "head",
+                "patch",
+                "trace",
+            }:
+                continue
+            for response in operation["responses"].values():
+                assert response["headers"]["X-Correlation-ID"] == {
+                    "description": "Server-generated request correlation identifier.",
+                    "schema": {"type": "string", "format": "uuid"},
+                }
     expected = {
         ("/health/ready", "get"): {"200", "503"},
         ("/api/v1/login", "post"): {"200", "401", "403", "422"},

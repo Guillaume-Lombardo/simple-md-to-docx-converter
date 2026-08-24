@@ -19,6 +19,9 @@ attempt, template identifiers, and safe functional failures—never paths, SQL, 
 identifiers. Status responses also include result expiration, the immutable template version, and
 the locked converter, Pandoc, Mermaid CLI, Chromium, and LibreOffice versions needed for
 traceability.
+Status also returns the durable correlation identifier accepted at submission. An embedded or
+external worker restores the same identifier when it claims the job; the content-free logging and
+metric contract is documented in [`observability.md`](observability.md).
 
 The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES`,
@@ -57,6 +60,10 @@ failures to its readiness owner. Polling, lease, heartbeat, recovery, cleanup, r
 concurrency, and stop values are caller-owned and have no implicit production defaults. Cleanup is
 scheduled from elapsed monotonic time rather than loop iterations, so queue activity cannot make it
 run too frequently or prevent an idle worker from running it.
+
+Distributed entrypoints use `AppComponents.build_external_worker_runtime`. That lifecycle wraps
+the shared loop with the independently bound process-local metrics listener documented in
+`docs/observability.md`; calling the bare external loop does not satisfy the runtime contract.
 
 The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
 exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored

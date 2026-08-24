@@ -23,9 +23,14 @@ from md_converter.jobs.models import (
 )
 from md_converter.jobs.policy import JobExecutionBudget
 from md_converter.jobs.ports import JobProcessor, JobRepository
+from md_converter.observability import (
+    OperationalMetrics,
+    bind_correlation_id,
+    log_event,
+    require_worker_id,
+    reset_correlation_id,
+)
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
-
-MAX_WORKER_ID_CHARACTERS = 255
 
 
 class MaintenanceCleaner(Protocol):
@@ -76,6 +81,7 @@ class WorkerRuntime:
     clock: Callable[[], datetime]
     monotonic_clock: Callable[[], float] = monotonic
     maintenance: MaintenanceCleaner | None = None
+    metrics: OperationalMetrics | None = None
 
 
 @dataclass(slots=True)
@@ -116,15 +122,14 @@ class ConversionWorker:
         runtime: WorkerRuntime,
         policy: WorkerPolicy,
     ) -> None:
-        if not worker_id or len(worker_id) > MAX_WORKER_ID_CHARACTERS:
-            raise ValueError("Worker identifier is invalid")
-        self._worker_id = worker_id
+        self._worker_id = require_worker_id(worker_id)
         self._repository = runtime.repository
         self._objects = runtime.objects
         self._processor = runtime.processor
         self._clock = runtime.clock
         self._monotonic_clock = runtime.monotonic_clock
         self._maintenance = runtime.maintenance
+        self._metrics = runtime.metrics
         self._policy = policy
 
     def run_once(self) -> bool:  # noqa: PLR0912, PLR0915 - lifecycle is explicit
@@ -153,6 +158,7 @@ class ConversionWorker:
         )
 
         progress_state = _ProgressState(job.step, job.progress)
+        step_started = started_monotonic
         progress_lock = Lock()
         heartbeat_operation = Lock()
         keepalive_stop = Event()
@@ -200,7 +206,15 @@ class ConversionWorker:
         )
 
         def progress(step: JobStep, percentage: int) -> None:
+            nonlocal step_started
             with progress_lock:
+                previous_step = progress_state.step
+                if step is not previous_step and self._metrics is not None:
+                    observed_at = self._monotonic_clock()
+                    self._metrics.record_step_duration(
+                        previous_step.value, max(0.0, observed_at - step_started)
+                    )
+                    step_started = observed_at
                 progress_state.step = step
                 progress_state.percentage = percentage
             with heartbeat_operation:
@@ -210,6 +224,16 @@ class ConversionWorker:
             target=keepalive,
             name=f"{self._worker_id}-heartbeat",
             daemon=False,
+        )
+        correlation_token = bind_correlation_id(job.correlation_id)
+        log_event(
+            "job_processing_started",
+            job_id=str(job.id),
+            owner_id=str(job.owner_id),
+            version_id=str(job.template_version_id),
+            worker_id=self._worker_id,
+            state=job.state.value,
+            step=job.step.value,
         )
         keepalive_thread.start()
         try:
@@ -277,22 +301,54 @@ class ConversionWorker:
             except BaseException:
                 self._objects.delete(result_key)
                 raise
-            if finished.state is JobState.CANCELLED:
+            finished_state = (
+                finished.state
+                if isinstance(finished, ConversionJob)
+                else JobState.SUCCEEDED
+            )
+            finished_step = (
+                finished.step
+                if isinstance(finished, ConversionJob)
+                else JobStep.COMPLETE
+            )
+            if finished_state is JobState.CANCELLED:
                 self._objects.delete(result_key)
+            log_event(
+                "job_processing_completed",
+                job_id=str(job.id),
+                owner_id=str(job.owner_id),
+                version_id=str(job.template_version_id),
+                worker_id=self._worker_id,
+                state=finished_state.value,
+                step=finished_step.value,
+            )
             return True
         finally:
             keepalive_stop.set()
             keepalive_thread.join()
+            if self._metrics is not None:
+                with progress_lock:
+                    final_step = progress_state.step
+                self._metrics.record_step_duration(
+                    final_step.value,
+                    max(0.0, self._monotonic_clock() - step_started),
+                )
+            reset_correlation_id(correlation_token)
 
     def recover(self) -> int:
         """Recover expired work and abandoned durable source reservations."""
 
         now = self._clock()
-        return self._repository.recover_expired_leases(
+        recovered = self._repository.recover_expired_leases(
             now,
             self._expires_at(now),
             now - timedelta(seconds=self._policy.incomplete_submission_seconds),
         )
+        if self._metrics is not None:
+            self._metrics.record_recovery(recovered)
+        if recovered:
+            log_event("job_recovery_completed", operation="lease_recovery")
+        return recovered
 
     def cleanup(self, *, limit: int) -> int:
         """Claim, delete, and acknowledge a bounded retry-safe cleanup batch."""
@@ -324,6 +380,10 @@ class ConversionWorker:
             if self._maintenance is not None
             else 0
         )
+        if self._metrics is not None:
+            self._metrics.record_expiration(len(expired))
+        if expired:
+            log_event("job_expiration_completed", operation="retention_cleanup")
         return len(expired) + maintained
 
     def _finish_cancelled(self, job: ConversionJob) -> None:
@@ -336,6 +396,15 @@ class ConversionWorker:
             job.lease_token,
             finished_at,
             self._expires_at(finished_at),
+        )
+        log_event(
+            "job_processing_completed",
+            job_id=str(job.id),
+            owner_id=str(job.owner_id),
+            version_id=str(job.template_version_id),
+            worker_id=self._worker_id,
+            state=JobState.CANCELLED.value,
+            step=job.step.value,
         )
 
     def _finish_failed(self, job: ConversionJob, error: ConversionError) -> None:
@@ -353,6 +422,18 @@ class ConversionWorker:
                 expires_at=self._expires_at(finished_at),
             )
         )
+        if self._metrics is not None:
+            self._metrics.record_failure(error.code.value)
+        log_event(
+            "job_processing_failed",
+            job_id=str(job.id),
+            owner_id=str(job.owner_id),
+            version_id=str(job.template_version_id),
+            worker_id=self._worker_id,
+            state=JobState.FAILED.value,
+            step=job.step.value,
+            error_code=error.code.value,
+        )
 
     def _finish_budget_exceeded(self, job: ConversionJob) -> None:
         if job.lease_token is None:
@@ -368,6 +449,18 @@ class ConversionWorker:
                 now=finished_at,
                 expires_at=self._expires_at(finished_at),
             )
+        )
+        if self._metrics is not None:
+            self._metrics.record_failure("resource_budget_exceeded")
+        log_event(
+            "job_processing_failed",
+            job_id=str(job.id),
+            owner_id=str(job.owner_id),
+            version_id=str(job.template_version_id),
+            worker_id=self._worker_id,
+            state=JobState.FAILED.value,
+            step=job.step.value,
+            error_code="resource_budget_exceeded",
         )
 
     def _expires_at(self, now: datetime) -> datetime:

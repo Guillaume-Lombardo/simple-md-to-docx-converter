@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     worker_error_backoff_seconds: float = Field(gt=0, allow_inf_nan=False)
     worker_cleanup_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
     worker_cleanup_batch_size: int = Field(gt=0)
+    worker_metrics_bind_host: str = Field(
+        default="127.0.0.1", min_length=1, max_length=255
+    )
+    worker_metrics_port: int = Field(default=9464, ge=1, le=65_535)
+    worker_metrics_max_connections: int = Field(default=4, gt=0, le=64)
+    worker_metrics_observation_limit: int = Field(default=2, gt=0, le=64)
+    worker_metrics_accept_queue_size: int = Field(default=8, gt=0, le=128)
+    worker_metrics_request_timeout_seconds: float = Field(
+        default=2.0, gt=0, allow_inf_nan=False
+    )
     template_max_archive_bytes: int = Field(gt=0)
     template_request_max_bytes: int = Field(gt=0)
     template_metadata_request_max_bytes: int = Field(gt=0)
@@ -81,6 +91,7 @@ class Settings(BaseSettings):
     template_version_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
     template_min_retained_versions: int = Field(default=10, ge=10)
     audit_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
+    readiness_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
     template_engine_workspace_root: Path | None = None
     clamav_host: str = Field(default="127.0.0.1", min_length=1)
     clamav_port: int = Field(default=3310, ge=1, le=65_535)
@@ -109,6 +120,18 @@ class Settings(BaseSettings):
             raise ValueError("template request limit must exceed the archive limit")
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
             raise ValueError("worker heartbeat must be shorter than its lease")
+        if any(
+            not character.isascii()
+            or not character.isprintable()
+            or character.isspace()
+            or character in "/\\"
+            for character in self.worker_metrics_bind_host
+        ):
+            raise ValueError("worker metrics bind host is invalid")
+        if self.worker_metrics_observation_limit > self.worker_metrics_max_connections:
+            raise ValueError(
+                "worker metrics observation limit must not exceed connection limit"
+            )
         self._validate_storage_profile()
         return self
 

@@ -7,7 +7,7 @@ from dataclasses import replace
 from threading import RLock
 from uuid import UUID, uuid4
 
-from md_converter.auth.models import Role, Session, User
+from md_converter.auth.models import AuthenticationAuditContext, Role, Session, User
 from md_converter.config import ConfigurationError
 
 
@@ -43,7 +43,10 @@ class MemoryUserRepository:
             self._normalized_ids[normalized_username] = user.id
             return user
 
-    def create(self, user: User) -> None:
+    def create(
+        self, user: User, *, audit: AuthenticationAuditContext | None = None
+    ) -> None:
+        del audit
         with self._lock:
             if user.normalized_username in self._normalized_ids:
                 raise KeyError(user.normalized_username)
@@ -94,8 +97,10 @@ class MemoryUserRepository:
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         """Atomically change account security state and invalidate older sessions."""
+        del audit
         with self._lock:
             user = self._users.get(user_id)
             if user is None:

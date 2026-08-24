@@ -11,10 +11,15 @@ from md_converter.app import AppComponents
 from md_converter.auth.ports import ReadinessProbe
 from md_converter.auth.service import AuthenticationService
 from md_converter.jobs.ports import JobProcessor, JobRepository
-from md_converter.jobs.runner import EmbeddedWorker, WorkerSchedule
+from md_converter.jobs.runner import (
+    EmbeddedWorker,
+    ExternalWorkerRuntime,
+    WorkerSchedule,
+)
 from md_converter.jobs.runtime import JobPolicies
 from md_converter.jobs.service import JobService
 from md_converter.jobs.worker import WorkerPolicy
+from md_converter.observability import QueueObserver
 from md_converter.retention import RetentionService
 from md_converter.storage import ObjectStore
 from md_converter.templates.processor import TemplateAwareProcessor
@@ -65,6 +70,8 @@ def _components(
         job_policies=policies,
         retention=cast(RetentionService, retention),
         job_repository=repository,
+        queue_observer=mocker.Mock(spec=QueueObserver),
+        worker_metrics_port=0,
     ), retention
 
 
@@ -83,6 +90,37 @@ def test_external_worker_assembly_runs_component_retention_on_schedule(
     loop.run(_StopAfterWait())
 
     assert retention.limits == [7]
+
+
+def test_owned_database_engines_close_once_after_observation_cancellation(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    engines = (mocker.Mock(), mocker.Mock(), mocker.Mock())
+    observer = mocker.Mock(spec=QueueObserver)
+    owned = replace(components, owned_engines=engines, queue_observer=observer)
+
+    owned.close()
+    owned.close()
+
+    observer.cancel_observations.assert_called_once_with(timeout_seconds=2.0)
+    for engine in engines:
+        engine.dispose.assert_called_once_with()
+
+
+def test_owned_database_engine_cleanup_continues_after_one_dispose_failure(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    engines = (mocker.Mock(), mocker.Mock(), mocker.Mock())
+    engines[1].dispose.side_effect = RuntimeError("dispose failed")
+    owned = replace(components, owned_engines=engines)
+
+    with pytest.raises(RuntimeError, match="dispose failed"):
+        owned.close()
+
+    for engine in engines:
+        engine.dispose.assert_called_once_with()
 
 
 def test_embedded_worker_uses_the_same_complete_production_assembly(
@@ -110,5 +148,16 @@ def test_embedded_worker_uses_the_same_complete_production_assembly(
     with pytest.raises(RuntimeError, match="components"):
         replace(components, retention=None).build_conversion_worker(
             worker_id="worker-incomplete",
+            processor=mocker.Mock(spec=TemplateAwareProcessor),
+        )
+
+    runtime = components.build_external_worker_runtime(
+        worker_id="external-metrics",
+        processor=mocker.Mock(spec=TemplateAwareProcessor),
+    )
+    assert isinstance(runtime, ExternalWorkerRuntime)
+    with pytest.raises(RuntimeError, match="queue observation"):
+        replace(components, queue_observer=None).build_external_worker_runtime(
+            worker_id="external-metrics",
             processor=mocker.Mock(spec=TemplateAwareProcessor),
         )

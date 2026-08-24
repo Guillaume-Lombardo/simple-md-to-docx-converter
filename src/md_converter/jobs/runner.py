@@ -11,6 +11,7 @@ from typing import Protocol
 
 from md_converter.jobs.errors import JobLeaseLostError, JobRepositoryError
 from md_converter.jobs.worker import ConversionWorker
+from md_converter.observability import MetricsHttpServer, OperationalMetrics, log_event
 from md_converter.persistence.errors import PersistenceError
 from md_converter.storage import ObjectStoreError
 
@@ -58,10 +59,12 @@ class WorkerLoop:
         schedule: WorkerSchedule,
         *,
         monotonic_clock: Callable[[], float] = monotonic,
+        metrics: OperationalMetrics | None = None,
     ) -> None:
         self._worker = worker
         self._schedule = schedule
         self._monotonic_clock = monotonic_clock
+        self._metrics = metrics
 
     def run(self, stop: StopSignal) -> None:
         next_cleanup = self._monotonic_clock() + self._schedule.cleanup_interval_seconds
@@ -81,7 +84,25 @@ class WorkerLoop:
                 ObjectStoreError,
                 PersistenceError,
             ):
+                if self._metrics is not None:
+                    self._metrics.record_retry("worker_loop")
+                log_event("worker_retry_scheduled", operation="worker_loop")
                 stop.wait(self._schedule.error_backoff_seconds)
+
+
+class ExternalWorkerRuntime:
+    """Run one worker loop with its independently scrapeable metrics lifecycle."""
+
+    def __init__(self, loop: WorkerLoop, metrics: MetricsHttpServer) -> None:
+        self._loop = loop
+        self._metrics = metrics
+
+    def run(self, stop: StopSignal) -> None:
+        self._metrics.start()
+        try:
+            self._loop.run(stop)
+        finally:
+            self._metrics.stop()
 
 
 class EmbeddedWorker:
