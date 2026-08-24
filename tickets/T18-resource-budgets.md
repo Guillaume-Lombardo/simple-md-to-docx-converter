@@ -49,10 +49,8 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   line coverage; real T18 PostgreSQL/RustFS tests passed. A separate unrestricted run without
   service environment variables reached 909 passing tests and 53 expected failures because
   Pandoc, Mermaid/Chromium, LibreOffice, PostgreSQL, and RustFS are unavailable in that invocation.
-  Post-T17 assembly must wire the new repository/policy factory and map owner saturation to HTTP 429
-  and global saturation to HTTP 503 with `Retry-After`. Final-image cgroup/ephemeral enforcement and
-  E2E remain T20/T21 work. No production values, antivirus provider, template/audit retention
-  contract, RPO, or RTO were invented without PM approval.
+  Final-image cgroup/ephemeral enforcement and E2E remain T20/T21 work. No implicit production
+  values, antivirus provider, template/audit retention contract, RPO, or RTO were invented.
 - 2026-08-24: Independent-review corrections switched overall job duration to a monotonic execution
   budget carried by the processor cancellation probe, fixed deterministic lease/cancellation/
   duration/error precedence, removed the unsupported upload/decompression ordering, added typed
@@ -60,17 +58,31 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   expanded both real storage-profile suites for same-owner races, saturated exact replay,
   idempotency conflict, result-attempt cleanup, injected deletion failure, cleanup-lease reclaim,
   and stale acknowledgement fencing.
+- 2026-08-24: Merged green T17 `main` at `0f6d4d5` without rewriting history and completed production
+  API assembly. Both profiles now construct the real repository with the configured atomic
+  admission policy; owner saturation returns stable HTTP 429 and global saturation returns stable
+  HTTP 503, both with `Retry-After`. Exact saturated replays remain accepted. Shared archive and
+  Mermaid ceilings constrain their processor adapters, and the worker's monotonic deadline is
+  passed through frozen-template resolution so Pandoc, Mermaid, and LibreOffice cap each engine
+  invocation by the remaining job duration. Real ASGI quota tests cover SQLite/filesystem and
+  PostgreSQL/RustFS.
+- 2026-08-24: Final assembly validation passed Ruff formatting/linting, `ty`, all 22 Web tests,
+  763 unit tests, 219 focused API/policy/engine/SQLite tests, all 3 focused T18 PostgreSQL/RustFS
+  tests, and the 941-test applicable canonical suite with real PostgreSQL/RustFS. The unrestricted
+  suite reached 948 passing tests; its 37 failures are confined to unavailable
+  Pandoc/Mermaid/Chromium/LibreOffice/font-engine tests.
 
 ## Unresolved PM decisions
 
-- Numeric production values for every T18 upload, structural, admission, duration, memory,
-  ephemeral-storage, lease, retry, retention, and cleanup setting.
-- Whether source and result retention remain one job-artifact window or become independent
-  contracts, plus template-version and audit-record retention/deletion semantics.
-- Antivirus engine/provider, scan boundary, failure policy, and quarantine behavior.
-- Standalone and distributed RPO/RTO targets and their required operational proof.
-- Final-image memory and ephemeral-storage enforcement values. T20 owns applying approved values.
-- T20/T21 final-rootless-image E2E remains sequencing debt, not a waiver.
+1. Template-version retention duration and deletion semantics.
+2. Audit-record retention duration and deletion semantics.
+3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
+4. Standalone and distributed RPO/RTO targets and their required operational proof.
+
+All implemented numeric ceilings and schedules remain required operator-supplied configuration
+without repository production defaults. Applying memory and ephemeral-storage ceilings and
+repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
+a waiver.
 
 ## Synchronization
 

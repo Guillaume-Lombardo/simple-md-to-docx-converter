@@ -18,6 +18,7 @@ from md_converter.conversion.archive import (
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.conversion.images import ImageLimits
 from md_converter.conversion.service import DocxConversionService
+from md_converter.jobs.policy import ArchiveResourceBudget
 
 LIMITS = ArchiveLimits(200_000, 20, 100_000, 150_000, 100.0, 50_000, 5)
 IMAGE_LIMITS = ImageLimits(100_000, 1_000, 1_000, 1_000_000, 10_000, 64)
@@ -87,6 +88,26 @@ def test_service_prepares_validates_and_delegates_real_png_archive(mocker) -> No
     assert result == b"docx"
     approved = converter.convert.call_args.args[0]
     assert approved.resources[0].content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.unit
+def test_service_applies_shared_archive_budget_before_extraction(mocker) -> None:
+    converter = mocker.Mock()
+    source = archive_bytes([("document.md", b"# Safe"), ("image.png", png_bytes())])
+    service = DocxConversionService(
+        converter,
+        ArchiveResourceBudget(
+            upload_bytes=len(source),
+            decompressed_bytes=100_000,
+            file_count=1,
+            image_count=5,
+        ),
+    )
+
+    with pytest.raises(ConversionError, match="configured limits"):
+        service.convert_archive(source, b"reference", LIMITS, IMAGE_LIMITS)
+
+    converter.convert.assert_not_called()
 
 
 @pytest.mark.unit
@@ -274,11 +295,26 @@ def test_rejects_invalid_utf8_markdown() -> None:
         (1, 1, 1, 1, float("nan"), 1, 1),
         (1, 1, 1, 1, float("inf"), 1, 1),
         (1, 1, 1, 1, 0.9, 1, 1),
+        (1, 1, 1, 1, 1.0, 1, 1, 0),
     ],
 )
 def test_limits_fail_closed(invalid) -> None:
     with pytest.raises(ValueError):
         ArchiveLimits(*invalid)
+
+
+@pytest.mark.unit
+def test_file_limit_does_not_count_directory_entries() -> None:
+    directory = zipfile.ZipInfo("docs/")
+    directory.external_attr = stat.S_IFDIR << 16
+    data = archive_bytes([(directory, b""), ("docs/document.md", b"# Safe")])
+    limits = ArchiveLimits(10_000, 2, 100, 100, 10.0, 100, 1, max_files=1)
+
+    document = prepare_archive(
+        data, limits, IMAGE_LIMITS, image_normalizer=normalize_stub
+    )
+
+    assert document.entrypoint.as_posix() == "docs/document.md"
 
 
 @pytest.mark.unit

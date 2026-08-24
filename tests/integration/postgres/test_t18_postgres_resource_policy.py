@@ -10,10 +10,13 @@ from uuid import UUID, uuid4
 
 import boto3
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from md_converter.app import create_app
 from md_converter.auth.models import Role, User
+from md_converter.config import Settings
 from md_converter.jobs.errors import (
     JobConflictError,
     JobQueueCapacityExceededError,
@@ -25,7 +28,12 @@ from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import ConversionJobRow, TemplateRow, UserRow
+from md_converter.persistence.schema import (
+    ConversionJobRow,
+    TemplateAuditRow,
+    TemplateRow,
+    UserRow,
+)
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
 from md_converter.storage import (
     FilesystemObjectStore,
@@ -35,9 +43,165 @@ from md_converter.storage import (
     ObjectStoreError,
     S3ObjectStore,
 )
+from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
+
+
+def _submit_http(
+    client: TestClient,
+    csrf: str,
+    template_id: UUID,
+    version_id: UUID,
+    key: str,
+):
+    return client.post(
+        "/api/v1/conversions",
+        headers={"X-CSRF-Token": csrf, "Idempotency-Key": key},
+        files={"source": ("source.md", f"# {key}".encode(), "text/markdown")},
+        data={
+            "template_id": str(template_id),
+            "template_version_id": str(version_id),
+            "output": "docx",
+        },
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+@pytest.mark.requires_s3
+def test_distributed_asgi_enforces_owner_and_global_admission(  # noqa: PLR0915
+    request: pytest.FixtureRequest,
+) -> None:
+    unique = uuid4().hex
+    admin_username = f"t18-api-{unique}"
+    password = "admin-" + "password"
+    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    app = create_app(
+        Settings(
+            **template_settings(
+                job_active_limit_per_user=1,
+                job_global_queue_capacity=2,
+            ),
+            initial_admin_username=admin_username,
+            initial_admin_password=password,
+            argon2_memory_cost=8,
+            argon2_time_cost=1,
+            storage_profile="distributed",
+            distributed_database_url=database_url,
+            s3_bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
+            s3_endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
+            s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
+            s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
+            s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+            conversion_upload_max_bytes=128,
+            conversion_request_max_bytes=2_000,
+            conversion_retry_after_seconds=9,
+            job_result_retention_seconds=60,
+        )
+    )
+    engine = create_database_engine(database_url)
+    owner_ids: list[UUID] = []
+    job_ids: list[UUID] = []
+    template_id, version_id = uuid4(), uuid4()
+
+    def cleanup() -> None:
+        repository = SqlJobRepository(engine)
+        for job_id in job_ids:
+            job = repository.get(job_id)
+            if job is not None:
+                app.state.components.object_store.delete(
+                    ObjectKey(ObjectScope.UPLOAD, job.owner_id, job.source_object_id)
+                )
+        with engine.begin() as connection:
+            connection.execute(
+                delete(ConversionJobRow).where(
+                    ConversionJobRow.owner_id.in_(str(owner) for owner in owner_ids)
+                )
+            )
+            connection.execute(
+                delete(TemplateAuditRow).where(
+                    TemplateAuditRow.template_id == str(template_id)
+                )
+            )
+            connection.execute(
+                delete(TemplateRow).where(TemplateRow.id == str(template_id))
+            )
+            connection.execute(
+                delete(UserRow).where(UserRow.id.in_(str(owner) for owner in owner_ids))
+            )
+        engine.dispose()
+
+    request.addfinalizer(cleanup)
+    with TestClient(app, base_url="https://testserver") as client:
+        admin_login = client.post(
+            "/api/v1/login",
+            json={"username": admin_username, "password": password},
+        ).json()
+        admin_id = UUID(admin_login["user"]["id"])
+        owner_ids.append(admin_id)
+        admin_csrf = admin_login["csrf_token"]
+        publish_template_pair(engine, admin_id, template_id, version_id)
+        for username in (f"alice-{unique}", f"bob-{unique}"):
+            created = client.post(
+                "/api/v1/admin/users",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"username": username, "password": f"{username}-password"},
+            )
+            assert created.status_code == 201
+            owner_ids.append(UUID(created.json()["id"]))
+
+        first = _submit_http(client, admin_csrf, template_id, version_id, "admin-one")
+        assert first.status_code == 202
+        job_ids.append(UUID(first.json()["id"]))
+        owner_full = _submit_http(
+            client, admin_csrf, template_id, version_id, "admin-two"
+        )
+        assert owner_full.status_code == 429
+        assert owner_full.headers["Retry-After"] == "9"
+
+        alice_name = f"alice-{unique}"
+        alice_login = client.post(
+            "/api/v1/login",
+            json={"username": alice_name, "password": f"{alice_name}-password"},
+        ).json()
+        alice = _submit_http(
+            client,
+            alice_login["csrf_token"],
+            template_id,
+            version_id,
+            "alice-one",
+        )
+        assert alice.status_code == 202
+        job_ids.append(UUID(alice.json()["id"]))
+        bob_name = f"bob-{unique}"
+        bob_login = client.post(
+            "/api/v1/login",
+            json={"username": bob_name, "password": f"{bob_name}-password"},
+        ).json()
+        global_full = _submit_http(
+            client,
+            bob_login["csrf_token"],
+            template_id,
+            version_id,
+            "bob-one",
+        )
+        assert global_full.status_code == 503
+        assert global_full.headers["Retry-After"] == "9"
+        assert global_full.json()["error"]["code"] == (
+            "CONVERSION_QUEUE_CAPACITY_EXCEEDED"
+        )
+        admin_login = client.post(
+            "/api/v1/login",
+            json={"username": admin_username, "password": password},
+        ).json()
+        replay = _submit_http(
+            client, admin_login["csrf_token"], template_id, version_id, "admin-one"
+        )
+        assert replay.status_code == 202
+        assert replay.json()["id"] == first.json()["id"]
+        assert app.state.components.job_policies.admission == JobAdmissionPolicy(1, 2)
 
 
 class FailOnceResultDeleteStore:

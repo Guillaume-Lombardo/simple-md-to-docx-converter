@@ -16,8 +16,8 @@ loops over SQLite or PostgreSQL. The authenticated server-rendered conversion pa
 upload and drag-and-drop, active-template search with preferred/fallback visibility, DOCX/PDF/both
 selection, asynchronous status and cancellation, expiration handling, and safe downloads. The
 template administration page provides owner and administrator lifecycle controls, preferences,
-version history, and an administrator-only local-account tab. Resource policy and final-container
-features remain under development.
+version history, and an administrator-only local-account tab. Configurable quotas and resource
+policy are assembled; final-container features remain under development.
 
 ## Requirements
 

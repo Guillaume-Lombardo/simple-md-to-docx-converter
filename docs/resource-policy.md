@@ -14,20 +14,19 @@ transaction-scoped advisory lock before counting and inserting. This prevents co
 from overshooting either limit. An exact idempotent replay is resolved before the counts, so retrying
 an accepted request does not fail merely because the queue later became full.
 
-The HTTP adapter must translate `JobUserQuotaExceededError` to `429` and
-`JobQueueCapacityExceededError` to `503`, using the configured
-`MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS` header value. That small adapter assembly is deferred
-until the concurrent T17 change releases `app.py`; the domain and persistence errors contain no
-database or document details.
+The assembled HTTP adapter translates `JobUserQuotaExceededError` to `429` and
+`JobQueueCapacityExceededError` to `503`. Both responses carry the configured
+`MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS` value in `Retry-After`; their stable error envelopes
+contain no database or document details. Exact idempotent replays remain accepted after saturation.
 
 ## Document and worker budgets
 
 The required upload, decompressed-byte, file, image, and diagram ceilings are assembled as a
 `DocumentResourceBudget` with typed `ArchiveResourceBudget` and `DiagramResourceBudget`
 projections. Upload and decompressed limits are independent because standalone Markdown and archive
-inputs apply them at different boundaries. Existing archive, image, Mermaid, Pandoc, and
-LibreOffice adapters retain their own finer-grained validated limits. Final conversion composition
-must derive those adapter limits from these projections rather than supply independent values.
+inputs apply them at different boundaries. The archive and Mermaid processors constrain their
+existing finer-grained validated limits with these shared projections before extraction or
+rendering. Adapter-specific limits remain independently strict and cannot be widened by T18.
 
 `MD_CONVERTER_JOB_MAX_DURATION_SECONDS` is converted into a monotonic `JobExecutionBudget` for each
 claim. The processor receives a callable cancellation probe exposing that budget, including its
@@ -35,9 +34,9 @@ monotonic deadline and remaining duration. A durable user cancellation wins over
 exhaustion; duration exhaustion wins over a simultaneous functional or unexpected processor error
 and produces the stable `resource_budget_exceeded` failure. Lease loss remains an infrastructure
 failure and wins before terminal transitions. Existing subprocess deadlines remain responsible for
-terminating engine process groups. Final processor composition must pass the remaining monotonic
-duration to each engine adapter; that assembly is deferred until the reserved conversion
-composition is available.
+terminating engine process groups. `FrozenTemplateJobProcessor` passes the absolute monotonic
+deadline explicitly to the document processor, and Pandoc, Mermaid, and LibreOffice cap each
+configured subprocess deadline by the remaining overall job duration when the engine starts.
 
 Memory and disk-backed workspace ceilings are required configuration
 (`MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES` and
@@ -59,9 +58,15 @@ Cleanup uses elapsed monotonic time, not processed-job count, with a required in
 batch size. Transient database or object-store failures use the configured backoff and remain
 retryable.
 
-Template-version and audit retention require their owning template/audit contracts and are not
-silently inferred here. Antivirus has no approved engine or provider contract. Both remain explicit
-product/assembly gaps instead of permissive no-op behavior.
+Four PM-owned product decisions remain explicit blockers rather than permissive no-op behavior:
+
+1. Template-version retention duration and deletion semantics.
+2. Audit-record retention duration and deletion semantics.
+3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
+4. Standalone and distributed RPO/RTO targets and the operational proof required for each.
+
+All implemented numeric ceilings and schedules remain required operator-supplied configuration;
+this repository deliberately supplies no implicit production values.
 
 ## Required settings
 

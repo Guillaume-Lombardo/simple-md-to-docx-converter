@@ -35,6 +35,7 @@ class ArchiveLimits:
     max_compression_ratio: float
     max_markdown_bytes: int
     max_images: int
+    max_files: int | None = None
 
     def __post_init__(self) -> None:
         integer_limits = (
@@ -47,6 +48,10 @@ class ArchiveLimits:
         )
         if any(type(value) is not int or value <= 0 for value in integer_limits):
             raise ValueError("Archive integer limits must be positive integers")
+        if self.max_files is not None and (
+            type(self.max_files) is not int or self.max_files <= 0
+        ):
+            raise ValueError("Archive file limit must be a positive integer")
         if type(self.max_compression_ratio) not in {int, float}:
             raise ValueError(
                 "Archive compression ratio must be finite and at least one"
@@ -200,6 +205,7 @@ def _preflight(
     members: list[_Member] = []
     keys: set[str] = set()
     total_uncompressed = 0
+    file_count = 0
     image_count = 0
     for info in infos:
         member = _inspect_member(info, limits)
@@ -207,6 +213,10 @@ def _preflight(
             _invalid_archive()
         keys.add(member.key)
         members.append(member)
+        if not info.is_dir():
+            file_count += 1
+            if limits.max_files is not None and file_count > limits.max_files:
+                _archive_limit()
         total_uncompressed += info.file_size
         if total_uncompressed > limits.max_total_uncompressed_bytes:
             _archive_limit()

@@ -12,6 +12,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from md_converter.config import Settings
+from md_converter.conversion.archive import ArchiveLimits
+from md_converter.conversion.mermaid import MermaidLimits
 from md_converter.jobs.errors import JobProcessingCancelled
 from md_converter.jobs.models import JobProcessResult, JobState
 from md_converter.jobs.policy import (
@@ -66,6 +68,24 @@ def test_execution_budget_uses_inclusive_finite_monotonic_deadline() -> None:
     assert budget.exhausted(13.0)
     with pytest.raises(ValueError, match="reading"):
         budget.remaining_seconds(float("nan"))
+
+
+def test_document_budgets_constrain_archive_and_mermaid_adapters() -> None:
+    archive = ArchiveResourceBudget(100, 200, 3, 4).constrain(
+        ArchiveLimits(1_000, 20, 500, 2_000, 10.0, 800, 10)
+    )
+    assert archive.max_archive_bytes == 100
+    assert archive.max_total_uncompressed_bytes == 200
+    assert archive.max_entries == 20
+    assert archive.max_files == 3
+    assert archive.max_images == 4
+    assert archive.max_member_uncompressed_bytes == 500
+
+    mermaid = DiagramResourceBudget(2).constrain(
+        MermaidLimits(10, 100, 200, 300, 400, 500, 600)
+    )
+    assert mermaid.max_diagrams == 2
+    assert mermaid.max_source_bytes == 100
 
 
 def test_settings_assemble_every_job_policy_without_defaults(tmp_path: Path) -> None:

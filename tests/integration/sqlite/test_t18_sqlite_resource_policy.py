@@ -8,10 +8,13 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from md_converter.app import create_app
 from md_converter.auth.models import Role, User
+from md_converter.config import Settings
 from md_converter.jobs.errors import (
     JobConflictError,
     JobQueueCapacityExceededError,
@@ -37,10 +40,118 @@ from md_converter.storage import (
     ObjectStoreError,
 )
 from tests.job_repository_contracts import TEMPLATE_ID, TEMPLATE_VERSION_ID
+from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
 COMPONENTS = (("md-converter", "0.1.0"),)
+
+
+def _submit_http(
+    client: TestClient,
+    csrf: str,
+    template_id: UUID,
+    version_id: UUID,
+    key: str,
+):
+    return client.post(
+        "/api/v1/conversions",
+        headers={"X-CSRF-Token": csrf, "Idempotency-Key": key},
+        files={"source": ("source.md", f"# {key}".encode(), "text/markdown")},
+        data={
+            "template_id": str(template_id),
+            "template_version_id": str(version_id),
+            "output": "docx",
+        },
+    )
+
+
+@pytest.mark.integration
+def test_standalone_asgi_enforces_owner_and_global_admission(tmp_path: Path) -> None:
+    password = "admin-" + "password"
+    app = create_app(
+        Settings(
+            **template_settings(
+                job_active_limit_per_user=1,
+                job_global_queue_capacity=2,
+            ),
+            initial_admin_username="admin",
+            initial_admin_password=password,
+            argon2_memory_cost=8,
+            argon2_time_cost=1,
+            storage_profile="standalone",
+            standalone_data_directory=tmp_path,
+            conversion_upload_max_bytes=128,
+            conversion_request_max_bytes=2_000,
+            conversion_retry_after_seconds=7,
+            job_result_retention_seconds=60,
+        )
+    )
+    with TestClient(app, base_url="https://testserver") as client:
+        admin_login = client.post(
+            "/api/v1/login", json={"username": "admin", "password": password}
+        ).json()
+        admin_id = UUID(admin_login["user"]["id"])
+        admin_csrf = admin_login["csrf_token"]
+        template_id, version_id = uuid4(), uuid4()
+        engine = create_database_engine(standalone_database_url(tmp_path))
+        publish_template_pair(engine, admin_id, template_id, version_id)
+        for username in ("alice", "bob"):
+            response = client.post(
+                "/api/v1/admin/users",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"username": username, "password": f"{username}-password"},
+            )
+            assert response.status_code == 201
+
+        first = _submit_http(client, admin_csrf, template_id, version_id, "admin-one")
+        assert first.status_code == 202
+        owner_full = _submit_http(
+            client, admin_csrf, template_id, version_id, "admin-two"
+        )
+        assert owner_full.status_code == 429
+        assert owner_full.headers["Retry-After"] == "7"
+        assert owner_full.json()["error"]["code"] == ("CONVERSION_USER_QUOTA_EXCEEDED")
+
+        alice_login = client.post(
+            "/api/v1/login",
+            json={"username": "alice", "password": "alice-password"},
+        ).json()
+        assert (
+            _submit_http(
+                client,
+                alice_login["csrf_token"],
+                template_id,
+                version_id,
+                "alice-one",
+            ).status_code
+            == 202
+        )
+        bob_login = client.post(
+            "/api/v1/login", json={"username": "bob", "password": "bob-password"}
+        ).json()
+        global_full = _submit_http(
+            client,
+            bob_login["csrf_token"],
+            template_id,
+            version_id,
+            "bob-one",
+        )
+        assert global_full.status_code == 503
+        assert global_full.headers["Retry-After"] == "7"
+        assert global_full.json()["error"]["code"] == (
+            "CONVERSION_QUEUE_CAPACITY_EXCEEDED"
+        )
+        admin_login = client.post(
+            "/api/v1/login", json={"username": "admin", "password": password}
+        ).json()
+        replay = _submit_http(
+            client, admin_login["csrf_token"], template_id, version_id, "admin-one"
+        )
+        assert replay.status_code == 202
+        assert replay.json()["id"] == first.json()["id"]
+        assert app.state.components.job_policies.admission == JobAdmissionPolicy(1, 2)
+        engine.dispose()
 
 
 class FailOnceResultDeleteStore:

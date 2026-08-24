@@ -9,8 +9,16 @@ from md_converter.conversion.validation import ApprovedMarkdown
 class RecordingConverter:
     def __init__(self) -> None:
         self.received: tuple[ApprovedMarkdown, bytes] | None = None
+        self.deadline_monotonic: float | None = None
 
-    def convert(self, markdown: ApprovedMarkdown, reference_docx: bytes) -> bytes:
+    def convert(
+        self,
+        markdown: ApprovedMarkdown,
+        reference_docx: bytes,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> bytes:
+        self.deadline_monotonic = deadline_monotonic
         self.received = (markdown, reference_docx)
         return b"converted-docx"
 
@@ -25,3 +33,18 @@ def test_service_passes_only_approved_markdown_to_engine() -> None:
         ApprovedMarkdown("# Approved\n\nFootnote.[^1]\n\n[^1]: Note."),
         b"reference",
     )
+
+
+@pytest.mark.functional
+def test_service_propagates_worker_deadline_to_docx_engine() -> None:
+    converter = RecordingConverter()
+
+    assert (
+        DocxConversionService(converter).convert(
+            "# Approved",
+            b"reference",
+            deadline_monotonic=123.5,
+        )
+        == b"converted-docx"
+    )
+    assert converter.deadline_monotonic == 123.5

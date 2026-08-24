@@ -127,16 +127,15 @@ bucket platforms provide a consistent cross-service recovery point.
 
 ## Operational decisions still open
 
-The T18 mechanisms are implemented, but the PM has not approved any production numeric value for
-uploads, decompression, file/image/diagram counts, user/global capacity, duration, memory,
-ephemeral storage, leases, retries, cleanup, or retained job artifacts. The PM must also decide:
+The T18 mechanisms are implemented and all numeric ceilings remain explicit operator-supplied
+configuration without repository defaults. Four PM-owned decisions still block their respective
+contracts:
 
-- whether source and result retention remain one job-artifact window or become separate contracts;
-- template-version and audit-record retention periods and deletion semantics;
-- the antivirus engine/provider, scan boundary, failure policy, and quarantine behavior;
-- standalone and distributed RPO/RTO targets and the operational proof required for each;
-- the final container/deployment enforcement values for memory and ephemeral storage.
+1. Template-version retention duration and deletion semantics.
+2. Audit-record retention duration and deletion semantics.
+3. Antivirus provider, scan boundary, failure policy, and quarantine behavior.
+4. Standalone and distributed RPO/RTO targets and the operational proof required for each.
 
-Operators must keep all placeholders configurable until those decisions are recorded. T12 verifies real
-SQLite/filesystem and PostgreSQL/RustFS boundaries. Final hardened-image rootless storage E2E is
-the explicitly approved T20/T21 sequencing debt and is not an integration-test waiver.
+T12 and T18 verify real SQLite/filesystem and PostgreSQL/RustFS boundaries. Applying the configured
+memory and ephemeral-storage ceilings to the final container and repeating quota workflows against
+the hardened rootless image remain T20/T21 sequencing debt, not integration-test waivers.

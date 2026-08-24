@@ -9,7 +9,7 @@ from uuid import UUID
 
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
 from md_converter.jobs.models import ConversionJob, JobProcessResult, JobStep
-from md_converter.jobs.ports import JobProcessor, JobRepository
+from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from md_converter.storage import ObjectStore
 from md_converter.templates.errors import (
@@ -31,13 +31,14 @@ class FrozenTemplateResolver(Protocol):
 class TemplateAwareProcessor(Protocol):
     """Production conversion boundary supplied with immutable template content."""
 
-    def process_with_template(
+    def process_with_template(  # noqa: PLR0913 - explicit worker boundary
         self,
         job: ConversionJob,
         template: TemplateVersion,
         template_content: bytes,
         *,
-        cancelled: Callable[[], bool],
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult: ...
 
@@ -55,7 +56,7 @@ class FrozenTemplateJobProcessor(JobProcessor):
         self,
         job: ConversionJob,
         *,
-        cancelled: Callable[[], bool],
+        cancelled: CancellationProbe,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult:
         try:
@@ -72,6 +73,11 @@ class FrozenTemplateJobProcessor(JobProcessor):
             template,
             content,
             cancelled=cancelled,
+            deadline_monotonic=(
+                cancelled.budget.deadline_monotonic
+                if cancelled.budget is not None
+                else None
+            ),
             progress=progress,
         )
 

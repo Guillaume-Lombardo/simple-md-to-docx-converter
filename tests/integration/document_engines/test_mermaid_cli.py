@@ -242,8 +242,15 @@ def test_pandoc_preserves_ratio_and_physical_dimension_caps(
     expected_extent: tuple[int, int],
 ) -> None:
     class StaticRenderer:
-        def render(self, source: str, max_output_bytes: int) -> bytes:
+        def render(
+            self,
+            source: str,
+            max_output_bytes: int,
+            *,
+            deadline_monotonic: float | None = None,
+        ) -> bytes:
             assert source == "flowchart LR\n"
+            assert deadline_monotonic is None
             output = _png(*image_size)
             assert len(output) <= max_output_bytes
             return output

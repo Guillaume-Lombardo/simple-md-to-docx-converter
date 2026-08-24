@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from md_converter.conversion.archive import ArchiveLimits
+    from md_converter.conversion.mermaid import MermaidLimits
 
 
 def _positive_integer(name: str, value: int) -> None:
@@ -43,6 +48,19 @@ class ArchiveResourceBudget:
         _positive_integer("File-count budget", self.file_count)
         _positive_integer("Image-count budget", self.image_count)
 
+    def constrain(self, limits: ArchiveLimits) -> ArchiveLimits:
+        """Project the shared ceilings onto the archive adapter contract."""
+
+        return replace(
+            limits,
+            max_archive_bytes=min(limits.max_archive_bytes, self.upload_bytes),
+            max_files=min(limits.max_files or self.file_count, self.file_count),
+            max_total_uncompressed_bytes=min(
+                limits.max_total_uncompressed_bytes, self.decompressed_bytes
+            ),
+            max_images=min(limits.max_images, self.image_count),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class DiagramResourceBudget:
@@ -52,6 +70,13 @@ class DiagramResourceBudget:
 
     def __post_init__(self) -> None:
         _positive_integer("Diagram-count budget", self.diagram_count)
+
+    def constrain(self, limits: MermaidLimits) -> MermaidLimits:
+        """Project the shared diagram ceiling onto the Mermaid adapter contract."""
+
+        return replace(
+            limits, max_diagrams=min(limits.max_diagrams, self.diagram_count)
+        )
 
 
 @dataclass(frozen=True, slots=True)

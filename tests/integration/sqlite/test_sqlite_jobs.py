@@ -90,16 +90,18 @@ class FailingProcessor(DeterministicProcessor):
 class TemplateBytesProcessor:
     """Prove the composed worker receives the persisted frozen bytes."""
 
-    def process_with_template(
+    def process_with_template(  # noqa: PLR0913 - explicit worker boundary
         self,
         job: ConversionJob,
         template: TemplateVersion,
         template_content: bytes,
         *,
         cancelled: Callable[[], bool],
+        deadline_monotonic: float | None,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult:
         assert not cancelled()
+        assert deadline_monotonic is None
         assert template.id == job.template_version_id
         progress(JobStep.DOCX, 70)
         return JobProcessResult(b"used:" + template_content)

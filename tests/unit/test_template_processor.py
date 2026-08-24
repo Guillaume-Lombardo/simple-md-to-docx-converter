@@ -7,6 +7,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from md_converter.jobs.models import JobProcessResult
+from md_converter.jobs.policy import JobExecutionBudget
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy
 from md_converter.templates.errors import TemplateIntegrityError
 from md_converter.templates.models import TemplateVersion
@@ -15,6 +16,15 @@ from md_converter.templates.processor import (
     build_template_conversion_worker,
 )
 from tests.unit.jobs.test_job_models import job
+
+
+class NoBudgetProbe:
+    """Non-cancelled probe satisfying the worker processor contract."""
+
+    budget = None
+
+    def __call__(self) -> bool:
+        return False
 
 
 @pytest.mark.unit
@@ -40,6 +50,7 @@ def test_processor_resolves_and_passes_exact_frozen_version(
     delegate = mocker.Mock()
     delegate.process_with_template.return_value = JobProcessResult(b"result")
     cancelled = mocker.Mock(return_value=False)
+    cancelled.budget = JobExecutionBudget(10.0, 20.0, 30.0)
     progress = mocker.Mock()
 
     result = FrozenTemplateJobProcessor(resolver, delegate).process(
@@ -55,6 +66,7 @@ def test_processor_resolves_and_passes_exact_frozen_version(
         version,
         b"docx",
         cancelled=cancelled,
+        deadline_monotonic=30.0,
         progress=progress,
     )
 
@@ -67,7 +79,7 @@ def test_processor_sanitizes_integrity_failure_and_factory_wraps(
     resolver.resolve_frozen_version.side_effect = TemplateIntegrityError
     with pytest.raises(Exception) as raised:
         FrozenTemplateJobProcessor(resolver, mocker.Mock()).process(
-            job(), cancelled=lambda: False, progress=lambda _step, _value: None
+            job(), cancelled=NoBudgetProbe(), progress=lambda _step, _value: None
         )
     assert getattr(raised.value, "code", None) == "template_integrity"
 

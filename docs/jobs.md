@@ -24,7 +24,8 @@ The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS`, and
 `MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS` settings deliberately have no production defaults.
-T18 owns their approved values and the associated quotas and schedules.
+T18 supplies their validated configurable contracts together with the associated quotas and
+schedules; operators must provide environment-specific values.
 The complete typed admission, budget, retention, and cleanup contract is documented in
 [`resource-policy.md`](resource-policy.md).
 
@@ -60,8 +61,9 @@ run too frequently or prevent an idle worker from running it.
 The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
 exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored
 size and SHA-256, and passes the immutable version metadata and bytes to the document processor;
-later replacement or restoration cannot change a queued job's reference bytes. T20 owns final-image
-process-mode wiring. Final rootless-image E2E
+later replacement or restoration cannot change a queued job's reference bytes. It also passes the
+worker's absolute monotonic deadline so document processors can cap every engine invocation by the
+remaining overall duration. T20 owns final-image process-mode wiring. Final rootless-image E2E
 coverage therefore remains sequenced to T20/T21; T13 covers the
 HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
 PostgreSQL/S3-compatible storage.

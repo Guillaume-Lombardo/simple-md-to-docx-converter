@@ -43,11 +43,14 @@ from md_converter.config import Settings, StorageProfile
 from md_converter.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
+    JobQueueCapacityExceededError,
     JobRepositoryError,
     JobRequestError,
+    JobUserQuotaExceededError,
 )
 from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
-from md_converter.jobs.service import JobService, JobServicePolicy
+from md_converter.jobs.runtime import JobPolicies, build_job_policies
+from md_converter.jobs.service import JobService
 from md_converter.persistence.errors import PersistenceError
 from md_converter.persistence.jobs import SqlJobRepository
 from md_converter.persistence.migrations import upgrade_database
@@ -332,6 +335,7 @@ ERROR_DESCRIPTIONS = {
     413: "The request body is too large",
     422: "The request is invalid",
     428: "The request requires a precondition",
+    429: "The caller has exceeded a configured quota",
     503: "The service is not ready",
 }
 
@@ -423,6 +427,40 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "CONVERSION_REQUEST_INVALID",
                     "message": "The conversion request is invalid.",
+                }
+            },
+        )
+
+    @app.exception_handler(JobUserQuotaExceededError)
+    def job_user_quota_handler(
+        request: Request, _error: JobUserQuotaExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={
+                "Retry-After": str(request.app.state.conversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "CONVERSION_USER_QUOTA_EXCEEDED",
+                    "message": "The active conversion quota is exhausted.",
+                }
+            },
+        )
+
+    @app.exception_handler(JobQueueCapacityExceededError)
+    def job_queue_capacity_handler(
+        request: Request, _error: JobQueueCapacityExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Retry-After": str(request.app.state.conversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "CONVERSION_QUEUE_CAPACITY_EXCEEDED",
+                    "message": "The conversion queue is at capacity.",
                 }
             },
         )
@@ -552,6 +590,7 @@ class AppComponents:
     object_store: ObjectStore
     jobs: JobService
     templates: TemplateService | None = None
+    job_policies: JobPolicies | None = None
 
 
 class ProfileReadinessProbe:
@@ -567,6 +606,7 @@ class ProfileReadinessProbe:
 
 def build_components(settings: Settings) -> AppComponents:
     """Assemble the selected coherent persistent storage profile."""
+    job_policies = build_job_policies(settings)
     if settings.storage_profile is StorageProfile.STANDALONE:
         data_directory = settings.standalone_data_directory
         if (
@@ -620,9 +660,9 @@ def build_components(settings: Settings) -> AppComponents:
         ),
     )
     jobs = JobService(
-        SqlJobRepository(engine),
+        SqlJobRepository(engine, job_policies.admission),
         object_store,
-        JobServicePolicy(settings.job_result_retention_seconds),
+        job_policies.service,
     )
     templates = TemplateService(
         catalog=SqlTemplateCatalogRepository(engine),
@@ -640,6 +680,7 @@ def build_components(settings: Settings) -> AppComponents:
         object_store=object_store,
         jobs=jobs,
         templates=templates,
+        job_policies=job_policies,
     )
 
 
@@ -672,6 +713,9 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         ),
     )
     app.state.components = resolved_components
+    app.state.conversion_retry_after_seconds = (
+        resolved_settings.conversion_retry_after_seconds
+    )
     install_error_handlers(app)
 
     def session_token(request: Request) -> str | None:
@@ -1016,7 +1060,7 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         response_model=ConversionResponse,
         status_code=status.HTTP_202_ACCEPTED,
         tags=["conversions"],
-        responses=error_responses(401, 403, 409, 413, 422, 503),
+        responses=error_responses(401, 403, 409, 413, 422, 429, 503),
     )
     async def create_conversion(  # noqa: PLR0913, PLR0917 - FastAPI fields
         response: Response,
