@@ -18,8 +18,13 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 - T10/G1L-321 is delivered on `main`; its local and Linear status are `Done`.
 - T11 is the smallest ready critical-path ticket. Its T09 and T10 dependencies are verified `Done`;
   it blocks T13.
-- Three read-only independent analyses cover official font artifacts, bounded OOXML architecture,
-  and the security/integration test matrix. No implementation ownership overlaps.
+- T11/G1L-320 is `In Progress` on `feat/T11-pdf-conversion`, based on delivered main
+  `c43b810`; T09 and T10 are verified dependencies.
+- T11 now has an isolated LibreOffice adapter, explicit DOCX/PDF bounds, process-group timeout and
+  cancellation, strict PDF validation, canonical traceability, locked PDFium rasterization, and a
+  reproducible exact golden. The canonical unit selection passes 610 tests at 93.98% coverage, the
+  default local suite passes 751 tests at 95.04% coverage, and the hardened rootless UBI harness
+  passes all 20 real Pandoc/LibreOffice/PDFium tests.
 - K3s is stopped. It will be started only for an applicable test and stopped immediately afterward.
 
 ## Delivered T10 Scope
@@ -55,8 +60,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Close T10 tracking through the protected documentation PR and verify its exact main CI.
-2. Start T11 PDF production and synchronize its local mirror with Linear.
+1. Publish the approved T11 revision and verify protected CI.
+2. Squash-merge, synchronize T11 to `Done`, and continue T13.
 
 ## Validation
 
@@ -74,3 +79,13 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   validation and was inconclusive; all resources were removed and K3s stopped. Previously delivered
   K3s proof remains valid and no VM networking was modified.
 - Final product validation has not run; the product remains incomplete.
+- T11 validation: formatting, Ruff, and `ty` pass; the unit selection passes 610 tests at 93.98%
+  application coverage; the default local selection passes 751 tests at 95.04%; and the rootless
+  T11 boundary suite passes 20 tests including exact raster golden, concurrent profiles, failure
+  outputs, timeout, cancellation, probe failure, and descendant cleanup. The unfiltered host run
+  passes 758 tests and has 34 expected missing-engine failures because Pandoc, LibreOffice,
+  Mermaid/Chromium, and the locked Fontconfig inventory are provided by the approved image rather
+  than the VM host.
+- Independent security, specification, and CI/toolchain reviewers approve exact implementation
+  revision `9f608e8` with no actionable finding. Changed application coverage is 97.32% and
+  application branch coverage is 91.53%.

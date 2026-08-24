@@ -26,6 +26,9 @@ Run E2E for both profiles with three identities, real conversion, restart recove
 - Security and rootless-runtime requirements are verified when applicable.
 - Both final-image storage profiles are exercised; distributed-profile environments use real PostgreSQL and RustFS through the provider-neutral AWS S3-compatible contract, never MinIO.
 - The suite discharges T12's deferred final-image rootless E2E debt for primary storage workflows and relevant critical failure, restart, recovery, and concurrency behavior.
+- The suite discharges T11's deferred final-image E2E debt through the final asynchronous workflow:
+  successful PDF conversion and download, engine/output failure, cancellation without publication,
+  concurrent isolated conversions, and the relevant authorization and recovery paths.
 
 ## Dependencies
 
@@ -35,6 +38,9 @@ Run E2E for both profiles with three identities, real conversion, restart recove
 ## Progress
 
 - 2026-08-23: Scope now explicitly includes T12's deferred final-image rootless E2E debt. Both profiles must run against the hardened image, with real PostgreSQL/RustFS for the distributed profile and relevant success, failure, restart, recovery, and concurrency paths.
+- 2026-08-24: Scope now explicitly includes T11's approved sequencing debt. Exercise the PDF path
+  through the durable T13 job workflow against the T20 image, including success, safe failure,
+  cancellation, concurrency, authorization, publication, and recovery behavior.
 
 ## Synchronization
 

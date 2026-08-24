@@ -29,6 +29,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
     ),
     "document-engines": (
         "src/**",
+        "scripts/generate_t11_pdf_golden.py",
         "spikes/toolchain/**",
         "tests/corpus/**",
         "tests/conftest.py",
