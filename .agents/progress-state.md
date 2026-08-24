@@ -9,15 +9,13 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Verified State
 
-- `main` is clean and matches `origin/main`; delivered history through T00 k3s PR #30 is verified
-  below.
-- T00, T01, T02, T03, T05, T06, T12, and T14 are delivered. Linear G1L-310 is synchronized as
-  `Done`, and T04 implementation is active on `feat/T04-golden-infrastructure`.
-- T04 implementation now includes the complete manifest-owned corpus, provenance-pinned generated
+- `main` is clean and matches `origin/main`; delivered history through T04 PR #32 is verified below.
+- T00, T01, T02, T03, T04, T05, T06, T12, and T14 are delivered. Linear G1L-310 is synchronized
+  as `Done`; Linear G1L-314 follows this durable T04 completion sync.
+- PR #32 delivered the complete manifest-owned corpus, provenance-pinned generated
   DOCX and adversarial ZIP fixtures, pre-read bounded archive/OpenXML inspection, bounded one-pass
   RGBA raster comparisons, reusable fixtures, exhaustive unit/integration coverage, an active T04
-  CI domain, and documentation. It remains `In Progress` pending independent review and
-  verification on `main`.
+  CI domain, and documentation. Its exact squash passed all active domains and the protected gate.
 - PR #26 delivered the independently reviewed rootless Podman Chrome sandbox proof. The sandbox
   stays enabled, `--no-sandbox` is forbidden, and OpenShift proof remains deferred.
 - PR #27 delivered the independently approved T14 ownership, visibility, search, preference, and
@@ -74,6 +72,8 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   arbitrary UID, read-only root, no network, dropped capabilities, writable areas, and cgroup
   envelopes on Docker, rootless Podman, and local k3s, with deferred OpenShift compatibility stated
   explicitly.
+- A manifest-owned reference corpus with deterministic synthetic fixtures, bounded OpenXML and
+  raster comparison helpers, reusable Pytest fixtures, and an active document-engine CI domain.
 
 ## Blockers and Risks
 
@@ -90,11 +90,10 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
 
 ## Next Actions
 
-1. Implement T04's reference corpus, reusable fixtures, deterministic DOCX/OpenXML and PDF-raster
-   comparison infrastructure, marker coverage, and tests without absorbing downstream conversion
-   behavior from T07-T11; implementation is ready for independent review.
-2. Obtain independent review, verify T04 on `main`, synchronize Linear G1L-314, and unblock T07/T08.
-   T13 still waits for T11.
+1. Synchronize Linear G1L-314 as `Done`, then select T07 as the next dependency-ready ticket.
+2. Implement T07 against the approved Markdown dialect and T04 corpus without absorbing T08 image/
+   archive security, T09 Mermaid, T10 template/font, or T11 PDF responsibilities. T08 still waits
+   for T07, and T13 still waits for T11.
 3. Preserve the explicit T12 final-image rootless E2E debt in T20/T21.
 4. Reconstruct repository, Linear, CI, and worker truth after each transition and rewrite this file
    as current state rather than a chronology.
@@ -117,11 +116,15 @@ Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
   security approval with no findings, passed run `32675125046`, and was squash-merged as
   `b927d060d60b6eacdabb872e627768defcd58126`. That exact squash passed main run `32675177329`,
   including the protected `CI / gate`.
+- PR #32 exact head `29c2ecae0eb36d26883459c71382b0de170d7583` received independent
+  approval with no findings, passed run `32678015088`, and was squash-merged as
+  `c2b84478282beb1c3ce1e231d107610e8ec65b82`. That exact squash passed main run `32678078658`,
+  including `CI / document-engines`, both storage profiles, and the protected `CI / gate`.
 - Linear G1L-325 was fetched by identifier and reports `Done`, with the PR #27 attachment and exact
   delivery entry matching the local `Done` ticket.
 - Linear G1L-310 reports `Done`, contains the PR #30 completion evidence and attachment, and matches
-  the local T00 mirror. Linear G1L-314 reports `In Progress`; its T00 and T01 dependencies are both
-  verified `Done`.
+  the local T00 mirror. Linear G1L-314 still reports `In Progress` pending this durable completion
+  sync; its T00 and T01 dependencies are both verified `Done`.
 - T04 formatting, Ruff, and ty checks pass. Its focused selection passes 148 tests; its helper-only
   coverage run passes 117 tests at 99% branch coverage; its active CI integration command passes 76
   tests; and the service-independent suite passes 298 tests at 98% application coverage. Both canonical Pytest
