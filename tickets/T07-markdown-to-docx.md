@@ -2,7 +2,7 @@
 ticket: T07
 linear_id: G1L-317
 linear_url: https://linear.app/g1lom/issue/G1L-317/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -33,6 +33,7 @@ Convert the fixed Markdown dialect to DOCX with fixed Pandoc arguments, isolated
 ## Progress
 
 - No implementation work started.
+- 2026-08-24: T04 and T06 are verified `Done` in the repository and Linear. T07 implementation started on `feat/T07-pandoc-docx` to add the fixed Markdown dialect, mandatory pre-Pandoc raw-HTML rejection, an isolated-workspace Pandoc adapter with fixed arguments and an explicit environment, reference-document support, stable errors, and real Pandoc/OpenXML integration coverage. T08 archive/image security, T09 Mermaid, T10 font/template validation, T11 PDF, and T18 production limits remain outside this ticket.
 
 ## Synchronization
 
