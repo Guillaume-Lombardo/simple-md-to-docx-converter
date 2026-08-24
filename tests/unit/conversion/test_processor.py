@@ -26,7 +26,13 @@ from md_converter.conversion.processor import (
     build_production_processor,
 )
 from md_converter.jobs.errors import JobProcessingCancelled
-from md_converter.jobs.models import ConversionJob, JobOutput, JobState, JobStep
+from md_converter.jobs.models import (
+    ConversionJob,
+    JobOutput,
+    JobProcessResult,
+    JobState,
+    JobStep,
+)
 from md_converter.storage import ObjectKey, ObjectNotFoundError, ObjectScope
 from md_converter.templates.models import TemplateVersion
 from tests.settings import template_settings
@@ -196,6 +202,23 @@ def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None
         processor._image_limits,
         deadline_monotonic=None,
     )
+
+
+def test_processor_publishes_docx_without_starting_pdf(mocker) -> None:
+    job = _job(JobOutput.DOCX)
+    processor, _objects, _docx, pdf = _processor(mocker, b"# Document\n")
+
+    result = processor.process_with_template(
+        job,
+        _template(job, b"template"),
+        b"template",
+        cancelled=_Cancellation(),
+        deadline_monotonic=None,
+        progress=mocker.Mock(),
+    )
+
+    assert result == JobProcessResult(b"docx")
+    pdf.convert.assert_not_called()
 
 
 def test_processor_rejects_missing_non_utf8_and_cancelled_sources(mocker) -> None:

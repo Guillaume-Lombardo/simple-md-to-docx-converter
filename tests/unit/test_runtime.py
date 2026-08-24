@@ -76,6 +76,10 @@ def test_runtime_rejects_mixed_profiles_and_closes_failed_assembly(
     with pytest.raises(ConfigurationError, match="standalone"):
         build_embedded_app(distributed)
 
+    standalone_for_external = _settings(tmp_path, profile="standalone")
+    with pytest.raises(ConfigurationError, match="distributed"):
+        run_external_worker(standalone_for_external)
+
     standalone = _settings(tmp_path, profile="standalone")
     components = mocker.Mock(spec=AppComponents)
     mocker.patch("md_converter.runtime.build_components", return_value=components)

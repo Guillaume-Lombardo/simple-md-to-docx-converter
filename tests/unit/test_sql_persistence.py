@@ -247,6 +247,24 @@ def test_database_url_helpers_select_the_expected_drivers() -> None:
 
 
 @pytest.mark.unit
+def test_postgresql_user_update_helper_keeps_returning(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    engine.dialect.name = "postgresql"
+    repository = SqlUserRepository(engine)
+    database = mocker.Mock()
+    statement = mocker.Mock()
+    expected = mocker.Mock()
+    database.execute.return_value.scalar_one_or_none.return_value = expected
+
+    assert repository._update_user_row(database, statement, "user-id") is expected
+
+    statement.returning.assert_called_once()
+    database.execute.assert_called_once_with(statement.returning.return_value)
+
+
+@pytest.mark.unit
 def test_sql_failures_have_one_stable_sanitized_boundary(
     mocker: MockerFixture,
 ) -> None:
