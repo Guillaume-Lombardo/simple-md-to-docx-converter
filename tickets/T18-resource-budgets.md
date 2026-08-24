@@ -81,13 +81,13 @@ Add quotas, queue capacity, resource budgets, retention, periodic cleanup, cance
   isolated restore runner and immutable retained quarterly report.
 - 2026-08-24: Added deterministic unit, real clamd TCP protocol, SQLite/filesystem, and live
   PostgreSQL/RustFS profile-parity coverage for primary and failure paths. Targeted validation is
-  green. Final validation passed Ruff formatting/linting, `ty`, all 22 Web tests, the 780-test unit
-  suite with its independent 90% branch gate, and the 961-test applicable canonical suite with live
-  PostgreSQL/RustFS and 94.95% displayed application coverage. The unrestricted suite reached 966
+  green. Final validation passed Ruff formatting/linting, `ty`, all 22 Web tests, the 781-test unit
+  suite with its independent 90% branch gate, and the 962-test applicable canonical suite with live
+  PostgreSQL/RustFS and 94.99% displayed application coverage. The unrestricted suite reached 966
   passing tests; its 37 failures are confined to unavailable Pandoc, Mermaid/Chromium,
   LibreOffice, and font artifacts. A real ClamAV installation is unavailable on this host, so the
-  deterministic real TCP INSTREAM boundary test is the local provider proof. Changed-line coverage
-  is recorded after committing the exact revision.
+  deterministic real TCP INSTREAM boundary test is the local provider proof. Changed application
+  line coverage is 98.36% (601/611 lines) against the exact committed implementation revision.
 
 Workload-dependent ceilings and schedules remain required operator-supplied configuration. Applying memory and ephemeral-storage ceilings and
 repeating the quota workflows against the final rootless image remain T20/T21 sequencing debt, not
