@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urlsplit
 
 import yaml
 from markdown_it import MarkdownIt
@@ -14,7 +16,13 @@ from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from md_converter.conversion.errors import validation_error
+from md_converter.conversion.archive import ApprovedDocument, ApprovedResource
+from md_converter.conversion.errors import ConversionError, validation_error
+from md_converter.conversion.images import (
+    SUPPORTED_IMAGE_SUFFIXES,
+    ImageLimits,
+    validate_normalized_png,
+)
 
 PANDOC_READER = (
     "commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html"
@@ -43,6 +51,9 @@ class ApprovedMarkdown:
     """Markdown that passed all T07 pre-Pandoc checks."""
 
     text: str
+    entrypoint: PurePosixPath = field(default_factory=lambda: PurePosixPath("input.md"))
+    resources: tuple[ApprovedResource, ...] = ()
+    image_limits: ImageLimits | None = None
 
 
 def _walk(tokens: list[Token]) -> Iterator[Token]:
@@ -89,7 +100,94 @@ def _is_raw_attribute(value: str, *, complete: bool) -> bool:
     )
 
 
-def _validate_tokens(tokens: tuple[Token, ...]) -> None:
+def _decoded_local_path(resource: str) -> PurePosixPath:
+    try:
+        parsed = urlsplit(resource)
+    except ValueError:
+        raise validation_error("Markdown image path is invalid.") from None
+    if parsed.query or parsed.fragment:
+        raise validation_error("Markdown image path is invalid.")
+    if re.search(r"(?i)%(?:2e|2f|5c)", resource):
+        raise validation_error("Markdown image path is invalid.")
+    try:
+        decoded = unquote(parsed.path, encoding="utf-8", errors="strict")
+    except UnicodeDecodeError:
+        raise validation_error("Markdown image path is invalid.") from None
+    if unquote(decoded, encoding="utf-8", errors="replace") != decoded:
+        raise validation_error("Markdown image path is invalid.")
+    if (
+        not decoded
+        or "\0" in decoded
+        or "\\" in decoded
+        or decoded.startswith("/")
+        or "?" in decoded
+        or "#" in decoded
+    ):
+        raise validation_error("Markdown image path is invalid.")
+    relative = PurePosixPath(decoded)
+    if relative.parts and ":" in relative.parts[0]:
+        raise validation_error("Markdown image path is invalid.")
+    return relative
+
+
+def _resolve_local_image(
+    resource: str,
+    entrypoint: PurePosixPath,
+    approved_paths: frozenset[PurePosixPath],
+) -> None:
+    relative = _decoded_local_path(resource)
+    resolved: list[str] = list(entrypoint.parent.parts)
+    if resolved == ["."]:
+        resolved.clear()
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not resolved:
+                raise validation_error("Markdown image path escapes the archive.")
+            resolved.pop()
+            continue
+        resolved.append(part)
+    path = PurePosixPath(*resolved)
+    if path not in approved_paths:
+        raise validation_error("Markdown image is missing or unapproved.")
+
+
+def _is_safe_package_path(path: PurePosixPath) -> bool:
+    return (
+        isinstance(path, PurePosixPath)
+        and bool(path.parts)
+        and not (
+            path.is_absolute()
+            or path.parts in {(), (".",)}
+            or ".." in path.parts
+            or "\0" in path.as_posix()
+            or "\\" in path.as_posix()
+            or ":" in path.parts[0]
+        )
+    )
+
+
+def _package_paths_are_distinct(paths: tuple[PurePosixPath, ...]) -> bool:
+    keys = {unicodedata.normalize("NFC", path.as_posix()).casefold() for path in paths}
+    if len(keys) != len(paths):
+        return False
+    for path in paths:
+        parent = path.parent
+        while parent.parts not in {(), (".",)}:
+            key = unicodedata.normalize("NFC", parent.as_posix()).casefold()
+            if key in keys:
+                return False
+            parent = parent.parent
+    return True
+
+
+def _validate_tokens(
+    tokens: tuple[Token, ...],
+    *,
+    entrypoint: PurePosixPath,
+    approved_paths: frozenset[PurePosixPath],
+) -> None:
     for token in tokens:
         if token.type == "fence" and _is_raw_attribute(
             token.info.strip(), complete=True
@@ -114,7 +212,9 @@ def _validate_tokens(tokens: tuple[Token, ...]) -> None:
         if isinstance(resource, str) and _REMOTE_RESOURCE.search(resource):
             raise validation_error("Markdown input contains a remote resource.")
         if token.type == "image":
-            raise validation_error("Markdown input contains an unapproved image.")
+            if not isinstance(resource, str) or not approved_paths:
+                raise validation_error("Markdown input contains an unapproved image.")
+            _resolve_local_image(resource, entrypoint, approved_paths)
 
 
 def validate_markdown(markdown: str) -> ApprovedMarkdown:
@@ -123,8 +223,78 @@ def validate_markdown(markdown: str) -> ApprovedMarkdown:
     if not isinstance(markdown, str) or not markdown.strip():
         raise validation_error("Markdown input must not be empty.")
     tokens = tuple(_walk(_MARKDOWN.parse(markdown)))
-    _validate_tokens(tokens)
+    _validate_tokens(
+        tokens,
+        entrypoint=PurePosixPath("input.md"),
+        approved_paths=frozenset(),
+    )
     for metadata in (token.content for token in tokens if token.type == "front_matter"):
         for scalar in _metadata_scalars(metadata):
-            _validate_tokens(tuple(_walk(_METADATA_MARKDOWN.parse(scalar))))
+            _validate_tokens(
+                tuple(_walk(_METADATA_MARKDOWN.parse(scalar))),
+                entrypoint=PurePosixPath("input.md"),
+                approved_paths=frozenset(),
+            )
     return ApprovedMarkdown(markdown)
+
+
+def validate_document(document: ApprovedDocument) -> ApprovedMarkdown:
+    """Bind every local image reference to one normalized archive resource."""
+
+    if not isinstance(document, ApprovedDocument):
+        raise validation_error("Document package is invalid.")
+    if (
+        type(document.markdown) is not str
+        or not _is_safe_package_path(document.entrypoint)
+        or document.entrypoint.suffix.casefold() != ".md"
+        or not isinstance(document.resources, tuple)
+    ):
+        raise validation_error("Document package is invalid.")
+    if any(
+        not isinstance(resource, ApprovedResource)
+        or not _is_safe_package_path(resource.path)
+        or resource.path.suffix.casefold() not in SUPPORTED_IMAGE_SUFFIXES
+        or resource.media_type != "image/png"
+        or type(resource.content) is not bytes
+        for resource in document.resources
+    ):
+        raise validation_error("Document package is invalid.")
+    if document.image_limits is not None and not isinstance(
+        document.image_limits, ImageLimits
+    ):
+        raise validation_error("Document package is invalid.")
+    if document.resources and document.image_limits is None:
+        raise validation_error("Document package is invalid.")
+    if document.image_limits is not None:
+        try:
+            for resource in document.resources:
+                validate_normalized_png(resource.content, document.image_limits)
+        except ConversionError:
+            raise validation_error("Document package is invalid.") from None
+    approved_paths = frozenset(resource.path for resource in document.resources)
+    package_paths = (document.entrypoint, *approved_paths)
+    if len(approved_paths) != len(
+        document.resources
+    ) or not _package_paths_are_distinct(package_paths):
+        raise validation_error("Document package is invalid.")
+    if not document.markdown.strip():
+        raise validation_error("Markdown input must not be empty.")
+    tokens = tuple(_walk(_MARKDOWN.parse(document.markdown)))
+    _validate_tokens(
+        tokens,
+        entrypoint=document.entrypoint,
+        approved_paths=approved_paths,
+    )
+    for metadata in (token.content for token in tokens if token.type == "front_matter"):
+        for scalar in _metadata_scalars(metadata):
+            _validate_tokens(
+                tuple(_walk(_METADATA_MARKDOWN.parse(scalar))),
+                entrypoint=document.entrypoint,
+                approved_paths=approved_paths,
+            )
+    return ApprovedMarkdown(
+        document.markdown,
+        entrypoint=document.entrypoint,
+        resources=document.resources,
+        image_limits=document.image_limits,
+    )
