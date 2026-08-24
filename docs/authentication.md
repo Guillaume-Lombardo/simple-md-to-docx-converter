@@ -70,10 +70,11 @@ browser into the attacker's account.
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
 - `GET /convert`: authenticated server-rendered conversion interface
+- `GET /templates`: authenticated template interface and administrator-only account tab
 
 Browser and JSON login responses set the opaque session cookie as HttpOnly. They also set the
 session-bound CSRF value in the Secure, SameSite=Lax `__Host-md_converter_csrf` cookie so the external
-same-origin conversion module can copy it into `X-CSRF-Token`. The `__Host-` prefix prevents a
+same-origin browser modules can copy it into `X-CSRF-Token`. The `__Host-` prefix prevents a
 subdomain from replacing that cookie; the server still verifies the value against the digest stored
 with the session for every mutation.
 
