@@ -2,7 +2,7 @@
 ticket: T08
 linear_id: G1L-318
 linear_url: https://linear.app/g1lom/issue/G1L-318/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,6 +52,10 @@ Implement safe archive validation and extraction, image normalization, hostile S
   containers were removed and K3s remained inactive. A reviewer explicitly approved deferring
   final-image E2E to T20/T21 because T08 delivers an internal synchronous component rather than a
   user-visible or operational workflow.
+- 2026-08-24: PR #36 was squash-merged as `ca46aabe4864b8b1dc5e85a03f584abc834d2dce`.
+  Exact-main CI run `32705438253` passed light checks, CI infrastructure, functional,
+  document-engine, standalone-storage, distributed-storage, and the protected gate. T08 is verified
+  on `main` and synchronized as `Done`.
 
 ## Synchronization
 
