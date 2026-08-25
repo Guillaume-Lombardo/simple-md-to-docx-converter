@@ -1071,6 +1071,11 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         resolved_settings.conversion_retry_after_seconds
     )
     install_error_handlers(app)
+    public_origin = (
+        str(resolved_settings.public_origin).rstrip("/").casefold()
+        if resolved_settings.public_origin is not None
+        else None
+    )
 
     def session_token(request: Request) -> str | None:
         return request.cookies.get(resolved_settings.session_cookie_name)
@@ -1082,7 +1087,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         origin = request.headers.get("Origin")
         if origin is None:
             return
-        expected = str(request.base_url).rstrip("/").casefold()
+        expected = public_origin or str(request.base_url).rstrip("/").casefold()
         if origin.rstrip("/").casefold() != expected:
             raise LOGIN_ORIGIN_INVALID.new()
 

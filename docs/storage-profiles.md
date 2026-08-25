@@ -47,7 +47,7 @@ Template activation invokes both configured document engines synchronously insid
 thread, so request handlers do not block the ASGI event loop. Startup also retries durable hidden
 publication reservations and deletion tombstones before accepting traffic.
 
-Both profiles also require the complete T18 resource policy below. Placeholders intentionally do
+Both profiles also require the complete resource policy below. Placeholders intentionally do
 not establish production values:
 
 ```text
@@ -85,7 +85,7 @@ Set:
 ```text
 MD_CONVERTER_STORAGE_PROFILE=standalone
 MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-# plus every shared T18 resource-policy variable listed above
+# plus every shared resource-policy variable listed above
 ```
 
 Metadata is stored in `/data/metadata.sqlite3`. Object bytes are stored below `/data/objects`;
@@ -116,7 +116,7 @@ Set:
 MD_CONVERTER_STORAGE_PROFILE=distributed
 MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
 MD_CONVERTER_S3_BUCKET=...
-# plus every shared T18 resource-policy variable listed above
+# plus every shared resource-policy variable listed above
 ```
 
 `MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.
@@ -148,6 +148,6 @@ monotonic clock, records UTC timestamps, and writes an immutable, owner-only rep
 document content or credentials. Retain
 reports in protected durable operational storage outside application cleanup.
 
-T12 and T18 verify real SQLite/filesystem and PostgreSQL/RustFS boundaries. Applying the configured
-memory and ephemeral-storage ceilings to the final container and repeating quota workflows against
-the hardened rootless image remain T20/T21 sequencing debt, not integration-test waivers.
+Both boundaries are contract-tested and exercised in the hardened rootless image. Production backup
+consistency, restore sequencing, and evidence requirements are detailed in
+[recovery.md](recovery.md).

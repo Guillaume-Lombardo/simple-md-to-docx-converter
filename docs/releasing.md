@@ -11,7 +11,7 @@ trusted push. A `pyproject.toml` edit that leaves the version unchanged is a suc
 requests, forks, tags, and GitHub Release events cannot start publication. Manual dispatch cannot
 publish Python artifacts; it is reserved for the container-only recovery described below.
 
-## One-time GitHub and PyPI configuration
+## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
 restrictions, or environment secrets. It is only the OIDC Trusted Publisher identity boundary.
@@ -23,10 +23,11 @@ Configure the PyPI Trusted Publisher with these exact values:
 - Workflow: `release.yml`
 - Environment: `pypi`
 
-No PyPI token belongs in GitHub. The first upload may use a pending publisher; later uploads use the
-normal publisher created from it. The first container push may create a private GHCR package. Set
-the `md-converter` package visibility to public before announcing the release and verify anonymous
-pull access. Do not grant the package to unrelated repositories.
+No PyPI token belongs in GitHub. The `markweave` project now has the active publisher created by its
+first trusted upload. If the repository, workflow, environment, or PyPI publisher identity changes,
+update and verify both ends before merging a version transition. The `md-converter` GHCR package is
+public; verify anonymous pull access after every release and do not grant the package to unrelated
+repositories.
 
 ## Prepare a version release
 
@@ -36,8 +37,8 @@ pull access. Do not grant the package to unrelated repositories.
    versions fail closed. A more explicit canonical spelling such as `0.3` to `0.3.0` remains a
    valid transition even though the two parsed PEP 440 versions have equal precedence.
 2. Open a pull request and require the complete `CI / gate`, independent review, and protected
-   merge to `main`. The first approved transition is `0.2.0` to `0.3.0`; future versions are not
-   hardcoded in the workflows.
+   merge to `main`. Release versions are derived dynamically and are not hardcoded in the
+   workflows.
 3. After merge, the workflow verifies the exact `github.event.before` and `github.sha` pair. It
    stops if `v<version>` already exists, a GitHub Release already uses that tag, or PyPI already has
    that exact `markweave` version.
@@ -68,8 +69,7 @@ state before authorizing any manual recovery. Recovery must not rebuild the cont
 serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
 `container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
 source SHA, and the ID of a failed source run whose `build-and-publish` job succeeded and retained
-the exact evidence artifact. For the first release, the approved retained source is run
-`32846007204` and artifact `9562665677` (`container-release-v0.3.0`).
+the exact evidence artifact.
 
 Before download, recovery verifies the source run belongs to this upstream repository and exact
 workflow, ran from trusted `main` at a descendant of the release source and an ancestor of the
@@ -83,18 +83,20 @@ attach the SBOM and evidence to the already verified Release. The recovery job h
 or OIDC permission, never enters the PyPI environment, and cannot invoke either build or Python
 publication.
 
-The current recovery dispatch is:
+The dispatch shape is:
 
 ```bash
 gh workflow run container-release.yml --ref main \
-  -f artifact-run-id=32846007204 \
-  -f version=0.3.0 \
-  -f tag=v0.3.0 \
-  -f source-sha=20c16305642ac3349fb333078aea510f8f3d1da1
+  -f artifact-run-id=FAILED_RUN_ID \
+  -f version=VERSION \
+  -f tag=vVERSION \
+  -f source-sha=RELEASE_SOURCE_SHA
 ```
 
-Before dispatch, re-query the run and artifact because retention expires on November 23, 2026.
-Afterward, verify the attestation and all Release attachments before treating recovery as complete.
+Before dispatch, re-query the run and artifact to prove that retention has not expired. Afterward,
+verify the attestation and all Release attachments before treating recovery as complete. The
+`0.3.0` evidence recovery was completed successfully; its historical run and artifact identifiers
+are recorded in `tickets/T22-finalize-cicd.md`, not presented here as a reusable current command.
 
 Every GHCR conflict observed during authenticated
 preflight fails before a copy. Repository and workflow concurrency prevent the automation from

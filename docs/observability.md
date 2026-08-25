@@ -57,8 +57,7 @@ joining its fixed worker pool, so a blocked scrape cannot leak a request thread 
 open indefinitely. Saturated connections receive a content-free `503` and close without entering
 an unbounded executor queue. Bind and scrape failures are content-free and never expose provider
 details. API and worker counters are intentionally separate process series; this surface does not
-claim in-process or cross-replica aggregation. T20 must connect the external-worker command to this
-lifecycle.
+claim in-process or cross-replica aggregation. The `external-worker` entrypoint uses this lifecycle.
 
 The application factory owns the main, readiness, and observation database engines it constructs.
 Assembly registers each engine for reverse-order cleanup immediately and transfers ownership only
@@ -106,13 +105,9 @@ connect/read budgets. These probe-only clients use the required positive finite
 bounded provider operation. Any component failure returns the stable content-free `NOT_READY`
 response. Liveness remains independent at `GET /health/live`.
 
-## Final-image E2E sequencing
+## Operational verification
 
-The source contract is complete in T19, but final-rootless-image validation is sequenced rather
-than waived. T20 must run both standalone and distributed final images and verify API metrics,
-isolated readiness success/failure, all account audit mutations plus authorization failures, and an
-external worker whose independently bound metrics listener is concurrently scrapeable and stops
-with the worker. It must also prove API and worker counters remain distinct. T21 must repeat both
-profiles through the published deployment/restore path, scrape every API/worker process, and verify
-authentication and template audit ordering/retention survives backup and restore. Results require
-independent review before T19 is marked done.
+Final-image tests run standalone and distributed deployments and verify API metrics, isolated
+readiness success and failure, account audit mutations and authorization failures, and a separately
+scrapeable external-worker listener that stops with its worker. Recovery exercises must additionally
+verify readiness and preserve audit ordering and retention across backup and restore.

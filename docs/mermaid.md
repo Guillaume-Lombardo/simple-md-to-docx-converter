@@ -1,8 +1,7 @@
 # Local Mermaid rendering
 
-T09 adds an internal preprocessing decorator between approved Markdown and the DOCX engine. It
-does not add an API, queue, worker, or final application image; those workflows remain assigned to
-later tickets.
+The worker uses an internal preprocessing decorator between approved Markdown and the DOCX engine.
+The decorator has no independent HTTP endpoint or queue contract.
 
 ## Supported Markdown
 
@@ -20,7 +19,7 @@ resource fails closed. The original source does not reach Pandoc or appear in er
 `MermaidLimits` provides no production defaults. It bounds diagram count, per-diagram and total
 source bytes, both raw and normalized per-diagram and total rendered output bytes, and the maximum
 displayed width and height. `ImageLimits` continues to bound decoded width, height, pixel count,
-and normalized image structure. T18 owns the eventual production values.
+and normalized image structure. The operator must supply the approved production values.
 
 Displayed dimensions use Pandoc's pixel unit at its fixed 96 DPI conversion. The preprocessor
 chooses the limiting axis required by the configured width and height caps and emits only that
@@ -54,6 +53,5 @@ and equivalent relaxations are never used. T09 integration runs exercise the rea
 Podman proof uses an arbitrary UID, read-only root, no network, no capabilities, no-new-privileges,
 bounded PID/memory/CPU/tmpfs resources, and the T00 profile. OpenShift proof remains deferred.
 
-Final-image E2E remains assigned to T20/T21 because T09 delivers an internal synchronous component,
-not a user-visible or operational workflow. This sequencing exception requires explicit reviewer
-approval in the T09 pull request.
+Final-image E2E exercises Mermaid through the asynchronous user workflow while the adapter's focused
+integration suite retains detailed process, sandbox, normalization, and failure coverage.

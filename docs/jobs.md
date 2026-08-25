@@ -39,8 +39,8 @@ The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES`,
 `MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS`, and
 `MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS` settings deliberately have no production defaults.
-T18 supplies their validated configurable contracts together with the associated quotas and
-schedules; operators must provide environment-specific values.
+Their validated configurable contracts include the associated quotas and schedules; operators must
+provide environment-specific values.
 The complete typed admission, budget, retention, and cleanup contract is documented in
 [`resource-policy.md`](resource-policy.md).
 
@@ -62,7 +62,7 @@ finishes them as cancelled when cancellation was already durable. Attempts remai
 recovery. Terminal transitions atomically honor a durable cancellation request before success or
 failure can be published.
 
-## Worker modes and sequencing
+## Worker modes
 
 `WorkerLoop` is shared by external processes and the standalone `EmbeddedWorker` lifecycle. It
 recovers expired leases and abandoned uploads continuously, processes one claim at a time, retries
@@ -82,11 +82,9 @@ exact frozen template pair through `TemplateService.resolve_frozen_version`, ver
 size and SHA-256, and passes the immutable version metadata and bytes to the document processor;
 later replacement or restoration cannot change a queued job's reference bytes. It also passes the
 worker's absolute monotonic deadline so document processors can cap every engine invocation by the
-remaining overall duration. T20 provides the production template-aware processor and final-image
-process-mode wiring. Its container smoke tests cover both standalone and distributed modes; T21
-retains the complete user-workflow E2E matrix. T13 covers the
-HTTP workflow against assembled ASGI storage and real worker paths through SQLite/filesystem and
-PostgreSQL/S3-compatible storage.
+remaining overall duration. Container smoke and final-image E2E cover both process modes, both
+storage profiles, and the complete user workflow. Functional tests also exercise the HTTP workflow
+against assembled ASGI storage and real worker paths.
 
 ## Browser workflow
 
@@ -94,4 +92,4 @@ The authenticated `/convert` page consumes this API without weakening its owners
 idempotency, or frozen-template rules. It submits a unique key with the multipart request, uses the
 returned `Retry-After` value before progressively backing off status requests, and offers cancel or
 download actions only for appropriate states. Recent owner-scoped jobs can be reopened. See
-`docs/conversion-ui.md` for the user-facing behavior and its T20/T21 final-image E2E sequencing.
+[conversion-ui.md](conversion-ui.md) for the user-facing behavior.

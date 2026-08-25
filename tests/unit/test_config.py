@@ -38,7 +38,66 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.audit_retention_seconds == 31_536_000
     assert (settings.clamav_host, settings.clamav_port) == ("127.0.0.1", 3310)
     assert settings.clamav_timeout_seconds == 5
+    assert settings.public_origin is None
     assert secret not in repr(settings)
+
+
+@pytest.mark.unit
+def test_public_origin_loads_from_environment_and_is_canonicalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "MD_CONVERTER_INITIAL_ADMIN_USERNAME": "admin",
+        "MD_CONVERTER_INITIAL_ADMIN_PASSWORD": "secret",
+        "MD_CONVERTER_STORAGE_PROFILE": "standalone",
+        "MD_CONVERTER_STANDALONE_DATA_DIRECTORY": "/data",
+        "MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES": "1000000",
+        "MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES": "1100000",
+        "MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS": "1",
+        "MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS": "3600",
+        "MD_CONVERTER_PUBLIC_ORIGIN": "https://Converter.Example:8443",
+    }
+    values.update(
+        {
+            f"MD_CONVERTER_{name.upper()}": value
+            for name, value in template_settings().items()
+        }
+    )
+    for name, value in values.items():
+        monkeypatch.setenv(name, str(value))
+
+    settings = Settings.load()
+
+    assert str(settings.public_origin) == "https://converter.example:8443/"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "public_origin",
+    [
+        "ftp://converter.example",
+        "https://user:password@converter.example",
+        "https://converter.example/app",
+        "https://converter.example?tenant=one",
+        "https://converter.example#login",
+    ],
+)
+def test_public_origin_rejects_non_origin_urls(public_origin: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                **template_settings(),
+                "initial_admin_username": "admin",
+                "initial_admin_password": "secret",
+                "storage_profile": "standalone",
+                "standalone_data_directory": "/data",
+                "conversion_upload_max_bytes": 1_000_000,
+                "conversion_request_max_bytes": 1_100_000,
+                "conversion_retry_after_seconds": 1,
+                "job_result_retention_seconds": 3_600,
+                "public_origin": public_origin,
+            }
+        )
 
 
 @pytest.mark.unit

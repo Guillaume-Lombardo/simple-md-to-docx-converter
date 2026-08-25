@@ -20,7 +20,7 @@ returning results and supports independent filters for normalized name, normaliz
 owner UUID, and status. Unicode NFKC normalization and case folding happen before persistence so
 SQLite and PostgreSQL produce the same contains-search behavior. Results use a deterministic
 normalized-name and UUID order and return an explicit total, offset, and caller-selected positive
-page size. T14 does not choose a product page-size limit.
+page size. The API schema defines the accepted page-size range.
 
 ## Preferences and fallback
 
@@ -28,8 +28,8 @@ Each account has at most one preferred template. Setting or clearing a preferenc
 singleton system fallback are recorded in the content-free audit trail. Setting a preference or
 fallback transactionally requires an active, published template. Selection resolves an active user
 preference first, then an active system fallback, and otherwise returns no template. An archived
-preference remains recorded but is ignored during resolution, allowing T15 to define archive and
-restoration behavior without silently changing ownership or preference history.
+preference remains recorded but is ignored during resolution. Archive and restoration do not
+silently change ownership or preference history.
 
 Only an administrator may set the system fallback. Owner/administrator mutation authorization
 records actor, owner, target, operation, and whether the action is an administrator intervention.
@@ -38,14 +38,14 @@ records actor, owner, target, operation, and whether the action is an administra
 
 Authenticated clients use `/api/v1/templates` to search or create templates. Creation and content
 replacement accept a multipart DOCX plus one or more `expected_fonts` declarations. Before a
-version can become visible, the service invokes the complete T10 activation boundary: bounded
+version can become visible, the service invokes the complete activation boundary: bounded
 OpenXML and relationship checks, required Pandoc styles, active-content exclusions, declared-font
 resolution against the pinned manifest, a blank Pandoc conversion using the candidate as
 `reference.docx`, and an isolated LibreOffice rewrite. The immutable version row records declared
 fonts, resolved substitutions, and the successful validation-stage trace. Missing or unsupported
 font declarations and engine failures return sanitized validation errors and publish neither
 metadata nor bytes. All safety ceilings and engine paths/timeouts are required
-`MD_CONVERTER_TEMPLATE_*` settings; T18 retains approval of their production values.
+`MD_CONVERTER_TEMPLATE_*` settings; operators retain approval of their production values.
 
 Every identity response carries an `ETag` of the form
 `"template-<template UUID>-<revision>"`. Metadata updates, replacements, restorations, archive, and
@@ -95,7 +95,6 @@ Database constraints and triggers enforce owner/pair integrity, immutable versio
 current-version membership, active/current job submission, and deletion restrictions in addition
 to the application-level transactions.
 
-T17 provides the owner and administrator browser interface described in
-`docs/administration-ui.md`. T20/T21 retain final rootless-image E2E for both profiles; T15 supplies
-functional ASGI and real SQLite/filesystem plus PostgreSQL/RustFS boundary coverage without
-claiming that later runtime proof.
+The owner and administrator browser interface is described in
+[administration-ui.md](administration-ui.md). Functional, storage-boundary, browser, and final-image
+tests cover the lifecycle in both profiles.

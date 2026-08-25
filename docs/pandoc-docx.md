@@ -1,8 +1,7 @@
 # Pandoc DOCX conversion
 
-T07 provides the internal synchronous Markdown-to-DOCX component. It accepts only Markdown that
-passes pre-engine validation and invokes Pandoc with a fixed reader and fixed output arguments.
-Queueing, APIs, workers, and final-container workflows are delivered by later tickets.
+The worker's synchronous Markdown-to-DOCX component accepts only Markdown that passes pre-engine
+validation and invokes Pandoc with a fixed reader and fixed output arguments.
 
 ## Accepted dialect and validation
 
@@ -19,21 +18,21 @@ rejected. The validator rejects raw HTML and every link or image destination tha
 protocol-relative form, or encoded equivalent. The same conservative checks apply inside YAML
 front matter and footnote continuations, where extension syntax could otherwise hide content from
 a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual code spans and code
-blocks. Standalone Markdown still rejects every image token. T08 archive inputs may bind a safe
+blocks. Standalone Markdown still rejects every image token. Archive inputs may bind a safe
 relative image destination to a normalized PNG in an immutable approved-resource manifest; missing,
 escaping, ambiguous, absolute, and remote destinations fail before the engine. Pandoc raw-code
 attributes such as `{=html}` and `{=tex}` are also rejected when attached to inline code or used as
 a fence info string. The same characters remain valid as literal code content.
 
-This validation prevents Pandoc from fetching a remote destination supplied by a document. T07
-does not claim operating-system network isolation; final runtime network policy belongs to the
-container and deployment work. Pandoc's `--sandbox` option is not enabled because it also prevents
-the approved local-resource behavior that T08 must implement and test.
+This validation prevents Pandoc from fetching a remote destination supplied by a document. The
+adapter does not claim operating-system network isolation; deployment network policy supplies that
+boundary. Pandoc's `--sandbox` option is not enabled because it also prevents the approved local
+resource behavior.
 
 ## Process boundary
 
-Each conversion uses a new temporary workspace containing only the Markdown input, T08-approved
-normalized resources, T09-generated normalized Mermaid PNG resources, opaque reference DOCX,
+Each conversion uses a new temporary workspace containing only the Markdown input, approved
+normalized resources, generated normalized Mermaid PNG resources, opaque reference DOCX,
 isolated home/cache/config/data/temp directories, and generated output. Pandoc receives no shell,
 no standard input or captured document output, a
 process group of its own, and only the explicitly supplied `PATH`, fixed `LANG=C.UTF-8`,
@@ -43,7 +42,7 @@ and unrelated environment values are not inherited.
 The arguments are fixed to the approved reader, DOCX writer, workspace reference document,
 workspace resource path, and fixed input/output names. There are no user-controlled options,
 filters, or include files. Conversion and termination-grace timeouts are required configuration;
-T07 deliberately does not select the production values owned by T18. A timed-out process group is
+the adapter does not select production values. A timed-out process group is
 terminated and then killed after its configured grace period.
 
 ## Stable failures
@@ -51,7 +50,7 @@ terminated and then killed after its configured grace period.
 The component exposes content-free categories suitable for later API/job translation:
 
 - `validation`: empty input, invalid YAML metadata, raw HTML, a Pandoc raw-code attribute, forbidden
-  resource destination, or an image not materialized and approved by T08;
+  resource destination, or an image not materialized and approved by the input-package boundary;
 - `workspace_failure`: workspace creation, preparation, output read, or cleanup failure;
 - `pandoc_unavailable`: the configured executable cannot start;
 - `pandoc_timeout`: conversion exceeds its configured deadline;
@@ -62,15 +61,15 @@ Errors do not include Markdown, template bytes, subprocess output, or workspace 
 
 ## Ownership boundaries
 
-The reference DOCX is intentionally opaque to T07. T10 owns template validation, fonts, and style
-policy. T08 owns archive/image security and approved local images, T09 owns Mermaid, T11 owns PDF,
-and T18 owns production size/resource limits. The generated DOCX check here is therefore limited to
-safe ZIP member names and the minimum required OpenXML parts; it is not a substitute for T10.
+The reference DOCX is intentionally opaque to this adapter. Template validation owns fonts and
+style policy. The archive/image, Mermaid, PDF, and resource-policy boundaries supply the validated inputs
+and production limits. The generated DOCX check here is therefore limited to
+safe ZIP member names and the minimum required OpenXML parts; it is not a substitute for template
+validation.
 
 The real integration suite uses the exact approved Pandoc 3.10.2 artifact, converts the T04 corpus,
 and inspects the resulting OpenXML for headings, lists, links, tables, footnotes, code styles,
 attributes, Unicode text, Mermaid media, and reference-document style propagation. CI downloads the
 official Pandoc and Chrome artifacts, verifies their locked SHA-256 values, and installs Mermaid
-from the T00 lock with Puppeteer downloads disabled. Final-image E2E is not applicable to this
-internal component; the user-visible asynchronous conversion workflow and its rootless-image E2E
-coverage belong to T20/T21.
+from the T00 lock with Puppeteer downloads disabled. Final-image E2E additionally covers the
+user-visible asynchronous conversion workflow in both storage profiles.

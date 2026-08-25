@@ -1,7 +1,7 @@
 # Isolated PDF conversion
 
-T11 provides the internal synchronous DOCX-to-PDF boundary used by the future T13 worker. It does
-not create jobs, persist cancellation state, publish results, or expose an HTTP endpoint.
+The internal synchronous DOCX-to-PDF boundary is used by the asynchronous conversion worker. It does
+not itself create jobs, persist cancellation state, publish results, or expose an HTTP endpoint.
 
 ## Conversion contract
 
@@ -13,7 +13,8 @@ standard-input channel, and a new process session.
 
 The caller must configure DOCX bytes, ZIP entries, member and total uncompressed bytes,
 compression ratio, PDF bytes, decoded PDF stream bytes, page count, PDF object count, and object
-depth. T18 owns the eventual production values. T11 deliberately defines no production defaults.
+depth. These production values are explicit operator configuration; the adapter defines no
+production defaults.
 
 Timeout, cancellation, non-zero exit, missing engine, unsafe input, invalid output, and limit
 violations have distinct stable error codes. Timeout and cancellation terminate the complete
@@ -54,7 +55,6 @@ spikes/toolchain/run-t11-tests.sh
 The harness stages a read-only source copy, installs only the locked dependency graph, disables
 network access for test execution, and removes its exact temporary volumes on every exit.
 
-T11 cannot exercise the final application image or asynchronous API because T13 and T20 do not yet
-exist. The approved sequencing exception keeps that final-image success, authorization,
-cancellation, recovery, concurrency, and failure E2E debt in T20/T21; it is not a waiver of that
-coverage.
+Final-image E2E exercises PDF success, authorization, cancellation, recovery, concurrency, and
+failure behavior through the asynchronous API. The focused harness remains the source for detailed
+LibreOffice isolation and structural-validation evidence.

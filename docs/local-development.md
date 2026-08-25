@@ -18,7 +18,7 @@ To reproduce the committed resolution without changing the lock file, run:
 uv sync --locked --all-groups
 ```
 
-Start the current FastAPI shell over HTTPS behind the local or deployment TLS terminator after
+Start the FastAPI application over HTTPS behind a local TLS terminator after
 providing bootstrap credentials:
 
 ```bash
@@ -27,6 +27,8 @@ read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
 export MD_CONVERTER_STORAGE_PROFILE=standalone
 export MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
+# Set this when the local TLS terminator changes the ASGI-visible origin:
+export MD_CONVERTER_PUBLIC_ORIGIN=https://converter.example.invalid
 : "${MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES:?set a disposable local value}"
 : "${MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES:?set a disposable local value}"
 : "${MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES:?set a disposable local value}"
@@ -157,13 +159,10 @@ heavy matrix whenever any active domain was selected. Caches are restore-only ou
 pushes to `main`, including pull requests, forks, merge groups, releases, schedules, and manual
 runs.
 
-The `functional` domain is active as of T06. Application changes selected for that domain run the
-ASGI authentication workflow and the real Argon2id integration suite. Final-image E2E remains a
-visible planned domain until T20/T21 deliver the hardened rootless runtime.
-
-The Sunday 03:17 UTC schedule is provisional until T22 fixes the GitHub Actions usage budget and
-final frequency. Release-triggered CI performs validation only; image and Python publication,
-SBOM, provenance, and OIDC permissions remain isolated T22 work.
+Active domains run their registered functional, document-engine, storage, container, and final-image
+suites as selected. The stable gate fails when a selected active domain is skipped or fails.
+Release publication, SBOM attachment, provenance, and OIDC permissions are isolated in the release
+workflow described in [releasing.md](releasing.md).
 
 ## Dependency changes
 
@@ -188,6 +187,6 @@ uv build --build-constraint build-constraints.txt --require-hashes
 
 ## External engines
 
-No document engine is required for the current bootstrap tests. Follow the dedicated engine setup
-documentation when those integrations are implemented; do not treat an unavailable engine test as
-passed.
+The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, and LibreOffice. Install
+the locked engines to run their integration suites and the complete final-image tests. An unavailable
+engine test is skipped only through its registered marker and must never be reported as passed.

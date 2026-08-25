@@ -6,7 +6,7 @@ remain owned by T07–T11 and T18 as recorded per case in `tests/corpus/manifest
 
 ## Corpus manifest
 
-Every case has a stable identifier, sorted categories, a purpose, a future owning ticket, an
+Every case has a stable identifier, sorted categories, a purpose, an owning ticket, an
 entrypoint, a complete file list, expected observations, and provenance. Static project-authored
 fixtures are text. Generated DOCX and adversarial ZIP fixtures are built deterministically and the
 manifest pins their generator, license, byte length, and SHA-256 digest. Manifest loading verifies

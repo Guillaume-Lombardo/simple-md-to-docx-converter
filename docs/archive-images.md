@@ -1,7 +1,6 @@
 # Secure archives and local images
 
-T08 adds an internal, synchronous input-package boundary. It does not add an upload endpoint or an
-asynchronous job workflow; those remain assigned to later tickets.
+The synchronous input-package boundary is used by conversion workers after upload scanning.
 
 ## Accepted inputs
 
@@ -14,7 +13,7 @@ Every ZIP limit is supplied explicitly through `ArchiveLimits`, and every image 
 through `ImageLimits`. Image limits cover source bytes, dimensions, pixels, SVG element count, and
 SVG nesting depth. Configured SVG depth is additionally constrained by a hard safety ceiling of 64
 elements so XML serialization and rasterization cannot reach Python's recursion limit. The code
-intentionally provides no production defaults because T18 owns the approved upload, decompression,
+intentionally provides no production defaults because deployment owns the approved upload, decompression,
 file-count, image-count, and resource values.
 
 ## Archive boundary
@@ -62,7 +61,5 @@ disposable `package` directory, keeps the reference and output documents at fixe
 and retains the fixed reader, arguments, environment, process-group deadline handling, and cleanup
 guarantees documented in `docs/pandoc-docx.md`.
 
-Real integration tests exercise ZIP corruption and encryption failures and the complete
-ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media path. Final-image
-rootless E2E remains assigned to T20/T21 because T08 does not deliver a user-visible or operational
-workflow or the final image.
+Real integration and final-image tests exercise ZIP corruption and encryption failures and the
+complete ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media path.

@@ -75,6 +75,7 @@ def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
 
         login = client.post(
             "/api/v1/login",
+            headers={"Origin": base_url},
             json={"username": "admin", "password": password},
         )
         assert login.status_code == 200
@@ -91,3 +92,45 @@ def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
         )
         assert logout.status_code == 204
         assert client.get("/api/v1/session", headers=session_headers).status_code == 401
+
+
+@pytest.mark.integration
+def test_public_origin_is_enforced_across_real_http_boundary(tmp_path: Path) -> None:
+    password = "admin-" + "password"
+    settings = Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password=password,
+        public_origin="https://converter.example",
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+    payload = {"username": "admin", "password": password}
+    forwarded_headers = {
+        "Forwarded": "host=attacker.example;proto=https",
+        "X-Forwarded-Host": "attacker.example",
+        "X-Forwarded-Proto": "https",
+    }
+
+    with (
+        running_server(settings) as base_url,
+        httpx.Client(base_url=base_url) as client,
+    ):
+        accepted = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://converter.example", **forwarded_headers},
+            json=payload,
+        )
+        spoofed = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://attacker.example", **forwarded_headers},
+            json=payload,
+        )
+
+    assert accepted.status_code == 200
+    assert spoofed.status_code == 403
+    assert spoofed.json()["error"]["code"] == "LOGIN_ORIGIN_INVALID"
