@@ -379,10 +379,35 @@ def multipage_markdown(paragraphs: int = 400) -> bytes:
     return f"# PDF output limit\n\n{body}\n".encode()
 
 
-def validate_result(client: ServiceClient, job: dict[str, Any], output: str) -> None:
+def retain_conversion_artifact(
+    artifact_dir: Path | None, *, job_id: str, output: str, content: bytes
+) -> None:
+    if artifact_dir is None:
+        return
+    directory = artifact_dir / "conversion-results"
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+    extension = "zip" if output == "both" else output
+    path = directory / f"{uuid.UUID(job_id)}.{extension}"
+    path.write_bytes(content)
+    os.chmod(path, 0o600)
+
+
+def validate_result(
+    client: ServiceClient,
+    job: dict[str, Any],
+    output: str,
+    artifact_dir: Path | None = None,
+) -> None:
     path = f"/api/v1/conversions/{required_string(job, 'id', 'result')}/result"
     result = client.request("GET", path)
     expect(result, 200, f"download {output}")
+    retain_conversion_artifact(
+        artifact_dir,
+        job_id=required_string(job, "id", "result"),
+        output=output,
+        content=result.body,
+    )
     if result.headers.get("cache-control") != "private, no-store":
         raise WorkflowFailure(f"download {output}: private cache contract missing")
     embedded_manifest: bytes | None = None
@@ -702,7 +727,7 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         terminal = wait_for_job(alice, location)
         if terminal.get("state") != "succeeded":
             raise WorkflowFailure(f"{output} conversion: did not succeed")
-        validate_result(alice, terminal, output)
+        validate_result(alice, terminal, output, arguments.artifact_dir)
         completed[output], locations[output] = terminal, location
 
     exercise_cancellation(alice, template)
@@ -775,8 +800,8 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         or bob_terminal.get("state") != "succeeded"
     ):
         raise WorkflowFailure("concurrent conversions: terminal success missing")
-    validate_result(alice, alice_terminal, "docx")
-    validate_result(bob, bob_terminal, "pdf")
+    validate_result(alice, alice_terminal, "docx", arguments.artifact_dir)
+    validate_result(bob, bob_terminal, "pdf", arguments.artifact_dir)
     assert_denied(alice, bob_location, "Alice-to-Bob job isolation")
     assert_denied(bob, alice_location, "Bob-to-Alice job isolation")
     if alice_concurrent["owner_id"] == bob_concurrent["owner_id"]:
@@ -830,9 +855,9 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         role="api",
         forbidden=(source_marker, alice_name, bob_name, alice_job_id, admin_id),
     )
-    if arguments.worker_metrics_url:
+    for worker_metrics_url in arguments.worker_metrics_url or ():
         scrape_metrics(
-            arguments.worker_metrics_url,
+            worker_metrics_url,
             role="worker",
             forbidden=(source_marker, alice_name, bob_name, alice_job_id, admin_id),
         )
@@ -853,6 +878,32 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     logout = alice.request("POST", "/api/v1/logout", mutate=True)
     expect(logout, 204, "Alice logout")
     expect(alice.request("GET", "/api/v1/session"), 401, "Alice logout revocation")
+
+    expiring = ServiceClient(arguments.base_url)
+    expiring.login(alice_name, alice_reset_password)
+    expiring_job, expiring_location = submit_conversion(
+        expiring, template, "docx", b"# Expiration boundary"
+    )
+    if wait_for_job(expiring, expiring_location).get("state") != "succeeded":
+        raise WorkflowFailure("expiration: prerequisite conversion did not succeed")
+    time.sleep(61)
+    expect(expiring.request("GET", "/api/v1/session"), 401, "session expiration")
+    observer = ServiceClient(arguments.base_url)
+    observer.login(arguments.admin_username, arguments.admin_password)
+    expired = observer.request("GET", expiring_location)
+    expect(expired, 200, "expired conversion read")
+    expired_job = decode_object(expired, "expired conversion read")
+    if (
+        expired_job.get("id") != expiring_job.get("id")
+        or expired_job.get("correlation_id") != expiring_job.get("correlation_id")
+        or expired_job.get("state") != "expired"
+    ):
+        raise WorkflowFailure("expiration: durable job did not expire in place")
+    expect(
+        observer.request("GET", f"{expiring_location}/result"),
+        409,
+        "expired result denial",
+    )
 
 
 def result_digest(client: ServiceClient, job: dict[str, Any]) -> str:
@@ -884,7 +935,7 @@ def checkpoint(arguments: argparse.Namespace) -> None:
     terminal = wait_for_job(client, location)
     if terminal.get("state") != "succeeded":
         raise WorkflowFailure("checkpoint: conversion did not succeed")
-    validate_result(client, terminal, arguments.output)
+    validate_result(client, terminal, arguments.output, arguments.artifact_dir)
     require_template_audit(client, str(template["id"]))
     write_state(
         arguments.state_file,
@@ -912,7 +963,7 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
         or job.get("correlation_id") != state["correlation_id"]
     ):
         raise WorkflowFailure("checkpoint recovery: durable identity changed")
-    validate_result(client, job, state["output"])
+    validate_result(client, job, state["output"], arguments.artifact_dir)
     if result_digest(client, job) != state["result_sha256"]:
         raise WorkflowFailure("checkpoint recovery: result bytes changed")
     require_template_audit(client, state["template_id"])
@@ -1011,9 +1062,15 @@ def verify_recovery(arguments: argparse.Namespace) -> None:
         or job.get("correlation_id") != state["correlation_id"]
     ):
         raise WorkflowFailure("recovery: durable identity changed")
-    if int(job.get("attempt", 0)) <= int(state["attempt"]):
-        raise WorkflowFailure("recovery: job was not reclaimed after interruption")
-    validate_result(client, job, state["output"])
+    validate_recovery_attempt(job, previous_attempt=int(state["attempt"]))
+    validate_result(client, job, state["output"], arguments.artifact_dir)
+
+
+def validate_recovery_attempt(job: dict[str, Any], *, previous_attempt: int) -> None:
+    """Require one and only one reclaim after the forced worker interruption."""
+
+    if int(job.get("attempt", 0)) != previous_attempt + 1:
+        raise WorkflowFailure("recovery: job was not reclaimed exactly once")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1034,7 +1091,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--template", type=Path)
     parser.add_argument("--api-metrics-url")
-    parser.add_argument("--worker-metrics-url")
+    parser.add_argument("--worker-metrics-url", action="append")
     parser.add_argument("--state-file", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--output", choices=("docx", "pdf", "both"), default="docx")
@@ -1068,14 +1125,15 @@ def validate_arguments(
         parser.error("--state-file is required for checkpoint and recovery commands")
     if arguments.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
-    for name in ("base_url", "api_metrics_url", "worker_metrics_url"):
-        value = getattr(arguments, name)
-        if value is None:
-            continue
+    urls = [arguments.base_url]
+    if arguments.api_metrics_url is not None:
+        urls.append(arguments.api_metrics_url)
+    urls.extend(arguments.worker_metrics_url or ())
+    for value in urls:
         try:
             ServiceClient(value)
         except ValueError as error:
-            parser.error(f"--{name.replace('_', '-')} is invalid: {error}")
+            parser.error(f"service URL is invalid: {error}")
 
 
 def write_failure_artifact(

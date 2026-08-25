@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -56,15 +57,40 @@ def restore(arguments: argparse.Namespace) -> None:
     manifest = json.loads(
         (arguments.directory / "manifest.json").read_text(encoding="utf-8")
     )
+    if not isinstance(manifest, list):
+        raise RuntimeError("S3 backup manifest is invalid")
+    verified: list[tuple[str, bytes]] = []
+    keys: set[str] = set()
+    for item in manifest:
+        if not isinstance(item, dict) or set(item) != {"key", "sha256", "size"}:
+            raise RuntimeError("S3 backup manifest entry is invalid")
+        key = item["key"]
+        digest = item["sha256"]
+        size = item["size"]
+        if (
+            not isinstance(key, str)
+            or not key
+            or key in keys
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+        ):
+            raise RuntimeError("S3 backup manifest entry is invalid")
+        keys.add(key)
+        payload = (arguments.directory / digest).read_bytes()
+        if len(payload) != size:
+            raise RuntimeError("S3 backup object size mismatch")
+        if hashlib.sha256(payload).hexdigest() != digest:
+            raise RuntimeError("S3 backup object digest mismatch")
+        verified.append((key, payload))
+
+    # Destructive replacement begins only after the entire snapshot is verified.
     for item in _objects(client, arguments.bucket):
         client.delete_object(Bucket=arguments.bucket, Key=str(item["Key"]))
-    for item in manifest:
-        payload = (arguments.directory / item["sha256"]).read_bytes()
-        if len(payload) != item["size"]:
-            raise RuntimeError("S3 backup object size mismatch")
-        if hashlib.sha256(payload).hexdigest() != item["sha256"]:
-            raise RuntimeError("S3 backup object digest mismatch")
-        client.put_object(Bucket=arguments.bucket, Key=item["key"], Body=payload)
+    for key, payload in verified:
+        client.put_object(Bucket=arguments.bucket, Key=key, Body=payload)
 
 
 def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:

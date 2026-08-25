@@ -103,6 +103,26 @@ async function setAccountActive(page, username, active) {
   );
 }
 
+async function resetPassword(page, username, password) {
+  await page.locator("#user-search").fill(username);
+  const card = page.locator("#user-list .management-card").filter({ hasText: username });
+  await card.waitFor();
+  const form = card.locator("form.inline-form");
+  await form.locator('input[name="password"]').fill(password);
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().includes("/api/v1/admin/users/")
+      && response.url().endsWith("/password")
+      && response.request().method() === "POST",
+  );
+  await form.getByRole("button", { name: "Reset password" }).click();
+  assert.equal((await responsePromise).status(), 204, "password reset failed");
+  await waitForText(
+    page,
+    "#administration-alert",
+    `Password reset completed for ${username}.`,
+  );
+}
+
 test("final rootless image supports the three-identity browser workflow", async () => {
   const settings = await configuration();
   const suffix = `${settings.profile}-${randomUUID().slice(0, 8)}`;
@@ -212,6 +232,34 @@ test("final rootless image supports the three-identity browser workflow", async 
     assert.equal((await sessionRequest(alicePage, "/api/v1/session")).status, 401);
     await setAccountActive(adminPage, identities.alice.username, true);
     assert.equal((await sessionRequest(alicePage, "/api/v1/session")).status, 401);
+
+    step = "password reset revokes an active browser session";
+    await login(alicePage, settings.baseUrl, identities.alice.username, identities.alice.password);
+    const resetPasswordValue = `Reset-${suffix}-password`;
+    await resetPassword(
+      adminPage,
+      identities.alice.username,
+      resetPasswordValue,
+    );
+    assert.equal((await sessionRequest(alicePage, "/api/v1/session")).status, 401);
+
+    step = "browser session expires at the configured boundary";
+    const expiringContext = await browser.newContext({
+      baseURL: settings.baseUrl,
+      acceptDownloads: false,
+      serviceWorkers: "block",
+    });
+    contexts.push(expiringContext);
+    const expiringPage = await expiringContext.newPage();
+    pages.push({ name: "expiring-alice", page: expiringPage });
+    await login(
+      expiringPage,
+      settings.baseUrl,
+      identities.alice.username,
+      resetPasswordValue,
+    );
+    await expiringPage.waitForTimeout(61_000);
+    assert.equal((await sessionRequest(expiringPage, "/api/v1/session")).status, 401);
 
     assert.equal(template.owner_id, jobs[0].owner_id);
     step = "discard successful traces";

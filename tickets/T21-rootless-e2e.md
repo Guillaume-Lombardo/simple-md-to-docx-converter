@@ -62,6 +62,20 @@ Run E2E for both profiles with three identities, real conversion, restart recove
   external workers, isolated API/worker metrics, simultaneous worker crash recovery, independent
   PostgreSQL and S3 readiness failures, and exact database/object backup and restore. Both required
   storage profiles now satisfy the T21 final-image matrix locally.
+- 2026-08-25: Independent review follow-up strengthened the final-image contract. Both worker
+  metrics endpoints are scraped, recovery requires exactly one reclaim, Playwright covers password
+  reset plus session expiration and authenticated state across restart, standalone liveness remains
+  healthy during a readiness failure, and RustFS snapshots are fully verified before replacement.
+  Controlled browser failure-artifact collection is covered without retaining private error text.
+- 2026-08-25: The strengthened standalone and distributed rootless-image workflows both pass.
+  Canonical formatting, linting, type checking, CI validation, and web tests pass; the applicable
+  Python suite passes with real PostgreSQL and RustFS (`1230 passed, 44 deselected`, 95.53% branch
+  coverage). The full host suite still cannot execute the 44 Pandoc, Mermaid/Chromium, and
+  LibreOffice-marked tests because those engines are unavailable on the host; both final images
+  exercised all three engines successfully.
+- 2026-08-25: Final independent review found no remaining blocking or non-blocking correctness
+  issues after the distributed API-and-worker restart, private failure-only conversion results,
+  recovery-browser diagnostics, and widened expiration boundary were revalidated in both images.
 
 ## Synchronization
 

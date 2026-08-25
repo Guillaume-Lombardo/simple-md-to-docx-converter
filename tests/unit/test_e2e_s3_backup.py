@@ -90,3 +90,5 @@ def test_restore_rejects_tampered_snapshot(tmp_path: Any, mocker: Any) -> None:
 
     with pytest.raises(RuntimeError, match="size mismatch"):
         s3_backup.restore(arguments)
+    assert client.deleted == []
+    assert client.objects == {"one": b"first"}

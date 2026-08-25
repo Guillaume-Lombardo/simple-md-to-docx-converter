@@ -29,6 +29,7 @@ recovery_state_file="$temporary_directory/recovery-state.json"
 clamav_script="$temporary_directory/fake-clamav.py"
 browser_runtime_directory="$temporary_directory/e2e"
 node_runtime_directory="$temporary_directory/node_modules"
+browser_session_directory="$temporary_directory/browser-session"
 created=()
 succeeded=false
 
@@ -158,9 +159,11 @@ hardened_runtime=(
 )
 
 remove_artifacts
-mkdir -p -- "$data_directory" "$evidence_directory" "$temporary_directory/browser-artifacts"
+mkdir -p -- "$data_directory" "$evidence_directory" \
+  "$temporary_directory/browser-artifacts" "$browser_session_directory"
 chmod 0770 "$data_directory"
-chmod 0777 "$evidence_directory" "$temporary_directory/browser-artifacts"
+chmod 0777 "$evidence_directory" "$temporary_directory/browser-artifacts" \
+  "$browser_session_directory"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
 cp -a "$repository/node_modules" "$node_runtime_directory"
@@ -232,6 +235,7 @@ application_volumes=(
   --volume "$node_runtime_directory:/node_modules:ro,Z"
   --volume "$evidence_directory:/evidence:rw,Z"
   --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,Z"
+  --volume "$browser_session_directory:/browser-session:rw,Z"
 )
 if [[ "$profile" == standalone ]]; then
   application_volumes+=(--volume "$data_directory:/data:rw,Z")
@@ -299,15 +303,25 @@ uv run python -m tests.e2e.service_workflow submit-recovery \
   --template "$evidence_directory/template.docx" \
   --state-file "$recovery_state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
+podman exec \
+  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MD_CONVERTER_E2E_PROFILE="$profile" \
+  --env MD_CONVERTER_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MD_CONVERTER_E2E_ADMIN_USERNAME=e2e-admin \
+  --env MD_CONVERTER_E2E_ADMIN_PASSWORD=e2e-admin-password \
+  "$application_name" node --test /e2e/browser-recovery-checkpoint.test.mjs
 if [[ "$profile" == standalone ]]; then
   podman kill --signal KILL "$application_name" >/dev/null
   test "$(podman inspect "$application_name" --format '{{.State.ExitCode}}')" = 137
   podman start "$application_name" >/dev/null
 else
-  podman kill --signal KILL "$worker_one_name" "$worker_two_name" >/dev/null
+  podman kill --signal KILL "$application_name" "$worker_one_name" \
+    "$worker_two_name" >/dev/null
+  test "$(podman inspect "$application_name" --format '{{.State.ExitCode}}')" = 137
   test "$(podman inspect "$worker_one_name" --format '{{.State.ExitCode}}')" = 137
   test "$(podman inspect "$worker_two_name" --format '{{.State.ExitCode}}')" = 137
-  podman start "$worker_one_name" "$worker_two_name" >/dev/null
+  podman start "$application_name" "$worker_one_name" "$worker_two_name" >/dev/null
 fi
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 uv run python -m tests.e2e.service_workflow verify-recovery \
@@ -315,10 +329,18 @@ uv run python -m tests.e2e.service_workflow verify-recovery \
   --state-file "$recovery_state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
+podman exec \
+  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MD_CONVERTER_E2E_PROFILE="$profile" \
+  --env MD_CONVERTER_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
+  "$application_name" node --test /e2e/browser-recovery.test.mjs
+
 require_http_status "$base_url/health/live" 200
 if [[ "$profile" == standalone ]]; then
   chmod 000 "$data_directory"
   require_http_status "$base_url/health/ready" 503
+  require_http_status "$base_url/health/live" 200
   chmod 0770 "$data_directory"
 else
   podman stop --time 10 "$rustfs_name" >/dev/null

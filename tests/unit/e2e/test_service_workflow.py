@@ -49,6 +49,54 @@ def test_service_client_requires_safe_absolute_http_url() -> None:
 
 
 @pytest.mark.unit
+def test_parser_preserves_every_worker_metrics_endpoint() -> None:
+    arguments = workflow.build_parser().parse_args(
+        [
+            "exercise",
+            "--base-url",
+            "https://api.test",
+            "--profile",
+            "distributed",
+            "--worker-metrics-url",
+            "https://worker-one.test/metrics",
+            "--worker-metrics-url",
+            "https://worker-two.test/metrics",
+        ]
+    )
+    assert arguments.worker_metrics_url == [
+        "https://worker-one.test/metrics",
+        "https://worker-two.test/metrics",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("attempt", (1, 3))
+def test_recovery_rejects_missing_or_duplicate_reclaims(attempt: int) -> None:
+    with pytest.raises(workflow.WorkflowFailure, match="reclaimed exactly once"):
+        workflow.validate_recovery_attempt({"attempt": attempt}, previous_attempt=1)
+
+
+@pytest.mark.unit
+def test_recovery_accepts_exactly_one_reclaim() -> None:
+    workflow.validate_recovery_attempt({"attempt": 2}, previous_attempt=1)
+
+
+@pytest.mark.unit
+def test_conversion_artifact_is_private_and_bounded_to_job_identity(
+    tmp_path: Path,
+) -> None:
+    job_id = identifier()
+    workflow.retain_conversion_artifact(
+        tmp_path, job_id=job_id, output="both", content=b"synthetic result"
+    )
+    directory = tmp_path / "conversion-results"
+    artifact = directory / f"{job_id}.zip"
+    assert artifact.read_bytes() == b"synthetic result"
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(artifact.stat().st_mode) == 0o600
+
+
+@pytest.mark.unit
 def test_expect_reports_only_status_and_stable_code() -> None:
     result = workflow.HttpResult(
         409,
