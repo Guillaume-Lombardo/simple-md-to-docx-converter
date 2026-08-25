@@ -163,7 +163,10 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert ", ".join(EXPECTED_FONTS) in readme
     assert "exact 256 MiB ext4 loop" in readme
     assert "rootful Docker Engine" in readme
-    assert "Docker Desktop, rootless Docker" in readme
+    assert "unix:///var/run/docker.sock" in readme
+    assert "`DOCKER_HOST` and remote or non-default Docker contexts" in readme
+    assert "Docker Desktop" in readme
+    assert "rootless Docker" in readme
     assert "do not automatically restart" in readme
     assert "never from a stale" in readme
     assert "reused for an unrelated file" in readme
@@ -189,6 +192,12 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert 'readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"' in script
     assert "Docker Desktop is not supported" in script
     assert "Rootless Docker is not supported" in script
+    assert '[[ -z "${DOCKER_HOST:-}" ]]' in script
+    assert '[[ "$context" == default ]]' in script
+    assert "unix:///var/run/docker.sock" in script
+    assert "docker context inspect" in script
+    assert "{{.Architecture}}" in script
+    assert '[[ "$(uname -m)" == x86_64 || "$(uname -m)" == amd64 ]]' in script
     assert "mkfs.ext4" in script
     assert "readonly losetup=/usr/sbin/losetup" in script
     assert 'sudo "$losetup" --find --show' in script
@@ -261,7 +270,7 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert '"MARKWEAVE_QUICKSTART_PROJECT=$project"' in runner
     assert '"MARKWEAVE_QUICKSTART_PORT=$port"' in runner
     assert '"$quickstart_script"' in runner
-    assert runner.count("quickstart up") == 3
+    assert runner.count("quickstart up") == 5
     assert runner.count("quickstart down") >= 2
     assert "docker compose" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
@@ -286,6 +295,20 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
         '"$unrelated_down_image"' in runner
     )
     assert "filesystem_uuid" in runner
+    assert "port_blocker_pid" in runner
+    assert "expected-up-failure.log" in runner
+    assert 'kill -0 "$port_blocker_pid"' in runner
+    assert 'test ! -e "$work_image"' in runner
+    assert (
+        'docker container ls --all --quiet --filter "label=com.docker.compose.project=$project"'
+        in runner
+    )
+    assert 'docker volume inspect "$data_volume"' in runner
+    assert 'docker volume inspect "$signatures_volume"' in runner
+    assert 'file_sha256 "$state_directory/password.env"' in runner
+    assert 'file_sha256 "$template_file"' in runner
+    assert 'file_sha256 "$unrelated_image"' in runner
+    assert 'file_sha256 "$unrelated_down_image"' in runner
     assert "mkfs.ext4" not in runner
     assert "mount -t ext4" not in runner
     assert "down --volumes --remove-orphans" in runner

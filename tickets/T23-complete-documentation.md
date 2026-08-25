@@ -75,7 +75,9 @@ Complete English user, template, administrator, API, operations, storage, queue,
   through one user-facing script, proves physical `ENOSPC`, and safely handles password reuse,
   obsolete volumes, restart, rollback, and shutdown. The Compose E2E drives that same script,
   reformats disposable scratch after an abnormal stop, proves recovery from durable `/data` state,
-  and verifies that stale loop-device metadata never detaches an unrelated reused device.
+  verifies failed-start rollback under a real port collision, and proves that stale loop-device
+  metadata neither detaches nor changes the bytes of an unrelated reused device. The helper accepts
+  only an AMD64 Linux host using the standard local rootful Docker Unix socket.
 - 2026-08-25: Eliminated the rejected E2E exceptions. Both standalone and distributed final-image
   suites now cover a ZIP/SVG success path with normalized PNG evidence; corrupt ZIP, encrypted ZIP,
   and invalid-image failures with no result; and exact macro, external-relationship, missing-style,

@@ -38,16 +38,30 @@ validate_project_and_port() {
 }
 
 require_supported_host() {
+  local architecture
   local context
+  local endpoint
   local operating_system
   local security_options
   [[ "$(uname -s)" == Linux ]] || \
     fail "This loop-backed quickstart requires a Linux host. Docker Desktop is not supported."
+  [[ "$(uname -m)" == x86_64 || "$(uname -m)" == amd64 ]] || \
+    fail "This quickstart requires an AMD64 Linux host."
+  [[ -z "${DOCKER_HOST:-}" ]] || \
+    fail "DOCKER_HOST is not supported; use the local Docker Engine Unix socket."
   docker info >/dev/null 2>&1 || \
     fail "A running, directly accessible Docker Engine daemon is required."
   context="$(docker context show)"
+  [[ "$context" == default ]] || \
+    fail "A remote or non-default Docker context is not supported."
+  endpoint="$(docker context inspect "$context" --format '{{ (index .Endpoints "docker").Host }}')"
+  [[ "$endpoint" == unix:///var/run/docker.sock ]] || \
+    fail "Docker Engine must use the local unix:///var/run/docker.sock endpoint."
+  architecture="$(docker info --format '{{.Architecture}}')"
   operating_system="$(docker info --format '{{.OperatingSystem}}')"
   security_options="$(docker info --format '{{json .SecurityOptions}}')"
+  [[ "$architecture" == x86_64 || "$architecture" == amd64 ]] || \
+    fail "The Docker Engine daemon must use AMD64 architecture."
   [[ "$context" != desktop-linux && "$operating_system" != *"Docker Desktop"* ]] || \
     fail "Docker Desktop is not supported by the loop-backed quickstart."
   [[ "$security_options" != *rootless* ]] || \

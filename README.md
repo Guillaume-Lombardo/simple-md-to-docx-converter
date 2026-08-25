@@ -12,10 +12,12 @@ to read them before trying the local profile.
 
 ## Try it locally
 
-You need an AMD64 Linux host, a rootful Docker Engine daemon with Compose, OpenSSL, `mkfs.ext4`,
-`losetup`, `sudo`, and about 6 GiB of available memory. Docker Desktop, rootless Docker, non-Linux
-hosts, and native ARM are not supported by this loop-backed quickstart. Clone the repository so
-Compose can use the reviewed Chromium seccomp profile, then run its single setup command:
+You need an AMD64 Linux host, the standard local rootful Docker Engine daemon at
+`unix:///var/run/docker.sock` with Compose, OpenSSL, `mkfs.ext4`, `losetup`, `sudo`, and about 6 GiB
+of available memory. `DOCKER_HOST` and remote or non-default Docker contexts are unsupported.
+Docker Desktop and rootless Docker, non-Linux hosts, and native ARM are also unsupported by this
+loop-backed quickstart. Clone the repository so Compose can use the reviewed Chromium seccomp
+profile, then run its setup command:
 
 ```bash
 git clone https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter.git
@@ -80,6 +82,10 @@ reformats the disposable filesystem, and then restarts the stack. A repeated `up
 is already running validates and reuses its current filesystem without reformatting it. The `down`
 command can also clean stale scratch metadata and the private image when the old loop association
 has vanished; it never detaches a device that has since been reused for an unrelated file.
+If Compose fails while starting—for example, because port 8080 is already occupied—the script
+removes the partially created containers, loop attachment, scratch volume, and scratch image. It
+retains the password, template, application data, and ClamAV signatures so correcting the conflict
+and rerunning `scripts/quickstart.sh up` safely resumes the evaluation.
 
 ## What this Compose profile is—and is not
 

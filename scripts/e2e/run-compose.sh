@@ -29,6 +29,7 @@ unrelated_image="$temporary_directory/unrelated-one.img"
 unrelated_down_image="$temporary_directory/unrelated-two.img"
 unrelated_device=""
 unrelated_down_device=""
+port_blocker_pid=""
 password=""
 port="$(uv run python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 succeeded=false
@@ -68,6 +69,10 @@ compose() {
 cleanup() {
   local exit_code=$?
   local device=""
+  if [[ -n "$port_blocker_pid" ]] && kill -0 "$port_blocker_pid" 2>/dev/null; then
+    kill "$port_blocker_pid" || exit_code=1
+    wait "$port_blocker_pid" 2>/dev/null || true
+  fi
   if [[ "$succeeded" != true && -f "$fault_env" ]]; then
     compose logs --no-color >&2 2>/dev/null || true
   fi
@@ -205,6 +210,10 @@ filesystem_uuid() {
   /usr/sbin/blkid -p -s UUID -o value -- "$work_image"
 }
 
+file_sha256() {
+  sha256sum -- "$1" | awk '{print $1}'
+}
+
 mkdir -p -- "$artifact_directory"
 
 # Exercise migration from the former unbounded local volume before the first start.
@@ -229,6 +238,60 @@ test "$(filesystem_uuid)" = "$first_uuid"
 wait_for_services
 write_checkpoint
 
+# A real Compose port-allocation failure must roll back only newly created
+# scratch while preserving every create-once and durable artifact.
+password_sha256="$(file_sha256 "$state_directory/password.env")"
+template_sha256="$(file_sha256 "$template_file")"
+quickstart down
+docker volume inspect "$data_volume" >/dev/null
+docker volume inspect "$signatures_volume" >/dev/null
+port_ready="$temporary_directory/port-blocker.ready"
+uv run python -c '
+import socket
+import sys
+from pathlib import Path
+
+port = int(sys.argv[1])
+ready = Path(sys.argv[2])
+with socket.socket() as listener:
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", port))
+    listener.listen()
+    ready.write_text("ready", encoding="utf-8")
+    listener.accept()
+' "$port" "$port_ready" &
+port_blocker_pid=$!
+for _ in $(seq 1 100); do
+  [[ -f "$port_ready" ]] && break
+  kill -0 "$port_blocker_pid"
+  sleep 0.1
+done
+test -f "$port_ready"
+if quickstart up >"$temporary_directory/expected-up-failure.log" 2>&1; then
+  echo "Quickstart unexpectedly succeeded while its HTTP port was occupied." >&2
+  exit 1
+fi
+kill -0 "$port_blocker_pid"
+test ! -e "$work_image"
+if docker volume inspect "$work_volume" >/dev/null 2>&1; then
+  echo "Failed startup retained its disposable work volume." >&2
+  exit 1
+fi
+test -z "$(docker container ls --all --quiet --filter "label=com.docker.compose.project=$project")"
+test -z "$(sudo /usr/sbin/losetup --noheadings --output NAME -j "$work_image")"
+test "$(file_sha256 "$state_directory/password.env")" = "$password_sha256"
+test "$(file_sha256 "$template_file")" = "$template_sha256"
+docker volume inspect "$data_volume" >/dev/null
+docker volume inspect "$signatures_volume" >/dev/null
+kill "$port_blocker_pid"
+wait "$port_blocker_pid" 2>/dev/null || true
+port_blocker_pid=""
+quickstart up
+password="$(quickstart password)"
+write_fault_env "$(work_device)"
+wait_for_services
+verify_checkpoint
+
 # Simulate an abnormal host stop: Compose metadata survives, its loop association
 # vanishes, and an unrelated file reuses the stale /dev/loopN allocation.
 stale_device="$(work_device)"
@@ -236,11 +299,13 @@ write_fault_env "$stale_device"
 compose down --remove-orphans --timeout 30
 sudo /usr/sbin/losetup --detach "$stale_device"
 truncate -s 1048576 "$unrelated_image"
+unrelated_sha256="$(file_sha256 "$unrelated_image")"
 unrelated_device="$(sudo /usr/sbin/losetup --find --show "$unrelated_image")"
 test "$unrelated_device" = "$stale_device"
 
 quickstart up
 test "$(backing_file "$unrelated_device")" = "$unrelated_image"
+test "$(file_sha256 "$unrelated_image")" = "$unrelated_sha256"
 recovered_device="$(work_device)"
 test "$recovered_device" != "$unrelated_device"
 test "$(filesystem_uuid)" != "$first_uuid"
@@ -256,6 +321,7 @@ verify_checkpoint
 compose down --remove-orphans --timeout 30
 sudo /usr/sbin/losetup --detach "$recovered_device"
 truncate -s 1048576 "$unrelated_down_image"
+unrelated_down_sha256="$(file_sha256 "$unrelated_down_image")"
 unrelated_down_device="$(sudo /usr/sbin/losetup --find --show "$unrelated_down_image")"
 test "$unrelated_down_device" = "$recovered_device"
 quickstart down
@@ -265,5 +331,6 @@ if docker volume inspect "$work_volume" >/dev/null 2>&1; then
 fi
 test ! -e "$work_image"
 test "$(backing_file "$unrelated_down_device")" = "$unrelated_down_image"
+test "$(file_sha256 "$unrelated_down_image")" = "$unrelated_down_sha256"
 
 succeeded=true
