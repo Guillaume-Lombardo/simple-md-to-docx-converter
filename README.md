@@ -4,8 +4,9 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage and scans every upload with
 ClamAV before saving it.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.3.0` is published as the Python
-package `markweave` and as the container image used below.
+The project is licensed under [Apache-2.0](LICENSE). Version `0.3.1` is the Python package
+release. Until its immutable image digest is available, the quickstart below remains pinned to the
+published `0.3.0` container image.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.
