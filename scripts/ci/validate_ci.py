@@ -63,9 +63,19 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 )
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
-PUBLISH_STEP_COUNT = 2
+PUBLISH_STEP_COUNT = 3
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
 RELEASE_PRODUCER_JOB = "build-and-verify"
+PYPI_AVAILABILITY_COMMAND = """\
+set -euo pipefail
+for url in https://pypi.org/pypi/markweave/json https://pypi.org/simple/markweave/; do
+  status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$url")"
+  test "$status" = 404
+done"""
+RELEASE_IDENTITY_COMMAND = """\
+set -euo pipefail
+test "$GITHUB_REF_TYPE" = tag
+test "$GITHUB_REF_NAME" = v0.3"""
 WORKFLOW_FIELDS = frozenset({"name", "on", "permissions", "concurrency", "jobs"})
 ACTION_STEP_FIELDS = frozenset({"name", "uses", "with", "if"})
 RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
@@ -121,6 +131,37 @@ class ReleaseWorkflowPolicy:
     artifact_directory: str
     manifest_name: str
     constraint: str | None
+    publishable_paths: tuple[str, ...]
+
+
+PRODUCTION_RELEASE_POLICY = ReleaseWorkflowPolicy(
+    approved_triggers=frozenset({"release"}),
+    approved_tag_patterns=None,
+    distribution_name="markweave",
+    version="0.3",
+    artifact_upload_action=(
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    ),
+    artifact_download_action=(
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    ),
+    checkout_action="actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    setup_python_action=(
+        "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+    ),
+    setup_uv_action="astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
+    pypi_publish_action=(
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+    ),
+    artifact_name="python-release-v0.3",
+    artifact_directory="dist",
+    manifest_name=RELEASE_MANIFEST_NAME,
+    constraint="build-constraints.txt",
+    publishable_paths=("dist/*.whl", "dist/*.tar.gz"),
+)
+CONTAINER_RELEASE_CANONICAL_DIGEST = (
+    "1ddeefeeed8a38182ae51eb5711dccd04cb0fda65ff3eed7b6159437ee8b0886"
+)
 
 
 READ_ONLY_WORKFLOW_POLICIES = {
@@ -237,7 +278,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="8d4618f1b3dc9d8a6b3889329ebacff712220b8ccfc1aeb5dc9aa0b6c1792f8e",
+        canonical_digest="5d0ea2d8f9294b6a5fd3bcdf954006dc8eb6df635e0b72b7e7fbe891db577f49",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -756,8 +797,8 @@ def _release_artifact_contract(
     *,
     policy: ReleaseWorkflowPolicy,
 ) -> list[str]:
-    download = publish_steps[0]
-    publish = publish_steps[1]
+    download = publish_steps[1]
+    publish = publish_steps[2]
     download_with = _mapping(download.get("with")) or {}
     publish_with = _mapping(publish.get("with")) or {}
     artifact_name = download_with.get("name")
@@ -801,9 +842,10 @@ def _release_artifact_contract(
         if (
             upload_job != RELEASE_PRODUCER_JOB
             or set(upload_step) != {"name", "uses", "with"}
-            or set(upload_with) != {"name", "path"}
+            or set(upload_with) != {"if-no-files-found", "name", "path"}
             or upload_with.get("name") != artifact_name
-            or upload_with.get("path") != download_path
+            or upload_with.get("path") != "\n".join(policy.publishable_paths) + "\n"
+            or upload_with.get("if-no-files-found") != "error"
         ):
             errors.append(
                 "verified artifact upload must be unique, unconditional, and exact"
@@ -883,7 +925,16 @@ def _validate_release_producer_job(
             "uses",
             {"python-version": "3.14", "check-latest": False},
         ),
-        ("Set up uv", "uses", None),
+        (
+            "Set up uv",
+            "uses",
+            {"version": "0.12.1", "enable-cache": False},
+        ),
+        (
+            "Validate the reviewed release identity",
+            "run",
+            RELEASE_IDENTITY_COMMAND + "\n",
+        ),
         ("Build distributions exactly once", "run", build_command),
         (
             "Verify artifact integrity and metadata",
@@ -898,7 +949,11 @@ def _validate_release_producer_job(
         (
             "Transfer verified artifacts",
             "uses",
-            {"name": policy.artifact_name, "path": policy.artifact_directory},
+            {
+                "name": policy.artifact_name,
+                "path": "\n".join(policy.publishable_paths) + "\n",
+                "if-no-files-found": "error",
+            },
         ),
     )
     if len(steps) != len(expected_steps):
@@ -907,6 +962,7 @@ def _validate_release_producer_job(
         policy.checkout_action,
         policy.setup_python_action,
         policy.setup_uv_action,
+        None,
         None,
         None,
         None,
@@ -1018,18 +1074,24 @@ def _validate_publish_job(
     if set(publish_job) != expected_job_fields:
         errors.append("publish job fields do not match the exact minimal contract")
     if publish_job.get("environment") != "pypi":
-        errors.append("publish job must use the protected pypi environment")
+        errors.append("publish job must use the dedicated pypi environment identity")
     if publish_job.get("needs") != RELEASE_PRODUCER_JOB:
         errors.append("publish job must depend only on prior artifact validation")
     publish_steps = _release_steps(publish_job)
     if publish_steps is None or len(publish_steps) != PUBLISH_STEP_COUNT:
-        errors.append("publish job must contain exactly two action steps")
+        errors.append("publish job must contain exactly three approved steps")
         return errors
+    preflight = publish_steps[0]
+    if preflight != {
+        "name": "Recheck PyPI name availability",
+        "run": PYPI_AVAILABILITY_COMMAND + "\n",
+    }:
+        errors.append("publish job must fail closed on first-release name availability")
     expected_actions = (
         policy.artifact_download_action,
         policy.pypi_publish_action,
     )
-    for step, expected_action in zip(publish_steps, expected_actions, strict=True):
+    for step, expected_action in zip(publish_steps[1:], expected_actions, strict=True):
         uses = step.get("uses")
         if set(step) != {"name", "uses", "with"}:
             errors.append("publish steps must contain exactly name, uses, and with")
@@ -1186,6 +1248,15 @@ def _validate_release_policy(policy: ReleaseWorkflowPolicy) -> list[str]:
         )
     if not _is_constraint(policy.constraint):
         errors.append("caller-approved constraint must be a safe relative literal path")
+    if not isinstance(policy.publishable_paths, tuple) or set(
+        policy.publishable_paths
+    ) != {
+        f"{policy.artifact_directory}/*.whl",
+        f"{policy.artifact_directory}/*.tar.gz",
+    }:
+        errors.append(
+            "caller-approved publishable paths must select only wheel and sdist files"
+        )
     if policy.manifest_name != RELEASE_MANIFEST_NAME:
         errors.append(
             "caller-approved manifest name must match the release build default"
@@ -1271,6 +1342,77 @@ def validate_release_workflow_text(
     return errors
 
 
+def validate_container_release_workflow_text(text: str) -> list[str]:
+    """Validate the exact least-privilege container publication contract."""
+    workflow, errors = _load_workflow(text)
+    if workflow is None:
+        return errors
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != (
+        CONTAINER_RELEASE_CANONICAL_DIGEST
+    ):
+        errors.append("container release workflow differs from the reviewed policy")
+    triggers = _mapping(workflow.get("on"))
+    if triggers != {"release": {"types": ["published"]}}:
+        errors.append("container publication must trigger only on published releases")
+    if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
+        errors.append("container release permissions must default to contents: read")
+    errors.extend(
+        _validate_concurrency(
+            workflow,
+            expected_group="container-release-${{ github.ref }}",
+            expected_cancellation=False,
+        )
+    )
+    jobs = _mapping(workflow.get("jobs")) or {}
+    if set(jobs) != {"build-and-publish", "attest", "release-evidence"}:
+        errors.append("container release jobs do not match the exact contract")
+    expected_permissions = {
+        "build-and-publish": {"contents": "read", "packages": "write"},
+        "attest": {
+            "attestations": "write",
+            "contents": "read",
+            "id-token": "write",
+            "packages": "write",
+        },
+        "release-evidence": {"contents": "write"},
+    }
+    for name, expected in expected_permissions.items():
+        job = _mapping(jobs.get(name)) or {}
+        if job.get("permissions") != expected:
+            errors.append(f"container release job {name!r} permissions are not minimal")
+        if job.get("if") != TRUSTED_REPOSITORY_GUARD:
+            errors.append(f"container release job {name!r} lacks the repository guard")
+        timeout = job.get("timeout-minutes")
+        if (
+            not isinstance(timeout, int)
+            or isinstance(timeout, bool)
+            or not 0 < timeout <= MAX_RELEASE_TIMEOUT_MINUTES
+        ):
+            errors.append(f"container release job {name!r} lacks a bounded timeout")
+    errors.extend(
+        _validate_action_allowlist(
+            workflow,
+            allowed_actions=frozenset(
+                {
+                    "actions/attest-build-provenance",
+                    "actions/checkout",
+                    "actions/download-artifact",
+                    "actions/setup-python",
+                    "actions/upload-artifact",
+                    "astral-sh/setup-uv",
+                    "docker/login-action",
+                }
+            ),
+        )
+    )
+    errors.extend(_validate_checkout_credentials(workflow))
+    if re.search(r"\bsecrets\b", text, re.IGNORECASE):
+        errors.append("container release workflow must not access stored secrets")
+    if "--privileged" in text.casefold():
+        errors.append("container release workflow must not use privileged containers")
+    return errors
+
+
 def validate_python_imports(paths: Iterable[Path]) -> list[str]:
     """Reject direct unittest.mock imports in tracked Python sources."""
     errors: list[str] = []
@@ -1313,6 +1455,30 @@ def validate_workflow_files(paths: Iterable[Path]) -> list[str]:
     """Validate every committed workflow against its filename-specific policy."""
     errors: list[str] = []
     for path in sorted(paths):
+        if path.name == "container-release.yml":
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as error:
+                errors.append(f"{path}: cannot read workflow: {error}")
+                continue
+            errors.extend(
+                f"{path}: {error}"
+                for error in validate_container_release_workflow_text(text)
+            )
+            continue
+        if path.name == "release.yml":
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as error:
+                errors.append(f"{path}: cannot read workflow: {error}")
+                continue
+            errors.extend(
+                f"{path}: {error}"
+                for error in validate_release_workflow_text(
+                    text, policy=PRODUCTION_RELEASE_POLICY
+                )
+            )
+            continue
         if path.name not in READ_ONLY_WORKFLOW_POLICIES:
             errors.append(f"{path}: workflow has no explicit security policy")
             continue
@@ -1340,7 +1506,12 @@ def main() -> int:
     registry = root / ".github/ci/domains.json"
     workflow_paths = discover_workflow_paths(workflow_directory)
     errors = validate_workflow_files(workflow_paths)
-    missing_workflows = set(READ_ONLY_WORKFLOW_POLICIES).difference(
+    required_workflows = {
+        *READ_ONLY_WORKFLOW_POLICIES,
+        "container-release.yml",
+        "release.yml",
+    }
+    missing_workflows = required_workflows.difference(
         path.name for path in workflow_paths
     )
     errors.extend(

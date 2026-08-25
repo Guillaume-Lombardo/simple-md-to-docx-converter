@@ -11,14 +11,15 @@ project: Markdown to DOCX and PDF Converter
 
 ## Objective
 
-Finalize selective CI/CD, scheduled full suite, mutation testing, dependency updates, release image, SBOM, provenance, and secure publication of the `md-converter` Python distribution to PyPI.
+Finalize selective CI/CD, scheduled full suite, mutation testing, dependency updates, release image, SBOM, provenance, and secure publication of the `markweave` Python distribution to PyPI while preserving the public import `md_converter`.
 
 ## Scope
 
 - Complete the selective GitHub Actions delivery workflows, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, and provenance.
 - Add an isolated Python release workflow that builds the sdist and wheel once from the reviewed tagged source, verifies them, and publishes those exact artifacts to PyPI.
-- Use PyPI Trusted Publishing with GitHub OIDC, a protected GitHub `pypi` environment, and a pending Trusted Publisher for the first release instead of a long-lived PyPI token.
-- Require manual approval for every publication run from designated trusted maintainers or the project manager configured as required reviewers on the `pypi` environment.
+- Use PyPI Trusted Publishing with GitHub OIDC, a dedicated GitHub `pypi` environment identity, and a pending Trusted Publisher for the first release instead of a long-lived PyPI token.
+- Keep the `pypi` environment free of required reviewers and manual approval; publishing the GitHub
+  Release is the sole human release gate, and release-creation permissions are security-critical.
 - Keep the release-version and tag-trigger policies as explicit T22 decisions to document before implementation.
 
 ## Acceptance criteria
@@ -32,18 +33,20 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
-- The `md-converter` sdist and wheel are built exactly once from the reviewed tagged source.
+- The `markweave` sdist and wheel are built exactly once from the reviewed tagged source and expose
+  the documented public import `md_converter`.
 - Distribution metadata, installation, the documented public import, and artifact integrity are validated before publication.
 - The publication job publishes the exact artifacts that passed validation and never rebuilds them.
-- PyPI publication uses Trusted Publishing through GitHub OIDC and the protected GitHub `pypi` environment; no long-lived PyPI token is created or stored.
-- Every PyPI publication run waits for manual approval from designated trusted maintainers or the project manager configured as required reviewers on the `pypi` environment.
+- PyPI publication uses Trusted Publishing through GitHub OIDC and the dedicated GitHub `pypi` environment identity; no long-lived PyPI token is created or stored.
+- The `pypi` environment has no required reviewer or manual approval, and only a published GitHub
+  Release in the trusted upstream repository can start publication.
 - Only the minimal PyPI upload job in the isolated workflow receives `id-token: write` for publication. A separate provenance or attestation job owned by T22 may receive `id-token: write` only when the need is documented and all its other permissions are least privilege.
 - Every action is pinned by full commit SHA.
 - PyPI publish attestations are generated and uploaded with the release artifacts.
 - Pull requests, forks, and every other untrusted context are prevented from publishing.
 - The release-version and tag-trigger policies are documented and approved before the workflow is implemented.
 - Before the first public release, the project manager decides the public package license and configures a PyPI pending Trusted Publisher for the exact GitHub repository, workflow, and `pypi` environment.
-- The availability of `md-converter` is rechecked immediately before the first publication attempt, which stops if the name is no longer available; a pending Trusted Publisher does not reserve the name.
+- The availability of `markweave` is rechecked immediately before the first publication attempt, which stops if the name is no longer available; a pending Trusted Publisher does not reserve the name.
 - The first successful OIDC upload creates the PyPI project and converts the pending publisher into a normal Trusted Publisher, and both the project and publisher state are verified afterward.
 
 ## Dependencies
@@ -54,13 +57,15 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 ## Progress
 
 - Planning scope expanded to include secure PyPI publication in T22; no CI implementation has started.
-- Independent planning review clarified mandatory environment approval, pending Trusted Publisher bootstrap, first-upload verification, and least-privilege OIDC boundaries.
+- Independent planning review clarified the pending Trusted Publisher bootstrap, first-upload
+  verification, and least-privilege OIDC boundaries. Its earlier environment-approval proposal was
+  superseded by the project manager's no-reviewer policy.
 - The official PyPI project and JSON endpoints for `md-converter` returned HTTP 404 on August 23, 2026. This is an availability observation, not a permanent reservation; no PyPI project was created or published.
 - 2026-08-25: Started implementation on `feat/T22-release-pipeline` from verified `main` at
   `2c01d4b` after T03 and T21 were confirmed `Done`. Work begins with the implementable CI,
   packaging-validation, dependency-update, release-artifact, SBOM, provenance, and security
   contracts. The workflow will not guess the unresolved release-version or tag-trigger policy, the
-  public package license, required environment reviewers, or pending PyPI Trusted Publisher state;
+  public package license, environment policy, or pending PyPI Trusted Publisher state;
   those approval and external-configuration gates remain explicit.
 - 2026-08-25: Added weekly grouped native-`uv`, npm, container, and GitHub Actions dependency
   updates plus an isolated read-only scheduled/manual mutation workflow. Its target is a fixed
@@ -108,13 +113,32 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   had already returned `201`; the retained failure evidence confirmed successful account creation.
   Its failed-job rerun passed on the identical `bac665a` source, while the distributed E2E,
   container, storage, engine, and functional jobs passed on the first attempt.
-- Remaining implementation is intentionally gated. The project manager must approve the public
-  package license; version source and PEP 440/tag mapping; exact release trigger and approved tag
-  patterns; scheduled full-suite cadence, timeout, parallelism, and usage budget; and release-image
-  registry identity and visibility. GitHub must then have a protected `pypi` environment with
-  designated required reviewers, and PyPI must have the matching pending Trusted Publisher. These
-  external states were absent when checked. `md-converter` availability must be rechecked immediately
-  before the first upload because a pending publisher does not reserve the name.
+- The former decision gate is resolved. External first-release setup still requires the dedicated
+  GitHub `pypi` environment without reviewers and the matching PyPI pending Trusted Publisher; the
+  repository workflows do not create either resource.
+- 2026-08-25: The project manager approved Apache-2.0, version `0.3` with tag `v0.3`, published
+  GitHub Releases as the only release trigger, public image
+  `ghcr.io/guillaume-lombardo/md-converter`, and the dedicated `pypi` environment without required
+  reviewers or manual approval. PyPI rejected `md-converter`, so the approved public distribution
+  is `markweave` while the import remains `md_converter`. The complete suite remains Sunday at
+  03:17 UTC with a 45-minute heavy-job timeout and at most two heavy jobs in parallel. The pending
+  Trusted Publisher uses project `markweave`, owner `Guillaume-Lombardo`, repository
+  `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`.
+  Publishing the GitHub Release is the sole human gate; this removes a second-person approval and
+  makes GitHub release-creation permissions and the upstream repository guard security-critical.
+- 2026-08-25: Implemented the remaining repository release contract. Apache-2.0 and PEP 440 version
+  `0.3` are carried by the `markweave` wheel and sdist while `md_converter` remains the public
+  import. The published-Release-only Python workflow builds once, verifies integrity, metadata,
+  license inclusion, a clean Python 3.14 installation, and the public import, then uploads only the
+  verified distributions with OIDC attestations from the `pypi` environment. The independent
+  container workflow rootless-smoke-tests the final image, applies the release Critical-vulnerability
+  gate, pushes GHCR, attests its digest, and retains and attaches its SBOM and verification evidence.
+  The repository validator locks both workflows, immutable action pins, trusted-repository guards,
+  exact permissions, and release identity. The scheduled matrix now has `max-parallel: 2` while
+  retaining Sunday 03:17 UTC and 45-minute heavy jobs. Both official `markweave` availability
+  endpoints returned `404` during implementation. The dedicated GitHub environment, PyPI pending
+  publisher, hosted release runs, public GHCR visibility, and post-upload verification remain
+  external first-release actions; no release, package, image, or attestation was published here.
 
 ## Synchronization
 

@@ -134,6 +134,7 @@ from md_converter.templates.processor import (
 )
 from md_converter.templates.runtime import build_template_validator
 from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
+from md_converter.version import VERSION
 from md_converter.web import (
     WEB_SECURITY_HEADERS,
     render_conversion_page,
@@ -144,7 +145,7 @@ from md_converter.web import (
 COMPONENT_VERSIONS = (
     ("chromium", "151.0.7922.173"),
     ("libreoffice", "26.2.5.2"),
-    ("md-converter", "0.1.0"),
+    ("md-converter", VERSION),
     ("mermaid-cli", "11.16.0"),
     ("pandoc", "3.10.2"),
 )
@@ -1051,7 +1052,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
 
     app = FastAPI(
         title="Markdown Converter API",
-        version="0.1.0",
+        version=VERSION,
         docs_url="/docs",
         openapi_url="/openapi.json",
         lifespan=lifespan,

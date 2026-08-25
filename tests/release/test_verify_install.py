@@ -108,7 +108,14 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         INSTALL_TIMEOUT_SECONDS,
     )
     assert calls[2] == (
-        (str(python), "-I", "-c", PUBLIC_IMPORT_CHECK, "0.1.0"),
+        (
+            str(python),
+            "-I",
+            "-c",
+            PUBLIC_IMPORT_CHECK,
+            "md-converter",
+            "0.1.0",
+        ),
         root,
         IMPORT_TIMEOUT_SECONDS,
     )

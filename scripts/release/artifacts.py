@@ -37,6 +37,7 @@ MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 500
 READ_CHUNK_BYTES = 1024 * 1024
 RECORD = "RECORD"
+PUBLIC_IMPORT_PACKAGE = "md_converter"
 ARTIFACT_COUNT = 2
 RECORD_FIELD_COUNT = 3
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -524,7 +525,7 @@ def verify_wheel(path: Path, *, expected_name: str, expected_version: str) -> No
             wheel_name = f"{dist_info}/WHEEL"
             record_name = f"{dist_info}/{RECORD}"
             required = {
-                f"{_distribution_component(expected_name)}/__init__.py",
+                f"{PUBLIC_IMPORT_PACKAGE}/__init__.py",
                 metadata_name,
                 wheel_name,
                 record_name,
@@ -619,7 +620,7 @@ def verify_sdist(path: Path, *, expected_name: str, expected_version: str) -> No
         f"{expected_stem}/PKG-INFO",
         f"{expected_stem}/README.md",
         f"{expected_stem}/pyproject.toml",
-        f"{expected_stem}/src/{_distribution_component(expected_name)}/__init__.py",
+        f"{expected_stem}/src/{PUBLIC_IMPORT_PACKAGE}/__init__.py",
     }
     missing = required.difference(names)
     if missing:

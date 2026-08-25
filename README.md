@@ -21,6 +21,11 @@ policy are assembled. Structured JSON logs, durable request-to-worker correlatio
 queue and worker metrics, bounded immutable-audit reads, version traceability, and cheap profile
 readiness are available; final-container features remain under development.
 
+The project is licensed under [Apache-2.0](LICENSE). The approved first public version is `0.3`,
+published on PyPI as `markweave` while preserving the public Python import `md_converter`. See
+[the release process](docs/releasing.md) for the protected PyPI and GHCR publication contract and
+required one-time external configuration.
+
 ## Requirements
 
 - [`uv`](https://docs.astral.sh/uv/)
@@ -78,6 +83,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/resource-policy.md`: quotas, budgets, retention, recovery, and cleanup configuration
 - `docs/container-deployment.md`: final-image build, hardening, runtime profiles, and SBOM scans
 - `docs/observability.md`: JSON logging, correlation, metrics, audit, and readiness contracts
+- `docs/releasing.md`: version, tag, PyPI Trusted Publishing, GHCR, SBOM, and provenance procedure
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
 - `docs/administration-ui.md`: template-owner and administrator browser workflows
 - `docs/templates.md`: template identity, visibility, selection, and T15 boundaries

@@ -28,8 +28,8 @@ PUBLIC_IMPORT_CHECK = """\
 from importlib.metadata import version
 import sys
 
-installed = version("md-converter")
-if installed != sys.argv[1]:
+installed = version(sys.argv[1])
+if installed != sys.argv[2]:
     raise SystemExit(f"unexpected installed version: {installed}")
 from md_converter import create_app
 if not callable(create_app):
@@ -142,7 +142,14 @@ def verify_clean_install(
             timeout=INSTALL_TIMEOUT_SECONDS,
         )
         run_command(
-            (str(python), "-I", "-c", PUBLIC_IMPORT_CHECK, expected_version),
+            (
+                str(python),
+                "-I",
+                "-c",
+                PUBLIC_IMPORT_CHECK,
+                expected_name,
+                expected_version,
+            ),
             cwd=root,
             label="isolated public import check",
             timeout=IMPORT_TIMEOUT_SECONDS,

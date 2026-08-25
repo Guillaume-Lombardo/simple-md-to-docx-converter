@@ -50,6 +50,7 @@ from md_converter.storage import (
     ObjectStoreError,
 )
 from md_converter.templates.models import TemplateVersion
+from md_converter.version import VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +321,7 @@ def build_production_processor(
         archive_limits=archive_limits,
         image_limits=image_limits,
         traceability=ProcessorTraceability(
-            application_version="0.1.0",
+            application_version=VERSION,
             conversion_contract_version="1",
             pandoc_reader=PANDOC_READER,
             font_manifest_sha256=hashlib.sha256(font_manifest).hexdigest(),

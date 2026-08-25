@@ -163,6 +163,7 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         domain: ${{ fromJSON(needs.detect.outputs.runnable-domains) }}
     services:

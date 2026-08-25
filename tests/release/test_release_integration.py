@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shutil
+import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -24,20 +26,26 @@ def test_real_build_validation_clean_install_and_tamper_failure(
 
     built = build_release(
         output,
-        expected_name="md-converter",
-        expected_version="0.1.0",
+        expected_name="markweave",
+        expected_version="0.3",
         constraint=project_root / "build-constraints.txt",
     )
-    verified = verify_release(
-        output, expected_name="md-converter", expected_version="0.1.0"
-    )
+    verified = verify_release(output, expected_name="markweave", expected_version="0.3")
     installed = verify_clean_install(
-        output, expected_name="md-converter", expected_version="0.1.0"
+        output, expected_name="markweave", expected_version="0.3"
     )
 
     assert built.integrity == verified.integrity
     assert installed.wheel_name == verified.wheel.name
     assert installed.sha256 == verified.sha256_for(verified.wheel)
+    with zipfile.ZipFile(verified.wheel) as wheel:
+        names = set(wheel.namelist())
+        assert "md_converter/__init__.py" in names
+        assert "markweave-0.3.dist-info/licenses/LICENSE" in names
+    with tarfile.open(verified.sdist, mode="r:gz") as sdist:
+        names = set(sdist.getnames())
+        assert "markweave-0.3/LICENSE" in names
+        assert "markweave-0.3/src/md_converter/__init__.py" in names
 
     tampered = tmp_path / "tampered"
     shutil.copytree(output, tampered)
@@ -45,5 +53,5 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         stream.write(b"controlled tamper")
     with pytest.raises(ArtifactError, match="integrity check failed"):
         verify_clean_install(
-            tampered, expected_name="md-converter", expected_version="0.1.0"
+            tampered, expected_name="markweave", expected_version="0.3"
         )

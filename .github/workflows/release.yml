@@ -1,0 +1,78 @@
+name: Python release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up clean Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Validate the reviewed release identity
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = v0.3
+      - name: Build distributions exactly once
+        run: uv run python -m scripts.release.build --output dist --name markweave --version 0.3 --constraint build-constraints.txt
+      - name: Verify artifact integrity and metadata
+        run: uv run python -m scripts.release.artifacts verify --directory dist --name markweave --version 0.3 --manifest-name release-integrity.json
+      - name: Verify clean Python 3.14 installation and public import
+        run: uv run python -m scripts.release.verify_install --directory dist --name markweave --version 0.3 --manifest-name release-integrity.json
+      - name: Transfer verified artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-release-v0.3
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+  publish:
+    needs: build-and-verify
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Recheck PyPI name availability
+        run: |
+          set -euo pipefail
+          for url in https://pypi.org/pypi/markweave/json https://pypi.org/simple/markweave/; do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$url")"
+            test "$status" = 404
+          done
+      - name: Download verified artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-release-v0.3
+          path: dist
+      - name: Publish exact artifacts
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          attestations: true
