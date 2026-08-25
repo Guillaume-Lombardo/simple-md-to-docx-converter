@@ -1,5 +1,6 @@
 """Functional conversion API coverage over real SQLite and filesystem storage."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -302,6 +303,26 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
             ).status_code
             == 422
         )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            concurrent = list(
+                executor.map(
+                    lambda index: submit(
+                        client,
+                        csrf,
+                        content=f"# Concurrent {index}".encode(),
+                        template_id=template_id,
+                        template_version_id=template_version_id,
+                    ),
+                    range(2),
+                )
+            )
+        assert all(response.status_code == 202 for response in concurrent)
+        assert all(
+            response.json()["correlation_id"] == response.headers["X-Correlation-ID"]
+            for response in concurrent
+        )
+        assert len({response.json()["correlation_id"] for response in concurrent}) == 2
         assert (
             submit(
                 client,

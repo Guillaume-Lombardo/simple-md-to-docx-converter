@@ -1,5 +1,6 @@
 """Deterministic observability, correlation, and metric safety tests."""
 
+import asyncio
 import json
 import logging
 from typing import Any, cast
@@ -7,9 +8,12 @@ from uuid import UUID
 
 import pytest
 from pytest_mock import MockerFixture
+from starlette.types import Message
 
 from md_converter import observability
 from md_converter.observability import (
+    CORRELATION_STATE_KEY,
+    CorrelationMiddleware,
     JsonLogFormatter,
     MetricsHttpServer,
     MetricsServerError,
@@ -59,6 +63,56 @@ def test_internal_correlation_context_rejects_hostile_values() -> None:
     with correlated("request-1"):
         assert current_correlation_id() == "request-1"
     assert current_correlation_id() is None
+
+
+def test_correlation_is_explicitly_isolated_in_concurrent_request_scopes() -> None:
+    async def exercise() -> list[tuple[str, str]]:
+        arrived = 0
+        both_arrived = asyncio.Event()
+        scope_correlations: dict[str, str] = {}
+
+        async def downstream(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal arrived
+            request_name = str(scope["path"])
+            scope_correlations[request_name] = scope["state"][CORRELATION_STATE_KEY]
+            arrived += 1
+            if arrived == 2:
+                both_arrived.set()
+            await asyncio.wait_for(both_arrived.wait(), timeout=1.0)
+            await send({"type": "http.response.start", "status": 204, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = CorrelationMiddleware(downstream, metrics=OperationalMetrics())
+
+        async def request(path: str) -> tuple[str, str]:
+            messages: list[Message] = []
+
+            async def receive() -> Message:
+                return {"type": "http.disconnect"}
+
+            async def send(message: Message) -> None:
+                messages.append(message)
+
+            await middleware(
+                {"type": "http", "method": "POST", "path": path, "headers": []},
+                receive,
+                send,
+            )
+            response_start = next(
+                message
+                for message in messages
+                if message["type"] == "http.response.start"
+            )
+            response_correlation = dict(response_start["headers"])[
+                b"x-correlation-id"
+            ].decode("ascii")
+            return scope_correlations[path], response_correlation
+
+        return list(await asyncio.gather(request("/first"), request("/second")))
+
+    correlations = asyncio.run(exercise())
+    assert all(scope_id == header_id for scope_id, header_id in correlations)
+    assert len({scope_id for scope_id, _header_id in correlations}) == 2
 
 
 def test_json_formatter_emits_only_allowlisted_content_free_fields() -> None:

@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 CORRELATION_HEADER = "X-Correlation-ID"
+CORRELATION_STATE_KEY = "correlation_id"
 MAX_CORRELATION_CHARACTERS = 128
 MAX_LOG_DURATION_SECONDS = 365 * 24 * 60 * 60
 MIN_HTTP_STATUS = 100
@@ -224,6 +225,13 @@ class CorrelationMiddleware:
             None,
         )
         correlation_id = normalize_correlation_id(supplied)
+        request_scope = {
+            **scope,
+            "state": {
+                **scope.get("state", {}),
+                CORRELATION_STATE_KEY: correlation_id,
+            },
+        }
         status_code = 500
         started = self._metrics.timer()
 
@@ -243,7 +251,7 @@ class CorrelationMiddleware:
 
         with correlated(correlation_id):
             try:
-                await self._app(scope, receive, correlated_send)
+                await self._app(request_scope, receive, correlated_send)
             finally:
                 duration = max(0.0, self._metrics.timer() - started)
                 method = _normalize_method(scope.get("method"))
