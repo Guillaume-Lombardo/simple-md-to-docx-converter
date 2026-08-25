@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import subprocess
 import sys
+import tarfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scripts.container import summarize_supply_chain
+from scripts.container import integrity, summarize_supply_chain, verify_supply_chain
 
 pytestmark = pytest.mark.unit
 
@@ -167,10 +171,30 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
     assert workflow["permissions"] == {"contents": "read"}
 
 
+def test_supply_chain_produces_in_private_staging_before_atomic_publication() -> None:
+    script = Path("scripts/container/supply-chain.sh").read_text(encoding="utf-8")
+    for contract in (
+        "umask 077",
+        '[[ -e "$output_directory" || -L "$output_directory" ]]',
+        '[[ -L "$output_parent" ]]',
+        'mktemp -d "$output_parent/.supply-chain.XXXXXX"',
+        'podman save --format oci-archive --output "$image_archive" "$image_id"',
+        'readonly canonical_image_id="sha256:$image_id"',
+        'mv --no-target-directory -- "$staging_directory" "$output_directory"',
+        "release_bundle_manifest_sha256=%s",
+    ):
+        assert contract in script
+    assert (
+        script.index("mktemp -d")
+        < script.index("podman save")
+        < script.index("mv --no-target-directory")
+    )
+
+
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    for name in ("sbom.cdx.json", "sbom.spdx.json"):
+    for name in ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
     report = {
         "matches": [
@@ -194,17 +218,281 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     }
     (tmp_path / "vulnerabilities.json").write_text(json.dumps(report), encoding="utf-8")
     inspected = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
-    inspected.return_value.stdout = json.dumps(
-        [{"Id": "sha256:image", "Digest": "sha256:digest", "Size": 123}]
+    inspected.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
+    mocker.patch(
+        "scripts.container.summarize_supply_chain.oci_identity",
+        return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
     )
     monkeypatch.setattr(
         sys,
         "argv",
-        ["summary", "--image", "image:test", "--artifacts", str(tmp_path)],
+        [
+            "summary",
+            "--image",
+            "image:test",
+            "--artifacts",
+            str(tmp_path),
+            "--expected-image-id",
+            f"sha256:{'2' * 64}",
+        ],
     )
 
     assert summarize_supply_chain.main() == 1
+    inspected.assert_called_once_with(
+        ["/usr/bin/podman", "image", "inspect", "2" * 64],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     evidence = json.loads((tmp_path / "image-metadata.json").read_text())
     assert evidence["vulnerabilities"]["counts_by_severity"] == {"Critical": 2}
     assert evidence["vulnerabilities"]["critical_with_fix"][0]["id"] == "CVE-FIXED"
     assert evidence["vulnerabilities"]["critical_without_fix"][0]["id"] == "CVE-UNFIXED"
+
+
+def test_release_summary_rejects_unfixed_critical_and_archive_identity_mismatch(
+    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    (tmp_path / "vulnerabilities.json").write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "artifact": {"name": "unfixed"},
+                        "vulnerability": {
+                            "id": "CVE-UNFIXED",
+                            "severity": "Critical",
+                            "fix": {"versions": []},
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    inspect = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
+    inspect.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
+    identity = mocker.patch(
+        "scripts.container.summarize_supply_chain.oci_identity",
+        return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
+    )
+    arguments = [
+        "summary",
+        "--image",
+        "image:test",
+        "--artifacts",
+        str(tmp_path),
+        "--expected-image-id",
+        f"sha256:{'2' * 64}",
+    ]
+    monkeypatch.setattr(sys, "argv", arguments)
+    assert summarize_supply_chain.main() == 0
+
+    monkeypatch.setattr(sys, "argv", [*arguments, "--release"])
+    assert summarize_supply_chain.main() == 1
+
+    identity.return_value = (f"sha256:{'1' * 64}", f"sha256:{'3' * 64}")
+    assert summarize_supply_chain.main() == 1
+
+
+def _write_release_bundle(path: Path) -> str:
+    source_names = (
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+    )
+    for name in source_names:
+        (path / name).write_bytes(f"content for {name}".encode())
+    source_digests = {name: integrity.sha256_file(path / name) for name in source_names}
+    (path / "image-metadata.json").write_text(
+        json.dumps({"artifacts": source_digests}), encoding="utf-8"
+    )
+    return verify_supply_chain.create_manifest(path)
+
+
+def test_release_bundle_verifier_accepts_exact_digest_bound_artifacts(
+    tmp_path: Path,
+) -> None:
+    expected = _write_release_bundle(tmp_path)
+
+    verify_supply_chain.verify_bundle(tmp_path, expected_manifest_sha256=expected)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda path: (path / "image.oci.tar").write_bytes(b"changed"), "mismatch"),
+        (
+            lambda path: (path / "release-bundle.sha256").write_text(
+                "unsafe", encoding="ascii"
+            ),
+            "trust anchor mismatch",
+        ),
+        (
+            lambda path: (path / "release-bundle.sha256").write_text(
+                (path / "release-bundle.sha256").read_text(encoding="ascii")
+                + ("0" * 64)
+                + "  extra.txt\n",
+                encoding="ascii",
+            ),
+            "trust anchor mismatch",
+        ),
+        (lambda path: (path / "extra.txt").write_text("extra"), "exact artifact set"),
+    ],
+)
+def test_release_bundle_verifier_rejects_substitution_and_malformed_evidence(
+    tmp_path: Path, mutation: Callable[[Path], object], message: str
+) -> None:
+    expected = _write_release_bundle(tmp_path)
+    mutation(tmp_path)
+
+    with pytest.raises(verify_supply_chain.SupplyChainVerificationError, match=message):
+        verify_supply_chain.verify_bundle(tmp_path, expected_manifest_sha256=expected)
+
+
+def test_release_bundle_verifier_rejects_internally_inconsistent_metadata(
+    tmp_path: Path,
+) -> None:
+    _write_release_bundle(tmp_path)
+    metadata_path = tmp_path / "image-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["artifacts"]["image.oci.tar"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    manifest_path = tmp_path / "release-bundle.sha256"
+    lines = manifest_path.read_text(encoding="ascii").splitlines()
+    manifest_path.write_text(
+        "\n".join(
+            (
+                f"{integrity.sha256_file(metadata_path)}  image-metadata.json"
+                if line.endswith("  image-metadata.json")
+                else line
+            )
+            for line in lines
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+    forged_anchor = integrity.sha256_file(manifest_path)
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError,
+        match="image metadata digest mismatch",
+    ):
+        verify_supply_chain.verify_bundle(
+            tmp_path, expected_manifest_sha256=forged_anchor
+        )
+
+
+def test_release_bundle_verifier_rejects_symlinked_artifact(tmp_path: Path) -> None:
+    expected = _write_release_bundle(tmp_path)
+    target = tmp_path.parent / f"{tmp_path.name}-outside.tar"
+    target.write_bytes((tmp_path / "image.oci.tar").read_bytes())
+    (tmp_path / "image.oci.tar").unlink()
+    (tmp_path / "image.oci.tar").symlink_to(target)
+
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError, match="artifact is unsafe"
+    ):
+        verify_supply_chain.verify_bundle(tmp_path, expected_manifest_sha256=expected)
+
+
+def test_release_bundle_verifier_rejects_forged_bundle_without_trusted_anchor(
+    tmp_path: Path,
+) -> None:
+    trusted_anchor = _write_release_bundle(tmp_path)
+    (tmp_path / "image.oci.tar").write_bytes(b"coherent forgery")
+    metadata = json.loads((tmp_path / "image-metadata.json").read_text())
+    metadata["artifacts"]["image.oci.tar"] = integrity.sha256_file(
+        tmp_path / "image.oci.tar"
+    )
+    (tmp_path / "image-metadata.json").write_text(json.dumps(metadata))
+    (tmp_path / "release-bundle.sha256").unlink()
+    verify_supply_chain.create_manifest(tmp_path)
+
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError, match="trust anchor mismatch"
+    ):
+        verify_supply_chain.verify_bundle(
+            tmp_path, expected_manifest_sha256=trusted_anchor
+        )
+
+
+def test_release_bundle_verifier_rejects_symlinked_manifest_and_directory(
+    tmp_path: Path,
+) -> None:
+    expected = _write_release_bundle(tmp_path)
+    manifest = tmp_path / "release-bundle.sha256"
+    external = tmp_path.parent / f"{tmp_path.name}-manifest"
+    manifest.rename(external)
+    manifest.symlink_to(external)
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError, match="manifest is unsafe"
+    ):
+        verify_supply_chain.verify_bundle(tmp_path, expected_manifest_sha256=expected)
+
+    manifest.unlink()
+    external.rename(manifest)
+    directory_link = tmp_path.parent / f"{tmp_path.name}-link"
+    directory_link.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError, match="directory is unsafe"
+    ):
+        verify_supply_chain.verify_bundle(
+            directory_link, expected_manifest_sha256=expected
+        )
+
+
+def test_sha256_file_streams_without_path_read_bytes(mocker, tmp_path: Path) -> None:
+    artifact = tmp_path / "large.oci.tar"
+    payload = b"a" * (2 * 1024 * 1024 + 17)
+    artifact.write_bytes(payload)
+    read_bytes = mocker.patch.object(Path, "read_bytes", side_effect=AssertionError)
+
+    assert integrity.sha256_file(artifact) == hashlib.sha256(payload).hexdigest()
+    read_bytes.assert_not_called()
+
+
+def _add_tar_bytes(archive: tarfile.TarFile, name: str, payload: bytes) -> None:
+    member = tarfile.TarInfo(name)
+    member.size = len(payload)
+    archive.addfile(member, io.BytesIO(payload))
+
+
+def test_oci_identity_is_derived_from_verified_archive(tmp_path: Path) -> None:
+    config = json.dumps({"rootfs": {"type": "layers", "diff_ids": []}}).encode()
+    config_hex = hashlib.sha256(config).hexdigest()
+    manifest = json.dumps(
+        {
+            "schemaVersion": 2,
+            "config": {"digest": f"sha256:{config_hex}", "size": len(config)},
+            "layers": [],
+        }
+    ).encode()
+    manifest_hex = hashlib.sha256(manifest).hexdigest()
+    index = json.dumps(
+        {
+            "schemaVersion": 2,
+            "manifests": [{"digest": f"sha256:{manifest_hex}", "size": len(manifest)}],
+        }
+    ).encode()
+    archive_path = tmp_path / "image.oci.tar"
+    with tarfile.open(archive_path, "w:") as archive:
+        _add_tar_bytes(archive, "index.json", index)
+        _add_tar_bytes(archive, f"blobs/sha256/{manifest_hex}", manifest)
+        _add_tar_bytes(archive, f"blobs/sha256/{config_hex}", config)
+
+    assert integrity.oci_identity(archive_path) == (
+        f"sha256:{manifest_hex}",
+        f"sha256:{config_hex}",
+    )
+
+    tampered = json.dumps({"rootfs": {"type": "layers", "diff_ids": ["bad"]}}).encode()
+    with tarfile.open(archive_path, "w:") as archive:
+        _add_tar_bytes(archive, "index.json", index)
+        _add_tar_bytes(archive, f"blobs/sha256/{manifest_hex}", manifest)
+        _add_tar_bytes(archive, f"blobs/sha256/{config_hex}", tampered)
+    with pytest.raises(integrity.IntegrityError, match="digest mismatch"):
+        integrity.oci_identity(archive_path)
