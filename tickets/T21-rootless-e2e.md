@@ -2,7 +2,7 @@
 ticket: T21
 linear_id: G1L-331
 linear_url: https://linear.app/g1lom/issue/G1L-331/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -76,6 +76,11 @@ Run E2E for both profiles with three identities, real conversion, restart recove
 - 2026-08-25: Final independent review found no remaining blocking or non-blocking correctness
   issues after the distributed API-and-worker restart, private failure-only conversion results,
   recovery-browser diagnostics, and widened expiration boundary were revalidated in both images.
+- 2026-08-25: PR #57 exact-head CI run `32801768871` passed every required domain, including both
+  final-rootless-image E2E profiles. The reviewed head `12a2efe` was squash-merged as `c99fab0`, and
+  exact-main run `32802323844` passed every job. The host-only document-engine limitation is fully
+  covered by successful final-image and CI engine execution. All acceptance criteria are verified
+  on `main`; T21 is `Done`.
 
 ## Synchronization
 

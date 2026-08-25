@@ -2,7 +2,7 @@
 ticket: T19
 linear_id: G1L-329
 linear_url: https://linear.app/g1lom/issue/G1L-329/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -154,6 +154,13 @@ Add structured logs, correlation, metrics, queue observability, audit, version t
   no-coverage suites each pass 1,080 tests, with 95.43% coverage in the covered run. Ruff, `ty`, and
   `git diff --check` pass. T19 remains `In Progress` pending CI confirmation, independent review,
   merge, final-image evidence, and verification on `main`.
+- 2026-08-25: T19 implementation PR #54 was merged as `3056736` after its exact-head CI run
+  `32784334747` passed, and exact-main run `32784574765` then passed. T21 PR #57 supplied the
+  deferred final-rootless-image evidence for both standalone and distributed profiles, including
+  API and per-worker metrics, isolated readiness failures, deterministic audit behavior, and audit
+  preservation across backup and restore. Its exact-head run `32801768871` passed, it was merged as
+  `c99fab0`, and exact-main run `32802323844` passed. Independent review found no remaining
+  actionable issue. All acceptance evidence is now verified on `main`; T19 is `Done`.
 
 ## Synchronization
 
