@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from md_converter.app import AppComponents
-from md_converter.config import ConfigurationError, Settings
-from md_converter.runtime import build_embedded_app, main, run_external_worker
+from markweave.app import AppComponents
+from markweave.config import ConfigurationError, Settings
+from markweave.runtime import build_embedded_app, main, run_external_worker
 from tests.settings import template_settings
 
 pytestmark = pytest.mark.unit
@@ -52,11 +52,9 @@ def test_embedded_runtime_assembles_one_owned_standalone_lifecycle(
     worker = mocker.Mock()
     components.build_embedded_worker.return_value = worker
     expected = mocker.Mock()
-    mocker.patch("md_converter.runtime.build_components", return_value=components)
-    mocker.patch(
-        "md_converter.runtime.build_production_processor", return_value=processor
-    )
-    create = mocker.patch("md_converter.runtime.create_app", return_value=expected)
+    mocker.patch("markweave.runtime.build_components", return_value=components)
+    mocker.patch("markweave.runtime.build_production_processor", return_value=processor)
+    create = mocker.patch("markweave.runtime.create_app", return_value=expected)
 
     assert build_embedded_app(settings) is expected
 
@@ -82,9 +80,9 @@ def test_runtime_rejects_mixed_profiles_and_closes_failed_assembly(
 
     standalone = _settings(tmp_path, profile="standalone")
     components = mocker.Mock(spec=AppComponents)
-    mocker.patch("md_converter.runtime.build_components", return_value=components)
+    mocker.patch("markweave.runtime.build_components", return_value=components)
     mocker.patch(
-        "md_converter.runtime.build_production_processor",
+        "markweave.runtime.build_production_processor",
         side_effect=ConfigurationError("failure"),
     )
     with pytest.raises(ConfigurationError, match="failure"):
@@ -100,10 +98,8 @@ def test_external_runtime_runs_signal_aware_loop_and_closes_components(
     processor = mocker.Mock()
     runtime = mocker.Mock()
     components.build_external_worker_runtime.return_value = runtime
-    mocker.patch("md_converter.runtime.build_components", return_value=components)
-    mocker.patch(
-        "md_converter.runtime.build_production_processor", return_value=processor
-    )
+    mocker.patch("markweave.runtime.build_components", return_value=components)
+    mocker.patch("markweave.runtime.build_production_processor", return_value=processor)
 
     run_external_worker(settings)
 
@@ -117,9 +113,9 @@ def test_external_runtime_runs_signal_aware_loop_and_closes_components(
 
 def test_main_dispatches_only_the_two_worker_modes(mocker) -> None:
     app = mocker.Mock()
-    mocker.patch("md_converter.runtime.build_embedded_app", return_value=app)
-    serve = mocker.patch("md_converter.runtime.uvicorn.run")
-    external = mocker.patch("md_converter.runtime.run_external_worker")
+    mocker.patch("markweave.runtime.build_embedded_app", return_value=app)
+    serve = mocker.patch("markweave.runtime.uvicorn.run")
+    external = mocker.patch("markweave.runtime.run_external_worker")
 
     assert main(("embedded-worker",)) == 0
     serve.assert_called_once()

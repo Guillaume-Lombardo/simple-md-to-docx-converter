@@ -8,9 +8,9 @@ from pathlib import Path
 
 import uvicorn
 
-from md_converter.app import create_app
-from md_converter.config import Settings
-from md_converter.malware import TrustingUploadScanner
+from markweave.app import create_app
+from markweave.config import Settings
+from markweave.malware import TrustingUploadScanner
 from tests.settings import template_settings
 
 

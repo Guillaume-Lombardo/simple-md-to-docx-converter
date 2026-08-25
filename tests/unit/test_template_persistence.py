@@ -9,19 +9,19 @@ import pytest
 from pytest_mock import MockerFixture
 from sqlalchemy.exc import SQLAlchemyError
 
-from md_converter.auth.models import Role, User
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.sql import SqlUserRepository, create_database_engine
-from md_converter.persistence.templates import (
+from markweave.auth.models import Role, User
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.sql import SqlUserRepository, create_database_engine
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.templates.errors import (
+from markweave.templates.errors import (
     TemplateConflictError,
     TemplateUnavailableError,
 )
-from md_converter.templates.models import (
+from markweave.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
     TemplatePublicationState,
@@ -31,16 +31,16 @@ from md_converter.templates.models import (
 )
 
 REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260823_02_template_identity"
+    "markweave.persistence.migrations.versions.20260823_02_template_identity"
 )
 VERSION_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_04_template_versions"
+    "markweave.persistence.migrations.versions.20260824_04_template_versions"
 )
 INTEGRITY_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_05_template_integrity"
+    "markweave.persistence.migrations.versions.20260824_05_template_integrity"
 )
 LEASE_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_06_template_publication_leases"
+    "markweave.persistence.migrations.versions.20260824_06_template_publication_leases"
 )
 
 
@@ -373,7 +373,7 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
         uuid4(), owner_id, "Private", "secret marker", TemplateStatus.ACTIVE
     )
     mocker.patch(
-        "md_converter.persistence.templates.DatabaseSession",
+        "markweave.persistence.templates.DatabaseSession",
         side_effect=SQLAlchemyError("private SQL and values"),
     )
     operations = (

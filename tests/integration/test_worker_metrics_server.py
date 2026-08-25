@@ -12,7 +12,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from md_converter.observability import (
+from markweave.observability import (
     MetricsHttpServer,
     MetricsServerError,
     OperationalMetrics,

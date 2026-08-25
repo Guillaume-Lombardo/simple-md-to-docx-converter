@@ -10,9 +10,9 @@ import pytest
 from pytest_mock import MockerFixture
 from sqlalchemy.exc import SQLAlchemyError
 
-from md_converter.jobs.errors import JobRepositoryError
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.observability import (
+from markweave.jobs.errors import JobRepositoryError
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.observability import (
     SqlAuditReader,
     SqlOperationalObserver,
 )
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.unit
 
 
 def _database_session(mocker: MockerFixture):
-    session = mocker.patch("md_converter.persistence.observability.DatabaseSession")
+    session = mocker.patch("markweave.persistence.observability.DatabaseSession")
     return session.return_value.__enter__.return_value
 
 

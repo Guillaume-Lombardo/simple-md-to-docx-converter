@@ -10,17 +10,17 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.auth.errors import AuthenticationError
-from md_converter.auth.memory import MemorySessionRepository, MemoryUserRepository
-from md_converter.auth.models import Role, User, normalize_username
-from md_converter.auth.security import digest_token
-from md_converter.auth.service import (
+from markweave.auth.errors import AuthenticationError
+from markweave.auth.memory import MemorySessionRepository, MemoryUserRepository
+from markweave.auth.models import Role, User, normalize_username
+from markweave.auth.security import digest_token
+from markweave.auth.service import (
     AuthenticationService,
     AuthorizationService,
     SecurityRuntime,
     SessionPolicy,
 )
-from md_converter.config import ConfigurationError
+from markweave.config import ConfigurationError
 
 
 class FakeHasher:

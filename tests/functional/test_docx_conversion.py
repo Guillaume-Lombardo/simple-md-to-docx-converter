@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 import pytest
 
-from md_converter.conversion.service import DocxConversionService
-from md_converter.conversion.validation import ApprovedMarkdown
+from markweave.conversion.service import DocxConversionService
+from markweave.conversion.validation import ApprovedMarkdown
 
 
 class RecordingConverter:

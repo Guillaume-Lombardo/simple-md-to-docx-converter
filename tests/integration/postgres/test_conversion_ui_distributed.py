@@ -7,19 +7,19 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
 
-from md_converter.app import create_app
-from md_converter.config import Settings
-from md_converter.malware import TrustingUploadScanner
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.schema import (
+from markweave.app import create_app
+from markweave.config import Settings
+from markweave.malware import TrustingUploadScanner
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.schema import (
     ConversionJobRow,
     SystemTemplateSelectionRow,
     TemplateRow,
     UserRow,
 )
-from md_converter.persistence.sql import create_database_engine
-from md_converter.persistence.templates import SqlTemplateSelectionRepository
-from md_converter.storage import ObjectKey, ObjectScope
+from markweave.persistence.sql import create_database_engine
+from markweave.persistence.templates import SqlTemplateSelectionRepository
+from markweave.storage import ObjectKey, ObjectScope
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 

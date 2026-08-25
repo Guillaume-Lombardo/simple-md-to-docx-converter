@@ -15,25 +15,25 @@ from uuid import UUID, uuid4
 import uvicorn
 from fastapi import FastAPI, Request
 
-from md_converter.app import AppComponents, create_app
-from md_converter.auth.memory import (
+from markweave.app import AppComponents, create_app
+from markweave.auth.memory import (
     MemoryReadinessProbe,
     MemorySessionRepository,
     MemoryUserRepository,
 )
-from md_converter.auth.models import User
-from md_converter.auth.security import (
+from markweave.auth.models import User
+from markweave.auth.security import (
     Argon2idPasswordHasher,
     SecretsTokenGenerator,
     SystemClock,
 )
-from md_converter.auth.service import (
+from markweave.auth.service import (
     AuthenticationService,
     SecurityRuntime,
     SessionPolicy,
 )
-from md_converter.config import Settings
-from md_converter.jobs.models import (
+from markweave.config import Settings
+from markweave.jobs.models import (
     ConversionJob,
     JobOutput,
     JobPage,
@@ -41,16 +41,16 @@ from md_converter.jobs.models import (
     JobState,
     JobStep,
 )
-from md_converter.jobs.service import JobService
-from md_converter.storage import ObjectKey, ObjectNotFoundError
-from md_converter.templates.errors import TemplateStorageError
-from md_converter.templates.models import (
+from markweave.jobs.service import JobService
+from markweave.storage import ObjectKey, ObjectNotFoundError
+from markweave.templates.errors import TemplateStorageError
+from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
 )
-from md_converter.templates.service import TemplateService
+from markweave.templates.service import TemplateService
 from tests.settings import template_settings
 
 USERNAME = "browser-admin"

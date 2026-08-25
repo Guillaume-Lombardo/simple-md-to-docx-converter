@@ -7,8 +7,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from md_converter.config import StorageProfile
-from md_converter.recovery import FilesystemRestoreReportStore, RestoreExerciseRunner
+from markweave.config import StorageProfile
+from markweave.recovery import FilesystemRestoreReportStore, RestoreExerciseRunner
 
 
 def main() -> int:

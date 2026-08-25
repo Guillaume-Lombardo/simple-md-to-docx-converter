@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from md_converter.conversion.archive import ArchiveLimits, prepare_archive
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.service import DocxConversionService
+from markweave.conversion.archive import ArchiveLimits, prepare_archive
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.service import DocxConversionService
 from tests.golden.limits import ArchiveLimits as InspectionLimits
 from tests.golden.openxml import inspect_docx
 

@@ -9,7 +9,7 @@ import pytest
 from argon2 import PasswordHasher
 from argon2.low_level import Type
 
-from md_converter.auth.security import Argon2idPasswordHasher, SecretsTokenGenerator
+from markweave.auth.security import Argon2idPasswordHasher, SecretsTokenGenerator
 
 
 @pytest.mark.integration

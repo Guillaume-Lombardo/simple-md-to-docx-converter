@@ -11,7 +11,7 @@ project: Markdown to DOCX and PDF Converter
 
 ## Objective
 
-Finalize selective CI/CD, scheduled full suite, mutation testing, dependency updates, release image, SBOM, provenance, and secure publication of the `markweave` Python distribution to PyPI while preserving the public import `md_converter`.
+Finalize selective CI/CD, scheduled full suite, mutation testing, dependency updates, release image, SBOM, provenance, and secure publication of the `markweave` Python distribution to PyPI with the matching public import `markweave`.
 
 ## Scope
 
@@ -34,7 +34,7 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
 - The `markweave` sdist and wheel are built exactly once from the reviewed tagged source and expose
-  the documented public import `md_converter`.
+  the documented public import `markweave`.
 - Distribution metadata, installation, the documented public import, and artifact integrity are validated before publication.
 - The publication job publishes the exact artifacts that passed validation and never rebuilds them.
 - PyPI publication uses Trusted Publishing through GitHub OIDC and the dedicated GitHub `pypi` environment identity; no long-lived PyPI token is created or stored.
@@ -120,14 +120,14 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   GitHub Releases as the only release trigger, public image
   `ghcr.io/guillaume-lombardo/md-converter`, and the dedicated `pypi` environment without required
   reviewers or manual approval. PyPI rejected `md-converter`, so the approved public distribution
-  is `markweave` while the import remains `md_converter`. The complete suite remains Sunday at
+  and public import are both `markweave`. The complete suite remains Sunday at
   03:17 UTC with a 45-minute heavy-job timeout and at most two heavy jobs in parallel. The pending
   Trusted Publisher uses project `markweave`, owner `Guillaume-Lombardo`, repository
   `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`.
   Publishing the GitHub Release is the sole human gate; this removes a second-person approval and
   makes GitHub release-creation permissions and the upstream repository guard security-critical.
 - 2026-08-25: Implemented the remaining repository release contract. Apache-2.0 and PEP 440 version
-  `0.3` are carried by the `markweave` wheel and sdist while `md_converter` remains the public
+  `0.3` are carried by the `markweave` wheel and sdist, which expose `markweave` as the public
   import. The published-Release-only Python workflow builds once, verifies integrity, metadata,
   license inclusion, a clean Python 3.14 installation, and the public import, then uploads only the
   verified distributions with OIDC attestations from the `pypi` environment. The independent
@@ -139,6 +139,11 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   endpoints returned `404` during implementation. The dedicated GitHub environment, PyPI pending
   publisher, hosted release runs, public GHCR visibility, and post-upload verification remain
   external first-release actions; no release, package, image, or attestation was published here.
+- 2026-08-25: Before the first publication, the project manager replaced the provisional
+  `md_converter` import with `markweave`, aligning the public distribution and import names. The
+  source tree, runtime entry points, release validation, coverage and mutation configuration,
+  tests, and documentation now use `markweave`; established `MD_CONVERTER` environment variables,
+  cookies, metrics, database names, and container product identifiers remain unchanged.
 
 ## Synchronization
 

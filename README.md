@@ -22,7 +22,7 @@ queue and worker metrics, bounded immutable-audit reads, version traceability, a
 readiness are available; final-container features remain under development.
 
 The project is licensed under [Apache-2.0](LICENSE). The approved first public version is `0.3`,
-published on PyPI as `markweave` while preserving the public Python import `md_converter`. See
+published on PyPI as `markweave` with the matching public Python import `markweave`. See
 [the release process](docs/releasing.md) for the protected PyPI and GHCR publication contract and
 required one-time external configuration.
 
@@ -59,7 +59,7 @@ uv run pytest
 ```
 
 These Pytest commands independently enforce at least 90% overall coverage and 90% branch-only
-coverage for the `md_converter` application package. Pull-request CI also enforces 90% coverage of
+coverage for the `markweave` application package. Pull-request CI also enforces 90% coverage of
 changed executable application lines. Tests use `pytest-mock`; direct imports from `unittest.mock`
 are rejected.
 
@@ -73,7 +73,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 
 ## Repository map
 
-- `src/md_converter/`: installable Python package
+- `src/markweave/`: installable Python package
 - `tests/`: automated tests
 - `build-constraints.txt`: hash-checked constraints exported from the build dependency group
 - `docs/architecture.md`: target architecture and component boundaries

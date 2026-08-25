@@ -6,12 +6,12 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.jobs.models import JobProcessResult
-from md_converter.jobs.policy import JobExecutionBudget
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy
-from md_converter.templates.errors import TemplateIntegrityError
-from md_converter.templates.models import TemplateVersion
-from md_converter.templates.processor import (
+from markweave.jobs.models import JobProcessResult
+from markweave.jobs.policy import JobExecutionBudget
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy
+from markweave.templates.errors import TemplateIntegrityError
+from markweave.templates.models import TemplateVersion
+from markweave.templates.processor import (
     FrozenTemplateJobProcessor,
     build_template_conversion_worker,
 )

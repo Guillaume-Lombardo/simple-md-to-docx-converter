@@ -47,7 +47,7 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   `375abd7` after T11, T12, T13, and T18 were confirmed `Done`. This workstream owns the final image,
   rootless runtime modes, build/deployment assets, SBOM and vulnerability scans, smoke/container
   tests, and operational documentation. T19 owns application source observability and readiness;
-  T20 will report rather than edit `src/md_converter/**` if an application change is required.
+  T20 will report rather than edit `src/markweave/**` if an application change is required.
 - 2026-08-24: Built the final UBI 9/Python 3.14 image twice with an identical image ID and verified
   its rootless, read-only, capability-free runtime plus Pandoc, Mermaid/Chromium, and LibreOffice
   conversions. The distributed PostgreSQL/RustFS API smoke test passes. CycloneDX and SPDX SBOMs

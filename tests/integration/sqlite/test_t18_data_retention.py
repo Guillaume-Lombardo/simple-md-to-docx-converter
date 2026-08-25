@@ -9,18 +9,18 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DatabaseSession
 
-from md_converter.persistence.migrations import downgrade_database, upgrade_database
-from md_converter.persistence.retention import SqlRetentionRepository
-from md_converter.persistence.schema import (
+from markweave.persistence.migrations import downgrade_database, upgrade_database
+from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.schema import (
     RetentionCleanupRunRow,
     TemplateAuditRow,
     TemplateRow,
     TemplateVersionRow,
     UserRow,
 )
-from md_converter.persistence.sql import create_database_engine, standalone_database_url
-from md_converter.retention import DataRetentionPolicy, RetentionService
-from md_converter.storage import FilesystemObjectStore, ObjectKey, ObjectScope
+from markweave.persistence.sql import create_database_engine, standalone_database_url
+from markweave.retention import DataRetentionPolicy, RetentionService
+from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 
 
 @pytest.mark.integration

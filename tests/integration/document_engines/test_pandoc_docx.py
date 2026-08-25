@@ -11,10 +11,10 @@ from xml.etree import ElementTree
 
 import pytest
 
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.service import DocxConversionService
-from md_converter.conversion.validation import ApprovedMarkdown
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.service import DocxConversionService
+from markweave.conversion.validation import ApprovedMarkdown
 from tests.golden.limits import ArchiveLimits
 from tests.golden.openxml import WORD_NAMESPACE, inspect_docx
 

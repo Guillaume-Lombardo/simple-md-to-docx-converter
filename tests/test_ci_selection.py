@@ -25,7 +25,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
 @pytest.mark.unit
 def test_source_change_selects_all_application_domains_except_container() -> None:
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
-    selected = select_domains(["src/md_converter/service.py"])
+    selected = select_domains(["src/markweave/service.py"])
     assert selected == sorted(set(DOMAIN_PATTERNS) - {"ci-infrastructure", "container"})
 
 
@@ -116,7 +116,7 @@ def test_committed_ci_infrastructure_domain_is_active_and_runnable() -> None:
 def test_t06_functional_domain_is_active_and_runnable() -> None:
     """Hosted CI executes the T06 ASGI and real Argon2 integration suite."""
     registry = load_registry(Path(".github/ci/domains.json"))
-    selected = select_domains(["src/md_converter/app.py"])
+    selected = select_domains(["src/markweave/app.py"])
     planned, runnable = classify_domains(selected, registry)
     assert "functional" not in planned
     assert "functional" in runnable
@@ -314,7 +314,7 @@ def test_registry_rejects_invalid_domain_entry(
 def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
     """The workflow receives deterministic JSON arrays through GITHUB_OUTPUT."""
     paths = tmp_path / "paths"
-    paths.write_bytes(b"src/md_converter/service.py\0")
+    paths.write_bytes(b"src/markweave/service.py\0")
     registry = tmp_path / "domains.json"
     registry.write_text(
         json.dumps(

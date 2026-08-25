@@ -73,7 +73,7 @@ def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
 def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
     dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["target"]
-    target = "md_converter.observability.x__normalize_method__mutmut_*"
+    target = "markweave.observability.x__normalize_method__mutmut_*"
     assert dispatch["type"] == "choice"
     assert dispatch["default"] == target
     assert dispatch["options"] == [target]

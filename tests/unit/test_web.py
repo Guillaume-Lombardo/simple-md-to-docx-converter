@@ -5,10 +5,10 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.auth.models import Role, User
-from md_converter.jobs.models import ConversionJob, JobOutput, JobState, JobStep
-from md_converter.templates.models import TemplateIdentity, TemplateStatus
-from md_converter.web import render_conversion_page, render_login_page
+from markweave.auth.models import Role, User
+from markweave.jobs.models import ConversionJob, JobOutput, JobState, JobStep
+from markweave.templates.models import TemplateIdentity, TemplateStatus
+from markweave.web import render_conversion_page, render_login_page
 
 
 @pytest.mark.unit

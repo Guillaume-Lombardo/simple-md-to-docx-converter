@@ -14,18 +14,18 @@ from xml.etree import ElementTree
 import pytest
 from PIL import Image
 
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits
-from md_converter.conversion.mermaid import (
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits
+from markweave.conversion.mermaid import (
     MermaidCliRenderer,
     MermaidConfig,
     MermaidLimits,
     MermaidPreprocessingConverter,
     render_mermaid,
 )
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.service import DocxConversionService
-from md_converter.conversion.validation import ApprovedMarkdown
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.service import DocxConversionService
+from markweave.conversion.validation import ApprovedMarkdown
 
 pytestmark = [
     pytest.mark.integration,

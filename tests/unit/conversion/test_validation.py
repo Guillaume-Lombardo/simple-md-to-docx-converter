@@ -7,11 +7,11 @@ from typing import cast
 import pytest
 from PIL import Image
 
-from md_converter.conversion.archive import ApprovedDocument, ApprovedResource
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits, normalize_image
-from md_converter.conversion.service import DocxConversionService
-from md_converter.conversion.validation import (
+from markweave.conversion.archive import ApprovedDocument, ApprovedResource
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits, normalize_image
+from markweave.conversion.service import DocxConversionService
+from markweave.conversion.validation import (
     PANDOC_READER,
     validate_document,
     validate_markdown,

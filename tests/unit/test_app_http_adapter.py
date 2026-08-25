@@ -10,33 +10,33 @@ import pytest
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from md_converter.app import AppComponents, ErrorResponse, create_app, error_responses
-from md_converter.auth.errors import INVALID_CREDENTIALS
-from md_converter.auth.memory import MemoryReadinessProbe
-from md_converter.auth.models import LoginResult, Role, User
-from md_converter.auth.service import AuthenticationService
-from md_converter.config import Settings
-from md_converter.jobs.errors import (
+from markweave.app import AppComponents, ErrorResponse, create_app, error_responses
+from markweave.auth.errors import INVALID_CREDENTIALS
+from markweave.auth.memory import MemoryReadinessProbe
+from markweave.auth.models import LoginResult, Role, User
+from markweave.auth.service import AuthenticationService
+from markweave.config import Settings
+from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.models import JobOutput, JobPage, JobState, JobStep
-from md_converter.jobs.runner import EmbeddedWorker
-from md_converter.jobs.service import JobService
-from md_converter.malware import (
+from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep
+from markweave.jobs.runner import EmbeddedWorker
+from markweave.jobs.service import JobService
+from markweave.malware import (
     MalwareDetectedError,
     MalwareScannerUnavailableError,
     UploadScanner,
 )
-from md_converter.observability import QueueObserver
-from md_converter.persistence.errors import PersistenceError
-from md_converter.templates.models import (
+from markweave.observability import QueueObserver
+from markweave.persistence.errors import PersistenceError
+from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
     TemplateStatus,
     TemplateVersion,
 )
-from md_converter.templates.service import TemplateService
+from markweave.templates.service import TemplateService
 from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
@@ -118,7 +118,7 @@ def test_application_lifespan_closes_owned_engines_after_success_or_failure(
 ) -> None:
     engine = mocker.Mock()
     components = _lifecycle_components(mocker, engine)
-    mocker.patch("md_converter.app.build_components", return_value=components)
+    mocker.patch("markweave.app.build_components", return_value=components)
     app = create_app(_lifecycle_settings())
     if request_fails:
 
@@ -215,7 +215,7 @@ def test_application_factory_closes_owned_engines_on_startup_failure(
         "bootstrap_admin",
         side_effect=RuntimeError("startup failed"),
     )
-    mocker.patch("md_converter.app.build_components", return_value=components)
+    mocker.patch("markweave.app.build_components", return_value=components)
 
     with pytest.raises(RuntimeError, match="startup failed"):
         create_app(_lifecycle_settings())

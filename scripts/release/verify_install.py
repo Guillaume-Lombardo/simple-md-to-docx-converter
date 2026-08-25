@@ -31,9 +31,9 @@ import sys
 installed = version(sys.argv[1])
 if installed != sys.argv[2]:
     raise SystemExit(f"unexpected installed version: {installed}")
-from md_converter import create_app
+from markweave import create_app
 if not callable(create_app):
-    raise SystemExit("md_converter.create_app is not callable")
+    raise SystemExit("markweave.create_app is not callable")
 """
 
 

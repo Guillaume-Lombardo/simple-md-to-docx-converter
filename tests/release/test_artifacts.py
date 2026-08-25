@@ -29,9 +29,9 @@ from scripts.release.artifacts import (
 
 pytestmark = pytest.mark.unit
 
-NAME = "md-converter"
+NAME = "markweave"
 VERSION = "0.1.0"
-DIST = "md_converter"
+DIST = "markweave"
 ROOT = f"{DIST}-{VERSION}"
 DIST_INFO = f"{ROOT}.dist-info"
 
@@ -277,6 +277,13 @@ def test_wheel_rejects_generated_bytecode(tmp_path: Path) -> None:
         verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
 
 
+def test_wheel_rejects_legacy_import_package(tmp_path: Path) -> None:
+    """The published wheel cannot retain the superseded import path."""
+    wheel = _write_wheel(tmp_path, extra=("md_converter/__init__.py", b"legacy import"))
+    with pytest.raises(ArtifactError, match="legacy public import package"):
+        verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+
+
 def test_wheel_rejects_member_count_bomb(tmp_path: Path, mocker: MockerFixture) -> None:
     """A ZIP central directory cannot force unbounded member processing."""
     wheel = _write_wheel(tmp_path)
@@ -382,6 +389,16 @@ def test_sdist_rejects_links(tmp_path: Path) -> None:
     """Links cannot redirect source distribution extraction."""
     sdist = _write_sdist(tmp_path, link_name=f"{ROOT}/linked-readme")
     with pytest.raises(ArtifactError, match="non-regular"):
+        verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
+
+
+def test_sdist_rejects_legacy_import_package(tmp_path: Path) -> None:
+    """The published source archive cannot retain the superseded package tree."""
+    sdist = _write_sdist(
+        tmp_path,
+        extra=(f"{ROOT}/src/md_converter/__init__.py", b"legacy import"),
+    )
+    with pytest.raises(ArtifactError, match="legacy public import package"):
         verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
 
 

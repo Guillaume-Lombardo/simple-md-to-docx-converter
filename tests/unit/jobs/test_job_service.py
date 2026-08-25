@@ -9,11 +9,11 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.jobs.errors import JobConflictError, JobNotFoundError
-from md_converter.jobs.models import JobOutput, JobRequest, JobState, JobStep
-from md_converter.jobs.ports import JobRepository
-from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.storage import ObjectNotFoundError, ObjectStore
+from markweave.jobs.errors import JobConflictError, JobNotFoundError
+from markweave.jobs.models import JobOutput, JobRequest, JobState, JobStep
+from markweave.jobs.ports import JobRepository
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.storage import ObjectNotFoundError, ObjectStore
 from tests.unit.jobs.test_job_models import job
 
 pytestmark = pytest.mark.unit

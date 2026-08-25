@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 
-from md_converter.config import StorageProfile
-from md_converter.recovery import (
+from markweave.config import StorageProfile
+from markweave.recovery import (
     FilesystemRestoreReportStore,
     RestoreExerciseRunner,
 )

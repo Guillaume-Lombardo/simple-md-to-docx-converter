@@ -19,9 +19,9 @@ pytestmark = pytest.mark.unit
 
 def _verified(directory: Path) -> ArtifactSet:
     return ArtifactSet(
-        wheel=directory / "md_converter-0.1.0-py3-none-any.whl",
-        sdist=directory / "md_converter-0.1.0.tar.gz",
-        integrity=(("md_converter-0.1.0-py3-none-any.whl", "a" * 64),),
+        wheel=directory / "markweave-0.1.0-py3-none-any.whl",
+        sdist=directory / "markweave-0.1.0.tar.gz",
+        integrity=(("markweave-0.1.0-py3-none-any.whl", "a" * 64),),
     )
 
 
@@ -57,7 +57,7 @@ def test_build_release_stages_once_then_publishes_atomically(
 
     result = build_release(
         output,
-        expected_name="md-converter",
+        expected_name="markweave",
         expected_version="0.1.0",
         constraint=Path("build-constraints.txt"),
     )
@@ -84,7 +84,7 @@ def test_build_release_stages_once_then_publishes_atomically(
     assert [name for name, _ in events] == ["manifest", "verify", "publish"]
     assert all(directory == staged for _, directory in events)
     assert output.is_dir()
-    assert result.wheel == output / "md_converter-0.1.0-py3-none-any.whl"
+    assert result.wheel == output / "markweave-0.1.0-py3-none-any.whl"
     assert list(tmp_path.glob(".dist-staging-*")) == []
 
 
@@ -99,7 +99,7 @@ def test_build_release_rejects_any_existing_output(
     with pytest.raises(ArtifactError, match="already exists"):
         build_release(
             output,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
             constraint=Path("build-constraints.txt"),
         )
@@ -130,7 +130,7 @@ def test_publication_race_preserves_target_and_cleans_staging(
     with pytest.raises(ArtifactError, match="already exists"):
         build_release(
             output,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
             constraint=Path("build-constraints.txt"),
         )
@@ -169,7 +169,7 @@ def test_timeout_is_normalized_cleanup_allows_retry(
     with pytest.raises(ArtifactError, match="build timed out"):
         build_release(
             output,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
             constraint=Path("build-constraints.txt"),
         )
@@ -186,7 +186,7 @@ def test_timeout_is_normalized_cleanup_allows_retry(
     mocker.patch("scripts.release.build._publish_no_replace", side_effect=_publish)
     build_release(
         output,
-        expected_name="md-converter",
+        expected_name="markweave",
         expected_version="0.1.0",
         constraint=Path("build-constraints.txt"),
     )

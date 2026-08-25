@@ -58,10 +58,10 @@ build-constraint-dependencies = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src/md_converter"]
+include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src/markweave"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/md_converter"]
+packages = ["src/markweave"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -69,7 +69,7 @@ addopts = [
     "--strict-markers",
     "-p",
     "scripts.ci.pytest_branch_coverage",
-    "--cov=md_converter",
+    "--cov=markweave",
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-report=json:coverage.json",
@@ -131,14 +131,14 @@ include = ["src", "scripts", "tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["md_converter"]
+source = ["markweave"]
 
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
 
 [tool.mutmut]
-source_paths = ["src/md_converter"]
+source_paths = ["src/markweave"]
 pytest_add_cli_args = [
     "-c",
     "/dev/null",

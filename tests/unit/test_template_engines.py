@@ -10,17 +10,17 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.templates import engines
-from md_converter.templates.engines import (
+from markweave.templates import engines
+from markweave.templates.engines import (
     TemplateActivationContext,
     TemplateEngineConfig,
     validate_template_for_activation,
 )
-from md_converter.templates.errors import (
+from markweave.templates.errors import (
     TemplateValidationError,
     TemplateValidationErrorCode,
 )
-from md_converter.templates.validation import (
+from markweave.templates.validation import (
     APPROVED_FONT_POLICY,
     TemplateFontDeclaration,
     TemplateLimits,

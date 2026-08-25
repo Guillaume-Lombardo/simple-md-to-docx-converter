@@ -7,24 +7,24 @@ import pytest
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from md_converter.auth.models import Role, User
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import (
+from markweave.auth.models import Role, User
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import (
     TemplatePreferenceRow,
     TemplateRow,
     UserRow,
 )
-from md_converter.persistence.sql import (
+from markweave.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.persistence.templates import (
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.templates.models import TemplateIdentity, TemplateStatus
+from markweave.templates.models import TemplateIdentity, TemplateStatus
 from tests.storage_contracts import (
     exercise_template_repository_contract,
     exercise_template_service_contract,

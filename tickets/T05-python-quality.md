@@ -44,7 +44,7 @@ Configure Ruff, ty, Pytest, pytest-cov, the pytest-mock restriction, 90% thresho
   reviewed subprocess vectors and test assertions/process probes.
 - 2026-08-23: Added a shell-free changed-line checker for pull requests and merge-group candidates.
   It compares reviewed commits with a zero-context Git diff, measures changed executable lines only
-  under `src/md_converter`, requires 90%, rejects changed application files missing from Coverage.py
+  under `src/markweave`, requires 90%, rejects changed application files missing from Coverage.py
   data, and passes changes with no executable application lines. The T03 light job produces the
   report; the stable `CI / gate`, action pins, permissions, cache policy, timeouts, draft behavior,
   domain lifecycle, and both future storage-profile domains remain unchanged.

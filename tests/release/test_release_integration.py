@@ -40,12 +40,14 @@ def test_real_build_validation_clean_install_and_tamper_failure(
     assert installed.sha256 == verified.sha256_for(verified.wheel)
     with zipfile.ZipFile(verified.wheel) as wheel:
         names = set(wheel.namelist())
-        assert "md_converter/__init__.py" in names
+        assert "markweave/__init__.py" in names
+        assert not any(name.startswith("md_converter/") for name in names)
         assert "markweave-0.3.dist-info/licenses/LICENSE" in names
     with tarfile.open(verified.sdist, mode="r:gz") as sdist:
         names = set(sdist.getnames())
         assert "markweave-0.3/LICENSE" in names
-        assert "markweave-0.3/src/md_converter/__init__.py" in names
+        assert "markweave-0.3/src/markweave/__init__.py" in names
+        assert not any("/src/md_converter/" in name for name in names)
 
     tampered = tmp_path / "tampered"
     shutil.copytree(output, tampered)

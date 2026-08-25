@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
-from md_converter.persistence.sql import create_database_engine
+from markweave.persistence.sql import create_database_engine
 
 
 def _drop_schema(admin_engine: Any, schema: str) -> None:

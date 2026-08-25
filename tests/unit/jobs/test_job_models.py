@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.jobs.models import (
+from markweave.jobs.models import (
     ConversionJob,
     JobOutput,
     JobState,

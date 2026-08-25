@@ -11,22 +11,22 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.config import ConfigurationError, Settings
-from md_converter.conversion.archive import ArchiveLimits
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits
-from md_converter.conversion.libreoffice import (
+from markweave.config import ConfigurationError, Settings
+from markweave.conversion.archive import ArchiveLimits
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits
+from markweave.conversion.libreoffice import (
     PdfArtifact,
     PdfPage,
     PdfTraceabilityManifest,
 )
-from md_converter.conversion.processor import (
+from markweave.conversion.processor import (
     ProcessorTraceability,
     ProductionTemplateAwareProcessor,
     build_production_processor,
 )
-from md_converter.jobs.errors import JobProcessingCancelled
-from md_converter.jobs.models import (
+from markweave.jobs.errors import JobProcessingCancelled
+from markweave.jobs.models import (
     ConversionJob,
     JobOutput,
     JobProcessResult,
@@ -34,8 +34,8 @@ from md_converter.jobs.models import (
     JobStep,
     SourceKind,
 )
-from md_converter.storage import ObjectKey, ObjectNotFoundError, ObjectScope
-from md_converter.templates.models import TemplateVersion
+from markweave.storage import ObjectKey, ObjectNotFoundError, ObjectScope
+from markweave.templates.models import TemplateVersion
 from tests.settings import template_settings
 
 pytestmark = pytest.mark.unit

@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from md_converter.jobs.errors import JobLeaseLostError
-from md_converter.jobs.models import (
+from markweave.jobs.errors import JobLeaseLostError
+from markweave.jobs.models import (
     JobFailure,
     JobOutput,
     JobState,
@@ -17,7 +17,7 @@ from md_converter.jobs.models import (
     LeaseHeartbeat,
     SourceKind,
 )
-from md_converter.persistence.jobs import SqlJobRepository
+from markweave.persistence.jobs import SqlJobRepository
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 LEASE_END = NOW + timedelta(seconds=30)

@@ -12,9 +12,9 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
-from md_converter.jobs.models import (
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.jobs.errors import JobLeaseLostError, JobProcessingCancelled
+from markweave.jobs.models import (
     ConversionJob,
     ExpiredJobObjects,
     JobOutput,
@@ -24,19 +24,19 @@ from md_converter.jobs.models import (
     result_manifest_object_id,
     result_object_id,
 )
-from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
-from md_converter.jobs.worker import (
+from markweave.jobs.ports import CancellationProbe, JobProcessor, JobRepository
+from markweave.jobs.worker import (
     ConversionWorker,
     MaintenanceCleaner,
     WorkerPolicy,
     WorkerRuntime,
 )
-from md_converter.observability import (
+from markweave.observability import (
     OperationalMetrics,
     QueueSnapshot,
     current_correlation_id,
 )
-from md_converter.storage import ObjectScope, ObjectStore, ObjectStoreError
+from markweave.storage import ObjectScope, ObjectStore, ObjectStoreError
 from tests.unit.jobs.test_job_models import job
 
 pytestmark = pytest.mark.unit
@@ -344,7 +344,7 @@ def test_worker_records_correlated_step_durations(mocker: MockerFixture) -> None
     clock_values = iter((0.0, 1.0, 2.0))
     metrics = OperationalMetrics()
     observed_correlations: list[str | None] = []
-    emitted = mocker.patch("md_converter.jobs.worker.log_event")
+    emitted = mocker.patch("markweave.jobs.worker.log_event")
     emitted.side_effect = lambda *_args, **_kwargs: observed_correlations.append(
         current_correlation_id()
     )
@@ -379,7 +379,7 @@ def test_worker_records_safe_failure_metric(mocker: MockerFixture) -> None:
     )
     metrics = OperationalMetrics()
     clock_values = iter((0.0, 1.0))
-    mocker.patch("md_converter.jobs.worker.log_event")
+    mocker.patch("markweave.jobs.worker.log_event")
     instance = ConversionWorker(
         worker_id="worker-1",
         runtime=WorkerRuntime(

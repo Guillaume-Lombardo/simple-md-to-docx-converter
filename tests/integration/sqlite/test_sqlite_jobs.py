@@ -12,9 +12,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Engine, inspect
 
-from md_converter.auth.models import Role, User
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.jobs.models import (
+from markweave.auth.models import Role, User
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.jobs.models import (
     ConversionJob,
     JobOutput,
     JobProcessResult,
@@ -23,30 +23,30 @@ from md_converter.jobs.models import (
     JobStep,
     LeaseHeartbeat,
 )
-from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import downgrade_database, upgrade_database
-from md_converter.persistence.sql import (
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import downgrade_database, upgrade_database
+from markweave.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.persistence.templates import (
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.storage import (
+from markweave.storage import (
     FilesystemObjectStore,
     ObjectKey,
     ObjectScope,
     ObjectStore,
     ObjectStoreError,
 )
-from md_converter.templates.models import TemplateVersion
-from md_converter.templates.processor import build_template_conversion_worker
-from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
-from md_converter.templates.validation import ValidatedTemplate
+from markweave.templates.models import TemplateVersion
+from markweave.templates.processor import build_template_conversion_worker
+from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
+from markweave.templates.validation import ValidatedTemplate
 from tests.job_repository_contracts import (
     TEMPLATE_ID,
     TEMPLATE_VERSION_ID,

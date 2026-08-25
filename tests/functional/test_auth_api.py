@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from md_converter.app import AppComponents, build_components, create_app
-from md_converter.auth.memory import MemoryReadinessProbe
-from md_converter.config import Settings
+from markweave.app import AppComponents, build_components, create_app
+from markweave.auth.memory import MemoryReadinessProbe
+from markweave.config import Settings
 from tests.settings import template_settings
 
 

@@ -37,7 +37,8 @@ MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 500
 READ_CHUNK_BYTES = 1024 * 1024
 RECORD = "RECORD"
-PUBLIC_IMPORT_PACKAGE = "md_converter"
+PUBLIC_IMPORT_PACKAGE = "markweave"
+LEGACY_IMPORT_PACKAGE = "md_converter"
 ARTIFACT_COUNT = 2
 RECORD_FIELD_COUNT = 3
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -536,6 +537,10 @@ def verify_wheel(path: Path, *, expected_name: str, expected_version: str) -> No
                     f"wheel is missing required members: {sorted(missing)}"
                 )
             if any(
+                PurePosixPath(name).parts[0] == LEGACY_IMPORT_PACKAGE for name in names
+            ):
+                raise ArtifactError("wheel contains the legacy public import package")
+            if any(
                 "__pycache__" in PurePosixPath(name).parts or name.endswith(".pyc")
                 for name in names
             ):
@@ -625,6 +630,11 @@ def verify_sdist(path: Path, *, expected_name: str, expected_version: str) -> No
     missing = required.difference(names)
     if missing:
         raise ArtifactError(f"sdist is missing required members: {sorted(missing)}")
+    if any(
+        PurePosixPath(name).parts[:3] == (expected_stem, "src", LEGACY_IMPORT_PACKAGE)
+        for name in names
+    ):
+        raise ArtifactError("sdist contains the legacy public import package")
     pkg_info_name = f"{expected_stem}/PKG-INFO"
     pyproject_name = f"{expected_stem}/pyproject.toml"
     _require_identity(

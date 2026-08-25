@@ -13,15 +13,15 @@ from pathlib import Path
 
 from PIL import Image
 
-from md_converter.conversion.libreoffice import (
+from markweave.conversion.libreoffice import (
     LibreOfficeConfig,
     LibreOfficePdfConverter,
     PdfLimits,
     PdfTraceabilityContext,
 )
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.validation import ApprovedMarkdown
-from md_converter.version import VERSION
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.validation import ApprovedMarkdown
+from markweave.version import VERSION
 from tests.golden.limits import RasterLimits
 from tests.golden.pdf import render_pdf
 from tests.golden.reference import normalize_reference_docx

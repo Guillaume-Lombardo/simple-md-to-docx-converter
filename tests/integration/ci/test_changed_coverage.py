@@ -48,7 +48,7 @@ def _git(repository: Path, *arguments: str) -> str:
 
 def _repository_with_changed_source(tmp_path: Path) -> tuple[Path, str, str]:
     repository = tmp_path / "repository"
-    source = repository / "src/md_converter/service.py"
+    source = repository / "src/markweave/service.py"
     source.parent.mkdir(parents=True)
     _git(repository.parent, "init", "--initial-branch=main", str(repository))
     _git(repository, "config", "user.email", "quality@example.invalid")
@@ -76,7 +76,7 @@ def test_real_git_diff_enforces_success_and_failure_boundary(
     report = tmp_path / "coverage.json"
     report.write_text(
         json.dumps(
-            {"files": {"src/md_converter/service.py": _file_coverage(covered=covered)}}
+            {"files": {"src/markweave/service.py": _file_coverage(covered=covered)}}
         ),
         encoding="utf-8",
     )

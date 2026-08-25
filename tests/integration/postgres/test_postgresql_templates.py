@@ -12,13 +12,13 @@ from sqlalchemy import Engine, delete, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from md_converter.auth.models import Role, User
-from md_converter.jobs.errors import JobRequestError
-from md_converter.jobs.models import JobOutput, JobSubmission
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import (
+from markweave.auth.models import Role, User
+from markweave.jobs.errors import JobRequestError
+from markweave.jobs.models import JobOutput, JobSubmission
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import (
     ConversionJobRow,
     SessionRow,
     SystemTemplateSelectionRow,
@@ -27,22 +27,22 @@ from md_converter.persistence.schema import (
     TemplateVersionRow,
     UserRow,
 )
-from md_converter.persistence.sql import SqlUserRepository, create_database_engine
-from md_converter.persistence.templates import (
+from markweave.persistence.sql import SqlUserRepository, create_database_engine
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.storage import ObjectKey, ObjectScope, S3ObjectStore
-from md_converter.templates.errors import TemplateConflictError
-from md_converter.templates.models import (
+from markweave.storage import ObjectKey, ObjectScope, S3ObjectStore
+from markweave.templates.errors import TemplateConflictError
+from markweave.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
     TemplateStatus,
     TemplateVersion,
 )
-from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
-from md_converter.templates.validation import ValidatedTemplate
+from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
+from markweave.templates.validation import ValidatedTemplate
 from tests.storage_contracts import (
     exercise_template_repository_contract,
     exercise_template_service_contract,

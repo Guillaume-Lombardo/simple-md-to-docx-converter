@@ -7,15 +7,15 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from md_converter.app import create_app
-from md_converter.config import Settings
-from md_converter.malware import TrustingUploadScanner
-from md_converter.persistence.sql import create_database_engine, standalone_database_url
-from md_converter.persistence.templates import (
+from markweave.app import create_app
+from markweave.config import Settings
+from markweave.malware import TrustingUploadScanner
+from markweave.persistence.sql import create_database_engine, standalone_database_url
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.templates.models import (
+from markweave.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
     TemplatePublicationState,

@@ -7,7 +7,7 @@ tag, opening a pull request, using the merge queue, or manually dispatching a wo
 publish Python or container artifacts.
 
 The source and `markweave` Python distribution are licensed under Apache-2.0. Its documented public
-import remains `md_converter`. The public container image is
+import is also `markweave`. The public container image is
 `ghcr.io/guillaume-lombardo/md-converter:0.3`. Release workflows pin every action by a full commit
 SHA and serialize each release without cancelling an upload in progress.
 
@@ -41,7 +41,7 @@ unrelated repositories.
 1. Require a clean `main` commit whose complete `CI / gate` run passed, including both rootless E2E
    profiles and the final-container domain. The approved complete suite runs Sunday at 03:17 UTC,
    gives each heavy job 45 minutes, and runs at most two heavy matrix jobs concurrently.
-2. Confirm `project.version`, `md_converter.__version__`, the OpenAPI version, and conversion
+2. Confirm `project.version`, `markweave.__version__`, the OpenAPI version, and conversion
    traceability all report `0.3`.
 3. Create the signed or protected tag `v0.3` at that reviewed commit and draft a GitHub Release from
    the tag. Do not publish it until the `pypi` environment and pending publisher above exist.
@@ -62,7 +62,7 @@ publisher became a normal publisher with the same owner, repository, workflow, a
 Install the wheel into a fresh Python 3.14 environment and run:
 
 ```python
-from md_converter import __version__, create_app
+from markweave import __version__, create_app
 
 assert __version__ == "0.3"
 assert callable(create_app)

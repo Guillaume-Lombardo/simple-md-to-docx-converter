@@ -7,7 +7,7 @@ from datetime import UTC
 import pytest
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
-from md_converter.auth.security import (
+from markweave.auth.security import (
     Argon2idPasswordHasher,
     SecretsTokenGenerator,
     SystemClock,

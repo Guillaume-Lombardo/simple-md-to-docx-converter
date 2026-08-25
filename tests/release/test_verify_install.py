@@ -25,9 +25,9 @@ def artifacts(tmp_path: Path) -> ArtifactSet:
     """Provide artifact paths with their canonical manifest-bound digest."""
     directory = tmp_path / "dist"
     directory.mkdir()
-    wheel = directory / "md_converter-0.1.0-py3-none-any.whl"
+    wheel = directory / "markweave-0.1.0-py3-none-any.whl"
     wheel.write_bytes(b"verified wheel")
-    sdist = directory / "md_converter-0.1.0.tar.gz"
+    sdist = directory / "markweave-0.1.0.tar.gz"
     sdist.write_bytes(b"verified sdist")
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
     return ArtifactSet(
@@ -70,13 +70,13 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
 
     result = verify_clean_install(
         artifacts.wheel.parent,
-        expected_name="md-converter",
+        expected_name="markweave",
         expected_version="0.1.0",
     )
 
     verify.assert_called_once_with(
         artifacts.wheel.parent,
-        expected_name="md-converter",
+        expected_name="markweave",
         expected_version="0.1.0",
         manifest_name="release-integrity.json",
     )
@@ -113,7 +113,7 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
             "-I",
             "-c",
             PUBLIC_IMPORT_CHECK,
-            "md-converter",
+            "markweave",
             "0.1.0",
         ),
         root,
@@ -142,7 +142,7 @@ def test_integrity_failure_prevents_environment_creation(
     with pytest.raises(ArtifactError, match="integrity failed"):
         verify_clean_install(
             artifacts.wheel.parent,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
         )
 
@@ -171,7 +171,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     with pytest.raises(ArtifactError, match="changed before private copy"):
         verify_clean_install(
             artifacts.wheel.parent,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
         )
 
@@ -203,7 +203,7 @@ def test_subprocess_failure_stops_later_steps_and_cleans_up(
     with pytest.raises(ArtifactError, match="failed"):
         verify_clean_install(
             artifacts.wheel.parent,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
         )
 
@@ -234,7 +234,7 @@ def test_blocked_subprocess_times_out_and_cleans_up(
     with pytest.raises(ArtifactError, match="timed out"):
         verify_clean_install(
             artifacts.wheel.parent,
-            expected_name="md-converter",
+            expected_name="markweave",
             expected_version="0.1.0",
         )
     assert roots and not roots[0].exists()

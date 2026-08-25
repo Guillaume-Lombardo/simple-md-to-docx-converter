@@ -48,7 +48,7 @@ dependencies with ad hoc skips.
 The Pytest configuration independently blocks overall application coverage and application branch
 coverage below 90%. A valid application report containing no branches is treated as 100%; malformed
 or inconsistent Coverage.py JSON fails closed. Pull requests and merge-group candidates also block
-when changed executable lines in `src/md_converter` are below 90% coverage. Use the `pytest-mock`
+when changed executable lines in `src/markweave` are below 90% coverage. Use the `pytest-mock`
 `mocker` fixture for test doubles; direct `unittest.mock` imports are prohibited.
 
 See [docs/local-development.md](docs/local-development.md) for the expanded workflow.

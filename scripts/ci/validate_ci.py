@@ -278,7 +278,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="5d0ea2d8f9294b6a5fd3bcdf954006dc8eb6df635e0b72b7e7fbe891db577f49",
+        canonical_digest="914981502f0d795e7b31c039a4d5369d748ef3662d6de5edce69b95786d31c2b",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -293,7 +293,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
         step_conditions={},
-        canonical_digest="d371e58ea1a49b6c29c35dd36c9226410c96b0eefa7ea028ce9299473d1db621",
+        canonical_digest="506f4cf1a2459e732d987aa0bbe9e5dc43af15df8b922404d750555b346d83a3",
     ),
 }
 
@@ -662,7 +662,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("light", "Enforce changed application line coverage"): (
             "uv run python -m scripts.ci.check_changed_coverage "
             '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
-            "--source-root src/md_converter --fail-under 90"
+            "--source-root src/markweave --fail-under 90"
         ),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
             "npm run test:web-browser"

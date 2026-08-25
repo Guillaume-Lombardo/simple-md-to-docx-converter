@@ -90,7 +90,7 @@ error objects or submitted values, so malformed payloads, passwords, and invalid
 are not reflected. OpenAPI declares this envelope for validation, authentication, administration,
 and readiness failures, including the real readiness `503` response.
 
-The ASGI factory is `md_converter:create_app`; Uvicorn is included as the runtime server. Deploy it
+The ASGI factory is `markweave:create_app`; Uvicorn is included as the runtime server. Deploy it
 behind the profile's TLS endpoint because authentication cookies are always secure.
 
 ## Deferred final-image verification

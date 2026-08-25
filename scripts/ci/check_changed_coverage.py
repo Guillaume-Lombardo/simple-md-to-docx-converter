@@ -245,7 +245,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--head", required=True)
     parser.add_argument("--coverage", type=Path, required=True)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
-    parser.add_argument("--source-root", type=PurePosixPath, default="src/md_converter")
+    parser.add_argument("--source-root", type=PurePosixPath, default="src/markweave")
     parser.add_argument("--fail-under", type=float, default=90.0)
     return parser.parse_args(argv)
 

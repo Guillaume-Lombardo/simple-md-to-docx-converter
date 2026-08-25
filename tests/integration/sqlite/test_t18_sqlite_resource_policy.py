@@ -12,28 +12,28 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from md_converter.app import create_app
-from md_converter.auth.models import Role, User
-from md_converter.config import Settings
-from md_converter.jobs.errors import (
+from markweave.app import create_app
+from markweave.auth.models import Role, User
+from markweave.config import Settings
+from markweave.jobs.errors import (
     JobConflictError,
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
-from md_converter.jobs.policy import JobAdmissionPolicy
-from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
-from md_converter.malware import TrustingUploadScanner
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import ConversionJobRow
-from md_converter.persistence.sql import (
+from markweave.jobs.models import JobOutput, JobProcessResult, JobRequest, JobState
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.malware import TrustingUploadScanner
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import ConversionJobRow
+from markweave.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.storage import (
+from markweave.storage import (
     FilesystemObjectStore,
     ObjectKey,
     ObjectScope,

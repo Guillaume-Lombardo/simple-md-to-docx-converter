@@ -7,23 +7,23 @@ from typing import cast
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.app import AppComponents
-from md_converter.auth.ports import ReadinessProbe
-from md_converter.auth.service import AuthenticationService
-from md_converter.jobs.ports import JobProcessor, JobRepository
-from md_converter.jobs.runner import (
+from markweave.app import AppComponents
+from markweave.auth.ports import ReadinessProbe
+from markweave.auth.service import AuthenticationService
+from markweave.jobs.ports import JobProcessor, JobRepository
+from markweave.jobs.runner import (
     EmbeddedWorker,
     ExternalWorkerRuntime,
     WorkerSchedule,
 )
-from md_converter.jobs.runtime import JobPolicies
-from md_converter.jobs.service import JobService
-from md_converter.jobs.worker import WorkerPolicy
-from md_converter.observability import QueueObserver
-from md_converter.retention import RetentionService
-from md_converter.storage import ObjectStore
-from md_converter.templates.processor import TemplateAwareProcessor
-from md_converter.templates.service import TemplateService
+from markweave.jobs.runtime import JobPolicies
+from markweave.jobs.service import JobService
+from markweave.jobs.worker import WorkerPolicy
+from markweave.observability import QueueObserver
+from markweave.retention import RetentionService
+from markweave.storage import ObjectStore
+from markweave.templates.processor import TemplateAwareProcessor
+from markweave.templates.service import TemplateService
 
 pytestmark = pytest.mark.unit
 

@@ -29,7 +29,7 @@ run_hardened --env "EXPECTED_APPLICATION_VERSION=$application_version" \
   md-converter-preflight
   test "$(id -u)" = "'"$runtime_uid"'"
   /opt/md-converter/venv/bin/python -c \
-    "import md_converter, os; assert md_converter.__version__ == os.environ[\"EXPECTED_APPLICATION_VERSION\"]"
+    "import markweave, os; assert markweave.__version__ == os.environ[\"EXPECTED_APPLICATION_VERSION\"]"
   test "$(pandoc --version | head -1)" = "pandoc 3.10.2"
   test "$(mmdc --version)" = "11.16.0"
   test "$(google-chrome-stable --version | awk "{\$1=\$1; print}")" = "Google Chrome 151.0.7922.173"

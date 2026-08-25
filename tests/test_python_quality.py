@@ -64,7 +64,7 @@ def _branch_report(*, covered: int, branches: int) -> dict[str, Any]:
             "num_partial_branches": 0,
         },
         "files": {
-            "src/md_converter/service.py": _file_coverage(
+            "src/markweave/service.py": _file_coverage(
                 executed=[1],
                 missing=[],
                 executed_branches=executed_branches,
@@ -83,14 +83,14 @@ def test_committed_quality_configuration_enforces_required_tools() -> None:
         "--strict-config",
         "--strict-markers",
         "scripts.ci.pytest_branch_coverage",
-        "--cov=md_converter",
+        "--cov=markweave",
         "--cov-branch",
         "--cov-report=json:coverage.json",
         "--cov-fail-under=90",
     }.issubset(pytest_options["addopts"])
     assert config["tool"]["coverage"]["run"] == {
         "branch": True,
-        "source": ["md_converter"],
+        "source": ["markweave"],
     }
     assert config["tool"]["coverage"]["report"]["fail_under"] == 90
     assert config["tool"]["ruff"]["target-version"] == "py314"
@@ -107,9 +107,9 @@ def test_committed_quality_configuration_enforces_required_tools() -> None:
 def test_changed_line_parser_limits_results_to_application_python() -> None:
     """Coverage changes outside the public application package cannot affect the ratio."""
     diff = """\
-diff --git a/src/md_converter/service.py b/src/md_converter/service.py
---- a/src/md_converter/service.py
-+++ b/src/md_converter/service.py
+diff --git a/src/markweave/service.py b/src/markweave/service.py
+--- a/src/markweave/service.py
++++ b/src/markweave/service.py
 @@ -1,0 +2,2 @@
 +first = 1
 +second = 2
@@ -119,8 +119,8 @@ diff --git a/tests/test_service.py b/tests/test_service.py
 @@ -1,0 +2 @@
 +assert True
 """
-    assert read_changed_lines(diff, source_root=PurePosixPath("src/md_converter")) == {
-        "src/md_converter/service.py": {2, 3}
+    assert read_changed_lines(diff, source_root=PurePosixPath("src/markweave")) == {
+        "src/markweave/service.py": {2, 3}
     }
 
 
@@ -136,9 +136,9 @@ def test_changed_coverage_calculates_success_and_failure_boundaries(
     executed_lines = list(range(1, len(executed) + 1))
     missing_lines = list(range(len(executed) + 1, 11))
     result = calculate_changed_coverage(
-        {"src/md_converter/service.py": set(range(1, 11))},
+        {"src/markweave/service.py": set(range(1, 11))},
         {
-            "src/md_converter/service.py": _file_coverage(
+            "src/markweave/service.py": _file_coverage(
                 executed=executed_lines, missing=missing_lines
             )
         },
@@ -150,7 +150,7 @@ def test_changed_coverage_calculates_success_and_failure_boundaries(
 def test_changed_coverage_rejects_unreported_application_file() -> None:
     """A changed source file cannot evade measurement by disappearing from the report."""
     with pytest.raises(CoverageCheckError, match="absent from coverage"):
-        calculate_changed_coverage({"src/md_converter/new.py": {1}}, {})
+        calculate_changed_coverage({"src/markweave/new.py": {1}}, {})
 
 
 @pytest.mark.unit
@@ -160,8 +160,8 @@ def test_changed_coverage_rejects_malformed_line_data() -> None:
         malformed = _file_coverage(executed=[1], missing=[])
         malformed["executed_lines"] = ["1"]
         calculate_changed_coverage(
-            {"src/md_converter/service.py": {1}},
-            {"src/md_converter/service.py": malformed},
+            {"src/markweave/service.py": {1}},
+            {"src/markweave/service.py": malformed},
         )
 
 
@@ -173,8 +173,8 @@ def test_changed_coverage_rejects_incomplete_arrays_despite_statement_summary() 
     incomplete["summary"]["num_statements"] = 1
     with pytest.raises(CoverageCheckError, match="incomplete coverage data"):
         calculate_changed_coverage(
-            {"src/md_converter/service.py": {1}},
-            {"src/md_converter/service.py": incomplete},
+            {"src/markweave/service.py": {1}},
+            {"src/markweave/service.py": incomplete},
         )
 
 
@@ -194,8 +194,8 @@ def test_changed_coverage_rejects_inconsistent_summary(
     malformed["summary"][key] = value
     with pytest.raises(CoverageCheckError, match=message):
         calculate_changed_coverage(
-            {"src/md_converter/service.py": {1}},
-            {"src/md_converter/service.py": malformed},
+            {"src/markweave/service.py": {1}},
+            {"src/markweave/service.py": malformed},
         )
 
 
@@ -205,8 +205,8 @@ def test_changed_coverage_rejects_overlapping_line_sets() -> None:
     malformed = _file_coverage(executed=[1], missing=[1], excluded=[1])
     with pytest.raises(CoverageCheckError, match="sets overlap"):
         calculate_changed_coverage(
-            {"src/md_converter/service.py": {1}},
-            {"src/md_converter/service.py": malformed},
+            {"src/markweave/service.py": {1}},
+            {"src/markweave/service.py": malformed},
         )
 
 
@@ -221,8 +221,8 @@ def test_changed_coverage_rejects_overlapping_branch_sets() -> None:
     )
     with pytest.raises(CoverageCheckError, match="branch coverage sets overlap"):
         calculate_changed_coverage(
-            {"src/md_converter/service.py": {1}},
-            {"src/md_converter/service.py": malformed},
+            {"src/markweave/service.py": {1}},
+            {"src/markweave/service.py": malformed},
         )
 
 
@@ -230,9 +230,9 @@ def test_changed_coverage_rejects_overlapping_branch_sets() -> None:
 def test_changed_coverage_preserves_valid_non_executable_and_excluded_lines() -> None:
     """A valid change containing only excluded or non-executable lines remains 0/0."""
     result = calculate_changed_coverage(
-        {"src/md_converter/service.py": {2, 3}},
+        {"src/markweave/service.py": {2, 3}},
         {
-            "src/md_converter/service.py": _file_coverage(
+            "src/markweave/service.py": _file_coverage(
                 executed=[1], missing=[], excluded=[2]
             )
         },

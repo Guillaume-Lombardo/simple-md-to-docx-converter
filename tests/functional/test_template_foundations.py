@@ -5,16 +5,16 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.auth.errors import AuthenticationError
-from md_converter.auth.models import Role, User
-from md_converter.templates.errors import TemplateUnavailableError
-from md_converter.templates.models import (
+from markweave.auth.errors import AuthenticationError
+from markweave.auth.models import Role, User
+from markweave.templates.errors import TemplateUnavailableError
+from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
 )
-from md_converter.templates.service import TemplateOperation, TemplateService
+from markweave.templates.service import TemplateOperation, TemplateService
 
 
 def user(name: str, role: Role = Role.USER) -> User:

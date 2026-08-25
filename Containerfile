@@ -93,7 +93,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/md-converter/venv \
     UV_LINK_MODE=copy
 RUN uv sync --locked --no-dev --no-editable \
     && /opt/md-converter/venv/bin/python -c \
-        'import md_converter, sys; assert md_converter.__version__ == sys.argv[1]' \
+        'import markweave, sys; assert markweave.__version__ == sys.argv[1]' \
         "${APPLICATION_VERSION}" \
     && rm -rf /root/.cache/uv /opt/md-converter/app/src \
     && rm -f /opt/md-converter/app/pyproject.toml /opt/md-converter/app/uv.lock \
