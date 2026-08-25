@@ -76,6 +76,7 @@ uv build --build-constraint build-constraints.txt --require-hashes
 - `docs/storage-profiles.md`: profile configuration, backup, and restore procedures
 - `docs/jobs.md`: conversion API, durable state machine, queue, worker, and recovery contract
 - `docs/resource-policy.md`: quotas, budgets, retention, recovery, and cleanup configuration
+- `docs/container-deployment.md`: final-image build, hardening, runtime profiles, and SBOM scans
 - `docs/observability.md`: JSON logging, correlation, metrics, audit, and readiness contracts
 - `docs/conversion-ui.md`: authenticated conversion-page workflow, security, and validation scope
 - `docs/administration-ui.md`: template-owner and administrator browser workflows

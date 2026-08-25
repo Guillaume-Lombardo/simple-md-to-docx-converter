@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: md-converter-api
+spec:
+  replicas: ${API_REPLICAS}
+  selector:
+    matchLabels: {app.kubernetes.io/name: md-converter-api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: md-converter-api}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: application
+          image: ${MD_CONVERTER_IMAGE}
+          args: [api]
+          envFrom:
+            - configMapRef: {name: md-converter}
+            - secretRef: {name: md-converter}
+          env:
+            - {name: MD_CONVERTER_STORAGE_PROFILE, value: distributed}
+            - {name: MD_CONVERTER_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
+          ports:
+            - {name: http, containerPort: 8080}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: temporary, mountPath: /tmp}
+            - {name: shared-memory, mountPath: /dev/shm}
+      volumes:
+        - name: work
+          emptyDir: {sizeLimit: "${API_EPHEMERAL_STORAGE_LIMIT_BYTES}"}
+        - name: temporary
+          emptyDir: {medium: Memory, sizeLimit: "${TMP_LIMIT_BYTES}"}
+        - name: shared-memory
+          emptyDir: {medium: Memory, sizeLimit: "${SHM_LIMIT_BYTES}"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: md-converter-worker
+spec:
+  replicas: ${WORKER_REPLICAS}
+  selector:
+    matchLabels: {app.kubernetes.io/name: md-converter-worker}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: md-converter-worker}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 0
+        seccompProfile:
+          type: Localhost
+          localhostProfile: profiles/md-converter-chrome.json
+      containers:
+        - name: worker
+          image: ${MD_CONVERTER_IMAGE}
+          args: [external-worker]
+          envFrom:
+            - configMapRef: {name: md-converter}
+            - secretRef: {name: md-converter}
+          env:
+            - {name: MD_CONVERTER_STORAGE_PROFILE, value: distributed}
+            - {name: MD_CONVERTER_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
+          resources:
+            requests:
+              memory: "${WORKER_MEMORY_BUDGET_BYTES}"
+              ephemeral-storage: "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}"
+            limits:
+              memory: "${WORKER_MEMORY_BUDGET_BYTES}"
+              ephemeral-storage: "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - {name: work, mountPath: /work}
+            - {name: temporary, mountPath: /tmp}
+            - {name: shared-memory, mountPath: /dev/shm}
+      volumes:
+        - name: work
+          emptyDir: {sizeLimit: "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}"}
+        - name: temporary
+          emptyDir: {medium: Memory, sizeLimit: "${TMP_LIMIT_BYTES}"}
+        - name: shared-memory
+          emptyDir: {medium: Memory, sizeLimit: "${SHM_LIMIT_BYTES}"}

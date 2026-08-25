@@ -294,6 +294,10 @@ class ConversionJobRow(Base):
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     source_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_filename: Mapped[str | None] = mapped_column(String(255))
+    source_kind: Mapped[str | None] = mapped_column(String(16))
+    source_sha256: Mapped[str | None] = mapped_column(String(64))
+    source_size: Mapped[int | None] = mapped_column(Integer)
     template_id: Mapped[str] = mapped_column(String(36), nullable=False)
     template_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
     output: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -320,6 +324,7 @@ class ConversionJobRow(Base):
         Boolean, nullable=False, default=False
     )
     result_object_id: Mapped[str | None] = mapped_column(String(36))
+    result_manifest_object_id: Mapped[str | None] = mapped_column(String(36))
     error_code: Mapped[str | None] = mapped_column(String(128))
     error_message: Mapped[str | None] = mapped_column(String(1024))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

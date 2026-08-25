@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from md_converter.conversion.archive import (
@@ -27,6 +28,7 @@ class DocxConverter(Protocol):
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes: ...
 
 
@@ -47,12 +49,16 @@ class DocxConversionService:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         approved = validate_markdown(markdown)
-        if deadline_monotonic is None:
+        if deadline_monotonic is None and cancellation_requested is None:
             return self._converter.convert(approved, reference_docx)
         return self._converter.convert(
-            approved, reference_docx, deadline_monotonic=deadline_monotonic
+            approved,
+            reference_docx,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )
 
     def convert_document(
@@ -61,17 +67,21 @@ class DocxConversionService:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         """Convert an already bounded package after binding every local image."""
 
         approved = validate_document(document)
-        if deadline_monotonic is None:
+        if deadline_monotonic is None and cancellation_requested is None:
             return self._converter.convert(approved, reference_docx)
         return self._converter.convert(
-            approved, reference_docx, deadline_monotonic=deadline_monotonic
+            approved,
+            reference_docx,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )
 
-    def convert_archive(
+    def convert_archive(  # noqa: PLR0913 - explicit archive and runtime policy
         self,
         archive: bytes,
         reference_docx: bytes,
@@ -79,6 +89,7 @@ class DocxConversionService:
         image_limits: ImageLimits,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         """Prepare and convert one untrusted Markdown resource archive."""
 
@@ -89,4 +100,5 @@ class DocxConversionService:
             document,
             reference_docx,
             deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )

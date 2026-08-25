@@ -138,11 +138,13 @@ def test_preprocessor_propagates_worker_deadline_to_renderer_and_engine(mocker) 
         "flowchart LR\n",
         LIMITS.max_output_bytes,
         deadline_monotonic=42.0,
+        cancellation_requested=None,
     )
     downstream.convert.assert_called_once_with(
         mocker.ANY,
         b"reference",
         deadline_monotonic=42.0,
+        cancellation_requested=None,
     )
 
 
@@ -538,6 +540,61 @@ def test_cli_timeout_terminates_then_kills_process_group(
     assert captured.value.code is ConversionErrorCode.MERMAID_TIMEOUT
     assert [call.args for call in killpg.call_args_list] == [(1234, 15), (1234, 9)]
     assert process.wait.call_count == 3
+
+
+def test_active_cancellation_terminates_mermaid_process_group(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock(pid=1234)
+    process.wait.side_effect = [subprocess.TimeoutExpired("mmdc", 0.1), 0]
+    mocker.patch(
+        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
+    )
+    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+    cancelled = mocker.Mock(side_effect=(False, True))
+
+    with pytest.raises(ConversionError, match="interrupted") as captured:
+        MermaidCliRenderer(_config(tmp_path), {}).render(
+            "secret", 100_000, cancellation_requested=cancelled
+        )
+
+    assert captured.value.code is ConversionErrorCode.MERMAID_FAILURE
+    assert [call.args for call in killpg.call_args_list] == [
+        (1234, 15),
+        (1234, 15),
+        (1234, 0),
+        (1234, 9),
+    ]
+    assert process.wait.call_count == 2
+
+
+@pytest.mark.parametrize("probe_failure", [False, True])
+def test_cancellable_cli_wait_handles_expired_deadline_and_probe_failure(
+    tmp_path: Path, mocker, probe_failure: bool
+) -> None:
+    process = mocker.Mock(pid=1234)
+    mocker.patch(
+        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
+    )
+    mocker.patch("md_converter.conversion.mermaid.time.monotonic", return_value=10.0)
+    killpg = mocker.patch(
+        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+    )
+    probe = (
+        mocker.Mock(side_effect=RuntimeError("probe failed"))
+        if probe_failure
+        else mocker.Mock(return_value=False)
+    )
+
+    expected = RuntimeError if probe_failure else ConversionError
+    with pytest.raises(expected):
+        MermaidCliRenderer(_config(tmp_path), {}).render(
+            "secret",
+            100_000,
+            deadline_monotonic=9.0,
+            cancellation_requested=probe,
+        )
+    killpg.assert_called_once_with(1234, 15)
 
 
 def test_worker_deadline_caps_mermaid_engine_timeout(tmp_path: Path, mocker) -> None:

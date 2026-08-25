@@ -370,17 +370,44 @@ class SqlTemplateCatalogRepository:
                         skip_locked=self._engine.dialect.name == "postgresql"
                     )
                 )
-                return tuple(
-                    _version(row)
-                    for row in database.scalars(
+                mutation = (
+                    update(TemplateVersionRow)
+                    .where(TemplateVersionRow.id.in_(candidates))
+                    .values(
+                        publication_token=str(publication_token),
+                        publication_lease_expires_at=lease_expires_at,
+                    )
+                )
+                if self._engine.dialect.name == "sqlite":
+                    candidate_ids = tuple(database.scalars(candidates))
+                    if not candidate_ids:
+                        return ()
+                    result = database.execute(
                         update(TemplateVersionRow)
-                        .where(TemplateVersionRow.id.in_(candidates))
+                        .where(
+                            TemplateVersionRow.id.in_(candidate_ids),
+                            TemplateVersionRow.publication_state == "pending",
+                            TemplateVersionRow.publication_lease_expires_at
+                            <= stale_before,
+                        )
                         .values(
                             publication_token=str(publication_token),
                             publication_lease_expires_at=lease_expires_at,
                         )
-                        .returning(TemplateVersionRow)
                     )
+                    if getattr(result, "rowcount", 0) != len(candidate_ids):
+                        raise PersistenceError
+                    return tuple(
+                        _version(row)
+                        for row in database.scalars(
+                            select(TemplateVersionRow)
+                            .where(TemplateVersionRow.id.in_(candidate_ids))
+                            .order_by(TemplateVersionRow.id)
+                        )
+                    )
+                return tuple(
+                    _version(row)
+                    for row in database.scalars(mutation.returning(TemplateVersionRow))
                 )
         except SQLAlchemyError:
             raise PersistenceError from None
@@ -693,15 +720,25 @@ class SqlTemplateCatalogRepository:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
-                changed = database.execute(
+                statement = (
                     update(TemplateRow)
                     .where(
                         TemplateRow.id == str(template_id),
                         TemplateRow.revision == expected_revision,
                     )
                     .values(**values, revision=TemplateRow.revision + 1)
-                    .returning(TemplateRow)
-                ).scalar_one_or_none()
+                )
+                if self._engine.dialect.name == "sqlite":
+                    result = database.execute(statement)
+                    changed = (
+                        database.get(TemplateRow, str(template_id))
+                        if getattr(result, "rowcount", 0) == 1
+                        else None
+                    )
+                else:
+                    changed = database.execute(
+                        statement.returning(TemplateRow)
+                    ).scalar_one_or_none()
                 if changed is None:
                     raise TemplateConflictError
                 database.add(_audit_row(audit))

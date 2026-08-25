@@ -24,8 +24,12 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "Containerfile*",
         "**/Containerfile*",
         ".dockerignore",
+        ".containerignore",
+        "container/**",
         "containers/**",
         "deploy/**",
+        "scripts/container/**",
+        "tests/container/**",
     ),
     "document-engines": (
         "package.json",

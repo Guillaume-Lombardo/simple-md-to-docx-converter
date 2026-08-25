@@ -43,6 +43,7 @@ from md_converter.templates.models import (
 )
 from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
 from md_converter.templates.validation import ValidatedTemplate
+from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 
 pytestmark = pytest.mark.integration
 
@@ -65,6 +66,7 @@ def _service(tmp_path: Path) -> tuple[TemplateService, Engine, User, User, User]
     engine = create_database_engine(
         f"sqlite+pysqlite:///{tmp_path / 'metadata.sqlite3'}"
     )
+    enforce_sqlite_334_update_grammar(engine)
     upgrade_database(engine)
     owner = _user(Role.USER, "Owner")
     other = _user(Role.USER, "Other")

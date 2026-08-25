@@ -1,5 +1,6 @@
 """Fast in-process coverage for the SQL job repository control flow."""
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -37,3 +38,30 @@ def test_job_repository_rejects_unsupported_dialect(mocker: MockerFixture) -> No
     engine.dialect.name = "mysql"
     with pytest.raises(ValueError, match="SQLite or PostgreSQL"):
         SqlJobRepository(engine)
+
+
+def test_postgresql_job_update_helper_keeps_returning(mocker: MockerFixture) -> None:
+    engine = mocker.Mock()
+    engine.dialect.name = "postgresql"
+    repository = SqlJobRepository(engine)
+    database = mocker.Mock()
+    statement = mocker.Mock()
+    expected = mocker.Mock()
+    database.scalar.return_value = expected
+
+    assert repository._update_job_row(database, statement, "job-id") is expected
+
+    statement.returning.assert_called_once()
+    database.scalar.assert_called_once_with(statement.returning.return_value)
+
+
+def test_empty_sqlite_queue_has_no_claim() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    now = datetime(2026, 8, 25, tzinfo=UTC)
+
+    assert (
+        SqlJobRepository(engine).claim("worker", now, now + timedelta(seconds=30))
+        is None
+    )
+    engine.dispose()

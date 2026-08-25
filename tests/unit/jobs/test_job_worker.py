@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -15,9 +17,11 @@ from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
 from md_converter.jobs.models import (
     ConversionJob,
     ExpiredJobObjects,
+    JobOutput,
     JobProcessResult,
     JobState,
     JobStep,
+    result_manifest_object_id,
     result_object_id,
 )
 from md_converter.jobs.ports import CancellationProbe, JobProcessor, JobRepository
@@ -108,6 +112,7 @@ def test_worker_records_recovery_and_expiration_counts(mocker: MockerFixture) ->
 
 def running_job() -> ConversionJob:
     return job(
+        output=JobOutput.DOCX,
         state=JobState.RUNNING,
         step=JobStep.VALIDATING,
         attempt=1,
@@ -116,6 +121,39 @@ def running_job() -> ConversionJob:
         lease_expires_at=NOW + timedelta(seconds=10),
         heartbeat_at=NOW,
     )
+
+
+def traceability_manifest() -> bytes:
+    return json.dumps(
+        {
+            "application_version": "0.1.0",
+            "chromium_version": "151.0.7922.173",
+            "conversion_contract_version": "1",
+            "export_filter": "pdf:writer_pdf_Export",
+            "font_manifest_sha256": "5" * 64,
+            "libreoffice_version": "26.2.5.2",
+            "mermaid_version": "11.16.0",
+            "output_format": "pdf",
+            "output_pdf_bytes": 3,
+            "output_pdf_sha256": "4" * 64,
+            "pages": [{"height_points": 792, "width_points": 612}],
+            "pandoc_reader": "commonmark_x",
+            "pandoc_version": "3.10.2",
+            "schema_version": 1,
+            "source_docx_sha256": "3" * 64,
+            "template_id": str(uuid4()),
+            "template_sha256": "2" * 64,
+            "template_version": "3",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def invalid_traceability_manifest(**changes: object) -> bytes:
+    decoded = json.loads(traceability_manifest())
+    decoded.update(changes)
+    return json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
 
 
 def test_worker_claims_heartbeats_and_publishes_only_after_processing(
@@ -148,6 +186,148 @@ def test_worker_claims_heartbeats_and_publishes_only_after_processing(
     repository.succeed.assert_called_once()
     assert objects.put.call_args.args[0].object_id == result_object_id(claimed.id, 1)
     objects.delete.assert_not_called()
+
+
+def test_worker_atomically_publishes_and_compensates_traceability_sidecar(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    claimed = replace(running_job(), output=JobOutput.PDF)
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    processor.process.return_value = JobProcessResult(b"pdf", traceability_manifest())
+
+    assert instance.run_once()
+
+    result_key, manifest_key = [call.args[0] for call in objects.put.call_args_list]
+    assert result_key.scope is ObjectScope.RESULT
+    assert manifest_key.scope is ObjectScope.RESULT_MANIFEST
+    assert manifest_key.object_id == result_manifest_object_id(claimed.id, 1)
+    assert (
+        repository.succeed.call_args.kwargs["result_manifest_object_id"]
+        == manifest_key.object_id
+    )
+
+    objects.reset_mock()
+    repository.succeed.reset_mock()
+    objects.put.side_effect = (None, ObjectStoreError())
+    with pytest.raises(ObjectStoreError):
+        instance.run_once()
+    assert [call.args[0] for call in objects.delete.call_args_list] == [
+        result_key,
+        manifest_key,
+    ]
+    repository.succeed.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("output", "manifest"),
+    (
+        (JobOutput.PDF, None),
+        (JobOutput.BOTH, None),
+        (JobOutput.PDF, b'{"not":"canonical"}'),
+        (JobOutput.PDF, b"[]"),
+        (JobOutput.PDF, invalid_traceability_manifest(schema_version=2)),
+        (JobOutput.PDF, invalid_traceability_manifest(output_format="docx")),
+        (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=True)),
+        (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=0)),
+        (JobOutput.PDF, invalid_traceability_manifest(template_sha256="invalid")),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=None)),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=[])),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=["invalid"])),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(pages=[{"width_points": 612}]),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(
+                pages=[{"height_points": 792, "width_points": "612"}]
+            ),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(
+                pages=[{"height_points": 0, "width_points": 612}]
+            ),
+        ),
+        (
+            JobOutput.PDF,
+            json.dumps(json.loads(traceability_manifest())).encode(),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(output_pdf_bytes=float("nan")),
+        ),
+        (JobOutput.DOCX, traceability_manifest()),
+    ),
+)
+def test_worker_rejects_result_manifest_cardinality_before_publication(
+    mocker: MockerFixture,
+    output: JobOutput,
+    manifest: bytes | None,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    repository.claim.return_value = replace(running_job(), output=output)
+    repository.heartbeat.return_value = True
+    processor.process.return_value = JobProcessResult(b"result", manifest)
+
+    with pytest.raises(RuntimeError, match="traceability manifest"):
+        instance.run_once()
+
+    objects.put.assert_not_called()
+    repository.succeed.assert_not_called()
+    repository.fail.assert_not_called()
+    repository.finish_cancelled.assert_not_called()
+
+
+def test_shutdown_interrupts_active_processing_without_terminal_transition(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    repository.claim.return_value = running_job()
+    repository.heartbeat.return_value = True
+    shutdown = mocker.Mock(return_value=False)
+
+    def process(
+        _job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        del progress
+        shutdown.return_value = True
+        assert cancelled()
+        raise JobProcessingCancelled
+
+    processor.process.side_effect = process
+
+    assert instance.run_once(shutdown_requested=shutdown)
+    objects.put.assert_not_called()
+    repository.succeed.assert_not_called()
+    repository.fail.assert_not_called()
+    repository.finish_cancelled.assert_not_called()
+
+
+def test_source_integrity_failure_is_durable_and_worker_accepts_next_job(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, _objects, processor = worker(mocker)
+    claimed = running_job()
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    processor.process.side_effect = (
+        ConversionError(
+            ConversionErrorCode.SOURCE_INTEGRITY,
+            "Frozen source content could not be verified.",
+        ),
+        JobProcessResult(b"next-result"),
+    )
+
+    assert instance.run_once()
+    assert repository.fail.call_args.args[0].code == "source_integrity"
+    assert instance.run_once()
+    repository.succeed.assert_called_once()
 
 
 def test_worker_records_correlated_step_durations(mocker: MockerFixture) -> None:
@@ -284,14 +464,21 @@ def test_worker_removes_unpublished_result_when_terminal_transition_fails(
     assert objects.delete.call_args.args[0] == objects.put.call_args.args[0]
 
 
-def test_worker_removes_result_when_atomic_cancellation_wins(
-    mocker: MockerFixture,
+@pytest.mark.parametrize(
+    ("output", "manifest"),
+    (
+        (JobOutput.DOCX, None),
+        (JobOutput.PDF, traceability_manifest()),
+    ),
+)
+def test_worker_removes_published_objects_when_atomic_cancellation_wins(
+    mocker: MockerFixture, output: JobOutput, manifest: bytes | None
 ) -> None:
     instance, repository, objects, processor = worker(mocker)
-    claimed = running_job()
+    claimed = replace(running_job(), output=output)
     repository.claim.return_value = claimed
     repository.cancellation_requested.return_value = False
-    processor.process.return_value = JobProcessResult(b"result")
+    processor.process.return_value = JobProcessResult(b"result", manifest)
     repository.succeed.return_value = job(
         id=claimed.id,
         owner_id=claimed.owner_id,
@@ -299,7 +486,23 @@ def test_worker_removes_result_when_atomic_cancellation_wins(
         expires_at=NOW + timedelta(seconds=100),
     )
     assert instance.run_once()
-    assert objects.delete.call_args.args[0] == objects.put.call_args.args[0]
+    assert [call.args[0] for call in objects.delete.call_args_list] == [
+        call.args[0] for call in objects.put.call_args_list
+    ]
+
+
+def test_worker_rejects_a_processor_that_returns_no_result(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    repository.claim.return_value = running_job()
+    processor.process.return_value = None
+
+    with pytest.raises(RuntimeError, match="returned no result"):
+        instance.run_once()
+
+    objects.put.assert_not_called()
+    repository.succeed.assert_not_called()
 
 
 def test_worker_recovery_and_bounded_cleanup_delegate_explicit_values(
@@ -337,7 +540,9 @@ def test_cleanup_remains_retryable_until_object_deletion_is_acknowledged(
     mocker: MockerFixture,
 ) -> None:
     instance, repository, objects, _processor = worker(mocker)
-    expired = ExpiredJobObjects(uuid4(), uuid4(), uuid4(), uuid4(), (uuid4(),))
+    expired = ExpiredJobObjects(
+        uuid4(), uuid4(), uuid4(), uuid4(), (uuid4(),), (uuid4(),)
+    )
     repository.expire_terminal.return_value = (expired,)
     objects.delete.side_effect = ObjectStoreError
     with pytest.raises(ObjectStoreError):
@@ -347,6 +552,10 @@ def test_cleanup_remains_retryable_until_object_deletion_is_acknowledged(
     objects.delete.side_effect = None
     repository.complete_cleanup.return_value = True
     assert instance.cleanup(limit=1) == 1
+    assert any(
+        call.args[0].scope is ObjectScope.RESULT_MANIFEST
+        for call in objects.delete.call_args_list
+    )
     repository.complete_cleanup.assert_called_once_with(
         expired.job_id, expired.cleanup_token
     )

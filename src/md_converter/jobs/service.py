@@ -77,10 +77,14 @@ class JobService:
         self, request: JobRequest, idempotency_key: str | None
     ) -> tuple[ConversionJob, bool]:
         idempotency_digest = self._idempotency_digest(idempotency_key)
+        source_sha256 = _digest(request.source)
+        source_size = len(request.source)
         request_digest = _digest(
             b"\0".join(
                 (
-                    _digest(request.source).encode("ascii"),
+                    source_sha256.encode("ascii"),
+                    str(source_size).encode("ascii"),
+                    request.source_kind.value.encode("ascii"),
                     str(request.template_id).encode("ascii"),
                     str(request.template_version_id).encode("ascii"),
                     request.output.value.encode("ascii"),
@@ -103,6 +107,10 @@ class JobService:
                 idempotency_digest=idempotency_digest,
                 created_at=request.now,
                 correlation_id=request.correlation_id or str(job_id),
+                source_filename=request.source_filename,
+                source_kind=request.source_kind,
+                source_sha256=source_sha256,
+                source_size=source_size,
             )
         )
         if replayed:
@@ -111,7 +119,11 @@ class JobService:
             if job.source_ready:
                 return job, True
         source_key = ObjectKey(ObjectScope.UPLOAD, job.owner_id, job.source_object_id)
-        self._objects.put(source_key, request.source)
+        try:
+            self._objects.put(source_key, request.source)
+        except Exception:
+            self._objects.delete(source_key)
+            raise
         return self._repository.activate_source(job.id, request.now), replayed
 
     def get_visible(
@@ -159,6 +171,24 @@ class JobService:
             return job, self._objects.get(key)
         except ObjectNotFoundError:
             raise JobConflictError("Conversion result is not available") from None
+
+    def download_manifest(
+        self, job_id: UUID, *, actor_id: UUID, actor_is_admin: bool
+    ) -> tuple[ConversionJob, bytes]:
+        """Return the atomically published PDF traceability sidecar."""
+
+        job = self.get_visible(job_id, actor_id=actor_id, actor_is_admin=actor_is_admin)
+        if job.state is not JobState.SUCCEEDED or job.result_manifest_object_id is None:
+            raise JobConflictError("Conversion manifest is not available")
+        key = ObjectKey(
+            ObjectScope.RESULT_MANIFEST,
+            job.owner_id,
+            job.result_manifest_object_id,
+        )
+        try:
+            return job, self._objects.get(key)
+        except ObjectNotFoundError:
+            raise JobConflictError("Conversion manifest is not available") from None
 
     @staticmethod
     def _idempotency_digest(value: str | None) -> str | None:

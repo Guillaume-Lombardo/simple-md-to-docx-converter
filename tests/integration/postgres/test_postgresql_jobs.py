@@ -1,6 +1,7 @@
 """Real PostgreSQL durable queue and concurrent claim coverage."""
 
 import hashlib
+import json
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +11,7 @@ from uuid import UUID, uuid4
 
 import boto3
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, inspect
 
 from md_converter.auth.models import Role, User
 from md_converter.conversion.errors import ConversionErrorCode
@@ -25,7 +26,7 @@ from md_converter.jobs.models import (
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import WorkerPolicy
 from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.migrations import downgrade_database, upgrade_database
 from md_converter.persistence.schema import ConversionJobRow, TemplateRow, UserRow
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
 from md_converter.persistence.templates import (
@@ -48,6 +49,45 @@ from tests.job_repository_contracts import (
 )
 from tests.template_records import publish_template_pair
 
+INTEGRITY_COLUMNS = {
+    "source_filename",
+    "source_kind",
+    "source_sha256",
+    "source_size",
+    "result_manifest_object_id",
+}
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_integrity_revision_round_trip_preserves_postgresql_schema() -> None:
+    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    before = inspect(engine)
+    expected_foreign_keys = before.get_foreign_keys("conversion_jobs")
+    expected_indexes = before.get_indexes("conversion_jobs")
+    try:
+        try:
+            downgrade_database(engine, "20260824_11")
+            downgraded = inspect(engine)
+            assert INTEGRITY_COLUMNS.isdisjoint(
+                column["name"] for column in downgraded.get_columns("conversion_jobs")
+            )
+            assert (
+                downgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+            )
+            assert downgraded.get_indexes("conversion_jobs") == expected_indexes
+        finally:
+            upgrade_database(engine)
+        upgraded = inspect(engine)
+        assert {
+            column["name"] for column in upgraded.get_columns("conversion_jobs")
+        } >= INTEGRITY_COLUMNS
+        assert upgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+        assert upgraded.get_indexes("conversion_jobs") == expected_indexes
+    finally:
+        engine.dispose()
+
 
 class DistributedTemplateProcessor:
     """Return evidence of the exact frozen bytes supplied by composition."""
@@ -66,7 +106,32 @@ class DistributedTemplateProcessor:
         assert deadline_monotonic is None
         assert not cancelled()
         progress(JobStep.PUBLISHING, 90)
-        return JobProcessResult(b"used:" + template_content)
+        content = b"used:" + template_content
+        manifest = json.dumps(
+            {
+                "application_version": "0.1.0",
+                "chromium_version": "151.0.7922.173",
+                "conversion_contract_version": "1",
+                "export_filter": "pdf:writer_pdf_Export",
+                "font_manifest_sha256": "5" * 64,
+                "libreoffice_version": "26.2.5.2",
+                "mermaid_version": "11.16.0",
+                "output_format": "pdf",
+                "output_pdf_bytes": len(content),
+                "output_pdf_sha256": hashlib.sha256(content).hexdigest(),
+                "pages": [{"height_points": 792, "width_points": 612}],
+                "pandoc_reader": "commonmark_x",
+                "pandoc_version": "3.10.2",
+                "schema_version": 1,
+                "source_docx_sha256": hashlib.sha256(content).hexdigest(),
+                "template_id": str(template.template_id),
+                "template_sha256": template.sha256,
+                "template_version": str(template.number),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return JobProcessResult(content, manifest)
 
 
 def race_cancel(
@@ -246,6 +311,14 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         )
         assert finished.state is JobState.SUCCEEDED
         assert content == b"used:" + frozen_content
+        manifested, manifest = service.download_manifest(
+            queued.id, actor_id=owner.id, actor_is_admin=False
+        )
+        assert manifested.id == finished.id
+        assert (
+            json.loads(manifest)["output_pdf_sha256"]
+            == hashlib.sha256(content).hexdigest()
+        )
         failed_job, _ = service.submit(
             JobRequest(
                 owner.id,
@@ -281,6 +354,14 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         if current is not None and current.result_object_id is not None:
             objects.delete(
                 ObjectKey(ObjectScope.RESULT, owner.id, current.result_object_id)
+            )
+        if current is not None and current.result_manifest_object_id is not None:
+            objects.delete(
+                ObjectKey(
+                    ObjectScope.RESULT_MANIFEST,
+                    owner.id,
+                    current.result_manifest_object_id,
+                )
             )
         with engine.begin() as connection:
             connection.execute(

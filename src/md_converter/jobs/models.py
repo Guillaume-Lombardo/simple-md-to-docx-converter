@@ -12,6 +12,10 @@ from md_converter.observability import require_correlation_id
 SHA256_CHARACTERS = 64
 COMPLETE_PROGRESS = 100
 RESULT_OBJECT_NAME_PREFIX = "result-attempt:"
+RESULT_MANIFEST_OBJECT_NAME_PREFIX = "result-manifest-attempt:"
+MAX_SOURCE_FILENAME_CHARACTERS = 255
+FIRST_CONTROL_CODEPOINT = 32
+DELETE_CODEPOINT = 127
 
 
 def result_object_id(job_id: UUID, attempt: int) -> UUID:
@@ -20,6 +24,14 @@ def result_object_id(job_id: UUID, attempt: int) -> UUID:
     if attempt <= 0:
         raise ValueError("Result attempts must be positive")
     return uuid5(job_id, f"{RESULT_OBJECT_NAME_PREFIX}{attempt}")
+
+
+def result_manifest_object_id(job_id: UUID, attempt: int) -> UUID:
+    """Derive the fenced traceability sidecar identifier for one attempt."""
+
+    if attempt <= 0:
+        raise ValueError("Result attempts must be positive")
+    return uuid5(job_id, f"{RESULT_MANIFEST_OBJECT_NAME_PREFIX}{attempt}")
 
 
 class JobState(StrEnum):
@@ -53,6 +65,43 @@ class JobOutput(StrEnum):
     BOTH = "both"
 
 
+class SourceKind(StrEnum):
+    """Persisted source interpretation selected from the admitted filename."""
+
+    MARKDOWN = "markdown"
+    ARCHIVE = "archive"
+
+
+def source_kind_for_filename(filename: str) -> SourceKind:
+    """Validate one private leaf filename and return its immutable source kind."""
+
+    if (
+        not filename
+        or len(filename) > MAX_SOURCE_FILENAME_CHARACTERS
+        or filename in {".", ".."}
+        or any(character in filename for character in ("/", "\\", "\0"))
+        or any(
+            ord(character) < FIRST_CONTROL_CODEPOINT
+            or ord(character) == DELETE_CODEPOINT
+            for character in filename
+        )
+    ):
+        raise ValueError("Source filename is invalid")
+    suffix = filename.rsplit(".", 1)[-1].casefold() if "." in filename else ""
+    if suffix == "md":
+        return SourceKind.MARKDOWN
+    if suffix == "zip":
+        return SourceKind.ARCHIVE
+    raise ValueError("Source filename must end in .md or .zip")
+
+
+def _validate_sha256(value: str) -> None:
+    if len(value) != SHA256_CHARACTERS or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError("Job digests must be lowercase SHA-256")
+
+
 TERMINAL_JOB_STATES = frozenset(
     {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.EXPIRED}
 )
@@ -79,6 +128,10 @@ class JobSubmission:
     idempotency_digest: str | None
     created_at: datetime
     correlation_id: str = ""
+    source_filename: str = "source.md"
+    source_kind: SourceKind = SourceKind.MARKDOWN
+    source_sha256: str = "0" * SHA256_CHARACTERS
+    source_size: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "created_at", _utc(self.created_at))
@@ -87,12 +140,14 @@ class JobSubmission:
             self, "correlation_id", require_correlation_id(correlation_id)
         )
         _validate_component_versions(self.component_versions)
+        if source_kind_for_filename(self.source_filename) is not self.source_kind:
+            raise ValueError("Source filename and kind do not match")
+        _validate_sha256(self.source_sha256)
+        if self.source_size <= 0:
+            raise ValueError("Source size must be positive")
         for digest in (self.request_digest, self.idempotency_digest):
-            if digest is not None and (
-                len(digest) != SHA256_CHARACTERS
-                or any(character not in "0123456789abcdef" for character in digest)
-            ):
-                raise ValueError("Job digests must be lowercase SHA-256")
+            if digest is not None:
+                _validate_sha256(digest)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +180,11 @@ class ConversionJob:
     error_code: str | None = None
     error_message: str | None = None
     expires_at: datetime | None = None
+    source_filename: str | None = None
+    source_kind: SourceKind | None = None
+    source_sha256: str | None = None
+    source_size: int | None = None
+    result_manifest_object_id: UUID | None = None
 
     def __post_init__(self) -> None:
         correlation_id = self.correlation_id or str(self.id)
@@ -134,9 +194,26 @@ class ConversionJob:
         self._normalize_timestamps()
         self._validate_progress()
         _validate_component_versions(self.component_versions)
+        self._validate_source()
         self._validate_lease()
         self._validate_result()
         self._validate_error()
+
+    def _validate_source(self) -> None:
+        filename = self.source_filename
+        kind = self.source_kind
+        sha256 = self.source_sha256
+        size = self.source_size
+        metadata = (filename, kind, sha256, size)
+        if all(value is None for value in metadata):
+            return
+        if filename is None or kind is None or sha256 is None or size is None:
+            raise ValueError("Source integrity metadata must be complete")
+        if source_kind_for_filename(filename) is not kind:
+            raise ValueError("Source filename and kind do not match")
+        _validate_sha256(sha256)
+        if size <= 0:
+            raise ValueError("Source size must be positive")
 
     def _normalize_timestamps(self) -> None:
         object.__setattr__(self, "created_at", _utc(self.created_at))
@@ -175,7 +252,10 @@ class ConversionJob:
         if self.state is JobState.SUCCEEDED:
             if self.result_object_id is None or self.progress != COMPLETE_PROGRESS:
                 raise ValueError("Succeeded jobs require a complete result")
-        elif self.result_object_id is not None:
+        elif (
+            self.result_object_id is not None
+            or self.result_manifest_object_id is not None
+        ):
             raise ValueError("Only succeeded jobs may expose a result")
 
     def _validate_error(self) -> None:
@@ -220,10 +300,14 @@ class JobRequest:
     component_versions: tuple[tuple[str, str], ...]
     now: datetime
     correlation_id: str = ""
+    source_filename: str = "source.md"
+    source_kind: SourceKind = SourceKind.MARKDOWN
 
     def __post_init__(self) -> None:
         if self.correlation_id:
             require_correlation_id(self.correlation_id)
+        if source_kind_for_filename(self.source_filename) is not self.source_kind:
+            raise ValueError("Source filename and kind do not match")
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +345,7 @@ class ExpiredJobObjects:
     owner_id: UUID
     source_object_id: UUID
     result_object_ids: tuple[UUID, ...]
+    result_manifest_object_ids: tuple[UUID, ...] = ()
 
 
 def _validate_component_versions(values: tuple[tuple[str, str], ...]) -> None:

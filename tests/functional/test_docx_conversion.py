@@ -1,5 +1,7 @@
 """Functional contract tests for assembled DOCX conversion behavior."""
 
+from collections.abc import Callable
+
 import pytest
 
 from md_converter.conversion.service import DocxConversionService
@@ -17,7 +19,9 @@ class RecordingConverter:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
+        assert cancellation_requested is None
         self.deadline_monotonic = deadline_monotonic
         self.received = (markdown, reference_docx)
         return b"converted-docx"

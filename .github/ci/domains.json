@@ -1,7 +1,11 @@
 {
   "container": {
     "activation_ticket": "T20",
-    "status": "planned"
+    "command": [
+      "bash",
+      "scripts/container/run-ci.sh"
+    ],
+    "status": "active"
   },
   "ci-infrastructure": {
     "activation_ticket": "T03",

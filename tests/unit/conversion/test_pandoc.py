@@ -302,6 +302,81 @@ def test_timeout_terminates_then_kills_the_process_group(
 
 
 @pytest.mark.unit
+def test_active_cancellation_terminates_pandoc_process_group(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock(pid=4321)
+    process.wait.side_effect = [subprocess.TimeoutExpired("pandoc", 0.1), 0]
+    mocker.patch(
+        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
+    )
+    killpg = mocker.patch("md_converter.conversion.pandoc.os.killpg")
+    cancelled = mocker.Mock(side_effect=(False, True))
+
+    with pytest.raises(ConversionError, match="interrupted") as captured:
+        converter(tmp_path).convert(
+            ApprovedMarkdown("# Safe"),
+            minimal_docx(),
+            cancellation_requested=cancelled,
+        )
+
+    assert captured.value.code is ConversionErrorCode.PANDOC_FAILURE
+    killpg.assert_called_once_with(4321, 15)
+    assert process.wait.call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("probe_failure", [False, True])
+def test_cancellable_wait_handles_expired_deadline_and_probe_failure(
+    tmp_path: Path, mocker, probe_failure: bool
+) -> None:
+    process = mocker.Mock(pid=4321)
+    mocker.patch(
+        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
+    )
+    mocker.patch("md_converter.conversion.pandoc.time.monotonic", return_value=10.0)
+    killpg = mocker.patch(
+        "md_converter.conversion.pandoc.os.killpg", side_effect=ProcessLookupError
+    )
+    probe = (
+        mocker.Mock(side_effect=RuntimeError("probe failed"))
+        if probe_failure
+        else mocker.Mock(return_value=False)
+    )
+
+    expected = RuntimeError if probe_failure else ConversionError
+    with pytest.raises(expected):
+        converter(tmp_path).convert(
+            ApprovedMarkdown("# Safe"),
+            minimal_docx(),
+            deadline_monotonic=9.0,
+            cancellation_requested=probe,
+        )
+    killpg.assert_called_once_with(4321, 15)
+
+
+@pytest.mark.unit
+def test_adapter_without_host_path_and_invalid_workspace_are_explicit(
+    tmp_path: Path, mocker
+) -> None:
+    reference = minimal_docx()
+    process = mocker.Mock()
+    process.wait.return_value = 0
+
+    def start(_arguments, **options):
+        assert "PATH" not in options["env"]
+        (options["cwd"] / "output.docx").write_bytes(reference)
+        return process
+
+    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    adapter = PandocDocxConverter(PandocConfig("pandoc", 5.0, 0.5, tmp_path), {})
+    assert adapter.convert(ApprovedMarkdown("# Safe"), reference) == reference
+
+    with pytest.raises(ValueError, match="workspace root"):
+        PandocConfig("pandoc", 5.0, 0.5, tmp_path / "missing")
+
+
+@pytest.mark.unit
 def test_worker_deadline_caps_pandoc_engine_timeout(tmp_path: Path, mocker) -> None:
     reference = minimal_docx()
     process = mocker.Mock()

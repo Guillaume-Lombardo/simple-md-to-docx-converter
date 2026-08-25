@@ -52,6 +52,8 @@ def test_security_defaults_and_secret_redaction() -> None:
         {"conversion_upload_max_bytes": 0},
         {"conversion_request_max_bytes": 1_000_000},
         {"conversion_retry_after_seconds": 0},
+        {"conversion_mermaid_max_total_source_bytes": 99_999},
+        {"conversion_mermaid_max_total_output_bytes": 999_999},
         {"job_result_retention_seconds": 0},
         {"template_version_retention_seconds": 0},
         {"template_min_retained_versions": 9},

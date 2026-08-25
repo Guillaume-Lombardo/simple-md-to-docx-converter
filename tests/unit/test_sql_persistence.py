@@ -55,6 +55,9 @@ CORRELATION_REVISION: Any = importlib.import_module(
 AUTH_AUDIT_REVISION: Any = importlib.import_module(
     "md_converter.persistence.migrations.versions.20260824_11_authentication_audit"
 )
+JOB_INTEGRITY_REVISION: Any = importlib.import_module(
+    "md_converter.persistence.migrations.versions.20260825_12_job_integrity_metadata"
+)
 
 
 @pytest.mark.unit
@@ -76,6 +79,16 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "templates",
         "users",
     }
+    job_columns = {
+        column["name"] for column in inspect(engine).get_columns("conversion_jobs")
+    }
+    assert {
+        "source_filename",
+        "source_kind",
+        "source_sha256",
+        "source_size",
+        "result_manifest_object_id",
+    } <= job_columns
     assert DatabaseReadinessProbe(engine).is_ready()
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
@@ -244,6 +257,24 @@ def test_database_url_helpers_select_the_expected_drivers() -> None:
     assert engine.url.drivername == "postgresql+psycopg"
     assert engine.hide_parameters
     engine.dispose()
+
+
+@pytest.mark.unit
+def test_postgresql_user_update_helper_keeps_returning(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.Mock()
+    engine.dialect.name = "postgresql"
+    repository = SqlUserRepository(engine)
+    database = mocker.Mock()
+    statement = mocker.Mock()
+    expected = mocker.Mock()
+    database.execute.return_value.scalar_one_or_none.return_value = expected
+
+    assert repository._update_user_row(database, statement, "user-id") is expected
+
+    statement.returning.assert_called_once()
+    database.execute.assert_called_once_with(statement.returning.return_value)
 
 
 @pytest.mark.unit
@@ -436,3 +467,40 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     )
     CORRELATION_REVISION.downgrade()
     correlation.drop_column.assert_called_once_with("conversion_jobs", "correlation_id")
+
+
+@pytest.mark.unit
+def test_job_integrity_downgrade_uses_batch_table_copy(mocker: MockerFixture) -> None:
+    integrity = mocker.patch.object(JOB_INTEGRITY_REVISION, "op")
+    batch = integrity.batch_alter_table.return_value.__enter__.return_value
+    JOB_INTEGRITY_REVISION.downgrade()
+    assert batch.drop_column.call_count == 5
+    integrity.drop_column.assert_not_called()
+
+
+@pytest.mark.unit
+def test_job_integrity_sqlite_downgrade_preserves_referencing_triggers(
+    mocker: MockerFixture,
+) -> None:
+    integrity = mocker.patch.object(JOB_INTEGRITY_REVISION, "op")
+    bind = mocker.MagicMock()
+    bind.dialect.name = "sqlite"
+    trigger_rows = mocker.Mock()
+    trigger_rows.tuples.return_value = (
+        ("conversion_guard", "CREATE TRIGGER conversion_guard AFTER INSERT ON users"),
+        ("job_guard", "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs"),
+    )
+    bind.execute.return_value = trigger_rows
+    integrity.get_bind.return_value = bind
+
+    JOB_INTEGRITY_REVISION.downgrade()
+
+    assert integrity.batch_alter_table.call_args.kwargs["recreate"] == "always"
+    assert bind.execute.call_count == 5
+    executed = [str(call.args[0]) for call in bind.execute.call_args_list]
+    assert 'DROP TRIGGER "conversion_guard"' in executed
+    assert 'DROP TRIGGER "job_guard"' in executed
+    assert executed[-2:] == [
+        "CREATE TRIGGER conversion_guard AFTER INSERT ON users",
+        "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs",
+    ]

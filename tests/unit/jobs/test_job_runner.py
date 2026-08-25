@@ -41,6 +41,8 @@ def test_external_loop_recovers_processes_cleans_and_waits(
     ).run(stop)
     assert worker.recover.call_count == 3
     assert worker.run_once.call_count == 3
+    shutdown_probe = worker.run_once.call_args_list[0].kwargs["shutdown_requested"]
+    assert callable(shutdown_probe)
     worker.cleanup.assert_called_once_with(limit=5)
     assert stop.wait.call_count == 2
 

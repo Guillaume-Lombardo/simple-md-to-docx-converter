@@ -54,6 +54,20 @@ def test_root_containerfile_selects_container_domain() -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        ".containerignore",
+        "container/entrypoint.sh",
+        "scripts/container/smoke.sh",
+        "tests/container/test_container_assets.py",
+    ],
+)
+def test_t20_asset_changes_select_container_domain(path: str) -> None:
+    assert select_domains([path]) == ["container"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
         ".github/ci/domains.json",
         ".github/workflows/ci.yml",
         "scripts/ci/run_domain.py",

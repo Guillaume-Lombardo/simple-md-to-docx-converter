@@ -45,6 +45,28 @@ class Settings(BaseSettings):
     conversion_max_files: int = Field(gt=0)
     conversion_max_images: int = Field(gt=0)
     conversion_max_diagrams: int = Field(gt=0)
+    conversion_max_compression_ratio: float = Field(ge=1.0, allow_inf_nan=False)
+    conversion_image_max_source_bytes: int = Field(gt=0)
+    conversion_image_max_width_pixels: int = Field(gt=0)
+    conversion_image_max_height_pixels: int = Field(gt=0)
+    conversion_image_max_pixels: int = Field(gt=0)
+    conversion_image_max_svg_elements: int = Field(gt=0)
+    conversion_image_max_svg_depth: int = Field(gt=0, le=64)
+    conversion_mermaid_max_source_bytes: int = Field(gt=0)
+    conversion_mermaid_max_total_source_bytes: int = Field(gt=0)
+    conversion_mermaid_max_output_bytes: int = Field(gt=0)
+    conversion_mermaid_max_total_output_bytes: int = Field(gt=0)
+    conversion_mermaid_max_width_pixels: int = Field(gt=0)
+    conversion_mermaid_max_height_pixels: int = Field(gt=0)
+    conversion_mermaid_executable: str = Field(min_length=1)
+    conversion_chromium_executable: str = Field(min_length=1)
+    conversion_pdf_cancellation_poll_seconds: float = Field(gt=0, allow_inf_nan=False)
+    conversion_pdf_max_bytes: int = Field(gt=0)
+    conversion_pdf_max_decoded_stream_bytes: int = Field(gt=0)
+    conversion_pdf_max_pages: int = Field(gt=0)
+    conversion_pdf_max_objects: int = Field(gt=0)
+    conversion_pdf_max_object_depth: int = Field(gt=0)
+    conversion_font_manifest_path: Path
     conversion_retry_after_seconds: int = Field(gt=0)
     job_result_retention_seconds: int = Field(gt=0)
     job_active_limit_per_user: int = Field(gt=0)
@@ -120,6 +142,13 @@ class Settings(BaseSettings):
             raise ValueError("template request limit must exceed the archive limit")
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
             raise ValueError("worker heartbeat must be shorter than its lease")
+        if (
+            self.conversion_mermaid_max_total_source_bytes
+            < self.conversion_mermaid_max_source_bytes
+            or self.conversion_mermaid_max_total_output_bytes
+            < self.conversion_mermaid_max_output_bytes
+        ):
+            raise ValueError("aggregate Mermaid limits must cover one diagram")
         if any(
             not character.isascii()
             or not character.isprintable()

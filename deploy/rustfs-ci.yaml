@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+    environment:
+      POSTGRES_DB: md_converter_test
+      POSTGRES_PASSWORD: t20-ci-password
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d md_converter_test]
+  rustfs:
+    image: ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04
+    environment:
+      RUSTFS_ACCESS_KEY: t20integration
+      RUSTFS_SECRET_KEY: t20integrationsecret
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "false"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,12 +14,15 @@ from typing import Protocol
 from md_converter.conversion.errors import ConversionError
 from md_converter.jobs.errors import JobLeaseLostError, JobProcessingCancelled
 from md_converter.jobs.models import (
+    SHA256_CHARACTERS,
     ConversionJob,
     JobFailure,
+    JobOutput,
     JobProcessResult,
     JobState,
     JobStep,
     LeaseHeartbeat,
+    result_manifest_object_id,
     result_object_id,
 )
 from md_converter.jobs.policy import JobExecutionBudget
@@ -31,6 +35,96 @@ from md_converter.observability import (
     reset_correlation_id,
 )
 from md_converter.storage import ObjectKey, ObjectScope, ObjectStore
+
+_TRACEABILITY_KEYS = frozenset(
+    {
+        "schema_version",
+        "application_version",
+        "conversion_contract_version",
+        "template_id",
+        "template_version",
+        "template_sha256",
+        "source_docx_sha256",
+        "output_pdf_sha256",
+        "output_pdf_bytes",
+        "pages",
+        "pandoc_version",
+        "pandoc_reader",
+        "mermaid_version",
+        "chromium_version",
+        "libreoffice_version",
+        "font_manifest_sha256",
+        "export_filter",
+        "output_format",
+    }
+)
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == SHA256_CHARACTERS
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _is_canonical_traceability_manifest(content: bytes) -> bool:  # noqa: PLR0911
+    try:
+        decoded = json.loads(content, parse_constant=_reject_json_constant)
+    except json.JSONDecodeError, UnicodeDecodeError, ValueError:
+        return False
+    if not isinstance(decoded, dict) or frozenset(decoded) != _TRACEABILITY_KEYS:
+        return False
+    if (
+        decoded.get("schema_version") != 1
+        or decoded.get("output_format") != "pdf"
+        or type(decoded.get("output_pdf_bytes")) is not int
+        or decoded["output_pdf_bytes"] <= 0
+        or not all(
+            _is_sha256(decoded.get(name))
+            for name in (
+                "template_sha256",
+                "source_docx_sha256",
+                "output_pdf_sha256",
+                "font_manifest_sha256",
+            )
+        )
+    ):
+        return False
+    pages = decoded.get("pages")
+    if not isinstance(pages, list) or not pages:
+        return False
+    for page in pages:
+        if not isinstance(page, dict) or set(page) != {"width_points", "height_points"}:
+            return False
+        if any(
+            type(page.get(name)) not in {int, float} or page[name] <= 0
+            for name in ("width_points", "height_points")
+        ):
+            return False
+    return (
+        json.dumps(
+            decoded, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        == content
+    )
+
+
+def _validated_manifest(job: ConversionJob, result: JobProcessResult) -> bytes | None:
+    manifest = result.progress_manifest
+    requires_manifest = job.output in {JobOutput.PDF, JobOutput.BOTH}
+    if requires_manifest:
+        if manifest is None or not _is_canonical_traceability_manifest(manifest):
+            raise RuntimeError(
+                "PDF conversion processor returned no canonical traceability manifest"
+            )
+    elif manifest is not None:
+        raise RuntimeError("DOCX conversion processor returned a traceability manifest")
+    return manifest
 
 
 class MaintenanceCleaner(Protocol):
@@ -99,15 +193,20 @@ class _BudgetCancellationProbe:
     budget: JobExecutionBudget | None
     lease_lost: Event
     duration_exhausted: Event
+    shutdown_interrupted: Event
     monotonic_clock: Callable[[], float]
     durable_requested: Callable[[], bool]
+    shutdown_requested: Callable[[], bool]
 
     def __call__(self) -> bool:
         if self.budget is not None and self.budget.exhausted(self.monotonic_clock()):
             self.duration_exhausted.set()
+        if self.shutdown_requested():
+            self.shutdown_interrupted.set()
         return (
             self.lease_lost.is_set()
             or self.duration_exhausted.is_set()
+            or self.shutdown_interrupted.is_set()
             or self.durable_requested()
         )
 
@@ -132,7 +231,9 @@ class ConversionWorker:
         self._metrics = runtime.metrics
         self._policy = policy
 
-    def run_once(self) -> bool:  # noqa: PLR0912, PLR0915 - lifecycle is explicit
+    def run_once(  # noqa: PLR0911, PLR0912, PLR0915 - lifecycle is explicit
+        self, *, shutdown_requested: Callable[[], bool] | None = None
+    ) -> bool:
         now = self._clock()
         job = self._repository.claim(
             self._worker_id,
@@ -164,7 +265,9 @@ class ConversionWorker:
         keepalive_stop = Event()
         lease_lost = Event()
         duration_exhausted = Event()
+        shutdown_interrupted = Event()
         keepalive_errors: list[BaseException] = []
+        should_shutdown = shutdown_requested or (lambda: False)
 
         def heartbeat() -> None:
             heartbeat_at = self._clock()
@@ -199,10 +302,12 @@ class ConversionWorker:
             budget=budget,
             lease_lost=lease_lost,
             duration_exhausted=duration_exhausted,
+            shutdown_interrupted=shutdown_interrupted,
             monotonic_clock=self._monotonic_clock,
             durable_requested=lambda: self._repository.cancellation_requested(
                 job.id, self._worker_id, lease_token
             ),
+            shutdown_requested=should_shutdown,
         )
 
         def progress(step: JobStep, percentage: int) -> None:
@@ -257,6 +362,8 @@ class ConversionWorker:
                     raise processing_error
                 if budget is not None and budget.exhausted(self._monotonic_clock()):
                     duration_exhausted.set()
+                if should_shutdown():
+                    shutdown_interrupted.set()
                 durable_cancelled = self._repository.cancellation_requested(
                     job.id, self._worker_id, lease_token
                 )
@@ -266,6 +373,18 @@ class ConversionWorker:
                     return True
                 if duration_exhausted.is_set():
                     self._finish_budget_exceeded(job)
+                    keepalive_stop.set()
+                    return True
+                if shutdown_interrupted.is_set():
+                    log_event(
+                        "job_processing_interrupted",
+                        job_id=str(job.id),
+                        owner_id=str(job.owner_id),
+                        version_id=str(job.template_version_id),
+                        worker_id=self._worker_id,
+                        state=job.state.value,
+                        step=progress_state.step.value,
+                    )
                     keepalive_stop.set()
                     return True
                 if isinstance(processing_error, JobProcessingCancelled):
@@ -283,8 +402,21 @@ class ConversionWorker:
 
             publication_id = result_object_id(job.id, job.attempt)
             result_key = ObjectKey(ObjectScope.RESULT, job.owner_id, publication_id)
-            self._objects.put(result_key, result.content)
+            manifest = _validated_manifest(job, result)
+            manifest_id = (
+                result_manifest_object_id(job.id, job.attempt)
+                if manifest is not None
+                else None
+            )
+            manifest_key = (
+                ObjectKey(ObjectScope.RESULT_MANIFEST, job.owner_id, manifest_id)
+                if manifest_id is not None
+                else None
+            )
             try:
+                self._objects.put(result_key, result.content)
+                if manifest_key is not None and manifest is not None:
+                    self._objects.put(manifest_key, manifest)
                 with heartbeat_operation:
                     if keepalive_errors:
                         raise keepalive_errors[0]
@@ -296,10 +428,13 @@ class ConversionWorker:
                         publication_id,
                         finished_at,
                         self._expires_at(finished_at),
+                        result_manifest_object_id=manifest_id,
                     )
                     keepalive_stop.set()
             except BaseException:
                 self._objects.delete(result_key)
+                if manifest_key is not None:
+                    self._objects.delete(manifest_key)
                 raise
             finished_state = (
                 finished.state
@@ -313,6 +448,8 @@ class ConversionWorker:
             )
             if finished_state is JobState.CANCELLED:
                 self._objects.delete(result_key)
+                if manifest_key is not None:
+                    self._objects.delete(manifest_key)
             log_event(
                 "job_processing_completed",
                 job_id=str(job.id),
@@ -373,6 +510,12 @@ class ConversionWorker:
             for object_id in candidate.result_object_ids:
                 self._objects.delete(
                     ObjectKey(ObjectScope.RESULT, candidate.owner_id, object_id)
+                )
+            for object_id in candidate.result_manifest_object_ids:
+                self._objects.delete(
+                    ObjectKey(
+                        ObjectScope.RESULT_MANIFEST, candidate.owner_id, object_id
+                    )
                 )
             self._repository.complete_cleanup(candidate.job_id, candidate.cleanup_token)
         maintained = (

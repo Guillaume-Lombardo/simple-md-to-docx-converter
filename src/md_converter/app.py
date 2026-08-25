@@ -54,7 +54,13 @@ from md_converter.jobs.errors import (
     JobRequestError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.models import ConversionJob, JobOutput, JobPage, JobRequest
+from md_converter.jobs.models import (
+    ConversionJob,
+    JobOutput,
+    JobPage,
+    JobRequest,
+    source_kind_for_filename,
+)
 from md_converter.jobs.ports import JobRepository
 from md_converter.jobs.runner import EmbeddedWorker, ExternalWorkerRuntime, WorkerLoop
 from md_converter.jobs.runtime import JobPolicies, build_job_policies
@@ -998,15 +1004,19 @@ def build_components(settings: Settings) -> AppComponents:
         return components
 
 
-def create_app(  # noqa: PLR0915 - the factory keeps route-local security dependencies
+def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composition
     settings: Settings | None = None,
     *,
     components: AppComponents | None = None,
     scanner: UploadScanner | None = None,
+    embedded_worker: EmbeddedWorker | None = None,
+    embedded_worker_stop_timeout_seconds: float = 30.0,
+    manage_components: bool = False,
 ) -> FastAPI:
     """Create a configured application or fail before serving requests."""
     resolved_settings = settings if settings is not None else Settings.load()
     resolved_components = components or build_components(resolved_settings)
+    owns_components = components is None or manage_components
     if scanner is not None:
         resolved_components = replace(resolved_components, scanner=scanner)
     auth = resolved_components.authentication
@@ -1016,18 +1026,28 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
             resolved_settings.initial_admin_password.get_secret_value(),
         )
     except Exception:
-        if components is None:
+        if owns_components:
             resolved_components.close()
         raise
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         del _app
+        worker_started = False
         try:
+            if embedded_worker is not None:
+                embedded_worker.start()
+                worker_started = True
             yield
         finally:
-            if components is None:
-                resolved_components.close()
+            try:
+                if embedded_worker is not None and worker_started:
+                    embedded_worker.stop(
+                        timeout_seconds=embedded_worker_stop_timeout_seconds
+                    )
+            finally:
+                if owns_components:
+                    resolved_components.close()
 
     app = FastAPI(
         title="Markdown Converter API",
@@ -1180,7 +1200,8 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         responses=error_responses(503),
     )
     def ready() -> Response:
-        if resolved_components.readiness.is_ready():
+        worker_ready = embedded_worker is None or embedded_worker.failure is None
+        if worker_ready and resolved_components.readiness.is_ready():
             return JSONResponse({"status": "ready"})
         log_event("readiness_failed")
         return JSONResponse(
@@ -1434,6 +1455,15 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
+        if source.filename is None:
+            await source.close()
+            raise JobRequestError
+        source_filename = source.filename
+        try:
+            source_kind = source_kind_for_filename(source_filename)
+        except ValueError:
+            await source.close()
+            raise JobRequestError from None
         try:
             content = await source.read(
                 resolved_settings.conversion_upload_max_bytes + 1
@@ -1455,6 +1485,8 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
                     correlation_id=current_correlation_id() or uuid4().hex,
+                    source_filename=source_filename,
+                    source_kind=source_kind,
                 ),
                 idempotency_key,
             )
@@ -1558,6 +1590,38 @@ def create_app(  # noqa: PLR0915 - the factory keeps route-local security depend
                 "Content-Disposition": (
                     f'attachment; filename="conversion-{job.id}.'
                     f'{extensions[job.output]}"'
+                ),
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.get(
+        "/api/v1/conversions/{job_id}/result/manifest",
+        response_class=Response,
+        tags=["conversions"],
+        responses={
+            200: {
+                "description": "Canonical PDF traceability manifest",
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            },
+            **error_responses(401, 404, 409, 422, 503),
+        },
+    )
+    def download_conversion_manifest(
+        job_id: UUID, actor: Annotated[User, Depends(current_user)]
+    ) -> Response:
+        job, content = resolved_components.jobs.download_manifest(
+            job_id,
+            actor_id=actor.id,
+            actor_is_admin=actor.role is Role.ADMIN,
+        )
+        return Response(
+            content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="conversion-{job.id}-traceability.json"'
                 ),
                 "Cache-Control": "private, no-store",
                 "X-Content-Type-Options": "nosniff",

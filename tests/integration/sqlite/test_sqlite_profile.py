@@ -29,6 +29,7 @@ from md_converter.storage import (
     ObjectStoreError,
 )
 from tests.settings import template_settings
+from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 from tests.storage_contracts import (
     exercise_auth_repository_contract,
     exercise_object_store_contract,
@@ -38,6 +39,7 @@ from tests.storage_contracts import (
 @pytest.mark.integration
 def test_sqlite_authentication_repository_contract(tmp_path: Path) -> None:
     engine = create_database_engine(standalone_database_url(tmp_path))
+    enforce_sqlite_334_update_grammar(engine)
     upgrade_database(engine)
     assert DatabaseReadinessProbe(engine).is_ready()
     exercise_auth_repository_contract(

@@ -41,6 +41,7 @@ _LOG_EVENTS = frozenset(
         "job_expiration_completed",
         "job_processing_completed",
         "job_processing_failed",
+        "job_processing_interrupted",
         "job_processing_started",
         "job_recovery_completed",
         "readiness_failed",
@@ -73,6 +74,7 @@ _LOG_ERROR_CODES = frozenset(
         "pdf_limit_exceeded",
         "invalid_pdf",
         "template_integrity",
+        "source_integrity",
         "resource_budget_exceeded",
     }
 )

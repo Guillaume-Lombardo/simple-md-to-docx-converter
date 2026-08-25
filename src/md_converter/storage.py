@@ -18,6 +18,7 @@ class ObjectScope(StrEnum):
 
     UPLOAD = "uploads"
     RESULT = "results"
+    RESULT_MANIFEST = "result-manifests"
     TEMPLATE_VERSION = "template-versions"
 
 
