@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import shlex
 from dataclasses import replace
 from pathlib import Path
-from textwrap import indent
 
 import pytest
 
@@ -29,37 +27,41 @@ PACKAGE_PLACEHOLDER = "PACKAGE_NAME_FROM_APPROVED_POLICY"
 VERSION_PLACEHOLDER = "VERSION_FROM_APPROVED_POLICY"
 ARTIFACT_PATH_PLACEHOLDER = "ARTIFACT_DIRECTORY_FROM_APPROVED_POLICY"
 ARTIFACT_NAME_PLACEHOLDER = "ARTIFACT_NAME_FROM_APPROVED_POLICY"
-MANIFEST_PLACEHOLDER = "MANIFEST_NAME_FROM_APPROVED_POLICY"
-BUILD_COMMAND = f"""\
-uv run python -m scripts.release.build \\
-  --output {ARTIFACT_PATH_PLACEHOLDER} \\
-  --name {PACKAGE_PLACEHOLDER} \\
-  --version {VERSION_PLACEHOLDER} \\
-  --constraint CONSTRAINT_FILE_FROM_APPROVED_POLICY
-"""
-ARTIFACT_VERIFY_COMMAND = f"""\
-uv run python -m scripts.release.artifacts verify \\
-  --directory {ARTIFACT_PATH_PLACEHOLDER} \\
-  --name {PACKAGE_PLACEHOLDER} \\
-  --version {VERSION_PLACEHOLDER} \\
-  --manifest-name {MANIFEST_PLACEHOLDER}
-"""
-CLEAN_INSTALL_COMMAND = f"""\
-uv run python -m scripts.release.verify_install \\
-  --directory {ARTIFACT_PATH_PLACEHOLDER} \\
-  --name {PACKAGE_PLACEHOLDER} \\
-  --version {VERSION_PLACEHOLDER} \\
-  --manifest-name {MANIFEST_PLACEHOLDER}
-"""
+MANIFEST_PLACEHOLDER = "release-integrity.json"
+CONSTRAINT_PLACEHOLDER = "CONSTRAINT_FILE_FROM_APPROVED_POLICY"
+BUILD_COMMAND = (
+    "uv run python -m scripts.release.build "
+    f"--output {ARTIFACT_PATH_PLACEHOLDER} "
+    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
+    f"--constraint {CONSTRAINT_PLACEHOLDER}"
+)
+ARTIFACT_VERIFY_COMMAND = (
+    "uv run python -m scripts.release.artifacts verify "
+    f"--directory {ARTIFACT_PATH_PLACEHOLDER} "
+    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
+    f"--manifest-name {MANIFEST_PLACEHOLDER}"
+)
+CLEAN_INSTALL_COMMAND = (
+    "uv run python -m scripts.release.verify_install "
+    f"--directory {ARTIFACT_PATH_PLACEHOLDER} "
+    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
+    f"--manifest-name {MANIFEST_PLACEHOLDER}"
+)
 RELEASE_POLICY = ReleaseWorkflowPolicy(
     approved_triggers=frozenset({"release"}),
     approved_tag_patterns=None,
-    build_command=BUILD_COMMAND,
-    artifact_verification_command=ARTIFACT_VERIFY_COMMAND,
-    clean_install_command=CLEAN_INSTALL_COMMAND,
+    distribution_name=PACKAGE_PLACEHOLDER,
+    version=VERSION_PLACEHOLDER,
     artifact_upload_action=f"actions/upload-artifact@{FULL_SHA_D}",
+    artifact_download_action=f"actions/download-artifact@{FULL_SHA_D}",
+    checkout_action=f"actions/checkout@{FULL_SHA_A}",
+    setup_python_action=f"actions/setup-python@{FULL_SHA_B}",
+    setup_uv_action=f"astral-sh/setup-uv@{FULL_SHA_C}",
+    pypi_publish_action=f"pypa/gh-action-pypi-publish@{FULL_SHA_E}",
     artifact_name=ARTIFACT_NAME_PLACEHOLDER,
-    artifact_path=ARTIFACT_PATH_PLACEHOLDER,
+    artifact_directory=ARTIFACT_PATH_PLACEHOLDER,
+    manifest_name=MANIFEST_PLACEHOLDER,
+    constraint=CONSTRAINT_PLACEHOLDER,
 )
 
 
@@ -98,12 +100,12 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@{FULL_SHA_C}
       - name: Build distributions exactly once
-        run: |
-{indent(BUILD_COMMAND, "          ")}      - name: Verify artifact integrity and metadata
-        run: |
-{indent(ARTIFACT_VERIFY_COMMAND, "          ")}      - name: Verify clean Python 3.14 installation and public import
-        run: |
-{indent(CLEAN_INSTALL_COMMAND, "          ")}      - name: Transfer verified artifacts
+        run: {BUILD_COMMAND}
+      - name: Verify artifact integrity and metadata
+        run: {ARTIFACT_VERIFY_COMMAND}
+      - name: Verify clean Python 3.14 installation and public import
+        run: {CLEAN_INSTALL_COMMAND}
+      - name: Transfer verified artifacts
         uses: actions/upload-artifact@{FULL_SHA_D}
         with:
           name: {ARTIFACT_NAME_PLACEHOLDER}
@@ -625,30 +627,24 @@ def test_release_policy_accepts_caller_approved_trusted_context(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("field", "command"),
+    ("field", "value"),
     [
-        ("build_command", "echo scripts.release.build\n"),
-        (
-            "artifact_verification_command",
-            "uv run python -m scripts.release.artifacts create-manifest "
-            "--directory output --name name --version version "
-            "--manifest-name manifest\n",
-        ),
-        ("clean_install_command", "echo scripts.release.verify_install\n"),
+        ("distribution_name", "$(id)"),
+        ("distribution_name", "PACKAGE*"),
+        ("version", "VERSION|cat"),
+        ("artifact_directory", "output>stolen"),
+        ("artifact_directory", "output\nnext"),
+        ("constraint", "constraints;touch-owned"),
     ],
 )
-def test_release_policy_rejects_fake_caller_approved_commands(
-    valid_release_workflow: str, field: str, command: str
+def test_release_policy_rejects_shell_syntax_in_structured_literals(
+    valid_release_workflow: str, field: str, value: str
 ) -> None:
-    """Even caller-provided commands must invoke the merged release CLIs exactly."""
-    original = getattr(RELEASE_POLICY, field)
-    weakened = valid_release_workflow.replace(
-        indent(original, "          "), indent(command, "          ")
-    )
+    """Structured values cannot carry substitution, globs, separators, or newlines."""
     errors = validate_release_workflow_text(
-        weakened, policy=replace(RELEASE_POLICY, **{field: command})
+        valid_release_workflow, policy=replace(RELEASE_POLICY, **{field: value})
     )
-    assert any("does not match the real CLI" in error for error in errors)
+    assert any("literal" in error for error in errors)
 
 
 @pytest.mark.unit
@@ -665,7 +661,8 @@ def test_release_policy_requires_explicit_immutable_upload_action(
         policy=replace(RELEASE_POLICY, artifact_upload_action=mutable),
     )
     assert (
-        "caller-approved upload action must be an immutable upload-artifact" in errors
+        "caller-approved upload-artifact action must be an immutable exact action"
+        in errors
     )
 
 
@@ -673,19 +670,84 @@ def test_release_policy_requires_explicit_immutable_upload_action(
 @pytest.mark.parametrize(
     "replacement",
     [
-        "set -e\n" + BUILD_COMMAND,
-        " ".join(shlex.split(BUILD_COMMAND.replace("\\\n", ""))) + "\n",
+        f"run: |\n          set -e\n          {BUILD_COMMAND}",
+        f"run: |\n          {BUILD_COMMAND}\n          true",
     ],
 )
 def test_release_commands_preserve_exact_shell_separators_and_newlines(
     valid_release_workflow: str, replacement: str
 ) -> None:
     """Token-equivalent or prefixed multiline shell programs remain distinct."""
-    weakened = valid_release_workflow.replace(
-        indent(BUILD_COMMAND, "          "), indent(replacement, "          ")
-    )
+    weakened = valid_release_workflow.replace(f"run: {BUILD_COMMAND}", replacement)
     errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release producer commands do not match the exact contract" in errors
+
+
+@pytest.mark.unit
+def test_release_policy_derives_build_without_optional_constraint(
+    valid_release_workflow: str,
+) -> None:
+    """Only the build command receives the optional safe constraint literal."""
+    suffix = f" --constraint {CONSTRAINT_PLACEHOLDER}"
+    workflow = valid_release_workflow.replace(suffix, "", 1)
+    assert (
+        validate_release_workflow_text(
+            workflow, policy=replace(RELEASE_POLICY, constraint=None)
+        )
+        == []
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "needle", "replacement"),
+    [
+        (BUILD_COMMAND, f"--output {ARTIFACT_PATH_PLACEHOLDER}", "--output OTHER_DIR"),
+        (
+            ARTIFACT_VERIFY_COMMAND,
+            f"--directory {ARTIFACT_PATH_PLACEHOLDER}",
+            "--directory OTHER_DIR",
+        ),
+        (
+            CLEAN_INSTALL_COMMAND,
+            f"--directory {ARTIFACT_PATH_PLACEHOLDER}",
+            "--directory OTHER_DIR",
+        ),
+        (BUILD_COMMAND, f"--name {PACKAGE_PLACEHOLDER}", "--name OTHER_NAME"),
+        (
+            ARTIFACT_VERIFY_COMMAND,
+            f"--version {VERSION_PLACEHOLDER}",
+            "--version OTHER_VERSION",
+        ),
+        (
+            CLEAN_INSTALL_COMMAND,
+            f"--manifest-name {MANIFEST_PLACEHOLDER}",
+            "--manifest-name other-manifest.json",
+        ),
+    ],
+)
+def test_release_policy_rejects_divergent_derived_command_values(
+    valid_release_workflow: str, command: str, needle: str, replacement: str
+) -> None:
+    """All three derived CLIs share one name, version, directory, and manifest."""
+    changed_command = command.replace(needle, replacement)
+    weakened = valid_release_workflow.replace(command, changed_command, 1)
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
+    assert "release producer commands do not match the exact contract" in errors
+
+
+@pytest.mark.unit
+def test_release_policy_requires_build_default_manifest_name(
+    valid_release_workflow: str,
+) -> None:
+    """Separate verification must consume the manifest created by the build CLI."""
+    errors = validate_release_workflow_text(
+        valid_release_workflow,
+        policy=replace(RELEASE_POLICY, manifest_name="other-manifest.json"),
+    )
+    assert (
+        "caller-approved manifest name must match the release build default" in errors
+    )
 
 
 @pytest.mark.unit
@@ -749,7 +811,7 @@ def test_release_policy_rejects_non_string_or_empty_tag_patterns(
         policy=replace(
             RELEASE_POLICY,
             approved_triggers=frozenset({"push"}),
-            approved_tag_patterns=("caller-approved-*",),
+            approved_tag_patterns=("TAG_FROM_APPROVED_POLICY",),
         ),
     )
     assert "push release trigger must match explicitly approved tag patterns" in errors
@@ -762,7 +824,7 @@ def test_push_release_requires_exact_caller_approved_tag_patterns(
     """The validator never chooses or merely infers the production tag policy."""
     pushed = valid_release_workflow.replace(
         "  release:\n    types: [published]",
-        '  push:\n    tags: ["caller-approved-*"]',
+        '  push:\n    tags: ["TAG_FROM_APPROVED_POLICY"]',
     )
     assert "push release trigger must match explicitly approved tag patterns" in (
         validate_release_workflow_text(
@@ -780,7 +842,7 @@ def test_push_release_requires_exact_caller_approved_tag_patterns(
             policy=replace(
                 RELEASE_POLICY,
                 approved_triggers=frozenset({"push"}),
-                approved_tag_patterns=("release-*",),
+                approved_tag_patterns=("OTHER_TAG_FROM_APPROVED_POLICY",),
             ),
         )
     )
@@ -790,12 +852,12 @@ def test_push_release_requires_exact_caller_approved_tag_patterns(
             policy=replace(
                 RELEASE_POLICY,
                 approved_triggers=frozenset({"push"}),
-                approved_tag_patterns=("caller-approved-*",),
+                approved_tag_patterns=("TAG_FROM_APPROVED_POLICY",),
             ),
         )
         == []
     )
-    dynamic = pushed.replace("caller-approved-*", "${{ github.ref }}")
+    dynamic = pushed.replace("TAG_FROM_APPROVED_POLICY", "${{ github.ref }}")
     assert "push release trigger must match explicitly approved tag patterns" in (
         validate_release_workflow_text(
             dynamic,
@@ -962,7 +1024,7 @@ def test_release_policy_rejects_inert_or_indirect_build(
 ) -> None:
     """Echoes, comments, and variables cannot satisfy the build-once contract."""
     weakened = valid_release_workflow.replace(
-        indent(BUILD_COMMAND, "          "), indent(replacement, "          ")
+        f"run: {BUILD_COMMAND}", f"run: {replacement.rstrip()}"
     )
     errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release producer commands do not match the exact contract" in errors
@@ -985,16 +1047,20 @@ def test_release_policy_rejects_artifact_substitution(
     ("needle", "replacement"),
     [
         (
-            indent(ARTIFACT_VERIFY_COMMAND, "          "),
-            "          echo metadata verified\n",
+            f"run: {ARTIFACT_VERIFY_COMMAND}",
+            "run: echo metadata verified",
         ),
         (
-            indent(CLEAN_INSTALL_COMMAND, "          "),
-            "          echo import verified\n",
+            f"run: {CLEAN_INSTALL_COMMAND}",
+            "run: echo import verified",
         ),
         (
             'python-version: "3.14"',
             'python-version: "3.13"',
+        ),
+        (
+            "check-latest: false",
+            "check-latest: 0",
         ),
         (
             "      - name: Transfer verified artifacts\n",
@@ -1019,6 +1085,16 @@ def test_release_policy_rejects_weakened_producer_or_publish_steps(
         policy=RELEASE_POLICY,
     )
     assert errors
+
+
+@pytest.mark.unit
+def test_release_python_setup_rejects_integer_zero_check_latest(
+    valid_release_workflow: str,
+) -> None:
+    """The setup action requires the boolean false value, not an equal integer."""
+    weakened = valid_release_workflow.replace("check-latest: false", "check-latest: 0")
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
+    assert "release Python setup check-latest must be boolean false" in errors
 
 
 @pytest.mark.unit

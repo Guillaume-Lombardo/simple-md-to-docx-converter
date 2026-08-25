@@ -6,7 +6,6 @@ import ast
 import hashlib
 import json
 import re
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +15,7 @@ from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
 from scripts.ci.select_domains import DOMAIN_PATTERNS, load_registry
+from scripts.release.artifacts import MANIFEST_NAME as RELEASE_MANIFEST_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -24,6 +24,8 @@ ACTION_REFERENCE = re.compile(
     r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)@([0-9a-f]+)$"
 )
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+SIMPLE_RELEASE_LITERAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+SAFE_RELEASE_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 TRUSTED_REPOSITORY = "Guillaume-Lombardo/simple-md-to-docx-converter"
 TRUSTED_REPOSITORY_CONDITION = f"github.repository == '{TRUSTED_REPOSITORY}'"
 TRUSTED_REPOSITORY_GUARD = f"${{{{ {TRUSTED_REPOSITORY_CONDITION} }}}}"
@@ -103,12 +105,18 @@ class ReleaseWorkflowPolicy:
 
     approved_triggers: frozenset[str]
     approved_tag_patterns: tuple[str, ...] | None
-    build_command: str
-    artifact_verification_command: str
-    clean_install_command: str
+    distribution_name: str
+    version: str
     artifact_upload_action: str
+    artifact_download_action: str
+    checkout_action: str
+    setup_python_action: str
+    setup_uv_action: str
+    pypi_publish_action: str
     artifact_name: str
-    artifact_path: str
+    artifact_directory: str
+    manifest_name: str
+    constraint: str | None
 
 
 READ_ONLY_WORKFLOW_POLICIES = {
@@ -761,7 +769,10 @@ def _release_artifact_contract(
         errors.append("publish download must name the verified artifact bundle")
     if not isinstance(download_path, str) or not download_path:
         errors.append("publish download must use an explicit artifact path")
-    if artifact_name != policy.artifact_name or download_path != policy.artifact_path:
+    if (
+        artifact_name != policy.artifact_name
+        or download_path != policy.artifact_directory
+    ):
         errors.append(
             "publish download must match the caller-approved artifact contract"
         )
@@ -800,6 +811,26 @@ def _release_artifact_contract(
     return errors
 
 
+def _release_commands(policy: ReleaseWorkflowPolicy) -> tuple[str, str, str]:
+    build = (
+        "uv run python -m scripts.release.build "
+        f"--output {policy.artifact_directory} "
+        f"--name {policy.distribution_name} "
+        f"--version {policy.version}"
+    )
+    if policy.constraint is not None:
+        build = f"{build} --constraint {policy.constraint}"
+    shared = (
+        f"--directory {policy.artifact_directory} "
+        f"--name {policy.distribution_name} "
+        f"--version {policy.version} "
+        f"--manifest-name {policy.manifest_name}"
+    )
+    verify = f"uv run python -m scripts.release.artifacts verify {shared}"
+    install = f"uv run python -m scripts.release.verify_install {shared}"
+    return build, verify, install
+
+
 def _validate_release_producer_job(
     job: Mapping[str, Any], *, policy: ReleaseWorkflowPolicy
 ) -> list[str]:
@@ -810,6 +841,7 @@ def _validate_release_producer_job(
     steps = _release_steps(job)
     if steps is None:
         return [*errors, "release producer steps must be mappings"]
+    build_command, verify_command, install_command = _release_commands(policy)
     expected_steps: tuple[tuple[str, str, object], ...] = (
         (
             "Check out reviewed source",
@@ -822,29 +854,29 @@ def _validate_release_producer_job(
             {"python-version": "3.14", "check-latest": False},
         ),
         ("Set up uv", "uses", None),
-        ("Build distributions exactly once", "run", policy.build_command),
+        ("Build distributions exactly once", "run", build_command),
         (
             "Verify artifact integrity and metadata",
             "run",
-            policy.artifact_verification_command,
+            verify_command,
         ),
         (
             "Verify clean Python 3.14 installation and public import",
             "run",
-            policy.clean_install_command,
+            install_command,
         ),
         (
             "Transfer verified artifacts",
             "uses",
-            {"name": policy.artifact_name, "path": policy.artifact_path},
+            {"name": policy.artifact_name, "path": policy.artifact_directory},
         ),
     )
     if len(steps) != len(expected_steps):
         return [*errors, "release producer steps do not match the exact contract"]
     expected_actions = (
-        "actions/checkout@",
-        "actions/setup-python@",
-        "astral-sh/setup-uv@",
+        policy.checkout_action,
+        policy.setup_python_action,
+        policy.setup_uv_action,
         None,
         None,
         None,
@@ -866,13 +898,7 @@ def _validate_release_producer_job(
                 )
         else:
             uses = step.get("uses")
-            action_matches = (
-                uses == action
-                if action == policy.artifact_upload_action
-                else isinstance(uses, str)
-                and action is not None
-                and uses.startswith(action)
-            )
+            action_matches = uses == action
             if not action_matches:
                 errors.append(
                     "release producer actions do not match the exact contract"
@@ -881,6 +907,9 @@ def _validate_release_producer_job(
                 errors.append(
                     "release producer action options do not match the exact contract"
                 )
+    python_options = _mapping(steps[1].get("with")) or {}
+    if python_options.get("check-latest") is not False:
+        errors.append("release Python setup check-latest must be boolean false")
     return errors
 
 
@@ -967,14 +996,14 @@ def _validate_publish_job(
         errors.append("publish job must contain exactly two action steps")
         return errors
     expected_actions = (
-        "actions/download-artifact@",
-        "pypa/gh-action-pypi-publish@",
+        policy.artifact_download_action,
+        policy.pypi_publish_action,
     )
     for step, expected_action in zip(publish_steps, expected_actions, strict=True):
         uses = step.get("uses")
         if set(step) != {"name", "uses", "with"}:
             errors.append("publish steps must contain exactly name, uses, and with")
-        if not isinstance(uses, str) or not uses.startswith(expected_action):
+        if uses != expected_action:
             errors.append("publish job must only download then publish artifacts")
     errors.extend(
         _release_artifact_contract(workflow, publish_job, publish_steps, policy=policy)
@@ -1025,18 +1054,12 @@ def _validate_release_triggers(
     if "push" in triggers and (
         approved_tag_patterns is None
         or not approved_tag_patterns
-        or not all(
-            isinstance(tag, str) and bool(tag.strip()) and "${{" not in tag
-            for tag in approved_tag_patterns
-        )
+        or not all(_is_simple_release_literal(tag) for tag in approved_tag_patterns)
         or push is None
         or set(push) != {"tags"}
         or not isinstance(push.get("tags"), list)
         or not push["tags"]
-        or not all(
-            isinstance(tag, str) and bool(tag.strip()) and "${{" not in tag
-            for tag in push.get("tags", [])
-        )
+        or not all(_is_simple_release_literal(tag) for tag in push.get("tags", []))
     ):
         errors.append(
             "push release trigger must match explicitly approved tag patterns"
@@ -1052,85 +1075,77 @@ def _validate_release_triggers(
     return errors
 
 
-def _command_matches_cli(
-    command: object, *, prefix: tuple[str, ...], required_options: frozenset[str]
-) -> bool:
-    if not isinstance(command, str):
-        return False
-    try:
-        tokens = shlex.split(command.replace("\\\n", ""))
-    except ValueError:
-        return False
-    if tuple(tokens[: len(prefix)]) != prefix:
-        return False
-    option_tokens = tokens[len(prefix) :]
-    if len(option_tokens) != 2 * len(required_options):
-        return False
-    options = option_tokens[::2]
-    values = option_tokens[1::2]
+def _is_simple_release_literal(value: object) -> bool:
     return (
-        set(options) == set(required_options)
-        and len(options) == len(set(options))
-        and all(value and not value.startswith("--") for value in values)
+        isinstance(value, str) and SIMPLE_RELEASE_LITERAL.fullmatch(value) is not None
+    )
+
+
+def _is_safe_release_path(value: object) -> bool:
+    if not isinstance(value, str) or SAFE_RELEASE_PATH.fullmatch(value) is None:
+        return False
+    return not value.startswith("/") and ".." not in Path(value).parts
+
+
+def _validate_release_action(reference: object, *, expected_action: str) -> bool:
+    if not isinstance(reference, str):
+        return False
+    match = ACTION_REFERENCE.fullmatch(reference)
+    return (
+        match is not None
+        and match.group(1) == expected_action
+        and FULL_SHA.fullmatch(match.group(2)) is not None
     )
 
 
 def _validate_release_policy(policy: ReleaseWorkflowPolicy) -> list[str]:
     errors: list[str] = []
-    command_contracts = (
-        (
-            policy.build_command,
-            ("uv", "run", "python", "-m", "scripts.release.build"),
-            frozenset({"--output", "--name", "--version", "--constraint"}),
-            "build",
-        ),
-        (
-            policy.artifact_verification_command,
-            (
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "scripts.release.artifacts",
-                "verify",
-            ),
-            frozenset({"--directory", "--name", "--version", "--manifest-name"}),
-            "artifact verification",
-        ),
-        (
-            policy.clean_install_command,
-            ("uv", "run", "python", "-m", "scripts.release.verify_install"),
-            frozenset({"--directory", "--name", "--version", "--manifest-name"}),
-            "clean install",
-        ),
+    simple_fields = {
+        "distribution name": policy.distribution_name,
+        "version": policy.version,
+        "artifact name": policy.artifact_name,
+        "manifest name": policy.manifest_name,
+    }
+    errors.extend(
+        f"caller-approved {label} must be a simple literal"
+        for label, value in simple_fields.items()
+        if not _is_simple_release_literal(value)
     )
-    for command, prefix, options, label in command_contracts:
-        if not _command_matches_cli(command, prefix=prefix, required_options=options):
-            errors.append(
-                f"caller-approved {label} command does not match the real CLI"
-            )
-    if (
-        not isinstance(policy.artifact_name, str)
-        or not policy.artifact_name.strip()
-        or not isinstance(policy.artifact_path, str)
-        or not policy.artifact_path.strip()
-    ):
-        errors.append(
-            "caller-approved artifact name and path must be non-empty strings"
-        )
-    upload_match = (
-        ACTION_REFERENCE.fullmatch(policy.artifact_upload_action)
-        if isinstance(policy.artifact_upload_action, str)
-        else None
+    path_fields = {
+        "artifact directory": policy.artifact_directory,
+        "constraint": policy.constraint,
+    }
+    errors.extend(
+        f"caller-approved {label} must be a safe relative literal path"
+        for label, value in path_fields.items()
+        if value is not None and not _is_safe_release_path(value)
     )
-    if (
-        upload_match is None
-        or upload_match.group(1) != "actions/upload-artifact"
-        or FULL_SHA.fullmatch(upload_match.group(2)) is None
-    ):
+    if policy.manifest_name != RELEASE_MANIFEST_NAME:
         errors.append(
-            "caller-approved upload action must be an immutable upload-artifact"
+            "caller-approved manifest name must match the release build default"
         )
+    action_fields = {
+        "checkout": (policy.checkout_action, "actions/checkout"),
+        "setup-python": (policy.setup_python_action, "actions/setup-python"),
+        "setup-uv": (policy.setup_uv_action, "astral-sh/setup-uv"),
+        "upload-artifact": (
+            policy.artifact_upload_action,
+            "actions/upload-artifact",
+        ),
+        "download-artifact": (
+            policy.artifact_download_action,
+            "actions/download-artifact",
+        ),
+        "PyPI publish": (
+            policy.pypi_publish_action,
+            "pypa/gh-action-pypi-publish",
+        ),
+    }
+    errors.extend(
+        f"caller-approved {label} action must be an immutable exact action"
+        for label, (reference, expected) in action_fields.items()
+        if not _validate_release_action(reference, expected_action=expected)
+    )
     return errors
 
 
