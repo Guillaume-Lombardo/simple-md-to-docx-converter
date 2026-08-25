@@ -33,10 +33,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_bundle(artifacts: Path) -> None:
-    """Verify the closed artifact set, checksum manifest, and metadata bindings."""
-
+def _load_manifest(artifacts: Path) -> dict[str, str]:
     manifest_path = artifacts / "release-bundle.sha256"
+    try:
+        actual_names = {entry.name for entry in artifacts.iterdir()}
+    except OSError as error:
+        raise SupplyChainVerificationError(
+            "release bundle directory is unavailable"
+        ) from error
+    if actual_names != EXPECTED_FILES | {manifest_path.name}:
+        raise SupplyChainVerificationError(
+            "release bundle directory does not contain the exact artifact set"
+        )
     try:
         lines = manifest_path.read_text(encoding="ascii").splitlines()
     except (OSError, UnicodeError) as error:
@@ -57,7 +65,10 @@ def verify_bundle(artifacts: Path) -> None:
         raise SupplyChainVerificationError(
             "checksum manifest does not name the exact release artifact set"
         )
+    return recorded
 
+
+def _verify_recorded_files(artifacts: Path, recorded: dict[str, str]) -> None:
     for name, expected in recorded.items():
         path = artifacts / name
         if not path.is_file() or path.is_symlink():
@@ -67,12 +78,25 @@ def verify_bundle(artifacts: Path) -> None:
                 f"release artifact digest mismatch: {name}"
             )
 
+
+def _load_metadata(artifacts: Path) -> dict[str, Any]:
     try:
-        metadata: dict[str, Any] = json.loads(
+        value: Any = json.loads(
             (artifacts / "image-metadata.json").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise SupplyChainVerificationError("image metadata is invalid") from error
+    if not isinstance(value, dict):
+        raise SupplyChainVerificationError("image metadata is invalid")
+    return value
+
+
+def verify_bundle(artifacts: Path) -> None:
+    """Verify the closed artifact set, checksum manifest, and metadata bindings."""
+
+    recorded = _load_manifest(artifacts)
+    _verify_recorded_files(artifacts, recorded)
+    metadata = _load_metadata(artifacts)
     metadata_artifacts = metadata.get("artifacts")
     expected_metadata = EXPECTED_FILES - {"image-metadata.json"}
     if not isinstance(metadata_artifacts, dict) or set(metadata_artifacts) != (

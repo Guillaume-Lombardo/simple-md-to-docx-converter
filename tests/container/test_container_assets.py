@@ -262,6 +262,7 @@ def test_release_bundle_verifier_accepts_exact_digest_bound_artifacts(
             ),
             "exact release artifact set",
         ),
+        (lambda path: (path / "extra.txt").write_text("extra"), "exact artifact set"),
     ],
 )
 def test_release_bundle_verifier_rejects_substitution_and_malformed_evidence(
@@ -306,7 +307,7 @@ def test_release_bundle_verifier_rejects_internally_inconsistent_metadata(
 
 def test_release_bundle_verifier_rejects_symlinked_artifact(tmp_path: Path) -> None:
     _write_release_bundle(tmp_path)
-    target = tmp_path / "outside.tar"
+    target = tmp_path.parent / f"{tmp_path.name}-outside.tar"
     target.write_bytes((tmp_path / "image.oci.tar").read_bytes())
     (tmp_path / "image.oci.tar").unlink()
     (tmp_path / "image.oci.tar").symlink_to(target)
