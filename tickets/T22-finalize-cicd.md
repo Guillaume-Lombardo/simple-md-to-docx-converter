@@ -19,9 +19,10 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Add an isolated automatic release workflow that detects a final-version transition on a trusted
   protected-main push, builds the sdist and wheel once from that exact reviewed source, verifies
   them, creates the matching tag and published GitHub Release, and publishes those exact artifacts.
-- Permit a manual container-only recovery from `main` for an already-created release when its
-  version, tag, source SHA, project metadata, and published GitHub Release all match exactly; this
-  path must not invoke or bypass the immutable PyPI publication job.
+- Permit a manual evidence-only recovery from `main` for an already-created release when its
+  version, tag, source SHA, project metadata, published GitHub Release, retained upstream build
+  artifact, and public GHCR digest all match exactly; this path must rebuild or republish neither
+  the container nor the immutable Python package.
 - Use PyPI Trusted Publishing with GitHub OIDC, a dedicated GitHub `pypi` environment identity, and a pending Trusted Publisher for the first release instead of a long-lived PyPI token.
 - Keep the `pypi` environment free of required reviewers and manual approval; merging the reviewed
   version-change pull request to protected `main` is the sole human release gate.
@@ -64,8 +65,14 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Every action is pinned by full commit SHA.
 - PyPI publish attestations are generated and uploaded with the release artifacts.
 - Pull requests, forks, tag pushes, Release events, and every other untrusted context are prevented
-  from publishing. Manual dispatch cannot publish Python artifacts and may recover only the
-  container/evidence path for an exact existing release identity from trusted `main`.
+  from publishing. Manual dispatch cannot publish Python or container artifacts and may recover
+  only provenance and evidence for an exact existing release identity from trusted `main`.
+- Manual evidence recovery selects one bounded, non-expired retained artifact by immutable ID only
+  after validating the upstream repository, workflow, trusted-main ancestry, successful source
+  build job, artifact metadata, release identity, exact regular-file set, checksum bundle, OCI
+  identity, publication receipt, and anonymously readable GHCR digest. It cannot rebuild or write
+  Python or container artifacts; only existing attestation and Release-evidence jobs receive the
+  validated digest and unchanged evidence.
 - The release-version and tag-trigger policies are documented and approved before the workflow is implemented.
 - Before the first public release, the project manager decides the public package license and configures a PyPI pending Trusted Publisher for the exact GitHub repository, workflow, and `pypi` environment.
 - The exact `markweave` version is rechecked immediately before each publication attempt, which
@@ -233,6 +240,15 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   stopped before the recorded status and registry read. Skopeo now runs as the condition of an
   explicit `if`, the Bash-defined context in which a nonzero status does not trigger `errexit`.
   Both branches record the real status before the unchanged authenticated exact-digest postcondition.
+- 2026-08-25: The successful `build-and-publish` job in failed recovery run `32846007204` retained
+  artifact `9562665677` (`container-release-v0.3.0`) and had already published and verified public
+  GHCR digest `sha256:4a16b311affb0d0a839350bd145810c1f6044cc7347d12ecd9263fe894de217d`.
+  Later source rebuilds are not byte-reproducible at the registry-manifest boundary, so recovery now
+  reuses that exact retained artifact instead of rebuilding. The recovery gate binds the failed run
+  to the upstream workflow and trusted-main history, requires its build job and unique artifact,
+  validates the downloaded bundle and public digest, then routes only that digest and unchanged
+  evidence to the existing provenance and Release-attachment jobs. PyPI and GHCR publication are
+  unreachable from this manual path.
 
 ## Synchronization
 

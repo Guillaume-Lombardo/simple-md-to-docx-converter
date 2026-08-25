@@ -33,7 +33,12 @@ def _sha256(path: Path) -> str:
         raise SupplyChainVerificationError(str(error)) from error
 
 
-def _load_manifest(artifacts: Path, expected_manifest_sha256: str) -> dict[str, str]:
+def _load_manifest(
+    artifacts: Path,
+    expected_manifest_sha256: str,
+    *,
+    allowed_extra_files: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     manifest_path = artifacts / "release-bundle.sha256"
     if not re.fullmatch(r"[0-9a-f]{64}", expected_manifest_sha256):
         raise SupplyChainVerificationError("expected manifest digest is invalid")
@@ -47,7 +52,7 @@ def _load_manifest(artifacts: Path, expected_manifest_sha256: str) -> dict[str, 
         raise SupplyChainVerificationError(
             "release bundle directory is unavailable"
         ) from error
-    if actual_names != EXPECTED_FILES | {manifest_path.name}:
+    if actual_names != EXPECTED_FILES | {manifest_path.name} | allowed_extra_files:
         raise SupplyChainVerificationError(
             "release bundle directory does not contain the exact artifact set"
         )
@@ -125,12 +130,21 @@ def create_manifest(artifacts: Path) -> str:
     return _sha256(manifest_path)
 
 
-def verify_bundle(artifacts: Path, *, expected_manifest_sha256: str) -> None:
+def verify_bundle(
+    artifacts: Path,
+    *,
+    expected_manifest_sha256: str,
+    allowed_extra_files: frozenset[str] = frozenset(),
+) -> None:
     """Verify the closed artifact set, checksum manifest, and metadata bindings."""
 
     if artifacts.is_symlink() or not artifacts.is_dir():
         raise SupplyChainVerificationError("release bundle directory is unsafe")
-    recorded = _load_manifest(artifacts, expected_manifest_sha256)
+    recorded = _load_manifest(
+        artifacts,
+        expected_manifest_sha256,
+        allowed_extra_files=allowed_extra_files,
+    )
     _verify_recorded_files(artifacts, recorded)
     metadata = _load_metadata(artifacts)
     metadata_artifacts = metadata.get("artifacts")

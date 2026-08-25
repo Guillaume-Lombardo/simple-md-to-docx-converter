@@ -64,13 +64,36 @@ not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` the
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. A container-only recovery must run the
-`container-release.yml` workflow from `main` with the exact existing version, `v<version>` tag, and
-reviewed source SHA. Before building or writing GHCR state, it checks out that source and verifies
-its project version, tag target, and the complete published Release identity (`draft=false` and
-`prerelease=false`). It never enters the PyPI environment or Python publication workflow. The
-recovery unsets `SOURCE_DATE_EPOCH` only for the historical source build script so that its own
-explicit deterministic timestamp remains unambiguous across supported Podman versions.
+state before authorizing any manual recovery. Recovery must not rebuild the container: registry
+serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
+`container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
+source SHA, and the ID of a failed source run whose `build-and-publish` job succeeded and retained
+the exact evidence artifact. For the first release, the approved retained source is run
+`32846007204` and artifact `9562665677` (`container-release-v0.3.0`).
+
+Before download, recovery verifies the source run belongs to this upstream repository and exact
+workflow, ran from trusted `main` at a descendant of the release source, completed with a successful
+build job, and has one bounded non-expired artifact with matching repository/run metadata. It
+downloads by immutable artifact ID, not name alone. It then validates the exact regular-file set,
+closed checksum bundle, OCI archive and metadata relationship, publication receipt, release
+version/tag/source, and the anonymously readable public GHCR digest. Only after those checks does
+it transfer the unchanged evidence into the recovery run, attest that exact public digest, and
+attach the SBOM and evidence to the already verified Release. The recovery job has no package-write
+or OIDC permission, never enters the PyPI environment, and cannot invoke either build or Python
+publication.
+
+The current recovery dispatch is:
+
+```bash
+gh workflow run container-release.yml --ref main \
+  -f artifact-run-id=32846007204 \
+  -f version=0.3.0 \
+  -f tag=v0.3.0 \
+  -f source-sha=20c16305642ac3349fb333078aea510f8f3d1da1
+```
+
+Before dispatch, re-query the run and artifact because retention expires on November 23, 2026.
+Afterward, verify the attestation and all Release attachments before treating recovery as complete.
 
 Every GHCR conflict observed during authenticated
 preflight fails before a copy. Repository and workflow concurrency prevent the automation from

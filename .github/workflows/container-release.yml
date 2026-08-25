@@ -14,6 +14,10 @@ on:
         type: string
   workflow_dispatch:
     inputs:
+      artifact-run-id:
+        description: Successful build run retaining the exact container artifact
+        required: true
+        type: string
       version:
         required: true
         type: string
@@ -29,7 +33,7 @@ permissions:
 
 jobs:
   build-and-publish:
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -61,11 +65,8 @@ jobs:
           SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" = push ]]; then
-            test "$GITHUB_SHA" = "$SOURCE_SHA"
-          else
-            test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          fi
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
           test "$RELEASE_TAG" = "v$RELEASE_VERSION"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           uv run python -c 'import os, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
@@ -94,11 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           image="localhost/md-converter:$RELEASE_VERSION"
-          if [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]]; then
-            env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"
-          else
-            SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
-          fi
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
           bash scripts/container/smoke.sh "$image"
           bash scripts/container/api-smoke.sh "$image"
           bash scripts/container/distributed-api-smoke.sh "$image"
@@ -227,9 +224,139 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  recover-evidence:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      digest: ${{ steps.identity.outputs.digest }}
+    steps:
+      - name: Check out the trusted recovery implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Synchronize locked recovery dependencies
+        run: uv sync --locked --all-groups
+      - name: Validate release, source run, artifact, and public image identity
+        id: identity
+        env:
+          ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
+          EXPECTED_REPOSITORY_ID: ${{ github.repository_id }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EXPECTED_REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" != 0000000000000000000000000000000000000000
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+
+          git show "$SOURCE_SHA:pyproject.toml" > "$RUNNER_TEMP/release-pyproject.toml"
+          RELEASE_PYPROJECT="$RUNNER_TEMP/release-pyproject.toml" uv run python -c 'import os, tomllib; assert tomllib.load(open(os.environ["RELEASE_PYPROJECT"], "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
+            = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
+
+          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/container-release.yml" --jq .id)"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID")"
+          jq --exit-status \
+            --argjson repository_id "$EXPECTED_REPOSITORY_ID" \
+            --argjson run_id "$ARTIFACT_RUN_ID" \
+            --argjson workflow_id "$workflow_id" \
+            '.id == $run_id and .repository.id == $repository_id and .head_repository.id == $repository_id and .workflow_id == $workflow_id and .path == ".github/workflows/container-release.yml" and .event == "workflow_dispatch" and .head_branch == "main" and .status == "completed" and .conclusion == "failure"' \
+            <<< "$run_json" >/dev/null
+          run_sha="$(jq --exit-status --raw-output '.head_sha | select(test("^[0-9a-f]{40}$"))' <<< "$run_json")"
+          git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"
+
+          jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs")"
+          test "$(jq '[.jobs[] | select(.name == "build-and-publish" and .status == "completed" and .conclusion == "success")] | length' <<< "$jobs_json")" = 1
+          artifact_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts" \
+            | jq --exit-status --arg name "container-release-$RELEASE_TAG" \
+              'if .total_count == 1 and (.artifacts | length) == 1 and .artifacts[0].name == $name then .artifacts[0] else error("expected the single retained artifact") end')"
+          jq --exit-status \
+            --argjson repository_id "$EXPECTED_REPOSITORY_ID" \
+            --argjson run_id "$ARTIFACT_RUN_ID" \
+            --arg run_sha "$run_sha" \
+            '.expired == false and .size_in_bytes > 0 and .size_in_bytes <= 2000000000 and .workflow_run.id == $run_id and .workflow_run.repository_id == $repository_id and .workflow_run.head_repository_id == $repository_id and .workflow_run.head_sha == $run_sha' \
+            <<< "$artifact_json" >/dev/null
+          artifact_id="$(jq --exit-status --raw-output '.id | select(. > 0)' <<< "$artifact_json")"
+
+          registry_path="guillaume-lombardo/md-converter"
+          registry_token="$(curl --fail --silent --show-error \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull" \
+            | jq --exit-status --raw-output '.token // .access_token')"
+          public_headers="$RUNNER_TEMP/public-registry-headers"
+          public_status="$(curl --silent --show-error --output /dev/null \
+            --dump-header "$public_headers" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $registry_token" \
+            --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/$registry_path/manifests/$RELEASE_VERSION")"
+          test "$public_status" = 200
+          public_digest="$(awk -F ': ' 'tolower($1) == "docker-content-digest" {gsub("\\r", "", $2); print $2}' "$public_headers")"
+          [[ "$public_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'artifact-id=%s\ndigest=%s\n' "$artifact_id" "$public_digest" >> "$GITHUB_OUTPUT"
+      - name: Download the exact retained artifact by immutable ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.identity.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.artifact-run-id }}
+          path: artifacts/container
+      - name: Verify retained bundle integrity and release identity
+        env:
+          PUBLIC_DIGEST: ${{ steps.identity.outputs.digest }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: >-
+          uv run python -m scripts.container.recover_release_evidence
+          --artifacts artifacts/container
+          --version "$RELEASE_VERSION"
+          --tag "$RELEASE_TAG"
+          --source-sha "$SOURCE_SHA"
+          --registry-digest "$PUBLIC_DIGEST"
+      - name: Transfer the exact verified evidence to this recovery run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-release-${{ inputs.tag }}
+          path: |
+            artifacts/container/image.oci.tar
+            artifacts/container/sbom.cdx.json
+            artifacts/container/sbom.spdx.json
+            artifacts/container/vulnerabilities.json
+            artifacts/container/image-metadata.json
+            artifacts/container/registry-publication.json
+            artifacts/container/release-bundle.sha256
+          if-no-files-found: error
+          retention-days: 90
+
   attest:
-    needs: build-and-publish
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
+    needs: [build-and-publish, recover-evidence]
+    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.build-and-publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -248,12 +375,12 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/guillaume-lombardo/md-converter
-          subject-digest: ${{ needs.build-and-publish.outputs.digest }}
+          subject-digest: ${{ needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest }}
           push-to-registry: true
 
   release-evidence:
-    needs: [build-and-publish, attest]
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
+    needs: [build-and-publish, recover-evidence, attest]
+    if: ${{ always() && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && needs.attest.result == 'success' && ((github.event_name == 'push' && github.sha == inputs.source-sha && needs.build-and-publish.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recover-evidence.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
