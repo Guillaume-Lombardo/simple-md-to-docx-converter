@@ -2,7 +2,7 @@
 ticket: T20
 linear_id: G1L-330
 linear_url: https://linear.app/g1lom/issue/G1L-330/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -109,6 +109,16 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   coverage (1,478/1,638), up from 89.26%. Changed application line coverage remains 95.30%
   (507/532). Ruff formatting and linting and ty also pass without exclusions, pragmas, or threshold
   changes.
+- 2026-08-25: Independent review approved exact head `5cabdb3`. Pull request
+  [#55](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/55) passed exact-head
+  CI run `32794246875`, including light coverage, both storage profiles, document engines, the
+  hardened final-image suite, and the final gate. It was squash-merged as `725602c`; the exact
+  implementation branch was confirmed absent locally and remotely. Exact-main CI run `32794683761`
+  then passed the same complete matrix. The reproducible rootless image, both runtime modes,
+  provider-neutral PostgreSQL/RustFS deployment, SBOMs, complete vulnerability evidence, and
+  authenticated DOCX/PDF/BOTH smoke workflows are therefore verified on `main`. T21 retains the
+  broader three-identity, restart, recovery, concurrency, authorization, and failure-artifact E2E
+  matrix explicitly sequenced after this ticket.
 
 ## Synchronization
 
