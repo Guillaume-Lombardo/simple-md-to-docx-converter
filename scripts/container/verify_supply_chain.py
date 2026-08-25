@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any
+
+from scripts.container.integrity import IntegrityError, sha256_file
 
 EXPECTED_FILES = frozenset(
     {
@@ -26,15 +27,20 @@ class SupplyChainVerificationError(ValueError):
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as artifact:
-        while chunk := artifact.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+    try:
+        return sha256_file(path)
+    except IntegrityError as error:
+        raise SupplyChainVerificationError(str(error)) from error
 
 
-def _load_manifest(artifacts: Path) -> dict[str, str]:
+def _load_manifest(artifacts: Path, expected_manifest_sha256: str) -> dict[str, str]:
     manifest_path = artifacts / "release-bundle.sha256"
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_manifest_sha256):
+        raise SupplyChainVerificationError("expected manifest digest is invalid")
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise SupplyChainVerificationError("checksum manifest is unsafe")
+    if _sha256(manifest_path) != expected_manifest_sha256:
+        raise SupplyChainVerificationError("checksum manifest trust anchor mismatch")
     try:
         actual_names = {entry.name for entry in artifacts.iterdir()}
     except OSError as error:
@@ -91,10 +97,40 @@ def _load_metadata(artifacts: Path) -> dict[str, Any]:
     return value
 
 
-def verify_bundle(artifacts: Path) -> None:
+def create_manifest(artifacts: Path) -> str:
+    """Create the bundle manifest from producer-recorded streaming digests."""
+
+    metadata = _load_metadata(artifacts)
+    source_digests = metadata.get("artifacts")
+    expected_sources = EXPECTED_FILES - {"image-metadata.json"}
+    if not isinstance(source_digests, dict) or set(source_digests) != expected_sources:
+        raise SupplyChainVerificationError(
+            "image metadata does not bind the exact source artifact set"
+        )
+    manifest_path = artifacts / "release-bundle.sha256"
+    if manifest_path.exists() or manifest_path.is_symlink():
+        raise SupplyChainVerificationError("checksum manifest destination is unsafe")
+    recorded = {"image-metadata.json": _sha256(artifacts / "image-metadata.json")}
+    for name in expected_sources:
+        digest = source_digests[name]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise SupplyChainVerificationError(
+                f"image metadata digest is invalid: {name}"
+            )
+        recorded[name] = digest
+    manifest_path.write_text(
+        "".join(f"{recorded[name]}  {name}\n" for name in sorted(recorded)),
+        encoding="ascii",
+    )
+    return _sha256(manifest_path)
+
+
+def verify_bundle(artifacts: Path, *, expected_manifest_sha256: str) -> None:
     """Verify the closed artifact set, checksum manifest, and metadata bindings."""
 
-    recorded = _load_manifest(artifacts)
+    if artifacts.is_symlink() or not artifacts.is_dir():
+        raise SupplyChainVerificationError("release bundle directory is unsafe")
+    recorded = _load_manifest(artifacts, expected_manifest_sha256)
     _verify_recorded_files(artifacts, recorded)
     metadata = _load_metadata(artifacts)
     metadata_artifacts = metadata.get("artifacts")
@@ -114,7 +150,9 @@ def verify_bundle(artifacts: Path) -> None:
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("create", "verify"))
     parser.add_argument("--artifacts", required=True, type=Path)
+    parser.add_argument("--expected-manifest-sha256")
     return parser.parse_args()
 
 
@@ -123,7 +161,21 @@ def main() -> int:
 
     arguments = _arguments()
     try:
-        verify_bundle(arguments.artifacts)
+        if arguments.action == "create":
+            if arguments.expected_manifest_sha256 is not None:
+                raise SupplyChainVerificationError(
+                    "manifest creation does not accept an expected digest"
+                )
+            print(create_manifest(arguments.artifacts))
+        else:
+            if arguments.expected_manifest_sha256 is None:
+                raise SupplyChainVerificationError(
+                    "manifest verification requires an expected digest"
+                )
+            verify_bundle(
+                arguments.artifacts,
+                expected_manifest_sha256=arguments.expected_manifest_sha256,
+            )
     except SupplyChainVerificationError as error:
         print(f"error: {error}")
         return 1
