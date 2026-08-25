@@ -222,6 +222,12 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   ghcr.io`. The attestation job now performs its own ephemeral GHCR login immediately before the
   pinned provenance action. Its existing job-local `packages: write`, `id-token: write`, and
   `attestations: write` permissions remain unchanged; no stored secret or PyPI path is added.
+- 2026-08-25: Two recovery attempts then exposed a GHCR/Skopeo post-write behavior: Skopeo copied
+  every blob and wrote the manifest but exited with status 1 and no diagnostic, so `set -e` stopped
+  the job before its existing exact-digest verification. The guarded copy now records Skopeo's
+  status without trusting it and accepts a nonzero exit only when an authenticated registry read
+  immediately proves that the requested tag resolves to the exact locally staged digest. Missing,
+  unreadable, or different remote state still fails closed.
 
 ## Synchronization
 
