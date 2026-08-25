@@ -1,72 +1,85 @@
 # Architecture
 
-## Current state
+Markweave is a server-rendered FastAPI application with durable asynchronous conversion workers.
+It accepts Markdown, local resources, and validated DOCX reference templates; Pandoc creates DOCX,
+local Mermaid CLI and sandboxed Chromium render diagrams, and headless LibreOffice creates PDF.
 
-The repository provides an installable Python 3.14 package, its development toolchain, and a
-FastAPI application shell. Local authentication and authorization use persistent SQL repositories
-selected by an explicit storage profile. Stable-identifier object-store ports use atomic files or
-AWS S3-compatible operations. Template identity, ownership, visibility-aware search, user
-preferences, fallback selection, and future-mutation authorization now have storage-neutral domain
-and persistence boundaries. Isolated adapters validate Markdown and resources, render Mermaid,
-produce DOCX with Pandoc, and produce bounded PDF with LibreOffice. Conversion submissions now use
-an owner-scoped idempotent API, a durable state machine, transactional SQLite/PostgreSQL claims,
-leases, heartbeats, deterministic recovery, cancellation, atomic result publication, and bounded
-embedded/external worker loops. Template content/version APIs and deployment wiring remain future
-work.
+## Component boundaries
 
-## Target system
+- The HTTP and Web layer authenticates local users, enforces same-origin and CSRF rules, validates
+  request structure, serves the browser interface, and exposes job state.
+- The application layer coordinates account, template, conversion, audit, and cleanup workflows.
+- Domain code defines immutable identifiers, authorization, template versions, job states, leases,
+  cancellation, and stable failures without depending on a storage product.
+- Repository and object-store ports have SQLite/atomic-filesystem and PostgreSQL/S3-compatible
+  adapters with shared contract tests.
+- Document adapters run ClamAV, archive/image validation, Mermaid, Pandoc, and LibreOffice behind
+  fixed argument vectors, allowlisted environments, bounded workspaces, deadlines, and structural
+  output validation.
+- Workers claim durable leases, heartbeat, load the frozen owner-scoped source and exact template
+  version, publish output atomically, and recover interrupted work deterministically.
 
-The product specification defines a server-rendered FastAPI application and asynchronous workers.
-The application will submit durable conversion jobs, while workers will invoke local document
-engines and store immutable inputs and outputs. Pandoc produces DOCX, Mermaid CLI with local
-Chromium produces diagrams, and LibreOffice converts DOCX to PDF.
+The conversion path is:
 
-The intended boundaries are:
+```text
+HTTPS request -> authenticated API -> durable source + job -> leased worker
+              -> validated local workspace -> DOCX -> optional PDF
+              -> atomic result + traceability manifest -> authenticated download
+```
 
-- the HTTP and Web layer authenticates users, validates requests, and exposes job state;
-- the application layer coordinates conversion and template workflows;
-- domain code defines jobs, templates, ownership, and stable state transitions;
-- adapters isolate document engines, repositories, object storage, and the filesystem;
-- workers claim persisted jobs, enforce resource limits, and publish results atomically.
+The API never converts inline. Submission persists immutable input before a worker can claim the
+job. Result visibility follows the committed job state, so a partial object is not exposed as a
+completed conversion.
 
-The HTTP authentication, conversion-job, worker orchestration, and storage boundaries now exist.
-T15 connects the worker processor to immutable template versions and the delivered document
-engines. T18 will supply approved operational values, and T20 will wire final runtime modes.
+## Storage and process profiles
 
-## Storage profiles
+Standalone uses one `embedded-worker` process, a SQLite database, and atomic files under `/data`.
+It is restricted to one replica. The database and object tree form one backup and recovery unit.
 
-The standalone profile uses SQLite, atomic files under `/data`, one application replica, and the
-delivered single embedded-worker lifecycle. The distributed profile uses PostgreSQL,
-S3-compatible object storage, and the same worker loop in separately scalable processes.
-Transactional PostgreSQL claims use `FOR UPDATE SKIP LOCKED`; SQLite remains restricted to one
-application replica. Shared repository and object-store interfaces receive the same contract tests
-for both profiles. T06 defines storage-neutral account and session
-repository ports are implemented by one transactional SQL adapter contract-tested against SQLite
-and PostgreSQL. The object-store contract is shared by atomic files and the AWS S3-compatible
-adapter; RustFS exercises that contract in CI without entering application interfaces.
+Distributed separates horizontally scalable `api` processes from `external-worker` processes. It
+requires PostgreSQL and an AWS S3-compatible bucket. PostgreSQL claims use row locking and
+`SKIP LOCKED`; immutable objects use conditional S3 operations. RustFS is the CI implementation of
+that interface, not an application-specific dependency.
 
-The user repository contract includes an authentication-version compare-and-set after password
-verification and an atomic security mutation that increments that version. Sessions capture the
-accepted version and reject stale values. This separates expensive Argon2 work from the storage
-transaction while preventing reset, disable, reactivation, and successful-login rehash races. T12
-must map these operations to real SQLite and PostgreSQL transactions; separate read/write calls do
-not satisfy the contract.
+Both profiles share the same domain and storage contracts. Profile selection is explicit at startup
+and rejects mixed SQLite/S3 or PostgreSQL/filesystem configuration. See
+[storage-profiles.md](storage-profiles.md).
 
-## Security and runtime
+## Templates and authorization
 
-Document-controlled network access is forbidden. Delivered engine adapters use fixed arguments,
-isolated workspaces, bounded resources, deadlines, cancellation where applicable, and explicit
-environment allowlists. The PDF adapter terminates the complete LibreOffice process group and
-validates the output structurally before publication. The final UBI 9 image must run rootlessly
-with an arbitrary UID and a read-only root filesystem. Final-image validation belongs to T20/T21.
+A template identity has an immutable owner and immutable content versions. Replacement and restore
+publish a new version atomically. Visibility-aware queries execute in the database; normalized
+search behavior remains profile-neutral. Per-user preference resolution falls back to the active
+system template. Archive and deletion enforce ownership, administrator intervention, retention, and
+referential-integrity rules. Security-sensitive administrator actions are audited.
 
-Values that remain unresolved in section 14 of the product specification are deliberately not
-encoded here.
+Accounts carry an authentication version. Password reset, disable, reactivation, and other security
+mutations increment it atomically, invalidating sessions that captured an older version. Expensive
+Argon2 verification remains outside the database transaction, while compare-and-set mutations
+prevent verification/reset races.
 
-## Template boundary
+## Security model
 
-T14 stores immutable-owner template identities, per-user preferences, and the singleton system
-fallback in the profile database. Search normalization is computed in application code for
-cross-profile parity, while visibility predicates and pagination execute in the database. The
-authorization service exposes an explicit administrator-intervention context for T15 audit
-persistence. See `docs/templates.md` for the exact delivered and deferred behavior.
+All browser and API use is authenticated and intended for HTTPS. State changes require a CSRF token
+and a matching effective origin. With `MD_CONVERTER_PUBLIC_ORIGIN` set, that exact external
+scheme/host/optional-port is authoritative for Origin checks; the value must contain no path, query,
+fragment, or user information. When it is unset, the direct ASGI request base URL is authoritative.
+Proxy forwarding headers remain deliberately untrusted.
+
+Document-controlled network access is forbidden. Remote Markdown, image, CSS, font, and Mermaid
+references are rejected; the only runtime egress is to explicitly configured infrastructure such as
+ClamAV, PostgreSQL, and S3-compatible storage. Engines receive fixed local paths and no shell.
+
+The final image runs as an arbitrary non-root UID with no capabilities, `no-new-privileges`, a
+read-only root filesystem, dedicated bounded `/tmp`, `/work`, and `/dev/shm`, and the reviewed
+Chrome seccomp profile on worker nodes. Input, expansion, structural, process, duration, memory,
+ephemeral-storage, queue, and retention ceilings are independent. Values unresolved by section 14
+of the product specification remain operator-required configuration, not hidden defaults.
+
+## Traceability and observability
+
+Correlation, user, job, template, version, and audit identifiers cross the API, worker, and output
+manifest boundaries without logging document content. DOCX embeds traceability; PDF uses a canonical
+sidecar; combined output packages both documents and `traceability.json`. API metrics are exposed
+per API process and worker metrics per external-worker process. Readiness verifies profile
+dependencies and, in standalone, embedded-worker health.

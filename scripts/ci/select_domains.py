@@ -12,6 +12,16 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
 DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
+    "compose": (
+        ".gitignore",
+        "README.md",
+        "compose.yaml",
+        "docs/local-development.md",
+        "examples/**",
+        "scripts/quickstart.sh",
+        "scripts/e2e/run-compose.sh",
+        "tests/test_quickstart_compose.py",
+    ),
     "ci-infrastructure": (
         ".github/ci/**",
         ".github/workflows/**",

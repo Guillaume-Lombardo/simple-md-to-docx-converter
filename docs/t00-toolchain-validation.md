@@ -1,5 +1,9 @@
 # T00 document toolchain validation
 
+> This is historical decision evidence captured during the T00 spike. Ticket-oriented future tense
+> below records the state at that time; use [container deployment](container-deployment.md),
+> [operations](operations.md), and [recovery](recovery.md) for the implemented runtime.
+
 ## Status
 
 Pandoc, Fontconfig, LibreOffice, and sandboxed Chrome/Mermaid are compatible

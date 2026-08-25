@@ -120,6 +120,12 @@ def test_main_dispatches_only_the_two_worker_modes(mocker) -> None:
     assert main(("embedded-worker",)) == 0
     serve.assert_called_once()
     assert serve.call_args.args[0] is app
+    assert serve.call_args.kwargs == {
+        "host": "0.0.0.0",  # noqa: S104 - asserting the container default
+        "port": 8080,
+        "proxy_headers": False,
+        "server_header": False,
+    }
     assert main(("external-worker",)) == 0
     external.assert_called_once_with()
     with pytest.raises(SystemExit, match="usage"):

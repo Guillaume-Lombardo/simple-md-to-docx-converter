@@ -168,12 +168,12 @@ chmod 0777 "$evidence_directory" "$temporary_directory/browser-artifacts" \
   "$browser_session_directory"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
+PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
 podman pull --quiet "$base_image"
 test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
 bash scripts/container/build.sh "$image"
@@ -195,6 +195,7 @@ if [[ "$profile" == standalone ]]; then
   E2E_SETTINGS+=(
     --env MD_CONVERTER_STORAGE_PROFILE=standalone
     --env MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
+    --env MD_CONVERTER_PUBLIC_ORIGIN=http://127.0.0.1:8080
   )
 else
   created=("$postgres_name" "${created[@]}")
@@ -268,6 +269,40 @@ application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 
+if [[ "$profile" == standalone ]]; then
+  podman exec "$application_name" /opt/md-converter/venv/bin/python -c '
+import http.client
+import json
+
+payload = json.dumps({"username": "e2e-admin", "password": "e2e-admin-password"})
+
+def login(origin):
+    connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=10)
+    connection.request(
+        "POST",
+        "/api/v1/login",
+        body=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Origin": origin,
+            "Forwarded": "host=attacker.example;proto=https",
+            "X-Forwarded-Host": "attacker.example",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    response = connection.getresponse()
+    body = response.read()
+    connection.close()
+    return response.status, body
+
+accepted_status, _ = login("http://127.0.0.1:8080")
+hostile_status, hostile_body = login("https://attacker.example")
+assert accepted_status == 200
+assert hostile_status == 403
+assert json.loads(hostile_body)["error"]["code"] == "LOGIN_ORIGIN_INVALID"
+'
+fi
+
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/e2e-template.md").write_text("# Template\n", encoding="utf-8")'
 podman exec "$application_name" pandoc /tmp/e2e-template.md --output=/tmp/e2e-template.docx
@@ -279,6 +314,11 @@ uv run python -c \
 printf '# Final image E2E\n\nReal **conversion** workflow.\n' >"$evidence_directory/source.md"
 chmod 0444 "$evidence_directory/template.docx" \
   "$evidence_directory/browser-template.docx" "$evidence_directory/source.md"
+
+uv run python -m tests.e2e.service_workflow exercise-security-boundaries \
+  --base-url "$base_url" --profile "$profile" \
+  --template "$evidence_directory/template.docx" \
+  --artifact-dir "$temporary_directory/browser-artifacts"
 
 worker_metrics=()
 if [[ "$profile" == distributed ]]; then

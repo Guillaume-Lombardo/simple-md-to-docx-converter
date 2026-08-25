@@ -1,7 +1,7 @@
 # Word template and font validation
 
-T10 validates untrusted DOCX reference templates before T15 may store or activate a version. The
-validator first checks explicit T18-owned byte, entry, expansion, XML element, depth, attribute,
+The service validates untrusted DOCX reference templates before storing or activating a version. The
+validator first checks explicit deployment-owned byte, entry, expansion, XML element, depth, attribute,
 and font-declaration bounds. It reads ZIP members in bounded chunks without extraction, rejects
 encrypted or non-regular members and normalized path collisions, parses every XML relationship
 part with entity expansion disabled, and verifies the internal OPC graph.
@@ -55,6 +55,9 @@ mapping for a script outside the approved Latin and Greek set fails activation. 
 remove dormant Office theme mappings for unsupported scripts when preparing a candidate template;
 they must add a reviewed pinned family before retaining a mapping that the template actually needs.
 
-T10 introduces no upload or activation HTTP workflow and no final application image. T15 must call
-this validator before atomic activation; T20/T21 retain final-image E2E coverage for valid activation
-and macro, external-relationship, missing-style, and unsupported-font rejection.
+Template publication calls this validator before atomic activation. In both storage profiles, the
+final-image E2E matrix covers successful publication of a valid template and its use by DOCX, PDF,
+and combined conversions. It also submits bounded macro, external-relationship, missing-style, and
+unsupported-font candidates through the final-image HTTP endpoint, requires their exact stable
+rejection categories, and proves that none enters the template catalog. Focused rootless
+real-engine integration tests retain the more detailed activation-boundary evidence.

@@ -23,10 +23,41 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".gitignore",
+        "README.md",
+        "compose.yaml",
+        "docs/local-development.md",
+        "examples/quickstart-template.docx.base64",
+        "examples/quickstart-source.md",
+        "scripts/quickstart.sh",
+        "tests/test_quickstart_compose.py",
+    ],
+)
+def test_quickstart_inputs_select_active_compose_e2e(path: str) -> None:
+    """Every casual quickstart input executes the real pinned Compose workflow."""
+    assert "compose" in select_domains([path])
+
+
+@pytest.mark.unit
+def test_compose_domain_is_active_and_uses_the_isolated_runner() -> None:
+    registry = load_registry(Path(".github/ci/domains.json"))
+    assert registry["compose"] == {
+        "activation_ticket": "T23",
+        "command": ["bash", "scripts/e2e/run-compose.sh"],
+        "status": "active",
+    }
+
+
+@pytest.mark.unit
 def test_source_change_selects_all_application_domains_except_container() -> None:
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
     selected = select_domains(["src/markweave/service.py"])
-    assert selected == sorted(set(DOMAIN_PATTERNS) - {"ci-infrastructure", "container"})
+    assert selected == sorted(
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
+    )
 
 
 @pytest.mark.unit
@@ -343,6 +374,6 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         line.split("=", maxsplit=1) for line in output.read_text().splitlines()
     )
     assert json.loads(values["selected-domains"]) == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
     )
     assert json.loads(values["runnable-domains"]) == []

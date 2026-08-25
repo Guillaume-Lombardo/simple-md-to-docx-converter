@@ -1,4 +1,12 @@
 {
+  "compose": {
+    "activation_ticket": "T23",
+    "command": [
+      "bash",
+      "scripts/e2e/run-compose.sh"
+    ],
+    "status": "active"
+  },
   "container": {
     "activation_ticket": "T20",
     "command": [

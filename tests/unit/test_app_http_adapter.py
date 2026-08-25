@@ -42,7 +42,11 @@ from tests.unit.jobs.test_job_models import job
 
 
 def isolated_client(
-    mocker: MockerFixture, *, ready: bool = True, scanner: UploadScanner | None = None
+    mocker: MockerFixture,
+    *,
+    ready: bool = True,
+    scanner: UploadScanner | None = None,
+    public_origin: str | None = None,
 ) -> tuple[TestClient, Any, User, User]:
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
@@ -59,6 +63,7 @@ def isolated_client(
         conversion_request_max_bytes=1_100_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
+        public_origin=public_origin,
     )
     admin = User(uuid4(), "admin", "admin", "admin-hash", Role.ADMIN)
     alice = User(uuid4(), "Alice", "alice", "alice-hash", Role.USER)
@@ -439,6 +444,38 @@ def test_login_origin_policy_rejects_hostile_and_allows_same_or_absent_origin(
             == 200
         )
         assert client.post("/api/v1/login", json=payload).status_code == 200
+
+
+@pytest.mark.unit
+def test_configured_public_origin_ignores_internal_and_forwarded_origins(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _, _ = isolated_client(
+        mocker, public_origin="https://converter.example"
+    )
+    payload = {"username": "admin", "password": "admin-password"}
+    forwarded_headers = {
+        "Forwarded": "host=attacker.example;proto=https",
+        "X-Forwarded-Host": "attacker.example",
+        "X-Forwarded-Proto": "https",
+    }
+
+    with client:
+        accepted = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://converter.example", **forwarded_headers},
+            json=payload,
+        )
+        spoofed = client.post(
+            "/api/v1/login",
+            headers={"Origin": "https://attacker.example", **forwarded_headers},
+            json=payload,
+        )
+
+    assert accepted.status_code == 200
+    assert spoofed.status_code == 403
+    assert spoofed.json()["error"]["code"] == "LOGIN_ORIGIN_INVALID"
+    auth.login.assert_called_once()
 
 
 @pytest.mark.unit

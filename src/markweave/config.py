@@ -6,7 +6,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
-from pydantic import Field, SecretStr, ValidationError, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +46,7 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=30 * 60, ge=1)
     session_absolute_seconds: int = Field(default=8 * 60 * 60, ge=1)
     session_cookie_name: str = Field(default="md_converter_session", min_length=1)
+    public_origin: AnyHttpUrl | None = None
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
     conversion_max_decompressed_bytes: int = Field(gt=0)
@@ -126,6 +134,22 @@ class Settings(BaseSettings):
     s3_region: str | None = Field(default=None, min_length=1)
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
+
+    @field_validator("public_origin")
+    @classmethod
+    def validate_public_origin(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
+        """Accept only an HTTP origin, not a URL containing resource components."""
+        if value is None:
+            return None
+        if (
+            value.username is not None
+            or value.password is not None
+            or value.path != "/"
+            or value.query is not None
+            or value.fragment is not None
+        ):
+            raise ValueError("public origin must contain only scheme, host, and port")
+        return value
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:

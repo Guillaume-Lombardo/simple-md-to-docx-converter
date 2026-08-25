@@ -45,7 +45,7 @@ deactivation, and reactivation increment it atomically. Login verifies a snapsho
 repository compare-and-set operation before issuing a session containing the accepted version.
 Authentication compares both versions. Consequently, a concurrent reset cannot be overwritten by
 a stale successful verification, and a session created after a concurrent security change is
-immediately unusable even if physical session deletion raced. T12 adapters must implement the
+immediately unusable even if physical session deletion raced. The adapters implement the
 compare-and-set and security-version update transactionally in SQLite and PostgreSQL; generic
 non-atomic password/account saves are not part of the port.
 
@@ -91,14 +91,14 @@ are not reflected. OpenAPI declares this envelope for validation, authentication
 and readiness failures, including the real readiness `503` response.
 
 The ASGI factory is `markweave:create_app`; Uvicorn is included as the runtime server. Deploy it
-behind the profile's TLS endpoint because authentication cookies are always secure.
+behind the profile's TLS endpoint because authentication cookies are always secure. When a proxy
+terminates TLS, set `MD_CONVERTER_PUBLIC_ORIGIN` to the exact browser-visible scheme, host, and
+optional port. Forwarded headers remain untrusted. Without that setting, Origin validation uses the
+direct ASGI request URL. See [container deployment](container-deployment.md).
 
-## Deferred final-image verification
+## Verification inventory
 
-The project manager approved a T06 exception for final-image E2E because the rootless image and its
-two runtime profiles do not exist before T20/T21. Unit, functional ASGI, and real Argon2id
-integration coverage remain blocking in T06. T20/T21 must repeat this exact inventory against the
-hardened rootless image:
+Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E cover:
 
 - successful administrator login, account creation, user login, session inspection, and logout;
 - unknown, wrong-password, inactive-account, missing-session, expired-session, and revoked-session

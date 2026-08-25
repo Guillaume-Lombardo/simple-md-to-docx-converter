@@ -1,12 +1,14 @@
 # Reference corpus and golden-test infrastructure
 
-T04 provides reusable test infrastructure; it does not perform Markdown conversion, invoke a
-document engine, sanitize resources, install fonts, or define production limits. Those behaviors
-remain owned by T07–T11 and T18 as recorded per case in `tests/corpus/manifest.json`.
+The repository provides reusable, bounded corpus and comparison infrastructure for the document
+engine suites. The helpers inspect fixtures and outputs; they do not themselves perform Markdown
+conversion, invoke an engine, sanitize resources, install fonts, or define production limits. Each
+case records its owning delivery ticket in `tests/corpus/manifest.json`; the historical field name
+is `future_owner`, but all listed owners are now delivered.
 
 ## Corpus manifest
 
-Every case has a stable identifier, sorted categories, a purpose, a future owning ticket, an
+Every case has a stable identifier, sorted categories, a purpose, an owning ticket, an
 entrypoint, a complete file list, expected observations, and provenance. Static project-authored
 fixtures are text. Generated DOCX and adversarial ZIP fixtures are built deterministically and the
 manifest pins their generator, license, byte length, and SHA-256 digest. Manifest loading verifies
@@ -20,7 +22,7 @@ Tests can use the session-scoped `corpus_manifest` fixture and the function retu
 security tests inspect central-directory metadata in memory and never call `extractall` or extract
 members individually. Every archive helper requires an immutable `ArchiveLimits` value covering
 entry count, member and total uncompressed bytes, and compression ratio. These test-harness bounds
-are metadata-checked before any member is read and are not T18 production limits.
+are metadata-checked before any member is read and are not production limits.
 
 ## DOCX comparisons
 
@@ -47,8 +49,8 @@ a changed pixel. Empty page sequences are invalid. Callers must also provide `Ra
 page count, per-page pixels, and total pixels; channel metrics are accumulated in one pass without
 allocating a second full-size delta buffer.
 
-T11 adds `render_pdf`, which uses the locked PDFium binding to render only after caller-supplied
-PDF-byte, page-count, per-page-pixel, and total-pixel limits pass. The T11 corpus stores one
+`render_pdf` uses the locked PDFium binding to render only after caller-supplied
+PDF-byte, page-count, per-page-pixel, and total-pixel limits pass. The PDF corpus stores one
 canonical PNG page and a canonical provenance manifest that pins the source, reference DOCX,
 font manifest, Pandoc, LibreOffice, PDFium, DPI, dimensions, and PNG digest. Regenerate it only in
 the approved rootless toolchain with:
@@ -63,9 +65,10 @@ hashing so Pandoc's extraction timestamps cannot create false provenance changes
 
 ## Test classification
 
-Pure raster arithmetic is marked `unit`. Real filesystem materialization, ZIP inspection, and XML
-parsing are marked `integration` under `tests/integration/document_engines`. Corpus and helper
-changes select the active `document-engines` CI domain, which runs T04's filesystem, archive, and
-XML boundary suite now. T07 can extend this active domain with real-engine tests without weakening
-the T04 command. T04 does not deliver a user-visible or operational workflow, so final-image E2E
-coverage is not applicable.
+Pure raster arithmetic is marked `unit`. Real filesystem materialization, ZIP inspection, XML
+parsing, and locked document-engine behavior are marked `integration` under
+`tests/integration/document_engines`. Corpus, helper, and document-adapter changes select the active
+`document-engines` CI domain, whose committed command runs that directory with the integration
+marker. The standalone and distributed final-image suites separately exercise the delivered
+browser and asynchronous conversion workflows; they do not replace the corpus suite's detailed
+archive, OpenXML, raster, and engine failure evidence.

@@ -51,10 +51,10 @@ their stable English message; an invalid or non-JSON response becomes a generic 
 is never reflected into markup. Forms use labels, native controls, headings, and buttons. Downloads
 retain the API's generated names, `nosniff`, content digest, and authorization behavior.
 
-## Verification and sequencing
+## Verification
 
 `npm run test:web` executes native JavaScript unit tests and independently blocks line, branch, and
-function coverage below 90% across both browser modules. T17 exercises the ASGI application through
+function coverage below 90% across both browser modules. Functional tests exercise the ASGI application through
 an HTTPS test origin over real SQLite and filesystem boundaries and separately verifies owner
 representation, search, authorization, and storage failures against live PostgreSQL and RustFS.
 A pinned-Chromium browser scenario runs two ordinary users and an administrator against a loopback
@@ -73,8 +73,6 @@ MD_CONVERTER_TEST_CHROMIUM=/usr/bin/google-chrome-stable \
 npm run test:web-browser
 ```
 
-The hardened final image and its two deployable profiles belong to T20/T21. The T17 browser suite is
-current-application browser integration: it does not claim deployment HTTPS, a rootless runtime, or
-final-image E2E. T20/T21 must repeat the primary administration workflows and relevant authorization,
-failure, recovery, and concurrency cases against the final image in both profiles. This is explicit
-sequencing debt, not a waiver.
+The final-image E2E suite exercises the primary administration workflows and relevant authorization,
+failure, recovery, and concurrency cases in both storage profiles. Deployment-specific TLS and
+rootless controls are described in [container-deployment.md](container-deployment.md).

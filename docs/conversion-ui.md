@@ -12,7 +12,7 @@ cancellation, and download behavior. Template and account administration remain 
 2. Keep the resolved preferred or system fallback template, or search active templates by name and
    choose another result. The interface shows which kind of default was resolved. The submitted job
    always carries the displayed immutable template-version identifier.
-3. Choose DOCX, PDF, or both. “Both” downloads as a ZIP archive.
+3. Choose DOCX, PDF, or both. "Both" downloads as a ZIP archive.
 4. Select **Start conversion**. Submission returns immediately; the interface shows the safe job step
    and percentage while it polls with progressive backoff.
 
@@ -40,8 +40,6 @@ Run the independent JavaScript tests and blocking 90% line, branch, and function
 npm run test:web
 ```
 
-T16 provides unit tests for rendering and browser logic plus functional HTTP coverage over real local
-authentication, SQLite, and filesystem boundaries. The final hardened application image does not
-exist until T20, so Playwright E2E against that rootless image remains sequenced to T20/T21. T21 must
-repeat submission, polling, cancellation, expiration, download, authorization, restart recovery, and
-concurrency behavior for both storage profiles. This sequencing is reviewable debt, not a waiver.
+Unit tests cover rendering and browser logic; functional HTTP and final-image E2E cover submission,
+polling, cancellation, expiration, download, authorization, restart recovery, and concurrency across
+the storage profiles.
