@@ -118,8 +118,9 @@ Complete English user, template, administrator, API, operations, storage, queue,
 - 2026-08-26: PR #81 passed its complete hosted matrix and was squash-merged to `main` as commit
   `8133385d`, but GitHub rejected the automatic release before starting any job. The reusable
   container workflow's recovery-only `artifact-run-id` input was not declared for `workflow_call`;
-  a compile-time regression fix and a real reusable-call canary are in progress. No `v0.3.1` tag,
-  GitHub Release, PyPI distribution, or GHCR image was created.
+  declaring it as an optional automatic-call input passed a real reusable-call canary while every
+  publication and recovery job remained skipped. No `v0.3.1` tag, GitHub Release, PyPI
+  distribution, or GHCR image was created by the failed run or canary.
 
 ## Synchronization
 
