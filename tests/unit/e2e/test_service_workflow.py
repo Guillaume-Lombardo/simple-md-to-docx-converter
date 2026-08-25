@@ -127,6 +127,28 @@ def test_docx_validation_accepts_required_parts_and_rejects_other_bytes() -> Non
 
 
 @pytest.mark.unit
+def test_real_engine_failure_sources_are_bounded_and_deterministic() -> None:
+    mermaid = workflow.long_mermaid_source(8)
+    assert mermaid.count(b"```mermaid") == 8
+    assert len(mermaid) < 10_000
+    assert mermaid == workflow.long_mermaid_source(8)
+    multipage = workflow.multipage_markdown(400)
+    assert multipage.count(b"Bounded final-image") == 400 * 8
+    assert 50_000 < len(multipage) < 1_000_000
+    assert multipage == workflow.multipage_markdown(400)
+
+
+@pytest.mark.unit
+def test_real_engine_failure_sources_reject_unbounded_counts() -> None:
+    for diagrams in (0, 21):
+        with pytest.raises(ValueError, match="diagram count"):
+            workflow.long_mermaid_source(diagrams)
+    for paragraphs in (99, 1_001):
+        with pytest.raises(ValueError, match="paragraph count"):
+            workflow.multipage_markdown(paragraphs)
+
+
+@pytest.mark.unit
 def test_cli_validation_requires_command_inputs_and_positive_timeout(
     tmp_path: Path,
 ) -> None:

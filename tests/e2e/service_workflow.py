@@ -25,7 +25,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from scripts.container.api_workflow_smoke import candidate_reference, multipart
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from scripts.container.api_workflow_smoke import (  # noqa: E402 - executable path bootstrap
+    candidate_reference,
+    multipart,
+)
 
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
 REQUIRED_METRICS = frozenset(
@@ -314,6 +321,44 @@ def wait_for_job(
     raise WorkflowFailure("poll conversion: terminal state timeout")
 
 
+def wait_for_running_job(
+    client: ServiceClient, location: str, *, timeout_seconds: float = 120
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        result = client.request("GET", location)
+        expect(result, 200, "poll running conversion")
+        job = decode_object(result, "poll running conversion")
+        if job.get("state") == "running":
+            return job
+        if job.get("state") in TERMINAL_STATES:
+            raise WorkflowFailure("poll running conversion: job terminated too early")
+        time.sleep(0.05)
+    raise WorkflowFailure("poll running conversion: claim timeout")
+
+
+def long_mermaid_source(diagrams: int = 8) -> bytes:
+    """Build bounded work that keeps the real Mermaid pipeline cancellable."""
+
+    if not 1 <= diagrams <= 20:
+        raise ValueError("diagram count must be between 1 and 20")
+    blocks = [
+        f"## Diagram {index}\n\n```mermaid\nflowchart LR\nA{index}-->B{index}\n```"
+        for index in range(1, diagrams + 1)
+    ]
+    return ("# Cancellation workflow\n\n" + "\n\n".join(blocks) + "\n").encode()
+
+
+def multipage_markdown(paragraphs: int = 400) -> bytes:
+    """Build a bounded source guaranteed to exceed a five-page PDF policy."""
+
+    if not 100 <= paragraphs <= 1_000:
+        raise ValueError("paragraph count must be between 100 and 1000")
+    paragraph = "Bounded final-image PDF validation text. " * 8
+    body = "\n\n".join(f"{index}. {paragraph}" for index in range(paragraphs))
+    return f"# PDF output limit\n\n{body}\n".encode()
+
+
 def validate_result(client: ServiceClient, job: dict[str, Any], output: str) -> None:
     path = f"/api/v1/conversions/{required_string(job, 'id', 'result')}/result"
     result = client.request("GET", path)
@@ -471,6 +516,56 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
     return {key: raw[key] for key in keys}
 
 
+def exercise_cancellation(
+    client: ServiceClient, template: dict[str, Any]
+) -> dict[str, Any]:
+    """Cancel active real engine work and prove that nothing was published."""
+
+    _submitted, location = submit_conversion(
+        client, template, "both", long_mermaid_source()
+    )
+    running = wait_for_running_job(client, location)
+    cancellation = client.request("DELETE", location, mutate=True)
+    expect(cancellation, 200, "cancel running conversion")
+    terminal = wait_for_job(client, location)
+    if terminal.get("state") != "cancelled" or not terminal.get("cancel_requested"):
+        raise WorkflowFailure("cancel running conversion: cancelled state missing")
+    if terminal.get("id") != running.get("id"):
+        raise WorkflowFailure("cancel running conversion: durable identity changed")
+    result_path = f"{location}/result"
+    expect(client.request("GET", result_path), 409, "cancelled result denial")
+    expect(
+        client.request("GET", f"{result_path}/manifest"),
+        409,
+        "cancelled manifest denial",
+    )
+    return terminal
+
+
+def exercise_pdf_limit_failure(
+    client: ServiceClient, template: dict[str, Any]
+) -> dict[str, Any]:
+    """Run LibreOffice and require the configured output-page validation failure."""
+
+    _submitted, location = submit_conversion(
+        client, template, "pdf", multipage_markdown()
+    )
+    terminal = wait_for_job(client, location)
+    if (
+        terminal.get("state") != "failed"
+        or terminal.get("error_code") != "pdf_limit_exceeded"
+    ):
+        raise WorkflowFailure("PDF output limit: deterministic failure missing")
+    result_path = f"{location}/result"
+    expect(client.request("GET", result_path), 409, "failed PDF result denial")
+    expect(
+        client.request("GET", f"{result_path}/manifest"),
+        409,
+        "failed PDF manifest denial",
+    )
+    return terminal
+
+
 def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     run_id = uuid.uuid4().hex[:10]
     alice_password = secrets.token_urlsafe(24)
@@ -577,6 +672,9 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
             raise WorkflowFailure(f"{output} conversion: did not succeed")
         validate_result(alice, terminal, output)
         completed[output], locations[output] = terminal, location
+
+    exercise_cancellation(alice, template)
+    exercise_pdf_limit_failure(alice, template)
 
     replay_key = f"t21-{run_id}-replay"
     replay_first, replay_location = submit_conversion(
