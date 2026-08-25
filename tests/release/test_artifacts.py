@@ -311,6 +311,45 @@ def test_wheel_rejects_real_oversized_central_directory_before_zipfile(
     opened.assert_not_called()
 
 
+def test_wheel_rejects_real_zip64_member_count_before_zipfile(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """A real 65,536-entry ZIP64 directory is rejected before ZipFile opens it."""
+    wheel = tmp_path / f"{ROOT}-py3-none-any.whl"
+    zip64_entry_count = artifact_module.ZIP16_SENTINEL + 1
+    with zipfile.ZipFile(wheel, mode="w", compression=zipfile.ZIP_STORED) as archive:
+        for index in range(zip64_entry_count):
+            member = zipfile.ZipInfo(f"{index:04x}")
+            member.compress_type = zipfile.ZIP_STORED
+            archive.writestr(member, b"")
+    assert wheel.stat().st_size < artifact_module.MAX_CENTRAL_DIRECTORY_BYTES
+
+    with wheel.open("rb") as stream:
+        stream.seek(-256, 2)
+        tail = stream.read()
+    zip64_eocd = tail.rfind(artifact_module.ZIP64_EOCD_SIGNATURE)
+    classic_eocd = tail.rfind(artifact_module.EOCD_SIGNATURE)
+    assert zip64_eocd >= 0
+    assert artifact_module.ZIP64_LOCATOR_SIGNATURE in tail
+    assert classic_eocd >= 0
+    assert struct.unpack_from("<Q", tail, zip64_eocd + 32)[0] == zip64_entry_count
+    assert struct.unpack_from("<2H", tail, classic_eocd + 8) == (
+        artifact_module.ZIP16_SENTINEL,
+        artifact_module.ZIP16_SENTINEL,
+    )
+
+    opened = mocker.patch.object(
+        artifact_module.zipfile,
+        "ZipFile",
+        side_effect=AssertionError(
+            "ZipFile must not open an oversized ZIP64 directory"
+        ),
+    )
+    with pytest.raises(ArtifactError, match="too many central-directory entries"):
+        verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+    opened.assert_not_called()
+
+
 def test_wheel_rejects_declared_central_directory_size_before_zipfile(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
