@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import shlex
+from dataclasses import replace
 from pathlib import Path
+from textwrap import indent
 
 import pytest
 
 from scripts.ci.validate_ci import (
+    ReleaseWorkflowPolicy,
     discover_workflow_paths,
     main,
     validate_python_imports,
@@ -21,6 +25,42 @@ FULL_SHA_B = "b" * 40
 FULL_SHA_C = "c" * 40
 FULL_SHA_D = "d" * 40
 FULL_SHA_E = "e" * 40
+PACKAGE_PLACEHOLDER = "PACKAGE_NAME_FROM_APPROVED_POLICY"
+VERSION_PLACEHOLDER = "VERSION_FROM_APPROVED_POLICY"
+ARTIFACT_PATH_PLACEHOLDER = "ARTIFACT_DIRECTORY_FROM_APPROVED_POLICY"
+ARTIFACT_NAME_PLACEHOLDER = "ARTIFACT_NAME_FROM_APPROVED_POLICY"
+MANIFEST_PLACEHOLDER = "MANIFEST_NAME_FROM_APPROVED_POLICY"
+BUILD_COMMAND = f"""\
+uv run python -m scripts.release.build \\
+  --output {ARTIFACT_PATH_PLACEHOLDER} \\
+  --name {PACKAGE_PLACEHOLDER} \\
+  --version {VERSION_PLACEHOLDER} \\
+  --constraint CONSTRAINT_FILE_FROM_APPROVED_POLICY
+"""
+ARTIFACT_VERIFY_COMMAND = f"""\
+uv run python -m scripts.release.artifacts verify \\
+  --directory {ARTIFACT_PATH_PLACEHOLDER} \\
+  --name {PACKAGE_PLACEHOLDER} \\
+  --version {VERSION_PLACEHOLDER} \\
+  --manifest-name {MANIFEST_PLACEHOLDER}
+"""
+CLEAN_INSTALL_COMMAND = f"""\
+uv run python -m scripts.release.verify_install \\
+  --directory {ARTIFACT_PATH_PLACEHOLDER} \\
+  --name {PACKAGE_PLACEHOLDER} \\
+  --version {VERSION_PLACEHOLDER} \\
+  --manifest-name {MANIFEST_PLACEHOLDER}
+"""
+RELEASE_POLICY = ReleaseWorkflowPolicy(
+    approved_triggers=frozenset({"release"}),
+    approved_tag_patterns=None,
+    build_command=BUILD_COMMAND,
+    artifact_verification_command=ARTIFACT_VERIFY_COMMAND,
+    clean_install_command=CLEAN_INSTALL_COMMAND,
+    artifact_upload_action=f"actions/upload-artifact@{FULL_SHA_D}",
+    artifact_name=ARTIFACT_NAME_PLACEHOLDER,
+    artifact_path=ARTIFACT_PATH_PLACEHOLDER,
+)
 
 
 @pytest.fixture
@@ -58,16 +98,16 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@{FULL_SHA_C}
       - name: Build distributions exactly once
-        run: uv run python -m scripts.release.build --output dist
-      - name: Verify artifact integrity and metadata
-        run: uv run python -m scripts.release.verify --dist dist
-      - name: Verify clean Python 3.14 installation and public import
-        run: uv run python -m scripts.release.verify_install --dist dist --python 3.14 --import md_converter
-      - name: Transfer verified artifacts
+        run: |
+{indent(BUILD_COMMAND, "          ")}      - name: Verify artifact integrity and metadata
+        run: |
+{indent(ARTIFACT_VERIFY_COMMAND, "          ")}      - name: Verify clean Python 3.14 installation and public import
+        run: |
+{indent(CLEAN_INSTALL_COMMAND, "          ")}      - name: Transfer verified artifacts
         uses: actions/upload-artifact@{FULL_SHA_D}
         with:
-          name: verified-python-distributions
-          path: dist
+          name: {ARTIFACT_NAME_PLACEHOLDER}
+          path: {ARTIFACT_PATH_PLACEHOLDER}
   publish:
     needs: build-and-verify
     if: ${{{{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}}}
@@ -80,12 +120,12 @@ jobs:
       - name: Download verified artifacts
         uses: actions/download-artifact@{FULL_SHA_D}
         with:
-          name: verified-python-distributions
-          path: dist
+          name: {ARTIFACT_NAME_PLACEHOLDER}
+          path: {ARTIFACT_PATH_PLACEHOLDER}
       - name: Publish exact artifacts
         uses: pypa/gh-action-pypi-publish@{FULL_SHA_E}
         with:
-          packages-dir: dist/
+          packages-dir: {ARTIFACT_PATH_PLACEHOLDER}/
           attestations: true
 """
 
@@ -410,6 +450,84 @@ def test_read_only_policy_rejects_neutralizing_fields(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("workflow_name", "needle", "replacement"),
+    [
+        ("ci.yml", 'cron: "17 3 * * 0"', 'cron: "18 3 * * 0"'),
+        ("ci.yml", 'version: "0.12.1"', 'version: "0.12.2"'),
+        (
+            "ci.yml",
+            "persist-credentials: false",
+            "persist-credentials: false\n          ref: refs/heads/unreviewed",
+        ),
+        (
+            "ci.yml",
+            "HEAVY_RESULT: ${{ needs.heavy.result }}",
+            'HEAVY_RESULT: "success"',
+        ),
+        ("ci.yml", "fail-fast: false", "fail-fast: true"),
+        (
+            "ci.yml",
+            "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
+            "postgres:18-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ),
+        (
+            "ci.yml",
+            "--health-retries 30",
+            "--health-retries 1",
+        ),
+        (
+            "ci.yml",
+            "    timeout-minutes: 45",
+            "    timeout-minutes: 45\n    volumes:\n      - /:/host",
+        ),
+        (
+            "ci.yml",
+            "selected-domains: ${{ steps.select.outputs.selected-domains }}",
+            'selected-domains: "[]"',
+        ),
+        (
+            "mutation.yml",
+            "        run: uv sync --locked --all-groups",
+            "        run: git checkout refs/heads/unreviewed",
+        ),
+        (
+            "mutation.yml",
+            "        run: uv sync --locked --all-groups",
+            "        env:\n          BASH_ENV: /tmp/attacker\n"
+            "        run: uv sync --locked --all-groups",
+        ),
+        (
+            "mutation.yml",
+            "      - name: Synchronize locked dependencies",
+            "      - name: Unreviewed extra step\n"
+            "        run: echo extra\n"
+            "      - name: Synchronize locked dependencies",
+        ),
+        ("mutation.yml", 'cron: "43 4 * * 2"', 'cron: "44 4 * * 2"'),
+    ],
+)
+def test_known_workflows_reject_any_noncanonical_value_or_structure(
+    workflow_name: str, needle: str, replacement: str
+) -> None:
+    """Reviewed workflows lock every nested value, order, and cardinality."""
+    workflow = Path(f".github/workflows/{workflow_name}").read_text(encoding="utf-8")
+    errors = validate_workflow_text(
+        workflow.replace(needle, replacement, 1), workflow_name=workflow_name
+    )
+    assert any("reviewed canonical policy" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_checkout_boolean_policy_rejects_integer_zero() -> None:
+    """YAML integer zero is not accepted as the boolean false security setting."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace("persist-credentials: false", "persist-credentials: 0")
+    errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
+    assert "checkout in job 'mutation' must disable persisted credentials" in errors
+
+
+@pytest.mark.unit
 def test_scalar_security_scans_decoded_yaml_values() -> None:
     """YAML escapes cannot hide privileged execution from scalar validation."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
@@ -443,6 +561,22 @@ def test_scalar_security_rejects_github_object_and_dynamic_access(
     )
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
     assert any("GitHub" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_scalar_security_is_not_truncated_by_expression_like_literal() -> None:
+    """A literal closing delimiter cannot hide a later full-context access."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "        run: uv sync --locked --all-groups",
+        "        env:\n"
+        "          CONTEXT: ${{ format('}}', toJSON(github)) }}\n"
+        "        run: uv sync --locked --all-groups",
+    )
+    errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
+    assert (
+        "workflow expression must not access the GitHub context dynamically" in errors
+    )
 
 
 @pytest.mark.unit
@@ -484,11 +618,74 @@ def test_release_policy_accepts_caller_approved_trusted_context(
 ) -> None:
     """A caller-supplied policy can validate the future isolated release shape."""
     assert (
-        validate_release_workflow_text(
-            valid_release_workflow, approved_triggers=frozenset({"release"})
-        )
+        validate_release_workflow_text(valid_release_workflow, policy=RELEASE_POLICY)
         == []
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "command"),
+    [
+        ("build_command", "echo scripts.release.build\n"),
+        (
+            "artifact_verification_command",
+            "uv run python -m scripts.release.artifacts create-manifest "
+            "--directory output --name name --version version "
+            "--manifest-name manifest\n",
+        ),
+        ("clean_install_command", "echo scripts.release.verify_install\n"),
+    ],
+)
+def test_release_policy_rejects_fake_caller_approved_commands(
+    valid_release_workflow: str, field: str, command: str
+) -> None:
+    """Even caller-provided commands must invoke the merged release CLIs exactly."""
+    original = getattr(RELEASE_POLICY, field)
+    weakened = valid_release_workflow.replace(
+        indent(original, "          "), indent(command, "          ")
+    )
+    errors = validate_release_workflow_text(
+        weakened, policy=replace(RELEASE_POLICY, **{field: command})
+    )
+    assert any("does not match the real CLI" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_release_policy_requires_explicit_immutable_upload_action(
+    valid_release_workflow: str,
+) -> None:
+    """The caller must approve the exact immutable artifact uploader reference."""
+    mutable = "actions/upload-artifact@v4"
+    weakened = valid_release_workflow.replace(
+        f"actions/upload-artifact@{FULL_SHA_D}", mutable
+    )
+    errors = validate_release_workflow_text(
+        weakened,
+        policy=replace(RELEASE_POLICY, artifact_upload_action=mutable),
+    )
+    assert (
+        "caller-approved upload action must be an immutable upload-artifact" in errors
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "set -e\n" + BUILD_COMMAND,
+        " ".join(shlex.split(BUILD_COMMAND.replace("\\\n", ""))) + "\n",
+    ],
+)
+def test_release_commands_preserve_exact_shell_separators_and_newlines(
+    valid_release_workflow: str, replacement: str
+) -> None:
+    """Token-equivalent or prefixed multiline shell programs remain distinct."""
+    weakened = valid_release_workflow.replace(
+        indent(BUILD_COMMAND, "          "), indent(replacement, "          ")
+    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
+    assert "release producer commands do not match the exact contract" in errors
 
 
 @pytest.mark.unit
@@ -500,7 +697,11 @@ def test_release_policy_rejects_untrusted_dispatch(
         "  release:\n    types: [published]", "  workflow_dispatch:"
     )
     errors = validate_release_workflow_text(
-        dispatched, approved_triggers=frozenset({"workflow_dispatch"})
+        dispatched,
+        policy=replace(
+            RELEASE_POLICY,
+            approved_triggers=frozenset({"workflow_dispatch"}),
+        ),
     )
     assert "approved release triggers must contain only trusted contexts" in errors
 
@@ -515,9 +716,7 @@ def test_release_policy_rejects_unsafe_event_or_push_shapes(
     )
     assert (
         "release event trigger must be restricted to published releases"
-        in validate_release_workflow_text(
-            draft_event, approved_triggers=frozenset({"release"})
-        )
+        in validate_release_workflow_text(draft_event, policy=RELEASE_POLICY)
     )
     branch_push = valid_release_workflow.replace(
         "  release:\n    types: [published]",
@@ -526,7 +725,12 @@ def test_release_policy_rejects_unsafe_event_or_push_shapes(
     assert (
         "push release trigger must match explicitly approved tag patterns"
         in validate_release_workflow_text(
-            branch_push, approved_triggers=frozenset({"push"})
+            branch_push,
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=None,
+            ),
         )
     )
 
@@ -541,7 +745,12 @@ def test_release_policy_rejects_non_string_or_empty_tag_patterns(
         "  release:\n    types: [published]", f"  push:\n    tags: {tags}"
     )
     errors = validate_release_workflow_text(
-        pushed, approved_triggers=frozenset({"push"})
+        pushed,
+        policy=replace(
+            RELEASE_POLICY,
+            approved_triggers=frozenset({"push"}),
+            approved_tag_patterns=("caller-approved-*",),
+        ),
     )
     assert "push release trigger must match explicitly approved tag patterns" in errors
 
@@ -556,20 +765,33 @@ def test_push_release_requires_exact_caller_approved_tag_patterns(
         '  push:\n    tags: ["caller-approved-*"]',
     )
     assert "push release trigger must match explicitly approved tag patterns" in (
-        validate_release_workflow_text(pushed, approved_triggers=frozenset({"push"}))
+        validate_release_workflow_text(
+            pushed,
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=None,
+            ),
+        )
     )
     assert "push release tag patterns do not match the approved policy" in (
         validate_release_workflow_text(
             pushed,
-            approved_triggers=frozenset({"push"}),
-            approved_tag_patterns=("release-*",),
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=("release-*",),
+            ),
         )
     )
     assert (
         validate_release_workflow_text(
             pushed,
-            approved_triggers=frozenset({"push"}),
-            approved_tag_patterns=("caller-approved-*",),
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=("caller-approved-*",),
+            ),
         )
         == []
     )
@@ -577,8 +799,11 @@ def test_push_release_requires_exact_caller_approved_tag_patterns(
     assert "push release trigger must match explicitly approved tag patterns" in (
         validate_release_workflow_text(
             dynamic,
-            approved_triggers=frozenset({"push"}),
-            approved_tag_patterns=("${{ github.ref }}",),
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=("${{ github.ref }}",),
+            ),
         )
     )
 
@@ -591,10 +816,20 @@ def test_release_policy_rejects_cancellable_publication(
     weakened = valid_release_workflow.replace(
         "cancel-in-progress: false", "cancel-in-progress: true"
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release publication concurrency must not cancel in progress" in errors
+
+
+@pytest.mark.unit
+def test_release_policy_rejects_integer_zero_cancellation(
+    valid_release_workflow: str,
+) -> None:
+    """Integer zero cannot impersonate the required boolean false value."""
+    weakened = valid_release_workflow.replace(
+        "cancel-in-progress: false", "cancel-in-progress: 0"
+    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
+    assert "workflow cancel-in-progress does not match the explicit policy" in errors
 
 
 @pytest.mark.unit
@@ -605,9 +840,7 @@ def test_release_policy_rejects_noncanonical_concurrency_group(
     weakened = valid_release_workflow.replace(
         "group: release-${{ github.ref }}", "group: release-global"
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "workflow concurrency group does not match the explicit policy" in errors
 
 
@@ -661,7 +894,7 @@ def test_release_policy_rejects_privilege_and_gate_weakening(
     """Publication keeps its environment, token scope, deadline, and dependency gate."""
     errors = validate_release_workflow_text(
         valid_release_workflow.replace(needle, replacement, 1),
-        approved_triggers=frozenset({"release"}),
+        policy=RELEASE_POLICY,
     )
     assert message in errors
 
@@ -673,9 +906,7 @@ def test_release_policy_rejects_secret_credentials(valid_release_workflow: str) 
         "          attestations: true",
         "          attestations: true\n          password: ${{ secrets.PYPI_TOKEN }}",
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "forbidden workflow secret access" in errors
     assert "PyPI publication must use Trusted Publishing without credentials" in errors
 
@@ -698,9 +929,7 @@ def test_release_policy_rejects_bracket_secret_and_token_access(
         f"    timeout-minutes: 30\n    env:\n      TOKEN: {expression}",
         1,
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert any("access" in error for error in errors)
 
 
@@ -715,10 +944,7 @@ def test_release_policy_rejects_publish_rebuild_or_extra_step(
         "        run: uv build\n"
         "      - name: Publish exact artifacts",
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
-    assert "release workflow must invoke the distribution build exactly once" in errors
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "publish job must contain exactly two action steps" in errors
 
 
@@ -726,9 +952,9 @@ def test_release_policy_rejects_publish_rebuild_or_extra_step(
 @pytest.mark.parametrize(
     "replacement",
     [
-        "run: echo scripts.release.build",
-        "run: true # scripts.release.build",
-        "run: BUILD=scripts.release.build; echo $BUILD",
+        "echo scripts.release.build\n",
+        "true # scripts.release.build\n",
+        "BUILD=scripts.release.build; echo $BUILD\n",
     ],
 )
 def test_release_policy_rejects_inert_or_indirect_build(
@@ -736,13 +962,10 @@ def test_release_policy_rejects_inert_or_indirect_build(
 ) -> None:
     """Echoes, comments, and variables cannot satisfy the build-once contract."""
     weakened = valid_release_workflow.replace(
-        "run: uv run python -m scripts.release.build --output dist",
-        replacement,
+        indent(BUILD_COMMAND, "          "), indent(replacement, "          ")
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
-    assert "release workflow must invoke the distribution build exactly once" in errors
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
+    assert "release producer commands do not match the exact contract" in errors
 
 
 @pytest.mark.unit
@@ -751,11 +974,9 @@ def test_release_policy_rejects_artifact_substitution(
 ) -> None:
     """Publication cannot select bytes other than the uniquely transferred bundle."""
     weakened = valid_release_workflow.replace(
-        "packages-dir: dist/", "packages-dir: other/"
+        f"packages-dir: {ARTIFACT_PATH_PLACEHOLDER}/", "packages-dir: other/"
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "PyPI upload must publish only the downloaded artifact directory" in errors
 
 
@@ -764,13 +985,12 @@ def test_release_policy_rejects_artifact_substitution(
     ("needle", "replacement"),
     [
         (
-            "run: uv run python -m scripts.release.verify --dist dist",
-            "run: echo metadata verified",
+            indent(ARTIFACT_VERIFY_COMMAND, "          "),
+            "          echo metadata verified\n",
         ),
         (
-            "run: uv run python -m scripts.release.verify_install --dist dist "
-            "--python 3.14 --import md_converter",
-            "run: echo import verified",
+            indent(CLEAN_INSTALL_COMMAND, "          "),
+            "          echo import verified\n",
         ),
         (
             'python-version: "3.14"',
@@ -796,7 +1016,7 @@ def test_release_policy_rejects_weakened_producer_or_publish_steps(
     """Verification, clean install, upload, and publication cannot be neutralized."""
     errors = validate_release_workflow_text(
         valid_release_workflow.replace(needle, replacement, 1),
-        approved_triggers=frozenset({"release"}),
+        policy=RELEASE_POLICY,
     )
     assert errors
 
@@ -817,9 +1037,7 @@ def test_release_policy_rejects_duplicate_artifact_upload_globally(
         "      - name: Transfer verified artifacts\n",
         duplicate + "      - name: Transfer verified artifacts\n",
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "exactly one job must upload the verified artifact bundle" in errors
 
 
@@ -843,9 +1061,7 @@ def test_release_policy_rejects_extra_job_and_dependency(
     weakened = weakened.replace(
         "needs: build-and-verify", "needs: [build-and-verify, substitute]"
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release jobs do not match the exact build and publish contract" in errors
     assert "publish job must depend only on prior artifact validation" in errors
 
@@ -861,9 +1077,7 @@ def test_release_policy_rejects_missing_repository_guard(
         "",
         1,
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
 
 
@@ -877,9 +1091,7 @@ def test_release_policy_rejects_bypassable_repository_guard(
         "simple-md-to-docx-converter' || true }}",
         1,
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
 
 
@@ -893,9 +1105,7 @@ def test_release_policy_rejects_negated_repository_guard(
         "!(github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter')",
         1,
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
 
 
@@ -906,9 +1116,7 @@ def test_release_policy_rejects_mutable_action(valid_release_workflow: str) -> N
         f"pypa/gh-action-pypi-publish@{FULL_SHA_E}",
         "pypa/gh-action-pypi-publish@release/v1",
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert any("every action reference must be pinned" in error for error in errors)
 
 
@@ -921,9 +1129,7 @@ def test_release_policy_rejects_mutable_action_with_spaced_key(
         f"uses: pypa/gh-action-pypi-publish@{FULL_SHA_E}",
         "uses : pypa/gh-action-pypi-publish@release/v1",
     )
-    errors = validate_release_workflow_text(
-        weakened, approved_triggers=frozenset({"release"})
-    )
+    errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
     assert any("every action reference must be pinned" in error for error in errors)
 
 

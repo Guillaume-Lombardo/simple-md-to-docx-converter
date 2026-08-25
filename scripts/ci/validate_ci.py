@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,8 +34,7 @@ TRUSTED_CACHE_WRITE = (
 READ_ONLY_PERMISSIONS = {"contents": "read"}
 FORBIDDEN_WORKFLOW_KEYS = frozenset({"secrets"})
 FORBIDDEN_WORKFLOW_SCALARS = ("--privileged",)
-EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
-GITHUB_PROPERTY = re.compile(r"\bgithub(?:\.[A-Za-z_][A-Za-z0-9_-]*)+")
+GITHUB_PROPERTY = re.compile(r"\bgithub(?:\.[A-Za-z_][A-Za-z0-9_-]*)+", re.IGNORECASE)
 SAFE_GITHUB_PROPERTIES = frozenset(
     {
         "github.event.before",
@@ -57,16 +58,8 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
 PUBLISH_STEP_COUNT = 2
-RELEASE_BUILD_COMMAND = "uv run python -m scripts.release.build --output dist"
-RELEASE_VERIFY_COMMAND = "uv run python -m scripts.release.verify --dist dist"
-RELEASE_INSTALL_COMMAND = (
-    "uv run python -m scripts.release.verify_install --dist dist "
-    "--python 3.14 --import md_converter"
-)
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
 RELEASE_PRODUCER_JOB = "build-and-verify"
-RELEASE_ARTIFACT_NAME = "verified-python-distributions"
-RELEASE_ARTIFACT_PATH = "dist"
 WORKFLOW_FIELDS = frozenset({"name", "on", "permissions", "concurrency", "jobs"})
 ACTION_STEP_FIELDS = frozenset({"name", "uses", "with", "if"})
 RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
@@ -101,6 +94,21 @@ class WorkflowPolicy:
     job_fields: Mapping[str, frozenset[str]]
     job_conditions: Mapping[str, str]
     step_conditions: Mapping[tuple[str, str], str]
+    canonical_digest: str
+
+
+@dataclass(frozen=True)
+class ReleaseWorkflowPolicy:
+    """Caller-approved release contract without repository production defaults."""
+
+    approved_triggers: frozenset[str]
+    approved_tag_patterns: tuple[str, ...] | None
+    build_command: str
+    artifact_verification_command: str
+    clean_install_command: str
+    artifact_upload_action: str
+    artifact_name: str
+    artifact_path: str
 
 
 READ_ONLY_WORKFLOW_POLICIES = {
@@ -217,6 +225,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
+        canonical_digest="82d5b853943ce8d6b49f74469c690cfeee53394f13be14e4e313eaa5cc2d38ee",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -231,6 +240,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
         step_conditions={},
+        canonical_digest="d371e58ea1a49b6c29c35dd36c9226410c96b0eefa7ea028ce9299473d1db621",
     ),
 }
 
@@ -338,17 +348,22 @@ def _validate_scalar_security(workflow: object) -> list[str]:
                 for fragment in FORBIDDEN_WORKFLOW_SCALARS
                 if fragment in lowered
             )
-            for expression in EXPRESSION.findall(value):
-                if re.search(r"\bsecrets\b", expression, re.IGNORECASE):
-                    errors.append("forbidden workflow secret access")
-                properties = GITHUB_PROPERTY.findall(expression)
+            if re.search(r"\bsecrets\b", value, re.IGNORECASE):
+                errors.append("forbidden workflow secret access")
+            expression_start = value.find("${{")
+            if expression_start >= 0:
+                expression_region = value[expression_start + 3 :]
+                properties = [
+                    property_name.lower()
+                    for property_name in GITHUB_PROPERTY.findall(expression_region)
+                ]
                 unsafe = sorted(set(properties).difference(SAFE_GITHUB_PROPERTIES))
                 if unsafe:
                     errors.append(
                         "workflow expression uses non-allowlisted GitHub properties: "
                         f"{unsafe!r}"
                     )
-                without_properties = GITHUB_PROPERTY.sub("", expression)
+                without_properties = GITHUB_PROPERTY.sub("", expression_region)
                 if re.search(r"\bgithub\b", without_properties, re.IGNORECASE):
                     errors.append(
                         "workflow expression must not access the GitHub context dynamically"
@@ -379,7 +394,12 @@ def _validate_concurrency(
         errors.append("workflow concurrency group does not match the explicit policy")
     elif expected_prefix is not None and not group.startswith(expected_prefix):
         errors.append(f"workflow concurrency group must start with {expected_prefix!r}")
-    if expected_cancellation is not None and cancellation != expected_cancellation:
+    cancellation_mismatch = (
+        cancellation is not expected_cancellation
+        if isinstance(expected_cancellation, bool)
+        else cancellation != expected_cancellation
+    )
+    if expected_cancellation is not None and cancellation_mismatch:
         errors.append("workflow cancel-in-progress does not match the explicit policy")
     elif not isinstance(cancellation, (bool, str)):
         errors.append("workflow cancel-in-progress must be explicit")
@@ -533,6 +553,13 @@ def _validate_read_only_workflow(
     workflow: Mapping[str, Any], *, policy: WorkflowPolicy
 ) -> list[str]:
     errors: list[str] = []
+    canonical = json.dumps(workflow, ensure_ascii=False, separators=(",", ":")).encode()
+    actual_digest = hashlib.sha256(canonical).hexdigest()
+    if actual_digest != policy.canonical_digest:
+        errors.append(
+            "workflow values, mapping order, jobs, and steps do not match the reviewed "
+            f"canonical policy (actual digest: {actual_digest})"
+        )
     if set(workflow) != set(WORKFLOW_FIELDS):
         errors.append("workflow fields do not match the explicit allowlist")
     triggers = _trigger_names(workflow)
@@ -551,12 +578,6 @@ def _validate_read_only_workflow(
     errors.extend(_validate_action_allowlist(workflow, allowed_actions=policy.actions))
     errors.extend(_validate_checkout_credentials(workflow))
     return errors
-
-
-def _normalized_command(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    return " ".join(value.split())
 
 
 def _job_steps(workflow: Mapping[str, Any], job_name: str) -> list[dict[str, Any]]:
@@ -595,12 +616,12 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
         ("gate", "Require every implemented CI stage"): (
-            'set -euo pipefail [[ "$DETECT_RESULT" == "success" ]] '
-            '[[ "$DOMAIN_PLAN_RESULT" == "success" ]] '
-            'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then '
-            '[[ "$HEAVY_RESULT" == "skipped" ]] else '
-            '[[ "$HEAVY_RESULT" == "success" ]] fi '
-            '[[ "$LIGHT_RESULT" == "success" ]]'
+            'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
+            '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
+            'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then\n'
+            '  [[ "$HEAVY_RESULT" == "skipped" ]]\nelse\n'
+            '  [[ "$HEAVY_RESULT" == "success" ]]\nfi\n'
+            '[[ "$LIGHT_RESULT" == "success" ]]\n'
         ),
     }
     for (job_name, step_name), expected_command in required_commands.items():
@@ -609,10 +630,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             for step in _job_steps(workflow, job_name)
             if step.get("name") == step_name
         ]
-        if (
-            len(matches) != 1
-            or _normalized_command(matches[0].get("run")) != expected_command
-        ):
+        if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
     required_conditions = {
@@ -723,6 +741,8 @@ def _release_artifact_contract(
     workflow: Mapping[str, Any],
     publish_job: Mapping[str, Any],
     publish_steps: list[dict[str, Any]],
+    *,
+    policy: ReleaseWorkflowPolicy,
 ) -> list[str]:
     download = publish_steps[0]
     publish = publish_steps[1]
@@ -741,6 +761,10 @@ def _release_artifact_contract(
         errors.append("publish download must name the verified artifact bundle")
     if not isinstance(download_path, str) or not download_path:
         errors.append("publish download must use an explicit artifact path")
+    if artifact_name != policy.artifact_name or download_path != policy.artifact_path:
+        errors.append(
+            "publish download must match the caller-approved artifact contract"
+        )
     packages_dir = publish_with.get("packages-dir")
     if not isinstance(packages_dir, str) or packages_dir.rstrip("/") != str(
         download_path
@@ -776,7 +800,9 @@ def _release_artifact_contract(
     return errors
 
 
-def _validate_release_producer_job(job: Mapping[str, Any]) -> list[str]:
+def _validate_release_producer_job(
+    job: Mapping[str, Any], *, policy: ReleaseWorkflowPolicy
+) -> list[str]:
     errors: list[str] = []
     expected_fields = {"if", "runs-on", "steps", "timeout-minutes"}
     if set(job) != expected_fields:
@@ -796,21 +822,21 @@ def _validate_release_producer_job(job: Mapping[str, Any]) -> list[str]:
             {"python-version": "3.14", "check-latest": False},
         ),
         ("Set up uv", "uses", None),
-        ("Build distributions exactly once", "run", RELEASE_BUILD_COMMAND),
+        ("Build distributions exactly once", "run", policy.build_command),
         (
             "Verify artifact integrity and metadata",
             "run",
-            RELEASE_VERIFY_COMMAND,
+            policy.artifact_verification_command,
         ),
         (
             "Verify clean Python 3.14 installation and public import",
             "run",
-            RELEASE_INSTALL_COMMAND,
+            policy.clean_install_command,
         ),
         (
             "Transfer verified artifacts",
             "uses",
-            {"name": RELEASE_ARTIFACT_NAME, "path": RELEASE_ARTIFACT_PATH},
+            {"name": policy.artifact_name, "path": policy.artifact_path},
         ),
     )
     if len(steps) != len(expected_steps):
@@ -822,7 +848,7 @@ def _validate_release_producer_job(job: Mapping[str, Any]) -> list[str]:
         None,
         None,
         None,
-        "actions/upload-artifact@",
+        policy.artifact_upload_action,
     )
     for step, (name, kind, payload), action in zip(
         steps, expected_steps, expected_actions, strict=True
@@ -834,17 +860,20 @@ def _validate_release_producer_job(job: Mapping[str, Any]) -> list[str]:
             errors.append("release producer steps do not match the exact contract")
             continue
         if kind == "run":
-            if _normalized_command(step.get("run")) != payload:
+            if step.get("run") != payload:
                 errors.append(
                     "release producer commands do not match the exact contract"
                 )
         else:
             uses = step.get("uses")
-            if (
-                not isinstance(uses, str)
-                or action is None
-                or not uses.startswith(action)
-            ):
+            action_matches = (
+                uses == action
+                if action == policy.artifact_upload_action
+                else isinstance(uses, str)
+                and action is not None
+                and uses.startswith(action)
+            )
+            if not action_matches:
                 errors.append(
                     "release producer actions do not match the exact contract"
                 )
@@ -912,7 +941,10 @@ def _validate_release_jobs(
 
 
 def _validate_publish_job(
-    workflow: Mapping[str, Any], publish_job: Mapping[str, Any]
+    workflow: Mapping[str, Any],
+    publish_job: Mapping[str, Any],
+    *,
+    policy: ReleaseWorkflowPolicy,
 ) -> list[str]:
     errors: list[str] = []
     expected_job_fields = {
@@ -944,17 +976,34 @@ def _validate_publish_job(
             errors.append("publish steps must contain exactly name, uses, and with")
         if not isinstance(uses, str) or not uses.startswith(expected_action):
             errors.append("publish job must only download then publish artifacts")
-    errors.extend(_release_artifact_contract(workflow, publish_job, publish_steps))
+    errors.extend(
+        _release_artifact_contract(workflow, publish_job, publish_steps, policy=policy)
+    )
     return errors
 
 
 def _validate_release_triggers(
     workflow: Mapping[str, Any],
     *,
-    approved_triggers: frozenset[str],
-    approved_tag_patterns: tuple[str, ...] | None,
+    policy: ReleaseWorkflowPolicy,
 ) -> list[str]:
     errors: list[str] = []
+    approved_triggers = (
+        policy.approved_triggers
+        if isinstance(policy.approved_triggers, frozenset)
+        and all(isinstance(trigger, str) for trigger in policy.approved_triggers)
+        else frozenset()
+    )
+    if approved_triggers != policy.approved_triggers:
+        errors.append("approved release triggers must be a frozenset of strings")
+    approved_tag_patterns = (
+        policy.approved_tag_patterns
+        if policy.approved_tag_patterns is None
+        or isinstance(policy.approved_tag_patterns, tuple)
+        else None
+    )
+    if approved_tag_patterns is not policy.approved_tag_patterns:
+        errors.append("approved release tag patterns must be an explicit tuple or None")
     if (
         not approved_triggers
         or approved_triggers & RELEASE_FORBIDDEN_TRIGGERS
@@ -1003,27 +1052,102 @@ def _validate_release_triggers(
     return errors
 
 
+def _command_matches_cli(
+    command: object, *, prefix: tuple[str, ...], required_options: frozenset[str]
+) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        tokens = shlex.split(command.replace("\\\n", ""))
+    except ValueError:
+        return False
+    if tuple(tokens[: len(prefix)]) != prefix:
+        return False
+    option_tokens = tokens[len(prefix) :]
+    if len(option_tokens) != 2 * len(required_options):
+        return False
+    options = option_tokens[::2]
+    values = option_tokens[1::2]
+    return (
+        set(options) == set(required_options)
+        and len(options) == len(set(options))
+        and all(value and not value.startswith("--") for value in values)
+    )
+
+
+def _validate_release_policy(policy: ReleaseWorkflowPolicy) -> list[str]:
+    errors: list[str] = []
+    command_contracts = (
+        (
+            policy.build_command,
+            ("uv", "run", "python", "-m", "scripts.release.build"),
+            frozenset({"--output", "--name", "--version", "--constraint"}),
+            "build",
+        ),
+        (
+            policy.artifact_verification_command,
+            (
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "scripts.release.artifacts",
+                "verify",
+            ),
+            frozenset({"--directory", "--name", "--version", "--manifest-name"}),
+            "artifact verification",
+        ),
+        (
+            policy.clean_install_command,
+            ("uv", "run", "python", "-m", "scripts.release.verify_install"),
+            frozenset({"--directory", "--name", "--version", "--manifest-name"}),
+            "clean install",
+        ),
+    )
+    for command, prefix, options, label in command_contracts:
+        if not _command_matches_cli(command, prefix=prefix, required_options=options):
+            errors.append(
+                f"caller-approved {label} command does not match the real CLI"
+            )
+    if (
+        not isinstance(policy.artifact_name, str)
+        or not policy.artifact_name.strip()
+        or not isinstance(policy.artifact_path, str)
+        or not policy.artifact_path.strip()
+    ):
+        errors.append(
+            "caller-approved artifact name and path must be non-empty strings"
+        )
+    upload_match = (
+        ACTION_REFERENCE.fullmatch(policy.artifact_upload_action)
+        if isinstance(policy.artifact_upload_action, str)
+        else None
+    )
+    if (
+        upload_match is None
+        or upload_match.group(1) != "actions/upload-artifact"
+        or FULL_SHA.fullmatch(upload_match.group(2)) is None
+    ):
+        errors.append(
+            "caller-approved upload action must be an immutable upload-artifact"
+        )
+    return errors
+
+
 def validate_release_workflow_text(
     text: str,
     *,
-    approved_triggers: frozenset[str],
-    approved_tag_patterns: tuple[str, ...] | None = None,
-    publish_job_name: str = "publish",
+    policy: ReleaseWorkflowPolicy,
 ) -> list[str]:
     """Validate a future isolated release workflow under an approved trigger policy."""
-    errors: list[str] = []
+    errors = _validate_release_policy(policy)
+    publish_job_name = "publish"
     workflow, loading_errors = _load_workflow(text)
     errors.extend(loading_errors)
     if workflow is None:
         return errors
     errors.extend(_validate_scalar_security(workflow))
-    errors.extend(
-        _validate_release_triggers(
-            workflow,
-            approved_triggers=approved_triggers,
-            approved_tag_patterns=approved_tag_patterns,
-        )
-    )
+    errors.extend(_validate_release_triggers(workflow, policy=policy))
     if set(workflow) != set(WORKFLOW_FIELDS):
         errors.append("release workflow fields do not match the exact allowlist")
     if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
@@ -1045,29 +1169,11 @@ def validate_release_workflow_text(
         return errors
     if set(jobs) != {RELEASE_PRODUCER_JOB, publish_job_name}:
         errors.append("release jobs do not match the exact build and publish contract")
-    release_commands = [
-        command
-        for job_name in jobs
-        for step in _job_steps(workflow, job_name)
-        if (command := _normalized_command(step.get("run"))) is not None
-    ]
-    build_invocations = release_commands.count(RELEASE_BUILD_COMMAND)
-    unexpected_build_commands = [
-        command
-        for command in release_commands
-        if command != RELEASE_BUILD_COMMAND
-        and re.search(r"(?:\buv\s+build\b|\bscripts\.release\.build\b)", command)
-    ]
-    if build_invocations != 1 or unexpected_build_commands:
-        errors.append(
-            "release workflow must invoke the distribution build exactly once"
-        )
-
     errors.extend(_validate_release_jobs(jobs, publish_job_name=publish_job_name))
     producer_job = _mapping(jobs.get(RELEASE_PRODUCER_JOB)) or {}
-    errors.extend(_validate_release_producer_job(producer_job))
+    errors.extend(_validate_release_producer_job(producer_job, policy=policy))
     publish_job = _mapping(jobs[publish_job_name]) or {}
-    errors.extend(_validate_publish_job(workflow, publish_job))
+    errors.extend(_validate_publish_job(workflow, publish_job, policy=policy))
 
     allowed_actions = frozenset(
         {
