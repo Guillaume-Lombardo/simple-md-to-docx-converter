@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -257,6 +257,85 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   from `.git`. The upload now passes `--repo "$GITHUB_REPOSITORY"` explicitly, preserving the
   minimal checkout-free job while binding the write to the already validated upstream repository.
   Static policy and mutation tests prevent removal of that explicit repository binding.
+- 2026-08-25: PR #75 (`fix(T22): recover retained release evidence`) merged head
+  `2ad6bf2fea05ad0f247a71ab761cb492db08d645` as
+  `e03681c8c265eb6658251e3fb38d27302dce2d68`. Exact PR CI run `32871203908` passed all 12 jobs on
+  attempt 1. PR #76 (`fix(T22): bind Release upload repository`) merged head
+  `cb0b1147d1e321849cf1c68315214061772bbfcd` as
+  `df39085b7d4124577e6fdcfb80f0b83dcd15b77f`. Exact PR CI run `32873638704` passed all 12 jobs on
+  attempt 2. Attempt 1 had unrelated transient browser timing failures in `document-engines`
+  (`conversion.browser.test.mjs` test timeout) and `e2e-standalone` (`page.waitForResponse` timeout);
+  both passed unchanged on the exact-head rerun, as did the final gate.
+- 2026-08-25: Final hosted recovery run `32877372823` succeeded on exact `main` SHA
+  `df39085b7d4124577e6fdcfb80f0b83dcd15b77f`: `recover-evidence`, `attest`, and
+  `release-evidence` passed, while the publication build was correctly skipped. The published
+  `v0.3.0` Release targets `20c16305642ac3349fb333078aea510f8f3d1da1` and contains exactly six
+  evidence assets:
+
+    - `image-metadata.json` — `sha256:946e751fecf814c5f2f1478ac07718c83d1352893df12cfea34bcbda21c55360`;
+    - `registry-publication.json` — `sha256:439114e03405d763b5eb9661a87bce48b2c7fda0d2f8f329ef555a341e360d5b`;
+    - `release-bundle.sha256` — `sha256:5c27d721f838b46e5e6bfa7d2710d89549660ed2c4956374999dca3707d917e8`;
+    - `sbom.cdx.json` — `sha256:bf05cd39ed9224c03c1175d71748eda2c2c23563eb8a92ef3c2444a76a1ee3ef`;
+    - `sbom.spdx.json` — `sha256:ad8f85ac1af9b439033483977d63f6b72afa2b68258cfca51c05bdcd47c91945`;
+    - `vulnerabilities.json` — `sha256:2c0488fd88733348122c200007919ef64106e2cee1c9092dbef07c63e8b2ee4c`.
+- 2026-08-25: The public image resolves to
+  `ghcr.io/guillaume-lombardo/md-converter@sha256:4a16b311affb0d0a839350bd145810c1f6044cc7347d12ecd9263fe894de217d`.
+  `gh attestation verify` succeeded for that subject and digest against repository
+  `Guillaume-Lombardo/simple-md-to-docx-converter`. The newest verified identity is
+  `.github/workflows/container-release.yml@refs/heads/main`, source/build SHA
+  `df39085b7d4124577e6fdcfb80f0b83dcd15b77f`, and invocation
+  `actions/runs/32877372823/attempts/1`.
+- 2026-08-25: PyPI exposes `markweave==0.3.0` as wheel
+  `markweave-0.3.0-py3-none-any.whl`
+  (`sha256:863c540cab620e861eebb2841ee3da6b4417a43ba10bd594663a8cd2bd700898`) and sdist
+  `markweave-0.3.0.tar.gz`
+  (`sha256:ec7b97d9fff9530e7110051604029024014eb425faeced812c815d9c846c4403`). PyPI's integrity API
+  verifies publish attestations for both files from the GitHub publisher repository
+  `Guillaume-Lombardo/simple-md-to-docx-converter`, workflow `release.yml`, environment `pypi`.
+  The successful Python publish job was invocation `32843157962/attempts/1` from exact release SHA
+  `20c16305642ac3349fb333078aea510f8f3d1da1`; the pending publisher became the active publisher.
+- 2026-08-25: The maintenance foundations are operational: selective and full 12-job CI matrices
+  cover both storage and final-image E2E profiles; the Sunday 03:17 UTC full schedule retains its
+  45-minute heavy-job timeout and `max-parallel: 2`; grouped Dependabot configuration was ingested
+  and opened the reviewed Actions and Python update pull requests; and scheduled mutation run
+  `32812214341` passed the strict four-mutant campaign. All actions remain pinned by full SHA.
+
+## Acceptance-criteria verification
+
+- The normative T22 release outcome, English documentation, both storage profiles, rootless image,
+  security boundaries, and all dynamic version/tag contracts are implemented and covered by the
+  repository-wide static workflow validator. PR #75 and #76 exact-head CI exercised formatting,
+  linting, types, unit/functional/integration suites, document engines, container security, both
+  final-image E2E profiles, both storage profiles, changed-line and branch coverage, and the final
+  gate. No integration or E2E exception is required; the two unrelated browser timeouts passed on
+  the unchanged attempt-2 rerun.
+- The wheel and sdist were built once from the reviewed main SHA, then their metadata, Apache-2.0
+  license, installability, public `markweave` import, closed manifest, and hashes were validated.
+  The exact verified files were published without rebuild through OIDC Trusted Publishing; the
+  `pypi` environment has no reviewer, secret, or second publication gate. The exact version was
+  rechecked before upload, PyPI created the project on first upload, and both file attestations and
+  the resulting active publisher identity were verified.
+- Automatic publication is restricted to a real final-version transition on trusted protected
+  `main`; unchanged versions are no-ops, and invalid, non-canonical, pre/dev/local/epoch,
+  lower-precedence, or conflicting remote state fails closed. The tag is created atomically before
+  the exact-SHA non-draft/non-prerelease Release, and retry logic accepts only complete matching
+  partial state. Tests cover equal-precedence spelling transitions and future versions remain
+  dynamic rather than hardcoded.
+- GHCR publication stages and verifies exact registry bytes before copy, rejects observed conflicts,
+  verifies every post-copy digest, prevents workflow self-races, and uses least-privilege job-local
+  package, attestation, OIDC, and Release permissions. Pull requests, forks, tag/Release events, and
+  other untrusted contexts cannot publish. Manual dispatch cannot build or publish Python or
+  container artifacts; it can only recover an exact retained artifact after repository, workflow,
+  ancestry, job, file-set, size, checksum, OCI, receipt, Release, and anonymous public-digest checks.
+- The approved Apache-2.0 license, version `0.3.0`, tag `v0.3.0`, public GHCR image, PyPI publisher,
+  release trigger, scheduled-suite budget, and parallelism decisions are documented and verified.
+  The scheduled-CI contract is statically locked and its identical full matrix passed in hosted PR
+  CI; Dependabot ingestion, scheduled mutation testing, SBOMs, vulnerability evidence, Release
+  assets, PyPI provenance, and GHCR provenance reached their required hosted boundaries.
+- The only residual limitation is the documented narrow preflight/copy race with another principal
+  independently holding `packages: write`, because GHCR does not provide an established conditional
+  manifest-creation contract. Exact post-copy verification and restricted write authority bound
+  this risk; it does not block T22 completion.
 
 ## Synchronization
 
