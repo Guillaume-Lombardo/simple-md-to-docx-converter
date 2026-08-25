@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
+import markweave
 from scripts.release.artifacts import ArtifactError, ArtifactSet
 from scripts.release.verify_install import (
     ENVIRONMENT_TIMEOUT_SECONDS,
@@ -27,11 +28,22 @@ def test_public_import_check_rejects_legacy_import_after_install(
 ) -> None:
     """The isolated verification script checks both the new and removed imports."""
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.0"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"
     ):
+        exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
+
+
+def test_public_import_check_rejects_application_version_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distribution and public application versions must identify one release."""
+    monkeypatch.setattr(markweave, "__version__", "9.9.9")
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.0"])
+
+    with pytest.raises(SystemExit, match=r"unexpected markweave\.__version__"):
         exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
 
 

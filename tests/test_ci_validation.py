@@ -16,6 +16,7 @@ from scripts.ci.validate_ci import (
     discover_workflow_paths,
     main,
     validate_container_release_workflow_text,
+    validate_production_release_workflow_text,
     validate_python_imports,
     validate_registry_text,
     validate_release_workflow_text,
@@ -160,7 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.3
+          test "$GITHUB_REF_NAME" = v{VERSION_PLACEHOLDER}
       - name: Build distributions exactly once
         run: {BUILD_COMMAND}
       - name: Verify artifact integrity and metadata
@@ -498,6 +499,196 @@ def test_container_release_policy_rejects_unreviewed_mutation() -> None:
     errors = validate_container_release_workflow_text(weakened)
     assert "container release workflow differs from the reviewed policy" in errors
     assert "container release job 'attest' permissions are not minimal" in errors
+
+
+@pytest.mark.unit
+def test_automatic_release_workflow_satisfies_exact_policy() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert validate_production_release_workflow_text(workflow) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "branches: [main]",
+            "branches: [main]\n    tags: ['v*']",
+            "automatic publication must trigger only on trusted main pyproject pushes",
+        ),
+        (
+            "paths: [pyproject.toml]",
+            "paths: ['**']\n  workflow_dispatch:",
+            "automatic publication must trigger only on trusted main pyproject pushes",
+        ),
+        (
+            "permissions:\n      contents: write",
+            "permissions:\n      contents: read",
+            "automatic release job 'create-release' permissions are not minimal",
+        ),
+        (
+            "permissions:\n      id-token: write",
+            "permissions:\n      id-token: write\n      contents: write",
+            "automatic release job 'publish' permissions are not minimal",
+        ),
+        (
+            "target_commitish=$SOURCE_SHA",
+            "target_commitish=main",
+            "automatic release is missing contract: target_commitish=$SOURCE_SHA",
+        ),
+    ],
+)
+def test_automatic_release_policy_rejects_trigger_permission_and_identity_weakening(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(needle, replacement, 1)
+    errors = validate_production_release_workflow_text(weakened)
+    assert "automatic release workflow differs from the reviewed policy" in errors
+    assert message in errors
+
+
+@pytest.mark.unit
+def test_automatic_release_policy_requires_dynamic_versions_and_no_secrets() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    hardcoded = workflow.replace('--version "$RELEASE_VERSION"', "--version 0.3.0")
+    errors = validate_production_release_workflow_text(hardcoded)
+    assert (
+        'automatic release is missing contract: --version "$RELEASE_VERSION"' in errors
+    )
+
+    credentialed = workflow.replace(
+        "          attestations: true",
+        "          attestations: true\n          password: ${{ secrets.PYPI_TOKEN }}",
+    )
+    errors = validate_production_release_workflow_text(credentialed)
+    assert "automatic release workflow must not access stored secrets" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "contract",
+    [
+        "github.event.before",
+        "needs.detect.outputs.changed == 'true'",
+        "/git/ref/tags/$RELEASE_TAG",
+        "/releases/tags/$RELEASE_TAG",
+        "/pypi/markweave/$RELEASE_VERSION/json",
+        "python-release-${{ needs.detect.outputs.tag }}",
+    ],
+)
+def test_automatic_release_policy_requires_transition_and_collision_gates(
+    contract: str,
+) -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(contract, "removed-contract")
+    errors = validate_production_release_workflow_text(weakened)
+    assert "automatic release workflow differs from the reviewed policy" in errors
+    assert f"automatic release is missing contract: {contract}" in errors
+
+
+@pytest.mark.unit
+def test_automatic_release_atomically_creates_tag_before_release() -> None:
+    workflow = yaml.safe_load(
+        Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["create-release"]["steps"]
+    [run] = [
+        step["run"]
+        for step in steps
+        if step["name"] == "Create the exact tag and published GitHub Release"
+    ]
+
+    tag_post = '--method POST "repos/$GITHUB_REPOSITORY/git/refs"'
+    release_post = '--method POST "repos/$GITHUB_REPOSITORY/releases"'
+    assert run.index(tag_post) < run.index(release_post)
+    assert (
+        run.count(
+            'gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha'
+        )
+        == 2
+    )
+    assert "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv" in run
+
+
+@pytest.mark.unit
+def test_automatic_release_policy_rejects_missing_partial_retry_identity_check() -> (
+    None
+):
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
+        'test "$SOURCE_SHA" = "$SOURCE_SHA"',
+        1,
+    )
+    errors = validate_production_release_workflow_text(weakened)
+    assert (
+        "automatic release must atomically create and exactly verify tag before Release"
+        in errors
+    )
+
+
+@pytest.mark.unit
+def test_container_release_policy_requires_dynamic_exact_source_and_evidence() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
+        'test "$RELEASE_TAG" = "v0.3.0"',
+    ).replace("            --clobber", "")
+    errors = validate_container_release_workflow_text(weakened)
+    assert "container release workflow differs from the reviewed policy" in errors
+    assert any('test "$RELEASE_TAG" = "v$RELEASE_VERSION"' in error for error in errors)
+    assert any("--clobber" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_inspects_remote_version_before_push() -> None:
+    workflow = yaml.safe_load(
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["build-and-publish"]["steps"]
+    [run] = [
+        step["run"]
+        for step in steps
+        if step["name"] == "Publish without overwriting a conflicting release image"
+    ]
+
+    stage = "podman push --format oci"
+    inspect = 'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
+    version_copy = 'copy_staged_tag "$RELEASE_VERSION"'
+    assert run.count(stage) == 1
+    assert run.index(stage) < run.index(inspect) < run.index(version_copy)
+    assert 'test "$staged_manifest_digest" = "$intended_digest"' in run
+    assert "skopeo copy --preserve-digests --retry-times 3" in run
+    assert 'test "$remote_digest" = "$intended_digest"' in run
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_conflict_guard_removal() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        'test "$remote_digest" = "$intended_digest"',
+        "true # permit overwrite",
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("remote_digest" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_remote_digest_derivation() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
+        '"localhost/md-converter:$RELEASE_VERSION" "docker://$registry_repository:unsafe"',
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("dir:$registry_stage" in error for error in errors)
 
 
 @pytest.mark.unit

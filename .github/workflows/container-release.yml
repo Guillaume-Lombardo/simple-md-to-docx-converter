@@ -1,19 +1,24 @@
 name: Container release
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      source-sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: container-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build-and-publish:
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -25,6 +30,7 @@ jobs:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source-sha }}
           persist-credentials: false
       - name: Set up Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -37,19 +43,25 @@ jobs:
           version: "0.12.1"
           enable-cache: false
       - name: Validate the reviewed release identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.3
-          uv run python -c 'import tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == "0.3"'
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          uv run python -c 'import os, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
-      - name: Install rootless Podman
+      - name: Install rootless Podman and Skopeo
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes podman
+          sudo apt-get install --yes podman skopeo
           podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+          skopeo --version
       - name: Pull and verify the pinned base image
         run: |
           set -euo pipefail
@@ -57,45 +69,121 @@ jobs:
           podman pull --quiet "$base"
           test "$(podman image inspect "$base" --format '{{.Digest}}')" = sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
       - name: Build and validate the final rootless image
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh localhost/md-converter:0.3
-          bash scripts/container/smoke.sh localhost/md-converter:0.3
-          bash scripts/container/api-smoke.sh localhost/md-converter:0.3
-          bash scripts/container/distributed-api-smoke.sh localhost/md-converter:0.3
+          image="localhost/md-converter:$RELEASE_VERSION"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
+          bash scripts/container/smoke.sh "$image"
+          bash scripts/container/api-smoke.sh "$image"
+          bash scripts/container/distributed-api-smoke.sh "$image"
       - name: Generate and verify release SBOM evidence
-        run: bash scripts/container/supply-chain.sh localhost/md-converter:0.3 artifacts/container release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/container/supply-chain.sh "localhost/md-converter:$RELEASE_VERSION" artifacts/container release
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Push the immutable release image
+      - name: Publish without overwriting a conflicting release image
         id: push
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          podman push --digestfile "$RUNNER_TEMP/image-digest" localhost/md-converter:0.3 docker://ghcr.io/guillaume-lombardo/md-converter:0.3
-          digest="$(cat "$RUNNER_TEMP/image-digest")"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          registry_repository="ghcr.io/guillaume-lombardo/md-converter"
+          registry_path="guillaume-lombardo/md-converter"
+          source_tag="source-$SOURCE_SHA"
+          registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"
+          chmod 700 "$registry_stage"
+          cleanup() {
+            rm -rf -- "$registry_stage"
+          }
+          trap cleanup EXIT
+          podman push --format oci --digestfile "$RUNNER_TEMP/staged-image-digest" \
+            "localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"
+          intended_digest="$(cat "$RUNNER_TEMP/staged-image-digest")"
+          [[ "$intended_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          staged_manifest_digest="sha256:$(sha256sum "$registry_stage/manifest.json" | cut -d' ' -f1)"
+          test "$staged_manifest_digest" = "$intended_digest"
+          registry_token="$(curl --fail --silent --show-error \
+            --user "$GITHUB_ACTOR:$GHCR_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull,push" \
+            | jq --exit-status --raw-output '.token // .access_token')"
+
+          inspect_remote_tag() {
+            local tag="$1"
+            local headers="$RUNNER_TEMP/registry-headers"
+            local status
+            if ! status="$(curl --silent --show-error --output /dev/null \
+              --dump-header "$headers" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $registry_token" \
+              --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$registry_path/manifests/$tag")"; then
+              return 5
+            fi
+            if [[ "$status" = 404 ]]; then
+              return 4
+            fi
+            [[ "$status" = 200 ]] || return 5
+            local digest
+            digest="$(awk -F ': ' 'tolower($1) == "docker-content-digest" {gsub("\\r", "", $2); print $2}' "$headers")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 5
+            printf '%s\n' "$digest"
+          }
+          copy_staged_tag() {
+            skopeo copy --preserve-digests --retry-times 3 \
+              "dir:$registry_stage" "docker://$registry_repository:$1"
+          }
+
+          if remote_digest="$(inspect_remote_tag "$source_tag")"; then
+            test "$remote_digest" = "$intended_digest"
+          else
+            test "$?" = 4
+            copy_staged_tag "$source_tag"
+            test "$(inspect_remote_tag "$source_tag")" = "$intended_digest"
+          fi
+
+          if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then
+            test "$remote_digest" = "$intended_digest"
+          else
+            test "$?" = 4
+            copy_staged_tag "$RELEASE_VERSION"
+            test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"
+          fi
+          archive_digest="$(jq --exit-status --raw-output '.image.oci_manifest_digest' artifacts/container/image-metadata.json)"
+          [[ "$archive_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq --null-input \
+            --arg archive_digest "$archive_digest" \
+            --arg registry_digest "$intended_digest" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg version "$RELEASE_VERSION" \
+            '{oci_archive_manifest_digest: $archive_digest, registry_manifest_digest: $registry_digest, source_sha: $source_sha, version: $version}' \
+            > artifacts/container/registry-publication.json
+          printf 'digest=%s\n' "$intended_digest" >> "$GITHUB_OUTPUT"
       - name: Retain exact release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: container-release-v0.3
+          name: container-release-${{ inputs.tag }}
           path: |
             artifacts/container/image.oci.tar
             artifacts/container/sbom.cdx.json
             artifacts/container/sbom.spdx.json
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
+            artifacts/container/registry-publication.json
             artifacts/container/release-bundle.sha256
           if-no-files-found: error
           retention-days: 90
 
   attest:
     needs: build-and-publish
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -113,7 +201,7 @@ jobs:
 
   release-evidence:
     needs: [build-and-publish, attest]
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -122,15 +210,24 @@ jobs:
       - name: Download verified release evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: container-release-v0.3
+          name: container-release-${{ inputs.tag }}
           path: artifacts/container
-      - name: Attach SBOM and verification evidence to the GitHub Release
+      - name: Verify the exact published Release and attach evidence idempotently
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload v0.3
-          artifacts/container/sbom.cdx.json
-          artifacts/container/sbom.spdx.json
-          artifacts/container/vulnerabilities.json
-          artifacts/container/image-metadata.json
-          artifacts/container/release-bundle.sha256
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
+            = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
+          gh release upload "$RELEASE_TAG" \
+            artifacts/container/sbom.cdx.json \
+            artifacts/container/sbom.spdx.json \
+            artifacts/container/vulnerabilities.json \
+            artifacts/container/image-metadata.json \
+            artifacts/container/registry-publication.json \
+            artifacts/container/release-bundle.sha256 \
+            --clobber

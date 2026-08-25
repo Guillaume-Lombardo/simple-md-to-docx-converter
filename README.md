@@ -21,10 +21,11 @@ policy are assembled. Structured JSON logs, durable request-to-worker correlatio
 queue and worker metrics, bounded immutable-audit reads, version traceability, and cheap profile
 readiness are available; final-container features remain under development.
 
-The project is licensed under [Apache-2.0](LICENSE). The approved first public version is `0.3`,
+The project is licensed under [Apache-2.0](LICENSE). The approved first public version is `0.3.0`,
 published on PyPI as `markweave` with the matching public Python import `markweave`. See
 [the release process](docs/releasing.md) for the protected PyPI and GHCR publication contract and
-required one-time external configuration.
+required one-time external configuration. A reviewed version-change pull request merged to
+protected `main` starts the automatic release; repository edits without a version transition do not.
 
 ## Requirements
 
