@@ -8,6 +8,7 @@ import io
 import os
 import stat
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -19,9 +20,14 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.yaml"
+SIMPLE_OVERLAY = ROOT / "compose.simple.yaml"
+PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
+ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
+SIMPLE_RUNNER = ROOT / "scripts/e2e/run-compose-simple.sh"
 QUICKSTART = ROOT / "scripts/quickstart.sh"
+SIMPLE_QUICKSTART = ROOT / "scripts/quickstart-simple.sh"
 FINAL_IMAGE_RUNNER = ROOT / "scripts/e2e/run.sh"
 TEMPLATE = ROOT / "examples/quickstart-template.docx.base64"
 SOURCE = ROOT / "examples/quickstart-source.md"
@@ -154,6 +160,9 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     readme = README.read_text(encoding="utf-8")
 
     assert "scripts/quickstart.sh up" in readme
+    assert "scripts/quickstart-simple.sh up" in readme
+    assert "scripts/quickstart-simple.sh down" in readme
+    assert "scripts/quickstart-simple.sh password" in readme
     assert "scripts/quickstart.sh down" in readme
     assert "scripts/quickstart.sh password" in readme
     assert "http://localhost:8080" in readme
@@ -163,6 +172,11 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "examples/quickstart-source.md" in readme
     assert ", ".join(EXPECTED_FONTS) in readme
     assert "exact 256 MiB ext4 loop" in readme
+    assert "no physical capacity cap" in readme
+    assert "Rootless Podman Compose" in readme
+    assert "MARKWEAVE_SIMPLE_RUNTIME=podman" in readme
+    assert "`flock` from util-linux" in readme
+    assert "Rootful Docker Compose only" in readme
     assert "rootful Docker Engine" in readme
     assert "unix:///var/run/docker.sock" in readme
     assert "`DOCKER_HOST` and remote or non-default Docker contexts" in readme
@@ -176,6 +190,82 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "AMD64 Linux host" in readme
     assert "docker compose down --volumes" not in readme
     assert "export MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in readme
+
+
+def test_simple_overlay_resets_only_the_privileged_volume_options() -> None:
+    overlay = SIMPLE_OVERLAY.read_text(encoding="utf-8")
+
+    assert "physically unbounded named volume" in overlay
+    assert overlay.endswith("volumes:\n  markweave-work:\n    driver_opts: !reset {}\n")
+    assert "services:" not in overlay
+
+
+def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
+    overlay = PODMAN_OVERLAY.read_text(encoding="utf-8")
+
+    assert "tmpfs: !override" in overlay
+    assert "uid=" not in overlay
+    assert "gid=" not in overlay
+    assert "/run:rw,nosuid,nodev,noexec,size=8m" in overlay
+    assert "/tmp:rw,nosuid,nodev,noexec,size=64m" in overlay  # noqa: S108
+    assert "/var/lock:rw,nosuid,nodev,noexec,size=1m" in overlay
+    assert "/var/log/clamav:rw,nosuid,nodev,noexec,size=32m,mode=0750" in overlay
+    assert "chown 1000:1000 /var/log/clamav && exec /init" in overlay
+    assert overlay.count("disable: true") == 2
+    assert "condition: service_started" in overlay
+    assert "security_opt: !override" in overlay
+    assert "no-new-privileges:true" in overlay
+    assert "seccomp=unconfined" not in overlay
+    assert "reviewed Chrome seccomp profile" in overlay
+    assert "frontend:" in overlay
+    assert "internal: true" in overlay
+    assert "driver_opts: !reset {}" in overlay
+
+
+def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+
+    assert "sudo" not in script
+    assert "compose.simple.yaml" in script
+    assert "compose.podman.yaml" in script
+    assert "MARKWEAVE_WORK_DEVICE=/dev/null" in script
+    assert 'readonly requested_runtime="${MARKWEAVE_SIMPLE_RUNTIME:-auto}"' in script
+    assert "candidate=docker" in script
+    assert "candidate=podman" in script
+    assert "podman compose" in script
+    assert "rootless Podman only" in script
+    assert 'CONTAINERS_CONF="$podman_config_file"' in script
+    assert "spikes/toolchain/chrome-seccomp.json" in script
+    assert "command -v crun" in script
+    assert "{{.Host.OCIRuntime.Path}}" in script
+    assert 'runtime="%s"' in script
+    assert "Podman's OCI runtime must be an executable absolute path" in script
+    assert "wait_for_podman_scanner" in script
+    assert "wait_for_application" in script
+    assert "/usr/local/bin/clamdcheck.sh" in script
+    assert "http://127.0.0.1:8080/health/ready" in script
+    assert "flock --exclusive --nonblock --close --conflict-exit-code 75" in script
+    assert "env MARKWEAVE_SIMPLE_STATE_LOCKED=1" in script
+    assert "Another simple quickstart command is already using" in script
+    assert "${XDG_STATE_HOME:-$HOME/.local/state}" in script
+    assert "markweave-quickstart-simple" in script
+    assert 'readonly project="${MARKWEAVE_SIMPLE_PROJECT:-markweave-simple}"' in script
+    assert 'readonly port="${MARKWEAVE_SIMPLE_PORT:-8080}"' in script
+    assert '[[ ! -e "$password_file" ]]' in script
+    assert '[[ -f "$path" && ! -L "$path" && -O "$path" ]]' in script
+    assert 'com.docker.compose.project" }}' in script
+    assert 'com.docker.compose.volume" }}' in script
+    assert "{{json .Options}}" in script
+    assert '"${runtime_command[@]}" volume rm "$work_volume"' in script
+    assert '--label "com.docker.compose.project=$project"' in script
+    assert '--label "com.docker.compose.volume=markweave-work"' in script
+    assert "--network none --read-only --user 0:0" in script
+    assert "--cap-drop ALL --cap-add CHOWN --security-opt no-new-privileges" in script
+    assert "chmod 0770 /work && chown 1001:0 /work" in script
+    assert "down --remove-orphans" in script
+    assert "down --volumes" not in script
+    assert "no physical capacity cap" in script
+    assert "Markweave is ready with $runtime_name" in script
 
 
 def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() -> None:
@@ -220,11 +310,20 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert "/quickstart-template.docx" in (ROOT / ".gitignore").read_text()
 
 
+@pytest.mark.parametrize(
+    ("quickstart", "directory"),
+    [
+        (QUICKSTART, "markweave-quickstart"),
+        (SIMPLE_QUICKSTART, "markweave-quickstart-simple"),
+    ],
+)
 def test_quickstart_password_is_create_once_and_rejects_symlinks(
     tmp_path: Path,
+    quickstart: Path,
+    directory: str,
 ) -> None:
     environment = os.environ | {"XDG_STATE_HOME": str(tmp_path / "state")}
-    command = [str(QUICKSTART), "password"]
+    command = [str(quickstart), "password"]
 
     first = subprocess.run(
         command,
@@ -240,7 +339,7 @@ def test_quickstart_password_is_create_once_and_rejects_symlinks(
         text=True,
         env=environment,
     ).stdout.strip()
-    state = tmp_path / "state" / "markweave-quickstart"
+    state = tmp_path / "state" / directory
     password = state / "password.env"
 
     assert first == second
@@ -262,6 +361,45 @@ def test_quickstart_password_is_create_once_and_rejects_symlinks(
     )
     assert rejected.returncode != 0
     assert target.read_text(encoding="utf-8") == "unchanged"
+
+
+def test_simple_quickstart_rejects_a_concurrent_state_user(tmp_path: Path) -> None:
+    environment = os.environ | {"XDG_STATE_HOME": str(tmp_path / "state")}
+    command = [str(SIMPLE_QUICKSTART), "password"]
+    subprocess.run(command, check=True, capture_output=True, text=True, env=environment)
+    state = tmp_path / "state" / "markweave-quickstart-simple"
+    ready = tmp_path / "lock-ready"
+    holder = subprocess.Popen(
+        [
+            "flock",
+            "--exclusive",
+            str(state),
+            "sh",
+            "-c",
+            'printf ready >"$1"; sleep 30',
+            "sh",
+            str(ready),
+        ]
+    )
+    try:
+        for _ in range(100):
+            if ready.exists():
+                break
+            assert holder.poll() is None
+            time.sleep(0.01)
+        assert ready.exists()
+        rejected = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        assert rejected.returncode != 0
+        assert "Another simple quickstart command is already using" in rejected.stderr
+    finally:
+        holder.terminate()
+        holder.wait(timeout=5)
 
 
 def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
@@ -314,6 +452,52 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert "mount -t ext4" not in runner
     assert "down --volumes --remove-orphans" in runner
     assert "down --remove-orphans" in runner
+
+
+def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> None:
+    runner = SIMPLE_RUNNER.read_text(encoding="utf-8")
+
+    assert "sudo" not in runner
+    assert '"XDG_STATE_HOME=$state_home"' in runner
+    assert '"MARKWEAVE_SIMPLE_PROJECT=$project"' in runner
+    assert '"MARKWEAVE_SIMPLE_PORT=$port"' in runner
+    assert '"MARKWEAVE_SIMPLE_RUNTIME=$runtime"' in runner
+    assert "MARKWEAVE_SIMPLE_E2E_RUNTIME" in runner
+    assert "runtime_command=(docker)" in runner
+    assert "runtime_command=(podman)" in runner
+    assert "compose.simple.yaml" in runner
+    assert runner.count("quickstart up") == 5
+    assert runner.count("quickstart down") >= 2
+    assert "tests.e2e.service_workflow checkpoint" in runner
+    assert "tests.e2e.service_workflow exercise-mermaid" in runner
+    assert "verify_helper_service_stopped" in runner
+    assert "podman-compose.sock" in runner
+    assert "tests.e2e.service_workflow verify-checkpoint" in runner
+    assert 'port "$application_id" 8080/tcp' in runner
+    assert 'port "$scanner_id"' in runner
+    assert 'socket.create_connection(("clamav", 3310), 5)' in runner
+    assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
+    assert "HostConfig.SecurityOpt" in runner
+    assert "all(int(values[name], 16) == 0" in runner
+    assert '[[ "$security_options" != *unconfined* ]]' in runner
+    assert "grep -Eq '^Seccomp:[[:space:]]+2$' /proc/1/status" in runner
+    assert 'exec "$application_id" test -f /work/simple-rerun-marker' in runner
+    assert "stopped restart" in runner
+    assert "expected-up-failure.log" in runner
+    assert 'kill -0 "$port_blocker_pid"' in runner
+    assert 'volume inspect "$data_volume"' in runner
+    assert 'volume inspect "$signatures_volume"' in runner
+    assert "{{json .Options}}" in runner
+
+
+def test_compose_ci_runs_secure_and_simple_real_e2e_paths() -> None:
+    runner = ALL_RUNNER.read_text(encoding="utf-8")
+
+    assert runner.endswith(
+        "bash scripts/e2e/run-compose.sh\n"
+        "MARKWEAVE_SIMPLE_E2E_RUNTIME=docker bash scripts/e2e/run-compose-simple.sh\n"
+        "MARKWEAVE_SIMPLE_E2E_RUNTIME=podman bash scripts/e2e/run-compose-simple.sh\n"
+    )
 
 
 def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:

@@ -1,0 +1,5 @@
+# Sudo-free evaluation overlay. This keeps the hardened service definitions from
+# compose.yaml but uses an ordinary, physically unbounded named volume for /work.
+volumes:
+  markweave-work:
+    driver_opts: !reset {}

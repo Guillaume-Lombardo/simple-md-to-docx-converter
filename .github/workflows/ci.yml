@@ -220,8 +220,8 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
-      - name: Install rootless Podman for final-image validation
-        if: ${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
+      - name: Install rootless Podman for container validation
+        if: ${{ matrix.domain == 'compose' || matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
         run: |
           set -euo pipefail
           sudo apt-get update

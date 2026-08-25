@@ -1,0 +1,33 @@
+# Rootless Podman rejects uid/gid as tmpfs mount options through its Docker API.
+# ClamAV's root init already has CHOWN and prepares its private log directory.
+services:
+  markweave:
+    depends_on:
+      clamav:
+        condition: service_started
+    # Docker Compose inlines local seccomp JSON through the Docker API, while
+    # Podman 5.4 treats that inline JSON as a path. The helper instead configures
+    # its private Podman API service with the reviewed Chrome seccomp profile.
+    security_opt: !override
+      - no-new-privileges:true
+    healthcheck:
+      disable: true
+  clamav:
+    # Podman's API cannot set tmpfs uid/gid; perform the same ownership setup
+    # before the image's normal init while retaining only the reviewed caps.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - chown 1000:1000 /var/log/clamav && exec /init
+    healthcheck:
+      disable: true
+    tmpfs: !override
+      - /run:rw,nosuid,nodev,noexec,size=8m
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      - /var/lock:rw,nosuid,nodev,noexec,size=1m
+      - /var/log/clamav:rw,nosuid,nodev,noexec,size=32m,mode=0750
+
+networks:
+  frontend:
+    internal: true
+    driver_opts: !reset {}

@@ -12,40 +12,78 @@ to read them before trying the local profile.
 
 ## Try it locally
 
-You need an AMD64 Linux host, the standard local rootful Docker Engine daemon at
-`unix:///var/run/docker.sock` with Compose, OpenSSL, `mkfs.ext4`, `losetup`, `sudo`, and about 6 GiB
-of available memory. `DOCKER_HOST` and remote or non-default Docker contexts are unsupported.
-Docker Desktop and rootless Docker, non-Linux hosts, and native ARM are also unsupported by this
-loop-backed quickstart. Clone the repository so Compose can use the reviewed Chromium seccomp
-profile, then run its setup command:
+You need OpenSSL, `flock` from util-linux, about 6 GiB of available memory, and either Docker Engine
+with Compose or rootless Podman with a working `podman compose` provider. The published Markweave
+image is Linux/AMD64; native ARM is not supported. Clone the repository so Compose can use the
+reviewed Chromium seccomp profile, then choose one of these local-evaluation paths.
+
+| Path | Runtime | Command | `/work` isolation |
+| --- | --- | --- | --- |
+| Simple | Docker Compose | `scripts/quickstart-simple.sh up` | Named volume; no physical cap |
+| Simple | Rootless Podman Compose | `MARKWEAVE_SIMPLE_RUNTIME=podman scripts/quickstart-simple.sh up` | Named volume; no physical cap |
+| Secure | Rootful Docker Compose only | `scripts/quickstart.sh up` | Exact 256 MiB ext4 filesystem |
+
+The simple path needs no `sudo` and is the easiest way to try Markweave:
 
 ```bash
 git clone https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter.git
 cd simple-md-to-docx-converter
+scripts/quickstart-simple.sh up
+```
+
+The helper automatically prefers a working Docker Compose installation and otherwise selects
+rootless Podman Compose. Set `MARKWEAVE_SIMPLE_RUNTIME=docker` or
+`MARKWEAVE_SIMPLE_RUNTIME=podman` to select one deterministically. It initializes the named
+workspace for application UID 1001 in a short-lived, network-isolated container; the application
+itself still starts as UID 1001 without capabilities. The rootless Podman-compatible application
+image and the simple Podman Compose workflow do not make the secure loop-device helper compatible
+with Podman. For Podman, the helper starts a private API service configured with the reviewed
+Chromium seccomp profile because Docker Compose cannot pass that local profile directly to Podman's
+Docker-compatible API. Podman's automatic Docker-API health metadata is not used; the helper polls
+ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
+bounded timeout.
+
+This uses an ordinary engine-managed named volume for disposable `/work` data. The application
+still runs as a non-root user with a read-only root filesystem, no Linux capabilities,
+loopback-only HTTP, pinned images, and the same memory, CPU, process, upload, and conversion limits.
+However, the named volume has **no physical capacity cap**: a failed or hostile document engine
+could consume host disk until the container engine or host stops it. Use the secure path below when
+physical disk-exhaustion isolation matters.
+
+The secure path creates an exact 256 MiB ext4 loop filesystem for `/work`. It additionally requires
+an AMD64 Linux host, the standard local rootful Docker Engine at `unix:///var/run/docker.sock`,
+`mkfs.ext4`, and `losetup`; it requests `sudo` to manage the loop device. Docker Desktop and
+rootless Docker are unsupported, as are `DOCKER_HOST` and remote or non-default Docker contexts,
+non-Linux hosts, and native ARM:
+
+```bash
 scripts/quickstart.sh up
 ```
 
-The script explains and requests `sudo` before it creates and attaches an exact 256 MiB ext4 loop
-filesystem for disposable work; Docker Engine mounts it while the application itself remains an
-unprivileged container process. The script creates the administrator password once under the
-current user's private state directory, reuses it on later starts, and never redirects a secret to
-a predictable path. It also decodes the committed
-`examples/quickstart-template.docx.base64` fixture into that private directory. Show the password
-without putting it in shell history:
+Both scripts create the administrator password once in a private state directory and reuse it on
+later starts. They also decode `examples/quickstart-template.docx.base64` beside that password.
+Show the simple-path password without putting it in shell history:
 
 ```bash
-scripts/quickstart.sh password
+scripts/quickstart-simple.sh password
 ```
 
+For the secure path, use the same commands with `quickstart.sh` instead of
+`quickstart-simple.sh`: `scripts/quickstart.sh password` shows its password and
+`scripts/quickstart.sh down` stops it.
+
 Open <http://localhost:8080>, sign in as `admin`, and use the password above. The first start can
-take several minutes while ClamAV downloads and loads its signatures;
-`scripts/quickstart.sh ps` shows when both services are healthy, and
-`scripts/quickstart.sh logs` follows the signature-download progress.
+take several minutes while ClamAV downloads and loads its signatures. The simple `up` command
+returns only after the selected runtime passes its readiness checks;
+`scripts/quickstart-simple.sh ps` shows the containers, and `scripts/quickstart-simple.sh logs`
+follows the signature-download progress. The secure helper reports that Markweave is starting;
+use `scripts/quickstart.sh ps` or `scripts/quickstart.sh logs` until both services are healthy.
 
 To make a first conversion:
 
 1. Open **Templates**, create a template, and select the generated template at the path printed by
-   the setup script (normally `~/.local/state/markweave-quickstart/quickstart-template.docx`).
+   the setup script (normally
+   `~/.local/state/markweave-quickstart-simple/quickstart-template.docx` for the simple path).
    In **Expected fonts**, enter this exact comma-separated list:
    `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
 2. Return to **Convert**, upload `examples/quickstart-source.md`, select your active template, and
@@ -63,40 +101,39 @@ Hello from **Markweave**.
 Stop the evaluation with:
 
 ```bash
-scripts/quickstart.sh down
+scripts/quickstart-simple.sh down
 ```
 
-The shutdown command validates the work volume's exact Compose labels before removing only that
-volume. It discovers a live loop device from the private backing file, never from a stale
-`/dev/loopN` recorded in Docker metadata, and detaches it only after confirming the backing-file
-identity. It then deletes the disposable 256 MiB image. `markweave-data`, `clamav-signatures`, the
-administrator password, and the decoded template remain, so accounts, templates, jobs, results,
-signatures, and credentials survive normal shutdown. Do not add the `--volumes` option unless you
-intentionally want Docker to remove the durable local data.
+The simple shutdown validates the ordinary work volume's exact project labels, local driver, and
+empty mount options before removing only that disposable volume. `markweave-data`,
+`clamav-signatures`, the administrator password, and the decoded template remain, so accounts,
+templates, jobs, results, signatures, and credentials survive normal shutdown. Do not add the
+`--volumes` option unless you intentionally want the container engine to remove durable local data.
 
 Completed conversion results remain downloadable for 10 minutes in this evaluation profile. This
 is a local convenience value, not a recommended production retention policy.
 
-The Compose services do not automatically restart with the Docker daemon because a loop-device
-number is not stable across a host reboot. After an abnormal stop or reboot, run
-`scripts/quickstart.sh up` again. It validates the exact project/volume labels, removes stale
-scratch metadata, resolves the private backing file independently of any old device number,
-reformats the disposable filesystem, and then restarts the stack. A repeated `up` while the service
-is already running validates and reuses its current filesystem without reformatting it. The `down`
-command can also clean stale scratch metadata and the private image when the old loop association
-has vanished; it never detaches a device that has since been reused for an unrelated file.
-If Compose fails while starting—for example, because port 8080 is already occupied—the script
-removes the partially created containers, loop attachment, scratch volume, and scratch image. It
-retains the password, template, application data, and ClamAV signatures so correcting the conflict
-and rerunning `scripts/quickstart.sh up` safely resumes the evaluation.
+Both paths support repeated `up`, stopped-stack restart, `ps`, `logs`, and `down`. A stopped restart
+discards only the disposable work volume and preserves durable data. If Compose fails while
+starting—for example, because port 8080 is occupied—the selected script removes partial containers
+and its exact scratch resources while retaining the password, template, application data, and
+ClamAV signatures. The simple helper rejects concurrent commands that could race over the same
+private state or Podman service; wait for the active command to finish before running another.
+
+The secure services do not automatically restart with Docker because loop-device numbers are not
+stable across a reboot. After an abnormal stop or reboot, run `scripts/quickstart.sh up`; it removes
+stale scratch metadata, resolves the private backing file independently of old device numbers,
+reformats disposable work, and restarts safely. Cleanup resolves the current device from the
+private backing file, never from a stale device number. It refuses a loop device reused for an unrelated file.
 
 ## What this Compose profile is—and is not
 
-`compose.yaml` is a bounded standalone evaluation profile: one rootless Markweave process runs the
-API and embedded worker, `/data` is persistent, writable scratch space is bounded, the root
-filesystem is read-only, and the browser port binds only to `127.0.0.1`. ClamAV has persistent
-signatures and no host port. The scanner network is internal, the browser-facing bridge disables
-IP masquerading, and only ClamAV joins the network used to refresh signatures.
+The secure base `compose.yaml` is a bounded standalone evaluation profile. The simple
+`compose.simple.yaml` overlay deliberately replaces only its bounded `/work` mount with an
+unbounded named volume. In both paths, one rootless Markweave process runs the API and embedded
+worker, `/data` is persistent, the root filesystem is read-only, and the browser port binds only
+to `127.0.0.1`. ClamAV has persistent signatures and no host port. The scanner network is internal,
+and only ClamAV joins the network used to refresh signatures.
 
 The Compose profile is not a production deployment. Its upload, queue, memory, retention, and
 timeout values are local evaluation limits reused from the tested final-image workflow. Do not

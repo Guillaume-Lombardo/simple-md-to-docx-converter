@@ -2,7 +2,7 @@
 ticket: T23
 linear_id: G1L-333
 linear_url: https://linear.app/g1lom/issue/G1L-333/
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -28,11 +28,16 @@ Complete English user, template, administrator, API, operations, storage, queue,
   conversion before presenting operations, architecture, and development details.
 - A tested root `compose.yaml` runs the released standalone image with real ClamAV, persistent data,
   loopback-only HTTP, immutable image identities, and the final rootless security contract.
+- The quickstart offers both the physically bounded, sudo-assisted ext4 workspace and a clearly
+  labeled sudo-free alternative backed by an ordinary, physically unbounded Docker or rootless
+  Podman volume.
 - The documentation index exposes role-based user, API, configuration, operations, recovery,
   deployment, architecture, development, and agent guides; every runtime setting and local link is
   checked automatically.
 - TLS-terminating deployments can configure one exact public HTTP(S) origin without trusting
   forwarded headers, while direct HTTP behavior remains backward compatible when it is unset.
+- After both quickstarts are verified on `main`, version `0.3.1` is published through the existing
+  automatic release path and Compose is repinned to the immutable `0.3.1` image digest.
 
 ## Dependencies
 
@@ -87,6 +92,25 @@ Complete English user, template, administrator, API, operations, storage, queue,
   Compose lifecycle, both final-image E2E profiles, storage, document-engine, functional, container,
   infrastructure, and final gate jobs. It was squash-merged to `main` as commit `9309880`, completing
   and verifying all T23 acceptance criteria.
+- 2026-08-25: Reopened for a requested usability follow-up. The existing physically bounded ext4
+  quickstart remains available as the secure sudo-assisted variant; a second tested path will run
+  without sudo on Docker or rootless Podman by accepting an ordinary engine-managed volume for
+  `/work` and documenting its weaker physical-capacity isolation.
+- 2026-08-25: The PM requested a `0.3.1` release after the two quickstarts are verified. The
+  existing automatic version-release workflow will publish the tag, GitHub Release, PyPI package,
+  and GHCR image; Compose will then be repinned to the published immutable image digest.
+- 2026-08-25: Implemented the sudo-free quickstart with an ordinary unbounded `/work` volume for
+  Docker Compose and rootless Podman Compose while retaining the existing 256 MiB ext4 secure
+  path. The helper validates exact volume ownership before cleanup, serializes commands over its
+  private state, waits for real ClamAV and application readiness, preserves durable volumes across
+  restart and rollback, and removes its private Podman API service after each command. The real
+  Docker and Podman lifecycle suites pass; Podman also completed a Mermaid DOCX/PDF conversion.
+  Ruff, `ty`, ShellCheck, the CI validator, 241 focused tests, and `git diff --check` pass.
+- 2026-08-25: PR #80's first hosted Compose run exposed a GitHub Ubuntu 24.04 runner mismatch:
+  recent Podman generated OCI 1.2.1 configuration but selected the older `/usr/bin/crun` 1.14.1
+  instead of the newer executable already first in `PATH`. The private Podman configuration now
+  selects that current `crun` when available and otherwise uses Podman's declared runtime path,
+  without changing global host configuration.
 
 ## Synchronization
 

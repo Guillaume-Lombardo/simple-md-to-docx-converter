@@ -208,9 +208,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             (
                 "heavy",
-                "Install rootless Podman for final-image validation",
+                "Install rootless Podman for container validation",
             ): (
-                "${{ matrix.domain == 'container' || "
+                "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
                 "startsWith(matrix.domain, 'e2e-') }}"
             ),
             (
@@ -253,7 +253,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="914981502f0d795e7b31c039a4d5369d748ef3662d6de5edce69b95786d31c2b",
+        canonical_digest="c0fa2619623a20fc230961beb8ac364d92d65afbc2f60180887e75500277206d",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -671,8 +671,9 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ github.event_name == 'pull_request' || "
             "github.event_name == 'merge_group' }}"
         ),
-        ("heavy", "Install rootless Podman for final-image validation"): (
-            "${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}"
+        ("heavy", "Install rootless Podman for container validation"): (
+            "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
+            "startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
             "${{ matrix.domain == 'document-engines' || "

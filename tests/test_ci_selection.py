@@ -28,11 +28,16 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
     [
         ".gitignore",
         "README.md",
+        "compose.simple.yaml",
+        "compose.podman.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/quickstart-template.docx.base64",
         "examples/quickstart-source.md",
+        "scripts/quickstart-simple.sh",
         "scripts/quickstart.sh",
+        "scripts/e2e/run-compose-all.sh",
+        "scripts/e2e/run-compose-simple.sh",
         "tests/test_quickstart_compose.py",
     ],
 )
@@ -46,7 +51,7 @@ def test_compose_domain_is_active_and_uses_the_isolated_runner() -> None:
     registry = load_registry(Path(".github/ci/domains.json"))
     assert registry["compose"] == {
         "activation_ticket": "T23",
-        "command": ["bash", "scripts/e2e/run-compose.sh"],
+        "command": ["bash", "scripts/e2e/run-compose-all.sh"],
         "status": "active",
     }
 
