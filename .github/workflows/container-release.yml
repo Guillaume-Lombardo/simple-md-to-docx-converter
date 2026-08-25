@@ -289,6 +289,7 @@ jobs:
             <<< "$run_json" >/dev/null
           run_sha="$(jq --exit-status --raw-output '.head_sha | select(test("^[0-9a-f]{40}$"))' <<< "$run_json")"
           git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"
+          git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"
 
           jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs")"
           test "$(jq '[.jobs[] | select(.name == "build-and-publish" and .status == "completed" and .conclusion == "success")] | length' <<< "$jobs_json")" = 1

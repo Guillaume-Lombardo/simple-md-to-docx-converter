@@ -72,9 +72,10 @@ the exact evidence artifact. For the first release, the approved retained source
 `32846007204` and artifact `9562665677` (`container-release-v0.3.0`).
 
 Before download, recovery verifies the source run belongs to this upstream repository and exact
-workflow, ran from trusted `main` at a descendant of the release source, completed with a successful
-build job, and has one bounded non-expired artifact with matching repository/run metadata. It
-downloads by immutable artifact ID, not name alone. It then validates the exact regular-file set,
+workflow, ran from trusted `main` at a descendant of the release source and an ancestor of the
+current trusted `main` workflow SHA, completed with a successful build job, and has one bounded
+non-expired artifact with matching repository/run metadata. It downloads by immutable artifact ID,
+not name alone. It then validates the exact regular-file set,
 closed checksum bundle, OCI archive and metadata relationship, publication receipt, release
 version/tag/source, and the anonymously readable public GHCR digest. Only after those checks does
 it transfer the unchanged evidence into the recovery run, attest that exact public digest, and

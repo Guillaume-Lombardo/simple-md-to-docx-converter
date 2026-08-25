@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sys
 import tarfile
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,22 @@ def _verify(artifacts: Path) -> None:
     )
 
 
+def _rebind_metadata(artifacts: Path) -> None:
+    manifest_path = artifacts / "release-bundle.sha256"
+    lines = manifest_path.read_text(encoding="ascii").splitlines()
+    metadata_digest = sha256_file(artifacts / "image-metadata.json")
+    manifest_path.write_text(
+        "\n".join(
+            f"{metadata_digest}  image-metadata.json"
+            if line.endswith("  image-metadata.json")
+            else line
+            for line in lines
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+
 def test_accepts_exact_retained_bundle_and_public_digest(
     recovery_artifacts: Path,
 ) -> None:
@@ -168,6 +185,78 @@ def test_rejects_extra_and_symlink_entries(
         _verify(recovery_artifacts)
 
 
+@pytest.mark.parametrize("replacement", ("file", "directory", "symlink"))
+def test_rejects_unsafe_artifact_directory(tmp_path: Path, replacement: str) -> None:
+    artifacts = tmp_path / "artifacts"
+    if replacement == "file":
+        artifacts.write_text("not a directory", encoding="ascii")
+    elif replacement == "directory":
+        artifacts.mkdir()
+    else:
+        target = tmp_path / "target"
+        target.mkdir()
+        artifacts.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(RecoveryEvidenceError, match=r"directory is unsafe|file set"):
+        _verify(artifacts)
+
+
+def test_rejects_non_regular_expected_entry(recovery_artifacts: Path) -> None:
+    receipt = recovery_artifacts / "registry-publication.json"
+    receipt.unlink()
+    receipt.mkdir()
+    with pytest.raises(RecoveryEvidenceError, match="unsafe entry"):
+        _verify(recovery_artifacts)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (b"{", "registry publication receipt is invalid"),
+        (b"[]", "registry publication receipt is not an object"),
+        (b"", "registry publication receipt size is outside the allowed range"),
+    ],
+)
+def test_rejects_invalid_receipt_json(
+    recovery_artifacts: Path, payload: bytes, message: str
+) -> None:
+    (recovery_artifacts / "registry-publication.json").write_bytes(payload)
+    with pytest.raises(RecoveryEvidenceError, match=message):
+        _verify(recovery_artifacts)
+
+
+def test_rejects_oversized_receipt_json(recovery_artifacts: Path, mocker) -> None:
+    mocker.patch.object(recover_release_evidence, "MAX_RECEIPT_BYTES", 1)
+    with pytest.raises(RecoveryEvidenceError, match="receipt size"):
+        _verify(recovery_artifacts)
+
+
+@pytest.mark.parametrize("payload", (b"{", b"[]"))
+def test_rejects_invalid_metadata_json(
+    recovery_artifacts: Path, payload: bytes
+) -> None:
+    (recovery_artifacts / "image-metadata.json").write_bytes(payload)
+    _rebind_metadata(recovery_artifacts)
+    with pytest.raises(RecoveryEvidenceError, match="image metadata is invalid"):
+        _verify(recovery_artifacts)
+
+
+def test_rejects_oversized_metadata_json(recovery_artifacts: Path, mocker) -> None:
+    mocker.patch.object(recover_release_evidence, "MAX_METADATA_BYTES", 1)
+    with pytest.raises(RecoveryEvidenceError, match="metadata size"):
+        _verify(recovery_artifacts)
+
+
+def test_rejects_metadata_oci_identity_mismatch(recovery_artifacts: Path) -> None:
+    metadata_path = recovery_artifacts / "image-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["image"]["oci_manifest_digest"] = "sha256:" + "9" * 64
+    _write_json(metadata_path, metadata)
+    _rebind_metadata(recovery_artifacts)
+    with pytest.raises(RecoveryEvidenceError, match="does not match the OCI archive"):
+        _verify(recovery_artifacts)
+
+
 def test_rejects_oversized_extracted_artifact(recovery_artifacts: Path, mocker) -> None:
     mocker.patch.object(recover_release_evidence, "MAX_RECOVERY_BYTES", 1)
     with pytest.raises(RecoveryEvidenceError, match="size limit"):
@@ -177,8 +266,13 @@ def test_rejects_oversized_extracted_artifact(recovery_artifacts: Path, mocker) 
 @pytest.mark.parametrize(
     ("version", "tag", "source_sha", "registry_digest"),
     [
+        ("not a version", TAG, SOURCE_SHA, REGISTRY_DIGEST),
         ("0.3.0rc1", TAG, SOURCE_SHA, REGISTRY_DIGEST),
+        ("0.3.0.dev1", TAG, SOURCE_SHA, REGISTRY_DIGEST),
+        ("0.3.0+local", TAG, SOURCE_SHA, REGISTRY_DIGEST),
+        ("1!0.3.0", TAG, SOURCE_SHA, REGISTRY_DIGEST),
         (VERSION, "wrong", SOURCE_SHA, REGISTRY_DIGEST),
+        (VERSION, TAG, "invalid", REGISTRY_DIGEST),
         (VERSION, TAG, "0" * 40, REGISTRY_DIGEST),
         (VERSION, TAG, SOURCE_SHA, "invalid"),
     ],
@@ -198,3 +292,83 @@ def test_rejects_invalid_requested_identity(
             source_sha=source_sha,
             registry_digest=registry_digest,
         )
+
+
+def test_cli_reports_validation_error(
+    recovery_artifacts: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recover-release-evidence",
+            "--artifacts",
+            str(recovery_artifacts),
+            "--version",
+            VERSION,
+            "--tag",
+            TAG,
+            "--source-sha",
+            SOURCE_SHA,
+            "--registry-digest",
+            "invalid",
+        ],
+    )
+    assert recover_release_evidence.main() == 1
+    assert capsys.readouterr().out == "error: public registry digest is invalid\n"
+
+
+def test_cli_accepts_valid_bundle(
+    recovery_artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recover-release-evidence",
+            "--artifacts",
+            str(recovery_artifacts),
+            "--version",
+            VERSION,
+            "--tag",
+            TAG,
+            "--source-sha",
+            SOURCE_SHA,
+            "--registry-digest",
+            REGISTRY_DIGEST,
+        ],
+    )
+    assert recover_release_evidence.main() == 0
+
+
+def test_cli_reports_os_error(
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recover-release-evidence",
+            "--artifacts",
+            "unused",
+            "--version",
+            VERSION,
+            "--tag",
+            TAG,
+            "--source-sha",
+            SOURCE_SHA,
+            "--registry-digest",
+            REGISTRY_DIGEST,
+        ],
+    )
+    mocker.patch.object(
+        recover_release_evidence,
+        "verify_recovery_evidence",
+        side_effect=OSError("unavailable"),
+    )
+    assert recover_release_evidence.main() == 1
+    assert capsys.readouterr().out == "error: unavailable\n"

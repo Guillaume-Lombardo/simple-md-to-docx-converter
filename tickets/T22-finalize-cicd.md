@@ -68,9 +68,10 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   from publishing. Manual dispatch cannot publish Python or container artifacts and may recover
   only provenance and evidence for an exact existing release identity from trusted `main`.
 - Manual evidence recovery selects one bounded, non-expired retained artifact by immutable ID only
-  after validating the upstream repository, workflow, trusted-main ancestry, successful source
-  build job, artifact metadata, release identity, exact regular-file set, checksum bundle, OCI
-  identity, publication receipt, and anonymously readable GHCR digest. It cannot rebuild or write
+  after validating the upstream repository, workflow, both release-source-to-run and
+  run-to-current-main ancestry, successful source build job, artifact metadata, release identity,
+  exact regular-file set, checksum bundle, OCI identity, publication receipt, and anonymously
+  readable GHCR digest. It cannot rebuild or write
   Python or container artifacts; only existing attestation and Release-evidence jobs receive the
   validated digest and unchanged evidence.
 - The release-version and tag-trigger policies are documented and approved before the workflow is implemented.
@@ -245,7 +246,8 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   GHCR digest `sha256:4a16b311affb0d0a839350bd145810c1f6044cc7347d12ecd9263fe894de217d`.
   Later source rebuilds are not byte-reproducible at the registry-manifest boundary, so recovery now
   reuses that exact retained artifact instead of rebuilding. The recovery gate binds the failed run
-  to the upstream workflow and trusted-main history, requires its build job and unique artifact,
+  to the upstream workflow and requires its SHA to remain between the release source and the current
+  trusted `main` workflow SHA, requires its build job and unique artifact,
   validates the downloaded bundle and public digest, then routes only that digest and unchanged
   evidence to the existing provenance and Release-attachment jobs. PyPI and GHCR publication are
   unreachable from this manual path.

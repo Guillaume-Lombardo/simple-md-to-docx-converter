@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "6cbc7905760212ff2d671a17956cbda2ce64a2b1f3d0b5ed80c837964dc9b9bb"
+    "f19ef85ed5391c618e01bf91648aae5a52e2aceb261bb2457cc7885b034f5574"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1496,6 +1496,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         '.event == "workflow_dispatch"',
         '.conclusion == "failure"',
         'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
+        'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
         '.name == "build-and-publish"',
         '.conclusion == "success"',
         ".total_count == 1",
@@ -1569,6 +1570,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ".workflow_run.head_repository_id == $repository_id",
         ".total_count == 1",
         'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
+        'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
         'scope=repository:$registry_path:pull"',
         "printf 'artifact-id=%s\\ndigest=%s\\n'",
     ):

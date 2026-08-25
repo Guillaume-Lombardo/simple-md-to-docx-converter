@@ -542,6 +542,7 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
     assert ".head_repository.id == $repository_id" in identity
     assert '.path == ".github/workflows/container-release.yml"' in identity
     assert 'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"' in identity
+    assert 'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"' in identity
     assert 'scope=repository:$registry_path:pull"' in identity
     download = next(
         step
@@ -576,6 +577,11 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
             '.path == ".github/workflows/container-release.yml"',
             "true",
             'container release is missing dynamic contract: .path == ".github/workflows/container-release.yml"',
+        ),
+        (
+            'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
+            'git merge-base --is-ancestor "$GITHUB_SHA" "$run_sha"',
+            'container release is missing dynamic contract: git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
         ),
         (
             "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
