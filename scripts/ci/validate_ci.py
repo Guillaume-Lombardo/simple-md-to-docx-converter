@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "488f57b815ead9c2aa33acefb24ffc4420680510c631876c14f8a012a750e862"
+    "5c67726f99574a9a28b8ec773294651e3cac5ed7677eee8f05e08dd031f5a9b4"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1343,6 +1343,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release workflow differs from the reviewed policy")
     triggers = _mapping(workflow.get("on"))
     expected_inputs = {
+        "artifact-run-id": {"required": False, "type": "string"},
         "version": {"required": True, "type": "string"},
         "tag": {"required": True, "type": "string"},
         "source-sha": {"required": True, "type": "string"},
@@ -1353,7 +1354,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
             "required": True,
             "type": "string",
         },
-        **expected_inputs,
+        "version": expected_inputs["version"],
+        "tag": expected_inputs["tag"],
+        "source-sha": expected_inputs["source-sha"],
     }
     if triggers != {
         "workflow_call": {"inputs": expected_inputs},
