@@ -2,7 +2,7 @@
 ticket: T23
 linear_id: G1L-333
 linear_url: https://linear.app/g1lom/issue/G1L-333/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -83,6 +83,10 @@ Complete English user, template, administrator, API, operations, storage, queue,
   and invalid-image failures with no result; and exact macro, external-relationship, missing-style,
   and unsupported-font template rejections with no catalog publication. Both complete final-image
   suites pass.
+- 2026-08-25: Pull request #78 passed every required hosted domain, including the privileged
+  Compose lifecycle, both final-image E2E profiles, storage, document-engine, functional, container,
+  infrastructure, and final gate jobs. It was squash-merged to `main` as commit `9309880`, completing
+  and verifying all T23 acceptance criteria.
 
 ## Synchronization
 
