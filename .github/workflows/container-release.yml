@@ -410,4 +410,5 @@ jobs:
             artifacts/container/image-metadata.json \
             artifacts/container/registry-publication.json \
             artifacts/container/release-bundle.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
             --clobber

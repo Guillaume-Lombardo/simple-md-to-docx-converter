@@ -620,6 +620,38 @@ def test_container_recovery_routes_exact_digest_to_existing_jobs() -> None:
 
 
 @pytest.mark.unit
+def test_container_release_evidence_upload_binds_repository_without_checkout() -> None:
+    workflow_text = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow = yaml.load(
+        workflow_text,
+        Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
+    )
+    evidence_steps = workflow["jobs"]["release-evidence"]["steps"]
+    assert all(
+        not step.get("uses", "").startswith("actions/checkout@")
+        for step in evidence_steps
+    )
+    upload = next(
+        step["run"]
+        for step in evidence_steps
+        if step["name"]
+        == "Verify the exact published Release and attach evidence idempotently"
+    )
+    assert 'gh release upload "$RELEASE_TAG"' in upload
+    assert '--repo "$GITHUB_REPOSITORY"' in upload
+
+    weakened = workflow_text.replace(
+        '            --repo "$GITHUB_REPOSITORY" \\\n', "", 1
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert (
+        "container Release evidence upload must bind the explicit repository" in errors
+    )
+
+
+@pytest.mark.unit
 def test_container_attestation_requires_job_local_registry_authentication() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
