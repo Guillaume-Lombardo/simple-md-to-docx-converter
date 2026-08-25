@@ -8,7 +8,8 @@ container repository is `ghcr.io/guillaume-lombardo/md-converter`.
 A protected pull-request merge to `main` is the sole human release gate. When that merge changes
 `project.version`, the automatic workflow compares the exact before and head commits from the
 trusted push. A `pyproject.toml` edit that leaves the version unchanged is a successful no-op. Pull
-requests, forks, tags, GitHub Release events, and manual dispatches cannot start publication.
+requests, forks, tags, and GitHub Release events cannot start publication. Manual dispatch cannot
+publish Python artifacts; it is reserved for the container-only recovery described below.
 
 ## One-time GitHub and PyPI configuration
 
@@ -61,7 +62,15 @@ not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` the
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. Every GHCR conflict observed during authenticated
+state before authorizing any manual recovery. A container-only recovery must run the
+`container-release.yml` workflow from `main` with the exact existing version, `v<version>` tag, and
+reviewed source SHA. Before building or writing GHCR state, it checks out that source and verifies
+its project version, tag target, and the complete published Release identity (`draft=false` and
+`prerelease=false`). It never enters the PyPI environment or Python publication workflow. The
+recovery unsets `SOURCE_DATE_EPOCH` only for the historical source build script so that its own
+explicit deterministic timestamp remains unambiguous across supported Podman versions.
+
+Every GHCR conflict observed during authenticated
 preflight fails before a copy. Repository and workflow concurrency prevent the automation from
 racing itself. GHCR does not provide a relied-upon conditional manifest creation primitive here,
 so another principal with `packages: write` could still change a tag in the narrow interval between

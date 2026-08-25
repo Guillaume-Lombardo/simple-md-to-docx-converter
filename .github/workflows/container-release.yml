@@ -12,13 +12,24 @@ on:
       source-sha:
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      source-sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   build-and-publish:
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -44,15 +55,24 @@ jobs:
           enable-cache: false
       - name: Validate the reviewed release identity
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_VERSION: ${{ inputs.version }}
           SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" = push ]]; then
+            test "$GITHUB_SHA" = "$SOURCE_SHA"
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          fi
           test "$RELEASE_TAG" = "v$RELEASE_VERSION"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           uv run python -c 'import os, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
+            = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
       - name: Install rootless Podman and Skopeo
@@ -74,7 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           image="localhost/md-converter:$RELEASE_VERSION"
-          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
+          if [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]]; then
+            env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"
+          else
+            SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
+          fi
           bash scripts/container/smoke.sh "$image"
           bash scripts/container/api-smoke.sh "$image"
           bash scripts/container/distributed-api-smoke.sh "$image"
@@ -183,7 +207,7 @@ jobs:
 
   attest:
     needs: build-and-publish
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -201,7 +225,7 @@ jobs:
 
   release-evidence:
     needs: [build-and-publish, attest]
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha == inputs.source-sha }}
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && ((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

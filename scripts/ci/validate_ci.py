@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "34e355d47d0583017ed81b893bb5b44f84f6a8d1a970fa68f3f4d83f02b85a2f"
+    "93340d24fce78e959aa08af4bf27b3c55073ae3dfa1d65bf3145610bb69c8514"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1329,7 +1329,9 @@ def validate_release_workflow_text(
     return errors
 
 
-def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: PLR0912
+def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
+    text: str,
+) -> list[str]:
     """Validate the exact least-privilege container publication contract."""
     workflow, errors = _load_workflow(text)
     if workflow is None:
@@ -1344,9 +1346,12 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
         "tag": {"required": True, "type": "string"},
         "source-sha": {"required": True, "type": "string"},
     }
-    if triggers != {"workflow_call": {"inputs": expected_inputs}}:
+    if triggers != {
+        "workflow_call": {"inputs": expected_inputs},
+        "workflow_dispatch": {"inputs": expected_inputs},
+    }:
         errors.append(
-            "container publication must be an exact secretless reusable workflow"
+            "container publication must be an exact secretless reusable and recovery workflow"
         )
     if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
         errors.append("container release permissions must default to contents: read")
@@ -1375,6 +1380,7 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
             for clause in (
                 TRUSTED_REPOSITORY_CONDITION,
                 "github.event_name == 'push'",
+                "github.event_name == 'workflow_dispatch'",
                 "github.ref == 'refs/heads/main'",
                 "github.sha == inputs.source-sha",
             )
@@ -1410,6 +1416,9 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
         errors.append("container release workflow must not use privileged containers")
     for required in (
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
+        "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
+        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
         '"localhost/md-converter:$RELEASE_VERSION"',
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
@@ -1429,6 +1438,34 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
     ):
         if required not in text:
             errors.append(f"container release is missing dynamic contract: {required}")
+    identity_steps = [
+        step
+        for step in _job_steps(workflow, "build-and-publish")
+        if step.get("name") == "Validate the reviewed release identity"
+    ]
+    identity_run = identity_steps[0].get("run") if len(identity_steps) == 1 else None
+    for required in (
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
+        "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
+        "= \"$RELEASE_TAG\"$'\\t'\"$SOURCE_SHA\"$'\\tfalse\\tfalse'",
+    ):
+        if not isinstance(identity_run, str) or required not in identity_run:
+            errors.append(
+                f"container recovery identity validation is missing: {required}"
+            )
+    build_steps = [
+        step
+        for step in _job_steps(workflow, "build-and-publish")
+        if step.get("name") == "Build and validate the final rootless image"
+    ]
+    build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
+    for required in (
+        'if [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]]; then',
+        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
+        'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
+    ):
+        if not isinstance(build_run, str) or required not in build_run:
+            errors.append(f"container recovery build is missing: {required}")
     publish_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")

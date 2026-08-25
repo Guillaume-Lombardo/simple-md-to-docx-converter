@@ -19,6 +19,9 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Add an isolated automatic release workflow that detects a final-version transition on a trusted
   protected-main push, builds the sdist and wheel once from that exact reviewed source, verifies
   them, creates the matching tag and published GitHub Release, and publishes those exact artifacts.
+- Permit a manual container-only recovery from `main` for an already-created release when its
+  version, tag, source SHA, project metadata, and published GitHub Release all match exactly; this
+  path must not invoke or bypass the immutable PyPI publication job.
 - Use PyPI Trusted Publishing with GitHub OIDC, a dedicated GitHub `pypi` environment identity, and a pending Trusted Publisher for the first release instead of a long-lived PyPI token.
 - Keep the `pypi` environment free of required reviewers and manual approval; merging the reviewed
   version-change pull request to protected `main` is the sole human release gate.
@@ -60,8 +63,9 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Only the minimal PyPI upload job in the isolated workflow receives `id-token: write` for publication. A separate provenance or attestation job owned by T22 may receive `id-token: write` only when the need is documented and all its other permissions are least privilege.
 - Every action is pinned by full commit SHA.
 - PyPI publish attestations are generated and uploaded with the release artifacts.
-- Pull requests, forks, tag pushes, Release events, manual dispatches, and every other untrusted
-  context are prevented from publishing.
+- Pull requests, forks, tag pushes, Release events, and every other untrusted context are prevented
+  from publishing. Manual dispatch cannot publish Python artifacts and may recover only the
+  container/evidence path for an exact existing release identity from trusted `main`.
 - The release-version and tag-trigger policies are documented and approved before the workflow is implemented.
 - Before the first public release, the project manager decides the public package license and configures a PyPI pending Trusted Publisher for the exact GitHub repository, workflow, and `pypi` environment.
 - The exact `markweave` version is rechecked immediately before each publication attempt, which
@@ -191,6 +195,26 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   states the accepted limitation precisely: observed conflicts fail before copy and automation
   cannot race itself, while another principal with package-write authority could race the narrow
   preflight/copy interval because GHCR conditional creation is not established.
+- 2026-08-25: PR #70 merged the automatic release workflow as `20c1630`. The exact-head CI passed
+  all twelve jobs after one unrelated Playwright response-observation timeout passed on a targeted
+  rerun. The trusted main push created `v0.3.0` and its published GitHub Release at the exact merge
+  SHA and published `markweave==0.3.0` to PyPI through the configured OIDC publisher. The first
+  container job exposed a hosted Podman 4.9 compatibility failure before any GHCR push: Podman
+  rejects an explicit `--timestamp` when `SOURCE_DATE_EPOCH` is simultaneously exported. The
+  follow-up keeps the explicit reproducible timestamp while removing that variable only from the
+  Podman process environment, and adds an input-bound manual container-only recovery trigger that
+  verifies the existing tag, Release, source SHA, and project version before publication. This
+  recovery cannot republish the immutable PyPI version.
+- 2026-08-25: Independent recovery review blocked the first hotfix because a manual run's current
+  main SHA differs from the historical release SHA, the historical source still contains the
+  pre-fix build wrapper, and the complete published Release identity was checked too late. The
+  corrected path requires the current SHA only for automatic pushes, always checks out and
+  validates the exact release source, verifies the tag and complete non-draft/non-prerelease
+  Release tuple before external writes, and invokes historical build scripts with
+  `SOURCE_DATE_EPOCH` absent so their own explicit deterministic timestamp remains unambiguous.
+  The exact `v0.3.0` historical script and final rootless smoke passed locally through this recovery
+  invocation. The normative specification and release operations guide now bound manual dispatch
+  to container-only recovery and explicitly exclude Python/PyPI publication.
 
 ## Synchronization
 

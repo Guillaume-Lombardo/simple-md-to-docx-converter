@@ -491,6 +491,34 @@ def test_container_release_workflow_satisfies_exact_policy() -> None:
 
 
 @pytest.mark.unit
+def test_container_release_recovery_is_bound_to_existing_release_identity() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
+        'test "$SOURCE_SHA" = "$SOURCE_SHA"',
+        1,
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("git/ref/tags" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_recovery_uses_source_compatible_build_invocation() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
+        'SOURCE_DATE_EPOCH=unsafe bash scripts/container/build.sh "$image"',
+        1,
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("recovery build" in error for error in errors)
+
+
+@pytest.mark.unit
 def test_container_release_policy_rejects_unreviewed_mutation() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
