@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -15,7 +15,7 @@ dependencies = [
     "cairosvg>=2.8,<3",
     "fastapi>=0.116,<1",
     "markdown-it-py>=4,<5",
-    "mdit-py-plugins>=0.5,<0.6",
+    "mdit-py-plugins>=0.5,<0.7",
     "pillow>=12,<13",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.10,<3",
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-build = ["hatchling==1.27.0"]
+build = ["hatchling==1.32.0"]
 dev = [
     "httpx>=0.28,<1",
     "mutmut==3.7.0",
@@ -42,7 +42,7 @@ dev = [
 
 [tool.uv]
 build-constraint-dependencies = [
-    "hatchling==1.27.0",
+    "hatchling==1.32.0",
     "packaging==26.3",
     "pathspec==1.1.1",
     "pluggy==1.6.0",
