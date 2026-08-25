@@ -7,7 +7,9 @@ import json
 import stat
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -87,6 +89,71 @@ def test_json_request_forwards_template_precondition_before_auth_check(
         "If-Match": 'W/"template-revision-1"'
     }
     assert client.request.call_args.kwargs["mutate"] is True
+
+
+@pytest.mark.unit
+def test_submission_contract_is_isolated_under_concurrent_validation() -> None:
+    submissions: list[tuple[dict[str, Any], str, str]] = []
+    for _index in range(100):
+        job_id = identifier()
+        correlation = identifier()
+        submissions.append(
+            (
+                {"id": job_id, "correlation_id": correlation},
+                f"/api/v1/conversions/{job_id}",
+                correlation,
+            )
+        )
+
+    def validate(submission: tuple[dict[str, Any], str, str]) -> None:
+        job, location, correlation = submission
+        workflow.validate_submission_contract(job, location, correlation)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(validate, submission) for submission in submissions]
+    assert all(future.result() is None for future in futures)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("location", "correlation", "job_correlation", "message"),
+    (
+        ("", "valid", "valid", "Location header is missing"),
+        ("/wrong", "valid", "valid", "Location does not match job identity"),
+        ("expected", "", "valid", "correlation header is missing"),
+        ("expected", "not-a-uuid", "not-a-uuid", "correlation UUID is invalid"),
+        (
+            "expected",
+            "00000000-0000-1000-8000-000000000001",
+            "00000000-0000-1000-8000-000000000001",
+            "correlation UUID is not version 4",
+        ),
+        (
+            "expected",
+            "generated",
+            "different",
+            "durable correlation identifiers differ",
+        ),
+    ),
+)
+def test_submission_contract_reports_each_invariant_precisely(
+    location: str, correlation: str, job_correlation: str, message: str
+) -> None:
+    job_id = identifier()
+    generated = identifier()
+    resolved_location = (
+        f"/api/v1/conversions/{job_id}" if location == "expected" else location
+    )
+    resolved_correlation = generated if correlation == "generated" else correlation
+    resolved_job_correlation = (
+        generated if job_correlation == "valid" else job_correlation
+    )
+    with pytest.raises(workflow.WorkflowFailure, match=message):
+        workflow.validate_submission_contract(
+            {"id": job_id, "correlation_id": resolved_job_correlation},
+            resolved_location,
+            resolved_correlation,
+        )
 
 
 @pytest.mark.unit

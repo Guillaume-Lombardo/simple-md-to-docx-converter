@@ -294,19 +294,36 @@ def submit_conversion(  # noqa: PLR0913 - explicit conversion submission contrac
     job = decode_object(result, f"submit {output}")
     location = result.headers.get("location", "")
     correlation = result.headers.get("x-correlation-id", "")
+    validate_submission_contract(job, location, correlation)
+    return job, location
+
+
+def validate_submission_contract(
+    job: dict[str, Any], location: str, correlation: str
+) -> None:
+    """Validate independent durable-response invariants with precise safe errors."""
+
+    job_id = required_string(job, "id", "conversion")
+    expected_location = f"/api/v1/conversions/{job_id}"
+    if not location:
+        raise WorkflowFailure("submit conversion: Location header is missing")
+    if location != expected_location:
+        raise WorkflowFailure("submit conversion: Location does not match job identity")
+    if not correlation:
+        raise WorkflowFailure("submit conversion: correlation header is missing")
     try:
-        uuid.UUID(correlation)
+        correlation_uuid = uuid.UUID(correlation)
     except ValueError as error:
         raise WorkflowFailure(
             "submit conversion: correlation UUID is invalid"
         ) from error
-    if job.get("correlation_id") != correlation or not location.endswith(
-        required_string(job, "id", "conversion")
-    ):
+    if correlation_uuid.version != 4:
+        raise WorkflowFailure("submit conversion: correlation UUID is not version 4")
+    job_correlation = required_string(job, "correlation_id", "conversion")
+    if job_correlation != correlation:
         raise WorkflowFailure(
-            "submit conversion: location/correlation contract mismatch"
+            "submit conversion: response and durable correlation identifiers differ"
         )
-    return job, location
 
 
 def wait_for_job(
