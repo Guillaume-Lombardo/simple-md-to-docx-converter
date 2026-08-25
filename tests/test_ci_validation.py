@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,28 +26,62 @@ FULL_SHA_C = "c" * 40
 FULL_SHA_D = "d" * 40
 FULL_SHA_E = "e" * 40
 PACKAGE_PLACEHOLDER = "PACKAGE_NAME_FROM_APPROVED_POLICY"
-VERSION_PLACEHOLDER = "VERSION_FROM_APPROVED_POLICY"
+VERSION_PLACEHOLDER = "0+version.from.approved.policy"
 ARTIFACT_PATH_PLACEHOLDER = "ARTIFACT_DIRECTORY_FROM_APPROVED_POLICY"
 ARTIFACT_NAME_PLACEHOLDER = "ARTIFACT_NAME_FROM_APPROVED_POLICY"
 MANIFEST_PLACEHOLDER = "release-integrity.json"
 CONSTRAINT_PLACEHOLDER = "CONSTRAINT_FILE_FROM_APPROVED_POLICY"
-BUILD_COMMAND = (
-    "uv run python -m scripts.release.build "
-    f"--output {ARTIFACT_PATH_PLACEHOLDER} "
-    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
-    f"--constraint {CONSTRAINT_PLACEHOLDER}"
+BUILD_COMMAND = shlex.join(
+    [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.build",
+        "--output",
+        ARTIFACT_PATH_PLACEHOLDER,
+        "--name",
+        PACKAGE_PLACEHOLDER,
+        "--version",
+        VERSION_PLACEHOLDER,
+        "--constraint",
+        CONSTRAINT_PLACEHOLDER,
+    ]
 )
-ARTIFACT_VERIFY_COMMAND = (
-    "uv run python -m scripts.release.artifacts verify "
-    f"--directory {ARTIFACT_PATH_PLACEHOLDER} "
-    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
-    f"--manifest-name {MANIFEST_PLACEHOLDER}"
+ARTIFACT_VERIFY_COMMAND = shlex.join(
+    [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.artifacts",
+        "verify",
+        "--directory",
+        ARTIFACT_PATH_PLACEHOLDER,
+        "--name",
+        PACKAGE_PLACEHOLDER,
+        "--version",
+        VERSION_PLACEHOLDER,
+        "--manifest-name",
+        MANIFEST_PLACEHOLDER,
+    ]
 )
-CLEAN_INSTALL_COMMAND = (
-    "uv run python -m scripts.release.verify_install "
-    f"--directory {ARTIFACT_PATH_PLACEHOLDER} "
-    f"--name {PACKAGE_PLACEHOLDER} --version {VERSION_PLACEHOLDER} "
-    f"--manifest-name {MANIFEST_PLACEHOLDER}"
+CLEAN_INSTALL_COMMAND = shlex.join(
+    [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.verify_install",
+        "--directory",
+        ARTIFACT_PATH_PLACEHOLDER,
+        "--name",
+        PACKAGE_PLACEHOLDER,
+        "--version",
+        VERSION_PLACEHOLDER,
+        "--manifest-name",
+        MANIFEST_PLACEHOLDER,
+    ]
 )
 RELEASE_POLICY = ReleaseWorkflowPolicy(
     approved_triggers=frozenset({"release"}),
@@ -63,6 +99,11 @@ RELEASE_POLICY = ReleaseWorkflowPolicy(
     manifest_name=MANIFEST_PLACEHOLDER,
     constraint=CONSTRAINT_PLACEHOLDER,
 )
+
+
+def _workflow_with_version(workflow: str, version: str) -> str:
+    replacement = shlex.quote(version)
+    return workflow.replace(VERSION_PLACEHOLDER, replacement)
 
 
 @pytest.fixture
@@ -631,7 +672,6 @@ def test_release_policy_accepts_caller_approved_trusted_context(
     [
         ("distribution_name", "$(id)"),
         ("distribution_name", "PACKAGE*"),
-        ("version", "VERSION|cat"),
         ("artifact_directory", "output>stolen"),
         ("artifact_directory", "output\nnext"),
         ("constraint", "constraints;touch-owned"),
@@ -645,6 +685,36 @@ def test_release_policy_rejects_shell_syntax_in_structured_literals(
         valid_release_workflow, policy=replace(RELEASE_POLICY, **{field: value})
     )
     assert any("literal" in error for error in errors)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["1.2.3+linux", "1!2.3"])
+def test_release_policy_accepts_pep440_versions_with_quoted_commands(
+    valid_release_workflow: str, version: str
+) -> None:
+    """Valid PEP 440 syntax remains data in each derived shell command."""
+    workflow = _workflow_with_version(valid_release_workflow, version)
+    assert (
+        validate_release_workflow_text(
+            workflow, policy=replace(RELEASE_POLICY, version=version)
+        )
+        == []
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "version",
+    ["not a version", "1.2.3\nnext", "1.0$(id)", "v*"],
+)
+def test_release_policy_rejects_non_pep440_versions(
+    valid_release_workflow: str, version: str
+) -> None:
+    errors = validate_release_workflow_text(
+        valid_release_workflow,
+        policy=replace(RELEASE_POLICY, version=version),
+    )
+    assert "caller-approved version must be a valid PEP 440 version" in errors
 
 
 @pytest.mark.unit
@@ -812,6 +882,55 @@ def test_release_policy_rejects_non_string_or_empty_tag_patterns(
             RELEASE_POLICY,
             approved_triggers=frozenset({"push"}),
             approved_tag_patterns=("TAG_FROM_APPROVED_POLICY",),
+        ),
+    )
+    assert "push release trigger must match explicitly approved tag patterns" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("patterns", [("v*",), ("release-*",), ("v[0-9]*",)])
+def test_push_release_accepts_github_tag_pattern_syntax(
+    valid_release_workflow: str, patterns: tuple[str, ...]
+) -> None:
+    pushed = valid_release_workflow.replace(
+        "  release:\n    types: [published]",
+        f"  push:\n    tags: {json.dumps(list(patterns))}",
+    )
+    assert (
+        validate_release_workflow_text(
+            pushed,
+            policy=replace(
+                RELEASE_POLICY,
+                approved_triggers=frozenset({"push"}),
+                approved_tag_patterns=patterns,
+            ),
+        )
+        == []
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("yaml_pattern", "approved_pattern"),
+    [
+        ('"v\\n*"', "v\n*"),
+        ('"v\\0*"', "v\0*"),
+        ('"${{ github.ref }}"', "${{ github.ref }}"),
+    ],
+)
+def test_push_release_rejects_control_or_expression_tag_patterns(
+    valid_release_workflow: str, yaml_pattern: str, approved_pattern: str
+) -> None:
+    pushed = valid_release_workflow.replace(
+        "  release:\n    types: [published]",
+        f"  push:\n    tags: [{yaml_pattern}]",
+    )
+    errors = validate_release_workflow_text(
+        pushed,
+        policy=replace(
+            RELEASE_POLICY,
+            approved_triggers=frozenset({"push"}),
+            approved_tag_patterns=(approved_pattern,),
         ),
     )
     assert "push release trigger must match explicitly approved tag patterns" in errors

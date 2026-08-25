@@ -6,11 +6,13 @@ import ast
 import hashlib
 import json
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from packaging.version import InvalidVersion, Version
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
@@ -26,6 +28,8 @@ ACTION_REFERENCE = re.compile(
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 SIMPLE_RELEASE_LITERAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 SAFE_RELEASE_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+ASCII_CONTROL_LIMIT = 32
+ASCII_DELETE = 127
 TRUSTED_REPOSITORY = "Guillaume-Lombardo/simple-md-to-docx-converter"
 TRUSTED_REPOSITORY_CONDITION = f"github.repository == '{TRUSTED_REPOSITORY}'"
 TRUSTED_REPOSITORY_GUARD = f"${{{{ {TRUSTED_REPOSITORY_CONDITION} }}}}"
@@ -812,23 +816,49 @@ def _release_artifact_contract(
 
 
 def _release_commands(policy: ReleaseWorkflowPolicy) -> tuple[str, str, str]:
-    build = (
-        "uv run python -m scripts.release.build "
-        f"--output {policy.artifact_directory} "
-        f"--name {policy.distribution_name} "
-        f"--version {policy.version}"
-    )
+    build_argv = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.build",
+        "--output",
+        policy.artifact_directory,
+        "--name",
+        policy.distribution_name,
+        "--version",
+        policy.version,
+    ]
     if policy.constraint is not None:
-        build = f"{build} --constraint {policy.constraint}"
-    shared = (
-        f"--directory {policy.artifact_directory} "
-        f"--name {policy.distribution_name} "
-        f"--version {policy.version} "
-        f"--manifest-name {policy.manifest_name}"
-    )
-    verify = f"uv run python -m scripts.release.artifacts verify {shared}"
-    install = f"uv run python -m scripts.release.verify_install {shared}"
-    return build, verify, install
+        build_argv.extend(("--constraint", policy.constraint))
+    shared_argv = [
+        "--directory",
+        policy.artifact_directory,
+        "--name",
+        policy.distribution_name,
+        "--version",
+        policy.version,
+        "--manifest-name",
+        policy.manifest_name,
+    ]
+    verify_argv = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.artifacts",
+        "verify",
+        *shared_argv,
+    ]
+    install_argv = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.release.verify_install",
+        *shared_argv,
+    ]
+    return shlex.join(build_argv), shlex.join(verify_argv), shlex.join(install_argv)
 
 
 def _validate_release_producer_job(
@@ -1054,12 +1084,12 @@ def _validate_release_triggers(
     if "push" in triggers and (
         approved_tag_patterns is None
         or not approved_tag_patterns
-        or not all(_is_simple_release_literal(tag) for tag in approved_tag_patterns)
+        or not all(_is_github_tag_pattern(tag) for tag in approved_tag_patterns)
         or push is None
         or set(push) != {"tags"}
         or not isinstance(push.get("tags"), list)
         or not push["tags"]
-        or not all(_is_simple_release_literal(tag) for tag in push.get("tags", []))
+        or not all(_is_github_tag_pattern(tag) for tag in push.get("tags", []))
     ):
         errors.append(
             "push release trigger must match explicitly approved tag patterns"
@@ -1081,10 +1111,52 @@ def _is_simple_release_literal(value: object) -> bool:
     )
 
 
+def _is_github_tag_pattern(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and "${{" not in value
+        and not any(
+            ord(character) < ASCII_CONTROL_LIMIT or ord(character) == ASCII_DELETE
+            for character in value
+        )
+    )
+
+
+def _is_distribution_name(value: object) -> bool:
+    return _is_simple_release_literal(value)
+
+
+def _is_pep440_version(value: object) -> bool:
+    if not isinstance(value, str) or value != value.strip():
+        return False
+    try:
+        Version(value)
+    except InvalidVersion:
+        return False
+    return True
+
+
+def _is_artifact_name(value: object) -> bool:
+    return _is_simple_release_literal(value)
+
+
+def _is_manifest_name(value: object) -> bool:
+    return _is_simple_release_literal(value)
+
+
 def _is_safe_release_path(value: object) -> bool:
     if not isinstance(value, str) or SAFE_RELEASE_PATH.fullmatch(value) is None:
         return False
     return not value.startswith("/") and ".." not in Path(value).parts
+
+
+def _is_artifact_directory(value: object) -> bool:
+    return _is_safe_release_path(value)
+
+
+def _is_constraint(value: object) -> bool:
+    return value is None or _is_safe_release_path(value)
 
 
 def _validate_release_action(reference: object, *, expected_action: str) -> bool:
@@ -1100,26 +1172,20 @@ def _validate_release_action(reference: object, *, expected_action: str) -> bool
 
 def _validate_release_policy(policy: ReleaseWorkflowPolicy) -> list[str]:
     errors: list[str] = []
-    simple_fields = {
-        "distribution name": policy.distribution_name,
-        "version": policy.version,
-        "artifact name": policy.artifact_name,
-        "manifest name": policy.manifest_name,
-    }
-    errors.extend(
-        f"caller-approved {label} must be a simple literal"
-        for label, value in simple_fields.items()
-        if not _is_simple_release_literal(value)
-    )
-    path_fields = {
-        "artifact directory": policy.artifact_directory,
-        "constraint": policy.constraint,
-    }
-    errors.extend(
-        f"caller-approved {label} must be a safe relative literal path"
-        for label, value in path_fields.items()
-        if value is not None and not _is_safe_release_path(value)
-    )
+    if not _is_distribution_name(policy.distribution_name):
+        errors.append("caller-approved distribution name must be a simple literal")
+    if not _is_pep440_version(policy.version):
+        errors.append("caller-approved version must be a valid PEP 440 version")
+    if not _is_artifact_name(policy.artifact_name):
+        errors.append("caller-approved artifact name must be a simple literal")
+    if not _is_manifest_name(policy.manifest_name):
+        errors.append("caller-approved manifest name must be a simple literal")
+    if not _is_artifact_directory(policy.artifact_directory):
+        errors.append(
+            "caller-approved artifact directory must be a safe relative literal path"
+        )
+    if not _is_constraint(policy.constraint):
+        errors.append("caller-approved constraint must be a safe relative literal path")
     if policy.manifest_name != RELEASE_MANIFEST_NAME:
         errors.append(
             "caller-approved manifest name must match the release build default"
