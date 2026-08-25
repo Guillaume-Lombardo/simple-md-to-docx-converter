@@ -111,6 +111,10 @@ Complete English user, template, administrator, API, operations, storage, queue,
   instead of the newer executable already first in `PATH`. The private Podman configuration now
   selects that current `crun` when available and otherwise uses Podman's declared runtime path,
   without changing global host configuration.
+- 2026-08-25: PR #80 passed every required hosted domain, including both sudo-free Docker and
+  rootless Podman Compose lifecycles, and was squash-merged to `main` as commit `bc43e885`. Prepared
+  the requested `0.3.1` version transition; publication and the final immutable Compose repin remain
+  pending.
 
 ## Synchronization
 
