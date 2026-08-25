@@ -530,10 +530,7 @@ def exercise_cancellation(
     cancellation = client.request("DELETE", location, mutate=True)
     expect(cancellation, 200, "cancel running conversion")
     terminal = wait_for_job(client, location)
-    if terminal.get("state") != "cancelled" or not terminal.get("cancel_requested"):
-        raise WorkflowFailure("cancel running conversion: cancelled state missing")
-    if terminal.get("id") != running.get("id"):
-        raise WorkflowFailure("cancel running conversion: durable identity changed")
+    require_cancelled_terminal(terminal, running)
     result_path = f"{location}/result"
     expect(client.request("GET", result_path), 409, "cancelled result denial")
     expect(
@@ -542,6 +539,17 @@ def exercise_cancellation(
         "cancelled manifest denial",
     )
     return terminal
+
+
+def require_cancelled_terminal(
+    terminal: dict[str, Any], running: dict[str, Any]
+) -> None:
+    """Require durable cancellation without relying on transient request flags."""
+
+    if terminal.get("state") != "cancelled":
+        raise WorkflowFailure("cancel running conversion: cancelled state missing")
+    if terminal.get("id") != running.get("id"):
+        raise WorkflowFailure("cancel running conversion: durable identity changed")
 
 
 def exercise_pdf_limit_failure(

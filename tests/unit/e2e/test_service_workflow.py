@@ -177,6 +177,25 @@ def test_real_engine_failure_sources_reject_unbounded_counts() -> None:
 
 
 @pytest.mark.unit
+def test_terminal_cancellation_does_not_require_transient_request_flag() -> None:
+    job_id = identifier()
+    workflow.require_cancelled_terminal(
+        {"id": job_id, "state": "cancelled", "cancel_requested": False},
+        {"id": job_id, "state": "running", "cancel_requested": False},
+    )
+    with pytest.raises(workflow.WorkflowFailure, match="cancelled state missing"):
+        workflow.require_cancelled_terminal(
+            {"id": job_id, "state": "succeeded"},
+            {"id": job_id, "state": "running"},
+        )
+    with pytest.raises(workflow.WorkflowFailure, match="durable identity changed"):
+        workflow.require_cancelled_terminal(
+            {"id": identifier(), "state": "cancelled"},
+            {"id": job_id, "state": "running"},
+        )
+
+
+@pytest.mark.unit
 def test_cli_validation_requires_command_inputs_and_positive_timeout(
     tmp_path: Path,
 ) -> None:
