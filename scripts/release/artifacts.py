@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import struct
 import tarfile
 import tomllib
 import zipfile
@@ -30,6 +31,7 @@ MAX_MANIFEST_BYTES = 64 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
+MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 500
@@ -39,6 +41,16 @@ ARTIFACT_COUNT = 2
 RECORD_FIELD_COUNT = 3
 SHA256 = re.compile(r"[0-9a-f]{64}")
 SAFE_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+EOCD_SIGNATURE = b"PK\x05\x06"
+ZIP64_EOCD_SIGNATURE = b"PK\x06\x06"
+ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
+EOCD_MIN_BYTES = 22
+EOCD_MAX_COMMENT_BYTES = 65_535
+ZIP64_LOCATOR_BYTES = 20
+ZIP64_EOCD_MIN_BYTES = 56
+MAX_ZIP64_EOCD_BYTES = 4096
+ZIP16_SENTINEL = 0xFFFF
+ZIP32_SENTINEL = 0xFFFFFFFF
 
 
 class ArtifactError(ValueError):
@@ -309,6 +321,119 @@ def _wheel_identity(path: Path, expected_name: str, expected_version: str) -> No
         raise ArtifactError("wheel filename has an unexpected version")
 
 
+def _read_at(stream: BinaryIO, *, offset: int, size: int, label: str) -> bytes:
+    if offset < 0:
+        raise ArtifactError(f"invalid wheel {label} offset")
+    stream.seek(offset)
+    data = stream.read(size)
+    if len(data) != size:
+        raise ArtifactError(f"truncated wheel {label}")
+    return data
+
+
+def _zip64_directory(
+    stream: BinaryIO, *, eocd_offset: int
+) -> tuple[int, int, int, int]:
+    locator = _read_at(
+        stream,
+        offset=eocd_offset - ZIP64_LOCATOR_BYTES,
+        size=ZIP64_LOCATOR_BYTES,
+        label="ZIP64 locator",
+    )
+    signature, zip64_disk, zip64_offset, disk_count = struct.unpack("<4sLQL", locator)
+    if signature != ZIP64_LOCATOR_SIGNATURE or zip64_disk != 0 or disk_count != 1:
+        raise ArtifactError("invalid or multidisk wheel ZIP64 locator")
+    header = _read_at(
+        stream,
+        offset=zip64_offset,
+        size=ZIP64_EOCD_MIN_BYTES,
+        label="ZIP64 EOCD",
+    )
+    if header[:4] != ZIP64_EOCD_SIGNATURE:
+        raise ArtifactError("invalid wheel ZIP64 EOCD signature")
+    record_size = struct.unpack_from("<Q", header, 4)[0]
+    complete_size = record_size + 12
+    if complete_size < ZIP64_EOCD_MIN_BYTES or complete_size > MAX_ZIP64_EOCD_BYTES:
+        raise ArtifactError("wheel ZIP64 EOCD exceeds its size limit")
+    if zip64_offset + complete_size != eocd_offset - ZIP64_LOCATOR_BYTES:
+        raise ArtifactError("wheel ZIP64 EOCD has an invalid bounded region")
+    (
+        _version_made,
+        _version_needed,
+        disk_number,
+        directory_disk,
+        entries_on_disk,
+        entry_count,
+        directory_size,
+        directory_offset,
+    ) = struct.unpack_from("<2H2L4Q", header, 12)
+    if disk_number != 0 or directory_disk != 0 or entries_on_disk != entry_count:
+        raise ArtifactError("multidisk wheel archives are forbidden")
+    return entry_count, directory_size, directory_offset, zip64_offset
+
+
+def _find_eocd(tail: bytes) -> int:
+    search_end = len(tail)
+    while search_end:
+        relative_offset = tail.rfind(EOCD_SIGNATURE, 0, search_end)
+        if relative_offset < 0:
+            break
+        if len(tail) - relative_offset >= EOCD_MIN_BYTES:
+            comment_size = struct.unpack_from("<H", tail, relative_offset + 20)[0]
+            if relative_offset + EOCD_MIN_BYTES + comment_size == len(tail):
+                return relative_offset
+        search_end = relative_offset
+    raise ArtifactError("wheel has no bounded EOCD record")
+
+
+def _prevalidate_zip_directory(path: Path) -> None:
+    """Bound EOCD and central-directory resources before ZipFile allocates."""
+    with _open_regular(path, max_bytes=MAX_ARTIFACT_BYTES, label=path.name) as stream:
+        stream.seek(0, os.SEEK_END)
+        archive_size = stream.tell()
+        tail_size = min(archive_size, EOCD_MIN_BYTES + EOCD_MAX_COMMENT_BYTES)
+        tail_offset = archive_size - tail_size
+        tail = _read_at(
+            stream, offset=tail_offset, size=tail_size, label="EOCD search window"
+        )
+        relative_offset = _find_eocd(tail)
+        eocd_offset = tail_offset + relative_offset
+        (
+            _signature,
+            disk_number,
+            directory_disk,
+            entries_on_disk,
+            entry_count,
+            directory_size,
+            directory_offset,
+            _comment_size,
+        ) = struct.unpack_from("<4s4H2LH", tail, relative_offset)
+        sentinel = ZIP16_SENTINEL in (
+            entry_count,
+            entries_on_disk,
+        ) or ZIP32_SENTINEL in (directory_size, directory_offset)
+        directory_end_limit = eocd_offset
+        if disk_number != 0 or directory_disk != 0:
+            raise ArtifactError("multidisk wheel archives are forbidden")
+        if sentinel:
+            (
+                entry_count,
+                directory_size,
+                directory_offset,
+                directory_end_limit,
+            ) = _zip64_directory(stream, eocd_offset=eocd_offset)
+        elif entries_on_disk != entry_count:
+            raise ArtifactError("multidisk wheel archives are forbidden")
+        if entry_count > MAX_ARCHIVE_MEMBERS:
+            raise ArtifactError("wheel has too many central-directory entries")
+        if directory_size > MAX_CENTRAL_DIRECTORY_BYTES:
+            raise ArtifactError("wheel central directory exceeds its size limit")
+        if entry_count and directory_size < entry_count * 46:
+            raise ArtifactError("wheel central directory is structurally too small")
+        if directory_offset + directory_size > directory_end_limit:
+            raise ArtifactError("wheel central directory exceeds its bounded region")
+
+
 def _zip_member_bytes(archive: zipfile.ZipFile, name: str) -> bytes:
     info = archive.getinfo(name)
     if info.file_size > MAX_METADATA_BYTES:
@@ -379,6 +504,7 @@ def verify_wheel(path: Path, *, expected_name: str, expected_version: str) -> No
     """Verify the wheel filename, metadata, contents, resources, and RECORD."""
     _wheel_identity(path, expected_name, expected_version)
     _require_artifact(path)
+    _prevalidate_zip_directory(path)
     try:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
@@ -441,6 +567,7 @@ def _scan_sdist(
     names: list[str] = []
     metadata_members: dict[str, bytes] = {}
     total_size = 0
+    compressed_size = path.stat().st_size
     required_metadata = {
         f"{expected_stem}/PKG-INFO",
         f"{expected_stem}/pyproject.toml",
@@ -466,6 +593,8 @@ def _scan_sdist(
                 total_size += member.size
                 if total_size > MAX_TOTAL_UNCOMPRESSED_BYTES:
                     raise ArtifactError("sdist exceeds the uncompressed size limit")
+                if total_size > max(compressed_size, 1) * MAX_COMPRESSION_RATIO:
+                    raise ArtifactError("sdist exceeds the compression ratio limit")
                 if name in required_metadata:
                     extracted = archive.extractfile(member)
                     if extracted is None:

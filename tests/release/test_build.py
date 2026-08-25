@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -37,7 +36,7 @@ def test_build_release_stages_once_then_publishes_atomically(
     output = tmp_path / "dist"
     events: list[tuple[str, Path]] = []
     mocker.patch("scripts.release.build.shutil.which", return_value="/usr/bin/uv")
-    run = mocker.patch("scripts.release.build.subprocess.run")
+    run = mocker.patch("scripts.release.build.run_command")
 
     def create(directory: Path, **kwargs: str) -> Path:
         events.append(("manifest", directory))
@@ -78,8 +77,8 @@ def test_build_release_stages_once_then_publishes_atomically(
         "--require-hashes",
     )
     assert run.call_args.kwargs == {
-        "check": True,
         "cwd": Path.cwd(),
+        "label": "release build",
         "timeout": BUILD_TIMEOUT_SECONDS,
     }
     assert [name for name, _ in events] == ["manifest", "verify", "publish"]
@@ -95,7 +94,7 @@ def test_build_release_rejects_any_existing_output(
     """Even an empty target cannot be replaced by publication."""
     output = tmp_path / "dist"
     output.mkdir()
-    run = mocker.patch("scripts.release.build.subprocess.run")
+    run = mocker.patch("scripts.release.build.run_command")
 
     with pytest.raises(ArtifactError, match="already exists"):
         build_release(
@@ -114,7 +113,7 @@ def test_publication_race_preserves_target_and_cleans_staging(
     """A target appearing after validation is preserved and staging is removed."""
     output = tmp_path / "dist"
     mocker.patch("scripts.release.build.shutil.which", return_value="/usr/bin/uv")
-    mocker.patch("scripts.release.build.subprocess.run")
+    mocker.patch("scripts.release.build.run_command")
     mocker.patch("scripts.release.build.create_manifest")
     mocker.patch(
         "scripts.release.build.verify_release",
@@ -163,8 +162,8 @@ def test_timeout_is_normalized_cleanup_allows_retry(
     output = tmp_path / "dist"
     mocker.patch("scripts.release.build.shutil.which", return_value="/usr/bin/uv")
     run = mocker.patch(
-        "scripts.release.build.subprocess.run",
-        side_effect=subprocess.TimeoutExpired(("uv", "build"), 600),
+        "scripts.release.build.run_command",
+        side_effect=ArtifactError("release build timed out"),
     )
 
     with pytest.raises(ArtifactError, match="build timed out"):

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -51,9 +50,8 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     calls: list[tuple[tuple[str, ...], Path, int]] = []
 
     def executed(
-        command: tuple[str, ...], *, check: bool, cwd: Path, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
-        assert check is True
+        command: tuple[str, ...], *, cwd: Path, label: str, timeout: int
+    ) -> None:
         events.append(command[1] if command[0] == "/usr/bin/uv" else "import")
         calls.append((command, cwd, timeout))
         if len(calls) == 2:
@@ -61,7 +59,6 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
             assert private_wheel != artifacts.wheel
             assert private_wheel.read_bytes() == artifacts.wheel.read_bytes()
             assert private_wheel.parent.name == "artifacts"
-        return subprocess.CompletedProcess(command, 0)
 
     verify = mocker.patch(
         "scripts.release.verify_install.verify_release", side_effect=verified
@@ -69,7 +66,7 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     mocker.patch(
         "scripts.release.verify_install.shutil.which", return_value="/usr/bin/uv"
     )
-    mocker.patch("scripts.release.verify_install.subprocess.run", side_effect=executed)
+    mocker.patch("scripts.release.verify_install.run_command", side_effect=executed)
 
     result = verify_clean_install(
         artifacts.wheel.parent,
@@ -133,7 +130,7 @@ def test_integrity_failure_prevents_environment_creation(
     temporary = mocker.patch(
         "scripts.release.verify_install.tempfile.TemporaryDirectory"
     )
-    run = mocker.patch("scripts.release.verify_install.subprocess.run")
+    run = mocker.patch("scripts.release.verify_install.run_command")
 
     with pytest.raises(ArtifactError, match="integrity failed"):
         verify_clean_install(
@@ -162,7 +159,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     mocker.patch(
         "scripts.release.verify_install.shutil.which", return_value="/usr/bin/uv"
     )
-    run = mocker.patch("scripts.release.verify_install.subprocess.run")
+    run = mocker.patch("scripts.release.verify_install.run_command")
 
     with pytest.raises(ArtifactError, match="changed before private copy"):
         verify_clean_install(
@@ -188,14 +185,13 @@ def test_subprocess_failure_stops_later_steps_and_cleans_up(
     calls: list[Path] = []
 
     def executed(
-        command: tuple[str, ...], *, check: bool, cwd: Path, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
+        command: tuple[str, ...], *, cwd: Path, label: str, timeout: int
+    ) -> None:
         calls.append(cwd)
         if len(calls) == failing_call:
-            raise subprocess.CalledProcessError(1, command)
-        return subprocess.CompletedProcess(command, 0)
+            raise ArtifactError(f"{label} failed")
 
-    mocker.patch("scripts.release.verify_install.subprocess.run", side_effect=executed)
+    mocker.patch("scripts.release.verify_install.run_command", side_effect=executed)
 
     with pytest.raises(ArtifactError, match="failed"):
         verify_clean_install(
@@ -222,12 +218,12 @@ def test_blocked_subprocess_times_out_and_cleans_up(
     roots: list[Path] = []
 
     def blocked(
-        command: tuple[str, ...], *, check: bool, cwd: Path, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
+        command: tuple[str, ...], *, cwd: Path, label: str, timeout: int
+    ) -> None:
         roots.append(cwd)
-        raise subprocess.TimeoutExpired(command, timeout)
+        raise ArtifactError(f"{label} timed out")
 
-    mocker.patch("scripts.release.verify_install.subprocess.run", side_effect=blocked)
+    mocker.patch("scripts.release.verify_install.run_command", side_effect=blocked)
     with pytest.raises(ArtifactError, match="timed out"):
         verify_clean_install(
             artifacts.wheel.parent,

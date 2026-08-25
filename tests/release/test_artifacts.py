@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import json
+import struct
 import tarfile
 import zipfile
 from pathlib import Path
@@ -80,7 +81,7 @@ def _write_wheel(
 def _write_sdist(
     directory: Path,
     *,
-    extra_name: str | None = None,
+    extra: tuple[str, bytes] | None = None,
     link_name: str | None = None,
     metadata_version: str = VERSION,
     project_version: str = VERSION,
@@ -96,8 +97,8 @@ def _write_sdist(
         ).encode(),
         f"{ROOT}/src/{DIST}/__init__.py": b'__version__ = "0.1.0"\n',
     }
-    if extra_name is not None:
-        contents[extra_name] = b"unexpected"
+    if extra is not None:
+        contents[extra[0]] = extra[1]
     with tarfile.open(path, mode="w:gz") as archive:
         for name, data in contents.items():
             info = tarfile.TarInfo(name)
@@ -280,7 +281,7 @@ def test_wheel_rejects_member_count_bomb(tmp_path: Path, mocker: MockerFixture) 
     """A ZIP central directory cannot force unbounded member processing."""
     wheel = _write_wheel(tmp_path)
     mocker.patch.object(artifact_module, "MAX_ARCHIVE_MEMBERS", 3)
-    with pytest.raises(ArtifactError, match="too many members"):
+    with pytest.raises(ArtifactError, match="too many"):
         verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
 
 
@@ -292,9 +293,48 @@ def test_wheel_rejects_compression_bomb(tmp_path: Path, mocker: MockerFixture) -
         verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
 
 
+def test_wheel_rejects_real_oversized_central_directory_before_zipfile(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """A real excessive entry table is rejected before ZipFile is constructed."""
+    wheel = tmp_path / f"{ROOT}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, mode="w", compression=zipfile.ZIP_STORED) as archive:
+        for index in range(artifact_module.MAX_ARCHIVE_MEMBERS + 1):
+            archive.writestr(f"entries/{index}", b"")
+    opened = mocker.patch.object(
+        artifact_module.zipfile,
+        "ZipFile",
+        side_effect=AssertionError("ZipFile must not open an oversized directory"),
+    )
+    with pytest.raises(ArtifactError, match="too many central-directory entries"):
+        verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+    opened.assert_not_called()
+
+
+def test_wheel_rejects_declared_central_directory_size_before_zipfile(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """An excessive central-directory size is bounded from EOCD metadata first."""
+    wheel = _write_wheel(tmp_path)
+    raw = bytearray(wheel.read_bytes())
+    eocd = raw.rfind(artifact_module.EOCD_SIGNATURE)
+    struct.pack_into(
+        "<L", raw, eocd + 12, artifact_module.MAX_CENTRAL_DIRECTORY_BYTES + 1
+    )
+    wheel.write_bytes(raw)
+    opened = mocker.patch.object(
+        artifact_module.zipfile,
+        "ZipFile",
+        side_effect=AssertionError("ZipFile must not open an oversized directory"),
+    )
+    with pytest.raises(ArtifactError, match="central directory exceeds its size limit"):
+        verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+    opened.assert_not_called()
+
+
 def test_sdist_rejects_path_traversal(tmp_path: Path) -> None:
     """Source distribution members cannot escape their archive root."""
-    sdist = _write_sdist(tmp_path, extra_name=f"{ROOT}/../outside")
+    sdist = _write_sdist(tmp_path, extra=(f"{ROOT}/../outside", b"unexpected"))
     with pytest.raises(ArtifactError, match="unsafe archive path"):
         verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
 
@@ -321,6 +361,16 @@ def test_sdist_rejects_declared_member_size_bomb(
     sdist = _write_sdist(tmp_path)
     mocker.patch.object(artifact_module, "MAX_MEMBER_BYTES", 8)
     with pytest.raises(ArtifactError, match="member exceeds its limit"):
+        verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
+
+
+def test_sdist_rejects_real_compression_bomb(tmp_path: Path) -> None:
+    """Declared tar growth is bounded against the compressed archive size."""
+    sdist = _write_sdist(
+        tmp_path,
+        extra=(f"{ROOT}/zeros.bin", b"\0" * (2 * 1024 * 1024)),
+    )
+    with pytest.raises(ArtifactError, match="compression ratio"):
         verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
 
 

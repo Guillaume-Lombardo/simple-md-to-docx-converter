@@ -7,7 +7,6 @@ import ctypes
 import errno
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -17,24 +16,11 @@ from scripts.release.artifacts import (
     create_manifest,
     verify_release,
 )
+from scripts.release.process import run_command
 
 BUILD_TIMEOUT_SECONDS = 600
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
-
-
-def _run_build(command: tuple[str, ...], *, cwd: Path) -> None:
-    try:
-        subprocess.run(  # noqa: S603 - argv only, with no shell interpretation
-            command,
-            check=True,
-            cwd=cwd,
-            timeout=BUILD_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise ArtifactError("release build timed out") from error
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ArtifactError("release build failed") from error
 
 
 def _publish_no_replace(staged: Path, output: Path) -> None:
@@ -96,7 +82,7 @@ def build_release(
             staging_root = Path(temporary)
             staged_release = staging_root / "release"
             staged_release.mkdir(mode=0o700)
-            _run_build(
+            run_command(
                 (
                     uv,
                     "build",
@@ -107,6 +93,8 @@ def build_release(
                     "--require-hashes",
                 ),
                 cwd=Path.cwd(),
+                label="release build",
+                timeout=BUILD_TIMEOUT_SECONDS,
             )
             create_manifest(
                 staged_release,

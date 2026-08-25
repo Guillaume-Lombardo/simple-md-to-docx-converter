@@ -7,7 +7,6 @@ import hashlib
 import os
 import shutil
 import stat
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from scripts.release.artifacts import (
     ArtifactError,
     verify_release,
 )
+from scripts.release.process import run_command
 
 ENVIRONMENT_TIMEOUT_SECONDS = 120
 INSTALL_TIMEOUT_SECONDS = 300
@@ -43,20 +43,6 @@ class CleanInstallResult:
 
     wheel_name: str
     sha256: str
-
-
-def _run(command: tuple[str, ...], *, cwd: Path, label: str, timeout: int) -> None:
-    try:
-        subprocess.run(  # noqa: S603 - argv only, with no shell interpretation
-            command,
-            check=True,
-            cwd=cwd,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise ArtifactError(f"{label} timed out") from error
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ArtifactError(f"{label} failed") from error
 
 
 def _copy_manifest_bound_wheel(source: Path, destination: Path, digest: str) -> None:
@@ -128,7 +114,7 @@ def verify_clean_install(
         _copy_manifest_bound_wheel(artifacts.wheel, private_wheel, wheel_digest)
         environment = root / "venv"
         python = environment / "bin" / "python"
-        _run(
+        run_command(
             (
                 uv,
                 "venv",
@@ -141,7 +127,7 @@ def verify_clean_install(
             label="clean environment creation",
             timeout=ENVIRONMENT_TIMEOUT_SECONDS,
         )
-        _run(
+        run_command(
             (
                 uv,
                 "pip",
@@ -155,7 +141,7 @@ def verify_clean_install(
             label="exact wheel installation",
             timeout=INSTALL_TIMEOUT_SECONDS,
         )
-        _run(
+        run_command(
             (str(python), "-I", "-c", PUBLIC_IMPORT_CHECK, expected_version),
             cwd=root,
             label="isolated public import check",
