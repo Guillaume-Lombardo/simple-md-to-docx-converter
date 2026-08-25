@@ -302,6 +302,30 @@ def test_timeout_terminates_then_kills_the_process_group(
 
 
 @pytest.mark.unit
+def test_active_cancellation_terminates_pandoc_process_group(
+    tmp_path: Path, mocker
+) -> None:
+    process = mocker.Mock(pid=4321)
+    process.wait.side_effect = [subprocess.TimeoutExpired("pandoc", 0.1), 0]
+    mocker.patch(
+        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
+    )
+    killpg = mocker.patch("md_converter.conversion.pandoc.os.killpg")
+    cancelled = mocker.Mock(side_effect=(False, True))
+
+    with pytest.raises(ConversionError, match="interrupted") as captured:
+        converter(tmp_path).convert(
+            ApprovedMarkdown("# Safe"),
+            minimal_docx(),
+            cancellation_requested=cancelled,
+        )
+
+    assert captured.value.code is ConversionErrorCode.PANDOC_FAILURE
+    killpg.assert_called_once_with(4321, 15)
+    assert process.wait.call_count == 2
+
+
+@pytest.mark.unit
 def test_worker_deadline_caps_pandoc_engine_timeout(tmp_path: Path, mocker) -> None:
     reference = minimal_docx()
     process = mocker.Mock()

@@ -13,6 +13,9 @@ seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=()
 template_directory="$(mktemp -d)"
+blocking_evidence_directory="$template_directory/blocking-evidence"
+blocking_job_file="$template_directory/blocking-job-location"
+mkdir -m 0777 "$blocking_evidence_directory"
 
 cleanup() {
   local resource
@@ -133,8 +136,8 @@ settings=(
   --env MD_CONVERTER_JOB_MAX_DURATION_SECONDS=60
   --env MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES=805306368
   --env MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES=268435456
-  --env MD_CONVERTER_WORKER_LEASE_SECONDS=30
-  --env MD_CONVERTER_WORKER_HEARTBEAT_SECONDS=5
+  --env MD_CONVERTER_WORKER_LEASE_SECONDS=6
+  --env MD_CONVERTER_WORKER_HEARTBEAT_SECONDS=1
   --env MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS=60
   --env MD_CONVERTER_WORKER_IDLE_POLL_SECONDS=0.25
   --env MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS=1
@@ -211,4 +214,59 @@ podman exec "$worker_name" /opt/md-converter/venv/bin/python -c \
   | grep -Fq 'md_converter_'
 podman stop --time 15 "$worker_name" >/dev/null
 test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
-echo "Final-image distributed conversion workflow and external-worker smoke passed for $image."
+podman rm "$worker_name" >/dev/null
+
+podman run --detach --name "$worker_name" --network "$network_name" \
+  --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
+  --memory=768m --cpus=2 --pids-limit=256 \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+  --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+  --shm-size=128m \
+  "${settings[@]}" \
+  --env MD_CONVERTER_CONVERSION_MERMAID_EXECUTABLE=/blocking-mmdc.sh \
+  --volume "$(pwd)/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
+  --volume "$blocking_evidence_directory:/evidence:rw,Z" \
+  "$image" external-worker >/dev/null
+test "$(podman inspect "$worker_name" --format '{{.State.Running}}')" = true
+uv run python -m scripts.container.api_workflow_smoke \
+  --base-url "http://127.0.0.1:$application_port" \
+  --template "$template_directory/template.docx" \
+  --submit-blocking-job "$blocking_job_file"
+for _ in $(seq 1 40); do
+  if [[ -f "$blocking_evidence_directory/active.pid" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ ! -f "$blocking_evidence_directory/active.pid" ]]; then
+  podman logs "$worker_name" >&2
+  exit 1
+fi
+
+shutdown_started="$(date +%s)"
+podman stop --time 8 "$worker_name" >/dev/null
+shutdown_elapsed="$(( $(date +%s) - shutdown_started ))"
+test "$shutdown_elapsed" -lt 8
+test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
+test "$(podman inspect "$worker_name" --format '{{.State.Pid}}')" = 0
+test -f "$blocking_evidence_directory/terminated"
+uv run python -m scripts.container.api_workflow_smoke \
+  --base-url "http://127.0.0.1:$application_port" \
+  --assert-running-job "$blocking_job_file"
+podman rm "$worker_name" >/dev/null
+
+podman run --detach --name "$worker_name" --network "$network_name" \
+  --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
+  --memory=768m --cpus=2 --pids-limit=256 \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+  --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+  --shm-size=128m \
+  "${settings[@]}" "$image" external-worker >/dev/null
+uv run python -m scripts.container.api_workflow_smoke \
+  --base-url "http://127.0.0.1:$application_port" \
+  --recover-job "$blocking_job_file"
+podman stop --time 15 "$worker_name" >/dev/null
+test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
+echo "Final-image distributed conversion, active SIGTERM, and lease recovery smoke passed for $image."

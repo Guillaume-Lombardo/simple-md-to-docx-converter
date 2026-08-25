@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -36,11 +36,16 @@ class PandocConfig:
     timeout_seconds: float
     termination_grace_seconds: float
     workspace_root: Path | None = None
+    cancellation_poll_seconds: float = 0.1
 
     def __post_init__(self) -> None:
         if not self.executable or "\0" in self.executable:
             raise ValueError("Pandoc executable must be a non-empty path or command")
-        for value in (self.timeout_seconds, self.termination_grace_seconds):
+        for value in (
+            self.timeout_seconds,
+            self.termination_grace_seconds,
+            self.cancellation_poll_seconds,
+        ):
             if (
                 type(value) not in {int, float}
                 or not math.isfinite(value)
@@ -109,6 +114,7 @@ class PandocDocxConverter:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         validated = validate_document(
             ApprovedDocument(
@@ -130,6 +136,7 @@ class PandocDocxConverter:
                 validated,
                 reference_docx,
                 deadline_monotonic=deadline_monotonic,
+                cancellation_requested=cancellation_requested,
             )
         except Exception:
             try:
@@ -150,6 +157,7 @@ class PandocDocxConverter:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> bytes:
         try:
             for directory in ("home", "tmp", "cache", "config", "data"):
@@ -180,7 +188,11 @@ class PandocDocxConverter:
             str(markdown_path),
         ]
         process = self._start(arguments, workspace)
-        self._wait(process, deadline_monotonic=deadline_monotonic)
+        self._wait(
+            process,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
+        )
         try:
             if output_path.is_symlink():
                 raise OSError
@@ -224,18 +236,48 @@ class PandocDocxConverter:
         process: subprocess.Popen[bytes],
         *,
         deadline_monotonic: float | None,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> None:
         timeout = self._config.timeout_seconds
         if deadline_monotonic is not None:
             timeout = min(timeout, max(0.0, deadline_monotonic - time.monotonic()))
-        try:
-            return_code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self._terminate_group(process)
-            raise ConversionError(
-                ConversionErrorCode.PANDOC_TIMEOUT,
-                "Pandoc conversion timed out.",
-            ) from None
+        if cancellation_requested is None:
+            try:
+                return_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._terminate_group(process)
+                raise ConversionError(
+                    ConversionErrorCode.PANDOC_TIMEOUT,
+                    "Pandoc conversion timed out.",
+                ) from None
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    cancelled = cancellation_requested()
+                except BaseException:
+                    self._terminate_group(process)
+                    raise
+                if cancelled:
+                    self._terminate_group(process)
+                    raise ConversionError(
+                        ConversionErrorCode.PANDOC_FAILURE,
+                        "Pandoc conversion was interrupted.",
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._terminate_group(process)
+                    raise ConversionError(
+                        ConversionErrorCode.PANDOC_TIMEOUT,
+                        "Pandoc conversion timed out.",
+                    )
+                try:
+                    return_code = process.wait(
+                        timeout=min(self._config.cancellation_poll_seconds, remaining)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         if return_code != 0:
             raise ConversionError(
                 ConversionErrorCode.PANDOC_FAILURE,

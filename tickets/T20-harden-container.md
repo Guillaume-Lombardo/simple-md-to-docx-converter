@@ -77,6 +77,18 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   The complete 1,502-match Grype report contains no Critical findings; the host-only full suite
   cannot run its 37 document-engine tests because those binaries and locked fonts are unavailable
   outside the final image, where the corresponding real workflows pass.
+- 2026-08-25: Resolved the remaining review findings. Active SIGTERM now propagates through the
+  worker cancellation probe to Pandoc and Mermaid process groups, preserves durable cancellation
+  and maximum-duration precedence, and leaves an interrupted lease recoverable without publishing
+  objects. Revision 12 now uses a trigger-preserving SQLite 3.34 table copy on downgrade, with real
+  SQLite and PostgreSQL upgrade-downgrade-upgrade coverage. Frozen Markdown rejects only actual ZIP
+  signatures, and result publication enforces the DOCX/PDF/BOTH manifest cardinality contract before
+  object writes. Combined-output smoke validation now inspects the inner DOCX, PDF, and canonical
+  manifest. The rebuilt rootless image
+  `350fc58f93eb252cb33b3e35d4c7fd71cc81a55259d0f3f2856ca30871d4a72b` passes the distributed
+  workflow, active blocking-Mermaid SIGTERM, orphan check, durable running-state check, lease
+  recovery, and final DOCX validation. Ruff, ty, 162 focused tests, 136 final regression tests, and
+  the dedicated PostgreSQL migration parity test pass.
 
 ## Synchronization
 

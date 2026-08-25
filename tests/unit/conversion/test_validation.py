@@ -73,6 +73,7 @@ def test_service_propagates_worker_deadline_to_docx_engine(mocker) -> None:
         mocker.ANY,
         b"reference",
         deadline_monotonic=123.5,
+        cancellation_requested=None,
     )
 
 

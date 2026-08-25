@@ -71,7 +71,7 @@ class WorkerLoop:
         while not stop.is_set():
             try:
                 self._worker.recover()
-                processed = self._worker.run_once()
+                processed = self._worker.run_once(shutdown_requested=stop.is_set)
                 now = self._monotonic_clock()
                 if now >= next_cleanup:
                     next_cleanup = now + self._schedule.cleanup_interval_seconds

@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -248,9 +249,11 @@ def test_pandoc_preserves_ratio_and_physical_dimension_caps(
             max_output_bytes: int,
             *,
             deadline_monotonic: float | None = None,
+            cancellation_requested: Callable[[], bool] | None = None,
         ) -> bytes:
             assert source == "flowchart LR\n"
             assert deadline_monotonic is None
+            assert cancellation_requested is None
             output = _png(*image_size)
             assert len(output) <= max_output_bytes
             return output

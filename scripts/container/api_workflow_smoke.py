@@ -136,6 +136,25 @@ def submit(
     filename: str,
     source: bytes,
 ) -> dict[str, object]:
+    location = submit_location(client, template, output, filename, source)
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        status, _, content = client.request("GET", location)
+        require(status, 200, content)
+        job = json.loads(content)
+        if job["state"] in {"succeeded", "failed", "cancelled"}:
+            return job
+        time.sleep(0.25)
+    raise RuntimeError("conversion did not reach a terminal state")
+
+
+def submit_location(
+    client: Client,
+    template: dict[str, object],
+    output: str,
+    filename: str,
+    source: bytes,
+) -> str:
     body, content_type = multipart(
         [
             ("template_id", str(template["id"])),
@@ -148,19 +167,35 @@ def submit(
         "POST", "/api/v1/conversions", body=body, content_type=content_type, mutate=True
     )
     require(status, 202, content)
-    location = headers["location"]
+    return headers["location"]
+
+
+def wait_for_running_job(client: Client, location: str) -> dict[str, object]:
     deadline = time.monotonic() + 120
+    job: dict[str, object] = {}
     while time.monotonic() < deadline:
         status, _, content = client.request("GET", location)
         require(status, 200, content)
         job = json.loads(content)
-        if job["state"] in {"succeeded", "failed", "cancelled"}:
+        if job["state"] == "running":
             return job
+        if job["state"] in {"succeeded", "failed", "cancelled"}:
+            raise RuntimeError(
+                f"blocking conversion terminated before rendering: {job}"
+            )
         time.sleep(0.25)
-    raise RuntimeError("conversion did not reach a terminal state")
+    raise RuntimeError(f"blocking conversion was not claimed: {job}")
 
 
-def validate_result(client: Client, job: dict[str, object], output: str) -> None:
+def get_job(client: Client, location: str) -> dict[str, object]:
+    status, _, content = client.request("GET", location)
+    require(status, 200, content)
+    return json.loads(content)
+
+
+def validate_result(  # noqa: PLR0912 - one assertion workflow covers all outputs
+    client: Client, job: dict[str, object], output: str
+) -> None:
     path = f"/api/v1/conversions/{job['id']}/result"
     status, headers, content = client.request("GET", path)
     require(status, 200, content)
@@ -168,7 +203,9 @@ def validate_result(client: Client, job: dict[str, object], output: str) -> None
         raise RuntimeError("result cache contract missing")
     if output == "docx":
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            if "[Content_Types].xml" not in archive.namelist():
+            if not {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= set(
+                archive.namelist()
+            ):
                 raise RuntimeError("invalid DOCX result")
         status, _, unavailable = client.request("GET", f"{path}/manifest")
         require(status, 409, unavailable)
@@ -183,17 +220,28 @@ def validate_result(client: Client, job: dict[str, object], output: str) -> None
                 "traceability.json",
             ]:
                 raise RuntimeError("invalid combined result")
+            docx = archive.read("document.docx")
+            pdf = archive.read("document.pdf")
             embedded_manifest = archive.read("traceability.json")
+        with zipfile.ZipFile(io.BytesIO(docx)) as document:
+            if not {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= set(
+                document.namelist()
+            ):
+                raise RuntimeError("invalid combined DOCX result")
+        if not pdf.startswith(b"%PDF-"):
+            raise RuntimeError("invalid combined PDF result")
     else:
+        pdf = content
         embedded_manifest = None
     status, _, manifest = client.request("GET", f"{path}/manifest")
     require(status, 200, manifest)
     decoded = json.loads(manifest)
-    if (
-        output == "pdf"
-        and decoded["output_pdf_sha256"] != hashlib.sha256(content).hexdigest()
-    ):
+    if decoded["output_pdf_sha256"] != hashlib.sha256(pdf).hexdigest():
         raise RuntimeError("PDF manifest digest mismatch")
+    if decoded["output_pdf_bytes"] != len(pdf):
+        raise RuntimeError("PDF manifest size mismatch")
+    if decoded["schema_version"] != 1 or decoded["output_format"] != "pdf":
+        raise RuntimeError("PDF manifest invariants mismatch")
     if embedded_manifest is not None and embedded_manifest != manifest:
         raise RuntimeError("combined and sidecar manifests differ")
 
@@ -201,7 +249,11 @@ def validate_result(client: Client, job: dict[str, object], output: str) -> None
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
-    parser.add_argument("--template", required=True, type=Path)
+    parser.add_argument("--template", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--submit-blocking-job", type=Path)
+    mode.add_argument("--assert-running-job", type=Path)
+    mode.add_argument("--recover-job", type=Path)
     arguments = parser.parse_args()
     client = Client(arguments.base_url)
     status, _, content = client.request(
@@ -214,6 +266,26 @@ def main() -> int:
     )
     require(status, 200, content)
     client.csrf = json.loads(content)["csrf_token"]
+    location_file = arguments.assert_running_job or arguments.recover_job
+    if location_file is not None:
+        location = location_file.read_text(encoding="utf-8").strip()
+        if arguments.assert_running_job is not None:
+            job = get_job(client, location)
+            if job["state"] != "running" or job.get("result_url") is not None:
+                raise RuntimeError(f"interrupted job is not durably leased: {job}")
+            return 0
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            job = get_job(client, location)
+            if job["state"] == "succeeded":
+                validate_result(client, job, "docx")
+                return 0
+            if job["state"] in {"failed", "cancelled"}:
+                raise RuntimeError(f"interrupted job did not recover safely: {job}")
+            time.sleep(0.25)
+        raise RuntimeError("interrupted job was not recovered")
+    if arguments.template is None:
+        parser.error("--template is required for conversion submission")
     template_body, template_type = multipart(
         [
             ("name", "T20 Smoke"),
@@ -249,6 +321,17 @@ def main() -> int:
     )
     require(status, 201, content)
     template = json.loads(content)
+    if arguments.submit_blocking_job is not None:
+        location = submit_location(
+            client,
+            template,
+            "docx",
+            "blocking.md",
+            b"# Blocking\n\n```mermaid\nflowchart LR\nA-->B\n```\n",
+        )
+        wait_for_running_job(client, location)
+        arguments.submit_blocking_job.write_text(location, encoding="utf-8")
+        return 0
     source = b"# Final image\n\nReal **conversion** workflow.\n"
     for output in ("docx", "pdf", "both"):
         job = submit(client, template, output, "source.md", source)

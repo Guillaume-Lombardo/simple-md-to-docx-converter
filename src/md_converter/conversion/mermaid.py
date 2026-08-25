@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import time
 import unicodedata
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path, PurePosixPath
@@ -50,6 +50,7 @@ class DocumentConverter(Protocol):
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes: ...
 
 
@@ -62,6 +63,7 @@ class MermaidRenderer(Protocol):
         max_output_bytes: int,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes: ...
 
 
@@ -102,6 +104,7 @@ class MermaidConfig:
     viewport_width_pixels: int
     viewport_height_pixels: int
     workspace_root: Path | None = None
+    cancellation_poll_seconds: float = 0.1
 
     def __post_init__(self) -> None:
         for executable in (self.executable, self.chromium_executable):
@@ -109,7 +112,11 @@ class MermaidConfig:
                 raise ValueError(
                     "Mermaid executables must be non-empty paths or commands"
                 )
-        for value in (self.timeout_seconds, self.termination_grace_seconds):
+        for value in (
+            self.timeout_seconds,
+            self.termination_grace_seconds,
+            self.cancellation_poll_seconds,
+        ):
             if (
                 type(value) not in {int, float}
                 or not math.isfinite(value)
@@ -253,13 +260,14 @@ def _normalized_diagram(
     return normalized
 
 
-def render_mermaid(
+def render_mermaid(  # noqa: PLR0913 - explicit rendering policy and cancellation
     markdown: ApprovedMarkdown,
     renderer: MermaidRenderer,
     limits: MermaidLimits,
     fallback_image_limits: ImageLimits | None = None,
     *,
     deadline_monotonic: float | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> ApprovedMarkdown:
     """Replace supported Mermaid fences with bounded approved PNG resources."""
 
@@ -310,11 +318,12 @@ def render_mermaid(
     ):
         output = (
             renderer.render(block.source, limits.max_output_bytes)
-            if deadline_monotonic is None
+            if deadline_monotonic is None and cancellation_requested is None
             else renderer.render(
                 block.source,
                 limits.max_output_bytes,
                 deadline_monotonic=deadline_monotonic,
+                cancellation_requested=cancellation_requested,
             )
         )
         normalized = _normalized_diagram(output, limits, image_limits)
@@ -370,6 +379,7 @@ class MermaidPreprocessingConverter:
         reference_docx: bytes,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         rendered = render_mermaid(
             markdown,
@@ -377,11 +387,15 @@ class MermaidPreprocessingConverter:
             self._limits,
             self._fallback_image_limits,
             deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )
-        if deadline_monotonic is None:
+        if deadline_monotonic is None and cancellation_requested is None:
             return self._converter.convert(rendered, reference_docx)
         return self._converter.convert(
-            rendered, reference_docx, deadline_monotonic=deadline_monotonic
+            rendered,
+            reference_docx,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )
 
 
@@ -420,6 +434,7 @@ class MermaidCliRenderer:
         max_output_bytes: int,
         *,
         deadline_monotonic: float | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> bytes:
         if type(max_output_bytes) is not int or max_output_bytes <= 0:
             raise ValueError("Mermaid output limit must be a positive integer")
@@ -435,6 +450,7 @@ class MermaidCliRenderer:
                 source,
                 max_output_bytes,
                 deadline_monotonic=deadline_monotonic,
+                cancellation_requested=cancellation_requested,
             )
         except Exception:
             try:
@@ -455,6 +471,7 @@ class MermaidCliRenderer:
         max_output_bytes: int,
         *,
         deadline_monotonic: float | None,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> bytes:
         input_path = workspace / "diagram.mmd"
         output_path = workspace / "diagram.png"
@@ -508,7 +525,11 @@ class MermaidCliRenderer:
             "1",
         ]
         process = self._start(arguments, workspace)
-        self._wait(process, deadline_monotonic=deadline_monotonic)
+        self._wait(
+            process,
+            deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
+        )
         descriptor = -1
         try:
             descriptor = os.open(
@@ -565,18 +586,48 @@ class MermaidCliRenderer:
         process: subprocess.Popen[bytes],
         *,
         deadline_monotonic: float | None,
+        cancellation_requested: Callable[[], bool] | None,
     ) -> None:
         timeout = self._config.timeout_seconds
         if deadline_monotonic is not None:
             timeout = min(timeout, max(0.0, deadline_monotonic - time.monotonic()))
-        try:
-            return_code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self._terminate_group(process)
-            raise ConversionError(
-                ConversionErrorCode.MERMAID_TIMEOUT,
-                "Mermaid rendering timed out.",
-            ) from None
+        if cancellation_requested is None:
+            try:
+                return_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._terminate_group(process)
+                raise ConversionError(
+                    ConversionErrorCode.MERMAID_TIMEOUT,
+                    "Mermaid rendering timed out.",
+                ) from None
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    cancelled = cancellation_requested()
+                except BaseException:
+                    self._terminate_group(process)
+                    raise
+                if cancelled:
+                    self._terminate_group(process)
+                    raise ConversionError(
+                        ConversionErrorCode.MERMAID_FAILURE,
+                        "Mermaid rendering was interrupted.",
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._terminate_group(process)
+                    raise ConversionError(
+                        ConversionErrorCode.MERMAID_TIMEOUT,
+                        "Mermaid rendering timed out.",
+                    )
+                try:
+                    return_code = process.wait(
+                        timeout=min(self._config.cancellation_poll_seconds, remaining)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         if return_code != 0:
             self._terminate_survivors(process.pid)
             raise ConversionError(

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import boto3
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, inspect
 
 from md_converter.auth.models import Role, User
 from md_converter.conversion.errors import ConversionErrorCode
@@ -25,7 +25,7 @@ from md_converter.jobs.models import (
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import WorkerPolicy
 from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.migrations import downgrade_database, upgrade_database
 from md_converter.persistence.schema import ConversionJobRow, TemplateRow, UserRow
 from md_converter.persistence.sql import SqlUserRepository, create_database_engine
 from md_converter.persistence.templates import (
@@ -47,6 +47,45 @@ from tests.job_repository_contracts import (
     submission,
 )
 from tests.template_records import publish_template_pair
+
+INTEGRITY_COLUMNS = {
+    "source_filename",
+    "source_kind",
+    "source_sha256",
+    "source_size",
+    "result_manifest_object_id",
+}
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_integrity_revision_round_trip_preserves_postgresql_schema() -> None:
+    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    before = inspect(engine)
+    expected_foreign_keys = before.get_foreign_keys("conversion_jobs")
+    expected_indexes = before.get_indexes("conversion_jobs")
+    try:
+        try:
+            downgrade_database(engine, "20260824_11")
+            downgraded = inspect(engine)
+            assert INTEGRITY_COLUMNS.isdisjoint(
+                column["name"] for column in downgraded.get_columns("conversion_jobs")
+            )
+            assert (
+                downgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+            )
+            assert downgraded.get_indexes("conversion_jobs") == expected_indexes
+        finally:
+            upgrade_database(engine)
+        upgraded = inspect(engine)
+        assert {
+            column["name"] for column in upgraded.get_columns("conversion_jobs")
+        } >= INTEGRITY_COLUMNS
+        assert upgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+        assert upgraded.get_indexes("conversion_jobs") == expected_indexes
+    finally:
+        engine.dispose()
 
 
 class DistributedTemplateProcessor:

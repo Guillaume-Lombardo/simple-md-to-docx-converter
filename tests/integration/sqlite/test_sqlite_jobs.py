@@ -10,7 +10,7 @@ from threading import Event, Lock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect
 
 from md_converter.auth.models import Role, User
 from md_converter.conversion.errors import ConversionError, ConversionErrorCode
@@ -26,7 +26,7 @@ from md_converter.jobs.models import (
 from md_converter.jobs.service import JobService, JobServicePolicy
 from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
+from md_converter.persistence.migrations import downgrade_database, upgrade_database
 from md_converter.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
@@ -52,10 +52,52 @@ from tests.job_repository_contracts import (
     TEMPLATE_VERSION_ID,
     exercise_job_repository_contract,
 )
-from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
+from tests.sqlite_compatibility import (
+    enforce_sqlite_334_alter_grammar,
+    enforce_sqlite_334_update_grammar,
+)
 from tests.template_records import publish_template_pair
 
 COMPONENT_VERSIONS = (("md-converter", "0.1.0"),)
+INTEGRITY_COLUMNS = {
+    "source_filename",
+    "source_kind",
+    "source_sha256",
+    "source_size",
+    "result_manifest_object_id",
+}
+
+
+@pytest.mark.integration
+def test_integrity_revision_round_trip_uses_sqlite_334_table_copy(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    enforce_sqlite_334_alter_grammar(engine)
+    before = inspect(engine)
+    expected_foreign_keys = before.get_foreign_keys("conversion_jobs")
+    expected_indexes = before.get_indexes("conversion_jobs")
+    assert {
+        column["name"] for column in before.get_columns("conversion_jobs")
+    } >= INTEGRITY_COLUMNS
+
+    downgrade_database(engine, "20260824_11")
+    downgraded = inspect(engine)
+    assert INTEGRITY_COLUMNS.isdisjoint(
+        column["name"] for column in downgraded.get_columns("conversion_jobs")
+    )
+    assert downgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+    assert downgraded.get_indexes("conversion_jobs") == expected_indexes
+
+    upgrade_database(engine)
+    upgraded = inspect(engine)
+    assert {
+        column["name"] for column in upgraded.get_columns("conversion_jobs")
+    } >= INTEGRITY_COLUMNS
+    assert upgraded.get_foreign_keys("conversion_jobs") == expected_foreign_keys
+    assert upgraded.get_indexes("conversion_jobs") == expected_indexes
+    engine.dispose()
 
 
 class ControlledClock:

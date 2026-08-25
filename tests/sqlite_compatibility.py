@@ -23,3 +23,21 @@ def enforce_sqlite_334_update_grammar(engine: Engine) -> None:
             raise AssertionError("SQLite 3.34 does not support UPDATE...RETURNING")
 
     event.listen(engine, "before_cursor_execute", reject_update_returning)
+
+
+def enforce_sqlite_334_alter_grammar(engine: Engine) -> None:
+    """Reject ALTER TABLE DROP COLUMN, which SQLite 3.34 cannot parse."""
+
+    def reject_drop_column(
+        _connection: Any,
+        _cursor: Any,
+        statement: str,
+        _parameters: Any,
+        _context: Any,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.upper().split())
+        if normalized.startswith("ALTER TABLE ") and " DROP COLUMN " in normalized:
+            raise AssertionError("SQLite 3.34 does not support ALTER TABLE DROP COLUMN")
+
+    event.listen(engine, "before_cursor_execute", reject_drop_column)

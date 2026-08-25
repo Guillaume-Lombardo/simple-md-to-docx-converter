@@ -467,3 +467,12 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     )
     CORRELATION_REVISION.downgrade()
     correlation.drop_column.assert_called_once_with("conversion_jobs", "correlation_id")
+
+
+@pytest.mark.unit
+def test_job_integrity_downgrade_uses_batch_table_copy(mocker: MockerFixture) -> None:
+    integrity = mocker.patch.object(JOB_INTEGRITY_REVISION, "op")
+    batch = integrity.batch_alter_table.return_value.__enter__.return_value
+    JOB_INTEGRITY_REVISION.downgrade()
+    assert batch.drop_column.call_count == 5
+    integrity.drop_column.assert_not_called()

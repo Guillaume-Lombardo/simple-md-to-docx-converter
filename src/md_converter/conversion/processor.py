@@ -97,12 +97,17 @@ class ProductionTemplateAwareProcessor:
         progress(JobStep.VALIDATING, 10)
         self._require_active(cancelled)
         progress(JobStep.RENDERING, 30)
-        docx = self._convert_docx(
-            source,
-            job.source_kind,
-            template_content,
-            deadline_monotonic=deadline_monotonic,
-        )
+        try:
+            docx = self._convert_docx(
+                source,
+                job.source_kind,
+                template_content,
+                deadline_monotonic=deadline_monotonic,
+                cancellation_requested=cancelled,
+            )
+        except ConversionError:
+            self._require_active(cancelled)
+            raise
         progress(JobStep.DOCX, 70)
         self._require_active(cancelled)
         if job.output is JobOutput.DOCX:
@@ -159,6 +164,7 @@ class ProductionTemplateAwareProcessor:
         template_content: bytes,
         *,
         deadline_monotonic: float | None,
+        cancellation_requested: CancellationProbe,
     ) -> bytes:
         if source_kind is SourceKind.ARCHIVE:
             if source[:4] not in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"}:
@@ -169,8 +175,13 @@ class ProductionTemplateAwareProcessor:
                 self._archive_limits,
                 self._image_limits,
                 deadline_monotonic=deadline_monotonic,
+                cancellation_requested=cancellation_requested,
             )
-        if source_kind is not SourceKind.MARKDOWN or source.startswith(b"PK"):
+        if source_kind is not SourceKind.MARKDOWN or source[:4] in {
+            b"PK\x03\x04",
+            b"PK\x05\x06",
+            b"PK\x07\x08",
+        }:
             raise _source_integrity_error()
         try:
             markdown = source.decode("utf-8")
@@ -180,6 +191,7 @@ class ProductionTemplateAwareProcessor:
             markdown,
             template_content,
             deadline_monotonic=deadline_monotonic,
+            cancellation_requested=cancellation_requested,
         )
 
     def _traceability_context(
@@ -246,6 +258,7 @@ def build_production_processor(
             settings.template_engine_timeout_seconds,
             settings.template_engine_termination_grace_seconds,
             workspace,
+            settings.conversion_pdf_cancellation_poll_seconds,
         ),
         os.environ,
     )
@@ -260,6 +273,7 @@ def build_production_processor(
                 settings.conversion_mermaid_max_width_pixels,
                 settings.conversion_mermaid_max_height_pixels,
                 workspace,
+                settings.conversion_pdf_cancellation_poll_seconds,
             ),
             os.environ,
         ),

@@ -168,7 +168,10 @@ def test_processor_uses_frozen_source_template_and_traceability(
         ObjectKey(ObjectScope.UPLOAD, job.owner_id, job.source_object_id)
     )
     docx.convert.assert_called_once_with(
-        "# Frozen\n", template_content, deadline_monotonic=42.0
+        "# Frozen\n",
+        template_content,
+        deadline_monotonic=42.0,
+        cancellation_requested=mocker.ANY,
     )
     context = pdf.convert.call_args.args[1]
     assert context.template_id == str(job.template_id)
@@ -218,7 +221,49 @@ def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None
         processor._archive_limits,
         processor._image_limits,
         deadline_monotonic=None,
+        cancellation_requested=mocker.ANY,
     )
+
+
+def test_processor_accepts_ordinary_markdown_starting_with_pk(mocker) -> None:
+    source = b"PK prose is ordinary Markdown.\n"
+    job = _job(JobOutput.DOCX, source)
+    processor, _objects, docx, _pdf = _processor(mocker, source)
+
+    assert processor.process_with_template(
+        job,
+        _template(job, b"template"),
+        b"template",
+        cancelled=_Cancellation(),
+        deadline_monotonic=None,
+        progress=mocker.Mock(),
+    ) == JobProcessResult(b"docx")
+    docx.convert.assert_called_once_with(
+        "PK prose is ordinary Markdown.\n",
+        b"template",
+        deadline_monotonic=None,
+        cancellation_requested=mocker.ANY,
+    )
+
+
+@pytest.mark.parametrize("signature", (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+def test_processor_rejects_real_zip_signatures_for_markdown(
+    mocker, signature: bytes
+) -> None:
+    source = signature + b"payload"
+    job = _job(JobOutput.DOCX, source)
+    processor, _objects, _docx, _pdf = _processor(mocker, source)
+
+    with pytest.raises(ConversionError) as caught:
+        processor.process_with_template(
+            job,
+            _template(job, b"template"),
+            b"template",
+            cancelled=_Cancellation(),
+            deadline_monotonic=None,
+            progress=mocker.Mock(),
+        )
+    assert caught.value.code is ConversionErrorCode.SOURCE_INTEGRITY
 
 
 def test_processor_publishes_docx_without_starting_pdf(mocker) -> None:
@@ -263,6 +308,27 @@ def test_processor_rejects_missing_non_utf8_and_cancelled_sources(mocker) -> Non
             template,
             b"template",
             cancelled=_Cancellation(True),
+            deadline_monotonic=None,
+            progress=mocker.Mock(),
+        )
+
+
+def test_processor_maps_active_docx_engine_interruption_to_worker_cancellation(
+    mocker,
+) -> None:
+    source = b"# Blocking\n"
+    job = _job(JobOutput.DOCX, source)
+    processor, _objects, docx, _pdf = _processor(mocker, source)
+    docx.convert.side_effect = ConversionError(
+        ConversionErrorCode.PANDOC_FAILURE, "Pandoc conversion was interrupted."
+    )
+
+    with pytest.raises(JobProcessingCancelled):
+        processor.process_with_template(
+            job,
+            _template(job, b"template"),
+            b"template",
+            cancelled=_Cancellation(False, False, True),
             deadline_monotonic=None,
             progress=mocker.Mock(),
         )

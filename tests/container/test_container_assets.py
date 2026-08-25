@@ -30,6 +30,7 @@ def test_container_domain_is_active_and_runs_rootless_harness() -> None:
         "container/entrypoint.sh",
         "container/preflight.sh",
         "scripts/container/build.sh",
+        "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/run-ci.sh",
@@ -107,6 +108,21 @@ def test_distributed_test_profile_is_provider_neutral_rustfs() -> None:
     deployment = Path("deploy/rustfs-ci.yaml").read_text(encoding="utf-8")
     assert "ghcr.io/rustfs/rustfs:" in deployment
     assert "minio" not in deployment.casefold()
+
+
+def test_distributed_smoke_covers_active_shutdown_and_lease_recovery() -> None:
+    smoke = Path("scripts/container/distributed-api-smoke.sh").read_text(
+        encoding="utf-8"
+    )
+    for contract in (
+        "--submit-blocking-job",
+        "blocking-mmdc.sh",
+        "podman stop --time 8",
+        "{{.State.Pid}}",
+        "--assert-running-job",
+        "--recover-job",
+    ):
+        assert contract in smoke
 
 
 def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
