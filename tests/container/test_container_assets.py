@@ -65,6 +65,7 @@ def test_final_image_version_comes_from_project_metadata() -> None:
     assert 'org.opencontainers.image.version="${APPLICATION_VERSION}"' in containerfile
     assert "markweave.__version__ == sys.argv[1]" in containerfile
     assert 'application_version="$(uv version --short --locked)"' in build
+    assert "env -u SOURCE_DATE_EPOCH podman build" in build
     assert '--build-arg "APPLICATION_VERSION=$application_version"' in build
     assert 'application_version="$(uv version --short --locked)"' in smoke
     assert '--env "EXPECTED_APPLICATION_VERSION=$application_version"' in smoke
