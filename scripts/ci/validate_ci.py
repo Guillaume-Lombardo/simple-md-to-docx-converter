@@ -64,6 +64,7 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
 PUBLISH_STEP_COUNT = 3
+PARTIAL_TAG_CHECK_COUNT = 2
 RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
 RELEASE_PRODUCER_JOB = "build-and-verify"
 PYPI_AVAILABILITY_COMMAND = """\
@@ -131,10 +132,10 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "2cb583d9e89f6215b7e5ee7fd5426895d57a68f5d4c42fdd2ea1096afe67b818"
+    "88d2f330d29058dd9bcaca601d580b31248ca26fa40e33a15838328f8bd499ea"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "83122e2eee30e16708af11c36f187d96b0d462c1eb052b0a443061a284bed9e7"
+    "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
 )
 
 
@@ -1410,12 +1411,39 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
     for required in (
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         '"localhost/md-converter:$RELEASE_VERSION"',
-        '"docker://ghcr.io/guillaume-lombardo/md-converter:$RELEASE_VERSION"',
+        '"docker://$registry_repository:$RELEASE_VERSION"',
         "container-release-${{ inputs.tag }}",
+        'source_tag="source-$SOURCE_SHA"',
+        'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then',
+        'test "$remote_digest" = "$intended_digest"',
+        'test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"',
+        'if [[ "$status" = 404 ]]; then',
+        "podman push --format oci",
         "--clobber",
     ):
         if required not in text:
             errors.append(f"container release is missing dynamic contract: {required}")
+    publish_steps = [
+        step
+        for step in _job_steps(workflow, "build-and-publish")
+        if step.get("name") == "Publish without overwriting a conflicting release image"
+    ]
+    publish_run = publish_steps[0].get("run") if len(publish_steps) == 1 else None
+    if not isinstance(publish_run, str):
+        errors.append("container release lacks the unique guarded publication step")
+    else:
+        inspect_marker = (
+            'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
+        )
+        push_marker = '"docker://$registry_repository:$RELEASE_VERSION"'
+        if (
+            inspect_marker not in publish_run
+            or push_marker not in publish_run
+            or publish_run.index(inspect_marker) > publish_run.index(push_marker)
+        ):
+            errors.append(
+                "container release must inspect the version tag before its push"
+            )
     return errors
 
 
@@ -1501,6 +1529,9 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
         "/git/ref/tags/$RELEASE_TAG",
         "/releases/tags/$RELEASE_TAG",
         "/pypi/markweave/$RELEASE_VERSION/json",
+        '--method POST "repos/$GITHUB_REPOSITORY/git/refs"',
+        '--field "ref=refs/tags/$RELEASE_TAG"',
+        '--field "sha=$SOURCE_SHA"',
         "target_commitish=$SOURCE_SHA",
         "python-release-${{ needs.detect.outputs.tag }}",
         '--version "$RELEASE_VERSION"',
@@ -1509,6 +1540,32 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
     for required in required_contracts:
         if required not in text:
             errors.append(f"automatic release is missing contract: {required}")
+    create_steps = [
+        step
+        for step in _job_steps(workflow, "create-release")
+        if step.get("name") == "Create the exact tag and published GitHub Release"
+    ]
+    create_run = create_steps[0].get("run") if len(create_steps) == 1 else None
+    tag_post = '--method POST "repos/$GITHUB_REPOSITORY/git/refs"'
+    release_post = '--method POST "repos/$GITHUB_REPOSITORY/releases"'
+    exact_tag_check = (
+        'gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha'
+    )
+    exact_release_check = (
+        "--jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv'"
+    )
+    if not isinstance(create_run, str):
+        errors.append("automatic release lacks the unique atomic creation step")
+    elif (
+        tag_post not in create_run
+        or release_post not in create_run
+        or create_run.index(tag_post) > create_run.index(release_post)
+        or create_run.count(exact_tag_check) < PARTIAL_TAG_CHECK_COUNT
+        or exact_release_check not in create_run
+    ):
+        errors.append(
+            "automatic release must atomically create and exactly verify tag before Release"
+        )
     errors.extend(
         _validate_action_allowlist(
             workflow,

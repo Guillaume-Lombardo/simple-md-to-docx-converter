@@ -87,18 +87,67 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Push the immutable release image
+      - name: Publish without overwriting a conflicting release image
         id: push
         env:
+          GHCR_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          podman push --digestfile "$RUNNER_TEMP/image-digest" \
-            "localhost/md-converter:$RELEASE_VERSION" \
-            "docker://ghcr.io/guillaume-lombardo/md-converter:$RELEASE_VERSION"
-          digest="$(cat "$RUNNER_TEMP/image-digest")"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          registry_repository="ghcr.io/guillaume-lombardo/md-converter"
+          registry_path="guillaume-lombardo/md-converter"
+          source_tag="source-$SOURCE_SHA"
+          intended_digest="$(uv run python -c 'from pathlib import Path; from scripts.container.integrity import oci_identity; print(oci_identity(Path("artifacts/container/image.oci.tar"))[0])')"
+          [[ "$intended_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          registry_token="$(curl --fail --silent --show-error \
+            --user "$GITHUB_ACTOR:$GHCR_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull,push" \
+            | jq --exit-status --raw-output '.token // .access_token')"
+
+          inspect_remote_tag() {
+            local tag="$1"
+            local headers="$RUNNER_TEMP/registry-headers"
+            local status
+            if ! status="$(curl --silent --show-error --output /dev/null \
+              --dump-header "$headers" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $registry_token" \
+              --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$registry_path/manifests/$tag")"; then
+              return 5
+            fi
+            if [[ "$status" = 404 ]]; then
+              return 4
+            fi
+            [[ "$status" = 200 ]] || return 5
+            local digest
+            digest="$(awk -F ': ' 'tolower($1) == "docker-content-digest" {gsub("\\r", "", $2); print $2}' "$headers")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 5
+            printf '%s\n' "$digest"
+          }
+
+          if remote_digest="$(inspect_remote_tag "$source_tag")"; then
+            test "$remote_digest" = "$intended_digest"
+          else
+            test "$?" = 4
+            podman push --format oci --digestfile "$RUNNER_TEMP/source-image-digest" \
+              "localhost/md-converter:$RELEASE_VERSION" \
+              "docker://$registry_repository:$source_tag"
+            test "$(cat "$RUNNER_TEMP/source-image-digest")" = "$intended_digest"
+            test "$(inspect_remote_tag "$source_tag")" = "$intended_digest"
+          fi
+
+          if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then
+            test "$remote_digest" = "$intended_digest"
+          else
+            test "$?" = 4
+            podman push --format oci --digestfile "$RUNNER_TEMP/version-image-digest" \
+              "localhost/md-converter:$RELEASE_VERSION" \
+              "docker://$registry_repository:$RELEASE_VERSION"
+            test "$(cat "$RUNNER_TEMP/version-image-digest")" = "$intended_digest"
+            test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"
+          fi
+          printf 'digest=%s\n' "$intended_digest" >> "$GITHUB_OUTPUT"
       - name: Retain exact release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -40,6 +40,21 @@ def test_pyproject_change_without_version_change_is_a_noop() -> None:
     )
 
 
+def test_equivalent_canonical_spelling_transition_is_valid() -> None:
+    assert detect_transition(_project("0.3"), _project("0.3.0")) == (
+        VersionTransition("0.3.0", "v0.3.0")
+    )
+
+
+@pytest.mark.parametrize(
+    ("previous", "current"),
+    [("0.4.0", "0.3.0"), ("1.0", "0.99")],
+)
+def test_rejects_version_downgrade(previous: str, current: str) -> None:
+    with pytest.raises(ReleaseVersionError, match="must not be lower"):
+        detect_transition(_project(previous), _project(current))
+
+
 @pytest.mark.parametrize(
     "version",
     ["invalid", "0.4.0rc1", "0.4.0.dev1", "0.4.0+local", "1!0.4.0", "00.4.0"],

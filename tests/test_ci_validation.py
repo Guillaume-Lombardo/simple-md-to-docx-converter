@@ -588,6 +588,47 @@ def test_automatic_release_policy_requires_transition_and_collision_gates(
 
 
 @pytest.mark.unit
+def test_automatic_release_atomically_creates_tag_before_release() -> None:
+    workflow = yaml.safe_load(
+        Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["create-release"]["steps"]
+    [run] = [
+        step["run"]
+        for step in steps
+        if step["name"] == "Create the exact tag and published GitHub Release"
+    ]
+
+    tag_post = '--method POST "repos/$GITHUB_REPOSITORY/git/refs"'
+    release_post = '--method POST "repos/$GITHUB_REPOSITORY/releases"'
+    assert run.index(tag_post) < run.index(release_post)
+    assert (
+        run.count(
+            'gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha'
+        )
+        == 2
+    )
+    assert "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv" in run
+
+
+@pytest.mark.unit
+def test_automatic_release_policy_rejects_missing_partial_retry_identity_check() -> (
+    None
+):
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
+        'test "$SOURCE_SHA" = "$SOURCE_SHA"',
+        1,
+    )
+    errors = validate_production_release_workflow_text(weakened)
+    assert (
+        "automatic release must atomically create and exactly verify tag before Release"
+        in errors
+    )
+
+
+@pytest.mark.unit
 def test_container_release_policy_requires_dynamic_exact_source_and_evidence() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
@@ -600,6 +641,37 @@ def test_container_release_policy_requires_dynamic_exact_source_and_evidence() -
     assert "container release workflow differs from the reviewed policy" in errors
     assert any('test "$RELEASE_TAG" = "v$RELEASE_VERSION"' in error for error in errors)
     assert any("--clobber" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_inspects_remote_version_before_push() -> None:
+    workflow = yaml.safe_load(
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["build-and-publish"]["steps"]
+    [run] = [
+        step["run"]
+        for step in steps
+        if step["name"] == "Publish without overwriting a conflicting release image"
+    ]
+
+    inspect = 'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
+    version_push = '"docker://$registry_repository:$RELEASE_VERSION"'
+    assert run.index(inspect) < run.index(version_push)
+    assert 'test "$remote_digest" = "$intended_digest"' in run
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_conflict_guard_removal() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        'test "$remote_digest" = "$intended_digest"',
+        "true # permit overwrite",
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("remote_digest" in error for error in errors)
 
 
 @pytest.mark.unit

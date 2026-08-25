@@ -31,7 +31,9 @@ pull access. Do not grant the package to unrelated repositories.
 
 1. Change only the intended release version in `project.version` and the matching application
    version source. Use canonical final public PEP 440 syntax. Pre-releases, development releases,
-   local versions, epochs, invalid spellings, and mismatched application versions fail closed.
+   local versions, epochs, invalid spellings, version downgrades, and mismatched application
+   versions fail closed. A more explicit canonical spelling such as `0.3` to `0.3.0` remains a
+   valid transition even though the two parsed PEP 440 versions have equal precedence.
 2. Open a pull request and require the complete `CI / gate`, independent review, and protected
    merge to `main`. The first approved transition is `0.2.0` to `0.3.0`; future versions are not
    hardcoded in the workflows.
@@ -41,19 +43,24 @@ pull access. Do not grant the package to unrelated repositories.
 4. The workflow builds the wheel and sdist once from the reviewed main SHA, validates bounded
    metadata and integrity, and installs the exact wheel in a clean Python 3.14 environment. Only
    those verified files are transferred to the `pypi` environment job.
-5. A minimal `contents: write` job creates the tag at the exact reviewed SHA and publishes the
-   matching GitHub Release. The PyPI job then rechecks that the version is still unpublished and
-   uploads the verified files with PEP 740 attestations through OIDC.
+5. A minimal `contents: write` job atomically creates the tag ref at the exact reviewed SHA before
+   publishing the matching GitHub Release. A failed-job rerun accepts a partially created tag or
+   Release only after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI
+   job then rechecks that the version is still unpublished and uploads the verified files with
+   PEP 740 attestations through OIDC.
 6. The reusable container workflow checks out the same SHA, derives the image tag from the detected
-   version, runs the rootless final-image and Critical-vulnerability gates, pushes GHCR, generates
-   provenance, and attaches the SBOM and evidence to the already verified Release identity.
+   version, runs the rootless final-image and Critical-vulnerability gates, and derives the
+   intended OCI digest. It publishes an immutable `source-<SHA>` identity, inspects any existing
+   version tag, and accepts only an absent tag or that same digest before pushing GHCR. It then
+   generates provenance and attaches the SBOM and evidence to the verified Release identity.
 
 The release orchestrator and reusable container workflow use the same trusted push context; they do
 not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` therefore cannot cause
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery.
+state before authorizing any manual recovery. A conflicting GHCR version or source tag also fails
+closed and is never overwritten.
 
 ## Post-publication verification
 

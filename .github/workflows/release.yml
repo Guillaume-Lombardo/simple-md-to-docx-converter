@@ -135,14 +135,24 @@ jobs:
           SOURCE_SHA: ${{ needs.detect.outputs.source-sha }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
-            --field "tag_name=$RELEASE_TAG" \
-            --field "target_commitish=$SOURCE_SHA" \
-            --field "name=Markweave $RELEASE_TAG" \
-            --field draft=false \
-            --field prerelease=false \
-            --field generate_release_notes=true >/dev/null
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            --field "ref=refs/tags/$RELEASE_TAG" \
+            --field "sha=$SOURCE_SHA" >/dev/null; then
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+          fi
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            if ! gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              --field "tag_name=$RELEASE_TAG" \
+              --field "target_commitish=$SOURCE_SHA" \
+              --field "name=Markweave $RELEASE_TAG" \
+              --field draft=false \
+              --field prerelease=false \
+              --field generate_release_notes=true >/dev/null; then
+              gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >/dev/null
+            fi
+          fi
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
             --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
             = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'

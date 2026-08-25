@@ -43,10 +43,15 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - The `pypi` environment has no required reviewer or manual approval, and only a real final-version
   transition merged to protected `main` in the trusted upstream repository can start publication.
 - A `pyproject.toml` change without a `project.version` transition is a successful no-op. Invalid,
-  non-canonical, pre-release, development, local, and epoch versions fail closed.
+  non-canonical, pre-release, development, local, epoch, and downgraded versions fail closed;
+  changed canonical spellings with equal PEP 440 precedence remain valid transitions.
 - The automation rejects an existing derived tag, matching GitHub Release, or already-published
   PyPI version before creating external state.
 - The derived `v<version>` tag and published GitHub Release target the exact reviewed main SHA.
+- Tag creation is atomic and precedes Release publication. Failed-job retries accept partial tag or
+  Release state only when its complete identity matches the intended tag and reviewed SHA.
+- GHCR publication never overwrites a conflicting version tag; an existing tag is accepted only
+  when it resolves to the exact intended OCI digest bound through the source SHA.
 - Future Python artifacts, GHCR tags, attestations, and evidence derive dynamically from
   `project.version`; only tests and documentation may lock the approved first `0.3.0` release.
 - Only the minimal PyPI upload job in the isolated workflow receives `id-token: write` for publication. A separate provenance or attestation job owned by T22 may receive `id-token: write` only when the need is documented and all its other permissions are least privilege.
@@ -169,6 +174,12 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   container artifacts from the same trusted push. A secretless reusable container workflow
   verifies Release identity before idempotent evidence attachment; token-created tag and Release
   events do not retrigger publication.
+- 2026-08-25: Independent review hardened automatic publication against downgrade and remote-state
+  races. The detector now compares parsed PEP 440 precedence while preserving an approved
+  equal-precedence spelling transition. The creation job atomically writes the exact tag ref before
+  the Release and safely verifies partial same-run state on failed-job reruns. Container publication
+  binds an immutable source-SHA tag to the locally verified OCI manifest, inspects the remote
+  version tag before writing it, accepts only the same digest, and fails closed on conflicts.
 
 ## Synchronization
 

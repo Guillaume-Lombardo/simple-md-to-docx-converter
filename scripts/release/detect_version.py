@@ -65,6 +65,10 @@ def detect_transition(previous: bytes, current: bytes) -> VersionTransition | No
     """Return a release transition only when the authoritative version changed."""
     previous_version = _public_final_version(previous, label="previous pyproject.toml")
     current_version = _public_final_version(current, label="current pyproject.toml")
+    if Version(current_version) < Version(previous_version):
+        raise ReleaseVersionError(
+            "current project.version must not be lower than the previous version"
+        )
     if current_version == previous_version:
         return None
     return VersionTransition(current_version, f"v{current_version}")
