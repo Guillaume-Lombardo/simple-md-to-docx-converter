@@ -61,6 +61,36 @@ def test_validator_rejects_removed_real_browser_workflow() -> None:
 
 
 @pytest.mark.unit
+def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert (
+        "matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-')" in workflow
+    )
+    assert (
+        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
+        in workflow
+    )
+    assert "failure() && startsWith(matrix.domain, 'e2e-')" in workflow
+    assert (
+        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
+        "&& 'standalone' || 'distributed' }}" in workflow
+    )
+
+
+@pytest.mark.unit
+def test_validator_rejects_successful_e2e_artifact_retention() -> None:
+    """Browser and service evidence must not be uploaded from passing scenarios."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "failure() && startsWith(matrix.domain, 'e2e-')",
+        "always() && startsWith(matrix.domain, 'e2e-')",
+    )
+    assert any(
+        "failure() && startsWith" in error for error in validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 def test_validator_rejects_unpinned_action_and_secret_access() -> None:
     """Mutable action tags and secret reads are rejected together."""
     workflow = "uses: actions/checkout@v7\nsecrets.DEPLOY_TOKEN\n"

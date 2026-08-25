@@ -18,4 +18,5 @@ htmlcov/
 dist/
 build/
 artifacts/
+node_modules/
 *.egg-info/

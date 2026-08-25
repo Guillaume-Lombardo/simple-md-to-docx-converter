@@ -52,6 +52,22 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
     assert "uv sync --locked --no-dev --no-editable" in containerfile
 
 
+def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> None:
+    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    digest = "194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653"
+    assert f"sha256:{digest}" in containerfile
+    assert f"readonly base_digest=sha256:{digest}" in script
+    pull = 'podman pull --quiet "$base_image"'
+    verification = (
+        'test "$(podman image inspect "$base_image" --format \'{{.Digest}}\')" '
+        '= "$base_digest"'
+    )
+    build = 'bash scripts/container/build.sh "$image"'
+    assert verification in script
+    assert script.index(pull) < script.index(verification) < script.index(build)
+
+
 def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
     entrypoint = Path("container/entrypoint.sh").read_text(encoding="utf-8")
     assert "api|embedded-worker|external-worker" in entrypoint

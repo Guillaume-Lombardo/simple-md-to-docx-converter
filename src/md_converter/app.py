@@ -75,6 +75,7 @@ from md_converter.malware import (
 )
 from md_converter.observability import (
     CORRELATION_HEADER,
+    CORRELATION_STATE_KEY,
     AuditReader,
     AuditRecord,
     CorrelationMiddleware,
@@ -82,7 +83,6 @@ from md_converter.observability import (
     OperationalMetrics,
     QueueObserver,
     QueueSnapshot,
-    current_correlation_id,
     log_event,
 )
 from md_converter.persistence.errors import PersistenceError
@@ -1447,6 +1447,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         responses=error_responses(401, 403, 409, 413, 422, 429, 503),
     )
     async def create_conversion(  # noqa: PLR0913, PLR0917 - FastAPI fields
+        request: Request,
         response: Response,
         actor: Annotated[User, Depends(mutation_actor)],
         source: Annotated[UploadFile, File()],
@@ -1455,6 +1456,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
+        correlation_id = getattr(request.state, CORRELATION_STATE_KEY)
         if source.filename is None:
             await source.close()
             raise JobRequestError
@@ -1484,7 +1486,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
                     output=output,
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
-                    correlation_id=current_correlation_id() or uuid4().hex,
+                    correlation_id=correlation_id,
                     source_filename=source_filename,
                     source_kind=source_kind,
                 ),
@@ -1493,6 +1495,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         except ValueError:
             raise JobRequestError from None
         response.headers["Location"] = f"/api/v1/conversions/{job.id}"
+        response.headers[CORRELATION_HEADER] = job.correlation_id
         response.headers["Retry-After"] = str(
             resolved_settings.conversion_retry_after_seconds
         )

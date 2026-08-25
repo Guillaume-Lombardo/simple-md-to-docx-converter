@@ -36,11 +36,21 @@
   },
   "e2e-distributed": {
     "activation_ticket": "T21",
-    "status": "planned"
+    "command": [
+      "bash",
+      "scripts/e2e/run.sh",
+      "distributed"
+    ],
+    "status": "active"
   },
   "e2e-standalone": {
     "activation_ticket": "T21",
-    "status": "planned"
+    "command": [
+      "bash",
+      "scripts/e2e/run.sh",
+      "standalone"
+    ],
+    "status": "active"
   },
   "functional": {
     "activation_ticket": "T06",

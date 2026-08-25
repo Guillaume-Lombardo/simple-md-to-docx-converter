@@ -45,6 +45,11 @@ def validate_workflow_text(text: str) -> list[str]:
         "--coverage coverage.json --fail-under 90",
         "python -m scripts.ci.check_changed_coverage",
         "npm run test:web-browser",
+        "matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-')",
+        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')",
+        "npm ci --ignore-scripts",
+        "failure() && startsWith(matrix.domain, 'e2e-')",
+        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && 'standalone' || 'distributed' }}",
         "github.event_name == 'pull_request' || github.event_name == 'merge_group'",
         "--source-root src/md_converter --fail-under 90",
     )
