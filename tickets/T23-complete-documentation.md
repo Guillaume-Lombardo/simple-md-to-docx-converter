@@ -71,10 +71,11 @@ Complete English user, template, administrator, API, operations, storage, queue,
   The final-image runner also proves that the configured public origin accepts a valid login and
   rejects a hostile Origin even when `Forwarded` and `X-Forwarded-*` headers are spoofed.
 - 2026-08-25: Exact-SHA review rejected an unbounded Docker work volume and proposed E2E exceptions.
-  The quickstart now creates a private 320 MiB ext4 loop filesystem through one user-facing script,
-  retains the 256 MiB application budget, proves physical `ENOSPC`, and safely handles password
-  reuse, obsolete volumes, restart, rollback, and shutdown. The Compose E2E reformats that
-  filesystem between starts before proving recovery from durable `/data` state.
+  The Linux/rootful-Docker quickstart now creates a private, exact 256 MiB ext4 loop filesystem
+  through one user-facing script, proves physical `ENOSPC`, and safely handles password reuse,
+  obsolete volumes, restart, rollback, and shutdown. The Compose E2E drives that same script,
+  reformats disposable scratch after an abnormal stop, proves recovery from durable `/data` state,
+  and verifies that stale loop-device metadata never detaches an unrelated reused device.
 - 2026-08-25: Eliminated the rejected E2E exceptions. Both standalone and distributed final-image
   suites now cover a ZIP/SVG success path with normalized PNG evidence; corrupt ZIP, encrypted ZIP,
   and invalid-image failures with no result; and exact macro, external-relationship, missing-style,

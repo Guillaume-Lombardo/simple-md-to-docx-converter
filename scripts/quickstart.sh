@@ -9,9 +9,10 @@ readonly state_directory="$state_home/markweave-quickstart"
 readonly password_file="$state_directory/password.env"
 readonly work_image="$state_directory/work.ext4"
 readonly template_file="$state_directory/quickstart-template.docx"
-readonly work_bytes=335544320
-readonly project=markweave
-readonly work_volume=markweave_markweave-work
+readonly work_bytes=268435456
+readonly project="${MARKWEAVE_QUICKSTART_PROJECT:-markweave}"
+readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"
+readonly work_volume="${project}_markweave-work"
 readonly blkid=/usr/sbin/blkid
 readonly losetup=/usr/sbin/losetup
 readonly mkfs_ext4=/usr/sbin/mkfs.ext4
@@ -29,6 +30,73 @@ fail() {
   exit 1
 }
 
+validate_project_and_port() {
+  [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || \
+    fail "The quickstart project name must contain only lowercase letters, numbers, underscores, and hyphens."
+  [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || \
+    fail "The quickstart port must be an integer from 1 through 65535."
+}
+
+require_supported_host() {
+  local context
+  local operating_system
+  local security_options
+  [[ "$(uname -s)" == Linux ]] || \
+    fail "This loop-backed quickstart requires a Linux host. Docker Desktop is not supported."
+  docker info >/dev/null 2>&1 || \
+    fail "A running, directly accessible Docker Engine daemon is required."
+  context="$(docker context show)"
+  operating_system="$(docker info --format '{{.OperatingSystem}}')"
+  security_options="$(docker info --format '{{json .SecurityOptions}}')"
+  [[ "$context" != desktop-linux && "$operating_system" != *"Docker Desktop"* ]] || \
+    fail "Docker Desktop is not supported by the loop-backed quickstart."
+  [[ "$security_options" != *rootless* ]] || \
+    fail "Rootless Docker is not supported by the loop-backed quickstart; use a rootful Docker Engine daemon."
+}
+
+validate_private_file() {
+  local path="$1"
+  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || \
+    fail "Refusing unsafe quickstart state file: $path"
+}
+
+loop_for_image() {
+  local devices
+  devices="$(sudo "$losetup" --noheadings --output NAME -j "$work_image")"
+  if [[ "$(sed '/^$/d' <<<"$devices" | wc -l)" -gt 1 ]]; then
+    fail "The quickstart work image is attached to more than one loop device."
+  fi
+  sed -n '1p' <<<"$devices" | xargs
+}
+
+device_backs_work_image() {
+  local device="$1"
+  [[ -n "$device" && -b "$device" ]] || return 1
+  [[ "$(sudo "$losetup" --noheadings --raw --output BACK-FILE "$device" 2>/dev/null)" == "$work_image" ]]
+}
+
+validate_work_volume_labels() {
+  [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' "$work_volume")" == "$project" ]] || \
+    fail "Refusing a work volume with an unexpected Compose project label."
+  [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' "$work_volume")" == markweave-work ]] || \
+    fail "Refusing a work volume with an unexpected Compose volume label."
+}
+
+work_volume_is_used() {
+  [[ -n "$(docker container ls --all --quiet --filter "volume=$work_volume")" ]]
+}
+
+remove_labeled_work_volume() {
+  if ! docker volume inspect "$work_volume" >/dev/null 2>&1; then
+    return 0
+  fi
+  validate_work_volume_labels
+  if work_volume_is_used; then
+    fail "Refusing to remove a work volume that is still used by a container."
+  fi
+  docker volume rm "$work_volume" >/dev/null
+}
+
 cleanup() {
   local exit_code=$?
   local device=""
@@ -38,25 +106,25 @@ cleanup() {
     fi
     rmdir -- "$initialization_mount" 2>/dev/null || true
   fi
-  if [[ "$starting" == true && "$start_succeeded" != true && "$loop_attached_by_run" == true ]]; then
-    device="$(loop_for_image)"
+  if [[ "$starting" == true && "$start_succeeded" != true ]]; then
     if [[ "$compose_started" == true ]]; then
       compose down --remove-orphans >/dev/null 2>&1 || true
     fi
     if docker volume inspect "$work_volume" >/dev/null 2>&1; then
       if [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' "$work_volume")" == "$project" ]] && \
         [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' "$work_volume")" == markweave-work ]] && \
-        [[ "$(docker volume inspect --format '{{ index .Options "type" }}' "$work_volume")" == ext4 ]] && \
-        [[ "$(docker volume inspect --format '{{ index .Options "o" }}' "$work_volume")" == rw,nosuid,nodev ]] && \
-        [[ "$(docker volume inspect --format '{{ index .Options "device" }}' "$work_volume")" == "$device" ]]; then
+        ! work_volume_is_used; then
         docker volume rm "$work_volume" >/dev/null || exit_code=1
       else
-        echo "Preserving an unexpected work volume after failed startup." >&2
+        echo "Preserving an unexpected or in-use work volume after failed startup." >&2
         exit_code=1
       fi
     fi
-    if [[ -n "$device" && "$(sudo "$losetup" --noheadings --raw --output BACK-FILE "$device")" == "$work_image" ]]; then
-      sudo "$losetup" --detach "$device" || exit_code=1
+    if [[ "$loop_attached_by_run" == true && -e "$work_image" ]]; then
+      device="$(loop_for_image)"
+      if device_backs_work_image "$device"; then
+        sudo "$losetup" --detach "$device" || exit_code=1
+      fi
     fi
     if [[ "$work_image_created" == true && -e "$work_image" ]]; then
       if [[ -z "$(loop_for_image)" ]]; then
@@ -83,12 +151,6 @@ prepare_private_state() {
   [[ -d "$state_directory" && -O "$state_directory" ]] || \
     fail "The quickstart state directory must be owned by the current user."
   chmod 0700 -- "$state_directory"
-}
-
-validate_private_file() {
-  local path="$1"
-  [[ -f "$path" && ! -L "$path" && -O "$path" ]] || \
-    fail "Refusing unsafe quickstart state file: $path"
 }
 
 prepare_password() {
@@ -122,44 +184,53 @@ prepare_template() {
 }
 
 prepare_work_image() {
+  local application_running="$1"
   local actual_size
-  local filesystem
   local temporary
   if [[ ! -e "$work_image" ]]; then
     temporary="$(mktemp "$state_directory/work.XXXXXX")"
     truncate -s "$work_bytes" "$temporary"
-    "$mkfs_ext4" -q -F -m 0 -O '^has_journal' "$temporary"
     chmod 0600 -- "$temporary"
     mv -- "$temporary" "$work_image"
     work_image_created=true
   fi
   validate_private_file "$work_image"
   actual_size="$(stat -c %s -- "$work_image")"
-  [[ "$actual_size" == "$work_bytes" ]] || \
-    fail "The quickstart work image is not exactly 320 MiB."
-  filesystem="$(sudo "$blkid" -p -s TYPE -o value -- "$work_image")"
-  [[ "$filesystem" == ext4 ]] || fail "The quickstart work image is not ext4."
-}
-
-initialize_work_device() {
-  local device="$1"
-  [[ "$work_image_created" == true || "$loop_attached_by_run" == true ]] || return 0
-  initialization_mount="$(mktemp -d "$state_directory/mount.XXXXXX")"
-  sudo mount -t ext4 -o rw,nosuid,nodev "$device" "$initialization_mount"
-  sudo chown 1001:0 "$initialization_mount"
-  sudo chmod 0770 "$initialization_mount"
-  sudo umount "$initialization_mount"
-  rmdir -- "$initialization_mount"
-  initialization_mount=""
-}
-
-loop_for_image() {
-  local devices
-  devices="$(sudo "$losetup" --noheadings --output NAME -j "$work_image")"
-  if [[ "$(sed '/^$/d' <<<"$devices" | wc -l)" -gt 1 ]]; then
-    fail "The quickstart work image is attached to more than one loop device."
+  if [[ "$actual_size" != "$work_bytes" ]]; then
+    [[ "$application_running" != true ]] || \
+      fail "The running quickstart work image is not exactly 256 MiB."
   fi
-  sed -n '1p' <<<"$devices" | xargs
+}
+
+resize_stopped_work_image() {
+  local actual_size
+  local device
+  local temporary
+  actual_size="$(stat -c %s -- "$work_image")"
+  [[ "$actual_size" != "$work_bytes" ]] || return 0
+  device="$(loop_for_image)"
+  if [[ -n "$device" ]]; then
+    device_backs_work_image "$device" || \
+      fail "Refusing to detach a loop device with an unexpected backing file."
+    sudo "$losetup" --detach "$device"
+  fi
+  temporary="$(mktemp "$state_directory/work.XXXXXX")"
+  truncate -s "$work_bytes" "$temporary"
+  chmod 0600 -- "$temporary"
+  mv -- "$temporary" "$work_image"
+  work_image_created=true
+  work_device_current=""
+  attach_work_image
+}
+
+validate_running_work_image() {
+  local actual_size
+  local filesystem
+  actual_size="$(stat -c %s -- "$work_image")"
+  [[ "$actual_size" == "$work_bytes" ]] || \
+    fail "The running quickstart work image is not exactly 256 MiB."
+  filesystem="$(sudo "$blkid" -p -s TYPE -o value -- "$work_image")"
+  [[ "$filesystem" == ext4 ]] || fail "The running quickstart work image is not ext4."
 }
 
 attach_work_image() {
@@ -170,109 +241,135 @@ attach_work_image() {
   fi
   [[ "$work_device_current" == /dev/loop* ]] || \
     fail "Unexpected loop device: $work_device_current"
+  device_backs_work_image "$work_device_current" || \
+    fail "The discovered loop device does not belong to the quickstart work image."
+}
+
+initialize_work_device() {
+  local device="$1"
+  initialization_mount="$(mktemp -d "$state_directory/mount.XXXXXX")"
+  sudo mount -t ext4 -o rw,nosuid,nodev "$device" "$initialization_mount"
+  sudo chown 1001:0 "$initialization_mount"
+  sudo chmod 0770 "$initialization_mount"
+  sudo umount "$initialization_mount"
+  rmdir -- "$initialization_mount"
+  initialization_mount=""
+}
+
+format_work_device() {
+  local device="$1"
+  device_backs_work_image "$device" || \
+    fail "Refusing to format a loop device that does not belong to the quickstart work image."
+  sudo "$mkfs_ext4" -q -F -m 0 -O '^has_journal' "$device"
+  initialize_work_device "$device"
 }
 
 write_runtime_env() {
   local device="$1"
   local password
+  if [[ -n "$runtime_env" && -f "$runtime_env" ]]; then
+    rm -f -- "$runtime_env"
+  fi
   runtime_env="$(mktemp "$state_directory/compose.XXXXXX")"
   password="$(sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' "$password_file")"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$device" >"$runtime_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$device" >"$runtime_env"
   chmod 0600 -- "$runtime_env"
 }
 
 compose() {
-  docker compose --project-directory "$repository" \
+  docker compose --project-name "$project" --project-directory "$repository" \
     --file "$repository/compose.yaml" --env-file "$runtime_env" "$@"
 }
 
-validate_work_volume() {
+application_container() {
+  docker container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=markweave"
+}
+
+application_is_running() {
+  local container
+  container="$(application_container)"
+  [[ -n "$container" ]] || return 1
+  [[ "$(docker inspect --format '{{.State.Running}}' "$container")" == true ]]
+}
+
+validate_current_work_volume() {
+  local device="$1"
+  docker volume inspect "$work_volume" >/dev/null 2>&1 || \
+    fail "The running quickstart has no work volume. Stop its containers before retrying."
   validate_work_volume_labels
   [[ "$(docker volume inspect --format '{{ index .Options "type" }}' "$work_volume")" == ext4 ]] || \
-    fail "The existing work volume is not the bounded ext4 volume. Run scripts/quickstart.sh down, then retry."
+    fail "The running work volume is not ext4. Stop its containers before retrying."
   [[ "$(docker volume inspect --format '{{ index .Options "o" }}' "$work_volume")" == rw,nosuid,nodev ]] || \
-    fail "The existing work volume has unexpected mount options. Run scripts/quickstart.sh down, then retry."
-}
-
-validate_work_volume_labels() {
-  [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' "$work_volume")" == "$project" ]] || \
-    fail "Refusing a work volume with an unexpected Compose project label."
-  [[ "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' "$work_volume")" == markweave-work ]] || \
-    fail "Refusing a work volume with an unexpected Compose volume label."
-}
-
-work_volume_is_used() {
-  [[ -n "$(docker container ls --all --quiet --filter "volume=$work_volume")" ]]
-}
-
-reconcile_work_volume() {
-  local device="$1"
-  local configured_device
-  if ! docker volume inspect "$work_volume" >/dev/null 2>&1; then
-    return 0
-  fi
-  validate_work_volume_labels
-  configured_device="$(docker volume inspect --format '{{ index .Options "device" }}' "$work_volume")"
-  if [[ "$(docker volume inspect --format '{{ index .Options "type" }}' "$work_volume")" == ext4 ]] && \
-    [[ "$(docker volume inspect --format '{{ index .Options "o" }}' "$work_volume")" == rw,nosuid,nodev ]] && \
-    [[ "$configured_device" == "$device" ]]; then
-    return 0
-  fi
-  if work_volume_is_used; then
-    fail "The obsolete work volume is still used by a container. Run scripts/quickstart.sh down, then retry."
-  fi
-  docker volume rm "$work_volume" >/dev/null
+    fail "The running work volume has unexpected mount options. Stop its containers before retrying."
+  [[ "$(docker volume inspect --format '{{ index .Options "device" }}' "$work_volume")" == "$device" ]] || \
+    fail "The running work volume does not use the loop device owned by this quickstart."
 }
 
 start() {
+  local application_running=false
   local device
-  starting=true
+  validate_project_and_port
+  require_supported_host
   prepare_private_state
   prepare_password
   prepare_template
-  echo "Preparing a bounded ext4 workspace requires sudo for blkid and loop-device setup."
+  echo "Preparing the 256 MiB ext4 workspace requires sudo for loop-device and filesystem setup."
   sudo -v
-  prepare_work_image
+  if application_is_running; then
+    application_running=true
+  fi
+  starting=true
+  prepare_work_image "$application_running"
+  if [[ "$application_running" == true && "$work_image_created" == true ]]; then
+    fail "Refusing to reuse a running stack whose private work image is missing."
+  fi
   attach_work_image
   device="$work_device_current"
-  initialize_work_device "$device"
   write_runtime_env "$device"
-  reconcile_work_volume "$device"
+
+  if [[ "$application_running" == true ]]; then
+    validate_running_work_image
+    validate_current_work_volume "$device"
+  else
+    # A stopped or vanished stack cannot safely retain a mount keyed by /dev/loopN.
+    # Remove only this exact Compose project, discard its labeled scratch volume,
+    # and rebuild the disposable filesystem through the backing-file association.
+    compose down --remove-orphans
+    remove_labeled_work_volume
+    resize_stopped_work_image
+    device="$work_device_current"
+    write_runtime_env "$device"
+    format_work_device "$device"
+  fi
+
   compose_started=true
   compose up --detach
   start_succeeded=true
-  echo "Markweave is starting at http://localhost:8080"
+  echo "Markweave is starting at http://localhost:$port"
   echo "Template: $template_file"
   echo "Show the administrator password with: scripts/quickstart.sh password"
 }
 
 stop() {
   local device=""
+  validate_project_and_port
+  require_supported_host
   prepare_private_state
   prepare_password
   if [[ -e "$work_image" ]]; then
     validate_private_file "$work_image"
-    echo "Detaching the bounded ext4 workspace requires sudo."
+    echo "Cleaning the 256 MiB ext4 workspace requires sudo for loop-device setup."
     sudo -v
     device="$(loop_for_image)"
   fi
   write_runtime_env "${device:-/dev/null}"
   compose down --remove-orphans
-  if docker volume inspect "$work_volume" >/dev/null 2>&1; then
-    validate_work_volume_labels
-    if work_volume_is_used; then
-      fail "Refusing to remove a work volume that is still used by a container."
-    fi
-    if [[ "$(docker volume inspect --format '{{ index .Options "type" }}' "$work_volume")" == ext4 ]]; then
-      [[ -n "$device" ]] || fail "Refusing to remove the current ext4 work volume without its image."
-      [[ "$(docker volume inspect --format '{{ index .Options "device" }}' "$work_volume")" == "$device" ]] || \
-        fail "Refusing a current ext4 work volume attached to an unexpected device."
-    fi
-    docker volume rm "$work_volume" >/dev/null
-  fi
+  remove_labeled_work_volume
   if [[ -n "$device" ]]; then
-    [[ "$(sudo "$losetup" --noheadings --raw --output BACK-FILE "$device")" == "$work_image" ]] || \
+    device_backs_work_image "$device" || \
       fail "Refusing to detach a loop device with an unexpected backing file."
     sudo "$losetup" --detach "$device"
   fi
@@ -292,9 +389,13 @@ show_password() {
 
 compose_status() {
   local device
+  validate_project_and_port
+  require_supported_host
   prepare_private_state
   prepare_password
   validate_private_file "$work_image"
+  echo "Inspecting the ext4 workspace requires sudo for loop-device lookup."
+  sudo -v
   device="$(loop_for_image)"
   [[ -n "$device" ]] || fail "The work image is not attached; run the up command first."
   write_runtime_env "$device"

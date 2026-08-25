@@ -12,10 +12,10 @@ to read them before trying the local profile.
 
 ## Try it locally
 
-You need Docker Engine with Compose, OpenSSL, `mkfs.ext4`, `losetup`, and about 6 GiB of available
-memory. The published Markweave image is currently Linux/AMD64 only; this quickstart does not claim
-native ARM support. Clone the repository so Compose can use the reviewed Chromium seccomp profile,
-then run its single setup command:
+You need an AMD64 Linux host, a rootful Docker Engine daemon with Compose, OpenSSL, `mkfs.ext4`,
+`losetup`, `sudo`, and about 6 GiB of available memory. Docker Desktop, rootless Docker, non-Linux
+hosts, and native ARM are not supported by this loop-backed quickstart. Clone the repository so
+Compose can use the reviewed Chromium seccomp profile, then run its single setup command:
 
 ```bash
 git clone https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter.git
@@ -23,10 +23,11 @@ cd simple-md-to-docx-converter
 scripts/quickstart.sh up
 ```
 
-The script explains and requests `sudo` before it validates and attaches a 320 MiB ext4 loop device;
-it never runs the application as root. It creates the administrator password once under the current
-user's private state directory, reuses it on later starts, and never redirects a secret to a
-predictable path. It also decodes the committed
+The script explains and requests `sudo` before it creates and attaches an exact 256 MiB ext4 loop
+filesystem for disposable work; Docker Engine mounts it while the application itself remains an
+unprivileged container process. The script creates the administrator password once under the
+current user's private state directory, reuses it on later starts, and never redirects a secret to
+a predictable path. It also decodes the committed
 `examples/quickstart-template.docx.base64` fixture into that private directory. Show the password
 without putting it in shell history:
 
@@ -63,13 +64,22 @@ Stop the evaluation with:
 scripts/quickstart.sh down
 ```
 
-The shutdown command validates the work volume's exact Compose labels, ext4 type, loop device, and
-backing file before removing only that volume, detaching the loop device, and deleting its temporary
-image. The application retains its 256 MiB logical workspace budget inside the physically bounded
-320 MiB filesystem. `markweave-data`, `clamav-signatures`, the administrator password, and the
-decoded template remain, so accounts, templates, jobs, results, signatures, and credentials survive
-normal shutdown. Do not add the `--volumes` option unless you intentionally want Docker to remove
-the durable local data.
+The shutdown command validates the work volume's exact Compose labels before removing only that
+volume. It discovers a live loop device from the private backing file, never from a stale
+`/dev/loopN` recorded in Docker metadata, and detaches it only after confirming the backing-file
+identity. It then deletes the disposable 256 MiB image. `markweave-data`, `clamav-signatures`, the
+administrator password, and the decoded template remain, so accounts, templates, jobs, results,
+signatures, and credentials survive normal shutdown. Do not add the `--volumes` option unless you
+intentionally want Docker to remove the durable local data.
+
+The Compose services do not automatically restart with the Docker daemon because a loop-device
+number is not stable across a host reboot. After an abnormal stop or reboot, run
+`scripts/quickstart.sh up` again. It validates the exact project/volume labels, removes stale
+scratch metadata, resolves the private backing file independently of any old device number,
+reformats the disposable filesystem, and then restarts the stack. A repeated `up` while the service
+is already running validates and reuses its current filesystem without reformatting it. The `down`
+command can also clean stale scratch metadata and the private image when the old loop association
+has vanished; it never detaches a device that has since been reused for an unrelated file.
 
 ## What this Compose profile is—and is not
 

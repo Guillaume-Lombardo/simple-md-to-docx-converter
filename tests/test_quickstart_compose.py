@@ -59,6 +59,7 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
     assert application["image"] == MARKWEAVE_DIGEST
     assert application["platform"] == "linux/amd64"
     assert application["command"] == "embedded-worker"
+    assert "restart" not in application
     assert application["depends_on"]["clamav"]["condition"] == "service_healthy"
     assert application["ports"] == ["127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"]
     assert set(application["volumes"]) == {
@@ -67,6 +68,7 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
     }
 
     assert scanner["image"] == CLAMAV_DIGEST
+    assert "restart" not in scanner
     assert scanner["healthcheck"]["test"] == [
         "CMD",
         "/usr/local/bin/clamdcheck.sh",
@@ -159,11 +161,15 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "examples/quickstart-template.docx.base64" in readme
     assert "examples/quickstart-source.md" in readme
     assert ", ".join(EXPECTED_FONTS) in readme
-    assert "320 MiB ext4 loop device" in readme
-    assert "256 MiB logical workspace budget" in readme
+    assert "exact 256 MiB ext4 loop" in readme
+    assert "rootful Docker Engine" in readme
+    assert "Docker Desktop, rootless Docker" in readme
+    assert "do not automatically restart" in readme
+    assert "never from a stale" in readme
+    assert "reused for an unrelated file" in readme
     assert "requests `sudo`" in readme
     assert "not a production deployment" in readme
-    assert "Linux/AMD64 only" in readme
+    assert "AMD64 Linux host" in readme
     assert "docker compose down --volumes" not in readme
     assert "export MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in readme
 
@@ -178,7 +184,11 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert 'chmod 0600 -- "$password_file"' in script
     assert '[[ -f "$path" && ! -L "$path" && -O "$path" ]]' in script
     assert 'truncate -s "$work_bytes"' in script
-    assert "readonly work_bytes=335544320" in script
+    assert "readonly work_bytes=268435456" in script
+    assert 'readonly project="${MARKWEAVE_QUICKSTART_PROJECT:-markweave}"' in script
+    assert 'readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"' in script
+    assert "Docker Desktop is not supported" in script
+    assert "Rootless Docker is not supported" in script
     assert "mkfs.ext4" in script
     assert "readonly losetup=/usr/sbin/losetup" in script
     assert 'sudo "$losetup" --find --show' in script
@@ -188,8 +198,11 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert 'index .Options "device"' in script
     assert 'index .Options "o"' in script
     assert 'docker container ls --all --quiet --filter "volume=$work_volume"' in script
-    assert "The obsolete work volume is still used" in script
+    assert "Refusing to remove a work volume that is still used" in script
     assert 'docker volume rm "$work_volume"' in script
+    assert "resize_stopped_work_image" in script
+    assert "format_work_device" in script
+    assert 'device_backs_work_image "$device"' in script
     assert "down --remove-orphans" in script
     assert "down --volumes" not in script
     assert "markweave-data" not in script
@@ -244,9 +257,12 @@ def test_quickstart_password_is_create_once_and_rejects_symlinks(
 def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
 
-    assert '--project-name "$project"' in runner
-    assert "MARKWEAVE_PORT=%s\\n" in runner
-    assert "MARKWEAVE_WORK_DEVICE=%s\\n" in runner
+    assert '"XDG_STATE_HOME=$state_home"' in runner
+    assert '"MARKWEAVE_QUICKSTART_PROJECT=$project"' in runner
+    assert '"MARKWEAVE_QUICKSTART_PORT=$port"' in runner
+    assert '"$quickstart_script"' in runner
+    assert runner.count("quickstart up") == 3
+    assert runner.count("quickstart down") >= 2
     assert "docker compose" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
@@ -256,14 +272,22 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
     assert "capacity = stats.f_blocks * stats.f_frsize" in runner
     assert "errno.ENOSPC" in runner
-    assert "335_544_320" in runner
-    assert 'volume="${project}_markweave-work"' in runner
-    assert 'com.docker.compose.project" }}' in runner
-    assert 'com.docker.compose.volume" }}' in runner
+    assert "268_435_456" in runner
+    assert 'readonly work_volume="${project}_markweave-work"' in runner
+    assert "com.docker.compose.project=$project" in runner
+    assert "com.docker.compose.volume=markweave-work" in runner
     assert 'index .Options "device"' in runner
     assert "sudo /usr/sbin/losetup --detach" in runner
-    assert "reset_work_device" in runner
-    assert "sudo /usr/sbin/mkfs.ext4" in runner
+    assert "unrelated_device" in runner
+    assert "unrelated_down_device" in runner
+    assert 'test "$unrelated_device" = "$stale_device"' in runner
+    assert (
+        'test "$(backing_file "$unrelated_down_device")" = '
+        '"$unrelated_down_image"' in runner
+    )
+    assert "filesystem_uuid" in runner
+    assert "mkfs.ext4" not in runner
+    assert "mount -t ext4" not in runner
     assert "down --volumes --remove-orphans" in runner
     assert "down --remove-orphans" in runner
 
