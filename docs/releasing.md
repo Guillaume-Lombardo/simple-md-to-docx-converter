@@ -55,7 +55,9 @@ pull access. Do not grant the package to unrelated repositories.
    Podman's digest file, and uses Skopeo to copy those exact staged bytes to the `source-<SHA>` and
    version tags. Authenticated preflight accepts only an absent tag or that same digest, and each
    copy is followed by an exact remote digest check. It then generates provenance and attaches the
-   SBOM, publication receipt, and evidence to the verified Release identity.
+   SBOM, publication receipt, and evidence to the verified Release identity. Because job
+   credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
+   before pushing provenance; it does not reuse or persist the publication job's credentials.
 
 The release orchestrator and reusable container workflow use the same trusted push context; they do
 not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` therefore cannot cause

@@ -215,6 +215,13 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   The exact `v0.3.0` historical script and final rootless smoke passed locally through this recovery
   invocation. The normative specification and release operations guide now bound manual dispatch
   to container-only recovery and explicitly exclude Python/PyPI publication.
+- 2026-08-25: The corrected recovery published and post-copy verified GHCR digest
+  `sha256:4a16b311affb0d0a839350bd145810c1f6044cc7347d12ecd9263fe894de217d`,
+  then exposed a second hosted integration gap: the separate provenance job had no registry
+  credentials and `actions/attest-build-provenance` failed with `No credentials found for registry
+  ghcr.io`. The attestation job now performs its own ephemeral GHCR login immediately before the
+  pinned provenance action. Its existing job-local `packages: write`, `id-token: write`, and
+  `attestations: write` permissions remain unchanged; no stored secret or PyPI path is added.
 
 ## Synchronization
 
