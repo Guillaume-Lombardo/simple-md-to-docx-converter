@@ -12,40 +12,45 @@ to read them before trying the local profile.
 
 ## Try it locally
 
-You need Docker Engine with Compose, OpenSSL for one password-generation command, and about 5 GiB
+You need Docker Engine with Compose, OpenSSL for one password-generation command, and about 6 GiB
 of available memory. The published Markweave image is currently Linux/AMD64 only; this quickstart
 does not claim native ARM support. Clone the repository so Compose can use the reviewed Chromium
-seccomp profile:
+seccomp profile. Store the generated evaluation password outside the checkout so later terminals
+use the same value:
 
 ```bash
 git clone https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter.git
 cd simple-md-to-docx-converter
-export MARKWEAVE_INITIAL_ADMIN_PASSWORD="$(openssl rand -hex 24)"
-docker compose up -d
+umask 077
+printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)" \
+  > /tmp/markweave-quickstart.env
+openssl base64 -d -in examples/quickstart-template.docx.base64 \
+  -out quickstart-template.docx
+docker compose --env-file /tmp/markweave-quickstart.env up -d
 ```
 
-Keep that terminal open until you have signed in, or record the generated password in your local
-password manager. Check it without copying it into shell history:
+Record the generated password in your local password manager. Read it from the protected file in
+any terminal without putting the value in shell history:
 
 ```bash
-printf '%s\n' "$MARKWEAVE_INITIAL_ADMIN_PASSWORD"
+sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' /tmp/markweave-quickstart.env
 ```
 
 Open <http://localhost:8080>, sign in as `admin`, and use the password above. The first start can
-take several minutes while ClamAV downloads and loads its signatures; `docker compose ps` shows
-when both services are healthy, and `docker compose logs -f clamav` shows download progress.
+take several minutes while ClamAV downloads and loads its signatures;
+`docker compose --env-file /tmp/markweave-quickstart.env ps` shows when both services are healthy,
+and `docker compose --env-file /tmp/markweave-quickstart.env logs -f clamav` shows download progress.
 
 To make a first conversion:
 
-1. Open **Administration**, create a template, and upload a trusted `.docx` whose styles you want
-   Markweave to reuse. Enter every font used by that file in **Expected fonts**. Template activation
-   deliberately fails if the file, styles, relationships, or font declaration are unsafe or
-   incomplete.
-2. Return to **Convert**, upload a Markdown file, select your active template, and choose DOCX, PDF,
-   or both.
+1. Open **Templates**, create a template, and select the generated `quickstart-template.docx`.
+   In **Expected fonts**, enter this exact comma-separated list:
+   `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
+2. Return to **Convert**, upload `examples/quickstart-source.md`, select your active template, and
+   choose DOCX, PDF, or both.
 3. Start the conversion. When the job says it is ready, download the result.
 
-A tiny source file is enough to try the workflow:
+A tiny source file is enough to try the workflow; `examples/quickstart-source.md` contains:
 
 ```markdown
 # My first document
@@ -53,9 +58,23 @@ A tiny source file is enough to try the workflow:
 Hello from **Markweave**.
 ```
 
-Stop the containers with `docker compose down`. The `markweave-data` and `clamav-signatures` named
-volumes survive that command, so accounts, templates, jobs, and antivirus signatures remain. Do
-not add `--volumes` unless you intentionally want Docker to remove that local data.
+Stop the containers with
+`docker compose --env-file /tmp/markweave-quickstart.env down`, then remove only the disposable
+conversion workspace after validating its exact default-project identity:
+
+```bash
+test "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' \
+  markweave_markweave-work)" = markweave
+test "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' \
+  markweave_markweave-work)" = markweave-work
+docker volume rm markweave_markweave-work
+```
+
+The application limits that disk-backed workspace to 256 MiB. `markweave-data` and
+`clamav-signatures` remain, so accounts, templates, jobs, results, and antivirus signatures survive.
+Do not add `--volumes` unless you intentionally want Docker to remove that durable local data.
+Remove `quickstart-template.docx` and the password file when you no longer need this evaluation
+deployment.
 
 ## What this Compose profile is—and is not
 

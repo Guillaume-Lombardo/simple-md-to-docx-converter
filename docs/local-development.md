@@ -18,57 +18,37 @@ To reproduce the committed resolution without changing the lock file, run:
 uv sync --locked --all-groups
 ```
 
-Start the FastAPI application over HTTPS behind a local TLS terminator after
-providing bootstrap credentials:
+## Run a complete local service
+
+Use the root Compose evaluation profile for the maintained, complete local service. It supplies all
+required application settings, the released rootless image, real ClamAV, persistent standalone
+storage, bounded writable mounts, and loopback-only HTTP. Follow the password creation, health wait,
+first conversion, and non-destructive shutdown steps in the [README quickstart](../README.md#try-it-locally).
+That profile intentionally runs the released image rather than the current worktree.
+
+To run worktree source instead, install every locked document engine and provide ClamAV plus every
+required setting in the [configuration reference](configuration.md). There is intentionally no
+partial development default set: `Settings.load()` validates the complete profile before serving
+and reports invalid assembly without echoing field values. After supplying the full environment,
+start the standalone API and embedded worker with:
 
 ```bash
-export MD_CONVERTER_INITIAL_ADMIN_USERNAME=admin
-read -rs MD_CONVERTER_INITIAL_ADMIN_PASSWORD
-export MD_CONVERTER_INITIAL_ADMIN_PASSWORD
-export MD_CONVERTER_STORAGE_PROFILE=standalone
-export MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-# Set this when the local TLS terminator changes the ASGI-visible origin:
-export MD_CONVERTER_PUBLIC_ORIGIN=https://converter.example.invalid
-: "${MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_MAX_FILES:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_MAX_IMAGES:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_MAX_DIAGRAMS:?set a disposable local value}"
-: "${MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_JOB_ACTIVE_LIMIT_PER_USER:?set a disposable local value}"
-: "${MD_CONVERTER_JOB_GLOBAL_QUEUE_CAPACITY:?set a disposable local value}"
-: "${MD_CONVERTER_JOB_MAX_DURATION_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_LEASE_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_HEARTBEAT_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_IDLE_POLL_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS:?set a disposable local value}"
-: "${MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE:?set a disposable local value}"
-export MD_CONVERTER_TEMPLATE_VERSION_RETENTION_SECONDS=31536000
-export MD_CONVERTER_TEMPLATE_MIN_RETAINED_VERSIONS=10
-export MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000
-export MD_CONVERTER_CLAMAV_HOST="${MD_CONVERTER_CLAMAV_HOST:-127.0.0.1}"
-export MD_CONVERTER_CLAMAV_PORT="${MD_CONVERTER_CLAMAV_PORT:-3310}"
-export MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS="${MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS:-5}"
-uv run uvicorn markweave:create_app --factory --host 127.0.0.1 --port 8000
+export MD_CONVERTER_HOST=127.0.0.1
+export MD_CONVERTER_PORT=8000
+uv run python -m markweave.runtime embedded-worker
 ```
 
-Set the required variables in the current shell before running this guard block. The documentation
-deliberately supplies no numeric values: even local examples must not be mistaken for approved
-production policy. The request-body limit must exceed the source limit to allow bounded multipart
-metadata. Upload and decompressed-content limits are independent ceilings; either may be smaller
-depending on the accepted standalone-file and archive contracts. The heartbeat must remain shorter
-than the lease. Template-policy variables listed in
-[storage-profiles.md](storage-profiles.md) are also required by the current application factory.
+The package runtime binds `MD_CONVERTER_HOST` and `MD_CONVERTER_PORT`, documented with the other
+runtime variables. For authenticated browser use, terminate TLS locally and set
+`MD_CONVERTER_PUBLIC_ORIGIN` to the exact browser-visible HTTPS origin, including a non-default port.
+That configured value, rather than proxy forwarding headers, is authoritative for login Origin
+validation. Keep the application listener private to the terminator and do not enable broad proxy
+header trust. Direct or end-to-end TLS may omit the setting only when the ASGI-visible scheme, host,
+and port already equal the browser origin.
 
-The session cookie is always `Secure`, so use an HTTPS endpoint for browser or API authentication.
-Do not commit bootstrap credentials or place production secrets in shell history; deployment
-secret injection belongs to the runtime-profile work.
+Do not commit bootstrap credentials or place production secrets in shell history. The request-body
+limit must exceed the source limit, and the worker heartbeat must remain shorter than its lease;
+all other cross-field rules are listed in the configuration reference.
 
 For disposable local development, point `MD_CONVERTER_STANDALONE_DATA_DIRECTORY` at a writable
 directory rather than production `/data`. Distributed development requires a real PostgreSQL

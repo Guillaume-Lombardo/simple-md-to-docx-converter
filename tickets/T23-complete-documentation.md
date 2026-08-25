@@ -59,6 +59,17 @@ Complete English user, template, administrator, API, operations, storage, queue,
   host suite reaches 1,521 passing tests and 95.49% coverage but cannot run 37 engine tests because
   Pandoc, Mermaid/Chromium, LibreOffice, and the locked fonts are not installed on the host; the
   pull-request matrix must verify those final-image engine boundaries before completion.
+- 2026-08-25: Independent review corrected the quickstart template instructions, the proxy-header
+  trust boundary, runtime-variable inventory, local-development guidance, golden-test wording, and
+  Markdown link/anchor validation. The Compose profile now uses a disk-backed bounded work volume
+  with memory headroom, and normal shutdown removes only that disposable volume after validating
+  its exact Compose labels while preserving application data and ClamAV signatures.
+- 2026-08-25: Added an active real-Compose CI domain. Its isolated final-image workflow uploads the
+  committed template, performs a combined DOCX/PDF conversion, verifies audit and result access,
+  checks loopback exposure, ClamAV reachability and blocked application egress, removes and
+  recreates only the work volume, restarts the stack, and verifies durable recovery from `/data`.
+  The final-image runner also proves that the configured public origin accepts a valid login and
+  rejects a hostile Origin even when `Forwarded` and `X-Forwarded-*` headers are spoofed.
 
 ## Synchronization
 

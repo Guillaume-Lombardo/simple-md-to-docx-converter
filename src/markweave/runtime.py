@@ -91,6 +91,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 "0.0.0.0",  # noqa: S104 - container bind
             ),
             port=int(os.environ.get("MD_CONVERTER_PORT", "8080")),
+            proxy_headers=False,
+            server_header=False,
         )
         return 0
     if selected == ("external-worker",):

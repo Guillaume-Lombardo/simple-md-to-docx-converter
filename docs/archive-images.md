@@ -61,5 +61,10 @@ disposable `package` directory, keeps the reference and output documents at fixe
 and retains the fixed reader, arguments, environment, process-group deadline handling, and cleanup
 guarantees documented in `docs/pandoc-docx.md`.
 
-Real integration and final-image tests exercise ZIP corruption and encryption failures and the
-complete ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media path.
+Focused rootless real-engine integration tests exercise ZIP corruption and encryption failures and
+the complete ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media
+path. The final-image E2E matrix currently exercises the asynchronous conversion workflow with a
+standalone Markdown source, not a ZIP/image source. Repeating the ZIP success path and its relevant
+critical archive/image failures through the final-image HTTP workflow remains explicit E2E coverage
+debt. Completing T23 with that debt requires a pull-request justification and explicit reviewer
+approval; the focused integration evidence does not replace that approval.

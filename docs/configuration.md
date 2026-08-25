@@ -5,6 +5,18 @@ fails startup with a content-free error when the assembled settings are invalid.
 means there is deliberately no application default; operators must choose an approved value.
 Defaults are implementation defaults, not approval to use them unchanged in production.
 
+Two container/runtime variables are consumed before Pydantic settings assembly:
+
+| Environment variable | Runtime default | Applies to / handling |
+| --- | --- | --- |
+| `MD_CONVERTER_HOST` | `0.0.0.0` in the image | API and embedded-worker HTTP bind address; restrict exposure in the platform |
+| `MD_CONVERTER_PORT` | `8080` in the image | API and embedded-worker HTTP listen port; valid Uvicorn integer port required |
+
+They are not `Settings` model fields. The container entrypoint and embedded-worker launcher pass
+them directly to Uvicorn, so invalid values fail runtime startup rather than Pydantic configuration
+validation. Service publication and accepted hostnames remain deployment concerns; binding a socket
+does not authorize public exposure.
+
 ## Identity and HTTP security
 
 | Environment variable | Requirement or default | Applies to / handling |
