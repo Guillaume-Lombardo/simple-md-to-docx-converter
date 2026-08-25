@@ -26,6 +26,7 @@ IMPORT_TIMEOUT_SECONDS = 60
 
 PUBLIC_IMPORT_CHECK = """\
 from importlib.metadata import version
+from importlib.util import find_spec
 import sys
 
 installed = version(sys.argv[1])
@@ -34,6 +35,8 @@ if installed != sys.argv[2]:
 from markweave import create_app
 if not callable(create_app):
     raise SystemExit("markweave.create_app is not callable")
+if find_spec("md_converter") is not None:
+    raise SystemExit("legacy md_converter import remains installed")
 """
 
 

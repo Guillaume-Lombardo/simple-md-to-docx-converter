@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,19 @@ from scripts.release.verify_install import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_public_import_check_rejects_legacy_import_after_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The isolated verification script checks both the new and removed imports."""
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3"])
+
+    with pytest.raises(
+        SystemExit, match="legacy md_converter import remains installed"
+    ):
+        exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
 
 
 @pytest.fixture

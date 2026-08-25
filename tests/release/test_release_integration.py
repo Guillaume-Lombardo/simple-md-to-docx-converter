@@ -42,12 +42,18 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         names = set(wheel.namelist())
         assert "markweave/__init__.py" in names
         assert not any(name.startswith("md_converter/") for name in names)
+        assert "md_converter.py" not in names
+        assert not any(
+            "/purelib/md_converter" in name or "/platlib/md_converter" in name
+            for name in names
+        )
         assert "markweave-0.3.dist-info/licenses/LICENSE" in names
     with tarfile.open(verified.sdist, mode="r:gz") as sdist:
         names = set(sdist.getnames())
         assert "markweave-0.3/LICENSE" in names
         assert "markweave-0.3/src/markweave/__init__.py" in names
         assert not any("/src/md_converter/" in name for name in names)
+        assert not any(name.endswith("/src/md_converter.py") for name in names)
 
     tampered = tmp_path / "tampered"
     shutil.copytree(output, tampered)
