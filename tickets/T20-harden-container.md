@@ -89,6 +89,18 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   workflow, active blocking-Mermaid SIGTERM, orphan check, durable running-state check, lease
   recovery, and final DOCX validation. Ruff, ty, 162 focused tests, 136 final regression tests, and
   the dedicated PostgreSQL migration parity test pass.
+- 2026-08-25: Re-ran final evidence on the reviewed head. The standalone authenticated final-image
+  smoke passes DOCX, PDF, combined output, and source-integrity failure paths; the rootless,
+  read-only runtime smoke also passes. Correct-environment PostgreSQL/RustFS runs pass all 1,164
+  applicable tests both with and without coverage (44 engine tests deselected), with 95.10% total
+  coverage. The run exposed and corrected one distributed PDF test double that had not supplied
+  the newly mandatory traceability manifest; the real boundary test now downloads, verifies, and
+  cleans up its S3 sidecar. Two fixed-timestamp builds produce identical image ID
+  `350fc58f93eb252cb33b3e35d4c7fd71cc81a55259d0f3f2856ca30871d4a72b` and digest
+  `sha256:07512e38f8f13ccb421574f7cc9b10e0654ca18f653760977faf07a9457d923b`. The complete current
+  Syft/Grype evidence contains 1,502 matches (91 High, 723 Medium, 679 Low, 9 Negligible), with zero
+  fixable and zero unfixed Critical findings. Ruff formatting and linting, ty, Bash syntax,
+  error-severity ShellCheck, 113 CI/container/web checks, and the container asset contracts pass.
 
 ## Synchronization
 

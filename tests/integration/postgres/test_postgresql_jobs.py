@@ -1,6 +1,7 @@
 """Real PostgreSQL durable queue and concurrent claim coverage."""
 
 import hashlib
+import json
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -105,7 +106,32 @@ class DistributedTemplateProcessor:
         assert deadline_monotonic is None
         assert not cancelled()
         progress(JobStep.PUBLISHING, 90)
-        return JobProcessResult(b"used:" + template_content)
+        content = b"used:" + template_content
+        manifest = json.dumps(
+            {
+                "application_version": "0.1.0",
+                "chromium_version": "151.0.7922.173",
+                "conversion_contract_version": "1",
+                "export_filter": "pdf:writer_pdf_Export",
+                "font_manifest_sha256": "5" * 64,
+                "libreoffice_version": "26.2.5.2",
+                "mermaid_version": "11.16.0",
+                "output_format": "pdf",
+                "output_pdf_bytes": len(content),
+                "output_pdf_sha256": hashlib.sha256(content).hexdigest(),
+                "pages": [{"height_points": 792, "width_points": 612}],
+                "pandoc_reader": "commonmark_x",
+                "pandoc_version": "3.10.2",
+                "schema_version": 1,
+                "source_docx_sha256": hashlib.sha256(content).hexdigest(),
+                "template_id": str(template.template_id),
+                "template_sha256": template.sha256,
+                "template_version": str(template.number),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return JobProcessResult(content, manifest)
 
 
 def race_cancel(
@@ -285,6 +311,14 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         )
         assert finished.state is JobState.SUCCEEDED
         assert content == b"used:" + frozen_content
+        manifested, manifest = service.download_manifest(
+            queued.id, actor_id=owner.id, actor_is_admin=False
+        )
+        assert manifested.id == finished.id
+        assert (
+            json.loads(manifest)["output_pdf_sha256"]
+            == hashlib.sha256(content).hexdigest()
+        )
         failed_job, _ = service.submit(
             JobRequest(
                 owner.id,
@@ -320,6 +354,14 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         if current is not None and current.result_object_id is not None:
             objects.delete(
                 ObjectKey(ObjectScope.RESULT, owner.id, current.result_object_id)
+            )
+        if current is not None and current.result_manifest_object_id is not None:
+            objects.delete(
+                ObjectKey(
+                    ObjectScope.RESULT_MANIFEST,
+                    owner.id,
+                    current.result_manifest_object_id,
+                )
             )
         with engine.begin() as connection:
             connection.execute(
