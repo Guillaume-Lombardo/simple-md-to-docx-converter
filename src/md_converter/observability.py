@@ -225,6 +225,7 @@ class CorrelationMiddleware:
             None,
         )
         correlation_id = normalize_correlation_id(supplied)
+        response_correlation_id = correlation_id
         request_scope = {
             **scope,
             "state": {
@@ -236,14 +237,31 @@ class CorrelationMiddleware:
         started = self._metrics.timer()
 
         async def correlated_send(message: Message) -> None:
-            nonlocal status_code
+            nonlocal response_correlation_id, status_code
             if message["type"] == "http.response.start":
                 status_code = int(message["status"])
                 headers = list(message.get("headers", ()))
+                downstream_correlation = next(
+                    (
+                        value.decode("ascii")
+                        for name, value in headers
+                        if name.lower() == CORRELATION_HEADER.lower().encode("ascii")
+                    ),
+                    None,
+                )
+                if downstream_correlation is not None:
+                    response_correlation_id = require_correlation_id(
+                        downstream_correlation
+                    )
+                    headers = [
+                        (name, value)
+                        for name, value in headers
+                        if name.lower() != CORRELATION_HEADER.lower().encode("ascii")
+                    ]
                 headers.append(
                     (
                         CORRELATION_HEADER.lower().encode("ascii"),
-                        correlation_id.encode("ascii"),
+                        response_correlation_id.encode("ascii"),
                     )
                 )
                 message = {**message, "headers": headers}
@@ -258,6 +276,7 @@ class CorrelationMiddleware:
                 self._metrics.record_request(method, status_code, duration)
                 log_event(
                     "http_request_completed",
+                    correlation_id=response_correlation_id,
                     method=method,
                     status_code=status_code,
                     duration_seconds=duration,

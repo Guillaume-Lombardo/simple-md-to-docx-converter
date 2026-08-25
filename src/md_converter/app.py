@@ -1456,6 +1456,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         output: Annotated[JobOutput, Form()],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
+        correlation_id = getattr(request.state, CORRELATION_STATE_KEY)
         if source.filename is None:
             await source.close()
             raise JobRequestError
@@ -1485,7 +1486,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
                     output=output,
                     component_versions=COMPONENT_VERSIONS,
                     now=datetime.now(UTC),
-                    correlation_id=getattr(request.state, CORRELATION_STATE_KEY),
+                    correlation_id=correlation_id,
                     source_filename=source_filename,
                     source_kind=source_kind,
                 ),
@@ -1494,6 +1495,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         except ValueError:
             raise JobRequestError from None
         response.headers["Location"] = f"/api/v1/conversions/{job.id}"
+        response.headers[CORRELATION_HEADER] = job.correlation_id
         response.headers["Retry-After"] = str(
             resolved_settings.conversion_retry_after_seconds
         )

@@ -115,6 +115,54 @@ def test_correlation_is_explicitly_isolated_in_concurrent_request_scopes() -> No
     assert len({scope_id for scope_id, _header_id in correlations}) == 2
 
 
+def test_downstream_durable_correlation_is_canonical_for_response_and_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    durable_correlation = "00000000-0000-4000-8000-000000000001"
+
+    async def exercise() -> str:
+        async def downstream(scope: Any, receive: Any, send: Any) -> None:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 202,
+                    "headers": [
+                        (b"x-correlation-id", durable_correlation.encode("ascii"))
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+
+        messages: list[Message] = []
+
+        async def receive() -> Message:
+            return {"type": "http.disconnect"}
+
+        async def send(message: Message) -> None:
+            messages.append(message)
+
+        middleware = CorrelationMiddleware(downstream, metrics=OperationalMetrics())
+        await middleware(
+            {"type": "http", "method": "POST", "path": "/", "headers": []},
+            receive,
+            send,
+        )
+        response_start = next(
+            message for message in messages if message["type"] == "http.response.start"
+        )
+        headers = [
+            value.decode("ascii")
+            for name, value in response_start["headers"]
+            if name == b"x-correlation-id"
+        ]
+        assert len(headers) == 1
+        return headers[0]
+
+    with caplog.at_level(logging.INFO, logger="md_converter.application"):
+        assert asyncio.run(exercise()) == durable_correlation
+    assert getattr(caplog.records[-1], "correlation_id", None) == durable_correlation
+
+
 def test_json_formatter_emits_only_allowlisted_content_free_fields() -> None:
     record = logging.LogRecord(
         "md_converter.application",
