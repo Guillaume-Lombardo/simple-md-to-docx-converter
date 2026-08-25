@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "f19ef85ed5391c618e01bf91648aae5a52e2aceb261bb2457cc7885b034f5574"
+    "488f57b815ead9c2aa33acefb24ffc4420680510c631876c14f8a012a750e862"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1505,6 +1505,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'scope=repository:$registry_path:pull"',
         'test "$public_status" = 200',
         "needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest",
+        '--repo "$GITHUB_REPOSITORY"',
         "--clobber",
     ):
         if required not in text:
@@ -1603,6 +1604,24 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         or attest_login[0] >= provenance[0]
     ):
         errors.append("container attestation must authenticate to GHCR before push")
+    evidence_steps = _job_steps(workflow, "release-evidence")
+    evidence_run = next(
+        (
+            step.get("run")
+            for step in evidence_steps
+            if step.get("name")
+            == "Verify the exact published Release and attach evidence idempotently"
+        ),
+        None,
+    )
+    if (
+        not isinstance(evidence_run, str)
+        or 'gh release upload "$RELEASE_TAG"' not in evidence_run
+        or '--repo "$GITHUB_REPOSITORY"' not in evidence_run
+    ):
+        errors.append(
+            "container Release evidence upload must bind the explicit repository"
+        )
     publish_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")

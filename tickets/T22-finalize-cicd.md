@@ -251,6 +251,12 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   validates the downloaded bundle and public digest, then routes only that digest and unchanged
   evidence to the existing provenance and Release-attachment jobs. PyPI and GHCR publication are
   unreachable from this manual path.
+- 2026-08-25: Hosted recovery run `32872650545` on exact `main` SHA `e03681c` successfully reused
+  the retained evidence and published the image attestation, but its checkout-free
+  `release-evidence` job failed when `gh release upload` implicitly tried to discover a repository
+  from `.git`. The upload now passes `--repo "$GITHUB_REPOSITORY"` explicitly, preserving the
+  minimal checkout-free job while binding the write to the already validated upstream repository.
+  Static policy and mutation tests prevent removal of that explicit repository binding.
 
 ## Synchronization
 
