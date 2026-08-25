@@ -505,17 +505,118 @@ def test_container_release_recovery_is_bound_to_existing_release_identity() -> N
 
 
 @pytest.mark.unit
-def test_container_release_recovery_uses_source_compatible_build_invocation() -> None:
+def test_container_release_recovery_cannot_enter_the_build_job() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
     )
     weakened = workflow.replace(
-        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
-        'SOURCE_DATE_EPOCH=unsafe bash scripts/container/build.sh "$image"',
+        "github.event_name == 'push' && github.sha == inputs.source-sha",
+        "((github.event_name == 'push' && github.sha == inputs.source-sha) || github.event_name == 'workflow_dispatch')",
         1,
     )
     errors = validate_container_release_workflow_text(weakened)
-    assert any("recovery build" in error for error in errors)
+    assert "manual container recovery must not enter the build job" in errors
+
+
+@pytest.mark.unit
+def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> None:
+    workflow = yaml.load(
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8"),
+        Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
+    )
+    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]
+    assert dispatch["artifact-run-id"] == {
+        "description": "Successful build run retaining the exact container artifact",
+        "required": True,
+        "type": "string",
+    }
+    recovery = workflow["jobs"]["recover-evidence"]
+    assert recovery["permissions"] == {"actions": "read", "contents": "read"}
+    identity = next(
+        step["run"]
+        for step in recovery["steps"]
+        if step["name"]
+        == "Validate release, source run, artifact, and public image identity"
+    )
+    assert ".repository.id == $repository_id" in identity
+    assert ".head_repository.id == $repository_id" in identity
+    assert '.path == ".github/workflows/container-release.yml"' in identity
+    assert 'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"' in identity
+    assert 'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"' in identity
+    assert 'scope=repository:$registry_path:pull"' in identity
+    download = next(
+        step
+        for step in recovery["steps"]
+        if step["name"] == "Download the exact retained artifact by immutable ID"
+    )
+    assert download["with"] == {
+        "artifact-ids": "${{ steps.identity.outputs.artifact-id }}",
+        "github-token": "${{ github.token }}",
+        "merge-multiple": True,
+        "repository": "${{ github.repository }}",
+        "run-id": "${{ inputs.artifact-run-id }}",
+        "path": "artifacts/container",
+    }
+    assert "scripts.container.recover_release_evidence" in next(
+        step["run"]
+        for step in recovery["steps"]
+        if step["name"] == "Verify retained bundle integrity and release identity"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            ".head_repository.id == $repository_id",
+            "true",
+            "container retained-artifact recovery is missing: .head_repository.id == $repository_id",
+        ),
+        (
+            '.path == ".github/workflows/container-release.yml"',
+            "true",
+            'container release is missing dynamic contract: .path == ".github/workflows/container-release.yml"',
+        ),
+        (
+            'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
+            'git merge-base --is-ancestor "$GITHUB_SHA" "$run_sha"',
+            'container release is missing dynamic contract: git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
+        ),
+        (
+            "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
+            "name: attacker-selected-artifact",
+            "container release is missing dynamic contract: artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
+        ),
+        (
+            "scripts.container.recover_release_evidence",
+            "scripts.container.verify_supply_chain",
+            "container release is missing dynamic contract: scripts.container.recover_release_evidence",
+        ),
+    ],
+)
+def test_container_recovery_policy_rejects_weakened_artifact_identity(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(needle, replacement, 1)
+    errors = validate_container_release_workflow_text(weakened)
+    assert message in errors
+
+
+@pytest.mark.unit
+def test_container_recovery_routes_exact_digest_to_existing_jobs() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "subject-digest: ${{ needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest }}"
+        in workflow
+    )
+    assert "needs.recover-evidence.result == 'success'" in workflow
+    assert "pypa/gh-action-pypi-publish" not in workflow
 
 
 @pytest.mark.unit

@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "fb19d24058793c0c028b3052dcc579be5174ac5522d488985d5d77c9ade3fd92"
+    "f19ef85ed5391c618e01bf91648aae5a52e2aceb261bb2457cc7885b034f5574"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1346,9 +1346,17 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         "tag": {"required": True, "type": "string"},
         "source-sha": {"required": True, "type": "string"},
     }
+    expected_recovery_inputs = {
+        "artifact-run-id": {
+            "description": "Successful build run retaining the exact container artifact",
+            "required": True,
+            "type": "string",
+        },
+        **expected_inputs,
+    }
     if triggers != {
         "workflow_call": {"inputs": expected_inputs},
-        "workflow_dispatch": {"inputs": expected_inputs},
+        "workflow_dispatch": {"inputs": expected_recovery_inputs},
     }:
         errors.append(
             "container publication must be an exact secretless reusable and recovery workflow"
@@ -1358,10 +1366,16 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     if set(workflow) != {"name", "on", "permissions", "jobs"}:
         errors.append("container release workflow fields do not match the allowlist")
     jobs = _mapping(workflow.get("jobs")) or {}
-    if set(jobs) != {"build-and-publish", "attest", "release-evidence"}:
+    if set(jobs) != {
+        "build-and-publish",
+        "recover-evidence",
+        "attest",
+        "release-evidence",
+    }:
         errors.append("container release jobs do not match the exact contract")
     expected_permissions = {
         "build-and-publish": {"contents": "read", "packages": "write"},
+        "recover-evidence": {"actions": "read", "contents": "read"},
         "attest": {
             "attestations": "write",
             "contents": "read",
@@ -1375,17 +1389,52 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         if job.get("permissions") != expected:
             errors.append(f"container release job {name!r} permissions are not minimal")
         condition = job.get("if")
-        if not isinstance(condition, str) or not all(
-            clause in condition
-            for clause in (
+        required_conditions = {
+            "build-and-publish": (
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+                "github.sha == inputs.source-sha",
+            ),
+            "recover-evidence": (
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'workflow_dispatch'",
+                "github.ref == 'refs/heads/main'",
+            ),
+            "attest": (
+                "always()",
                 TRUSTED_REPOSITORY_CONDITION,
                 "github.event_name == 'push'",
                 "github.event_name == 'workflow_dispatch'",
-                "github.ref == 'refs/heads/main'",
-                "github.sha == inputs.source-sha",
-            )
+                "needs.build-and-publish.result == 'success'",
+                "needs.recover-evidence.result == 'success'",
+            ),
+            "release-evidence": (
+                "always()",
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'push'",
+                "github.event_name == 'workflow_dispatch'",
+                "needs.build-and-publish.result == 'success'",
+                "needs.recover-evidence.result == 'success'",
+                "needs.attest.result == 'success'",
+            ),
+        }[name]
+        if not isinstance(condition, str) or not all(
+            clause in condition for clause in required_conditions
         ):
             errors.append(f"container release job {name!r} lacks the repository guard")
+        if (
+            name == "build-and-publish"
+            and isinstance(condition, str)
+            and "workflow_dispatch" in condition
+        ):
+            errors.append("manual container recovery must not enter the build job")
+        if (
+            name == "recover-evidence"
+            and isinstance(condition, str)
+            and "github.event_name == 'push'" in condition
+        ):
+            errors.append("automatic publication must not enter the recovery job")
         timeout = job.get("timeout-minutes")
         if (
             not isinstance(timeout, int)
@@ -1418,7 +1467,6 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
-        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
         '"localhost/md-converter:$RELEASE_VERSION"',
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
@@ -1439,6 +1487,24 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'if [[ "$status" = 404 ]]; then',
         "podman push --format oci",
         "artifacts/container/registry-publication.json",
+        "scripts.container.recover_release_evidence",
+        "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
+        "run-id: ${{ inputs.artifact-run-id }}",
+        "merge-multiple: true",
+        ".head_repository.id == $repository_id",
+        '.path == ".github/workflows/container-release.yml"',
+        '.event == "workflow_dispatch"',
+        '.conclusion == "failure"',
+        'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
+        'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
+        '.name == "build-and-publish"',
+        '.conclusion == "success"',
+        ".total_count == 1",
+        ".size_in_bytes <= 2000000000",
+        ".expired == false",
+        'scope=repository:$registry_path:pull"',
+        'test "$public_status" = 200',
+        "needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest",
         "--clobber",
     ):
         if required not in text:
@@ -1465,12 +1531,53 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     ]
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
-        'if [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]]; then',
-        'env -u SOURCE_DATE_EPOCH bash scripts/container/build.sh "$image"',
         'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
     ):
         if not isinstance(build_run, str) or required not in build_run:
-            errors.append(f"container recovery build is missing: {required}")
+            errors.append(f"automatic container build is missing: {required}")
+    if isinstance(build_run, str) and "workflow_dispatch" in build_run:
+        errors.append("manual container recovery must not rebuild the image")
+    recovery_steps = _job_steps(workflow, "recover-evidence")
+    recovery_names = [step.get("name") for step in recovery_steps]
+    expected_recovery_names = [
+        "Check out the trusted recovery implementation",
+        "Set up Python 3.14",
+        "Set up uv",
+        "Synchronize locked recovery dependencies",
+        "Validate release, source run, artifact, and public image identity",
+        "Download the exact retained artifact by immutable ID",
+        "Verify retained bundle integrity and release identity",
+        "Transfer the exact verified evidence to this recovery run",
+    ]
+    if recovery_names != expected_recovery_names:
+        errors.append("container recovery steps do not match the exact artifact flow")
+    recovery_identity = next(
+        (
+            step.get("run")
+            for step in recovery_steps
+            if step.get("name")
+            == "Validate release, source run, artifact, and public image identity"
+        ),
+        None,
+    )
+    for required in (
+        'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
+        'git show "$SOURCE_SHA:pyproject.toml"',
+        'actions/workflows/container-release.yml" --jq .id',
+        ".repository.id == $repository_id",
+        ".head_repository.id == $repository_id",
+        ".workflow_run.repository_id == $repository_id",
+        ".workflow_run.head_repository_id == $repository_id",
+        ".total_count == 1",
+        'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
+        'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
+        'scope=repository:$registry_path:pull"',
+        "printf 'artifact-id=%s\\ndigest=%s\\n'",
+    ):
+        if not isinstance(recovery_identity, str) or required not in recovery_identity:
+            errors.append(
+                f"container retained-artifact recovery is missing: {required}"
+            )
     attest_steps = _job_steps(workflow, "attest")
     attest_login = [
         index
