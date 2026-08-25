@@ -25,6 +25,12 @@ FULL_SHA_B = "b" * 40
 FULL_SHA_C = "c" * 40
 FULL_SHA_D = "d" * 40
 FULL_SHA_E = "e" * 40
+UPLOAD_ARTIFACT_PIN = (
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+)
+LEGACY_UPLOAD_ARTIFACT_PIN = (
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2"
+)
 PACKAGE_PLACEHOLDER = "PACKAGE_NAME_FROM_APPROVED_POLICY"
 VERSION_PLACEHOLDER = "0+version.from.approved.policy"
 ARTIFACT_PATH_PLACEHOLDER = "ARTIFACT_DIRECTORY_FROM_APPROVED_POLICY"
@@ -178,6 +184,37 @@ def test_committed_workflow_satisfies_local_security_policy() -> None:
     """The real workflow is covered by the same validator used in CI."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert validate_workflow_text(workflow) == []
+
+
+@pytest.mark.unit
+def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
+    """Both retained-evidence uploads use the reviewed v7 pin without direct mode."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    upload_lines = [
+        line.strip()
+        for line in workflow.splitlines()
+        if "uses: actions/upload-artifact@" in line
+    ]
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 2
+    assert "archive: false" not in workflow
+
+    drifted = workflow.replace(
+        UPLOAD_ARTIFACT_PIN,
+        LEGACY_UPLOAD_ARTIFACT_PIN,
+        1,
+    )
+    assert any(
+        "do not match the reviewed canonical policy" in error
+        for error in validate_workflow_text(drifted)
+    )
+
+
+@pytest.mark.unit
+def test_ci_uses_only_github_hosted_runners() -> None:
+    """The upload-artifact v7 runner floor is delegated to GitHub-hosted images."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert workflow.count("runs-on: ubuntu-24.04") == 5
+    assert "self-hosted" not in workflow
 
 
 @pytest.mark.unit
