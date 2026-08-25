@@ -41,7 +41,7 @@ install_tool() {
     --connect-timeout 20 --max-time 300 --retry 3 --retry-all-errors \
     --output "$archive" \
     "https://github.com/anchore/$name/releases/download/v$version/${name}_${version}_linux_amd64.tar.gz"
-  echo "$expected  $archive" | sha256sum --check --strict
+  echo "$expected  $archive" | sha256sum --check --strict --status
   tar --extract --gzip --file "$archive" --directory "$tool_directory" "$name"
 }
 
@@ -49,7 +49,8 @@ install_tool syft "$syft_version" "$syft_sha256"
 install_tool grype "$grype_version" "$grype_sha256"
 image_id="$(podman image inspect "$image" --format '{{.Id}}')"
 readonly image_id
-[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$image_id" =~ ^[0-9a-f]{64}$ ]]
+readonly canonical_image_id="sha256:$image_id"
 readonly image_archive="$staging_directory/image.oci.tar"
 podman save --format oci-archive --output "$image_archive" "$image_id"
 "$tool_directory/syft" "oci-archive:$image_archive" \
@@ -61,7 +62,7 @@ GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
 summary_arguments=(
   --image "$image"
   --artifacts "$staging_directory"
-  --expected-image-id "$image_id"
+  --expected-image-id "$canonical_image_id"
 )
 if [[ "$purpose" == "release" ]]; then
   summary_arguments+=(--release)

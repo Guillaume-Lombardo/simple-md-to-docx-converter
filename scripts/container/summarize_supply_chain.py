@@ -32,10 +32,11 @@ def _image_identity(artifacts: Path, expected_image_id: str) -> tuple[str, str, 
         raise EvidenceError(str(error)) from error
     if config_digest != expected_image_id:
         raise EvidenceError("exported OCI config does not match the resolved image ID")
+    podman_image_id = expected_image_id.removeprefix("sha256:")
     try:
         inspection: Any = json.loads(
             subprocess.run(  # noqa: S603 - fixed executable and immutable image ID
-                ["/usr/bin/podman", "image", "inspect", expected_image_id],
+                ["/usr/bin/podman", "image", "inspect", podman_image_id],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -50,7 +51,7 @@ def _image_identity(artifacts: Path, expected_image_id: str) -> tuple[str, str, 
         TypeError,
     ) as error:
         raise EvidenceError(f"immutable image inspection failed: {error}") from error
-    if not isinstance(inspected, dict) or inspected.get("Id") != expected_image_id:
+    if not isinstance(inspected, dict) or inspected.get("Id") != podman_image_id:
         raise EvidenceError("immutable image inspection returned another identity")
     return manifest_digest, config_digest, inspected
 

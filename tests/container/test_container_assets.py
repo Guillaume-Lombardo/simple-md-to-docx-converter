@@ -179,6 +179,7 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
         '[[ -L "$output_parent" ]]',
         'mktemp -d "$output_parent/.supply-chain.XXXXXX"',
         'podman save --format oci-archive --output "$image_archive" "$image_id"',
+        'readonly canonical_image_id="sha256:$image_id"',
         'mv --no-target-directory -- "$staging_directory" "$output_directory"',
         "release_bundle_manifest_sha256=%s",
     ):
@@ -217,9 +218,7 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     }
     (tmp_path / "vulnerabilities.json").write_text(json.dumps(report), encoding="utf-8")
     inspected = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
-    inspected.return_value.stdout = json.dumps(
-        [{"Id": f"sha256:{'2' * 64}", "Size": 123}]
-    )
+    inspected.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
     mocker.patch(
         "scripts.container.summarize_supply_chain.oci_identity",
         return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
@@ -239,6 +238,12 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     )
 
     assert summarize_supply_chain.main() == 1
+    inspected.assert_called_once_with(
+        ["/usr/bin/podman", "image", "inspect", "2" * 64],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     evidence = json.loads((tmp_path / "image-metadata.json").read_text())
     assert evidence["vulnerabilities"]["counts_by_severity"] == {"Critical": 2}
     assert evidence["vulnerabilities"]["critical_with_fix"][0]["id"] == "CVE-FIXED"
@@ -268,9 +273,7 @@ def test_release_summary_rejects_unfixed_critical_and_archive_identity_mismatch(
         encoding="utf-8",
     )
     inspect = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
-    inspect.return_value.stdout = json.dumps(
-        [{"Id": f"sha256:{'2' * 64}", "Size": 123}]
-    )
+    inspect.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
     identity = mocker.patch(
         "scripts.container.summarize_supply_chain.oci_identity",
         return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
