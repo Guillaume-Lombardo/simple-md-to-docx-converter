@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from md_converter.config import ConfigurationError, Settings
+from markweave.config import ConfigurationError, Settings
 from tests.settings import template_settings
 
 TEMPLATE_REQUIRED_FIELDS = tuple(template_settings())

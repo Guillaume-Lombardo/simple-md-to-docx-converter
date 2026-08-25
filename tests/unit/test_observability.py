@@ -10,8 +10,8 @@ import pytest
 from pytest_mock import MockerFixture
 from starlette.types import Message
 
-from md_converter import observability
-from md_converter.observability import (
+from markweave import observability
+from markweave.observability import (
     CORRELATION_STATE_KEY,
     CorrelationMiddleware,
     JsonLogFormatter,
@@ -282,8 +282,8 @@ def test_metrics_server_lifecycle_and_bind_failure_are_sanitized(
     mocker: MockerFixture,
 ) -> None:
     queue = mocker.Mock(spec=QueueObserver)
-    http_server = mocker.patch("md_converter.observability._BoundedMetricsHttpServer")
-    thread = mocker.patch("md_converter.observability.Thread")
+    http_server = mocker.patch("markweave.observability._BoundedMetricsHttpServer")
+    thread = mocker.patch("markweave.observability.Thread")
     http_server.return_value.server_address = ("127.0.0.1", 9464)
     thread.return_value.is_alive.return_value = False
     server = MetricsHttpServer(OperationalMetrics(), queue, host="127.0.0.1", port=9464)
@@ -346,7 +346,7 @@ def test_deadline_reader_enforces_absolute_budget_and_bounded_reads(
 ) -> None:
     connection = mocker.Mock()
     connection.recv.side_effect = [b"a", b"\n"]
-    mocker.patch("md_converter.observability.monotonic", return_value=1.0)
+    mocker.patch("markweave.observability.monotonic", return_value=1.0)
     reader = observability._DeadlineReader(connection, 2.0)
     assert reader.readline() == b"a\n"
     assert reader.readable()
@@ -366,7 +366,7 @@ def test_deadline_reader_enforces_absolute_budget_and_bounded_reads(
     with pytest.raises(ValueError, match="require a size"):
         reader.read()
 
-    mocker.patch("md_converter.observability.monotonic", return_value=3.0)
+    mocker.patch("markweave.observability.monotonic", return_value=3.0)
     with pytest.raises(TimeoutError):
         observability._DeadlineReader(connection, 2.0).readline(1)
 

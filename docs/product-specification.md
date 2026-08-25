@@ -29,7 +29,7 @@ The product includes a conversion page, template administration, local authentic
 | DOCX to PDF | LibreOffice headless |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
-| Python distribution | `md-converter` on PyPI; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
+| Python distribution | `markweave` on PyPI with public import `markweave`; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
 | Git workflow | Trunk-based, short branches, pull requests to `main`, squash merge |
 | Python dependencies | `uv` |
 | Quality tools | Ruff, `ty`, Pytest, pytest-cov, and pytest-mock |
@@ -276,9 +276,9 @@ Use selective path/domain detection while keeping one required `CI / gate` resul
 
 Light draft checks include formatting, lint, types, unit tests, coverage, and cheap security checks. Ready and merge-queue checks add affected functional, integration, container, and E2E domains. Run the full two-profile matrix on schedule and before releases. Publish the image, SBOM, and provenance only for releases.
 
-Use an isolated release workflow to publish the `md-converter` Python distribution. Build its sdist and wheel once from the reviewed tagged source, then validate metadata, installation, the documented public import, and artifact integrity before publication. Publish those exact verified artifacts to PyPI; do not rebuild them in the publication job. Use PyPI Trusted Publishing through GitHub OIDC and a protected GitHub `pypi` environment, with no long-lived PyPI token. Every publication run must wait for manual approval from designated trusted maintainers or the project manager configured as required reviewers on that environment. Grant `id-token: write` only to the minimal PyPI upload job within the isolated workflow; a separate provenance or attestation job owned by T22 may receive the same permission only when its need is documented and its remaining permissions are least privilege. Pin every action by full commit SHA, generate and upload PyPI publish attestations, and prevent pull requests, forks, and all other untrusted contexts from publishing. The release-version and tag-trigger policies remain T22 decisions and must be documented before implementation.
+Use an isolated release workflow to publish the `markweave` Python distribution with the matching public import `markweave`. Build its sdist and wheel once from the reviewed tagged source, then validate metadata, installation, the documented public import, and artifact integrity before publication. Publish those exact verified artifacts to PyPI; do not rebuild them in the publication job. Use PyPI Trusted Publishing through GitHub OIDC and the dedicated GitHub `pypi` environment as an identity boundary, with no long-lived PyPI token. The environment has no required reviewer or manual approval; publishing the GitHub Release is the sole human release gate. This deliberately trades a second approval for a simpler release path, so release-creation permissions and the trusted repository guard are security-critical. Grant `id-token: write` only to the minimal PyPI upload job within the isolated workflow; a separate provenance or attestation job owned by T22 may receive the same permission only when its need is documented and its remaining permissions are least privilege. Pin every action by full commit SHA, generate and upload PyPI publish attestations, and prevent pull requests, forks, and all other untrusted contexts from publishing. Version `0.3` maps to tag `v0.3`, and publication is triggered only by publishing that GitHub Release.
 
-Before the first public release, the project manager must decide the public package license and configure a PyPI pending Trusted Publisher for the exact GitHub repository, workflow, and `pypi` environment. Immediately before the first publication attempt, recheck that `md-converter` remains available and stop if it does not. A pending publisher does not reserve the distribution name. The first successful OIDC upload creates the PyPI project and converts the pending publisher into a normal Trusted Publisher; verify both the project and publisher state after that upload.
+Before the first public release, configure a PyPI pending Trusted Publisher for project `markweave`, owner `Guillaume-Lombardo`, repository `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`. Immediately before the first publication attempt, recheck that `markweave` remains available and stop if it does not. A pending publisher does not reserve the distribution name. The first successful OIDC upload creates the PyPI project and converts the pending publisher into a normal Trusted Publisher; verify both the project and publisher state after that upload. The public license is Apache-2.0.
 
 ## 12. Global acceptance criteria
 
@@ -317,7 +317,7 @@ Before the first public release, the project manager must decide the public pack
 | T19 | Add structured logs, correlation, metrics, queue observability, audit, version traceability, and cheap readiness | T15, T18 |
 | T20 | Build hardened reproducible final image with API, embedded-worker, and external-worker modes, SBOM, scans, and smoke test | T11, T12, T13, T18 |
 | T21 | Run rootless E2E for both profiles with three identities, real conversion, restart recovery, concurrency, and failure artifacts | T17, T20 |
-| T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `md-converter` sdist and wheel to PyPI | T03, T21 |
+| T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `markweave` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
@@ -335,7 +335,8 @@ Recommended delivery order: T00 and T01 can start in parallel, and T00 may conti
   queue-depth limits; worker duration, memory, and ephemeral storage; source/result retention;
   quotas; and cleanup schedules. Keep workload-dependent production values configurable. The
   approved template/audit retention, ClamAV, and recovery contracts are fixed in section 8.2.
-- T22 owns GitHub Actions heavy-job timeouts, full-suite frequency, and usage budget.
+- T22 fixes the complete-suite schedule to Sunday at 03:17 UTC, the heavy-job timeout to 45 minutes,
+  and heavy-matrix parallelism to two jobs. Monitor hosted usage before changing this policy.
 - PDF/A output and automatic Word or PDF table-of-contents generation are outside the initial
   product scope. Adding either capability requires separately approved future scope.
 

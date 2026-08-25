@@ -7,7 +7,7 @@ from threading import Thread
 
 import pytest
 
-from md_converter.malware import ClamAVUploadScanner
+from markweave.malware import ClamAVUploadScanner
 
 
 class _ClamdHandler(socketserver.BaseRequestHandler):

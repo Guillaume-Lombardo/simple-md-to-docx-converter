@@ -12,6 +12,7 @@ ARG LIBREOFFICE_SHA256=f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6
 ARG UV_VERSION=0.12.1
 ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
 ARG GOOGLE_RPM_KEY_SHA256=54dea5f6c2a26091578cf52a999cebc6b64df478d37ad4dce96376b711e3b27c
+ARG APPLICATION_VERSION
 
 RUN dnf install -y \
         alsa-lib at-spi2-atk at-spi2-core atk cups-libs curl-minimal findutils \
@@ -91,6 +92,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/md-converter/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 RUN uv sync --locked --no-dev --no-editable \
+    && /opt/md-converter/venv/bin/python -c \
+        'import markweave, sys; assert markweave.__version__ == sys.argv[1]' \
+        "${APPLICATION_VERSION}" \
     && rm -rf /root/.cache/uv /opt/md-converter/app/src \
     && rm -f /opt/md-converter/app/pyproject.toml /opt/md-converter/app/uv.lock \
         /opt/md-converter/app/README.md /usr/local/bin/uv /usr/local/bin/uvx
@@ -129,7 +133,7 @@ ENV PATH=/opt/md-converter/venv/bin:/usr/local/bin:/usr/bin \
 
 ARG BASE_IMAGE
 LABEL org.opencontainers.image.title="Markdown to DOCX and PDF Converter" \
-      org.opencontainers.image.version="0.1.0" \
+      org.opencontainers.image.version="${APPLICATION_VERSION}" \
       org.opencontainers.image.source="https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter" \
       org.opencontainers.image.base.name="${BASE_IMAGE}"
 

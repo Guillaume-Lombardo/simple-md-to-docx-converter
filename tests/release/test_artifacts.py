@@ -29,9 +29,9 @@ from scripts.release.artifacts import (
 
 pytestmark = pytest.mark.unit
 
-NAME = "md-converter"
+NAME = "markweave"
 VERSION = "0.1.0"
-DIST = "md_converter"
+DIST = "markweave"
 ROOT = f"{DIST}-{VERSION}"
 DIST_INFO = f"{ROOT}.dist-info"
 
@@ -277,6 +277,35 @@ def test_wheel_rejects_generated_bytecode(tmp_path: Path) -> None:
         verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
 
 
+@pytest.mark.parametrize(
+    "legacy_member",
+    [
+        "md_converter.py",
+        "md_converter/__init__.py",
+        "md_converter.cpython-314-x86_64-linux-gnu.so",
+        f"{ROOT}.data/purelib/md_converter.py",
+        f"{ROOT}.data/purelib/md_converter/__init__.py",
+        f"{ROOT}.data/platlib/md_converter.py",
+        f"{ROOT}.data/platlib/md_converter/__init__.py",
+    ],
+)
+def test_wheel_rejects_legacy_import_in_installable_layouts(
+    tmp_path: Path, legacy_member: str
+) -> None:
+    """Every wheel location that installs an import rejects the old name."""
+    wheel = _write_wheel(tmp_path, extra=(legacy_member, b"legacy import"))
+    with pytest.raises(ArtifactError, match="legacy public import package"):
+        verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+
+
+def test_wheel_does_not_overmatch_legacy_name_inside_metadata(tmp_path: Path) -> None:
+    """A non-installable metadata member is not mistaken for a public import."""
+    wheel = _write_wheel(
+        tmp_path, extra=(f"{DIST_INFO}/md_converter.py", b"metadata only")
+    )
+    verify_wheel(wheel, expected_name=NAME, expected_version=VERSION)
+
+
 def test_wheel_rejects_member_count_bomb(tmp_path: Path, mocker: MockerFixture) -> None:
     """A ZIP central directory cannot force unbounded member processing."""
     wheel = _write_wheel(tmp_path)
@@ -382,6 +411,25 @@ def test_sdist_rejects_links(tmp_path: Path) -> None:
     """Links cannot redirect source distribution extraction."""
     sdist = _write_sdist(tmp_path, link_name=f"{ROOT}/linked-readme")
     with pytest.raises(ArtifactError, match="non-regular"):
+        verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
+
+
+@pytest.mark.parametrize(
+    "legacy_member",
+    [
+        f"{ROOT}/src/md_converter.py",
+        f"{ROOT}/src/md_converter/__init__.py",
+    ],
+)
+def test_sdist_rejects_legacy_import_package(
+    tmp_path: Path, legacy_member: str
+) -> None:
+    """The source archive rejects old module and package layouts."""
+    sdist = _write_sdist(
+        tmp_path,
+        extra=(legacy_member, b"legacy import"),
+    )
+    with pytest.raises(ArtifactError, match="legacy public import package"):
         verify_sdist(sdist, expected_name=NAME, expected_version=VERSION)
 
 

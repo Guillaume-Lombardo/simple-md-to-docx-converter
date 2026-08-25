@@ -8,21 +8,21 @@ import pytest
 from pytest_mock import MockerFixture
 from sqlalchemy import delete, text
 
-from md_converter.app import create_app
-from md_converter.auth.errors import AuthenticationError
-from md_converter.auth.models import Role, Session, User
-from md_converter.config import Settings
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import UserRow
-from md_converter.persistence.sql import (
+from markweave.app import create_app
+from markweave.auth.errors import AuthenticationError
+from markweave.auth.models import Role, Session, User
+from markweave.config import Settings
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import UserRow
+from markweave.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.storage import (
+from markweave.storage import (
     FilesystemObjectStore,
     ObjectKey,
     ObjectScope,
@@ -174,7 +174,7 @@ def test_filesystem_replace_failure_removes_the_pending_file(
 ) -> None:
     store = FilesystemObjectStore(tmp_path)
     key = ObjectKey(ObjectScope.RESULT, uuid4(), uuid4())
-    mocker.patch("md_converter.storage.os.replace", side_effect=PermissionError)
+    mocker.patch("markweave.storage.os.replace", side_effect=PermissionError)
     with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
         store.put(key, b"content")
     assert not list((tmp_path / "objects").rglob(".pending-*"))
@@ -187,7 +187,7 @@ def test_filesystem_delete_sync_failure_is_sanitized_after_removal(
     store = FilesystemObjectStore(tmp_path / "nested" / "data")
     key = ObjectKey(ObjectScope.RESULT, uuid4(), uuid4())
     store.put(key, b"content")
-    mocker.patch("md_converter.storage.os.fsync", side_effect=PermissionError)
+    mocker.patch("markweave.storage.os.fsync", side_effect=PermissionError)
     with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
         store.delete(key)
     assert not store.exists(key)

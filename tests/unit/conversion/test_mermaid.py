@@ -12,10 +12,10 @@ from typing import cast
 import pytest
 from PIL import Image
 
-from md_converter.conversion.archive import ApprovedResource
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits, normalize_image
-from md_converter.conversion.mermaid import (
+from markweave.conversion.archive import ApprovedResource
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits, normalize_image
+from markweave.conversion.mermaid import (
     MermaidCliRenderer,
     MermaidConfig,
     MermaidLimits,
@@ -23,8 +23,8 @@ from md_converter.conversion.mermaid import (
     contains_mermaid,
     render_mermaid,
 )
-from md_converter.conversion.validation import ApprovedMarkdown
-from md_converter.jobs.policy import DiagramResourceBudget
+from markweave.conversion.validation import ApprovedMarkdown
+from markweave.jobs.policy import DiagramResourceBudget
 
 pytestmark = pytest.mark.unit
 
@@ -42,7 +42,7 @@ def _png(width: int = 8, height: int = 6) -> bytes:
 def _patch_normalization(mocker, png: bytes | None = None) -> bytes:
     normalized = png or _png()
     mocker.patch(
-        "md_converter.conversion.mermaid.normalize_image", return_value=normalized
+        "markweave.conversion.mermaid.normalize_image", return_value=normalized
     )
     return normalized
 
@@ -296,7 +296,7 @@ def test_invalid_renderer_output_is_content_free(mocker, output: bytes) -> None:
 
 def test_normalization_failure_is_mapped_to_mermaid_output_error(mocker) -> None:
     mocker.patch(
-        "md_converter.conversion.mermaid.normalize_image",
+        "markweave.conversion.mermaid.normalize_image",
         side_effect=ConversionError(ConversionErrorCode.VALIDATION, "image detail"),
     )
     renderer = mocker.Mock()
@@ -314,7 +314,7 @@ def test_normalization_failure_is_mapped_to_mermaid_output_error(mocker) -> None
 
 def test_normalized_output_must_stay_within_per_diagram_limit(mocker) -> None:
     mocker.patch(
-        "md_converter.conversion.mermaid.normalize_image", return_value=b"x" * 101
+        "markweave.conversion.mermaid.normalize_image", return_value=b"x" * 101
     )
     renderer = mocker.Mock()
     renderer.render.return_value = b"raw"
@@ -478,10 +478,10 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
         return process
 
     popen = mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", side_effect=start
+        "markweave.conversion.mermaid.subprocess.Popen", side_effect=start
     )
     killpg = mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
     renderer = MermaidCliRenderer(
         _config(tmp_path), {"PATH": "/fixed/path", "SECRET": "not-allowed"}
@@ -495,7 +495,7 @@ def test_cli_uses_fixed_arguments_environment_and_private_workspace(
 
 
 def test_cli_maps_unavailable_and_nonzero_failures(tmp_path: Path, mocker) -> None:
-    popen = mocker.patch("md_converter.conversion.mermaid.subprocess.Popen")
+    popen = mocker.patch("markweave.conversion.mermaid.subprocess.Popen")
     popen.side_effect = OSError
     with pytest.raises(ConversionError) as unavailable:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
@@ -507,7 +507,7 @@ def test_cli_maps_unavailable_and_nonzero_failures(tmp_path: Path, mocker) -> No
     process.wait.return_value = 2
     popen.side_effect = None
     popen.return_value = process
-    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+    killpg = mocker.patch("markweave.conversion.mermaid.os.killpg")
     with pytest.raises(ConversionError) as failed:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert failed.value.code is ConversionErrorCode.MERMAID_FAILURE
@@ -529,10 +529,8 @@ def test_cli_timeout_terminates_then_kills_process_group(
         subprocess.TimeoutExpired("mmdc", 0.5),
         0,
     ]
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
-    )
-    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", return_value=process)
+    killpg = mocker.patch("markweave.conversion.mermaid.os.killpg")
 
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
@@ -547,10 +545,8 @@ def test_active_cancellation_terminates_mermaid_process_group(
 ) -> None:
     process = mocker.Mock(pid=1234)
     process.wait.side_effect = [subprocess.TimeoutExpired("mmdc", 0.1), 0]
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
-    )
-    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", return_value=process)
+    killpg = mocker.patch("markweave.conversion.mermaid.os.killpg")
     cancelled = mocker.Mock(side_effect=(False, True))
 
     with pytest.raises(ConversionError, match="interrupted") as captured:
@@ -573,12 +569,10 @@ def test_cancellable_cli_wait_handles_expired_deadline_and_probe_failure(
     tmp_path: Path, mocker, probe_failure: bool
 ) -> None:
     process = mocker.Mock(pid=1234)
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
-    )
-    mocker.patch("md_converter.conversion.mermaid.time.monotonic", return_value=10.0)
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", return_value=process)
+    mocker.patch("markweave.conversion.mermaid.time.monotonic", return_value=10.0)
     killpg = mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
     probe = (
         mocker.Mock(side_effect=RuntimeError("probe failed"))
@@ -605,10 +599,10 @@ def test_worker_deadline_caps_mermaid_engine_timeout(tmp_path: Path, mocker) -> 
         (options["cwd"] / "diagram.png").write_bytes(RAW_OUTPUT)
         return process
 
-    mocker.patch("md_converter.conversion.mermaid.subprocess.Popen", side_effect=start)
-    mocker.patch("md_converter.conversion.mermaid.time.monotonic", return_value=20.0)
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.mermaid.time.monotonic", return_value=20.0)
     mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
     assert (
@@ -627,15 +621,13 @@ def test_cli_missing_output_is_invalid(tmp_path: Path, mocker) -> None:
     process.pid = 3456
     process.wait.return_value = 0
     mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
     def missing(_arguments, **_options):
         return process
 
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", side_effect=missing
-    )
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=missing)
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
@@ -646,16 +638,14 @@ def test_cli_symlink_output_is_invalid(tmp_path: Path, mocker) -> None:
     process.pid = 4567
     process.wait.return_value = 0
     mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
     def symlink(_arguments, **options):
         (options["cwd"] / "diagram.png").symlink_to("/dev/null")
         return process
 
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", side_effect=symlink
-    )
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=symlink)
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
@@ -666,14 +656,14 @@ def test_cli_fifo_output_is_rejected_without_blocking(tmp_path: Path, mocker) ->
     process.pid = 4789
     process.wait.return_value = 0
     mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
     def fifo(_arguments, **options):
         os.mkfifo(options["cwd"] / "diagram.png")
         return process
 
-    mocker.patch("md_converter.conversion.mermaid.subprocess.Popen", side_effect=fifo)
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=fifo)
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
@@ -684,16 +674,14 @@ def test_cli_output_read_is_bounded(tmp_path: Path, mocker) -> None:
     process.pid = 5678
     process.wait.return_value = 0
     mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
 
     def oversized(_arguments, **options):
         (options["cwd"] / "diagram.png").write_bytes(b"123456")
         return process
 
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", side_effect=oversized
-    )
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", side_effect=oversized)
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 5)
     assert captured.value.code is ConversionErrorCode.INVALID_MERMAID_OUTPUT
@@ -710,11 +698,9 @@ def test_cli_process_disappearance_during_timeout_is_safe(
     process = mocker.Mock()
     process.pid = 1234
     process.wait.side_effect = subprocess.TimeoutExpired("mmdc", 5)
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", return_value=process)
     mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
-    )
-    mocker.patch(
-        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
     )
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)
@@ -729,10 +715,8 @@ def test_cli_final_wait_after_sigkill_is_bounded(tmp_path: Path, mocker) -> None
         subprocess.TimeoutExpired("mmdc", 0.5),
         subprocess.TimeoutExpired("mmdc", 0.5),
     ]
-    mocker.patch(
-        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
-    )
-    killpg = mocker.patch("md_converter.conversion.mermaid.os.killpg")
+    mocker.patch("markweave.conversion.mermaid.subprocess.Popen", return_value=process)
+    killpg = mocker.patch("markweave.conversion.mermaid.os.killpg")
 
     with pytest.raises(ConversionError) as captured:
         MermaidCliRenderer(_config(tmp_path), {}).render("secret", 100_000)

@@ -126,7 +126,7 @@ jobs:
         run: >-
           uv run python -m scripts.ci.check_changed_coverage
           --base "$BASE_SHA" --head "$HEAD_SHA"
-          --coverage coverage.json --source-root src/md_converter --fail-under 90
+          --coverage coverage.json --source-root src/markweave --fail-under 90
       - name: Run cheap CI security checks
         run: |
           uv lock --check
@@ -163,6 +163,7 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         domain: ${{ fromJSON(needs.detect.outputs.runnable-domains) }}
     services:

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.templates.models import (
+from markweave.templates.models import (
     TemplateIdentity,
     TemplatePublicationState,
     TemplateSearch,

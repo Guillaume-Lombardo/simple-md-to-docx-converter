@@ -20,28 +20,28 @@ import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from md_converter.auth.models import Role, User
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.schema import TemplateVersionRow, UserRow
-from md_converter.persistence.sql import create_database_engine
-from md_converter.persistence.templates import (
+from markweave.auth.models import Role, User
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import TemplateVersionRow, UserRow
+from markweave.persistence.sql import create_database_engine
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.storage import FilesystemObjectStore
-from md_converter.templates import engines as template_engines
-from md_converter.templates.engines import (
+from markweave.storage import FilesystemObjectStore
+from markweave.templates import engines as template_engines
+from markweave.templates.engines import (
     TemplateActivationContext,
     TemplateEngineConfig,
     validate_template_for_activation,
 )
-from md_converter.templates.errors import (
+from markweave.templates.errors import (
     TemplateValidationError,
     TemplateValidationErrorCode,
 )
-from md_converter.templates.models import TemplateCreate, TemplateSearch
-from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
-from md_converter.templates.validation import (
+from markweave.templates.models import TemplateCreate, TemplateSearch
+from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
+from markweave.templates.validation import (
     APPROVED_FONT_POLICY,
     TemplateFontDeclaration,
     TemplateLimits,

@@ -13,12 +13,12 @@ from xml.etree import ElementTree
 
 import pytest
 
-from md_converter.templates import validation as template_validation
-from md_converter.templates.errors import (
+from markweave.templates import validation as template_validation
+from markweave.templates.errors import (
     TemplateValidationError,
     TemplateValidationErrorCode,
 )
-from md_converter.templates.validation import (
+from markweave.templates.validation import (
     PANDOC_REQUIRED_STYLES,
     FontPolicy,
     RequiredStyle,

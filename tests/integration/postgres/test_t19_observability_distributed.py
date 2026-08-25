@@ -12,31 +12,31 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, insert, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 
-from md_converter.app import create_app
-from md_converter.auth.models import (
+from markweave.app import create_app
+from markweave.auth.models import (
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
     Role,
     User,
 )
-from md_converter.config import Settings
-from md_converter.jobs.errors import JobRepositoryError
-from md_converter.jobs.models import JobOutput, JobRequest
-from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import downgrade_database, upgrade_database
-from md_converter.persistence.observability import (
+from markweave.config import Settings
+from markweave.jobs.errors import JobRepositoryError
+from markweave.jobs.models import JobOutput, JobRequest
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import downgrade_database, upgrade_database
+from markweave.persistence.observability import (
     SqlAuditReader,
     SqlOperationalObserver,
 )
-from md_converter.persistence.retention import SqlRetentionRepository
-from md_converter.persistence.schema import (
+from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.schema import (
     AuthenticationAuditRow,
     RetentionCleanupRunRow,
     TemplateAuditRow,
 )
-from md_converter.persistence.sql import SqlUserRepository, create_database_engine
-from md_converter.storage import FilesystemObjectStore
+from markweave.persistence.sql import SqlUserRepository, create_database_engine
+from markweave.storage import FilesystemObjectStore
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 

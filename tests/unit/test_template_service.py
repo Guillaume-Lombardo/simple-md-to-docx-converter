@@ -9,29 +9,29 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.auth.errors import AuthenticationError
-from md_converter.auth.models import Role, User
-from md_converter.persistence.errors import PersistenceError
-from md_converter.storage import ObjectNotFoundError, ObjectStore, ObjectStoreError
-from md_converter.templates.errors import (
+from markweave.auth.errors import AuthenticationError
+from markweave.auth.models import Role, User
+from markweave.persistence.errors import PersistenceError
+from markweave.storage import ObjectNotFoundError, ObjectStore, ObjectStoreError
+from markweave.templates.errors import (
     TemplateConflictError,
     TemplateIntegrityError,
     TemplateStorageError,
     TemplateUnavailableError,
 )
-from md_converter.templates.models import (
+from markweave.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
     TemplateStatus,
     TemplateVersion,
 )
-from md_converter.templates.service import (
+from markweave.templates.service import (
     TemplateOperation,
     TemplateRecoveryPolicy,
     TemplateService,
 )
-from md_converter.templates.validation import ValidatedTemplate
+from markweave.templates.validation import ValidatedTemplate
 
 
 def _validated(data: bytes) -> ValidatedTemplate:

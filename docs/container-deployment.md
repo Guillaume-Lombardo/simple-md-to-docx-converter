@@ -8,7 +8,7 @@ default is fixed for reproducibility.
 
 The entrypoint accepts exactly `api`, `embedded-worker`, or `external-worker`. `api` serves HTTP
 without a worker. `embedded-worker` is the one-replica standalone process. `external-worker` is a
-distributed worker without HTTP. Both worker modes use the package-native `md_converter.runtime`
+distributed worker without HTTP. Both worker modes use the package-native `markweave.runtime`
 assembly and the same production conversion processor.
 
 Every mode refuses UID 0, non-empty effective or bounding capabilities, absent

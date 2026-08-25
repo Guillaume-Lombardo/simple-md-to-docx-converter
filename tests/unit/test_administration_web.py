@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.auth.models import Role, User
-from md_converter.templates.models import TemplateIdentity, TemplateStatus
-from md_converter.web import render_templates_page
+from markweave.auth.models import Role, User
+from markweave.templates.models import TemplateIdentity, TemplateStatus
+from markweave.web import render_templates_page
 
 
 @pytest.mark.unit

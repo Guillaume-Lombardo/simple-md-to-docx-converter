@@ -8,24 +8,24 @@ from pytest_mock import MockerFixture
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DatabaseSession
 
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.retention import SqlRetentionRepository
-from md_converter.persistence.schema import (
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.schema import (
     RetentionCleanupRunRow,
     TemplateAuditRow,
     TemplateRow,
     TemplateVersionRow,
     UserRow,
 )
-from md_converter.persistence.sql import create_database_engine
-from md_converter.retention import (
+from markweave.persistence.sql import create_database_engine
+from markweave.retention import (
     DataRetentionPolicy,
     RetentionClaim,
     RetentionRepository,
     RetentionService,
 )
-from md_converter.storage import ObjectStore, ObjectStoreError
-from md_converter.templates.models import TemplateVersion
+from markweave.storage import ObjectStore, ObjectStoreError
+from markweave.templates.models import TemplateVersion
 
 
 @pytest.mark.unit

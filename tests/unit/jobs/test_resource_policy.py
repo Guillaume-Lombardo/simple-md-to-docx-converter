@@ -11,12 +11,12 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.config import Settings
-from md_converter.conversion.archive import ArchiveLimits
-from md_converter.conversion.mermaid import MermaidLimits
-from md_converter.jobs.errors import JobProcessingCancelled
-from md_converter.jobs.models import JobProcessResult, JobState
-from md_converter.jobs.policy import (
+from markweave.config import Settings
+from markweave.conversion.archive import ArchiveLimits
+from markweave.conversion.mermaid import MermaidLimits
+from markweave.jobs.errors import JobProcessingCancelled
+from markweave.jobs.models import JobProcessResult, JobState
+from markweave.jobs.policy import (
     ArchiveResourceBudget,
     DiagramResourceBudget,
     JobAdmissionPolicy,
@@ -24,12 +24,12 @@ from md_converter.jobs.policy import (
     ResourceBudget,
     RetentionPolicy,
 )
-from md_converter.jobs.ports import JobProcessor, JobRepository
-from md_converter.jobs.runner import WorkerSchedule
-from md_converter.jobs.runtime import build_job_policies
-from md_converter.jobs.service import JobServicePolicy
-from md_converter.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
-from md_converter.storage import ObjectStore
+from markweave.jobs.ports import JobProcessor, JobRepository
+from markweave.jobs.runner import WorkerSchedule
+from markweave.jobs.runtime import build_job_policies
+from markweave.jobs.service import JobServicePolicy
+from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
+from markweave.storage import ObjectStore
 from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 

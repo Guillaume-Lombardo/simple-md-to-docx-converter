@@ -14,24 +14,24 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, event, select
 from sqlalchemy.exc import OperationalError
 
-from md_converter.app import AppComponents, build_components, create_app
-from md_converter.config import Settings
-from md_converter.malware import TrustingUploadScanner
-from md_converter.persistence.schema import (
+from markweave.app import AppComponents, build_components, create_app
+from markweave.config import Settings
+from markweave.malware import TrustingUploadScanner
+from markweave.persistence.schema import (
     TemplatePreferenceRow,
     TemplateRow,
     TemplateVersionRow,
     UserRow,
 )
-from md_converter.persistence.sql import SqlUserRepository
-from md_converter.persistence.templates import (
+from markweave.persistence.sql import SqlUserRepository
+from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
     SqlTemplateSelectionRepository,
 )
-from md_converter.storage import ObjectKey, ObjectScope
-from md_converter.templates.models import TemplatePublicationState
-from md_converter.templates.service import TemplateRecoveryPolicy, TemplateService
-from md_converter.templates.validation import ValidatedTemplate
+from markweave.storage import ObjectKey, ObjectScope
+from markweave.templates.models import TemplatePublicationState
+from markweave.templates.service import TemplateRecoveryPolicy, TemplateService
+from markweave.templates.validation import ValidatedTemplate
 from tests.settings import template_settings
 
 pytestmark = [

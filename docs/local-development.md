@@ -53,7 +53,7 @@ export MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000
 export MD_CONVERTER_CLAMAV_HOST="${MD_CONVERTER_CLAMAV_HOST:-127.0.0.1}"
 export MD_CONVERTER_CLAMAV_PORT="${MD_CONVERTER_CLAMAV_PORT:-3310}"
 export MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS="${MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS:-5}"
-uv run uvicorn md_converter:create_app --factory --host 127.0.0.1 --port 8000
+uv run uvicorn markweave:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
 Set the required variables in the current shell before running this guard block. The documentation
@@ -109,7 +109,7 @@ integration, and end-to-end tests remain included in the default command. Config
 `MD_CONVERTER_TEST_POSTGRES_URL` and the `MD_CONVERTER_TEST_S3_*` variables before the canonical
 run. The distributed CI domain provisions PostgreSQL and RustFS and never substitutes MinIO.
 
-Pytest always measures the installed `md_converter` application package and enforces two separate
+Pytest always measures the installed `markweave` application package and enforces two separate
 thresholds: at least 90% overall application coverage and at least 90% of application branches.
 The branch-only Pytest hook validates Coverage.py JSON after every canonical run, so high line
 coverage cannot hide low branch coverage. A complete, internally consistent report with zero
@@ -133,7 +133,7 @@ and cheap workflow security checks. Draft pull requests do not run activated hea
 
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least
-90% of changed executable lines under `src/md_converter` must be covered. The checker uses a
+90% of changed executable lines under `src/markweave` must be covered. The checker uses a
 zero-context Git diff without shell interpretation, ignores tests and tooling, and validates every
 Coverage.py file entry before measuring it. Executed, missing, and excluded line sets must contain
 unique positive line numbers, be disjoint, and agree with statement summaries; branch arrays and

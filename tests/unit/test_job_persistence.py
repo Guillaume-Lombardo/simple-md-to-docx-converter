@@ -6,10 +6,10 @@ from uuid import uuid4
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.auth.models import Role, User
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.sql import SqlUserRepository, create_database_engine
+from markweave.auth.models import Role, User
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from tests.job_repository_contracts import (
     TEMPLATE_ID,
     TEMPLATE_VERSION_ID,

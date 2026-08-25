@@ -1,0 +1,136 @@
+name: Container release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Validate the reviewed release identity
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = v0.3
+          uv run python -c 'import tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == "0.3"'
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Install rootless Podman
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes podman
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+      - name: Pull and verify the pinned base image
+        run: |
+          set -euo pipefail
+          base=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+          podman pull --quiet "$base"
+          test "$(podman image inspect "$base" --format '{{.Digest}}')" = sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+      - name: Build and validate the final rootless image
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh localhost/md-converter:0.3
+          bash scripts/container/smoke.sh localhost/md-converter:0.3
+          bash scripts/container/api-smoke.sh localhost/md-converter:0.3
+          bash scripts/container/distributed-api-smoke.sh localhost/md-converter:0.3
+      - name: Generate and verify release SBOM evidence
+        run: bash scripts/container/supply-chain.sh localhost/md-converter:0.3 artifacts/container release
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push the immutable release image
+        id: push
+        run: |
+          set -euo pipefail
+          podman push --digestfile "$RUNNER_TEMP/image-digest" localhost/md-converter:0.3 docker://ghcr.io/guillaume-lombardo/md-converter:0.3
+          digest="$(cat "$RUNNER_TEMP/image-digest")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Retain exact release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-release-v0.3
+          path: |
+            artifacts/container/image.oci.tar
+            artifacts/container/sbom.cdx.json
+            artifacts/container/sbom.spdx.json
+            artifacts/container/vulnerabilities.json
+            artifacts/container/image-metadata.json
+            artifacts/container/release-bundle.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+  attest:
+    needs: build-and-publish
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Attest the published image identity
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/guillaume-lombardo/md-converter
+          subject-digest: ${{ needs.build-and-publish.outputs.digest }}
+          push-to-registry: true
+
+  release-evidence:
+    needs: [build-and-publish, attest]
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: container-release-v0.3
+          path: artifacts/container
+      - name: Attach SBOM and verification evidence to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload v0.3
+          artifacts/container/sbom.cdx.json
+          artifacts/container/sbom.spdx.json
+          artifacts/container/vulnerabilities.json
+          artifacts/container/image-metadata.json
+          artifacts/container/release-bundle.sha256

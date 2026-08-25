@@ -13,14 +13,15 @@ from pathlib import Path
 
 from PIL import Image
 
-from md_converter.conversion.libreoffice import (
+from markweave.conversion.libreoffice import (
     LibreOfficeConfig,
     LibreOfficePdfConverter,
     PdfLimits,
     PdfTraceabilityContext,
 )
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.validation import ApprovedMarkdown
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.validation import ApprovedMarkdown
+from markweave.version import VERSION
 from tests.golden.limits import RasterLimits
 from tests.golden.pdf import render_pdf
 from tests.golden.reference import normalize_reference_docx
@@ -95,7 +96,7 @@ def generate(output: Path, workspace: Path) -> None:
     ).convert(ApprovedMarkdown(markdown.decode("utf-8")), reference)
     font_manifest = Path("spikes/toolchain/fonts/manifest.json").read_bytes()
     trace = PdfTraceabilityContext(
-        application_version="0.1.0",
+        application_version=VERSION,
         conversion_contract_version="1",
         template_id="t11-golden-template",
         template_version="1",

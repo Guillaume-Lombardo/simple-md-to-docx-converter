@@ -3,10 +3,12 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "md-converter"
-version = "0.1.0"
+name = "markweave"
+version = "0.3"
 description = "A service for converting Markdown documents to DOCX and PDF"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "alembic>=1.16,<2",
@@ -26,6 +28,11 @@ dependencies = [
     "tinycss2>=1.5,<2",
     "uvicorn>=0.35,<1",
 ]
+
+[project.urls]
+Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter#readme"
+Issues = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues"
+Repository = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"
 
 [dependency-groups]
 build = ["hatchling==1.32.0"]
@@ -51,7 +58,10 @@ build-constraint-dependencies = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["/README.md", "/pyproject.toml", "/src/md_converter"]
+include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src/markweave"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/markweave"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -59,7 +69,7 @@ addopts = [
     "--strict-markers",
     "-p",
     "scripts.ci.pytest_branch_coverage",
-    "--cov=md_converter",
+    "--cov=markweave",
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-report=json:coverage.json",
@@ -121,14 +131,14 @@ include = ["src", "scripts", "tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["md_converter"]
+source = ["markweave"]
 
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
 
 [tool.mutmut]
-source_paths = ["src/md_converter"]
+source_paths = ["src/markweave"]
 pytest_add_cli_args = [
     "-c",
     "/dev/null",

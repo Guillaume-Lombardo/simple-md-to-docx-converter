@@ -18,16 +18,16 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.libreoffice import (
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.libreoffice import (
     LibreOfficeConfig,
     LibreOfficePdfConverter,
     PdfArtifact,
     PdfLimits,
     PdfTraceabilityContext,
 )
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.validation import ApprovedMarkdown
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.validation import ApprovedMarkdown
 from tests.golden.limits import RasterLimits
 from tests.golden.pdf import render_pdf
 from tests.golden.raster import RasterPage, RasterTolerance, compare_pdf_rasters

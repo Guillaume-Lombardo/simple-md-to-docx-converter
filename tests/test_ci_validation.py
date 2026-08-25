@@ -8,11 +8,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci.validate_ci import (
     ReleaseWorkflowPolicy,
+    WorkflowLoader,
     discover_workflow_paths,
     main,
+    validate_container_release_workflow_text,
     validate_python_imports,
     validate_registry_text,
     validate_release_workflow_text,
@@ -104,6 +107,10 @@ RELEASE_POLICY = ReleaseWorkflowPolicy(
     artifact_directory=ARTIFACT_PATH_PLACEHOLDER,
     manifest_name=MANIFEST_PLACEHOLDER,
     constraint=CONSTRAINT_PLACEHOLDER,
+    publishable_paths=(
+        f"{ARTIFACT_PATH_PLACEHOLDER}/*.whl",
+        f"{ARTIFACT_PATH_PLACEHOLDER}/*.tar.gz",
+    ),
 )
 
 
@@ -146,6 +153,14 @@ jobs:
           check-latest: false
       - name: Set up uv
         uses: astral-sh/setup-uv@{FULL_SHA_C}
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Validate the reviewed release identity
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = v0.3
       - name: Build distributions exactly once
         run: {BUILD_COMMAND}
       - name: Verify artifact integrity and metadata
@@ -156,7 +171,10 @@ jobs:
         uses: actions/upload-artifact@{FULL_SHA_D}
         with:
           name: {ARTIFACT_NAME_PLACEHOLDER}
-          path: {ARTIFACT_PATH_PLACEHOLDER}
+          path: |
+            {ARTIFACT_PATH_PLACEHOLDER}/*.whl
+            {ARTIFACT_PATH_PLACEHOLDER}/*.tar.gz
+          if-no-files-found: error
   publish:
     needs: build-and-verify
     if: ${{{{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}}}
@@ -166,6 +184,13 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Recheck PyPI name availability
+        run: |
+          set -euo pipefail
+          for url in https://pypi.org/pypi/markweave/json https://pypi.org/simple/markweave/; do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{{http_code}}' "$url")"
+            test "$status" = 404
+          done
       - name: Download verified artifacts
         uses: actions/download-artifact@{FULL_SHA_D}
         with:
@@ -184,6 +209,18 @@ def test_committed_workflow_satisfies_local_security_policy() -> None:
     """The real workflow is covered by the same validator used in CI."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert validate_workflow_text(workflow) == []
+
+
+@pytest.mark.unit
+def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
+    workflow = yaml.load(
+        Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
+    )
+
+    assert workflow["on"]["schedule"] == [{"cron": "17 3 * * 0"}]
+    assert workflow["jobs"]["heavy"]["timeout-minutes"] == 45
+    assert workflow["jobs"]["heavy"]["strategy"]["max-parallel"] == 2
 
 
 @pytest.mark.unit
@@ -435,8 +472,32 @@ def test_committed_ci_validation_entrypoint_succeeds() -> None:
 def test_all_committed_workflows_have_explicit_policies() -> None:
     """The entrypoint cannot silently leave a newly committed workflow unchecked."""
     workflows = discover_workflow_paths(Path(".github/workflows"))
-    assert [path.name for path in workflows] == ["ci.yml", "mutation.yml"]
+    assert [path.name for path in workflows] == [
+        "ci.yml",
+        "container-release.yml",
+        "mutation.yml",
+        "release.yml",
+    ]
     assert validate_workflow_files(workflows) == []
+
+
+@pytest.mark.unit
+def test_container_release_workflow_satisfies_exact_policy() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert validate_container_release_workflow_text(workflow) == []
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_unreviewed_mutation() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace("attestations: write", "attestations: read", 1)
+    errors = validate_container_release_workflow_text(weakened)
+    assert "container release workflow differs from the reviewed policy" in errors
+    assert "container release job 'attest' permissions are not minimal" in errors
 
 
 @pytest.mark.unit
@@ -1069,7 +1130,7 @@ def test_release_policy_rejects_noncanonical_concurrency_group(
         (
             "environment: pypi",
             "environment: staging",
-            "publish job must use the protected pypi environment",
+            "publish job must use the dedicated pypi environment identity",
         ),
         (
             "permissions:\n      id-token: write",
@@ -1163,7 +1224,7 @@ def test_release_policy_rejects_publish_rebuild_or_extra_step(
         "      - name: Publish exact artifacts",
     )
     errors = validate_release_workflow_text(weakened, policy=RELEASE_POLICY)
-    assert "publish job must contain exactly two action steps" in errors
+    assert "publish job must contain exactly three approved steps" in errors
 
 
 @pytest.mark.unit

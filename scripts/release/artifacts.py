@@ -37,8 +37,11 @@ MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 500
 READ_CHUNK_BYTES = 1024 * 1024
 RECORD = "RECORD"
+PUBLIC_IMPORT_PACKAGE = "markweave"
+LEGACY_IMPORT_PACKAGE = "md_converter"
 ARTIFACT_COUNT = 2
 RECORD_FIELD_COUNT = 3
+INSTALL_IMPORT_PATH_PARTS = 3
 SHA256 = re.compile(r"[0-9a-f]{64}")
 SAFE_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 EOCD_SIGNATURE = b"PK\x05\x06"
@@ -87,6 +90,25 @@ def normalized_name(value: str) -> str:
 
 def _distribution_component(value: str) -> str:
     return normalized_name(value).replace("-", "_")
+
+
+def _is_legacy_import_entry(value: str) -> bool:
+    return value in {LEGACY_IMPORT_PACKAGE, f"{LEGACY_IMPORT_PACKAGE}.py"} or (
+        value.startswith(f"{LEGACY_IMPORT_PACKAGE}.")
+        and value.endswith((".so", ".pyd"))
+    )
+
+
+def _wheel_installs_legacy_import(name: str, *, data_directory: str) -> bool:
+    parts = PurePosixPath(name).parts
+    if parts[0] == data_directory:
+        if len(parts) < INSTALL_IMPORT_PATH_PARTS or parts[1] not in {
+            "purelib",
+            "platlib",
+        }:
+            return False
+        return _is_legacy_import_entry(parts[2])
+    return _is_legacy_import_entry(parts[0])
 
 
 def _safe_manifest_name(value: str) -> str:
@@ -523,8 +545,11 @@ def verify_wheel(path: Path, *, expected_name: str, expected_version: str) -> No
             metadata_name = f"{dist_info}/METADATA"
             wheel_name = f"{dist_info}/WHEEL"
             record_name = f"{dist_info}/{RECORD}"
+            data_directory = (
+                f"{_distribution_component(expected_name)}-{expected_version}.data"
+            )
             required = {
-                f"{_distribution_component(expected_name)}/__init__.py",
+                f"{PUBLIC_IMPORT_PACKAGE}/__init__.py",
                 metadata_name,
                 wheel_name,
                 record_name,
@@ -534,6 +559,11 @@ def verify_wheel(path: Path, *, expected_name: str, expected_version: str) -> No
                 raise ArtifactError(
                     f"wheel is missing required members: {sorted(missing)}"
                 )
+            if any(
+                _wheel_installs_legacy_import(name, data_directory=data_directory)
+                for name in names
+            ):
+                raise ArtifactError("wheel contains the legacy public import package")
             if any(
                 "__pycache__" in PurePosixPath(name).parts or name.endswith(".pyc")
                 for name in names
@@ -619,11 +649,18 @@ def verify_sdist(path: Path, *, expected_name: str, expected_version: str) -> No
         f"{expected_stem}/PKG-INFO",
         f"{expected_stem}/README.md",
         f"{expected_stem}/pyproject.toml",
-        f"{expected_stem}/src/{_distribution_component(expected_name)}/__init__.py",
+        f"{expected_stem}/src/{PUBLIC_IMPORT_PACKAGE}/__init__.py",
     }
     missing = required.difference(names)
     if missing:
         raise ArtifactError(f"sdist is missing required members: {sorted(missing)}")
+    if any(
+        len(parts := PurePosixPath(name).parts) >= INSTALL_IMPORT_PATH_PARTS
+        and parts[:2] == (expected_stem, "src")
+        and _is_legacy_import_entry(parts[2])
+        for name in names
+    ):
+        raise ArtifactError("sdist contains the legacy public import package")
     pkg_info_name = f"{expected_stem}/PKG-INFO"
     pyproject_name = f"{expected_stem}/pyproject.toml"
     _require_identity(

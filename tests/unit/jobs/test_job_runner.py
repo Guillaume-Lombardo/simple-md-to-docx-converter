@@ -7,20 +7,20 @@ from threading import Event
 import pytest
 from pytest_mock import MockerFixture
 
-from md_converter.jobs.errors import JobRepositoryError
-from md_converter.jobs.runner import (
+from markweave.jobs.errors import JobRepositoryError
+from markweave.jobs.runner import (
     EmbeddedWorker,
     ExternalWorkerRuntime,
     WorkerLoop,
     WorkerSchedule,
 )
-from md_converter.jobs.worker import ConversionWorker
-from md_converter.observability import (
+from markweave.jobs.worker import ConversionWorker
+from markweave.observability import (
     MetricsHttpServer,
     OperationalMetrics,
     QueueSnapshot,
 )
-from md_converter.persistence.errors import PersistenceError
+from markweave.persistence.errors import PersistenceError
 
 pytestmark = pytest.mark.unit
 

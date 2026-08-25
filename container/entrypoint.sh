@@ -24,7 +24,7 @@ for directory in \
 done
 
 if [[ "$mode" == api ]]; then
-  exec uvicorn md_converter:create_app \
+  exec uvicorn markweave:create_app \
     --factory \
     --host "${MD_CONVERTER_HOST:-0.0.0.0}" \
     --port "${MD_CONVERTER_PORT:-8080}" \
@@ -34,4 +34,4 @@ if [[ "$mode" == api ]]; then
 fi
 
 exec /opt/md-converter/venv/bin/python \
-  -m md_converter.runtime "$mode" "$@"
+  -m markweave.runtime "$mode" "$@"

@@ -11,7 +11,7 @@ import {
   validTemplatePage,
   validUsers,
   validVersions,
-} from "../../src/md_converter/static/administration.js";
+} from "../../src/markweave/static/administration.js";
 
 class FakeClassList {
   values = new Set();

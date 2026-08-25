@@ -11,24 +11,24 @@ from sqlalchemy import delete, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
-from md_converter.app import create_app
-from md_converter.auth.models import Role, Session, User
-from md_converter.config import Settings
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.migrations import (
+from markweave.app import create_app
+from markweave.auth.models import Role, Session, User
+from markweave.config import Settings
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import (
     POSTGRES_MIGRATION_LOCK,
     downgrade_database,
     upgrade_database,
 )
-from md_converter.persistence.schema import SessionRow, UserRow
-from md_converter.persistence.sql import (
+from markweave.persistence.schema import SessionRow, UserRow
+from markweave.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
 )
-from md_converter.persistence.templates import SqlTemplateCatalogRepository
-from md_converter.templates.models import TemplateSearch
+from markweave.persistence.templates import SqlTemplateCatalogRepository
+from markweave.templates.models import TemplateSearch
 from tests.settings import template_settings
 from tests.storage_contracts import exercise_auth_repository_contract
 

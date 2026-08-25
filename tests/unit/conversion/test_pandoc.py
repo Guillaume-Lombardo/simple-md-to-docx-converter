@@ -10,11 +10,11 @@ from pathlib import Path, PurePosixPath
 import pytest
 from PIL import Image
 
-from md_converter.conversion.archive import ApprovedResource
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits, normalize_image
-from md_converter.conversion.pandoc import PandocConfig, PandocDocxConverter
-from md_converter.conversion.validation import PANDOC_READER, ApprovedMarkdown
+from markweave.conversion.archive import ApprovedResource
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits, normalize_image
+from markweave.conversion.pandoc import PandocConfig, PandocDocxConverter
+from markweave.conversion.validation import PANDOC_READER, ApprovedMarkdown
 
 IMAGE_LIMITS = ImageLimits(100_000, 256, 256, 65_536, 1_000, 64)
 
@@ -85,7 +85,7 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
         return process
 
     popen = mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", side_effect=start
+        "markweave.conversion.pandoc.subprocess.Popen", side_effect=start
     )
     result = converter(tmp_path).convert(ApprovedMarkdown("# Safe"), reference)
     assert result == reference
@@ -108,7 +108,7 @@ def test_each_conversion_uses_a_distinct_cleaned_workspace(
         (workspace / "output.docx").write_bytes(reference)
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
     adapter = converter(tmp_path)
     adapter.convert(ApprovedMarkdown("# First"), reference)
     adapter.convert(ApprovedMarkdown("# Second"), reference)
@@ -139,7 +139,7 @@ def test_adapter_materializes_only_approved_package_resources(
         (workspace / "output.docx").write_bytes(reference)
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
     approved = ApprovedMarkdown(
         "![safe](../assets/image.svg)",
         entrypoint=PurePosixPath("docs/readme.md"),
@@ -160,7 +160,7 @@ def test_reference_document_is_opaque_to_t07(tmp_path: Path, mocker) -> None:
         return process
 
     popen = mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", side_effect=start
+        "markweave.conversion.pandoc.subprocess.Popen", side_effect=start
     )
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), b"opaque-reference")
@@ -172,7 +172,7 @@ def test_reference_document_is_opaque_to_t07(tmp_path: Path, mocker) -> None:
 def test_adapter_revalidates_approved_type_before_subprocess(
     tmp_path: Path, mocker
 ) -> None:
-    popen = mocker.patch("md_converter.conversion.pandoc.subprocess.Popen")
+    popen = mocker.patch("markweave.conversion.pandoc.subprocess.Popen")
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(
             ApprovedMarkdown("<script>bad()</script>"), b"opaque"
@@ -186,7 +186,7 @@ def test_unavailable_pandoc_has_stable_content_free_error(
     tmp_path: Path, mocker
 ) -> None:
     mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen",
+        "markweave.conversion.pandoc.subprocess.Popen",
         side_effect=FileNotFoundError("sensitive path and input"),
     )
     with pytest.raises(ConversionError) as captured:
@@ -199,9 +199,7 @@ def test_unavailable_pandoc_has_stable_content_free_error(
 def test_nonzero_exit_has_stable_error(tmp_path: Path, mocker) -> None:
     process = mocker.Mock()
     process.wait.return_value = 23
-    mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
-    )
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
     assert captured.value.code is ConversionErrorCode.PANDOC_FAILURE
@@ -217,7 +215,7 @@ def test_invalid_output_has_stable_error(tmp_path: Path, mocker) -> None:
         (options["cwd"] / "output.docx").write_bytes(b"invalid")
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
     assert captured.value.code is ConversionErrorCode.INVALID_DOCX
@@ -236,22 +234,22 @@ def test_workspace_failures_have_stable_content_free_error(
         (options["cwd"] / "output.docx").write_bytes(minimal_docx())
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
     sensitive = OSError("sensitive workspace path and document")
     if failure_point == "create":
         mocker.patch(
-            "md_converter.conversion.pandoc.tempfile.TemporaryDirectory",
+            "markweave.conversion.pandoc.tempfile.TemporaryDirectory",
             side_effect=sensitive,
         )
     elif failure_point == "prepare":
-        mocker.patch("md_converter.conversion.pandoc.Path.mkdir", side_effect=sensitive)
+        mocker.patch("markweave.conversion.pandoc.Path.mkdir", side_effect=sensitive)
     elif failure_point == "read":
         mocker.patch(
-            "md_converter.conversion.pandoc.Path.read_bytes", side_effect=sensitive
+            "markweave.conversion.pandoc.Path.read_bytes", side_effect=sensitive
         )
     else:
         mocker.patch(
-            "md_converter.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
+            "markweave.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
             side_effect=sensitive,
         )
     with pytest.raises(ConversionError) as captured:
@@ -266,11 +264,9 @@ def test_cleanup_failure_replaces_conversion_failure_with_workspace_error(
 ) -> None:
     process = mocker.Mock()
     process.wait.return_value = 23
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
     mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
-    )
-    mocker.patch(
-        "md_converter.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
+        "markweave.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
         side_effect=OSError("sensitive cleanup path"),
     )
     with pytest.raises(ConversionError) as captured:
@@ -289,10 +285,8 @@ def test_timeout_terminates_then_kills_the_process_group(
         subprocess.TimeoutExpired("pandoc", 0.5),
         0,
     ]
-    mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
-    )
-    killpg = mocker.patch("md_converter.conversion.pandoc.os.killpg")
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+    killpg = mocker.patch("markweave.conversion.pandoc.os.killpg")
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
     assert captured.value.code is ConversionErrorCode.PANDOC_TIMEOUT
@@ -307,10 +301,8 @@ def test_active_cancellation_terminates_pandoc_process_group(
 ) -> None:
     process = mocker.Mock(pid=4321)
     process.wait.side_effect = [subprocess.TimeoutExpired("pandoc", 0.1), 0]
-    mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
-    )
-    killpg = mocker.patch("md_converter.conversion.pandoc.os.killpg")
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+    killpg = mocker.patch("markweave.conversion.pandoc.os.killpg")
     cancelled = mocker.Mock(side_effect=(False, True))
 
     with pytest.raises(ConversionError, match="interrupted") as captured:
@@ -331,12 +323,10 @@ def test_cancellable_wait_handles_expired_deadline_and_probe_failure(
     tmp_path: Path, mocker, probe_failure: bool
 ) -> None:
     process = mocker.Mock(pid=4321)
-    mocker.patch(
-        "md_converter.conversion.pandoc.subprocess.Popen", return_value=process
-    )
-    mocker.patch("md_converter.conversion.pandoc.time.monotonic", return_value=10.0)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+    mocker.patch("markweave.conversion.pandoc.time.monotonic", return_value=10.0)
     killpg = mocker.patch(
-        "md_converter.conversion.pandoc.os.killpg", side_effect=ProcessLookupError
+        "markweave.conversion.pandoc.os.killpg", side_effect=ProcessLookupError
     )
     probe = (
         mocker.Mock(side_effect=RuntimeError("probe failed"))
@@ -368,7 +358,7 @@ def test_adapter_without_host_path_and_invalid_workspace_are_explicit(
         (options["cwd"] / "output.docx").write_bytes(reference)
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
     adapter = PandocDocxConverter(PandocConfig("pandoc", 5.0, 0.5, tmp_path), {})
     assert adapter.convert(ApprovedMarkdown("# Safe"), reference) == reference
 
@@ -386,8 +376,8 @@ def test_worker_deadline_caps_pandoc_engine_timeout(tmp_path: Path, mocker) -> N
         (options["cwd"] / "output.docx").write_bytes(reference)
         return process
 
-    mocker.patch("md_converter.conversion.pandoc.subprocess.Popen", side_effect=start)
-    mocker.patch("md_converter.conversion.pandoc.time.monotonic", return_value=10.0)
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
+    mocker.patch("markweave.conversion.pandoc.time.monotonic", return_value=10.0)
 
     assert (
         converter(tmp_path).convert(

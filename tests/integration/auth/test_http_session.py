@@ -13,8 +13,8 @@ import httpx
 import pytest
 import uvicorn
 
-from md_converter.app import create_app
-from md_converter.config import Settings
+from markweave.app import create_app
+from markweave.config import Settings
 from tests.settings import template_settings
 
 

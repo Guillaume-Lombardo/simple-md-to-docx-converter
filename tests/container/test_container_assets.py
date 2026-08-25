@@ -56,6 +56,21 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
     assert "uv sync --locked --no-dev --no-editable" in containerfile
 
 
+def test_final_image_version_comes_from_project_metadata() -> None:
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    build = Path("scripts/container/build.sh").read_text(encoding="utf-8")
+    smoke = Path("scripts/container/smoke.sh").read_text(encoding="utf-8")
+
+    assert "ARG APPLICATION_VERSION\n" in containerfile
+    assert 'org.opencontainers.image.version="${APPLICATION_VERSION}"' in containerfile
+    assert "markweave.__version__ == sys.argv[1]" in containerfile
+    assert 'application_version="$(uv version --short --locked)"' in build
+    assert '--build-arg "APPLICATION_VERSION=$application_version"' in build
+    assert 'application_version="$(uv version --short --locked)"' in smoke
+    assert '--env "EXPECTED_APPLICATION_VERSION=$application_version"' in smoke
+    assert 'os.environ[\\"EXPECTED_APPLICATION_VERSION\\"]' in smoke
+
+
 def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> None:
     script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
     containerfile = Path("Containerfile").read_text(encoding="utf-8")
@@ -75,7 +90,7 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
 def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
     entrypoint = Path("container/entrypoint.sh").read_text(encoding="utf-8")
     assert "api|embedded-worker|external-worker" in entrypoint
-    assert "md_converter.runtime" in entrypoint
+    assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
 
 

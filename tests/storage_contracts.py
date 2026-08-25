@@ -9,28 +9,28 @@ from uuid import uuid4
 
 import pytest
 
-from md_converter.auth.errors import AuthenticationError
-from md_converter.auth.models import Role, Session, User
-from md_converter.auth.ports import SessionRepository, UserRepository
-from md_converter.config import ConfigurationError
-from md_converter.storage import (
+from markweave.auth.errors import AuthenticationError
+from markweave.auth.models import Role, Session, User
+from markweave.auth.ports import SessionRepository, UserRepository
+from markweave.config import ConfigurationError
+from markweave.storage import (
     ObjectKey,
     ObjectNotFoundError,
     ObjectScope,
     ObjectStore,
 )
-from md_converter.templates.errors import TemplateUnavailableError
-from md_converter.templates.models import (
+from markweave.templates.errors import TemplateUnavailableError
+from markweave.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplateSearch,
     TemplateStatus,
 )
-from md_converter.templates.ports import (
+from markweave.templates.ports import (
     TemplateCatalogRepository,
     TemplateSelectionRepository,
 )
-from md_converter.templates.service import TemplateOperation, TemplateService
+from markweave.templates.service import TemplateOperation, TemplateService
 
 
 def exercise_auth_repository_contract(

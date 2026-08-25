@@ -9,9 +9,9 @@ on:
         description: Bounded Python symbol pattern to mutate
         required: true
         type: choice
-        default: md_converter.observability.x__normalize_method__mutmut_*
+        default: markweave.observability.x__normalize_method__mutmut_*
         options:
-          - md_converter.observability.x__normalize_method__mutmut_*
+          - markweave.observability.x__normalize_method__mutmut_*
 
 permissions:
   contents: read
@@ -45,7 +45,7 @@ jobs:
         run: uv sync --locked --all-groups
       - name: Run a fresh, non-empty targeted mutation campaign
         env:
-          MUTATION_TARGET: ${{ inputs.target || 'md_converter.observability.x__normalize_method__mutmut_*' }}
+          MUTATION_TARGET: ${{ inputs.target || 'markweave.observability.x__normalize_method__mutmut_*' }}
         run: |
           set -euo pipefail
           rm -rf -- mutants

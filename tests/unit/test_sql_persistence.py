@@ -11,22 +11,22 @@ from pytest_mock import MockerFixture
 from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from md_converter.auth.models import (
+from markweave.auth.models import (
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
     Role,
     Session,
     User,
 )
-from md_converter.config import ConfigurationError
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.migrations import (
+from markweave.config import ConfigurationError
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.migrations import (
     downgrade_database,
     run_migration_environment,
     upgrade_database,
 )
-from md_converter.persistence.schema import AuthenticationAuditRow
-from md_converter.persistence.sql import (
+from markweave.persistence.schema import AuthenticationAuditRow
+from markweave.persistence.sql import (
     DatabaseReadinessProbe,
     SqlSessionRepository,
     SqlUserRepository,
@@ -35,28 +35,28 @@ from md_converter.persistence.sql import (
 )
 
 REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260823_01_auth_tables"
+    "markweave.persistence.migrations.versions.20260823_01_auth_tables"
 )
 JOB_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_03_conversion_jobs"
+    "markweave.persistence.migrations.versions.20260824_03_conversion_jobs"
 )
 RETENTION_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_07_retention_cleanup"
+    "markweave.persistence.migrations.versions.20260824_07_retention_cleanup"
 )
 IMMUTABILITY_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_08_immutable_retention_records"
+    "markweave.persistence.migrations.versions.20260824_08_immutable_retention_records"
 )
 CLEANUP_EVIDENCE_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_09_immutable_cleanup_evidence"
+    "markweave.persistence.migrations.versions.20260824_09_immutable_cleanup_evidence"
 )
 CORRELATION_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_10_job_correlation"
+    "markweave.persistence.migrations.versions.20260824_10_job_correlation"
 )
 AUTH_AUDIT_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260824_11_authentication_audit"
+    "markweave.persistence.migrations.versions.20260824_11_authentication_audit"
 )
 JOB_INTEGRITY_REVISION: Any = importlib.import_module(
-    "md_converter.persistence.migrations.versions.20260825_12_job_integrity_metadata"
+    "markweave.persistence.migrations.versions.20260825_12_job_integrity_metadata"
 )
 
 
@@ -158,8 +158,8 @@ def test_inprocess_sql_repository_control_flow() -> None:
 def test_database_engine_applies_profile_bounded_timeouts(
     mocker: MockerFixture,
 ) -> None:
-    created = mocker.patch("md_converter.persistence.sql.create_engine")
-    listen = mocker.patch("md_converter.persistence.sql.event.listen")
+    created = mocker.patch("markweave.persistence.sql.create_engine")
+    listen = mocker.patch("markweave.persistence.sql.event.listen")
 
     sqlite_engine = create_database_engine(
         "sqlite+pysqlite:///:memory:", timeout_seconds=0.5
@@ -297,7 +297,7 @@ def test_sql_failures_have_one_stable_sanitized_boundary(
         connection.execute(text("PRAGMA query_only=OFF"))
 
     command = mocker.patch(
-        "md_converter.persistence.migrations.command.upgrade",
+        "markweave.persistence.migrations.command.upgrade",
         side_effect=SQLAlchemyError("private SQL and parameters"),
     )
     with pytest.raises(PersistenceError) as migration_error:
@@ -330,7 +330,7 @@ def test_every_repository_operation_sanitizes_sqlalchemy_failures(
         absolute_expires_at=now + timedelta(hours=8),
     )
     mocker.patch(
-        "md_converter.persistence.sql.DatabaseSession",
+        "markweave.persistence.sql.DatabaseSession",
         side_effect=SQLAlchemyError("private SQL parameters"),
     )
     operations = (
@@ -351,7 +351,7 @@ def test_every_repository_operation_sanitizes_sqlalchemy_failures(
         assert "private" not in repr(caught.value)
 
     mocker.patch(
-        "md_converter.persistence.sql.create_engine",
+        "markweave.persistence.sql.create_engine",
         side_effect=SQLAlchemyError("private URL"),
     )
     with pytest.raises(PersistenceError) as engine_error:

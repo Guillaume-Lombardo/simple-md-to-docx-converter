@@ -12,8 +12,8 @@ from typing import cast
 import pytest
 from PIL import Image
 
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import (
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import (
     ImageLimits,
     normalize_image,
     render_svg_with_cairo,

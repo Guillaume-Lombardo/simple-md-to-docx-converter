@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import Engine, update
 from sqlalchemy.orm import Session
 
-from md_converter.persistence.schema import TemplateRow, TemplateVersionRow
+from markweave.persistence.schema import TemplateRow, TemplateVersionRow
 
 
 def publish_template_pair(  # noqa: PLR0913

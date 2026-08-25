@@ -10,15 +10,15 @@ from collections.abc import Iterable
 import pytest
 from PIL import Image
 
-from md_converter.conversion.archive import (
+from markweave.conversion.archive import (
     ApprovedResource,
     ArchiveLimits,
     prepare_archive,
 )
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.images import ImageLimits
-from md_converter.conversion.service import DocxConversionService
-from md_converter.jobs.policy import ArchiveResourceBudget
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.images import ImageLimits
+from markweave.conversion.service import DocxConversionService
+from markweave.jobs.policy import ArchiveResourceBudget
 
 LIMITS = ArchiveLimits(200_000, 20, 100_000, 150_000, 100.0, 50_000, 5)
 IMAGE_LIMITS = ImageLimits(100_000, 1_000, 1_000, 1_000_000, 10_000, 64)

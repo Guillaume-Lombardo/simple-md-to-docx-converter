@@ -7,7 +7,7 @@ from uuid import uuid4
 import boto3
 import pytest
 
-from md_converter.storage import (
+from markweave.storage import (
     ObjectKey,
     ObjectScope,
     ObjectStoreError,

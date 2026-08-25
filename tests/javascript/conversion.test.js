@@ -8,7 +8,7 @@ import {
   responseError,
   statusPresentation,
   validSource,
-} from "../../src/md_converter/static/conversion.js";
+} from "../../src/markweave/static/conversion.js";
 
 class FakeClassList {
   values = new Set();

@@ -17,9 +17,9 @@ from pypdf.errors import LimitReachedError, PyPdfError
 from pypdf.generic import DictionaryObject, NameObject, TextStringObject
 from pytest_mock import MockerFixture
 
-from md_converter.conversion import libreoffice
-from md_converter.conversion.errors import ConversionError, ConversionErrorCode
-from md_converter.conversion.libreoffice import (
+from markweave.conversion import libreoffice
+from markweave.conversion.errors import ConversionError, ConversionErrorCode
+from markweave.conversion.libreoffice import (
     LibreOfficeConfig,
     LibreOfficePdfConverter,
     PdfLimits,

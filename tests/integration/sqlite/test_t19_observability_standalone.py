@@ -8,25 +8,25 @@ import pytest
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from md_converter.auth.models import Role, User
-from md_converter.jobs.errors import JobRepositoryError
-from md_converter.jobs.models import JobOutput, JobRequest
-from md_converter.jobs.service import JobService, JobServicePolicy
-from md_converter.persistence.errors import PersistenceError
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.observability import (
+from markweave.auth.models import Role, User
+from markweave.jobs.errors import JobRepositoryError
+from markweave.jobs.models import JobOutput, JobRequest
+from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.persistence.errors import PersistenceError
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.observability import (
     SqlAuditReader,
     SqlOperationalObserver,
 )
-from md_converter.persistence.retention import SqlRetentionRepository
-from md_converter.persistence.schema import AuthenticationAuditRow, TemplateAuditRow
-from md_converter.persistence.sql import (
+from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.schema import AuthenticationAuditRow, TemplateAuditRow
+from markweave.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
     standalone_database_url,
 )
-from md_converter.storage import FilesystemObjectStore
+from markweave.storage import FilesystemObjectStore
 from tests.template_records import publish_template_pair
 
 pytestmark = pytest.mark.integration

@@ -7,15 +7,15 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import Engine
 
-from md_converter.auth.models import Role, User
-from md_converter.jobs.errors import (
+from markweave.auth.models import Role, User
+from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from md_converter.jobs.policy import JobAdmissionPolicy
-from md_converter.persistence.jobs import SqlJobRepository
-from md_converter.persistence.migrations import upgrade_database
-from md_converter.persistence.sql import SqlUserRepository, create_database_engine
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from tests.job_repository_contracts import LEASE_END, NOW, submission
 from tests.template_records import publish_template_pair
 
