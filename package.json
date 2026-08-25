@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "test:web": "node --test --experimental-test-coverage --test-coverage-include=src/md_converter/static/*.js --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 tests/javascript/*.test.js",
-    "test:web-browser": "node --test tests/browser/*.browser.test.mjs"
+    "test:web-browser": "node --test tests/browser/*.browser.test.mjs",
+    "test:e2e-browser": "node --test tests/e2e/browser*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
   }
 }
