@@ -655,9 +655,13 @@ def test_container_release_inspects_remote_version_before_push() -> None:
         if step["name"] == "Publish without overwriting a conflicting release image"
     ]
 
+    stage = "podman push --format oci"
     inspect = 'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
-    version_push = '"docker://$registry_repository:$RELEASE_VERSION"'
-    assert run.index(inspect) < run.index(version_push)
+    version_copy = 'copy_staged_tag "$RELEASE_VERSION"'
+    assert run.count(stage) == 1
+    assert run.index(stage) < run.index(inspect) < run.index(version_copy)
+    assert 'test "$staged_manifest_digest" = "$intended_digest"' in run
+    assert "skopeo copy --preserve-digests --retry-times 3" in run
     assert 'test "$remote_digest" = "$intended_digest"' in run
 
 
@@ -672,6 +676,19 @@ def test_container_release_policy_rejects_conflict_guard_removal() -> None:
     )
     errors = validate_container_release_workflow_text(weakened)
     assert any("remote_digest" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_remote_digest_derivation() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
+        '"localhost/md-converter:$RELEASE_VERSION" "docker://$registry_repository:unsafe"',
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any("dir:$registry_stage" in error for error in errors)
 
 
 @pytest.mark.unit

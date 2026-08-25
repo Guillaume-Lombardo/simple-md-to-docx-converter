@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "88d2f330d29058dd9bcaca601d580b31248ca26fa40e33a15838328f8bd499ea"
+    "34e355d47d0583017ed81b893bb5b44f84f6a8d1a970fa68f3f4d83f02b85a2f"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1411,14 +1411,20 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
     for required in (
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         '"localhost/md-converter:$RELEASE_VERSION"',
-        '"docker://$registry_repository:$RELEASE_VERSION"',
         "container-release-${{ inputs.tag }}",
+        "sudo apt-get install --yes podman skopeo",
+        "skopeo --version",
         'source_tag="source-$SOURCE_SHA"',
+        'registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"',
+        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
+        'test "$staged_manifest_digest" = "$intended_digest"',
+        "skopeo copy --preserve-digests --retry-times 3",
         'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then',
         'test "$remote_digest" = "$intended_digest"',
         'test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"',
         'if [[ "$status" = 404 ]]; then',
         "podman push --format oci",
+        "artifacts/container/registry-publication.json",
         "--clobber",
     ):
         if required not in text:
@@ -1435,14 +1441,18 @@ def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: P
         inspect_marker = (
             'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
         )
-        push_marker = '"docker://$registry_repository:$RELEASE_VERSION"'
+        stage_marker = "podman push --format oci"
+        copy_marker = 'copy_staged_tag "$RELEASE_VERSION"'
         if (
             inspect_marker not in publish_run
-            or push_marker not in publish_run
-            or publish_run.index(inspect_marker) > publish_run.index(push_marker)
+            or stage_marker not in publish_run
+            or copy_marker not in publish_run
+            or publish_run.count(stage_marker) != 1
+            or publish_run.index(stage_marker) > publish_run.index(inspect_marker)
+            or publish_run.index(inspect_marker) > publish_run.index(copy_marker)
         ):
             errors.append(
-                "container release must inspect the version tag before its push"
+                "container release must stage exact bytes then inspect before registry copy"
             )
     return errors
 

@@ -49,18 +49,28 @@ pull access. Do not grant the package to unrelated repositories.
    job then rechecks that the version is still unpublished and uploads the verified files with
    PEP 740 attestations through OIDC.
 6. The reusable container workflow checks out the same SHA, derives the image tag from the detected
-   version, runs the rootless final-image and Critical-vulnerability gates, and derives the
-   intended OCI digest. It publishes an immutable `source-<SHA>` identity, inspects any existing
-   version tag, and accepts only an absent tag or that same digest before pushing GHCR. It then
-   generates provenance and attaches the SBOM and evidence to the verified Release identity.
+   version, and runs the rootless final-image and Critical-vulnerability gates. It serializes the
+   image once into a private `dir:` transport, verifies the registry manifest bytes against
+   Podman's digest file, and uses Skopeo to copy those exact staged bytes to the `source-<SHA>` and
+   version tags. Authenticated preflight accepts only an absent tag or that same digest, and each
+   copy is followed by an exact remote digest check. It then generates provenance and attaches the
+   SBOM, publication receipt, and evidence to the verified Release identity.
 
 The release orchestrator and reusable container workflow use the same trusted push context; they do
 not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` therefore cannot cause
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. A conflicting GHCR version or source tag also fails
-closed and is never overwritten.
+state before authorizing any manual recovery. Every GHCR conflict observed during authenticated
+preflight fails before a copy. Repository and workflow concurrency prevent the automation from
+racing itself. GHCR does not provide a relied-upon conditional manifest creation primitive here,
+so another principal with `packages: write` could still change a tag in the narrow interval between
+inspection and copy; do not grant that permission outside the release workflow.
+
+The retained OCI archive and registry serialization can have different manifest digests for the
+same local image. `image-metadata.json` remains internally bound to `image.oci.tar` and its SBOM;
+`registry-publication.json` records that archive digest beside the exact registry digest, reviewed
+source SHA, and version. Provenance uses the registry digest produced by the staged `dir:` transport.
 
 ## Post-publication verification
 

@@ -55,12 +55,13 @@ jobs:
           uv run python -c 'import os, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == os.environ["RELEASE_VERSION"]'
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
-      - name: Install rootless Podman
+      - name: Install rootless Podman and Skopeo
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes podman
+          sudo apt-get install --yes podman skopeo
           podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+          skopeo --version
       - name: Pull and verify the pinned base image
         run: |
           set -euo pipefail
@@ -98,8 +99,18 @@ jobs:
           registry_repository="ghcr.io/guillaume-lombardo/md-converter"
           registry_path="guillaume-lombardo/md-converter"
           source_tag="source-$SOURCE_SHA"
-          intended_digest="$(uv run python -c 'from pathlib import Path; from scripts.container.integrity import oci_identity; print(oci_identity(Path("artifacts/container/image.oci.tar"))[0])')"
+          registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"
+          chmod 700 "$registry_stage"
+          cleanup() {
+            rm -rf -- "$registry_stage"
+          }
+          trap cleanup EXIT
+          podman push --format oci --digestfile "$RUNNER_TEMP/staged-image-digest" \
+            "localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"
+          intended_digest="$(cat "$RUNNER_TEMP/staged-image-digest")"
           [[ "$intended_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          staged_manifest_digest="sha256:$(sha256sum "$registry_stage/manifest.json" | cut -d' ' -f1)"
+          test "$staged_manifest_digest" = "$intended_digest"
           registry_token="$(curl --fail --silent --show-error \
             --user "$GITHUB_ACTOR:$GHCR_TOKEN" \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull,push" \
@@ -125,15 +136,16 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 5
             printf '%s\n' "$digest"
           }
+          copy_staged_tag() {
+            skopeo copy --preserve-digests --retry-times 3 \
+              "dir:$registry_stage" "docker://$registry_repository:$1"
+          }
 
           if remote_digest="$(inspect_remote_tag "$source_tag")"; then
             test "$remote_digest" = "$intended_digest"
           else
             test "$?" = 4
-            podman push --format oci --digestfile "$RUNNER_TEMP/source-image-digest" \
-              "localhost/md-converter:$RELEASE_VERSION" \
-              "docker://$registry_repository:$source_tag"
-            test "$(cat "$RUNNER_TEMP/source-image-digest")" = "$intended_digest"
+            copy_staged_tag "$source_tag"
             test "$(inspect_remote_tag "$source_tag")" = "$intended_digest"
           fi
 
@@ -141,12 +153,18 @@ jobs:
             test "$remote_digest" = "$intended_digest"
           else
             test "$?" = 4
-            podman push --format oci --digestfile "$RUNNER_TEMP/version-image-digest" \
-              "localhost/md-converter:$RELEASE_VERSION" \
-              "docker://$registry_repository:$RELEASE_VERSION"
-            test "$(cat "$RUNNER_TEMP/version-image-digest")" = "$intended_digest"
+            copy_staged_tag "$RELEASE_VERSION"
             test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"
           fi
+          archive_digest="$(jq --exit-status --raw-output '.image.oci_manifest_digest' artifacts/container/image-metadata.json)"
+          [[ "$archive_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq --null-input \
+            --arg archive_digest "$archive_digest" \
+            --arg registry_digest "$intended_digest" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg version "$RELEASE_VERSION" \
+            '{oci_archive_manifest_digest: $archive_digest, registry_manifest_digest: $registry_digest, source_sha: $source_sha, version: $version}' \
+            > artifacts/container/registry-publication.json
           printf 'digest=%s\n' "$intended_digest" >> "$GITHUB_OUTPUT"
       - name: Retain exact release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -158,6 +176,7 @@ jobs:
             artifacts/container/sbom.spdx.json
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
+            artifacts/container/registry-publication.json
             artifacts/container/release-bundle.sha256
           if-no-files-found: error
           retention-days: 90
@@ -209,5 +228,6 @@ jobs:
             artifacts/container/sbom.spdx.json \
             artifacts/container/vulnerabilities.json \
             artifacts/container/image-metadata.json \
+            artifacts/container/registry-publication.json \
             artifacts/container/release-bundle.sha256 \
             --clobber

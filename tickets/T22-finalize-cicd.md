@@ -50,8 +50,11 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - The derived `v<version>` tag and published GitHub Release target the exact reviewed main SHA.
 - Tag creation is atomic and precedes Release publication. Failed-job retries accept partial tag or
   Release state only when its complete identity matches the intended tag and reviewed SHA.
-- GHCR publication never overwrites a conflicting version tag; an existing tag is accepted only
-  when it resolves to the exact intended OCI digest bound through the source SHA.
+- GHCR publication serializes exact registry bytes locally before remote access. Authenticated
+  preflight rejects every observed conflicting tag, same-digest state is idempotent, and post-copy
+  verification is exact. Workflow/repository concurrency prevents self-races; the documented
+  residual inspect/copy race is limited to another principal holding `packages: write` because no
+  GHCR conditional manifest creation contract is assumed.
 - Future Python artifacts, GHCR tags, attestations, and evidence derive dynamically from
   `project.version`; only tests and documentation may lock the approved first `0.3.0` release.
 - Only the minimal PyPI upload job in the isolated workflow receives `id-token: write` for publication. A separate provenance or attestation job owned by T22 may receive `id-token: write` only when the need is documented and all its other permissions are least privilege.
@@ -178,8 +181,16 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   races. The detector now compares parsed PEP 440 precedence while preserving an approved
   equal-precedence spelling transition. The creation job atomically writes the exact tag ref before
   the Release and safely verifies partial same-run state on failed-job reruns. Container publication
-  binds an immutable source-SHA tag to the locally verified OCI manifest, inspects the remote
-  version tag before writing it, accepts only the same digest, and fails closed on conflicts.
+  binds a source-SHA tag to the locally verified image identity, inspects the remote version tag
+  before writing it, accepts only the same digest, and fails closed on observed conflicts.
+- 2026-08-25: Re-review reproduced that Podman's OCI-archive manifest digest can differ from the
+  registry `dir:` serialization for the same local image. Publication now stages the exact registry
+  bytes privately before remote access, validates the staged manifest against Podman's digest file,
+  and copies that transport with preserved digests through Skopeo. A publication receipt relates
+  the internally verified OCI archive to the registry digest used by provenance. The contract now
+  states the accepted limitation precisely: observed conflicts fail before copy and automation
+  cannot race itself, while another principal with package-write authority could race the narrow
+  preflight/copy interval because GHCR conditional creation is not established.
 
 ## Synchronization
 
