@@ -58,6 +58,10 @@ Run E2E for both profiles with three identities, real conversion, restart recove
   readiness failure, restart, checkpoint, backup, and restore scenarios. Concurrent final-image
   submissions exposed and now regress a response/durable correlation race; request scope isolation
   and canonical durable response correlation are covered by unit and functional tests.
+- 2026-08-25: The distributed final-image workflow also passes with PostgreSQL 18, RustFS, two
+  external workers, isolated API/worker metrics, simultaneous worker crash recovery, independent
+  PostgreSQL and S3 readiness failures, and exact database/object backup and restore. Both required
+  storage profiles now satisfy the T21 final-image matrix locally.
 
 ## Synchronization
 
