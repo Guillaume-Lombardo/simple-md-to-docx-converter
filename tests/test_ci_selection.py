@@ -46,8 +46,12 @@ def test_complete_suite_selects_every_domain_without_paths() -> None:
 
 @pytest.mark.unit
 def test_root_containerfile_selects_container_domain() -> None:
-    """The future final image definition activates container validation."""
-    assert select_domains(["Containerfile"]) == ["container"]
+    """Final-image changes run container validation and both image E2E profiles."""
+    assert select_domains(["Containerfile"]) == [
+        "container",
+        "e2e-distributed",
+        "e2e-standalone",
+    ]
 
 
 @pytest.mark.unit
@@ -61,7 +65,11 @@ def test_root_containerfile_selects_container_domain() -> None:
     ],
 )
 def test_t20_asset_changes_select_container_domain(path: str) -> None:
-    assert select_domains([path]) == ["container"]
+    selected = select_domains([path])
+    assert "container" in selected
+    if path != "tests/container/test_container_assets.py":
+        assert "e2e-distributed" in selected
+        assert "e2e-standalone" in selected
 
 
 @pytest.mark.unit
@@ -147,7 +155,11 @@ def test_auth_integration_change_selects_functional_domain() -> None:
 def test_golden_infrastructure_selects_active_document_engine_domain(
     path: str,
 ) -> None:
-    assert select_domains([path]) == ["document-engines"]
+    selected = select_domains([path])
+    assert "document-engines" in selected
+    if path.startswith("tests/corpus/"):
+        assert "e2e-distributed" in selected
+        assert "e2e-standalone" in selected
 
 
 @pytest.mark.unit
@@ -161,7 +173,11 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
 )
 def test_browser_workflow_changes_select_document_engine_domain(path: str) -> None:
     """Browser scripts and tests cannot skip the Chrome-provisioned heavy job."""
-    assert select_domains([path]) == ["document-engines"]
+    selected = select_domains([path])
+    assert "document-engines" in selected
+    if path == "package.json":
+        assert "e2e-distributed" in selected
+        assert "e2e-standalone" in selected
 
 
 @pytest.mark.unit
@@ -183,6 +199,47 @@ def test_t04_document_engine_domain_runs_current_integration_boundaries() -> Non
         ],
         "status": "active",
     }
+
+
+@pytest.mark.unit
+def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
+    """Each final-image profile runs through its own reviewed matrix command."""
+    registry = load_registry(Path(".github/ci/domains.json"))
+    assert registry["e2e-standalone"] == {
+        "activation_ticket": "T21",
+        "command": ["bash", "scripts/e2e/run.sh", "standalone"],
+        "status": "active",
+    }
+    assert registry["e2e-distributed"] == {
+        "activation_ticket": "T21",
+        "command": ["bash", "scripts/e2e/run.sh", "distributed"],
+        "status": "active",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".containerignore",
+        "Containerfile",
+        "package.json",
+        "package-lock.json",
+        "playwright.config.mjs",
+        "container/entrypoint.sh",
+        "scripts/container/build.sh",
+        "scripts/e2e/run.sh",
+        "spikes/toolchain/package-lock.json",
+        "tests/e2e/rootless.spec.mjs",
+        "tests/corpus/mermaid/diagram.md",
+        "deploy/standalone.yaml.example",
+    ],
+)
+def test_final_image_inputs_select_both_t21_profiles(path: str) -> None:
+    """No final-image, driver, deployment, or E2E change can skip one profile."""
+    selected = select_domains([path])
+    assert "e2e-standalone" in selected
+    assert "e2e-distributed" in selected
 
 
 @pytest.mark.unit

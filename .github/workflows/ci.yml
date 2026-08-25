@@ -220,7 +220,7 @@ jobs:
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
       - name: Install rootless Podman for final-image validation
-        if: ${{ matrix.domain == 'container' }}
+        if: ${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -277,8 +277,8 @@ jobs:
             fc-list --format '%{file}\n' | wc -l)" -eq 32
           test "$(/opt/libreoffice26.2/program/soffice --version | awk '{$1=$1; print}')" \
             = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
-      - name: Set up the pinned Node runtime for Mermaid tests
-        if: ${{ matrix.domain == 'document-engines' }}
+      - name: Set up the pinned Node runtime for browser and Mermaid tests
+        if: ${{ matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-') }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.1
@@ -315,8 +315,19 @@ jobs:
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
+      - name: Install the locked E2E browser driver
+        if: ${{ startsWith(matrix.domain, 'e2e-') }}
+        run: npm ci --ignore-scripts
       - name: Run selected domain suite without a shell
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+      - name: Retain failed E2E evidence
+        if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-failure-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && 'standalone' || 'distributed' }}
+          if-no-files-found: error
+          retention-days: 30
       - name: Retain final-image verification evidence
         if: ${{ always() && matrix.domain == 'container' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
