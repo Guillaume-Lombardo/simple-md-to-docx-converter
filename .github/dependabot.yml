@@ -1,0 +1,54 @@
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:11"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/spikes/toolchain"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:21"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      javascript-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - "/"
+      - "/spikes/toolchain"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:31"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      container-bases:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:41"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      workflow-actions:
+        patterns: ["*"]

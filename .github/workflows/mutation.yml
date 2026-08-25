@@ -1,0 +1,78 @@
+name: Mutation testing
+
+on:
+  schedule:
+    - cron: "43 4 * * 2"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Bounded Python symbol pattern to mutate
+        required: true
+        type: choice
+        default: md_converter.observability.x__normalize_method__mutmut_*
+        options:
+          - md_converter.observability.x__normalize_method__mutmut_*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Mutation / targeted
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Run a fresh, non-empty targeted mutation campaign
+        env:
+          MUTATION_TARGET: ${{ inputs.target || 'md_converter.observability.x__normalize_method__mutmut_*' }}
+        run: |
+          set -euo pipefail
+          rm -rf -- mutants
+          uv run mutmut run "$MUTATION_TARGET"
+          uv run mutmut export-cicd-stats
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          stats = json.loads(
+              Path("mutants/mutmut-cicd-stats.json").read_text(encoding="utf-8")
+          )
+          if stats.get("killed", 0) <= 0:
+              raise SystemExit("Mutation campaign produced no killed mutants.")
+          failures = {
+              name: stats.get(name, 0)
+              for name in (
+                  "survived",
+                  "no_tests",
+                  "suspicious",
+                  "timeout",
+                  "check_was_interrupted_by_user",
+                  "segfault",
+              )
+              if stats.get(name, 0) != 0
+          }
+          if failures:
+              raise SystemExit(f"Mutation campaign left non-killed mutants: {failures}")
+          print(f"Mutation campaign killed {stats['killed']} mutants.")
+          PY

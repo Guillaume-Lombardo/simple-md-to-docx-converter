@@ -31,6 +31,7 @@ dependencies = [
 build = ["hatchling==1.27.0"]
 dev = [
     "httpx>=0.28,<1",
+    "mutmut==3.7.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",
@@ -124,3 +125,14 @@ source = ["md_converter"]
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+
+[tool.mutmut]
+source_paths = ["src/md_converter"]
+pytest_add_cli_args = [
+    "-c",
+    "/dev/null",
+    "-q",
+    "tests/unit/test_observability.py",
+]
+timeout_constant = 5.0
+timeout_multiplier = 3.0
