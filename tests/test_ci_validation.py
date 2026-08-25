@@ -525,6 +525,8 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
         Path(".github/workflows/container-release.yml").read_text(encoding="utf-8"),
         Loader=WorkflowLoader,  # noqa: S506 - no Python object constructors
     )
+    call = workflow["on"]["workflow_call"]["inputs"]
+    assert call["artifact-run-id"] == {"required": False, "type": "string"}
     dispatch = workflow["on"]["workflow_dispatch"]["inputs"]
     assert dispatch["artifact-run-id"] == {
         "description": "Successful build run retaining the exact container artifact",

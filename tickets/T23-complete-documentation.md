@@ -115,6 +115,12 @@ Complete English user, template, administrator, API, operations, storage, queue,
   rootless Podman Compose lifecycles, and was squash-merged to `main` as commit `bc43e885`. Prepared
   the requested `0.3.1` version transition; publication and the final immutable Compose repin remain
   pending.
+- 2026-08-26: PR #81 passed its complete hosted matrix and was squash-merged to `main` as commit
+  `8133385d`, but GitHub rejected the automatic release before starting any job. The reusable
+  container workflow's recovery-only `artifact-run-id` input was not declared for `workflow_call`;
+  declaring it as an optional automatic-call input passed a real reusable-call canary while every
+  publication and recovery job remained skipped. No `v0.3.1` tag, GitHub Release, PyPI
+  distribution, or GHCR image was created by the failed run or canary.
 
 ## Synchronization
 
