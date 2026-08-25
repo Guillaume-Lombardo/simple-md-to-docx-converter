@@ -24,6 +24,7 @@ ACTION_REFERENCE = re.compile(
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 TRUSTED_REPOSITORY = "Guillaume-Lombardo/simple-md-to-docx-converter"
 TRUSTED_REPOSITORY_CONDITION = f"github.repository == '{TRUSTED_REPOSITORY}'"
+TRUSTED_REPOSITORY_GUARD = f"${{{{ {TRUSTED_REPOSITORY_CONDITION} }}}}"
 TRUSTED_CACHE_WRITE = (
     "save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
     "&& github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
@@ -33,10 +34,18 @@ FORBIDDEN_WORKFLOW_FRAGMENTS = (
     "pull_request_target",
     "repository_dispatch",
     "workflow_run",
-    "secrets.",
     "secrets:",
-    "github.token",
     "--privileged",
+)
+FORBIDDEN_EXPRESSION_PATTERNS = (
+    (re.compile(r"\bsecrets\s*(?:\.|\[)", re.IGNORECASE), "secret access"),
+    (
+        re.compile(
+            r"\bgithub\s*(?:\.\s*token\b|\[\s*(['\"])token\1\s*\])",
+            re.IGNORECASE,
+        ),
+        "GitHub token access",
+    ),
 )
 RELEASE_FORBIDDEN_TRIGGERS = frozenset(
     {"pull_request", "pull_request_target", "merge_group", "workflow_dispatch"}
@@ -44,6 +53,7 @@ RELEASE_FORBIDDEN_TRIGGERS = frozenset(
 RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
 PUBLISH_STEP_COUNT = 2
+RELEASE_BUILD_COMMAND = "uv run python -m scripts.release.build --output dist"
 
 
 @dataclass(frozen=True)
@@ -53,7 +63,8 @@ class WorkflowPolicy:
     triggers: frozenset[str]
     jobs: Mapping[str, int]
     actions: frozenset[str]
-    concurrency_prefix: str
+    concurrency_group: str
+    cancel_in_progress: bool | str
 
 
 READ_ONLY_WORKFLOW_POLICIES = {
@@ -78,7 +89,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "astral-sh/setup-uv",
             }
         ),
-        concurrency_prefix="ci-",
+        concurrency_group=(
+            "ci-${{ github.event.pull_request.number || "
+            "github.event.merge_group.head_sha || github.ref }}"
+        ),
+        cancel_in_progress=(
+            "${{ github.event_name == 'pull_request' || "
+            "github.event_name == 'merge_group' }}"
+        ),
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -86,7 +104,8 @@ READ_ONLY_WORKFLOW_POLICIES = {
         actions=frozenset(
             {"actions/checkout", "actions/setup-python", "astral-sh/setup-uv"}
         ),
-        concurrency_prefix="mutation-",
+        concurrency_group="mutation-${{ github.ref }}",
+        cancel_in_progress=True,
     ),
 }
 
@@ -156,15 +175,14 @@ def _trigger_names(workflow: Mapping[str, Any]) -> set[str] | None:
     return set(triggers) if triggers is not None else None
 
 
-def _action_references(workflow: object) -> list[tuple[str, str]]:
-    references: list[tuple[str, str]] = []
+def _action_references(workflow: object) -> list[object]:
+    references: list[object] = []
 
     def visit(value: object) -> None:
         if isinstance(value, dict):
             for key, child in value.items():
-                if key == "uses" and isinstance(child, str):
-                    match = ACTION_REFERENCE.fullmatch(child)
-                    references.append((child, match.group(1) if match else ""))
+                if key == "uses":
+                    references.append(child)
                 else:
                     visit(child)
         elif isinstance(value, list):
@@ -181,25 +199,20 @@ def _validate_lexical_security(text: str) -> list[str]:
         for fragment in FORBIDDEN_WORKFLOW_FRAGMENTS
         if fragment.lower() in text.lower()
     ]
-    uses_lines = [
-        line.strip() for line in text.splitlines() if line.lstrip().startswith("uses:")
-    ]
-    for line in uses_lines:
-        value = line.removeprefix("uses:").split(" #", maxsplit=1)[0].strip()
-        match = ACTION_REFERENCE.fullmatch(value)
-        if match is None:
-            errors.append(
-                "every action reference must be pinned to a lowercase hexadecimal revision"
-            )
-            continue
-        revision = match.group(2)
-        if FULL_SHA.fullmatch(revision) is None:
-            errors.append(f"action revision is not a full commit SHA: {revision!r}")
+    errors.extend(
+        f"forbidden workflow {description}"
+        for pattern, description in FORBIDDEN_EXPRESSION_PATTERNS
+        if pattern.search(text)
+    )
     return errors
 
 
 def _validate_concurrency(
-    workflow: Mapping[str, Any], *, expected_prefix: str | None = None
+    workflow: Mapping[str, Any],
+    *,
+    expected_group: str | None = None,
+    expected_prefix: str | None = None,
+    expected_cancellation: bool | str | None = None,
 ) -> list[str]:
     concurrency = _mapping(workflow.get("concurrency"))
     if concurrency is None or set(concurrency) != {"group", "cancel-in-progress"}:
@@ -211,9 +224,13 @@ def _validate_concurrency(
     errors: list[str] = []
     if not isinstance(group, str) or not group.strip():
         errors.append("workflow concurrency group must be a non-empty string")
+    elif expected_group is not None and group != expected_group:
+        errors.append("workflow concurrency group does not match the explicit policy")
     elif expected_prefix is not None and not group.startswith(expected_prefix):
         errors.append(f"workflow concurrency group must start with {expected_prefix!r}")
-    if not isinstance(cancellation, (bool, str)):
+    if expected_cancellation is not None and cancellation != expected_cancellation:
+        errors.append("workflow cancel-in-progress does not match the explicit policy")
+    elif not isinstance(cancellation, (bool, str)):
         errors.append("workflow cancel-in-progress must be explicit")
     return errors
 
@@ -259,8 +276,19 @@ def _validate_action_allowlist(
     workflow: Mapping[str, Any], *, allowed_actions: frozenset[str]
 ) -> list[str]:
     errors: list[str] = []
-    for reference, action in _action_references(workflow):
-        if not action:
+    for reference in _action_references(workflow):
+        if not isinstance(reference, str):
+            errors.append("every action reference must be a string")
+            continue
+        match = ACTION_REFERENCE.fullmatch(reference)
+        if match is None:
+            errors.append(
+                "every action reference must be pinned to a lowercase hexadecimal revision"
+            )
+            continue
+        action, revision = match.groups()
+        if FULL_SHA.fullmatch(revision) is None:
+            errors.append(f"action revision is not a full commit SHA: {revision!r}")
             continue
         if action not in allowed_actions:
             errors.append(f"action is not allowlisted for this workflow: {reference!r}")
@@ -298,7 +326,11 @@ def _validate_read_only_workflow(
     if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
         errors.append("read-only workflow permissions must be exactly contents: read")
     errors.extend(
-        _validate_concurrency(workflow, expected_prefix=policy.concurrency_prefix)
+        _validate_concurrency(
+            workflow,
+            expected_group=policy.concurrency_group,
+            expected_cancellation=policy.cancel_in_progress,
+        )
     )
     errors.extend(_validate_jobs(workflow, policy=policy))
     errors.extend(_validate_action_allowlist(workflow, allowed_actions=policy.actions))
@@ -306,39 +338,122 @@ def _validate_read_only_workflow(
     return errors
 
 
-def _validate_ci_contract(text: str) -> list[str]:
-    required_fragments = (
-        "name: CI / gate",
-        'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then',
-        '[[ "$HEAVY_RESULT" == "skipped" ]]',
-        '[[ "$HEAVY_RESULT" == "success" ]]',
-        "uv run pytest -m unit",
-        "--cov-report=json:coverage.json",
-        "python -m scripts.ci.check_branch_coverage",
-        "--coverage coverage.json --fail-under 90",
-        "python -m scripts.ci.check_changed_coverage",
-        "npm run test:web-browser",
-        "matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-')",
-        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')",
-        "npm ci --ignore-scripts",
-        "failure() && startsWith(matrix.domain, 'e2e-')",
-        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && 'standalone' || 'distributed' }}",
-        "github.event_name == 'pull_request' || github.event_name == 'merge_group'",
-        "--source-root src/md_converter --fail-under 90",
-    )
-    errors = [
-        f"missing required workflow fragment: {fragment!r}"
-        for fragment in required_fragments
-        if fragment not in text
-    ]
-    if text.count("name: CI / gate") != 1:
+def _normalized_command(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return " ".join(value.split())
+
+
+def _job_steps(workflow: Mapping[str, Any], job_name: str) -> list[dict[str, Any]]:
+    jobs = _mapping(workflow.get("jobs")) or {}
+    job = _mapping(jobs.get(job_name)) or {}
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return []
+    return [step for value in steps if (step := _mapping(value)) is not None]
+
+
+def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    jobs = _mapping(workflow.get("jobs")) or {}
+    if (
+        sum((_mapping(job) or {}).get("name") == "CI / gate" for job in jobs.values())
+        != 1
+    ):
         errors.append("workflow must define exactly one CI / gate check")
-    cache_write_lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.lstrip().startswith("save-cache:")
+
+    required_commands = {
+        ("light", "Run unit tests with branch coverage"): (
+            "uv run pytest -m unit --cov-report=json:coverage.json"
+        ),
+        ("light", "Enforce application branch-only coverage"): (
+            "uv run python -m scripts.ci.check_branch_coverage "
+            "--coverage coverage.json --fail-under 90"
+        ),
+        ("light", "Enforce changed application line coverage"): (
+            "uv run python -m scripts.ci.check_changed_coverage "
+            '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
+            "--source-root src/md_converter --fail-under 90"
+        ),
+        ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
+            "npm run test:web-browser"
+        ),
+        ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
+        ("gate", "Require every implemented CI stage"): (
+            'set -euo pipefail [[ "$DETECT_RESULT" == "success" ]] '
+            '[[ "$DOMAIN_PLAN_RESULT" == "success" ]] '
+            'if [[ "$RUNNABLE_DOMAINS" == "[]" ]]; then '
+            '[[ "$HEAVY_RESULT" == "skipped" ]] else '
+            '[[ "$HEAVY_RESULT" == "success" ]] fi '
+            '[[ "$LIGHT_RESULT" == "success" ]]'
+        ),
+    }
+    for (job_name, step_name), expected_command in required_commands.items():
+        matches = [
+            step
+            for step in _job_steps(workflow, job_name)
+            if step.get("name") == step_name
+        ]
+        if (
+            len(matches) != 1
+            or _normalized_command(matches[0].get("run")) != expected_command
+        ):
+            errors.append(f"missing required workflow command: {expected_command!r}")
+
+    required_conditions = {
+        ("light", "Enforce changed application line coverage"): (
+            "${{ github.event_name == 'pull_request' || "
+            "github.event_name == 'merge_group' }}"
+        ),
+        ("heavy", "Install rootless Podman for final-image validation"): (
+            "${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}"
+        ),
+        ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
+            "${{ matrix.domain == 'document-engines' || "
+            "startsWith(matrix.domain, 'e2e-') }}"
+        ),
+        ("heavy", "Retain failed E2E evidence"): (
+            "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
+        ),
+    }
+    for (job_name, step_name), expected_condition in required_conditions.items():
+        matches = [
+            step
+            for step in _job_steps(workflow, job_name)
+            if step.get("name") == step_name and step.get("if") == expected_condition
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"missing required workflow condition: {expected_condition!r}"
+            )
+
+    evidence_steps = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Retain failed E2E evidence"
     ]
-    if cache_write_lines != [TRUSTED_CACHE_WRITE, TRUSTED_CACHE_WRITE]:
+    evidence_options = (
+        _mapping(evidence_steps[0].get("with")) if len(evidence_steps) == 1 else None
+    )
+    expected_evidence_path = (
+        "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' && "
+        "'standalone' || 'distributed' }}"
+    )
+    if (
+        evidence_options is None
+        or evidence_options.get("path") != expected_evidence_path
+    ):
+        errors.append(
+            f"missing required workflow artifact path: {expected_evidence_path!r}"
+        )
+
+    cache_writes = []
+    for job_name in jobs:
+        for step in _job_steps(workflow, job_name):
+            options = _mapping(step.get("with")) or {}
+            if "save-cache" in options:
+                cache_writes.append(options["save-cache"])
+    if cache_writes != [TRUSTED_CACHE_WRITE.removeprefix("save-cache: ")] * 2:
         errors.append("cache writes must be limited to trusted pushes on main")
     return errors
 
@@ -356,8 +471,8 @@ def validate_workflow_text(text: str, *, workflow_name: str = "ci.yml") -> list[
         return errors
     if workflow is not None:
         errors.extend(_validate_read_only_workflow(workflow, policy=policy))
-    if workflow_name == "ci.yml":
-        errors.extend(_validate_ci_contract(text))
+    if workflow_name == "ci.yml" and workflow is not None:
+        errors.extend(_validate_ci_contract(workflow))
     return errors
 
 
@@ -447,24 +562,6 @@ def _release_artifact_contract(
     return errors
 
 
-def _run_commands(workflow: object) -> list[str]:
-    commands: list[str] = []
-
-    def visit(value: object) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key == "run" and isinstance(child, str):
-                    commands.append(child)
-                else:
-                    visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
-
-    visit(workflow)
-    return commands
-
-
 def _validate_release_jobs(
     jobs: Mapping[str, Any], *, publish_job_name: str
 ) -> list[str]:
@@ -484,9 +581,7 @@ def _validate_release_jobs(
         condition = job.get("if")
         if (
             not isinstance(condition, str)
-            or TRUSTED_REPOSITORY_CONDITION not in condition
-            or "||" in condition
-            or "always()" in condition
+            or condition.strip() != TRUSTED_REPOSITORY_GUARD
         ):
             errors.append(
                 f"release job {job_name!r} lacks the trusted repository guard"
@@ -570,6 +665,9 @@ def _validate_release_triggers(
         or set(push) != {"tags"}
         or not isinstance(push.get("tags"), list)
         or not push["tags"]
+        or not all(
+            isinstance(tag, str) and bool(tag.strip()) for tag in push.get("tags", [])
+        )
     ):
         errors.append(
             "push release trigger must be restricted to an explicit tag policy"
@@ -603,11 +701,20 @@ def validate_release_workflow_text(
     if jobs is None or publish_job_name not in jobs:
         errors.append(f"release workflow must define job {publish_job_name!r}")
         return errors
-    commands = "\n".join(_run_commands(workflow))
-    build_invocations = len(
-        re.findall(r"(?:\buv\s+build\b|\bscripts\.release\.build\b)", commands)
-    )
-    if build_invocations != 1:
+    release_commands = [
+        command
+        for job_name in jobs
+        for step in _job_steps(workflow, job_name)
+        if (command := _normalized_command(step.get("run"))) is not None
+    ]
+    build_invocations = release_commands.count(RELEASE_BUILD_COMMAND)
+    unexpected_build_commands = [
+        command
+        for command in release_commands
+        if command != RELEASE_BUILD_COMMAND
+        and re.search(r"(?:\buv\s+build\b|\bscripts\.release\.build\b)", command)
+    ]
+    if build_invocations != 1 or unexpected_build_commands:
         errors.append(
             "release workflow must invoke the distribution build exactly once"
         )
@@ -688,12 +795,17 @@ def validate_workflow_files(paths: Iterable[Path]) -> list[str]:
     return errors
 
 
+def discover_workflow_paths(directory: Path) -> list[Path]:
+    """Return every workflow file extension recognized by GitHub Actions."""
+    return sorted((*directory.glob("*.yml"), *directory.glob("*.yaml")))
+
+
 def main() -> int:
     """Validate the committed CI implementation."""
     root = Path(__file__).resolve().parents[2]
     workflow_directory = root / ".github/workflows"
     registry = root / ".github/ci/domains.json"
-    workflow_paths = sorted(workflow_directory.glob("*.yml"))
+    workflow_paths = discover_workflow_paths(workflow_directory)
     errors = validate_workflow_files(workflow_paths)
     missing_workflows = set(READ_ONLY_WORKFLOW_POLICIES).difference(
         path.name for path in workflow_paths

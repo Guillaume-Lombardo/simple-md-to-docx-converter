@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.ci.validate_ci import (
+    discover_workflow_paths,
     main,
     validate_python_imports,
     validate_registry_text,
@@ -161,10 +162,17 @@ def test_validator_rejects_successful_e2e_artifact_retention() -> None:
 @pytest.mark.unit
 def test_validator_rejects_unpinned_action_and_secret_access() -> None:
     """Mutable action tags and secret reads are rejected together."""
-    workflow = "uses: actions/checkout@v7\nsecrets.DEPLOY_TOKEN\n"
+    workflow = """\
+jobs:
+  check:
+    steps:
+      - uses: actions/checkout@v7
+        env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+"""
     errors = validate_workflow_text(workflow)
     assert "every action reference must be pinned" in " ".join(errors)
-    assert "forbidden workflow fragment: 'secrets.'" in errors
+    assert "forbidden workflow secret access" in errors
 
 
 @pytest.mark.unit
@@ -220,6 +228,31 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "replacement"),
+    [
+        ("uv run pytest -m unit", "echo uv run pytest -m unit"),
+        ("uv run pytest -m unit", "true # uv run pytest -m unit"),
+        (
+            "uv run pytest -m unit",
+            "COMMAND='uv run pytest -m unit'; $COMMAND",
+        ),
+        (
+            "python -m scripts.ci.check_changed_coverage",
+            "echo python -m scripts.ci.check_changed_coverage",
+        ),
+    ],
+)
+def test_ci_contract_rejects_inert_or_indirect_commands(
+    command: str, replacement: str
+) -> None:
+    """Echoes, comments, and variables cannot satisfy an executable CI contract."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(command, replacement, 1)
+    assert validate_workflow_text(weakened)
+
+
+@pytest.mark.unit
 def test_validator_rejects_removed_branch_only_coverage() -> None:
     """Combined coverage cannot replace the independent branch ratio gate."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -236,7 +269,8 @@ def test_validator_rejects_removed_branch_only_coverage() -> None:
 def test_validator_rejects_duplicate_required_gate_name() -> None:
     """Branch protection must observe one unambiguous required check context."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    errors = validate_workflow_text(f"{workflow}\nname: CI / gate\n")
+    weakened = workflow.replace("name: CI / affected domains", "name: CI / gate")
+    errors = validate_workflow_text(weakened)
     assert "workflow must define exactly one CI / gate check" in errors
 
 
@@ -273,7 +307,7 @@ def test_committed_ci_validation_entrypoint_succeeds() -> None:
 @pytest.mark.unit
 def test_all_committed_workflows_have_explicit_policies() -> None:
     """The entrypoint cannot silently leave a newly committed workflow unchecked."""
-    workflows = sorted(Path(".github/workflows").glob("*.yml"))
+    workflows = discover_workflow_paths(Path(".github/workflows"))
     assert [path.name for path in workflows] == ["ci.yml", "mutation.yml"]
     assert validate_workflow_files(workflows) == []
 
@@ -286,6 +320,16 @@ def test_workflow_scan_rejects_unknown_policy(tmp_path: Path) -> None:
     assert validate_workflow_files([workflow]) == [
         f"{workflow}: workflow has no explicit security policy"
     ]
+
+
+@pytest.mark.unit
+def test_workflow_scan_includes_both_supported_yaml_extensions(tmp_path: Path) -> None:
+    """A workflow cannot evade policy selection by using the long YAML suffix."""
+    short = tmp_path / "short.yml"
+    long = tmp_path / "long.yaml"
+    short.touch()
+    long.touch()
+    assert discover_workflow_paths(tmp_path) == [long, short]
 
 
 @pytest.mark.unit
@@ -305,6 +349,19 @@ def test_mutation_policy_rejects_trigger_permission_and_job_drift() -> None:
 
 
 @pytest.mark.unit
+def test_mutation_policy_rejects_arbitrary_concurrency_expression() -> None:
+    """Cancellation semantics are part of the filename-specific policy."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "cancel-in-progress: true", "cancel-in-progress: attacker-controlled"
+    )
+    assert (
+        "workflow cancel-in-progress does not match the explicit policy"
+        in validate_workflow_text(weakened, workflow_name="mutation.yml")
+    )
+
+
+@pytest.mark.unit
 def test_read_only_policy_rejects_unallowlisted_action_and_privileged_command() -> None:
     """A pinned action or container command is not trusted merely because it is valid YAML."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
@@ -315,6 +372,26 @@ def test_read_only_policy_rejects_unallowlisted_action_and_privileged_command() 
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
     assert any("action is not allowlisted" in error for error in errors)
     assert "forbidden workflow fragment: '--privileged'" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flow_style", [False, True])
+def test_action_pin_validation_uses_parsed_yaml(flow_style: bool) -> None:
+    """Whitespace and flow mappings cannot hide a mutable action reference."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    pinned = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    if flow_style:
+        weakened = workflow.replace(
+            "      - name: Check out reviewed source\n"
+            f"        uses: {pinned} # v7.0.1\n"
+            "        with:\n"
+            "          persist-credentials: false",
+            "      - {uses: actions/checkout@v7, with: {persist-credentials: false}}",
+        )
+    else:
+        weakened = workflow.replace(f"uses: {pinned}", "uses : actions/checkout@v7")
+    errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
+    assert any("every action reference must be pinned" in error for error in errors)
 
 
 @pytest.mark.unit
@@ -368,6 +445,21 @@ def test_release_policy_rejects_unsafe_event_or_push_shapes(
             branch_push, approved_triggers=frozenset({"push"})
         )
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tags", ["[true]", '["  "]'])
+def test_release_policy_rejects_non_string_or_empty_tag_patterns(
+    valid_release_workflow: str, tags: str
+) -> None:
+    """A caller-approved push still requires explicit non-empty string patterns."""
+    pushed = valid_release_workflow.replace(
+        "  release:\n    types: [published]", f"  push:\n    tags: {tags}"
+    )
+    errors = validate_release_workflow_text(
+        pushed, approved_triggers=frozenset({"push"})
+    )
+    assert "push release trigger must be restricted to an explicit tag policy" in errors
 
 
 @pytest.mark.unit
@@ -449,8 +541,32 @@ def test_release_policy_rejects_secret_credentials(valid_release_workflow: str) 
     errors = validate_release_workflow_text(
         weakened, approved_triggers=frozenset({"release"})
     )
-    assert "forbidden workflow fragment: 'secrets.'" in errors
+    assert "forbidden workflow secret access" in errors
     assert "PyPI publication must use Trusted Publishing without credentials" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "${{ secrets['PYPI_TOKEN'] }}",
+        "${{ secrets ['PYPI_TOKEN'] }}",
+        "${{ github['token'] }}",
+    ],
+)
+def test_release_policy_rejects_bracket_secret_and_token_access(
+    valid_release_workflow: str, expression: str
+) -> None:
+    """Expression indexing cannot evade the no-credential release policy."""
+    weakened = valid_release_workflow.replace(
+        "    timeout-minutes: 30",
+        f"    timeout-minutes: 30\n    env:\n      TOKEN: {expression}",
+        1,
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert any("access" in error for error in errors)
 
 
 @pytest.mark.unit
@@ -469,6 +585,29 @@ def test_release_policy_rejects_publish_rebuild_or_extra_step(
     )
     assert "release workflow must invoke the distribution build exactly once" in errors
     assert "publish job must contain exactly two action steps" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "run: echo scripts.release.build",
+        "run: true # scripts.release.build",
+        "run: BUILD=scripts.release.build; echo $BUILD",
+    ],
+)
+def test_release_policy_rejects_inert_or_indirect_build(
+    valid_release_workflow: str, replacement: str
+) -> None:
+    """Echoes, comments, and variables cannot satisfy the build-once contract."""
+    weakened = valid_release_workflow.replace(
+        "run: uv run python -m scripts.release.build --output dist",
+        replacement,
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert "release workflow must invoke the distribution build exactly once" in errors
 
 
 @pytest.mark.unit
@@ -519,11 +658,42 @@ def test_release_policy_rejects_bypassable_repository_guard(
 
 
 @pytest.mark.unit
+def test_release_policy_rejects_negated_repository_guard(
+    valid_release_workflow: str,
+) -> None:
+    """The trusted comparison cannot be accepted inside a negated expression."""
+    weakened = valid_release_workflow.replace(
+        "github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter'",
+        "!(github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter')",
+        1,
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert "release job 'build-and-verify' lacks the trusted repository guard" in errors
+
+
+@pytest.mark.unit
 def test_release_policy_rejects_mutable_action(valid_release_workflow: str) -> None:
     """Release actions follow the same immutable full-SHA policy as CI."""
     weakened = valid_release_workflow.replace(
         f"pypa/gh-action-pypi-publish@{FULL_SHA_E}",
         "pypa/gh-action-pypi-publish@release/v1",
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert any("every action reference must be pinned" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_release_policy_rejects_mutable_action_with_spaced_key(
+    valid_release_workflow: str,
+) -> None:
+    """Release pinning is based on parsed action fields, not lexical layout."""
+    weakened = valid_release_workflow.replace(
+        f"uses: pypa/gh-action-pypi-publish@{FULL_SHA_E}",
+        "uses : pypa/gh-action-pypi-publish@release/v1",
     )
     errors = validate_release_workflow_text(
         weakened, approved_triggers=frozenset({"release"})
