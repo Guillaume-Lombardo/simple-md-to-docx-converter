@@ -50,12 +50,19 @@ jobs:
         uses: actions/checkout@{FULL_SHA_A}
         with:
           persist-credentials: false
-      - name: Set up Python
+      - name: Set up clean Python 3.14
         uses: actions/setup-python@{FULL_SHA_B}
+        with:
+          python-version: "3.14"
+          check-latest: false
       - name: Set up uv
         uses: astral-sh/setup-uv@{FULL_SHA_C}
-      - name: Build and verify exactly once
+      - name: Build distributions exactly once
         run: uv run python -m scripts.release.build --output dist
+      - name: Verify artifact integrity and metadata
+        run: uv run python -m scripts.release.verify --dist dist
+      - name: Verify clean Python 3.14 installation and public import
+        run: uv run python -m scripts.release.verify_install --dist dist --python 3.14 --import md_converter
       - name: Transfer verified artifacts
         uses: actions/upload-artifact@{FULL_SHA_D}
         with:
@@ -362,6 +369,83 @@ def test_mutation_policy_rejects_arbitrary_concurrency_expression() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement"),
+    [
+        (
+            "permissions:\n  contents: read",
+            "permissions:\n  contents: read\n\ndefaults:\n  run:\n    shell: bash",
+        ),
+        (
+            "    timeout-minutes: 30",
+            "    timeout-minutes: 30\n    continue-on-error: true",
+        ),
+        (
+            "      - name: Synchronize locked dependencies\n"
+            "        run: uv sync --locked --all-groups",
+            "      - name: Synchronize locked dependencies\n"
+            "        if: ${{ false }}\n"
+            "        run: uv sync --locked --all-groups",
+        ),
+        (
+            "        run: uv sync --locked --all-groups",
+            "        run: uv sync --locked --all-groups\n"
+            "        continue-on-error: true",
+        ),
+        (
+            "        run: uv sync --locked --all-groups",
+            "        run: uv sync --locked --all-groups\n        shell: bash",
+        ),
+    ],
+)
+def test_read_only_policy_rejects_neutralizing_fields(
+    needle: str, replacement: str
+) -> None:
+    """Defaults, conditions, shells, and error suppression cannot weaken jobs."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    errors = validate_workflow_text(
+        workflow.replace(needle, replacement, 1), workflow_name="mutation.yml"
+    )
+    assert errors
+
+
+@pytest.mark.unit
+def test_scalar_security_scans_decoded_yaml_values() -> None:
+    """YAML escapes cannot hide privileged execution from scalar validation."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "run: uv sync --locked --all-groups",
+        r'run: "docker run \x2d\x2dprivileged image"',
+    )
+    errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
+    assert "forbidden workflow scalar: '--privileged'" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "${{ toJSON(github) }}",
+        "${{ github }}",
+        "${{ github['repository'] }}",
+        "${{ github.event.issue.title }}",
+    ],
+)
+def test_scalar_security_rejects_github_object_and_dynamic_access(
+    expression: str,
+) -> None:
+    """Only explicitly allowlisted GitHub context properties may be evaluated."""
+    workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "        run: uv sync --locked --all-groups",
+        f"        env:\n          CONTEXT: {expression}\n"
+        "        run: uv sync --locked --all-groups",
+    )
+    errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
+    assert any("GitHub" in error for error in errors)
+
+
+@pytest.mark.unit
 def test_read_only_policy_rejects_unallowlisted_action_and_privileged_command() -> None:
     """A pinned action or container command is not trusted merely because it is valid YAML."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
@@ -371,7 +455,7 @@ def test_read_only_policy_rejects_unallowlisted_action_and_privileged_command() 
     ).replace("uv sync --locked --all-groups", "docker run --privileged image")
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
     assert any("action is not allowlisted" in error for error in errors)
-    assert "forbidden workflow fragment: '--privileged'" in errors
+    assert "forbidden workflow scalar: '--privileged'" in errors
 
 
 @pytest.mark.unit
@@ -440,7 +524,7 @@ def test_release_policy_rejects_unsafe_event_or_push_shapes(
         "  push:\n    branches: [main]",
     )
     assert (
-        "push release trigger must be restricted to an explicit tag policy"
+        "push release trigger must match explicitly approved tag patterns"
         in validate_release_workflow_text(
             branch_push, approved_triggers=frozenset({"push"})
         )
@@ -459,7 +543,44 @@ def test_release_policy_rejects_non_string_or_empty_tag_patterns(
     errors = validate_release_workflow_text(
         pushed, approved_triggers=frozenset({"push"})
     )
-    assert "push release trigger must be restricted to an explicit tag policy" in errors
+    assert "push release trigger must match explicitly approved tag patterns" in errors
+
+
+@pytest.mark.unit
+def test_push_release_requires_exact_caller_approved_tag_patterns(
+    valid_release_workflow: str,
+) -> None:
+    """The validator never chooses or merely infers the production tag policy."""
+    pushed = valid_release_workflow.replace(
+        "  release:\n    types: [published]",
+        '  push:\n    tags: ["caller-approved-*"]',
+    )
+    assert "push release trigger must match explicitly approved tag patterns" in (
+        validate_release_workflow_text(pushed, approved_triggers=frozenset({"push"}))
+    )
+    assert "push release tag patterns do not match the approved policy" in (
+        validate_release_workflow_text(
+            pushed,
+            approved_triggers=frozenset({"push"}),
+            approved_tag_patterns=("release-*",),
+        )
+    )
+    assert (
+        validate_release_workflow_text(
+            pushed,
+            approved_triggers=frozenset({"push"}),
+            approved_tag_patterns=("caller-approved-*",),
+        )
+        == []
+    )
+    dynamic = pushed.replace("caller-approved-*", "${{ github.ref }}")
+    assert "push release trigger must match explicitly approved tag patterns" in (
+        validate_release_workflow_text(
+            dynamic,
+            approved_triggers=frozenset({"push"}),
+            approved_tag_patterns=("${{ github.ref }}",),
+        )
+    )
 
 
 @pytest.mark.unit
@@ -474,6 +595,20 @@ def test_release_policy_rejects_cancellable_publication(
         weakened, approved_triggers=frozenset({"release"})
     )
     assert "release publication concurrency must not cancel in progress" in errors
+
+
+@pytest.mark.unit
+def test_release_policy_rejects_noncanonical_concurrency_group(
+    valid_release_workflow: str,
+) -> None:
+    """Release serialization is keyed exactly by the reviewed ref."""
+    weakened = valid_release_workflow.replace(
+        "group: release-${{ github.ref }}", "group: release-global"
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert "workflow concurrency group does not match the explicit policy" in errors
 
 
 @pytest.mark.unit
@@ -498,12 +633,12 @@ def test_release_policy_rejects_cancellable_publication(
         (
             "needs: build-and-verify",
             "needs: []",
-            "publish job must depend on prior artifact validation",
+            "publish job must depend only on prior artifact validation",
         ),
         (
             "needs: build-and-verify",
             "needs: unrelated",
-            "publish job must depend on the verified artifact uploader",
+            "publish job must depend only on the verified artifact uploader",
         ),
         (
             "runs-on: ubuntu-24.04\n    timeout-minutes: 10",
@@ -513,7 +648,7 @@ def test_release_policy_rejects_cancellable_publication(
         (
             "environment: pypi",
             "environment: pypi\n    container: attacker/image",
-            "publish job contains fields outside the minimal allowlist",
+            "publish job fields do not match the exact minimal contract",
         ),
     ],
 )
@@ -622,6 +757,97 @@ def test_release_policy_rejects_artifact_substitution(
         weakened, approved_triggers=frozenset({"release"})
     )
     assert "PyPI upload must publish only the downloaded artifact directory" in errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement"),
+    [
+        (
+            "run: uv run python -m scripts.release.verify --dist dist",
+            "run: echo metadata verified",
+        ),
+        (
+            "run: uv run python -m scripts.release.verify_install --dist dist "
+            "--python 3.14 --import md_converter",
+            "run: echo import verified",
+        ),
+        (
+            'python-version: "3.14"',
+            'python-version: "3.13"',
+        ),
+        (
+            "      - name: Transfer verified artifacts\n",
+            "      - name: Transfer verified artifacts\n        if: ${{ false }}\n",
+        ),
+        (
+            "    timeout-minutes: 30",
+            "    timeout-minutes: 30\n    continue-on-error: true",
+        ),
+        (
+            "      - name: Publish exact artifacts\n",
+            "      - name: Publish exact artifacts\n        continue-on-error: true\n",
+        ),
+    ],
+)
+def test_release_policy_rejects_weakened_producer_or_publish_steps(
+    valid_release_workflow: str, needle: str, replacement: str
+) -> None:
+    """Verification, clean install, upload, and publication cannot be neutralized."""
+    errors = validate_release_workflow_text(
+        valid_release_workflow.replace(needle, replacement, 1),
+        approved_triggers=frozenset({"release"}),
+    )
+    assert errors
+
+
+@pytest.mark.unit
+def test_release_policy_rejects_duplicate_artifact_upload_globally(
+    valid_release_workflow: str,
+) -> None:
+    """Only one unconditional artifact upload may exist in the entire workflow."""
+    duplicate = f"""\
+      - name: Upload an unrelated bundle
+        uses: actions/upload-artifact@{FULL_SHA_D}
+        with:
+          name: unrelated
+          path: other
+"""
+    weakened = valid_release_workflow.replace(
+        "      - name: Transfer verified artifacts\n",
+        duplicate + "      - name: Transfer verified artifacts\n",
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert "exactly one job must upload the verified artifact bundle" in errors
+
+
+@pytest.mark.unit
+def test_release_policy_rejects_extra_job_and_dependency(
+    valid_release_workflow: str,
+) -> None:
+    """The release DAG contains only the exact producer and minimal publisher."""
+    extra_job = """\
+  substitute:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Substitute artifacts
+        run: echo substitute
+"""
+    weakened = valid_release_workflow.replace(
+        "  publish:\n", extra_job + "  publish:\n"
+    )
+    weakened = weakened.replace(
+        "needs: build-and-verify", "needs: [build-and-verify, substitute]"
+    )
+    errors = validate_release_workflow_text(
+        weakened, approved_triggers=frozenset({"release"})
+    )
+    assert "release jobs do not match the exact build and publish contract" in errors
+    assert "publish job must depend only on prior artifact validation" in errors
 
 
 @pytest.mark.unit

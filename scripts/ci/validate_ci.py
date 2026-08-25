@@ -30,22 +30,26 @@ TRUSTED_CACHE_WRITE = (
     "&& github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
 )
 READ_ONLY_PERMISSIONS = {"contents": "read"}
-FORBIDDEN_WORKFLOW_FRAGMENTS = (
-    "pull_request_target",
-    "repository_dispatch",
-    "workflow_run",
-    "secrets:",
-    "--privileged",
-)
-FORBIDDEN_EXPRESSION_PATTERNS = (
-    (re.compile(r"\bsecrets\s*(?:\.|\[)", re.IGNORECASE), "secret access"),
-    (
-        re.compile(
-            r"\bgithub\s*(?:\.\s*token\b|\[\s*(['\"])token\1\s*\])",
-            re.IGNORECASE,
-        ),
-        "GitHub token access",
-    ),
+FORBIDDEN_WORKFLOW_KEYS = frozenset({"secrets"})
+FORBIDDEN_WORKFLOW_SCALARS = ("--privileged",)
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+GITHUB_PROPERTY = re.compile(r"\bgithub(?:\.[A-Za-z_][A-Za-z0-9_-]*)+")
+SAFE_GITHUB_PROPERTIES = frozenset(
+    {
+        "github.event.before",
+        "github.event.merge_group.base_sha",
+        "github.event.merge_group.head_sha",
+        "github.event.pull_request.base.sha",
+        "github.event.pull_request.draft",
+        "github.event.pull_request.head.sha",
+        "github.event.pull_request.number",
+        "github.event_name",
+        "github.ref",
+        "github.repository",
+        "github.run_attempt",
+        "github.run_id",
+        "github.sha",
+    }
 )
 RELEASE_FORBIDDEN_TRIGGERS = frozenset(
     {"pull_request", "pull_request_target", "merge_group", "workflow_dispatch"}
@@ -54,6 +58,35 @@ RELEASE_TRIGGER_CANDIDATES = frozenset({"push", "release"})
 MAX_RELEASE_TIMEOUT_MINUTES = 60
 PUBLISH_STEP_COUNT = 2
 RELEASE_BUILD_COMMAND = "uv run python -m scripts.release.build --output dist"
+RELEASE_VERIFY_COMMAND = "uv run python -m scripts.release.verify --dist dist"
+RELEASE_INSTALL_COMMAND = (
+    "uv run python -m scripts.release.verify_install --dist dist "
+    "--python 3.14 --import md_converter"
+)
+RELEASE_CONCURRENCY_GROUP = "release-${{ github.ref }}"
+RELEASE_PRODUCER_JOB = "build-and-verify"
+RELEASE_ARTIFACT_NAME = "verified-python-distributions"
+RELEASE_ARTIFACT_PATH = "dist"
+WORKFLOW_FIELDS = frozenset({"name", "on", "permissions", "concurrency", "jobs"})
+ACTION_STEP_FIELDS = frozenset({"name", "uses", "with", "if"})
+RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
+READ_ONLY_ENV_STEPS = frozenset(
+    {
+        ("detect", "Select affected domains"),
+        ("light", "Enforce changed application line coverage"),
+        ("domain-plan", "Report runnable and explicitly planned suites"),
+        ("heavy", "Install verified Pandoc for document-engine tests"),
+        (
+            "heavy",
+            "Install verified fonts and LibreOffice for document-engine tests",
+        ),
+        ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
+        ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
+        ("gate", "Require every implemented CI stage"),
+        ("mutation", "Run a fresh, non-empty targeted mutation campaign"),
+    }
+)
+READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
 
 
 @dataclass(frozen=True)
@@ -65,6 +98,9 @@ class WorkflowPolicy:
     actions: frozenset[str]
     concurrency_group: str
     cancel_in_progress: bool | str
+    job_fields: Mapping[str, frozenset[str]]
+    job_conditions: Mapping[str, str]
+    step_conditions: Mapping[tuple[str, str], str]
 
 
 READ_ONLY_WORKFLOW_POLICIES = {
@@ -97,6 +133,90 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "${{ github.event_name == 'pull_request' || "
             "github.event_name == 'merge_group' }}"
         ),
+        job_fields={
+            "detect": frozenset(
+                {"name", "outputs", "runs-on", "steps", "timeout-minutes"}
+            ),
+            "light": frozenset({"name", "runs-on", "steps", "timeout-minutes"}),
+            "domain-plan": frozenset(
+                {"name", "needs", "runs-on", "steps", "timeout-minutes"}
+            ),
+            "heavy": frozenset(
+                {
+                    "env",
+                    "if",
+                    "name",
+                    "needs",
+                    "runs-on",
+                    "services",
+                    "steps",
+                    "strategy",
+                    "timeout-minutes",
+                }
+            ),
+            "gate": frozenset(
+                {"if", "name", "needs", "runs-on", "steps", "timeout-minutes"}
+            ),
+        },
+        job_conditions={
+            "heavy": "${{ needs.detect.outputs.runnable-domains != '[]' }}",
+            "gate": "${{ always() }}",
+        },
+        step_conditions={
+            (
+                "light",
+                "Enforce changed application line coverage",
+            ): (
+                "${{ github.event_name == 'pull_request' || "
+                "github.event_name == 'merge_group' }}"
+            ),
+            (
+                "heavy",
+                "Install rootless Podman for final-image validation",
+            ): (
+                "${{ matrix.domain == 'container' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Install verified Pandoc for document-engine tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Install verified fonts and LibreOffice for document-engine tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Set up the pinned Node runtime for browser and Mermaid tests",
+            ): (
+                "${{ matrix.domain == 'document-engines' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Install verified Mermaid and Chrome for document-engine tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Run authenticated conversion workflow in pinned Chrome",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Prepare the RustFS test bucket",
+            ): "${{ matrix.domain == 'storage-distributed' }}",
+            (
+                "heavy",
+                "Install the locked E2E browser driver",
+            ): "${{ startsWith(matrix.domain, 'e2e-') }}",
+            (
+                "heavy",
+                "Retain failed E2E evidence",
+            ): "${{ failure() && startsWith(matrix.domain, 'e2e-') }}",
+            (
+                "heavy",
+                "Retain final-image verification evidence",
+            ): "${{ always() && matrix.domain == 'container' }}",
+        },
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -106,6 +226,11 @@ READ_ONLY_WORKFLOW_POLICIES = {
         ),
         concurrency_group="mutation-${{ github.ref }}",
         cancel_in_progress=True,
+        job_fields={
+            "mutation": frozenset({"if", "name", "runs-on", "steps", "timeout-minutes"})
+        },
+        job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
+        step_conditions={},
     ),
 }
 
@@ -193,17 +318,43 @@ def _action_references(workflow: object) -> list[object]:
     return references
 
 
-def _validate_lexical_security(text: str) -> list[str]:
-    errors = [
-        f"forbidden workflow fragment: {fragment!r}"
-        for fragment in FORBIDDEN_WORKFLOW_FRAGMENTS
-        if fragment.lower() in text.lower()
-    ]
-    errors.extend(
-        f"forbidden workflow {description}"
-        for pattern, description in FORBIDDEN_EXPRESSION_PATTERNS
-        if pattern.search(text)
-    )
+def _validate_scalar_security(workflow: object) -> list[str]:
+    errors: list[str] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if isinstance(key, str) and key.lower() in FORBIDDEN_WORKFLOW_KEYS:
+                    errors.append(f"forbidden workflow key: {key!r}")
+                visit(key)
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str):
+            lowered = value.lower()
+            errors.extend(
+                f"forbidden workflow scalar: {fragment!r}"
+                for fragment in FORBIDDEN_WORKFLOW_SCALARS
+                if fragment in lowered
+            )
+            for expression in EXPRESSION.findall(value):
+                if re.search(r"\bsecrets\b", expression, re.IGNORECASE):
+                    errors.append("forbidden workflow secret access")
+                properties = GITHUB_PROPERTY.findall(expression)
+                unsafe = sorted(set(properties).difference(SAFE_GITHUB_PROPERTIES))
+                if unsafe:
+                    errors.append(
+                        "workflow expression uses non-allowlisted GitHub properties: "
+                        f"{unsafe!r}"
+                    )
+                without_properties = GITHUB_PROPERTY.sub("", expression)
+                if re.search(r"\bgithub\b", without_properties, re.IGNORECASE):
+                    errors.append(
+                        "workflow expression must not access the GitHub context dynamically"
+                    )
+
+    visit(workflow)
     return errors
 
 
@@ -235,12 +386,92 @@ def _validate_concurrency(
     return errors
 
 
+def _validate_read_only_step(
+    step_value: object, *, job_name: str, policy: WorkflowPolicy
+) -> list[str]:
+    step = _mapping(step_value)
+    if step is None:
+        return [f"job {job_name!r} steps must be mappings"]
+    errors: list[str] = []
+    step_name = step.get("name")
+    if not isinstance(step_name, str) or not step_name:
+        errors.append(f"job {job_name!r} steps must have explicit names")
+    has_uses = "uses" in step
+    has_run = "run" in step
+    allowed_fields = ACTION_STEP_FIELDS if has_uses else RUN_STEP_FIELDS
+    expected_fields = {"name", "uses", "with"} if has_uses else {"name", "run"}
+    step_identity = (job_name, str(step_name))
+    if step_identity in READ_ONLY_ENV_STEPS:
+        expected_fields.add("env")
+    if step_identity in READ_ONLY_ID_STEPS:
+        expected_fields.add("id")
+    expected_condition = policy.step_conditions.get(step_identity)
+    if expected_condition is not None:
+        expected_fields.add("if")
+    if (
+        has_uses == has_run
+        or set(step).difference(allowed_fields)
+        or set(step) != expected_fields
+    ):
+        errors.append(
+            f"step {step_name!r} in job {job_name!r} fields do not match "
+            "the exact allowlist"
+        )
+    if expected_condition is None:
+        if "if" in step:
+            errors.append(
+                f"step {step_name!r} in job {job_name!r} must not define a condition"
+            )
+    elif step.get("if") != expected_condition:
+        errors.append(
+            f"step {step_name!r} in job {job_name!r} condition does not match "
+            "the explicit policy"
+        )
+    return errors
+
+
+def _validate_read_only_job(
+    job_name: str, job: Mapping[str, Any], *, policy: WorkflowPolicy
+) -> list[str]:
+    errors: list[str] = []
+    expected_fields = policy.job_fields.get(job_name)
+    if expected_fields is None or set(job) != set(expected_fields):
+        errors.append(f"job {job_name!r} fields do not match the explicit allowlist")
+    expected_condition = policy.job_conditions.get(job_name)
+    if expected_condition is None:
+        if "if" in job:
+            errors.append(f"job {job_name!r} must not define a condition")
+    elif job.get("if") != expected_condition:
+        errors.append(f"job {job_name!r} condition does not match the explicit policy")
+    timeout = job.get("timeout-minutes")
+    maximum = policy.jobs.get(job_name)
+    if (
+        not isinstance(timeout, int)
+        or isinstance(timeout, bool)
+        or timeout <= 0
+        or maximum is None
+        or timeout > maximum
+    ):
+        errors.append(f"job {job_name!r} must define an allowlisted bounded timeout")
+    if "permissions" in job:
+        errors.append(
+            f"read-only job {job_name!r} must not override workflow permissions"
+        )
+    if job.get("runs-on") != "ubuntu-24.04":
+        errors.append(f"job {job_name!r} must use the allowlisted hosted runner")
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return [*errors, f"job {job_name!r} steps must be a list"]
+    for step in steps:
+        errors.extend(_validate_read_only_step(step, job_name=job_name, policy=policy))
+    return errors
+
+
 def _validate_jobs(workflow: Mapping[str, Any], *, policy: WorkflowPolicy) -> list[str]:
     jobs = _mapping(workflow.get("jobs"))
     if jobs is None:
         return ["workflow jobs must be a mapping"]
     errors: list[str] = []
-    invalid_timeout = False
     if set(jobs) != set(policy.jobs):
         errors.append("workflow jobs do not match the explicit allowlist")
     for job_name, job_value in jobs.items():
@@ -248,26 +479,8 @@ def _validate_jobs(workflow: Mapping[str, Any], *, policy: WorkflowPolicy) -> li
         if job is None:
             errors.append(f"job {job_name!r} must be a mapping")
             continue
-        timeout = job.get("timeout-minutes")
-        maximum = policy.jobs.get(job_name)
-        if (
-            not isinstance(timeout, int)
-            or isinstance(timeout, bool)
-            or timeout <= 0
-            or maximum is None
-            or timeout > maximum
-        ):
-            invalid_timeout = True
-            errors.append(
-                f"job {job_name!r} must define an allowlisted bounded timeout"
-            )
-        if "permissions" in job:
-            errors.append(
-                f"read-only job {job_name!r} must not override workflow permissions"
-            )
-        if job.get("runs-on") != "ubuntu-24.04":
-            errors.append(f"job {job_name!r} must use the allowlisted hosted runner")
-    if invalid_timeout:
+        errors.extend(_validate_read_only_job(job_name, job, policy=policy))
+    if any("bounded timeout" in error for error in errors):
         errors.append("every job must define a bounded timeout")
     return errors
 
@@ -320,6 +533,8 @@ def _validate_read_only_workflow(
     workflow: Mapping[str, Any], *, policy: WorkflowPolicy
 ) -> list[str]:
     errors: list[str] = []
+    if set(workflow) != set(WORKFLOW_FIELDS):
+        errors.append("workflow fields do not match the explicit allowlist")
     triggers = _trigger_names(workflow)
     if triggers != set(policy.triggers):
         errors.append("workflow triggers do not match the explicit allowlist")
@@ -460,7 +675,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
 def validate_workflow_text(text: str, *, workflow_name: str = "ci.yml") -> list[str]:
     """Return actionable errors for an allowlisted committed workflow."""
-    errors = _validate_lexical_security(text)
+    errors: list[str] = []
     if re.search(r"^\s+[a-z][a-z-]*:\s+write(?:\s|$)", text, re.MULTILINE):
         errors.append("write permission is forbidden in the CI workflow")
     workflow, loading_errors = _load_workflow(text)
@@ -470,6 +685,7 @@ def validate_workflow_text(text: str, *, workflow_name: str = "ci.yml") -> list[
         errors.append(f"workflow has no explicit security policy: {workflow_name}")
         return errors
     if workflow is not None:
+        errors.extend(_validate_scalar_security(workflow))
         errors.extend(_validate_read_only_workflow(workflow, policy=policy))
     if workflow_name == "ci.yml" and workflow is not None:
         errors.extend(_validate_ci_contract(workflow))
@@ -489,33 +705,18 @@ def _release_steps(job: Mapping[str, Any]) -> list[dict[str, Any]] | None:
     return result
 
 
-def _artifact_upload_jobs(
-    workflow: Mapping[str, Any], *, artifact_name: object, artifact_path: object
-) -> list[str]:
-    matches: list[str] = []
+def _artifact_upload_steps(
+    workflow: Mapping[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    matches: list[tuple[str, dict[str, Any]]] = []
     jobs = _mapping(workflow.get("jobs")) or {}
     for job_name, job_value in jobs.items():
         job = _mapping(job_value) or {}
         for step in _release_steps(job) or []:
             uses = step.get("uses")
-            options = _mapping(step.get("with")) or {}
-            if (
-                isinstance(uses, str)
-                and uses.startswith("actions/upload-artifact@")
-                and options.get("name") == artifact_name
-                and str(options.get("path", "")).rstrip("/")
-                == str(artifact_path).rstrip("/")
-            ):
-                matches.append(job_name)
+            if isinstance(uses, str) and uses.startswith("actions/upload-artifact@"):
+                matches.append((job_name, step))
     return matches
-
-
-def _needed_job_names(value: object) -> set[str]:
-    if isinstance(value, str):
-        return {value}
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return set(value)
-    return set()
 
 
 def _release_artifact_contract(
@@ -552,13 +753,105 @@ def _release_artifact_contract(
             "PyPI publication must use Trusted Publishing without credentials"
         )
 
-    upload_jobs = _artifact_upload_jobs(
-        workflow, artifact_name=artifact_name, artifact_path=download_path
-    )
-    if len(upload_jobs) != 1:
+    uploads = _artifact_upload_steps(workflow)
+    if len(uploads) != 1:
         errors.append("exactly one job must upload the verified artifact bundle")
-    elif upload_jobs[0] not in _needed_job_names(publish_job.get("needs")):
-        errors.append("publish job must depend on the verified artifact uploader")
+    else:
+        upload_job, upload_step = uploads[0]
+        upload_with = _mapping(upload_step.get("with")) or {}
+        if (
+            upload_job != RELEASE_PRODUCER_JOB
+            or set(upload_step) != {"name", "uses", "with"}
+            or set(upload_with) != {"name", "path"}
+            or upload_with.get("name") != artifact_name
+            or upload_with.get("path") != download_path
+        ):
+            errors.append(
+                "verified artifact upload must be unique, unconditional, and exact"
+            )
+        if publish_job.get("needs") != upload_job:
+            errors.append(
+                "publish job must depend only on the verified artifact uploader"
+            )
+    return errors
+
+
+def _validate_release_producer_job(job: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    expected_fields = {"if", "runs-on", "steps", "timeout-minutes"}
+    if set(job) != expected_fields:
+        errors.append("release producer job fields do not match the exact contract")
+    steps = _release_steps(job)
+    if steps is None:
+        return [*errors, "release producer steps must be mappings"]
+    expected_steps: tuple[tuple[str, str, object], ...] = (
+        (
+            "Check out reviewed source",
+            "uses",
+            {"persist-credentials": False},
+        ),
+        (
+            "Set up clean Python 3.14",
+            "uses",
+            {"python-version": "3.14", "check-latest": False},
+        ),
+        ("Set up uv", "uses", None),
+        ("Build distributions exactly once", "run", RELEASE_BUILD_COMMAND),
+        (
+            "Verify artifact integrity and metadata",
+            "run",
+            RELEASE_VERIFY_COMMAND,
+        ),
+        (
+            "Verify clean Python 3.14 installation and public import",
+            "run",
+            RELEASE_INSTALL_COMMAND,
+        ),
+        (
+            "Transfer verified artifacts",
+            "uses",
+            {"name": RELEASE_ARTIFACT_NAME, "path": RELEASE_ARTIFACT_PATH},
+        ),
+    )
+    if len(steps) != len(expected_steps):
+        return [*errors, "release producer steps do not match the exact contract"]
+    expected_actions = (
+        "actions/checkout@",
+        "actions/setup-python@",
+        "astral-sh/setup-uv@",
+        None,
+        None,
+        None,
+        "actions/upload-artifact@",
+    )
+    for step, (name, kind, payload), action in zip(
+        steps, expected_steps, expected_actions, strict=True
+    ):
+        expected_step_fields = {"name", kind}
+        if payload is not None and kind == "uses":
+            expected_step_fields.add("with")
+        if set(step) != expected_step_fields or step.get("name") != name:
+            errors.append("release producer steps do not match the exact contract")
+            continue
+        if kind == "run":
+            if _normalized_command(step.get("run")) != payload:
+                errors.append(
+                    "release producer commands do not match the exact contract"
+                )
+        else:
+            uses = step.get("uses")
+            if (
+                not isinstance(uses, str)
+                or action is None
+                or not uses.startswith(action)
+            ):
+                errors.append(
+                    "release producer actions do not match the exact contract"
+                )
+            if payload is not None and step.get("with") != payload:
+                errors.append(
+                    "release producer action options do not match the exact contract"
+                )
     return errors
 
 
@@ -571,6 +864,23 @@ def _validate_release_jobs(
         if job is None:
             errors.append(f"job {job_name!r} must be a mapping")
             continue
+        expected_fields = (
+            {
+                "environment",
+                "if",
+                "needs",
+                "permissions",
+                "runs-on",
+                "steps",
+                "timeout-minutes",
+            }
+            if job_name == publish_job_name
+            else {"if", "runs-on", "steps", "timeout-minutes"}
+        )
+        if set(job) != expected_fields:
+            errors.append(
+                f"release job {job_name!r} fields do not match the exact contract"
+            )
         timeout = job.get("timeout-minutes")
         if (
             not isinstance(timeout, int)
@@ -605,23 +915,21 @@ def _validate_publish_job(
     workflow: Mapping[str, Any], publish_job: Mapping[str, Any]
 ) -> list[str]:
     errors: list[str] = []
-    allowed_job_fields = {
+    expected_job_fields = {
         "environment",
         "if",
-        "name",
         "needs",
         "permissions",
         "runs-on",
         "steps",
         "timeout-minutes",
     }
-    if set(publish_job).difference(allowed_job_fields):
-        errors.append("publish job contains fields outside the minimal allowlist")
+    if set(publish_job) != expected_job_fields:
+        errors.append("publish job fields do not match the exact minimal contract")
     if publish_job.get("environment") != "pypi":
         errors.append("publish job must use the protected pypi environment")
-    needs = publish_job.get("needs")
-    if not isinstance(needs, (str, list)) or not needs:
-        errors.append("publish job must depend on prior artifact validation")
+    if publish_job.get("needs") != RELEASE_PRODUCER_JOB:
+        errors.append("publish job must depend only on prior artifact validation")
     publish_steps = _release_steps(publish_job)
     if publish_steps is None or len(publish_steps) != PUBLISH_STEP_COUNT:
         errors.append("publish job must contain exactly two action steps")
@@ -632,8 +940,8 @@ def _validate_publish_job(
     )
     for step, expected_action in zip(publish_steps, expected_actions, strict=True):
         uses = step.get("uses")
-        if set(step).difference({"name", "uses", "with"}):
-            errors.append("publish steps may contain only name, uses, and with")
+        if set(step) != {"name", "uses", "with"}:
+            errors.append("publish steps must contain exactly name, uses, and with")
         if not isinstance(uses, str) or not uses.startswith(expected_action):
             errors.append("publish job must only download then publish artifacts")
     errors.extend(_release_artifact_contract(workflow, publish_job, publish_steps))
@@ -641,7 +949,10 @@ def _validate_publish_job(
 
 
 def _validate_release_triggers(
-    workflow: Mapping[str, Any], *, approved_triggers: frozenset[str]
+    workflow: Mapping[str, Any],
+    *,
+    approved_triggers: frozenset[str],
+    approved_tag_patterns: tuple[str, ...] | None,
 ) -> list[str]:
     errors: list[str] = []
     if (
@@ -656,22 +967,39 @@ def _validate_release_triggers(
         return errors
     release = _mapping(triggers.get("release"))
     if "release" in triggers and (
-        release is None or release.get("types") != ["published"]
+        release is None
+        or set(release) != {"types"}
+        or release.get("types") != ["published"]
     ):
         errors.append("release event trigger must be restricted to published releases")
     push = _mapping(triggers.get("push"))
     if "push" in triggers and (
-        push is None
+        approved_tag_patterns is None
+        or not approved_tag_patterns
+        or not all(
+            isinstance(tag, str) and bool(tag.strip()) and "${{" not in tag
+            for tag in approved_tag_patterns
+        )
+        or push is None
         or set(push) != {"tags"}
         or not isinstance(push.get("tags"), list)
         or not push["tags"]
         or not all(
-            isinstance(tag, str) and bool(tag.strip()) for tag in push.get("tags", [])
+            isinstance(tag, str) and bool(tag.strip()) and "${{" not in tag
+            for tag in push.get("tags", [])
         )
     ):
         errors.append(
-            "push release trigger must be restricted to an explicit tag policy"
+            "push release trigger must match explicitly approved tag patterns"
         )
+    elif (
+        "push" in triggers
+        and push is not None
+        and push.get("tags") != list(approved_tag_patterns or ())
+    ):
+        errors.append("push release tag patterns do not match the approved policy")
+    if "push" not in triggers and approved_tag_patterns is not None:
+        errors.append("tag patterns may be approved only for a push release trigger")
     return errors
 
 
@@ -679,20 +1007,34 @@ def validate_release_workflow_text(
     text: str,
     *,
     approved_triggers: frozenset[str],
+    approved_tag_patterns: tuple[str, ...] | None = None,
     publish_job_name: str = "publish",
 ) -> list[str]:
     """Validate a future isolated release workflow under an approved trigger policy."""
-    errors = _validate_lexical_security(text)
+    errors: list[str] = []
     workflow, loading_errors = _load_workflow(text)
     errors.extend(loading_errors)
     if workflow is None:
         return errors
+    errors.extend(_validate_scalar_security(workflow))
     errors.extend(
-        _validate_release_triggers(workflow, approved_triggers=approved_triggers)
+        _validate_release_triggers(
+            workflow,
+            approved_triggers=approved_triggers,
+            approved_tag_patterns=approved_tag_patterns,
+        )
     )
+    if set(workflow) != set(WORKFLOW_FIELDS):
+        errors.append("release workflow fields do not match the exact allowlist")
     if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
         errors.append("release workflow permissions must default to contents: read")
-    errors.extend(_validate_concurrency(workflow, expected_prefix="release-"))
+    errors.extend(
+        _validate_concurrency(
+            workflow,
+            expected_group=RELEASE_CONCURRENCY_GROUP,
+            expected_cancellation=False,
+        )
+    )
     concurrency = _mapping(workflow.get("concurrency")) or {}
     if concurrency.get("cancel-in-progress") is not False:
         errors.append("release publication concurrency must not cancel in progress")
@@ -701,6 +1043,8 @@ def validate_release_workflow_text(
     if jobs is None or publish_job_name not in jobs:
         errors.append(f"release workflow must define job {publish_job_name!r}")
         return errors
+    if set(jobs) != {RELEASE_PRODUCER_JOB, publish_job_name}:
+        errors.append("release jobs do not match the exact build and publish contract")
     release_commands = [
         command
         for job_name in jobs
@@ -720,6 +1064,8 @@ def validate_release_workflow_text(
         )
 
     errors.extend(_validate_release_jobs(jobs, publish_job_name=publish_job_name))
+    producer_job = _mapping(jobs.get(RELEASE_PRODUCER_JOB)) or {}
+    errors.extend(_validate_release_producer_job(producer_job))
     publish_job = _mapping(jobs[publish_job_name]) or {}
     errors.extend(_validate_publish_job(workflow, publish_job))
 
