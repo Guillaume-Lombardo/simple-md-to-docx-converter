@@ -24,8 +24,9 @@ install_tool() {
 mkdir -p -- "$output_directory"
 install_tool syft "$syft_version" "$syft_sha256"
 install_tool grype "$grype_version" "$grype_sha256"
-podman save --format oci-archive --output "$tool_directory/image.tar" "$image"
-"$tool_directory/syft" "oci-archive:$tool_directory/image.tar" \
+readonly image_archive="$output_directory/image.oci.tar"
+podman save --format oci-archive --output "$image_archive" "$image"
+"$tool_directory/syft" "oci-archive:$image_archive" \
   --output "cyclonedx-json=$output_directory/sbom.cdx.json" \
   --output "spdx-json=$output_directory/sbom.spdx.json"
 GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
@@ -33,4 +34,15 @@ GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
   --output json > "$output_directory/vulnerabilities.json"
 uv run python -m scripts.container.summarize_supply_chain \
   --image "$image" \
+  --artifacts "$output_directory"
+(
+  cd "$output_directory"
+  sha256sum \
+    image.oci.tar \
+    image-metadata.json \
+    sbom.cdx.json \
+    sbom.spdx.json \
+    vulnerabilities.json > release-bundle.sha256
+)
+uv run python -m scripts.container.verify_supply_chain \
   --artifacts "$output_directory"

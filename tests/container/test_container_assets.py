@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scripts.container import summarize_supply_chain
+from scripts.container import summarize_supply_chain, verify_supply_chain
 
 pytestmark = pytest.mark.unit
 
@@ -170,7 +171,7 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    for name in ("sbom.cdx.json", "sbom.spdx.json"):
+    for name in ("image.oci.tar", "sbom.cdx.json", "sbom.spdx.json"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
     report = {
         "matches": [
@@ -208,3 +209,109 @@ def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     assert evidence["vulnerabilities"]["counts_by_severity"] == {"Critical": 2}
     assert evidence["vulnerabilities"]["critical_with_fix"][0]["id"] == "CVE-FIXED"
     assert evidence["vulnerabilities"]["critical_without_fix"][0]["id"] == "CVE-UNFIXED"
+
+
+def _write_release_bundle(path: Path) -> None:
+    source_names = (
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+    )
+    for name in source_names:
+        (path / name).write_bytes(f"content for {name}".encode())
+    source_digests = {
+        name: verify_supply_chain._sha256(path / name) for name in source_names
+    }
+    (path / "image-metadata.json").write_text(
+        json.dumps({"artifacts": source_digests}), encoding="utf-8"
+    )
+    names = (*source_names[:1], "image-metadata.json", *source_names[1:])
+    (path / "release-bundle.sha256").write_text(
+        "".join(
+            f"{verify_supply_chain._sha256(path / name)}  {name}\n" for name in names
+        ),
+        encoding="ascii",
+    )
+
+
+def test_release_bundle_verifier_accepts_exact_digest_bound_artifacts(
+    tmp_path: Path,
+) -> None:
+    _write_release_bundle(tmp_path)
+
+    verify_supply_chain.verify_bundle(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda path: (path / "image.oci.tar").write_bytes(b"changed"), "mismatch"),
+        (
+            lambda path: (path / "release-bundle.sha256").write_text(
+                "unsafe", encoding="ascii"
+            ),
+            "malformed",
+        ),
+        (
+            lambda path: (path / "release-bundle.sha256").write_text(
+                (path / "release-bundle.sha256").read_text(encoding="ascii")
+                + ("0" * 64)
+                + "  extra.txt\n",
+                encoding="ascii",
+            ),
+            "exact release artifact set",
+        ),
+    ],
+)
+def test_release_bundle_verifier_rejects_substitution_and_malformed_evidence(
+    tmp_path: Path, mutation: Callable[[Path], object], message: str
+) -> None:
+    _write_release_bundle(tmp_path)
+    mutation(tmp_path)
+
+    with pytest.raises(verify_supply_chain.SupplyChainVerificationError, match=message):
+        verify_supply_chain.verify_bundle(tmp_path)
+
+
+def test_release_bundle_verifier_rejects_internally_inconsistent_metadata(
+    tmp_path: Path,
+) -> None:
+    _write_release_bundle(tmp_path)
+    metadata_path = tmp_path / "image-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["artifacts"]["image.oci.tar"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    manifest_path = tmp_path / "release-bundle.sha256"
+    lines = manifest_path.read_text(encoding="ascii").splitlines()
+    manifest_path.write_text(
+        "\n".join(
+            (
+                f"{verify_supply_chain._sha256(metadata_path)}  image-metadata.json"
+                if line.endswith("  image-metadata.json")
+                else line
+            )
+            for line in lines
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError,
+        match="image metadata digest mismatch",
+    ):
+        verify_supply_chain.verify_bundle(tmp_path)
+
+
+def test_release_bundle_verifier_rejects_symlinked_artifact(tmp_path: Path) -> None:
+    _write_release_bundle(tmp_path)
+    target = tmp_path / "outside.tar"
+    target.write_bytes((tmp_path / "image.oci.tar").read_bytes())
+    (tmp_path / "image.oci.tar").unlink()
+    (tmp_path / "image.oci.tar").symlink_to(target)
+
+    with pytest.raises(
+        verify_supply_chain.SupplyChainVerificationError, match="artifact is unsafe"
+    ):
+        verify_supply_chain.verify_bundle(tmp_path)

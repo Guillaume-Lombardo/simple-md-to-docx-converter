@@ -61,7 +61,12 @@ def main() -> int:
         },
         "artifacts": {
             name: _sha256(arguments.artifacts / name)
-            for name in ("sbom.cdx.json", "sbom.spdx.json", "vulnerabilities.json")
+            for name in (
+                "image.oci.tar",
+                "sbom.cdx.json",
+                "sbom.spdx.json",
+                "vulnerabilities.json",
+            )
         },
         "vulnerabilities": {
             "counts_by_severity": dict(sorted(severities.items())),
