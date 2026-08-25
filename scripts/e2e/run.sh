@@ -315,6 +315,11 @@ printf '# Final image E2E\n\nReal **conversion** workflow.\n' >"$evidence_direct
 chmod 0444 "$evidence_directory/template.docx" \
   "$evidence_directory/browser-template.docx" "$evidence_directory/source.md"
 
+uv run python -m tests.e2e.service_workflow exercise-security-boundaries \
+  --base-url "$base_url" --profile "$profile" \
+  --template "$evidence_directory/template.docx" \
+  --artifact-dir "$temporary_directory/browser-artifacts"
+
 worker_metrics=()
 if [[ "$profile" == distributed ]]; then
   worker_metrics+=(--worker-metrics-url "http://127.0.0.1:$(podman port "$worker_one_name" 9464/tcp | sed 's/.*://')/metrics")

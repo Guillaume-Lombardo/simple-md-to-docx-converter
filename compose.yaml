@@ -91,7 +91,7 @@ services:
       - frontend
     volumes:
       - markweave-data:/data
-      # Disk-backed conversion workspace; the application budget below is 256 MiB.
+      # 320 MiB disk-backed filesystem; the application budget below remains 256 MiB.
       - markweave-work:/work
     read_only: true
     user: "1001:0"
@@ -169,5 +169,10 @@ networks:
 
 volumes:
   markweave-data: {}
-  markweave-work: {}
+  markweave-work:
+    driver: local
+    driver_opts:
+      type: ext4
+      device: "${MARKWEAVE_WORK_DEVICE:?Run scripts/quickstart.sh up}"
+      o: rw,nosuid,nodev
   clamav-signatures: {}

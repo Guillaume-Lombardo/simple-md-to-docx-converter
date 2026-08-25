@@ -26,9 +26,13 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        ".gitignore",
+        "README.md",
         "compose.yaml",
+        "docs/local-development.md",
         "examples/quickstart-template.docx.base64",
         "examples/quickstart-source.md",
+        "scripts/quickstart.sh",
         "tests/test_quickstart_compose.py",
     ],
 )

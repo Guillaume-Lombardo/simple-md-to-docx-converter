@@ -12,38 +12,37 @@ to read them before trying the local profile.
 
 ## Try it locally
 
-You need Docker Engine with Compose, OpenSSL for one password-generation command, and about 6 GiB
-of available memory. The published Markweave image is currently Linux/AMD64 only; this quickstart
-does not claim native ARM support. Clone the repository so Compose can use the reviewed Chromium
-seccomp profile. Store the generated evaluation password outside the checkout so later terminals
-use the same value:
+You need Docker Engine with Compose, OpenSSL, `mkfs.ext4`, `losetup`, and about 6 GiB of available
+memory. The published Markweave image is currently Linux/AMD64 only; this quickstart does not claim
+native ARM support. Clone the repository so Compose can use the reviewed Chromium seccomp profile,
+then run its single setup command:
 
 ```bash
 git clone https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter.git
 cd simple-md-to-docx-converter
-umask 077
-printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)" \
-  > /tmp/markweave-quickstart.env
-openssl base64 -d -in examples/quickstart-template.docx.base64 \
-  -out quickstart-template.docx
-docker compose --env-file /tmp/markweave-quickstart.env up -d
+scripts/quickstart.sh up
 ```
 
-Record the generated password in your local password manager. Read it from the protected file in
-any terminal without putting the value in shell history:
+The script explains and requests `sudo` before it validates and attaches a 320 MiB ext4 loop device;
+it never runs the application as root. It creates the administrator password once under the current
+user's private state directory, reuses it on later starts, and never redirects a secret to a
+predictable path. It also decodes the committed
+`examples/quickstart-template.docx.base64` fixture into that private directory. Show the password
+without putting it in shell history:
 
 ```bash
-sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' /tmp/markweave-quickstart.env
+scripts/quickstart.sh password
 ```
 
 Open <http://localhost:8080>, sign in as `admin`, and use the password above. The first start can
 take several minutes while ClamAV downloads and loads its signatures;
-`docker compose --env-file /tmp/markweave-quickstart.env ps` shows when both services are healthy,
-and `docker compose --env-file /tmp/markweave-quickstart.env logs -f clamav` shows download progress.
+`scripts/quickstart.sh ps` shows when both services are healthy, and
+`scripts/quickstart.sh logs` follows the signature-download progress.
 
 To make a first conversion:
 
-1. Open **Templates**, create a template, and select the generated `quickstart-template.docx`.
+1. Open **Templates**, create a template, and select the generated template at the path printed by
+   the setup script (normally `~/.local/state/markweave-quickstart/quickstart-template.docx`).
    In **Expected fonts**, enter this exact comma-separated list:
    `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
 2. Return to **Convert**, upload `examples/quickstart-source.md`, select your active template, and
@@ -58,23 +57,19 @@ A tiny source file is enough to try the workflow; `examples/quickstart-source.md
 Hello from **Markweave**.
 ```
 
-Stop the containers with
-`docker compose --env-file /tmp/markweave-quickstart.env down`, then remove only the disposable
-conversion workspace after validating its exact default-project identity:
+Stop the evaluation with:
 
 ```bash
-test "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' \
-  markweave_markweave-work)" = markweave
-test "$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' \
-  markweave_markweave-work)" = markweave-work
-docker volume rm markweave_markweave-work
+scripts/quickstart.sh down
 ```
 
-The application limits that disk-backed workspace to 256 MiB. `markweave-data` and
-`clamav-signatures` remain, so accounts, templates, jobs, results, and antivirus signatures survive.
-Do not add `--volumes` unless you intentionally want Docker to remove that durable local data.
-Remove `quickstart-template.docx` and the password file when you no longer need this evaluation
-deployment.
+The shutdown command validates the work volume's exact Compose labels, ext4 type, loop device, and
+backing file before removing only that volume, detaching the loop device, and deleting its temporary
+image. The application retains its 256 MiB logical workspace budget inside the physically bounded
+320 MiB filesystem. `markweave-data`, `clamav-signatures`, the administrator password, and the
+decoded template remain, so accounts, templates, jobs, results, signatures, and credentials survive
+normal shutdown. Do not add the `--volumes` option unless you intentionally want Docker to remove
+the durable local data.
 
 ## What this Compose profile is—and is not
 

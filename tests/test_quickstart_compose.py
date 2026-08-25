@@ -5,6 +5,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
+import stat
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
+QUICKSTART = ROOT / "scripts/quickstart.sh"
 FINAL_IMAGE_RUNNER = ROOT / "scripts/e2e/run.sh"
 TEMPLATE = ROOT / "examples/quickstart-template.docx.base64"
 SOURCE = ROOT / "examples/quickstart-source.md"
@@ -82,6 +86,14 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
         "markweave-work",
         "clamav-signatures",
     }
+    assert document["volumes"]["markweave-work"] == {
+        "driver": "local",
+        "driver_opts": {
+            "type": "ext4",
+            "device": "${MARKWEAVE_WORK_DEVICE:?Run scripts/quickstart.sh up}",
+            "o": "rw,nosuid,nodev",
+        },
+    }
     assert document["networks"]["scanner"]["internal"] is True
     assert document["networks"]["frontend"]["driver_opts"] == {
         "com.docker.network.bridge.enable_ip_masquerade": "false"
@@ -138,19 +150,95 @@ def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> No
 def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     readme = README.read_text(encoding="utf-8")
 
-    assert "--env-file /tmp/markweave-quickstart.env up -d" in readme
+    assert "scripts/quickstart.sh up" in readme
+    assert "scripts/quickstart.sh down" in readme
+    assert "scripts/quickstart.sh password" in readme
     assert "http://localhost:8080" in readme
     assert "**Templates**" in readme
     assert "**Administration**" not in readme
     assert "examples/quickstart-template.docx.base64" in readme
     assert "examples/quickstart-source.md" in readme
     assert ", ".join(EXPECTED_FONTS) in readme
-    assert "markweave_markweave-work" in readme
-    assert 'com.docker.compose.volume" }}' in readme
+    assert "320 MiB ext4 loop device" in readme
+    assert "256 MiB logical workspace budget" in readme
+    assert "requests `sudo`" in readme
     assert "not a production deployment" in readme
     assert "Linux/AMD64 only" in readme
     assert "docker compose down --volumes" not in readme
     assert "export MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in readme
+
+
+def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() -> None:
+    script = QUICKSTART.read_text(encoding="utf-8")
+
+    assert "${XDG_STATE_HOME:-$HOME/.local/state}" in script
+    assert 'mktemp "$state_directory/password.XXXXXX"' in script
+    assert "openssl rand -hex 24" in script
+    assert '[[ ! -e "$password_file" ]]' in script
+    assert 'chmod 0600 -- "$password_file"' in script
+    assert '[[ -f "$path" && ! -L "$path" && -O "$path" ]]' in script
+    assert 'truncate -s "$work_bytes"' in script
+    assert "readonly work_bytes=335544320" in script
+    assert "mkfs.ext4" in script
+    assert "readonly losetup=/usr/sbin/losetup" in script
+    assert 'sudo "$losetup" --find --show' in script
+    assert 'sudo "$losetup" --detach' in script
+    assert 'com.docker.compose.project" }}' in script
+    assert 'com.docker.compose.volume" }}' in script
+    assert 'index .Options "device"' in script
+    assert 'index .Options "o"' in script
+    assert 'docker container ls --all --quiet --filter "volume=$work_volume"' in script
+    assert "The obsolete work volume is still used" in script
+    assert 'docker volume rm "$work_volume"' in script
+    assert "down --remove-orphans" in script
+    assert "down --volumes" not in script
+    assert "markweave-data" not in script
+    assert "clamav-signatures" not in script
+    assert "/quickstart-template.docx" in (ROOT / ".gitignore").read_text()
+
+
+def test_quickstart_password_is_create_once_and_rejects_symlinks(
+    tmp_path: Path,
+) -> None:
+    environment = os.environ | {"XDG_STATE_HOME": str(tmp_path / "state")}
+    command = [str(QUICKSTART), "password"]
+
+    first = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    ).stdout.strip()
+    second = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    ).stdout.strip()
+    state = tmp_path / "state" / "markweave-quickstart"
+    password = state / "password.env"
+
+    assert first == second
+    assert len(first) == 48
+    assert all(character in "0123456789abcdef" for character in first)
+    assert stat.S_IMODE(state.stat().st_mode) == 0o700
+    assert stat.S_IMODE(password.stat().st_mode) == 0o600
+
+    password.unlink()
+    target = tmp_path / "redirected"
+    target.write_text("unchanged", encoding="utf-8")
+    password.symlink_to(target)
+    rejected = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert rejected.returncode != 0
+    assert target.read_text(encoding="utf-8") == "unchanged"
 
 
 def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
@@ -158,6 +246,7 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
 
     assert '--project-name "$project"' in runner
     assert "MARKWEAVE_PORT=%s\\n" in runner
+    assert "MARKWEAVE_WORK_DEVICE=%s\\n" in runner
     assert "docker compose" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
@@ -165,9 +254,16 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert 'docker port "$scanner_id"' in runner
     assert 'socket.create_connection(("clamav", 3310), 5)' in runner
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
+    assert "capacity = stats.f_blocks * stats.f_frsize" in runner
+    assert "errno.ENOSPC" in runner
+    assert "335_544_320" in runner
     assert 'volume="${project}_markweave-work"' in runner
     assert 'com.docker.compose.project" }}' in runner
     assert 'com.docker.compose.volume" }}' in runner
+    assert 'index .Options "device"' in runner
+    assert "sudo /usr/sbin/losetup --detach" in runner
+    assert "reset_work_device" in runner
+    assert "sudo /usr/sbin/mkfs.ext4" in runner
     assert "down --volumes --remove-orphans" in runner
     assert "down --remove-orphans" in runner
 

@@ -62,9 +62,8 @@ and retains the fixed reader, arguments, environment, process-group deadline han
 guarantees documented in `docs/pandoc-docx.md`.
 
 Focused rootless real-engine integration tests exercise ZIP corruption and encryption failures and
-the complete ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media
-path. The final-image E2E matrix currently exercises the asynchronous conversion workflow with a
-standalone Markdown source, not a ZIP/image source. Repeating the ZIP success path and its relevant
-critical archive/image failures through the final-image HTTP workflow remains explicit E2E coverage
-debt. Completing T23 with that debt requires a pull-request justification and explicit reviewer
-approval; the focused integration evidence does not replace that approval.
+the complete ZIP → sanitized SVG → local Cairo rasterization → Pandoc 3.10.2 → OpenXML media path.
+The standalone and distributed final-image E2E suites repeat that primary ZIP/SVG path through the
+asynchronous HTTP workflow, require exactly one normalized PNG in the resulting OpenXML, and verify
+stable failed jobs with no published result for corrupt ZIP data, encrypted member metadata, and
+invalid image bytes.

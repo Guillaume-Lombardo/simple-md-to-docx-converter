@@ -21,3 +21,6 @@ build/
 artifacts/
 node_modules/
 *.egg-info/
+
+# Legacy quickstart output; current quickstart state lives outside the checkout.
+/quickstart-template.docx

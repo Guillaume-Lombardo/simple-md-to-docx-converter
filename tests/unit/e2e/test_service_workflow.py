@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import stat
@@ -14,6 +15,16 @@ from typing import Any
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.templates.errors import (
+    TemplateValidationError,
+    TemplateValidationErrorCode,
+)
+from markweave.templates.validation import (
+    APPROVED_FONT_POLICY,
+    TemplateFontDeclaration,
+    TemplateLimits,
+    validate_template,
+)
 from tests.e2e import service_workflow as workflow
 
 
@@ -267,6 +278,76 @@ def test_docx_validation_accepts_required_parts_and_rejects_other_bytes() -> Non
     workflow.validate_docx(output.getvalue(), "test document")
     with pytest.raises(workflow.WorkflowFailure, match="invalid OpenXML"):
         workflow.validate_docx(b"not a ZIP", "test document")
+
+
+@pytest.mark.unit
+def test_final_image_template_rejection_fixtures_have_exact_categories() -> None:
+    encoded = Path("examples/quickstart-template.docx.base64").read_bytes()
+    template = base64.b64decode(b"".join(encoded.splitlines()), validate=True)
+    limits = TemplateLimits(
+        1_000_000,
+        2_000,
+        1_000_000,
+        2_000_000,
+        200.0,
+        250_000,
+        100,
+        500_000,
+        64,
+        128,
+    )
+
+    fixtures = workflow.template_rejection_fixtures(template)
+    assert set(fixtures) == {
+        "active_content",
+        "external_relationship",
+        "required_styles",
+        "font_contract",
+    }
+    for category, (candidate, fonts) in fixtures.items():
+        with pytest.raises(TemplateValidationError) as captured:
+            validate_template(
+                candidate,
+                TemplateFontDeclaration(fonts),
+                limits,
+                APPROVED_FONT_POLICY,
+            )
+        assert captured.value.code is TemplateValidationErrorCode(category)
+
+
+@pytest.mark.unit
+def test_final_image_archive_failure_fixtures_are_deterministic_and_real() -> None:
+    stored = workflow._zip_fixture(
+        [("document.md", b"bounded marker")], compression=zipfile.ZIP_STORED
+    )
+    assert stored == workflow._zip_fixture(
+        [("document.md", b"bounded marker")], compression=zipfile.ZIP_STORED
+    )
+    corrupted = workflow._corrupt_archive(stored, b"bounded marker")
+    with (
+        zipfile.ZipFile(io.BytesIO(corrupted)) as archive,
+        pytest.raises(zipfile.BadZipFile, match="CRC"),
+    ):
+        archive.read("document.md")
+
+    encrypted = workflow._encrypted_archive(
+        workflow._zip_fixture([("document.md", b"safe")])
+    )
+    with zipfile.ZipFile(io.BytesIO(encrypted)) as archive:
+        assert archive.getinfo("document.md").flag_bits & 1
+    with (
+        zipfile.ZipFile(io.BytesIO(encrypted)) as archive,
+        pytest.raises(RuntimeError, match="encrypted"),
+    ):
+        archive.read("document.md")
+
+
+@pytest.mark.unit
+def test_final_image_runner_invokes_security_boundaries_for_each_profile() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    assert runner.count("service_workflow exercise-security-boundaries") == 1
+    assert '--base-url "$base_url" --profile "$profile"' in runner
+    assert '--template "$evidence_directory/template.docx"' in runner
 
 
 @pytest.mark.unit

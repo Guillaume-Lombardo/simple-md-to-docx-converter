@@ -14,6 +14,7 @@ import io
 import json
 import os
 import secrets
+import struct
 import sys
 import time
 import uuid
@@ -24,11 +25,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from markweave.templates.validation import PANDOC_REQUIRED_STYLES  # noqa: E402
 from scripts.container.api_workflow_smoke import (  # noqa: E402 - executable path bootstrap
     candidate_reference,
     multipart,
@@ -259,6 +262,149 @@ def create_template(
     )
     expect(result, 201, "create template")
     return decode_object(result, "create template")
+
+
+def _zip_fixture(
+    entries: list[tuple[str, bytes]], *, compression: int = zipfile.ZIP_DEFLATED
+) -> bytes:
+    """Build one deterministic regular-file ZIP fixture."""
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name, content in entries:
+            member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.create_system = 3
+            member.external_attr = 0o100644 << 16
+            member.compress_type = compression
+            archive.writestr(member, content)
+    return output.getvalue()
+
+
+def _rewrite_docx(
+    content: bytes,
+    *,
+    replacements: dict[str, bytes] | None = None,
+    additions: list[tuple[str, bytes]] | None = None,
+) -> bytes:
+    """Rewrite selected OpenXML parts while retaining the source member metadata."""
+
+    replacement_parts = replacements or {}
+    output = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(content)) as source,
+        zipfile.ZipFile(output, "w") as target,
+    ):
+        for member in source.infolist():
+            target.writestr(
+                member,
+                replacement_parts.get(member.filename, source.read(member)),
+            )
+        for name, payload in additions or []:
+            member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.create_system = 3
+            member.external_attr = 0o100644 << 16
+            member.compress_type = zipfile.ZIP_DEFLATED
+            target.writestr(member, payload)
+    return output.getvalue()
+
+
+def template_rejection_fixtures(
+    template: bytes,
+) -> dict[str, tuple[bytes, tuple[str, ...]]]:
+    """Create bounded candidates for the four final-image activation rejections."""
+
+    candidate = candidate_reference(template)
+    with zipfile.ZipFile(io.BytesIO(candidate)) as archive:
+        relationships = ElementTree.fromstring(  # noqa: S314 - trusted generated fixture
+            archive.read("word/_rels/document.xml.rels")
+        )
+        styles = ElementTree.fromstring(  # noqa: S314 - trusted generated fixture
+            archive.read("word/styles.xml")
+        )
+
+    relationship_namespace = (
+        "http://schemas.openxmlformats.org/package/2006/relationships"
+    )
+    ElementTree.SubElement(
+        relationships,
+        f"{{{relationship_namespace}}}Relationship",
+        {
+            "Id": "rIdFinalImageExternal",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+            "Target": "https://attacker.invalid/private.png",
+            "TargetMode": "External",
+        },
+    )
+    word_namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    missing_style_id = PANDOC_REQUIRED_STYLES[0].style_id
+    missing_style = next(
+        node
+        for node in styles.findall(f"{{{word_namespace}}}style")
+        if node.attrib.get(f"{{{word_namespace}}}styleId") == missing_style_id
+    )
+    styles.remove(missing_style)
+
+    return {
+        "active_content": (
+            _rewrite_docx(candidate, additions=[("word/vbaProject.bin", b"bounded")]),
+            EXPECTED_FONTS,
+        ),
+        "external_relationship": (
+            _rewrite_docx(
+                candidate,
+                replacements={
+                    "word/_rels/document.xml.rels": ElementTree.tostring(
+                        relationships, encoding="utf-8", xml_declaration=True
+                    )
+                },
+            ),
+            EXPECTED_FONTS,
+        ),
+        "required_styles": (
+            _rewrite_docx(
+                candidate,
+                replacements={
+                    "word/styles.xml": ElementTree.tostring(
+                        styles, encoding="utf-8", xml_declaration=True
+                    )
+                },
+            ),
+            EXPECTED_FONTS,
+        ),
+        "font_contract": (
+            candidate,
+            (*EXPECTED_FONTS, "Unsupported Final Image Font"),
+        ),
+    }
+
+
+def reject_template_candidate(
+    client: ServiceClient,
+    content: bytes,
+    fonts: tuple[str, ...],
+    *,
+    expected_code: str,
+) -> None:
+    """Require one candidate to fail at the final-image HTTP activation boundary."""
+
+    body, content_type = multipart(
+        [
+            ("name", f"Rejected {expected_code}"),
+            ("description", "Bounded final-image rejection fixture"),
+            *(("expected_fonts", family) for family in fonts),
+        ],
+        [("content", "rejected-template.docx", content)],
+    )
+    result = client.request(
+        "POST",
+        "/api/v1/templates",
+        body=body,
+        content_type=content_type,
+        mutate=True,
+    )
+    expect(result, 422, f"reject {expected_code}")
+    if error_payload(result).get("code") != expected_code:
+        raise WorkflowFailure(f"reject {expected_code}: stable error code missing")
 
 
 def submit_conversion(  # noqa: PLR0913 - explicit conversion submission contract
@@ -617,6 +763,134 @@ def exercise_pdf_limit_failure(
         "failed PDF manifest denial",
     )
     return terminal
+
+
+def _encrypted_archive(content: bytes) -> bytes:
+    """Set the real ZIP encryption flag in local and central member headers."""
+
+    archive = bytearray(content)
+    local = archive.find(b"PK\x03\x04")
+    central = archive.find(b"PK\x01\x02")
+    if local < 0 or central < 0:
+        raise ValueError("ZIP fixture is missing required member headers")
+    local_flags = struct.unpack_from("<H", archive, local + 6)[0]
+    central_flags = struct.unpack_from("<H", archive, central + 8)[0]
+    struct.pack_into("<H", archive, local + 6, local_flags | 1)
+    struct.pack_into("<H", archive, central + 8, central_flags | 1)
+    return bytes(archive)
+
+
+def _corrupt_archive(content: bytes, marker: bytes) -> bytes:
+    """Corrupt one stored member payload without changing its ZIP metadata."""
+
+    archive = bytearray(content)
+    offset = archive.find(marker)
+    if offset < 0:
+        raise ValueError("ZIP fixture marker is missing")
+    archive[offset] ^= 0x01
+    return bytes(archive)
+
+
+def require_failed_conversion(
+    client: ServiceClient,
+    template: dict[str, Any],
+    source: bytes,
+    *,
+    label: str,
+) -> None:
+    """Require an invalid archive/image upload to fail without publishing a result."""
+
+    _job, location = submit_conversion(
+        client, template, "docx", source, filename=f"{label}.zip"
+    )
+    terminal = wait_for_job(client, location)
+    if terminal.get("state") != "failed" or terminal.get("error_code") != "validation":
+        raise WorkflowFailure(f"{label}: deterministic validation failure missing")
+    expect(client.request("GET", f"{location}/result"), 409, f"{label} result denial")
+
+
+def exercise_security_boundaries(arguments: argparse.Namespace) -> None:
+    """Exercise archive/image and template rejection paths through the final image."""
+
+    client = ServiceClient(arguments.base_url)
+    client.login(arguments.admin_username, arguments.admin_password)
+    template_content = arguments.template.read_bytes()
+
+    before = decode_object(
+        client.request("GET", "/api/v1/templates"), "template rejection baseline"
+    ).get("total")
+    if not isinstance(before, int):
+        raise WorkflowFailure("template rejection baseline: total is missing")
+    for category, (candidate, fonts) in template_rejection_fixtures(
+        template_content
+    ).items():
+        reject_template_candidate(
+            client,
+            candidate,
+            fonts,
+            expected_code=f"TEMPLATE_{category.upper()}",
+        )
+    after = decode_object(
+        client.request("GET", "/api/v1/templates"), "template rejection result"
+    ).get("total")
+    if after != before:
+        raise WorkflowFailure("rejected templates were published")
+
+    template = create_template(client, arguments.template, run_id="security-boundaries")
+    svg = (
+        REPOSITORY_ROOT / "tests/corpus/local-images/assets/safe-local.svg"
+    ).read_bytes()
+    valid_archive = _zip_fixture(
+        [
+            ("document.md", b"# Final-image archive\n\n![safe](assets/safe.svg)\n"),
+            ("assets/safe.svg", svg),
+        ]
+    )
+    _job, location = submit_conversion(
+        client, template, "docx", valid_archive, filename="source.zip"
+    )
+    terminal = wait_for_job(client, location)
+    if terminal.get("state") != "succeeded":
+        raise WorkflowFailure("archive/image primary path did not succeed")
+    result = client.request("GET", f"{location}/result")
+    expect(result, 200, "archive/image result")
+    validate_docx(result.body, "archive/image DOCX result")
+    with zipfile.ZipFile(io.BytesIO(result.body)) as document:
+        media = [
+            document.read(name)
+            for name in document.namelist()
+            if name.startswith("word/media/")
+        ]
+    if len(media) != 1 or not media[0].startswith(b"\x89PNG\r\n\x1a\n"):
+        raise WorkflowFailure("archive/image result: normalized PNG evidence missing")
+
+    stored = _zip_fixture(
+        [("document.md", b"sensitive archive marker")],
+        compression=zipfile.ZIP_STORED,
+    )
+    require_failed_conversion(
+        client,
+        template,
+        _corrupt_archive(stored, b"sensitive archive marker"),
+        label="corrupt-archive",
+    )
+    require_failed_conversion(
+        client,
+        template,
+        _encrypted_archive(_zip_fixture([("document.md", b"safe")])),
+        label="encrypted-archive",
+    )
+    require_failed_conversion(
+        client,
+        template,
+        _zip_fixture(
+            [
+                ("document.md", b"# Invalid image\n\n![bad](bad.png)\n"),
+                ("bad.png", b"not an image"),
+            ]
+        ),
+        label="invalid-image",
+    )
 
 
 def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
@@ -1079,6 +1353,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "exercise",
+            "exercise-security-boundaries",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1116,12 +1391,26 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_arguments(
     parser: argparse.ArgumentParser, arguments: argparse.Namespace
 ) -> None:
-    if arguments.command in {"exercise", "checkpoint", "submit-recovery"}:
+    if arguments.command in {
+        "exercise",
+        "exercise-security-boundaries",
+        "checkpoint",
+        "submit-recovery",
+    }:
         if arguments.template is None:
             parser.error("--template is required for this command")
         if not arguments.template.is_file():
             parser.error("--template must name a readable file")
-    if arguments.command != "exercise" and arguments.state_file is None:
+    if (
+        arguments.command
+        in {
+            "checkpoint",
+            "verify-checkpoint",
+            "submit-recovery",
+            "verify-recovery",
+        }
+        and arguments.state_file is None
+    ):
         parser.error("--state-file is required for checkpoint and recovery commands")
     if arguments.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
@@ -1160,6 +1449,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if arguments.command == "exercise":
             exercise(arguments)
+        elif arguments.command == "exercise-security-boundaries":
+            exercise_security_boundaries(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

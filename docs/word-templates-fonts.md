@@ -55,10 +55,9 @@ mapping for a script outside the approved Latin and Greek set fails activation. 
 remove dormant Office theme mappings for unsupported scripts when preparing a candidate template;
 they must add a reviewed pinned family before retaining a mapping that the template actually needs.
 
-Template publication calls this validator before atomic activation. The final-image E2E matrix
-covers successful publication of a valid template and its use by DOCX, PDF, and combined
-conversions in both storage profiles. Focused rootless real-engine integration tests cover macro,
-external-relationship, missing-style, and unsupported-font rejection at the activation boundary.
-Those rejection cases are not currently repeated through the final-image HTTP workflow. This is
-explicit E2E coverage debt, not evidence that the paths are non-applicable; completing T23 with that
-debt requires the pull request to justify the exception and a reviewer to approve it explicitly.
+Template publication calls this validator before atomic activation. In both storage profiles, the
+final-image E2E matrix covers successful publication of a valid template and its use by DOCX, PDF,
+and combined conversions. It also submits bounded macro, external-relationship, missing-style, and
+unsupported-font candidates through the final-image HTTP endpoint, requires their exact stable
+rejection categories, and proves that none enters the template catalog. Focused rootless
+real-engine integration tests retain the more detailed activation-boundary evidence.

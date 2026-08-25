@@ -13,8 +13,12 @@ if TYPE_CHECKING:
 
 DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
     "compose": (
+        ".gitignore",
+        "README.md",
         "compose.yaml",
+        "docs/local-development.md",
         "examples/**",
+        "scripts/quickstart.sh",
         "scripts/e2e/run-compose.sh",
         "tests/test_quickstart_compose.py",
     ),
