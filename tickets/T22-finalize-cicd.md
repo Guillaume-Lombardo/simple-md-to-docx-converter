@@ -93,6 +93,21 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   binds the real build, integrity verification, clean-install/import, unique upload, and minimal
   PyPI OIDC publish chain. It has no production defaults and adds no release workflow or product
   decision. Exact-head run 32809979039 and exact-main run 32810485581 passed all 12 jobs.
+- 2026-08-25: Hosted Dependabot ingestion produced grouped Actions and Python update pull requests.
+  The raw Actions PR could not satisfy the exact workflow contract, so independently approved PR
+  #66 integrated `actions/upload-artifact` 7.0.1 together with its reviewed canonical fingerprint
+  and hosted-runner regression tests. The archive behavior stayed enabled, and the Node 24 action
+  ran on GitHub-hosted Ubuntu 24.04. Exact-head run 32811871886 and exact-main run 32812499063
+  passed all 12 jobs, including retained final-image evidence through the updated action.
+- 2026-08-25: Independent review found that the raw Python Dependabot PR omitted Hatchling 1.32's
+  new `tomlkit` dependency from the strict build constraints, causing the real hash-required build
+  to fail. PR #67 added `tomlkit==0.15.1`, relocked, and canonically regenerated both hashes. Real
+  build, integrity verification, clean Python 3.14 installation/import, Metadata 2.5, tamper
+  rejection, and rendering/golden tests passed. Exact-head run 32813216652 passed all 12 jobs.
+  Exact-main run 32813781840 initially hit a Playwright response-observation timeout after the API
+  had already returned `201`; the retained failure evidence confirmed successful account creation.
+  Its failed-job rerun passed on the identical `bac665a` source, while the distributed E2E,
+  container, storage, engine, and functional jobs passed on the first attempt.
 - Remaining implementation is intentionally gated. The project manager must approve the public
   package license; version source and PEP 440/tag mapping; exact release trigger and approved tag
   patterns; scheduled full-suite cadence, timeout, parallelism, and usage budget; and release-image
