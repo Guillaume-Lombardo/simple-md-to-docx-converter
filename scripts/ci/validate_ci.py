@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "adabed46e50f14f38787212f85584a79c5ecbe2f67aa39b52ce758b6035f7682"
+    "fb19d24058793c0c028b3052dcc579be5174ac5522d488985d5d77c9ade3fd92"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1428,6 +1428,8 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
         'test "$staged_manifest_digest" = "$intended_digest"',
         "skopeo copy --preserve-digests --retry-times 3",
+        '"docker://$registry_repository:$tag"; then',
+        "copy_status=0",
         'copy_status="$?"',
         'if copied_digest="$(inspect_remote_tag "$tag")"; then',
         '[[ "$copied_digest" = "$intended_digest" ]]',

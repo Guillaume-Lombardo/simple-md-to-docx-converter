@@ -228,6 +228,11 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   status without trusting it and accepts a nonzero exit only when an authenticated registry read
   immediately proves that the requested tag resolves to the exact locally staged digest. Missing,
   unreadable, or different remote state still fails closed.
+- 2026-08-25: The first hosted execution of that postcondition guard showed that toggling `errexit`
+  around Skopeo was not portable to the GitHub runner's `bash -e` invocation: the shell still
+  stopped before the recorded status and registry read. Skopeo now runs as the condition of an
+  explicit `if`, the Bash-defined context in which a nonzero status does not trigger `errexit`.
+  Both branches record the real status before the unchanged authenticated exact-digest postcondition.
 
 ## Synchronization
 

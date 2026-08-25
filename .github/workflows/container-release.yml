@@ -165,11 +165,12 @@ jobs:
             local copy_status
             local copied_digest
             local inspect_status
-            set +e
-            skopeo copy --preserve-digests --retry-times 3 \
-              "dir:$registry_stage" "docker://$registry_repository:$tag"
-            copy_status="$?"
-            set -e
+            if skopeo copy --preserve-digests --retry-times 3 \
+              "dir:$registry_stage" "docker://$registry_repository:$tag"; then
+              copy_status=0
+            else
+              copy_status="$?"
+            fi
             if copied_digest="$(inspect_remote_tag "$tag")"; then
               if [[ "$copied_digest" = "$intended_digest" ]]; then
                 if [[ "$copy_status" != 0 ]]; then
