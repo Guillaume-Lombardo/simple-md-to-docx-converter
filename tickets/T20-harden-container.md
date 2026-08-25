@@ -101,6 +101,14 @@ Build the reproducible rootless image with API and worker modes, SBOM, scans, an
   Syft/Grype evidence contains 1,502 matches (91 High, 723 Medium, 679 Low, 9 Negligible), with zero
   fixable and zero unfixed Critical findings. Ruff formatting and linting, ty, Bash syntax,
   error-severity ShellCheck, 113 CI/container/web checks, and the container asset contracts pass.
+- 2026-08-25: Closed the light-CI branch-coverage gap with behavioral unit tests for canonical
+  manifest validation and atomic sidecar compensation, active Pandoc/Mermaid cancellation and
+  expired deadlines, DOCX service delegation paths, Pandoc environment/workspace isolation, and
+  SQLite trigger preservation during the revision 12 table copy. The unit matrix now passes all
+  970 selected tests (261 deselected) with 93.58% total coverage and 90.23% application branch
+  coverage (1,478/1,638), up from 89.26%. Changed application line coverage remains 95.30%
+  (507/532). Ruff formatting and linting and ty also pass without exclusions, pragmas, or threshold
+  changes.
 
 ## Synchronization
 

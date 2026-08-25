@@ -476,3 +476,31 @@ def test_job_integrity_downgrade_uses_batch_table_copy(mocker: MockerFixture) ->
     JOB_INTEGRITY_REVISION.downgrade()
     assert batch.drop_column.call_count == 5
     integrity.drop_column.assert_not_called()
+
+
+@pytest.mark.unit
+def test_job_integrity_sqlite_downgrade_preserves_referencing_triggers(
+    mocker: MockerFixture,
+) -> None:
+    integrity = mocker.patch.object(JOB_INTEGRITY_REVISION, "op")
+    bind = mocker.MagicMock()
+    bind.dialect.name = "sqlite"
+    trigger_rows = mocker.Mock()
+    trigger_rows.tuples.return_value = (
+        ("conversion_guard", "CREATE TRIGGER conversion_guard AFTER INSERT ON users"),
+        ("job_guard", "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs"),
+    )
+    bind.execute.return_value = trigger_rows
+    integrity.get_bind.return_value = bind
+
+    JOB_INTEGRITY_REVISION.downgrade()
+
+    assert integrity.batch_alter_table.call_args.kwargs["recreate"] == "always"
+    assert bind.execute.call_count == 5
+    executed = [str(call.args[0]) for call in bind.execute.call_args_list]
+    assert 'DROP TRIGGER "conversion_guard"' in executed
+    assert 'DROP TRIGGER "job_guard"' in executed
+    assert executed[-2:] == [
+        "CREATE TRIGGER conversion_guard AFTER INSERT ON users",
+        "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs",
+    ]

@@ -78,6 +78,32 @@ def test_service_propagates_worker_deadline_to_docx_engine(mocker) -> None:
 
 
 @pytest.mark.unit
+def test_service_uses_simple_and_cancellable_document_engine_paths(mocker) -> None:
+    converter = mocker.Mock()
+    converter.convert.return_value = b"docx"
+    service = DocxConversionService(converter)
+
+    assert service.convert("# Safe", b"reference") == b"docx"
+    converter.convert.assert_called_once_with(mocker.ANY, b"reference")
+
+    converter.reset_mock()
+    document = ApprovedDocument("# Safe", PurePosixPath("readme.md"), ())
+    cancellation = mocker.Mock(return_value=False)
+    assert (
+        service.convert_document(
+            document, b"reference", cancellation_requested=cancellation
+        )
+        == b"docx"
+    )
+    converter.convert.assert_called_once_with(
+        mocker.ANY,
+        b"reference",
+        deadline_monotonic=None,
+        cancellation_requested=cancellation,
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "raw_html",
     [

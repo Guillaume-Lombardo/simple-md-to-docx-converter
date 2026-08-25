@@ -150,6 +150,12 @@ def traceability_manifest() -> bytes:
     ).encode()
 
 
+def invalid_traceability_manifest(**changes: object) -> bytes:
+    decoded = json.loads(traceability_manifest())
+    decoded.update(changes)
+    return json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
+
+
 def test_worker_claims_heartbeats_and_publishes_only_after_processing(
     mocker: MockerFixture,
 ) -> None:
@@ -220,6 +226,39 @@ def test_worker_atomically_publishes_and_compensates_traceability_sidecar(
         (JobOutput.PDF, None),
         (JobOutput.BOTH, None),
         (JobOutput.PDF, b'{"not":"canonical"}'),
+        (JobOutput.PDF, b"[]"),
+        (JobOutput.PDF, invalid_traceability_manifest(schema_version=2)),
+        (JobOutput.PDF, invalid_traceability_manifest(output_format="docx")),
+        (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=True)),
+        (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=0)),
+        (JobOutput.PDF, invalid_traceability_manifest(template_sha256="invalid")),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=None)),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=[])),
+        (JobOutput.PDF, invalid_traceability_manifest(pages=["invalid"])),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(pages=[{"width_points": 612}]),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(
+                pages=[{"height_points": 792, "width_points": "612"}]
+            ),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(
+                pages=[{"height_points": 0, "width_points": 612}]
+            ),
+        ),
+        (
+            JobOutput.PDF,
+            json.dumps(json.loads(traceability_manifest())).encode(),
+        ),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(output_pdf_bytes=float("nan")),
+        ),
         (JobOutput.DOCX, traceability_manifest()),
     ),
 )
@@ -425,14 +464,21 @@ def test_worker_removes_unpublished_result_when_terminal_transition_fails(
     assert objects.delete.call_args.args[0] == objects.put.call_args.args[0]
 
 
-def test_worker_removes_result_when_atomic_cancellation_wins(
-    mocker: MockerFixture,
+@pytest.mark.parametrize(
+    ("output", "manifest"),
+    (
+        (JobOutput.DOCX, None),
+        (JobOutput.PDF, traceability_manifest()),
+    ),
+)
+def test_worker_removes_published_objects_when_atomic_cancellation_wins(
+    mocker: MockerFixture, output: JobOutput, manifest: bytes | None
 ) -> None:
     instance, repository, objects, processor = worker(mocker)
-    claimed = running_job()
+    claimed = replace(running_job(), output=output)
     repository.claim.return_value = claimed
     repository.cancellation_requested.return_value = False
-    processor.process.return_value = JobProcessResult(b"result")
+    processor.process.return_value = JobProcessResult(b"result", manifest)
     repository.succeed.return_value = job(
         id=claimed.id,
         owner_id=claimed.owner_id,
@@ -440,7 +486,23 @@ def test_worker_removes_result_when_atomic_cancellation_wins(
         expires_at=NOW + timedelta(seconds=100),
     )
     assert instance.run_once()
-    assert objects.delete.call_args.args[0] == objects.put.call_args.args[0]
+    assert [call.args[0] for call in objects.delete.call_args_list] == [
+        call.args[0] for call in objects.put.call_args_list
+    ]
+
+
+def test_worker_rejects_a_processor_that_returns_no_result(
+    mocker: MockerFixture,
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    repository.claim.return_value = running_job()
+    processor.process.return_value = None
+
+    with pytest.raises(RuntimeError, match="returned no result"):
+        instance.run_once()
+
+    objects.put.assert_not_called()
+    repository.succeed.assert_not_called()
 
 
 def test_worker_recovery_and_bounded_cleanup_delegate_explicit_values(

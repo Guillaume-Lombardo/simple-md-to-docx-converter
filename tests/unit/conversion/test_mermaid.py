@@ -568,6 +568,35 @@ def test_active_cancellation_terminates_mermaid_process_group(
     assert process.wait.call_count == 2
 
 
+@pytest.mark.parametrize("probe_failure", [False, True])
+def test_cancellable_cli_wait_handles_expired_deadline_and_probe_failure(
+    tmp_path: Path, mocker, probe_failure: bool
+) -> None:
+    process = mocker.Mock(pid=1234)
+    mocker.patch(
+        "md_converter.conversion.mermaid.subprocess.Popen", return_value=process
+    )
+    mocker.patch("md_converter.conversion.mermaid.time.monotonic", return_value=10.0)
+    killpg = mocker.patch(
+        "md_converter.conversion.mermaid.os.killpg", side_effect=ProcessLookupError
+    )
+    probe = (
+        mocker.Mock(side_effect=RuntimeError("probe failed"))
+        if probe_failure
+        else mocker.Mock(return_value=False)
+    )
+
+    expected = RuntimeError if probe_failure else ConversionError
+    with pytest.raises(expected):
+        MermaidCliRenderer(_config(tmp_path), {}).render(
+            "secret",
+            100_000,
+            deadline_monotonic=9.0,
+            cancellation_requested=probe,
+        )
+    killpg.assert_called_once_with(1234, 15)
+
+
 def test_worker_deadline_caps_mermaid_engine_timeout(tmp_path: Path, mocker) -> None:
     process = mocker.Mock(pid=1234)
     process.wait.return_value = 0
