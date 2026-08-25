@@ -25,6 +25,11 @@ def test_approved_release_version_is_consistent_across_public_surfaces() -> None
     assert "version=VERSION" in Path("src/md_converter/app.py").read_text(
         encoding="utf-8"
     )
+    golden_generator = Path("scripts/generate_t11_pdf_golden.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from md_converter.version import VERSION" in golden_generator
+    assert "application_version=VERSION" in golden_generator
 
 
 def test_release_metadata_declares_public_apache_license() -> None:

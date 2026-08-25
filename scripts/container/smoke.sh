@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly image="${1:-localhost/md-converter:t20}"
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
+readonly application_version="$(uv version --short --locked)"
 seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 
@@ -23,10 +24,12 @@ run_hardened() {
     "$@"
 }
 
-run_hardened --entrypoint /bin/bash "$image" -ceu '
+run_hardened --env "EXPECTED_APPLICATION_VERSION=$application_version" \
+  --entrypoint /bin/bash "$image" -ceu '
   md-converter-preflight
   test "$(id -u)" = "'"$runtime_uid"'"
-  /opt/md-converter/venv/bin/python -c "import md_converter; assert md_converter.__version__ == \"0.1.0\""
+  /opt/md-converter/venv/bin/python -c \
+    "import md_converter, os; assert md_converter.__version__ == os.environ[\"EXPECTED_APPLICATION_VERSION\"]"
   test "$(pandoc --version | head -1)" = "pandoc 3.10.2"
   test "$(mmdc --version)" = "11.16.0"
   test "$(google-chrome-stable --version | awk "{\$1=\$1; print}")" = "Google Chrome 151.0.7922.173"
