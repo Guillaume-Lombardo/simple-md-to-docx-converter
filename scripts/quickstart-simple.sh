@@ -87,6 +87,7 @@ validate_private_file() {
 }
 
 start_private_podman_service() {
+  local oci_runtime
   local temporary
   podman_socket="$state_directory/podman-compose.sock"
   if [[ -e "$podman_socket" || -L "$podman_socket" ]]; then
@@ -94,9 +95,15 @@ start_private_podman_service() {
       fail "Refusing an unsafe private Podman socket: $podman_socket"
     rm -f -- "$podman_socket"
   fi
+  oci_runtime="$(command -v crun || true)"
+  if [[ -z "$oci_runtime" ]]; then
+    oci_runtime="$(podman info --format '{{.Host.OCIRuntime.Path}}')"
+  fi
+  [[ "$oci_runtime" == /* && -x "$oci_runtime" ]] || \
+    fail "Podman's OCI runtime must be an executable absolute path."
   temporary="$(mktemp "$state_directory/podman-config.XXXXXX")"
-  printf '[containers]\nseccomp_profile="%s"\n' \
-    "$repository/spikes/toolchain/chrome-seccomp.json" >"$temporary"
+  printf '[containers]\nseccomp_profile="%s"\n[engine]\nruntime="%s"\n' \
+    "$repository/spikes/toolchain/chrome-seccomp.json" "$oci_runtime" >"$temporary"
   chmod 0600 -- "$temporary"
   mv -- "$temporary" "$podman_config_file"
   CONTAINERS_CONF="$podman_config_file" \

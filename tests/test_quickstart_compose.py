@@ -236,6 +236,10 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "rootless Podman only" in script
     assert 'CONTAINERS_CONF="$podman_config_file"' in script
     assert "spikes/toolchain/chrome-seccomp.json" in script
+    assert "command -v crun" in script
+    assert "{{.Host.OCIRuntime.Path}}" in script
+    assert 'runtime="%s"' in script
+    assert "Podman's OCI runtime must be an executable absolute path" in script
     assert "wait_for_podman_scanner" in script
     assert "wait_for_application" in script
     assert "/usr/local/bin/clamdcheck.sh" in script

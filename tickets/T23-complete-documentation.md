@@ -106,6 +106,11 @@ Complete English user, template, administrator, API, operations, storage, queue,
   restart and rollback, and removes its private Podman API service after each command. The real
   Docker and Podman lifecycle suites pass; Podman also completed a Mermaid DOCX/PDF conversion.
   Ruff, `ty`, ShellCheck, the CI validator, 241 focused tests, and `git diff --check` pass.
+- 2026-08-25: PR #80's first hosted Compose run exposed a GitHub Ubuntu 24.04 runner mismatch:
+  recent Podman generated OCI 1.2.1 configuration but selected the older `/usr/bin/crun` 1.14.1
+  instead of the newer executable already first in `PATH`. The private Podman configuration now
+  selects that current `crun` when available and otherwise uses Podman's declared runtime path,
+  without changing global host configuration.
 
 ## Synchronization
 
