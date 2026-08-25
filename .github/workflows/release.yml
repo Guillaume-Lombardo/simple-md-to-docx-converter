@@ -35,17 +35,17 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.3
+          test "$GITHUB_REF_NAME" = v0.3.0
       - name: Build distributions exactly once
-        run: uv run python -m scripts.release.build --output dist --name markweave --version 0.3 --constraint build-constraints.txt
+        run: uv run python -m scripts.release.build --output dist --name markweave --version 0.3.0 --constraint build-constraints.txt
       - name: Verify artifact integrity and metadata
-        run: uv run python -m scripts.release.artifacts verify --directory dist --name markweave --version 0.3 --manifest-name release-integrity.json
+        run: uv run python -m scripts.release.artifacts verify --directory dist --name markweave --version 0.3.0 --manifest-name release-integrity.json
       - name: Verify clean Python 3.14 installation and public import
-        run: uv run python -m scripts.release.verify_install --directory dist --name markweave --version 0.3 --manifest-name release-integrity.json
+        run: uv run python -m scripts.release.verify_install --directory dist --name markweave --version 0.3.0 --manifest-name release-integrity.json
       - name: Transfer verified artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-release-v0.3
+          name: python-release-v0.3.0
           path: |
             dist/*.whl
             dist/*.tar.gz
@@ -69,7 +69,7 @@ jobs:
       - name: Download verified artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-release-v0.3
+          name: python-release-v0.3.0
           path: dist
       - name: Publish exact artifacts
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

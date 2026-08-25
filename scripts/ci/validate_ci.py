@@ -75,7 +75,7 @@ done"""
 RELEASE_IDENTITY_COMMAND = """\
 set -euo pipefail
 test "$GITHUB_REF_TYPE" = tag
-test "$GITHUB_REF_NAME" = v0.3"""
+test "$GITHUB_REF_NAME" = v0.3.0"""
 WORKFLOW_FIELDS = frozenset({"name", "on", "permissions", "concurrency", "jobs"})
 ACTION_STEP_FIELDS = frozenset({"name", "uses", "with", "if"})
 RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
@@ -138,7 +138,7 @@ PRODUCTION_RELEASE_POLICY = ReleaseWorkflowPolicy(
     approved_triggers=frozenset({"release"}),
     approved_tag_patterns=None,
     distribution_name="markweave",
-    version="0.3",
+    version="0.3.0",
     artifact_upload_action=(
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     ),
@@ -153,14 +153,14 @@ PRODUCTION_RELEASE_POLICY = ReleaseWorkflowPolicy(
     pypi_publish_action=(
         "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
     ),
-    artifact_name="python-release-v0.3",
+    artifact_name="python-release-v0.3.0",
     artifact_directory="dist",
     manifest_name=RELEASE_MANIFEST_NAME,
     constraint="build-constraints.txt",
     publishable_paths=("dist/*.whl", "dist/*.tar.gz"),
 )
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "1ddeefeeed8a38182ae51eb5711dccd04cb0fda65ff3eed7b6159437ee8b0886"
+    "91740ab9a266e67bc01846c39d5c49f423d0690a176de83637cf9e3b0a30a050"
 )
 
 

@@ -160,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.3
+          test "$GITHUB_REF_NAME" = v0.3.0
       - name: Build distributions exactly once
         run: {BUILD_COMMAND}
       - name: Verify artifact integrity and metadata

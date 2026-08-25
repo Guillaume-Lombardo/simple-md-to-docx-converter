@@ -27,7 +27,7 @@ def test_public_import_check_rejects_legacy_import_after_install(
 ) -> None:
     """The isolated verification script checks both the new and removed imports."""
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.0"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"

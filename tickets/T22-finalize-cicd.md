@@ -113,10 +113,10 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   had already returned `201`; the retained failure evidence confirmed successful account creation.
   Its failed-job rerun passed on the identical `bac665a` source, while the distributed E2E,
   container, storage, engine, and functional jobs passed on the first attempt.
-- The former decision gate is resolved. External first-release setup still requires the dedicated
-  GitHub `pypi` environment without reviewers and the matching PyPI pending Trusted Publisher; the
-  repository workflows do not create either resource.
-- 2026-08-25: The project manager approved Apache-2.0, version `0.3` with tag `v0.3`, published
+- The former decision gate is resolved. The dedicated GitHub `pypi` environment without reviewers
+  and the matching PyPI pending Trusted Publisher are now configured; the repository workflows do
+  not create either resource.
+- 2026-08-25: The project manager approved Apache-2.0, version `0.3.0` with tag `v0.3.0`, published
   GitHub Releases as the only release trigger, public image
   `ghcr.io/guillaume-lombardo/md-converter`, and the dedicated `pypi` environment without required
   reviewers or manual approval. PyPI rejected `md-converter`, so the approved public distribution
@@ -127,7 +127,7 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   Publishing the GitHub Release is the sole human gate; this removes a second-person approval and
   makes GitHub release-creation permissions and the upstream repository guard security-critical.
 - 2026-08-25: Implemented the remaining repository release contract. Apache-2.0 and PEP 440 version
-  `0.3` are carried by the `markweave` wheel and sdist, which expose `markweave` as the public
+  `0.3.0` are carried by the `markweave` wheel and sdist, which expose `markweave` as the public
   import. The published-Release-only Python workflow builds once, verifies integrity, metadata,
   license inclusion, a clean Python 3.14 installation, and the public import, then uploads only the
   verified distributions with OIDC attestations from the `pypi` environment. The independent
@@ -144,6 +144,12 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   source tree, runtime entry points, release validation, coverage and mutation configuration,
   tests, and documentation now use `markweave`; established `MD_CONVERTER` environment variables,
   cookies, metrics, database names, and container product identifiers remain unchanged.
+- 2026-08-25: Before the first publication, the project manager refined the first public version
+  from `0.3`/`v0.3` to the explicit three-component PEP 440 version `0.3.0` and tag `v0.3.0`.
+- 2026-08-25: The project manager recreated and visually confirmed the PyPI pending Trusted
+  Publisher for `markweave` with owner `Guillaume-Lombardo`, repository
+  `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`. The matching
+  GitHub environment exists without required reviewers, deployment restrictions, or secrets.
 
 ## Synchronization
 
