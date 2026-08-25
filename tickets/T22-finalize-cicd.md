@@ -70,6 +70,36 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   dependency check, four maintenance tests, and the complete unit suite pass; the unit suite
   reports 1,018 passed and 93.61% branch coverage. Hosted Dependabot ingestion and scheduled
   execution remain to be verified by GitHub after merge.
+- 2026-08-25: PR #59 merged the maintenance foundation as `867ab02`. Exact-head run 32804796522
+  and exact-main run 32805306397 passed all 12 jobs, including both rootless E2E profiles,
+  document engines, container validation, and the final gate. Dependabot then opened grouped
+  Python and GitHub Actions update pull requests, confirming hosted configuration ingestion.
+- 2026-08-25: PR #62 merged the independently approved container-evidence foundation as
+  `67d27cb`. It binds the same immutable Podman image identity to the retained OCI archive, SBOM,
+  vulnerability report, metadata, and an externally anchored manifest. Verification uses bounded
+  streaming reads, private atomic staging, exact OCI config/rootfs identity, closed bundle
+  membership, and a release-purpose gate for every Critical finding. Exact-head run 32805927412
+  and exact-main run 32806442680 passed.
+- 2026-08-25: PR #63 merged the independently approved Python-artifact foundation as `eda5793`.
+  It builds the wheel and sdist once in private staging; validates bounded classic ZIP/ZIP64, tar,
+  metadata, RECORD, and manifest contracts; terminates timed-out descendant process groups; proves
+  clean Python 3.14 installation and public import from the exact digest-bound wheel; rejects
+  tampering and concurrent replacement; and publishes the verified local bundle atomically without
+  replacement. Exact-head runs 32806350066 and 32806985241 and exact-main run 32807062637 passed.
+- 2026-08-25: PR #64 merged the independently approved repository-wide workflow validator as
+  `255b418`. Current CI and mutation workflows are locked to exact least-privilege contracts. A
+  future release workflow must supply an explicit policy with approved trigger/tag patterns,
+  distribution identity, artifact path, manifest, and immutable actions; the validator derives and
+  binds the real build, integrity verification, clean-install/import, unique upload, and minimal
+  PyPI OIDC publish chain. It has no production defaults and adds no release workflow or product
+  decision. Exact-head run 32809979039 and exact-main run 32810485581 passed all 12 jobs.
+- Remaining implementation is intentionally gated. The project manager must approve the public
+  package license; version source and PEP 440/tag mapping; exact release trigger and approved tag
+  patterns; scheduled full-suite cadence, timeout, parallelism, and usage budget; and release-image
+  registry identity and visibility. GitHub must then have a protected `pypi` environment with
+  designated required reviewers, and PyPI must have the matching pending Trusted Publisher. These
+  external states were absent when checked. `md-converter` availability must be rechecked immediately
+  before the first upload because a pending publisher does not reserve the name.
 
 ## Synchronization
 
