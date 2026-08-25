@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from tests.e2e import service_workflow as workflow
 
@@ -59,6 +60,33 @@ def test_expect_reports_only_status_and_stable_code() -> None:
         "submit: HTTP 409, expected 202, code CONVERSION_CONFLICT"
     )
     assert "private body" not in str(failure.value)
+
+
+@pytest.mark.unit
+def test_json_request_forwards_template_precondition_before_auth_check(
+    mocker: MockerFixture,
+) -> None:
+    client = mocker.Mock(spec=workflow.ServiceClient)
+    client.request.return_value = workflow.HttpResult(
+        403,
+        {},
+        b'{"error":{"code":"FORBIDDEN","message":"safe"}}',
+        (),
+    )
+    result = workflow.json_request(
+        client,
+        "PATCH",
+        f"/api/v1/templates/{identifier()}",
+        {"name": "Forbidden", "description": "Forbidden"},
+        expected=403,
+        operation="owner denial",
+        headers={"If-Match": 'W/"template-revision-1"'},
+    )
+    assert workflow.error_payload(result)["code"] == "FORBIDDEN"
+    assert client.request.call_args.kwargs["headers"] == {
+        "If-Match": 'W/"template-revision-1"'
+    }
+    assert client.request.call_args.kwargs["mutate"] is True
 
 
 @pytest.mark.unit

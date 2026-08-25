@@ -206,6 +206,7 @@ def json_request(  # noqa: PLR0913 - explicit expected-response contract
     *,
     expected: int,
     operation: str,
+    headers: dict[str, str] | None = None,
 ) -> HttpResult:
     result = client.request(
         method,
@@ -213,6 +214,7 @@ def json_request(  # noqa: PLR0913 - explicit expected-response contract
         body=json.dumps(payload).encode(),
         content_type="application/json",
         mutate=True,
+        headers=headers,
     )
     expect(result, expected, operation)
     return result
@@ -635,6 +637,9 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     template_id = required_string(template, "id", "template")
     visible = bob.request("GET", f"/api/v1/templates/{template_id}")
     expect(visible, 200, "Bob template visibility")
+    visible_etag = visible.headers.get("etag", "")
+    if not visible_etag:
+        raise WorkflowFailure("Bob template visibility: ETag missing")
     downloaded = bob.request("GET", f"/api/v1/templates/{template_id}/content")
     expect(downloaded, 200, "Bob template download")
     validate_docx(downloaded.body, "visible template")
@@ -645,6 +650,7 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         {"name": "Forbidden", "description": "Forbidden"},
         expected=403,
         operation="Bob template mutation denial",
+        headers={"If-Match": visible_etag},
     )
     if error_payload(forbidden_update).get("code") != "FORBIDDEN":
         raise WorkflowFailure("Bob template mutation denial: stable error missing")
