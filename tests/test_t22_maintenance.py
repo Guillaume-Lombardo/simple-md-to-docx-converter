@@ -33,8 +33,9 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
     updates = config["updates"]
     assert isinstance(updates, list)
     by_ecosystem = {entry["package-ecosystem"]: entry for entry in updates}
-    assert set(by_ecosystem) == {"pip", "npm", "docker", "github-actions"}
-    assert by_ecosystem["pip"]["directory"] == "/"
+    assert set(by_ecosystem) == {"uv", "npm", "docker", "github-actions"}
+    assert "pip" not in by_ecosystem
+    assert by_ecosystem["uv"]["directory"] == "/"
     assert by_ecosystem["github-actions"]["directory"] == "/"
     assert by_ecosystem["npm"]["directories"] == ["/", "/spikes/toolchain"]
     assert by_ecosystem["docker"]["directories"] == ["/", "/spikes/toolchain"]
