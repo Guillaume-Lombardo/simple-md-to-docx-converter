@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -56,6 +56,20 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Planning scope expanded to include secure PyPI publication in T22; no CI implementation has started.
 - Independent planning review clarified mandatory environment approval, pending Trusted Publisher bootstrap, first-upload verification, and least-privilege OIDC boundaries.
 - The official PyPI project and JSON endpoints for `md-converter` returned HTTP 404 on August 23, 2026. This is an availability observation, not a permanent reservation; no PyPI project was created or published.
+- 2026-08-25: Started implementation on `feat/T22-release-pipeline` from verified `main` at
+  `2c01d4b` after T03 and T21 were confirmed `Done`. Work begins with the implementable CI,
+  packaging-validation, dependency-update, release-artifact, SBOM, provenance, and security
+  contracts. The workflow will not guess the unresolved release-version or tag-trigger policy, the
+  public package license, required environment reviewers, or pending PyPI Trusted Publisher state;
+  those approval and external-configuration gates remain explicit.
+- 2026-08-25: Added weekly grouped native-`uv`, npm, container, and GitHub Actions dependency
+  updates plus an isolated read-only scheduled/manual mutation workflow. Its target is a fixed
+  deterministic observability normalizer, with a 30-minute budget and a strict non-empty gate that
+  rejects surviving, uncovered, suspicious, timed-out, interrupted, or crashing mutants. A fresh
+  local campaign killed all four selected mutants. Ruff, `ty`, the CI validator, the locked
+  dependency check, four maintenance tests, and the complete unit suite pass; the unit suite
+  reports 1,018 passed and 93.61% branch coverage. Hosted Dependabot ingestion and scheduled
+  execution remain to be verified by GitHub after merge.
 
 ## Synchronization
 
