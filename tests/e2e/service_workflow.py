@@ -1225,6 +1225,23 @@ def checkpoint(arguments: argparse.Namespace) -> None:
     )
 
 
+def exercise_mermaid(arguments: argparse.Namespace) -> None:
+    """Complete one real Mermaid conversion through the deployed service."""
+    client = ServiceClient(arguments.base_url)
+    client.login(arguments.admin_username, arguments.admin_password)
+    template = create_template(client, arguments.template, run_id="podman-mermaid")
+    _submitted, location = submit_conversion(
+        client,
+        template,
+        "both",
+        b"# Podman Mermaid\n\n```mermaid\nflowchart LR\nA-->B\n```\n",
+    )
+    job = wait_for_job(client, location)
+    if job.get("state") != "succeeded":
+        raise WorkflowFailure("Podman Mermaid conversion did not succeed")
+    validate_result(client, job, "both", arguments.artifact_dir)
+
+
 def verify_checkpoint(arguments: argparse.Namespace) -> None:
     state = read_state(arguments.state_file, expected_profile=arguments.profile)
     client = ServiceClient(arguments.base_url)
@@ -1354,6 +1371,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "exercise",
             "exercise-security-boundaries",
+            "exercise-mermaid",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1394,6 +1412,7 @@ def validate_arguments(
     if arguments.command in {
         "exercise",
         "exercise-security-boundaries",
+        "exercise-mermaid",
         "checkpoint",
         "submit-recovery",
     }:
@@ -1451,6 +1470,8 @@ def main(argv: list[str] | None = None) -> int:
             exercise(arguments)
         elif arguments.command == "exercise-security-boundaries":
             exercise_security_boundaries(arguments)
+        elif arguments.command == "exercise-mermaid":
+            exercise_mermaid(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

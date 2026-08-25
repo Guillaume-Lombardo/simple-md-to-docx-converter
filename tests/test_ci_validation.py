@@ -298,7 +298,8 @@ def test_validator_rejects_removed_real_browser_workflow() -> None:
 def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert (
-        "matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-')" in workflow
+        "matrix.domain == 'compose' || matrix.domain == 'container' || "
+        "startsWith(matrix.domain, 'e2e-')" in workflow
     )
     assert (
         "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
