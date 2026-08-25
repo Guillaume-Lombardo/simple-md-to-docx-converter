@@ -132,7 +132,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "93340d24fce78e959aa08af4bf27b3c55073ae3dfa1d65bf3145610bb69c8514"
+    "0c8dfef9a917e77a03e8c4e34fb87b535bf63758888834f2534bf11d809be8a5"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
@@ -1466,6 +1466,31 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"container recovery build is missing: {required}")
+    attest_steps = _job_steps(workflow, "attest")
+    attest_login = [
+        index
+        for index, step in enumerate(attest_steps)
+        if step.get("name") == "Log in to GHCR for attestation publication"
+        and step.get("uses", "").startswith("docker/login-action@")
+        and step.get("with")
+        == {
+            "registry": "ghcr.io",
+            "username": "${{ github.actor }}",
+            "password": "${{ github.token }}",
+        }
+    ]
+    provenance = [
+        index
+        for index, step in enumerate(attest_steps)
+        if step.get("name") == "Attest the published image identity"
+        and step.get("uses", "").startswith("actions/attest-build-provenance@")
+    ]
+    if (
+        len(attest_login) != 1
+        or len(provenance) != 1
+        or attest_login[0] >= provenance[0]
+    ):
+        errors.append("container attestation must authenticate to GHCR before push")
     publish_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")

@@ -519,6 +519,25 @@ def test_container_release_recovery_uses_source_compatible_build_invocation() ->
 
 
 @pytest.mark.unit
+def test_container_attestation_requires_job_local_registry_authentication() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        "      - name: Log in to GHCR for attestation publication\n"
+        "        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0\n"
+        "        with:\n"
+        "          registry: ghcr.io\n"
+        "          username: ${{ github.actor }}\n"
+        "          password: ${{ github.token }}\n",
+        "",
+        1,
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert "container attestation must authenticate to GHCR before push" in errors
+
+
+@pytest.mark.unit
 def test_container_release_policy_rejects_unreviewed_mutation() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"
