@@ -1,0 +1,167 @@
+"""Deterministic unit coverage for the final-image service E2E driver."""
+
+from __future__ import annotations
+
+import io
+import json
+import stat
+import uuid
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from tests.e2e import service_workflow as workflow
+
+
+def identifier() -> str:
+    return str(uuid.uuid4())
+
+
+def checkpoint() -> dict[str, str]:
+    job_id = identifier()
+    return {
+        "schema": "t21-service-checkpoint-v1",
+        "profile": "standalone",
+        "owner": "e2e-admin",
+        "location": f"/api/v1/conversions/{job_id}",
+        "output": "both",
+        "job_id": job_id,
+        "correlation_id": identifier(),
+        "template_id": identifier(),
+        "template_version_id": identifier(),
+        "result_sha256": "a" * 64,
+    }
+
+
+@pytest.mark.unit
+def test_service_client_requires_safe_absolute_http_url() -> None:
+    client = workflow.ServiceClient("https://example.test/service")
+    assert client._prefix == "/service"
+    for invalid in ("example.test", "ftp://example.test", "https:///missing"):
+        with pytest.raises(ValueError, match="absolute HTTP"):
+            workflow.ServiceClient(invalid)
+    with pytest.raises(ValueError, match="query or fragment"):
+        workflow.ServiceClient("https://example.test/?secret=no")
+
+
+@pytest.mark.unit
+def test_expect_reports_only_status_and_stable_code() -> None:
+    result = workflow.HttpResult(
+        409,
+        {},
+        b'{"error":{"code":"CONVERSION_CONFLICT","message":"private body"}}',
+        (),
+    )
+    with pytest.raises(workflow.WorkflowFailure) as failure:
+        workflow.expect(result, 202, "submit")
+    assert str(failure.value) == (
+        "submit: HTTP 409, expected 202, code CONVERSION_CONFLICT"
+    )
+    assert "private body" not in str(failure.value)
+
+
+@pytest.mark.unit
+def test_checkpoint_round_trip_is_content_free_and_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    expected = checkpoint()
+    workflow.write_state(path, expected)
+    assert workflow.read_state(path, expected_profile="standalone") == expected
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    rendered = path.read_text(encoding="utf-8")
+    assert "password" not in rendered
+    assert "source content" not in rendered
+
+
+@pytest.mark.unit
+def test_checkpoint_rejects_profile_schema_and_identifier_changes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.json"
+    payload = checkpoint()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(workflow.WorkflowFailure, match="profile or version"):
+        workflow.read_state(path, expected_profile="distributed")
+    payload["job_id"] = "../private"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(workflow.WorkflowFailure, match="location mismatch"):
+        workflow.read_state(path, expected_profile="standalone")
+    payload = checkpoint() | {"secret": "must-not-be-accepted"}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(workflow.WorkflowFailure, match="invalid schema"):
+        workflow.read_state(path, expected_profile="standalone")
+
+
+@pytest.mark.unit
+def test_recovery_state_requires_exact_durable_identity(tmp_path: Path) -> None:
+    job_id = identifier()
+    expected = {
+        "schema": "t21-service-recovery-v1",
+        "profile": "distributed",
+        "location": f"/api/v1/conversions/{job_id}",
+        "output": "docx",
+        "job_id": job_id,
+        "correlation_id": identifier(),
+        "attempt": "1",
+    }
+    path = tmp_path / "recovery.json"
+    workflow.write_state(path, expected)
+    assert (
+        workflow.read_recovery_state(path, expected_profile="distributed") == expected
+    )
+    expected["attempt"] = "not-an-integer"
+    path.write_text(json.dumps(expected), encoding="utf-8")
+    with pytest.raises(workflow.WorkflowFailure, match="durable identity"):
+        workflow.read_recovery_state(path, expected_profile="distributed")
+
+
+@pytest.mark.unit
+def test_docx_validation_accepts_required_parts_and_rejects_other_bytes() -> None:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name in ("[Content_Types].xml", "_rels/.rels", "word/document.xml"):
+            archive.writestr(name, b"safe")
+    workflow.validate_docx(output.getvalue(), "test document")
+    with pytest.raises(workflow.WorkflowFailure, match="invalid OpenXML"):
+        workflow.validate_docx(b"not a ZIP", "test document")
+
+
+@pytest.mark.unit
+def test_cli_validation_requires_command_inputs_and_positive_timeout(
+    tmp_path: Path,
+) -> None:
+    parser = workflow.build_parser()
+    missing_template = parser.parse_args(
+        ["checkpoint", "--base-url", "http://service", "--profile", "standalone"]
+    )
+    with pytest.raises(SystemExit):
+        workflow.validate_arguments(parser, missing_template)
+    invalid_timeout = parser.parse_args(
+        [
+            "verify-recovery",
+            "--base-url",
+            "http://service",
+            "--profile",
+            "distributed",
+            "--state-file",
+            str(tmp_path / "state"),
+            "--timeout-seconds",
+            "0",
+        ]
+    )
+    with pytest.raises(SystemExit):
+        workflow.validate_arguments(parser, invalid_timeout)
+
+
+@pytest.mark.unit
+def test_failure_artifact_is_bounded_private_and_sanitized_by_caller(
+    tmp_path: Path,
+) -> None:
+    workflow.write_failure_artifact(
+        tmp_path, profile="standalone", message="safe failure" * 100
+    )
+    path = tmp_path / "service-failure.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["profile"] == "standalone"
+    assert len(payload["message"]) == 300
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
