@@ -5,6 +5,7 @@
 .ty
 coverage.json
 htmlcov
+node_modules
 tests
 tickets
 docs

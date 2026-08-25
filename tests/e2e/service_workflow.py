@@ -322,7 +322,8 @@ def validate_submission_contract(
     job_correlation = required_string(job, "correlation_id", "conversion")
     if job_correlation != correlation:
         raise WorkflowFailure(
-            "submit conversion: response and durable correlation identifiers differ"
+            "submit conversion: response and durable correlation identifiers differ "
+            f"(header={correlation}, durable={job_correlation})"
         )
 
 

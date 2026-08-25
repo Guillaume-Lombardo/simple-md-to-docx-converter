@@ -78,9 +78,16 @@ async function convertAndDownload(page, sourceFixture, output, timeout) {
   await waitForText(page, "#job-status", "ready to download", timeout);
   const href = await page.locator("#download-result").getAttribute("href");
   assert.ok(href, `${output} result link is missing`);
-  const result = await page.context().request.get(href);
-  assert.equal(result.status(), 200, `${output} result download failed`);
-  assertDownloadedResult(output, result.headers(), await result.body());
+  const result = await page.evaluate(async (resultUrl) => {
+    const response = await fetch(resultUrl);
+    return {
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: [...new Uint8Array(await response.arrayBuffer())],
+    };
+  }, href);
+  assert.equal(result.status, 200, `${output} result download failed`);
+  assertDownloadedResult(output, result.headers, Buffer.from(result.body));
   return job;
 }
 
@@ -129,7 +136,7 @@ test("final rootless image supports the three-identity browser workflow", async 
 
     step = "administrator login and cookie contract";
     await login(adminPage, settings.baseUrl, settings.adminUsername, settings.adminPassword);
-    const sessionCookie = (await contexts[0].cookies(settings.baseUrl))
+    const sessionCookie = (await contexts[0].cookies())
       .find((cookie) => cookie.name === "md_converter_session");
     assert.ok(sessionCookie, "session cookie is missing");
     assert.equal(sessionCookie.httpOnly, true);
