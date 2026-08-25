@@ -161,8 +161,29 @@ jobs:
             printf '%s\n' "$digest"
           }
           copy_staged_tag() {
+            local tag="$1"
+            local copy_status
+            local copied_digest
+            local inspect_status
+            set +e
             skopeo copy --preserve-digests --retry-times 3 \
-              "dir:$registry_stage" "docker://$registry_repository:$1"
+              "dir:$registry_stage" "docker://$registry_repository:$tag"
+            copy_status="$?"
+            set -e
+            if copied_digest="$(inspect_remote_tag "$tag")"; then
+              if [[ "$copied_digest" = "$intended_digest" ]]; then
+                if [[ "$copy_status" != 0 ]]; then
+                  echo "Skopeo returned $copy_status after GHCR stored the exact expected manifest for $tag; accepting the verified registry postcondition." >&2
+                fi
+                return 0
+              fi
+              echo "GHCR tag $tag resolves to unexpected digest $copied_digest after copy." >&2
+              return 1
+            else
+              inspect_status="$?"
+              echo "GHCR tag $tag could not be verified after Skopeo returned $copy_status (inspection status $inspect_status)." >&2
+              return 1
+            fi
           }
 
           if remote_digest="$(inspect_remote_tag "$source_tag")"; then
