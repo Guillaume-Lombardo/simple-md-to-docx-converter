@@ -72,10 +72,6 @@ for url in https://pypi.org/pypi/markweave/json https://pypi.org/simple/markweav
   status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$url")"
   test "$status" = 404
 done"""
-RELEASE_IDENTITY_COMMAND = """\
-set -euo pipefail
-test "$GITHUB_REF_TYPE" = tag
-test "$GITHUB_REF_NAME" = v0.3.0"""
 WORKFLOW_FIELDS = frozenset({"name", "on", "permissions", "concurrency", "jobs"})
 ACTION_STEP_FIELDS = frozenset({"name", "uses", "with", "if"})
 RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
@@ -134,33 +130,11 @@ class ReleaseWorkflowPolicy:
     publishable_paths: tuple[str, ...]
 
 
-PRODUCTION_RELEASE_POLICY = ReleaseWorkflowPolicy(
-    approved_triggers=frozenset({"release"}),
-    approved_tag_patterns=None,
-    distribution_name="markweave",
-    version="0.3.0",
-    artifact_upload_action=(
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-    ),
-    artifact_download_action=(
-        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-    ),
-    checkout_action="actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-    setup_python_action=(
-        "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
-    ),
-    setup_uv_action="astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
-    pypi_publish_action=(
-        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
-    ),
-    artifact_name="python-release-v0.3.0",
-    artifact_directory="dist",
-    manifest_name=RELEASE_MANIFEST_NAME,
-    constraint="build-constraints.txt",
-    publishable_paths=("dist/*.whl", "dist/*.tar.gz"),
-)
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "91740ab9a266e67bc01846c39d5c49f423d0690a176de83637cf9e3b0a30a050"
+    "2cb583d9e89f6215b7e5ee7fd5426895d57a68f5d4c42fdd2ea1096afe67b818"
+)
+PRODUCTION_RELEASE_CANONICAL_DIGEST = (
+    "83122e2eee30e16708af11c36f187d96b0d462c1eb052b0a443061a284bed9e7"
 )
 
 
@@ -559,12 +533,17 @@ def _validate_jobs(workflow: Mapping[str, Any], *, policy: WorkflowPolicy) -> li
 
 
 def _validate_action_allowlist(
-    workflow: Mapping[str, Any], *, allowed_actions: frozenset[str]
+    workflow: Mapping[str, Any],
+    *,
+    allowed_actions: frozenset[str],
+    allowed_local_workflows: frozenset[str] = frozenset(),
 ) -> list[str]:
     errors: list[str] = []
     for reference in _action_references(workflow):
         if not isinstance(reference, str):
             errors.append("every action reference must be a string")
+            continue
+        if reference in allowed_local_workflows:
             continue
         match = ACTION_REFERENCE.fullmatch(reference)
         if match is None:
@@ -903,6 +882,13 @@ def _release_commands(policy: ReleaseWorkflowPolicy) -> tuple[str, str, str]:
     return shlex.join(build_argv), shlex.join(verify_argv), shlex.join(install_argv)
 
 
+def _release_identity_command(version: str) -> str:
+    return (
+        'set -euo pipefail\ntest "$GITHUB_REF_TYPE" = tag\n'
+        f'test "$GITHUB_REF_NAME" = v{shlex.quote(version)}'
+    )
+
+
 def _validate_release_producer_job(
     job: Mapping[str, Any], *, policy: ReleaseWorkflowPolicy
 ) -> list[str]:
@@ -933,7 +919,7 @@ def _validate_release_producer_job(
         (
             "Validate the reviewed release identity",
             "run",
-            RELEASE_IDENTITY_COMMAND + "\n",
+            _release_identity_command(policy.version) + "\n",
         ),
         ("Build distributions exactly once", "run", build_command),
         (
@@ -1342,7 +1328,7 @@ def validate_release_workflow_text(
     return errors
 
 
-def validate_container_release_workflow_text(text: str) -> list[str]:
+def validate_container_release_workflow_text(text: str) -> list[str]:  # noqa: PLR0912
     """Validate the exact least-privilege container publication contract."""
     workflow, errors = _load_workflow(text)
     if workflow is None:
@@ -1352,17 +1338,19 @@ def validate_container_release_workflow_text(text: str) -> list[str]:
     ):
         errors.append("container release workflow differs from the reviewed policy")
     triggers = _mapping(workflow.get("on"))
-    if triggers != {"release": {"types": ["published"]}}:
-        errors.append("container publication must trigger only on published releases")
+    expected_inputs = {
+        "version": {"required": True, "type": "string"},
+        "tag": {"required": True, "type": "string"},
+        "source-sha": {"required": True, "type": "string"},
+    }
+    if triggers != {"workflow_call": {"inputs": expected_inputs}}:
+        errors.append(
+            "container publication must be an exact secretless reusable workflow"
+        )
     if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
         errors.append("container release permissions must default to contents: read")
-    errors.extend(
-        _validate_concurrency(
-            workflow,
-            expected_group="container-release-${{ github.ref }}",
-            expected_cancellation=False,
-        )
-    )
+    if set(workflow) != {"name", "on", "permissions", "jobs"}:
+        errors.append("container release workflow fields do not match the allowlist")
     jobs = _mapping(workflow.get("jobs")) or {}
     if set(jobs) != {"build-and-publish", "attest", "release-evidence"}:
         errors.append("container release jobs do not match the exact contract")
@@ -1380,7 +1368,16 @@ def validate_container_release_workflow_text(text: str) -> list[str]:
         job = _mapping(jobs.get(name)) or {}
         if job.get("permissions") != expected:
             errors.append(f"container release job {name!r} permissions are not minimal")
-        if job.get("if") != TRUSTED_REPOSITORY_GUARD:
+        condition = job.get("if")
+        if not isinstance(condition, str) or not all(
+            clause in condition
+            for clause in (
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+                "github.sha == inputs.source-sha",
+            )
+        ):
             errors.append(f"container release job {name!r} lacks the repository guard")
         timeout = job.get("timeout-minutes")
         if (
@@ -1410,6 +1407,127 @@ def validate_container_release_workflow_text(text: str) -> list[str]:
         errors.append("container release workflow must not access stored secrets")
     if "--privileged" in text.casefold():
         errors.append("container release workflow must not use privileged containers")
+    for required in (
+        'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
+        '"localhost/md-converter:$RELEASE_VERSION"',
+        '"docker://ghcr.io/guillaume-lombardo/md-converter:$RELEASE_VERSION"',
+        "container-release-${{ inputs.tag }}",
+        "--clobber",
+    ):
+        if required not in text:
+            errors.append(f"container release is missing dynamic contract: {required}")
+    return errors
+
+
+def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: PLR0912
+    """Validate the exact trusted-main automatic publication orchestrator."""
+    workflow, errors = _load_workflow(text)
+    if workflow is None:
+        return errors
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != (
+        PRODUCTION_RELEASE_CANONICAL_DIGEST
+    ):
+        errors.append("automatic release workflow differs from the reviewed policy")
+    triggers = _mapping(workflow.get("on"))
+    if triggers != {"push": {"branches": ["main"], "paths": ["pyproject.toml"]}}:
+        errors.append(
+            "automatic publication must trigger only on trusted main pyproject pushes"
+        )
+    if workflow.get("permissions") != READ_ONLY_PERMISSIONS:
+        errors.append("automatic release permissions must default to contents: read")
+    errors.extend(
+        _validate_concurrency(
+            workflow,
+            expected_group="automatic-release-${{ github.ref }}",
+            expected_cancellation=False,
+        )
+    )
+    jobs = _mapping(workflow.get("jobs")) or {}
+    expected_jobs = {
+        "detect",
+        RELEASE_PRODUCER_JOB,
+        "create-release",
+        "publish",
+        "container",
+    }
+    if set(jobs) != expected_jobs:
+        errors.append("automatic release jobs do not match the exact contract")
+    expected_permissions = {
+        "create-release": {"contents": "write"},
+        "publish": {"id-token": "write"},
+        "container": {
+            "attestations": "write",
+            "contents": "write",
+            "id-token": "write",
+            "packages": "write",
+        },
+    }
+    for name, job_value in jobs.items():
+        job = _mapping(job_value) or {}
+        condition = job.get("if")
+        if not isinstance(condition, str) or not all(
+            clause in condition
+            for clause in (
+                TRUSTED_REPOSITORY_CONDITION,
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+            )
+        ):
+            errors.append(
+                f"automatic release job {name!r} lacks the trusted-main guard"
+            )
+        permissions = job.get("permissions")
+        if name in expected_permissions:
+            if permissions != expected_permissions[name]:
+                errors.append(
+                    f"automatic release job {name!r} permissions are not minimal"
+                )
+        elif permissions is not None:
+            errors.append(
+                f"automatic release job {name!r} must inherit read-only permissions"
+            )
+    publish = _mapping(jobs.get("publish")) or {}
+    if publish.get("environment") != "pypi":
+        errors.append("automatic PyPI publication must use the pypi environment")
+    container = _mapping(jobs.get("container")) or {}
+    if container.get("uses") != "./.github/workflows/container-release.yml":
+        errors.append("container publication must call the reviewed reusable workflow")
+    if re.search(r"\bsecrets\b", text, re.IGNORECASE):
+        errors.append("automatic release workflow must not access stored secrets")
+    required_contracts = (
+        "scripts.release.detect_version",
+        "github.event.before",
+        "needs.detect.outputs.changed == 'true'",
+        "/git/ref/tags/$RELEASE_TAG",
+        "/releases/tags/$RELEASE_TAG",
+        "/pypi/markweave/$RELEASE_VERSION/json",
+        "target_commitish=$SOURCE_SHA",
+        "python-release-${{ needs.detect.outputs.tag }}",
+        '--version "$RELEASE_VERSION"',
+        "./.github/workflows/container-release.yml",
+    )
+    for required in required_contracts:
+        if required not in text:
+            errors.append(f"automatic release is missing contract: {required}")
+    errors.extend(
+        _validate_action_allowlist(
+            workflow,
+            allowed_actions=frozenset(
+                {
+                    "actions/checkout",
+                    "actions/download-artifact",
+                    "actions/setup-python",
+                    "actions/upload-artifact",
+                    "astral-sh/setup-uv",
+                    "pypa/gh-action-pypi-publish",
+                }
+            ),
+            allowed_local_workflows=frozenset(
+                {"./.github/workflows/container-release.yml"}
+            ),
+        )
+    )
+    errors.extend(_validate_checkout_credentials(workflow))
     return errors
 
 
@@ -1474,9 +1592,7 @@ def validate_workflow_files(paths: Iterable[Path]) -> list[str]:
                 continue
             errors.extend(
                 f"{path}: {error}"
-                for error in validate_release_workflow_text(
-                    text, policy=PRODUCTION_RELEASE_POLICY
-                )
+                for error in validate_production_release_workflow_text(text)
             )
             continue
         if path.name not in READ_ONLY_WORKFLOW_POLICIES:

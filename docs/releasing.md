@@ -1,25 +1,20 @@
 # Release process
 
-Version `0.3.0` is the first approved public release. The authoritative PEP 440 version is
-`project.version` in `pyproject.toml`; the corresponding Git tag and GitHub Release tag are exactly
-`v0.3.0`. Publication is triggered only when that GitHub Release is published. Creating or pushing a
-tag, opening a pull request, using the merge queue, or manually dispatching a workflow cannot
-publish Python or container artifacts.
+Version `0.3.0` is the first approved public release. `project.version` in `pyproject.toml` is the
+authoritative PEP 440 version, and every release tag is derived as `v<project.version>`. The source
+and `markweave` distribution are Apache-2.0 licensed, the public import is `markweave`, and the
+container repository is `ghcr.io/guillaume-lombardo/md-converter`.
 
-The source and `markweave` Python distribution are licensed under Apache-2.0. Its documented public
-import is also `markweave`. The public container image is
-`ghcr.io/guillaume-lombardo/md-converter:0.3.0`. Release workflows pin every action by a full commit
-SHA and serialize each release without cancelling an upload in progress.
+A protected pull-request merge to `main` is the sole human release gate. When that merge changes
+`project.version`, the automatic workflow compares the exact before and head commits from the
+trusted push. A `pyproject.toml` edit that leaves the version unchanged is a successful no-op. Pull
+requests, forks, tags, GitHub Release events, and manual dispatches cannot start publication.
 
 ## One-time GitHub and PyPI configuration
 
-Create the GitHub Actions environment `pypi` in repository settings without required reviewers,
-wait timers, deployment-branch restrictions, or environment secrets. It exists only as the OIDC
-Trusted Publisher identity boundary. Publishing the GitHub Release is the sole human gate. This
-removes a second approval, so restrict GitHub release creation to trusted maintainers and treat the
-repository guard in the workflow as security-critical.
-
-Before the first release, create a PyPI pending Trusted Publisher with these exact values:
+Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
+restrictions, or environment secrets. It is only the OIDC Trusted Publisher identity boundary.
+Configure the PyPI Trusted Publisher with these exact values:
 
 - PyPI project name: `markweave`
 - GitHub owner: `Guillaume-Lombardo`
@@ -27,48 +22,51 @@ Before the first release, create a PyPI pending Trusted Publisher with these exa
 - Workflow: `release.yml`
 - Environment: `pypi`
 
-The pending publisher does not reserve the project name. No PyPI token belongs in GitHub. The
-release workflow rechecks both the PyPI JSON and Simple Index endpoints immediately before upload;
-anything other than two `404` responses stops the first publication.
+No PyPI token belongs in GitHub. The first upload may use a pending publisher; later uploads use the
+normal publisher created from it. The first container push may create a private GHCR package. Set
+the `md-converter` package visibility to public before announcing the release and verify anonymous
+pull access. Do not grant the package to unrelated repositories.
 
-The first container push may create a private GHCR package despite the public-image policy. In the
-package settings, change `md-converter` visibility to public before announcing the release, then
-verify that an anonymous client can pull the immutable `0.3.0` tag. Do not grant the package access to
-unrelated repositories.
+## Prepare a version release
 
-## Prepare and publish `v0.3.0`
+1. Change only the intended release version in `project.version` and the matching application
+   version source. Use canonical final public PEP 440 syntax. Pre-releases, development releases,
+   local versions, epochs, invalid spellings, and mismatched application versions fail closed.
+2. Open a pull request and require the complete `CI / gate`, independent review, and protected
+   merge to `main`. The first approved transition is `0.2.0` to `0.3.0`; future versions are not
+   hardcoded in the workflows.
+3. After merge, the workflow verifies the exact `github.event.before` and `github.sha` pair. It
+   stops if `v<version>` already exists, a GitHub Release already uses that tag, or PyPI already has
+   that exact `markweave` version.
+4. The workflow builds the wheel and sdist once from the reviewed main SHA, validates bounded
+   metadata and integrity, and installs the exact wheel in a clean Python 3.14 environment. Only
+   those verified files are transferred to the `pypi` environment job.
+5. A minimal `contents: write` job creates the tag at the exact reviewed SHA and publishes the
+   matching GitHub Release. The PyPI job then rechecks that the version is still unpublished and
+   uploads the verified files with PEP 740 attestations through OIDC.
+6. The reusable container workflow checks out the same SHA, derives the image tag from the detected
+   version, runs the rootless final-image and Critical-vulnerability gates, pushes GHCR, generates
+   provenance, and attaches the SBOM and evidence to the already verified Release identity.
 
-1. Require a clean `main` commit whose complete `CI / gate` run passed, including both rootless E2E
-   profiles and the final-container domain. The approved complete suite runs Sunday at 03:17 UTC,
-   gives each heavy job 45 minutes, and runs at most two heavy matrix jobs concurrently.
-2. Confirm `project.version`, `markweave.__version__`, the OpenAPI version, and conversion
-   traceability all report `0.3.0`.
-3. Create the signed or protected tag `v0.3.0` at that reviewed commit and draft a GitHub Release from
-   the tag. Do not publish it until the `pypi` environment and pending publisher above exist.
-4. Publish the GitHub Release. The Python workflow builds the wheel and sdist once, validates their
-   bounded metadata and integrity, installs the exact wheel in a clean Python 3.14 environment, and
-   transfers only those verified distributions to the protected upload job. The PyPI action uploads
-   those bytes with PEP 740 attestations through OIDC.
-5. The container workflow rebuilds and rootless-smoke-tests the pinned final image, rejects every
-   Critical vulnerability for release, pushes the immutable GHCR tag, generates an image provenance
-   attestation, and attaches CycloneDX/SPDX SBOMs plus vulnerability and identity evidence to the
-   GitHub Release.
+The release orchestrator and reusable container workflow use the same trusted push context; they do
+not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` therefore cannot cause
+a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
+using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
+PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
+state before authorizing any manual recovery.
 
 ## Post-publication verification
 
-After the first successful PyPI upload, verify that `https://pypi.org/project/markweave/` shows
-version `0.3.0`, Apache-2.0 metadata, both wheel and sdist, and attestations. Confirm that the pending
-publisher became a normal publisher with the same owner, repository, workflow, and environment.
-Install the wheel into a fresh Python 3.14 environment and run:
+For released version `<version>`:
 
-```python
-from markweave import __version__, create_app
+- verify `https://pypi.org/project/markweave/<version>/` shows Apache-2.0 metadata, the exact wheel
+  and sdist, and attestations;
+- install the wheel into a fresh Python 3.14 environment and verify
+  `from markweave import __version__, create_app`, the exact version, and callable factory;
+- verify GHCR tag `<version>` resolves to the workflow digest and is anonymously pullable;
+- verify provenance identifies this repository and reviewed main SHA;
+- verify the GitHub tag `v<version>` targets that same SHA and every release evidence file is
+  attached to its published GitHub Release.
 
-assert __version__ == "0.3.0"
-assert callable(create_app)
-```
-
-Verify the GHCR `0.3.0` digest matches the workflow output, the provenance attestation verifies for
-the repository identity, the package is publicly pullable without authentication, and every release
-evidence file is attached to the GitHub Release. Preserve the workflow URLs and immutable digests in
-the release record.
+Preserve workflow URLs and immutable digests in the release record. Do not publish, replace, or
+delete external release state outside this protected automation without explicit approval.

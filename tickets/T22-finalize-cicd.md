@@ -16,10 +16,12 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 ## Scope
 
 - Complete the selective GitHub Actions delivery workflows, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, and provenance.
-- Add an isolated Python release workflow that builds the sdist and wheel once from the reviewed tagged source, verifies them, and publishes those exact artifacts to PyPI.
+- Add an isolated automatic release workflow that detects a final-version transition on a trusted
+  protected-main push, builds the sdist and wheel once from that exact reviewed source, verifies
+  them, creates the matching tag and published GitHub Release, and publishes those exact artifacts.
 - Use PyPI Trusted Publishing with GitHub OIDC, a dedicated GitHub `pypi` environment identity, and a pending Trusted Publisher for the first release instead of a long-lived PyPI token.
-- Keep the `pypi` environment free of required reviewers and manual approval; publishing the GitHub
-  Release is the sole human release gate, and release-creation permissions are security-critical.
+- Keep the `pypi` environment free of required reviewers and manual approval; merging the reviewed
+  version-change pull request to protected `main` is the sole human release gate.
 - Keep the release-version and tag-trigger policies as explicit T22 decisions to document before implementation.
 
 ## Acceptance criteria
@@ -33,20 +35,29 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 - Documentation and user-facing text are in English.
 - Both storage profiles are considered when the shared contract is affected.
 - Security and rootless-runtime requirements are verified when applicable.
-- The `markweave` sdist and wheel are built exactly once from the reviewed tagged source and expose
+- The `markweave` sdist and wheel are built exactly once from the reviewed main SHA and expose
   the documented public import `markweave`.
 - Distribution metadata, installation, the documented public import, and artifact integrity are validated before publication.
 - The publication job publishes the exact artifacts that passed validation and never rebuilds them.
 - PyPI publication uses Trusted Publishing through GitHub OIDC and the dedicated GitHub `pypi` environment identity; no long-lived PyPI token is created or stored.
-- The `pypi` environment has no required reviewer or manual approval, and only a published GitHub
-  Release in the trusted upstream repository can start publication.
+- The `pypi` environment has no required reviewer or manual approval, and only a real final-version
+  transition merged to protected `main` in the trusted upstream repository can start publication.
+- A `pyproject.toml` change without a `project.version` transition is a successful no-op. Invalid,
+  non-canonical, pre-release, development, local, and epoch versions fail closed.
+- The automation rejects an existing derived tag, matching GitHub Release, or already-published
+  PyPI version before creating external state.
+- The derived `v<version>` tag and published GitHub Release target the exact reviewed main SHA.
+- Future Python artifacts, GHCR tags, attestations, and evidence derive dynamically from
+  `project.version`; only tests and documentation may lock the approved first `0.3.0` release.
 - Only the minimal PyPI upload job in the isolated workflow receives `id-token: write` for publication. A separate provenance or attestation job owned by T22 may receive `id-token: write` only when the need is documented and all its other permissions are least privilege.
 - Every action is pinned by full commit SHA.
 - PyPI publish attestations are generated and uploaded with the release artifacts.
-- Pull requests, forks, and every other untrusted context are prevented from publishing.
+- Pull requests, forks, tag pushes, Release events, manual dispatches, and every other untrusted
+  context are prevented from publishing.
 - The release-version and tag-trigger policies are documented and approved before the workflow is implemented.
 - Before the first public release, the project manager decides the public package license and configures a PyPI pending Trusted Publisher for the exact GitHub repository, workflow, and `pypi` environment.
-- The availability of `markweave` is rechecked immediately before the first publication attempt, which stops if the name is no longer available; a pending Trusted Publisher does not reserve the name.
+- The exact `markweave` version is rechecked immediately before each publication attempt, which
+  stops if it is already published; a pending Trusted Publisher does not reserve the project name.
 - The first successful OIDC upload creates the PyPI project and converts the pending publisher into a normal Trusted Publisher, and both the project and publisher state are verified afterward.
 
 ## Dependencies
@@ -150,6 +161,14 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   Publisher for `markweave` with owner `Guillaume-Lombardo`, repository
   `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`. The matching
   GitHub environment exists without required reviewers, deployment restrictions, or secrets.
+- 2026-08-25: The project manager replaced manual GitHub Release publication with automatic
+  publication after a reviewed version-change pull request merges to protected `main`. The
+  workflow now compares the exact push before/head versions, treats unchanged versions as no-ops,
+  rejects unsafe versions and pre-existing tag/Release/PyPI state, builds once, creates the derived
+  tag and published Release at the reviewed SHA, and publishes Python and dynamically tagged
+  container artifacts from the same trusted push. A secretless reusable container workflow
+  verifies Release identity before idempotent evidence attachment; token-created tag and Release
+  events do not retrigger publication.
 
 ## Synchronization
 

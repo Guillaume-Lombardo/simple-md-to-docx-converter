@@ -1,25 +1,33 @@
-name: Python release
+name: Automatic release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths: [pyproject.toml]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: automatic-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-and-verify:
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+  detect:
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      source-sha: ${{ steps.version.outputs.source-sha }}
     steps:
-      - name: Check out reviewed source
+      - name: Check out the exact reviewed main source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up clean Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -31,48 +39,152 @@ jobs:
         with:
           version: "0.12.1"
           enable-cache: false
-      - name: Validate the reviewed release identity
+      - name: Detect an exact final-version transition
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: >-
+          uv run python -m scripts.release.detect_version
+          --before "$BEFORE_SHA" --head "$HEAD_SHA"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Reject an existing tag, release, or PyPI version
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = v0.3.0
+          tag_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          release_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          pypi_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://pypi.org/pypi/markweave/$RELEASE_VERSION/json")"
+          test "$tag_status" = 404
+          test "$release_status" = 404
+          test "$pypi_status" = 404
+
+  build-and-verify:
+    needs: detect
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.detect.outputs.source-sha }}
+          persist-credentials: false
+      - name: Set up clean Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          enable-cache: false
       - name: Build distributions exactly once
-        run: uv run python -m scripts.release.build --output dist --name markweave --version 0.3.0 --constraint build-constraints.txt
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: >-
+          uv run python -m scripts.release.build
+          --output dist --name markweave --version "$RELEASE_VERSION"
+          --constraint build-constraints.txt
       - name: Verify artifact integrity and metadata
-        run: uv run python -m scripts.release.artifacts verify --directory dist --name markweave --version 0.3.0 --manifest-name release-integrity.json
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: >-
+          uv run python -m scripts.release.artifacts verify
+          --directory dist --name markweave --version "$RELEASE_VERSION"
+          --manifest-name release-integrity.json
       - name: Verify clean Python 3.14 installation and public import
-        run: uv run python -m scripts.release.verify_install --directory dist --name markweave --version 0.3.0 --manifest-name release-integrity.json
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: >-
+          uv run python -m scripts.release.verify_install
+          --directory dist --name markweave --version "$RELEASE_VERSION"
+          --manifest-name release-integrity.json
       - name: Transfer verified artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-release-v0.3.0
+          name: python-release-${{ needs.detect.outputs.tag }}
           path: |
             dist/*.whl
             dist/*.tar.gz
           if-no-files-found: error
+
+  create-release:
+    needs: [detect, build-and-verify]
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create the exact tag and published GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.detect.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+          SOURCE_SHA: ${{ needs.detect.outputs.source-sha }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            --field "tag_name=$RELEASE_TAG" \
+            --field "target_commitish=$SOURCE_SHA" \
+            --field "name=Markweave $RELEASE_TAG" \
+            --field draft=false \
+            --field prerelease=false \
+            --field generate_release_notes=true >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
+            = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
+
   publish:
-    needs: build-and-verify
-    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+    needs: [detect, build-and-verify, create-release]
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
     permissions:
       id-token: write
     steps:
-      - name: Recheck PyPI name availability
+      - name: Recheck that the PyPI version is unpublished
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -euo pipefail
-          for url in https://pypi.org/pypi/markweave/json https://pypi.org/simple/markweave/; do
-            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$url")"
-            test "$status" = 404
-          done
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://pypi.org/pypi/markweave/$RELEASE_VERSION/json")"
+          test "$status" = 404
       - name: Download verified artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-release-v0.3.0
+          name: python-release-${{ needs.detect.outputs.tag }}
           path: dist
       - name: Publish exact artifacts
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
           attestations: true
+
+  container:
+    needs: [detect, create-release]
+    if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect.outputs.changed == 'true' }}
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    uses: ./.github/workflows/container-release.yml
+    with:
+      version: ${{ needs.detect.outputs.version }}
+      tag: ${{ needs.detect.outputs.tag }}
+      source-sha: ${{ needs.detect.outputs.source-sha }}
