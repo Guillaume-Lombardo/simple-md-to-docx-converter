@@ -130,6 +130,7 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     assert environment["MD_CONVERTER_CLAMAV_HOST"] == "clamav"
     assert environment["MD_CONVERTER_STORAGE_PROFILE"] == "standalone"
     assert environment["MD_CONVERTER_STANDALONE_DATA_DIRECTORY"] == "/data"
+    assert environment["MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS"] == "600"
 
 
 def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> None:

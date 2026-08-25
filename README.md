@@ -74,6 +74,9 @@ administrator password, and the decoded template remain, so accounts, templates,
 signatures, and credentials survive normal shutdown. Do not add the `--volumes` option unless you
 intentionally want Docker to remove the durable local data.
 
+Completed conversion results remain downloadable for 10 minutes in this evaluation profile. This
+is a local convenience value, not a recommended production retention policy.
+
 The Compose services do not automatically restart with the Docker daemon because a loop-device
 number is not stable across a host reboot. After an abnormal stop or reboot, run
 `scripts/quickstart.sh up` again. It validates the exact project/volume labels, removes stale
