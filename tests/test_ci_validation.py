@@ -709,6 +709,8 @@ def test_container_release_inspects_remote_version_before_push() -> None:
     assert run.index(stage) < run.index(inspect) < run.index(version_copy)
     assert 'test "$staged_manifest_digest" = "$intended_digest"' in run
     assert "skopeo copy --preserve-digests --retry-times 3" in run
+    assert '"docker://$registry_repository:$tag"; then' in run
+    assert "copy_status=0" in run
     assert 'copy_status="$?"' in run
     assert 'if copied_digest="$(inspect_remote_tag "$tag")"; then' in run
     assert '[[ "$copied_digest" = "$intended_digest" ]]' in run
@@ -726,6 +728,21 @@ def test_container_release_rejects_unverified_skopeo_failure_tolerance() -> None
     )
     errors = validate_container_release_workflow_text(weakened)
     assert any("copied_digest" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_rejects_errexit_toggle_around_skopeo() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace(
+        '"docker://$registry_repository:$tag"; then',
+        '"docker://$registry_repository:$tag" # followed by a global errexit toggle',
+    )
+    errors = validate_container_release_workflow_text(weakened)
+    assert any(
+        '"docker://$registry_repository:$tag"; then' in error for error in errors
+    )
 
 
 @pytest.mark.unit
