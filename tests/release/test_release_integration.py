@@ -27,14 +27,14 @@ def test_real_build_validation_clean_install_and_tamper_failure(
     built = build_release(
         output,
         expected_name="markweave",
-        expected_version="0.3.0",
+        expected_version="0.3.1",
         constraint=project_root / "build-constraints.txt",
     )
     verified = verify_release(
-        output, expected_name="markweave", expected_version="0.3.0"
+        output, expected_name="markweave", expected_version="0.3.1"
     )
     installed = verify_clean_install(
-        output, expected_name="markweave", expected_version="0.3.0"
+        output, expected_name="markweave", expected_version="0.3.1"
     )
 
     assert built.integrity == verified.integrity
@@ -49,11 +49,11 @@ def test_real_build_validation_clean_install_and_tamper_failure(
             "/purelib/md_converter" in name or "/platlib/md_converter" in name
             for name in names
         )
-        assert "markweave-0.3.0.dist-info/licenses/LICENSE" in names
+        assert "markweave-0.3.1.dist-info/licenses/LICENSE" in names
     with tarfile.open(verified.sdist, mode="r:gz") as sdist:
         names = set(sdist.getnames())
-        assert "markweave-0.3.0/LICENSE" in names
-        assert "markweave-0.3.0/src/markweave/__init__.py" in names
+        assert "markweave-0.3.1/LICENSE" in names
+        assert "markweave-0.3.1/src/markweave/__init__.py" in names
         assert not any("/src/md_converter/" in name for name in names)
         assert not any(name.endswith("/src/md_converter.py") for name in names)
 
@@ -63,5 +63,5 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         stream.write(b"controlled tamper")
     with pytest.raises(ArtifactError, match="integrity check failed"):
         verify_clean_install(
-            tampered, expected_name="markweave", expected_version="0.3.0"
+            tampered, expected_name="markweave", expected_version="0.3.1"
         )
