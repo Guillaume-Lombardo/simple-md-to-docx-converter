@@ -77,7 +77,7 @@ x-markweave-settings: &markweave-settings
 
 services:
   markweave:
-    image: ghcr.io/guillaume-lombardo/md-converter:0.3.0@sha256:4a16b311affb0d0a839350bd145810c1f6044cc7347d12ecd9263fe894de217d
+    image: ghcr.io/guillaume-lombardo/md-converter:0.3.1@sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92
     platform: linux/amd64
     command: embedded-worker
     depends_on:
