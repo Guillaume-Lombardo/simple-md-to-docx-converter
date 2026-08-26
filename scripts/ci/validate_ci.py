@@ -135,7 +135,7 @@ CONTAINER_RELEASE_CANONICAL_DIGEST = (
     "5c67726f99574a9a28b8ec773294651e3cac5ed7677eee8f05e08dd031f5a9b4"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "b79990e9a188bf33d3cbe4b540cc3d8ccc4200dc00ec35b768be9e06d986b043"
+    "6b2450bfe139fced0ae234d3dba83a0aeb71c290d7a74e28ed30a4a93622542c"
 )
 
 
@@ -1691,6 +1691,7 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
         "create-release": {"contents": "write"},
         "publish": {"id-token": "write"},
         "container": {
+            "actions": "read",
             "attestations": "write",
             "contents": "write",
             "id-token": "write",

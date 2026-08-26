@@ -715,6 +715,11 @@ def test_automatic_release_workflow_satisfies_exact_policy() -> None:
             "automatic release job 'publish' permissions are not minimal",
         ),
         (
+            "      actions: read\n      attestations: write",
+            "      attestations: write",
+            "automatic release job 'container' permissions are not minimal",
+        ),
+        (
             "target_commitish=$SOURCE_SHA",
             "target_commitish=main",
             "automatic release is missing contract: target_commitish=$SOURCE_SHA",

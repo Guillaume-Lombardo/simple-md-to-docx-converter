@@ -132,6 +132,12 @@ Complete English user, template, administrator, API, operations, storage, queue,
   success message and before the form's asynchronous user-list refresh released its submission
   guard, so the second submit was correctly ignored and the response wait expired. The helper now
   waits for that observable guard to clear before creating the next account.
+- 2026-08-26: Recovery PR #83 passed its complete hosted matrix and was squash-merged as `4b11b46d`.
+  Its downgrade created no release state, but the automatic workflow exposed the next reusable-call
+  validation failure: the caller did not grant the recovery path's required `actions: read`
+  permission. The automatic container call now grants that read-only permission explicitly, and
+  the exact release policy rejects its removal. Reapplying `0.3.1` remains blocked until this
+  startup correction passes protected review and a trusted-main canary.
 
 ## Synchronization
 
