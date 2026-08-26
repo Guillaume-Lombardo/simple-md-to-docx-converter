@@ -2,7 +2,7 @@
 ticket: T23
 linear_id: G1L-333
 linear_url: https://linear.app/g1lom/issue/G1L-333/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -170,6 +170,11 @@ Complete English user, template, administrator, API, operations, storage, queue,
 - 2026-08-26: Repinned the root Compose quickstarts and their static contract test to the published
   immutable `0.3.1` GHCR image identity. T23 can move to `Done` only after this final repin passes
   review, the required hosted matrix, and verification on `main`.
+- 2026-08-26: PR #88 passed its required hosted matrix and independent exact-SHA review, then was
+  squash-merged to `main` as `6e869b77`. Post-merge run `33011674248` passed every selected job,
+  including the real Compose lifecycle and final gate, with the root quickstarts pinned to
+  `ghcr.io/guillaume-lombardo/md-converter:0.3.1@sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92`.
+  All T23 acceptance criteria are verified on `main`; no limitation or exception remains.
 
 ## Synchronization
 
