@@ -20,8 +20,14 @@ BEFORE = "1" * 40
 HEAD = "2" * 40
 
 
-def _project(version: str, *, extra: str = "") -> bytes:
-    return f'[project]\nname = "markweave"\nversion = "{version}"\n{extra}'.encode()
+def _project(version: str, *, extra: str = "", attempt: object | None = None) -> bytes:
+    release = ""
+    if attempt is not None:
+        value = str(attempt).lower() if isinstance(attempt, bool) else repr(attempt)
+        release = f"[tool.markweave.release]\nattempt = {value}\n"
+    return (
+        f'[project]\nname = "markweave"\nversion = "{version}"\n{extra}{release}'
+    ).encode()
 
 
 def test_detects_real_final_version_transition() -> None:
@@ -38,6 +44,37 @@ def test_pyproject_change_without_version_change_is_a_noop() -> None:
         )
         is None
     )
+
+
+def test_detects_exact_same_version_release_attempt_increment() -> None:
+    assert detect_transition(
+        _project("0.3.0"), _project("0.3.0", attempt=2)
+    ) == VersionTransition("0.3.0", "v0.3.0")
+
+
+@pytest.mark.parametrize(
+    ("previous_attempt", "current_attempt", "message"),
+    [(2, 1, "must not decrease"), (1, 3, "increase by exactly 1")],
+)
+def test_rejects_invalid_same_version_release_attempt_transition(
+    previous_attempt: int, current_attempt: int, message: str
+) -> None:
+    with pytest.raises(ReleaseVersionError, match=message):
+        detect_transition(
+            _project("0.3.0", attempt=previous_attempt),
+            _project("0.3.0", attempt=current_attempt),
+        )
+
+
+@pytest.mark.parametrize("attempt", [0, -1, True, "two"])
+def test_rejects_invalid_release_attempt(attempt: object) -> None:
+    with pytest.raises(ReleaseVersionError, match="positive integer"):
+        detect_transition(_project("0.3.0"), _project("0.3.0", attempt=attempt))
+
+
+def test_new_version_must_reset_release_attempt() -> None:
+    with pytest.raises(ReleaseVersionError, match="reset the release attempt"):
+        detect_transition(_project("0.3.0", attempt=2), _project("0.4.0", attempt=2))
 
 
 def test_equivalent_canonical_spelling_transition_is_valid() -> None:

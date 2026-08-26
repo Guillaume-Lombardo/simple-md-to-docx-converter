@@ -7,9 +7,14 @@ container repository is `ghcr.io/guillaume-lombardo/md-converter`.
 
 A protected pull-request merge to `main` is the sole human release gate. When that merge changes
 `project.version`, the automatic workflow compares the exact before and head commits from the
-trusted push. A `pyproject.toml` edit that leaves the version unchanged is a successful no-op. Pull
-requests, forks, tags, and GitHub Release events cannot start publication. Manual dispatch cannot
-publish Python artifacts; it is reserved for the container-only recovery described below.
+trusted push. A `pyproject.toml` edit that leaves the version and the positive integer
+`tool.markweave.release.attempt` unchanged is a successful no-op. After an infrastructure failure
+leaves a release run impossible to rerun and creates no tag, GitHub Release, PyPI version, or GHCR
+version tag, a protected recovery pull request may increment `attempt` by exactly one to retry the
+same final version. The next version transition must reset it to `1`. Decreases, skipped attempt
+numbers, and stale attempts on a new version fail closed. Pull requests, forks, tags, and GitHub
+Release events cannot start publication. Manual dispatch cannot publish Python artifacts; it is
+reserved for the container-only recovery described below.
 
 ## GitHub and PyPI trust configuration
 
@@ -59,6 +64,14 @@ repositories.
    SBOM, publication receipt, and evidence to the verified Release identity. Because job
    credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
    before pushing provenance; it does not reuse or persist the publication job's credentials.
+
+If GitHub loses a run before creating any job, first prove that every external release surface is
+absent and attempt the normal, forced, and platform-advised cancellation or rerun paths. Record the
+orphaned run ID. If GitHub still cannot close or rerun it, increment
+`tool.markweave.release.attempt` by exactly one in a protected pull request without changing the
+version. Keep the existing workflow concurrency group: a recovered pending run is serialized with
+the retry, while atomic tag creation and exact-SHA verification prevent two source SHAs from both
+passing publication if the platform revives the orphan unexpectedly.
 
 The release orchestrator and reusable container workflow use the same trusted push context; they do
 not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` therefore cannot cause

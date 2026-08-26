@@ -31,9 +31,18 @@ class VersionTransition:
     tag: str
 
 
-def _public_final_version(document: bytes, *, label: str) -> str:
+@dataclass(frozen=True)
+class ReleaseIdentity:
+    """The canonical version and protected publication attempt."""
+
+    version: str
+    attempt: int
+
+
+def _release_identity(document: bytes, *, label: str) -> ReleaseIdentity:
     try:
-        project = tomllib.loads(document.decode())["project"]
+        parsed_document = tomllib.loads(document.decode())
+        project = parsed_document["project"]
         raw = project["version"]
     except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as error:
         raise ReleaseVersionError(f"{label} has no valid project.version") from error
@@ -58,18 +67,45 @@ def _public_final_version(document: bytes, *, label: str) -> str:
         raise ReleaseVersionError(
             f"{label} project.version must be a final public version"
         )
-    return raw
+    try:
+        raw_attempt = (
+            parsed_document.get("tool", {})
+            .get("markweave", {})
+            .get("release", {})
+            .get("attempt", 1)
+        )
+    except AttributeError as error:
+        raise ReleaseVersionError(
+            f"{label} tool.markweave.release must be a table"
+        ) from error
+    if type(raw_attempt) is not int or raw_attempt < 1:
+        raise ReleaseVersionError(
+            f"{label} tool.markweave.release.attempt must be a positive integer"
+        )
+    return ReleaseIdentity(raw, raw_attempt)
 
 
 def detect_transition(previous: bytes, current: bytes) -> VersionTransition | None:
-    """Return a release transition only when the authoritative version changed."""
-    previous_version = _public_final_version(previous, label="previous pyproject.toml")
-    current_version = _public_final_version(current, label="current pyproject.toml")
+    """Return a protected version or same-version retry transition."""
+    previous_identity = _release_identity(previous, label="previous pyproject.toml")
+    current_identity = _release_identity(current, label="current pyproject.toml")
+    previous_version = previous_identity.version
+    current_version = current_identity.version
     if Version(current_version) < Version(previous_version):
         raise ReleaseVersionError(
             "current project.version must not be lower than the previous version"
         )
-    if current_version == previous_version:
+    if current_version != previous_version:
+        if current_identity.attempt != 1:
+            raise ReleaseVersionError(
+                "a new project.version must reset the release attempt to 1"
+            )
+        return VersionTransition(current_version, f"v{current_version}")
+    if current_identity.attempt < previous_identity.attempt:
+        raise ReleaseVersionError("release attempt must not decrease")
+    if current_identity.attempt > previous_identity.attempt + 1:
+        raise ReleaseVersionError("release attempt must increase by exactly 1")
+    if current_identity.attempt == previous_identity.attempt:
         return None
     return VersionTransition(current_version, f"v{current_version}")
 
