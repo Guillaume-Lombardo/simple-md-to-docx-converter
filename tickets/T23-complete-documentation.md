@@ -161,6 +161,15 @@ Complete English user, template, administrator, API, operations, storage, queue,
   coverage, and 23 JavaScript tests pass. The canonical non-engine suite reached 1,524 passing tests
   but cannot complete locally because PostgreSQL and RustFS service variables are absent; hosted CI
   must verify those service-backed domains and the complete release matrix.
+- 2026-08-26: Recovery PR #87 passed its complete hosted matrix and was squash-merged as
+  `1b3d3a84`. Automatic release run `33008087510` published tag and GitHub Release `v0.3.1`, the
+  `markweave==0.3.1` wheel and source distribution on PyPI, and the attested GHCR image at registry
+  digest `sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92`.
+  The post-merge `main` matrix passed after a targeted rerun of one timing-sensitive SQLite lease
+  test.
+- 2026-08-26: Repinned the root Compose quickstarts and their static contract test to the published
+  immutable `0.3.1` GHCR image identity. T23 can move to `Done` only after this final repin passes
+  review, the required hosted matrix, and verification on `main`.
 
 ## Synchronization
 

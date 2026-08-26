@@ -7,22 +7,43 @@ description: Publish the current Codex work in a GitHub pull request, squash-mer
 
 Run each phase in order from the repository root. The implicit pull request is the one for the current Codex work and current branch.
 
+## Authorization granted by invocation
+
+An explicit `$yolo` invocation grants, in the same request, the approvals required to:
+
+- push the exact current work branch;
+- create, update, and mark ready the pull request for that branch and the captured target branch;
+- squash-merge that pull request at the exact captured head SHA after all required checks, reviews,
+  conversations, and protections pass; and
+- delete the exact captured source branch locally and remotely after the merge is verified.
+
+Do not stop to request those approvals again. The authorization is scoped to the current work,
+source branch, target branch, and pull request captured during this invocation. It expires if the
+head SHA changes unexpectedly, new work appears, the target or pull request is ambiguous, a check
+or review fails, or any phase has an ambiguous external result. It never authorizes a force-push,
+protection bypass, unrelated pull request, target-branch deletion, destructive worktree cleanup, or
+resolution of a new blocker without the user's direction.
+
 ## 1. Publish
 
 1. Read all repository instructions and the product specification referenced by `AGENTS.md`.
-2. Load and follow `$yeet-github` in full to inspect, validate, commit, push, and open a draft pull request.
+2. Load and follow `$yeet-github` in full to inspect, validate, commit, push, and open a draft pull
+   request. The explicit `$yolo` invocation satisfies `$yeet-github`'s approval requirement for the
+   captured push and pull-request publication; do not ask for it again.
 3. Retain the exact source and target branches, pushed SHA, pull-request number, and URL.
 4. Stop after any failure or ambiguous external result. Never merge or clean up after a partial failure.
 
 ## 2. Merge
 
-1. Explicit `$yolo` invocation authorizes merging only the pull request for the current work. It never authorizes bypassing protections or merging another pull request.
+1. Explicit `$yolo` invocation authorizes merging only the pull request for the current work at the
+   captured head SHA. It never authorizes bypassing protections or merging another pull request.
 2. Verify with `gh pr view` that the pull request exactly matches the captured source branch and SHA. Reject ambiguity or a changed head.
 3. Inspect required checks, reviews, conversations, and protections with `gh pr checks` and `gh pr view --json mergeStateStatus,reviewDecision,statusCheckRollup`.
 4. Mark a ready draft with `gh pr ready <number>`.
 5. Watch pending checks with `gh pr checks <number> --watch --interval 10`; stop and report any failing check.
-6. Present the final state and obtain explicit approval immediately before merging and deleting branches.
-7. After approval, use `gh pr merge <number> --squash --delete-branch --match-head-commit <source-sha>`.
+6. Present the final state as a progress update, reconfirm that the invocation's authorization is
+   still valid, and proceed without requesting a second approval.
+7. Use `gh pr merge <number> --squash --delete-branch --match-head-commit <source-sha>`.
 8. If GitHub queues the merge, keep monitoring. Clean up only after `gh pr view <number> --json state,mergedAt,mergeCommit` reports `MERGED`.
 
 ## 3. Clean up
@@ -32,7 +53,9 @@ Run each phase in order from the repository root. The implicit pull request is t
 3. Run `git fetch --prune origin`.
 4. Switch to the target branch and update it only by fast-forward with `git switch <target-branch>` and `git pull --ff-only origin <target-branch>`.
 5. Delete the exact local source branch if it remains. `git branch -D <source-branch>` is allowed only after verified squash merge.
-6. If the unprotected remote branch remains, obtain fresh explicit approval before `git push origin --delete <source-branch>`.
+6. If the exact captured unprotected remote source branch remains, delete it under the invocation's
+   authorization. Obtain fresh explicit approval only when its exact identity or ownership cannot
+   be proven.
 7. Run `git status --short --branch` and report the final state.
 
 ## Guardrails
