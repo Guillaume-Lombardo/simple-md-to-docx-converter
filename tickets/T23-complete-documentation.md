@@ -147,6 +147,20 @@ Complete English user, template, administrator, API, operations, storage, queue,
   publication job was skipped, and the `v0.3.1` tag, GitHub Release, PyPI distribution, and GHCR
   image all remained absent. Reapply the exact `0.3.1` version surfaces through this protected
   transition; its trusted-main merge is the sole authorized publication trigger.
+- 2026-08-26: PR #86 passed its complete hosted matrix and was squash-merged as `3464348b`, but the
+  GitHub Actions incident stranded its automatic release run `32985274926` before job creation.
+  After GitHub reported recovery, normal cancellation, force-cancellation, rerun, and deletion all
+  rejected the run's contradictory pre-queue state. Every `0.3.1` release surface remains absent.
+  The protected recovery adds a positive monotonic release attempt: an exact increment retries the
+  same final version, while decreases, skipped attempts, stale attempts on new versions, existing
+  external state, and every untrusted trigger continue to fail closed.
+- 2026-08-26: Implemented release attempt `2` with unit coverage for valid, invalid, decreasing,
+  skipped, and stale transitions plus a real-Git integration test. The release guide and normative
+  policy document the no-external-state precondition and retained concurrency/atomic-tag safety.
+  Ruff formatting and linting, `ty`, the CI validator, 188 focused tests, 1,332 unit tests at 93.63%
+  coverage, and 23 JavaScript tests pass. The canonical non-engine suite reached 1,524 passing tests
+  but cannot complete locally because PostgreSQL and RustFS service variables are absent; hosted CI
+  must verify those service-backed domains and the complete release matrix.
 
 ## Synchronization
 

@@ -48,6 +48,10 @@ dev = [
     "ty>=0.0.1a20,<1",
 ]
 
+[tool.markweave.release]
+# Increment only through a protected recovery PR after a publication run created no external state.
+attempt = 2
+
 [tool.uv]
 build-constraint-dependencies = [
     "hatchling==1.32.0",
