@@ -127,6 +127,11 @@ Complete English user, template, administrator, API, operations, storage, queue,
   already published `0.3.0`; the automatic detector must fail closed on that downgrade without
   creating external state. A second reviewed merge will reapply `0.3.1` from the corrected
   workflow and start the real automatic publication.
+- 2026-08-26: Recovery PR #83 exposed an existing browser-test race in the distributed final-image
+  workflow. Account creation returned `201`, but the helper attempted the next submit after the
+  success message and before the form's asynchronous user-list refresh released its submission
+  guard, so the second submit was correctly ignored and the response wait expired. The helper now
+  waits for that observable guard to clear before creating the next account.
 
 ## Synchronization
 
