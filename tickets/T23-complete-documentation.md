@@ -142,6 +142,11 @@ Complete English user, template, administrator, API, operations, storage, queue,
   protected metadata-only `pyproject.toml` change now triggers the corrected automatic workflow
   while retaining version `0.3.0`; the detector must report no version transition and every
   publication job must remain skipped before `0.3.1` is reapplied.
+- 2026-08-26: PR #85 passed its complete hosted matrix and was squash-merged as `1abdda78`. Its
+  trusted-main canary run completed successfully: version detection passed, every build and
+  publication job was skipped, and the `v0.3.1` tag, GitHub Release, PyPI distribution, and GHCR
+  image all remained absent. Reapply the exact `0.3.1` version surfaces through this protected
+  transition; its trusted-main merge is the sole authorized publication trigger.
 
 ## Synchronization
 
