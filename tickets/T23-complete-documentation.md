@@ -121,6 +121,17 @@ Complete English user, template, administrator, API, operations, storage, queue,
   declaring it as an optional automatic-call input passed a real reusable-call canary while every
   publication and recovery job remained skipped. No `v0.3.1` tag, GitHub Release, PyPI
   distribution, or GHCR image was created by the failed run or canary.
+- 2026-08-26: The PM authorized release recovery. Because rerunning the failed push would preserve
+  its invalid workflow SHA and manual publication is forbidden, recovery uses two protected
+  version-transition pull requests. This first change restores every live version surface to the
+  already published `0.3.0`; the automatic detector must fail closed on that downgrade without
+  creating external state. A second reviewed merge will reapply `0.3.1` from the corrected
+  workflow and start the real automatic publication.
+- 2026-08-26: Recovery PR #83 exposed an existing browser-test race in the distributed final-image
+  workflow. Account creation returned `201`, but the helper attempted the next submit after the
+  success message and before the form's asynchronous user-list refresh released its submission
+  guard, so the second submit was correctly ignored and the response wait expired. The helper now
+  waits for that observable guard to clear before creating the next account.
 
 ## Synchronization
 

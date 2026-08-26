@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "markweave"
-version = "0.3.1"
+version = "0.3.0"
 description = "A service for converting Markdown documents to DOCX and PDF"
 readme = "README.md"
 license = "Apache-2.0"

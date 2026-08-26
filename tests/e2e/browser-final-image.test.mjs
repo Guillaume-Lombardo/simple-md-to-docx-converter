@@ -32,6 +32,9 @@ async function createAccount(page, username, password) {
   const response = await responsePromise;
   assert.equal(response.status(), 201, "administrator could not create a regular user");
   await waitForText(page, "#administration-alert", "Account was created.");
+  await page.waitForFunction(
+    () => document.querySelector("#create-user-form")?.dataset.submitting !== "true",
+  );
   return response.json();
 }
 
