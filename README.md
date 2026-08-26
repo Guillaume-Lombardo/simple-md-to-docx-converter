@@ -1,8 +1,8 @@
 # Markweave: Markdown to DOCX and PDF
 
 Markweave turns a Markdown file into DOCX, PDF, or both from a small browser interface. It keeps
-your Word templates and completed jobs on local persistent storage and scans every upload with
-ClamAV before saving it.
+your Word templates and completed jobs on local persistent storage. It scans every upload with
+ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
 The project is licensed under [Apache-2.0](LICENSE). Version `0.3.1` is the current Python package
 and container image release.
@@ -21,6 +21,7 @@ reviewed Chromium seccomp profile, then choose one of these local-evaluation pat
 | --- | --- | --- | --- |
 | Simple | Docker Compose | `scripts/quickstart-simple.sh up` | Named volume; no physical cap |
 | Simple | Rootless Podman Compose | `MARKWEAVE_SIMPLE_RUNTIME=podman scripts/quickstart-simple.sh up` | Named volume; no physical cap |
+| Trusted upstream | Rootless Podman Compose | `MARKWEAVE_SIMPLE_RUNTIME=podman scripts/quickstart-simple.sh up --trust-upstream-antivirus` | Named volume; no physical cap |
 | Secure | Rootful Docker Compose only | `scripts/quickstart.sh up` | Exact 256 MiB ext4 filesystem |
 
 The simple path needs no `sudo` and is the easiest way to try Markweave:
@@ -42,6 +43,19 @@ Chromium seccomp profile because Docker Compose cannot pass that local profile d
 Docker-compatible API. Podman's automatic Docker-API health metadata is not used; the helper polls
 ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
 bounded timeout.
+
+If an upstream proxy already scans every upload, the Podman quickstart can omit ClamAV entirely:
+
+```bash
+MARKWEAVE_SIMPLE_RUNTIME=podman \
+  scripts/quickstart-simple.sh up --trust-upstream-antivirus
+```
+
+This option neither pulls nor starts the ClamAV image. It is safe only when the proxy scans every
+conversion and template upload before forwarding and host firewall or network policy prevents any
+direct or alternate route to Markweave. The helper and application print a warning because this is
+an operator-asserted external security boundary. Never use the option merely to work around an
+unavailable scanner.
 
 This uses an ordinary engine-managed named volume for disposable `/work` data. The application
 still runs as a non-root user with a read-only root filesystem, no Linux capabilities,
@@ -72,8 +86,8 @@ For the secure path, use the same commands with `quickstart.sh` instead of
 `quickstart-simple.sh`: `scripts/quickstart.sh password` shows its password and
 `scripts/quickstart.sh down` stops it.
 
-Open <http://localhost:8080>, sign in as `admin`, and use the password above. The first start can
-take several minutes while ClamAV downloads and loads its signatures. The simple `up` command
+Open <http://localhost:8080>, sign in as `admin`, and use the password above. In the default mode,
+the first start can take several minutes while ClamAV downloads and loads its signatures. The simple `up` command
 returns only after the selected runtime passes its readiness checks;
 `scripts/quickstart-simple.sh ps` shows the containers, and `scripts/quickstart-simple.sh logs`
 follows the signature-download progress. The secure helper reports that Markweave is starting;
@@ -106,8 +120,8 @@ scripts/quickstart-simple.sh down
 
 The simple shutdown validates the ordinary work volume's exact project labels, local driver, and
 empty mount options before removing only that disposable volume. `markweave-data`,
-`clamav-signatures`, the administrator password, and the decoded template remain, so accounts,
-templates, jobs, results, signatures, and credentials survive normal shutdown. Do not add the
+`clamav-signatures` when it exists, the administrator password, and the decoded template remain, so
+accounts, templates, jobs, results, signatures, and credentials survive normal shutdown. Do not add the
 `--volumes` option unless you intentionally want the container engine to remove durable local data.
 
 Completed conversion results remain downloadable for 10 minutes in this evaluation profile. This
@@ -132,8 +146,9 @@ The secure base `compose.yaml` is a bounded standalone evaluation profile. The s
 `compose.simple.yaml` overlay deliberately replaces only its bounded `/work` mount with an
 unbounded named volume. In both paths, one rootless Markweave process runs the API and embedded
 worker, `/data` is persistent, the root filesystem is read-only, and the browser port binds only
-to `127.0.0.1`. ClamAV has persistent signatures and no host port. The scanner network is internal,
-and only ClamAV joins the network used to refresh signatures.
+to `127.0.0.1`. In the default mode, ClamAV has persistent signatures and no host port; its scanner
+network is internal, and only ClamAV joins the network used to refresh signatures. The
+trusted-upstream overlay removes the application dependency and keeps the ClamAV service inactive.
 
 The Compose profile is not a production deployment. Its upload, queue, memory, retention, and
 timeout values are local evaluation limits reused from the tested final-image workflow. Do not

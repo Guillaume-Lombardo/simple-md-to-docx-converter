@@ -125,12 +125,16 @@ the memory and ephemeral-storage configuration exactly to the worker container l
 | `MD_CONVERTER_AUDIT_RETENTION_SECONDS` | `31536000` | Both |
 | `MD_CONVERTER_READINESS_TIMEOUT_SECONDS` | Required positive finite number | API modes in both profiles |
 | `MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT` | Optional path | Both; bounded workspace parent |
+| `MD_CONVERTER_MALWARE_SCANNING_MODE` | `clamav` | Both; `clamav` or `trusted-upstream` |
 | `MD_CONVERTER_CLAMAV_HOST` | `127.0.0.1` | Both; set service host explicitly in deployment |
 | `MD_CONVERTER_CLAMAV_PORT` | `3310` | Both; 1–65535 |
 | `MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS` | `5.0` | Both; positive finite number |
 
-ClamAV scanner unavailability fails closed. Network policy should permit only the configured scanner
-path, and credentials or document content must never be placed in these settings.
+In the default `clamav` mode, scanner unavailability fails closed. `trusted-upstream` performs no
+local malware scan and must be selected only when a proxy scans every upload before forwarding it
+and network policy prevents all direct or alternate application access. Startup emits a warning in
+that mode because the operator, rather than Markweave, owns and asserts the scanning boundary.
+Credentials or document content must never be placed in these settings.
 
 ## Storage profiles and secrets
 

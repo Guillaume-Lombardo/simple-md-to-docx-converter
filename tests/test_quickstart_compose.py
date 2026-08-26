@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "compose.yaml"
 SIMPLE_OVERLAY = ROOT / "compose.simple.yaml"
 PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
+TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
 ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
@@ -175,6 +176,11 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "no physical capacity cap" in readme
     assert "Rootless Podman Compose" in readme
     assert "MARKWEAVE_SIMPLE_RUNTIME=podman" in readme
+    assert "up --trust-upstream-antivirus" in readme
+    assert "neither pulls nor starts the ClamAV image" in readme
+    assert "prevents any direct or alternate route to Markweave" in " ".join(
+        readme.split()
+    )
     assert "`flock` from util-linux" in readme
     assert "Rootful Docker Compose only" in readme
     assert "rootful Docker Engine" in readme
@@ -198,6 +204,15 @@ def test_simple_overlay_resets_only_the_privileged_volume_options() -> None:
     assert "physically unbounded named volume" in overlay
     assert overlay.endswith("volumes:\n  markweave-work:\n    driver_opts: !reset {}\n")
     assert "services:" not in overlay
+
+
+def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
+    overlay = TRUSTED_UPSTREAM_OVERLAY.read_text(encoding="utf-8")
+
+    assert "depends_on: !reset {}" in overlay
+    assert "MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
+    assert "profiles:" in overlay
+    assert "local-antivirus" in overlay
 
 
 def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
@@ -230,6 +245,11 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "compose.podman.yaml" in script
     assert "MARKWEAVE_WORK_DEVICE=/dev/null" in script
     assert 'readonly requested_runtime="${MARKWEAVE_SIMPLE_RUNTIME:-auto}"' in script
+    assert "--trust-upstream-antivirus" in script
+    assert "trusted_upstream_antivirus=true" in script
+    assert 'files+=(--file "$repository/compose.trusted-upstream.yaml")' in script
+    assert "compose rm --stop --force clamav" in script
+    assert "Trusted upstream antivirus mode is active" in script
     assert "candidate=docker" in script
     assert "candidate=podman" in script
     assert "podman compose" in script

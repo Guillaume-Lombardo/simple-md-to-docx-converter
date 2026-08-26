@@ -2,7 +2,7 @@
 
 **Status:** Functional, technical, and autonomous-development specification
 
-**Date:** August 24, 2026
+**Date:** August 26, 2026
 
 **Runtime target:** UBI 9 container, Python 3.14, rootless Podman, and OpenShift
 
@@ -45,7 +45,7 @@ The product includes a conversion page, template administration, local authentic
 | Repository language | English for code, identifiers, docstrings, UI, errors, logs, documentation, commits, and pull requests |
 | Superseded template retention | 365 days; never delete the active version or ten newest versions per template |
 | Audit retention | Immutable for 365 days, then bounded traceable deletion |
-| Upload malware scanning | ClamAV before processing or durable persistence; fail closed; no durable quarantine |
+| Upload malware scanning | Local ClamAV before processing or durable persistence by default; an explicit trusted-upstream mode is permitted only behind a non-bypassable proxy that scans every upload before forwarding; fail closed in ClamAV mode; no durable quarantine |
 | Recovery targets | Standalone RPO 24h/RTO 4h; distributed RPO 1h/RTO 2h; automated quarterly proof |
 
 Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
@@ -209,12 +209,15 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
   Delete object bytes before fenced metadata acknowledgement so interrupted cleanup is retryable.
 - Keep audit records immutable for 365 days, then delete them in bounded transactions that retain
   immutable, content-free cleanup evidence.
-- Scan every conversion and template upload through ClamAV after bounded request reading and before
-  validation, processing, database reservation, or object persistence. Scanner unavailability,
-  timeout, protocol error, and indeterminate results fail closed. Infected uploads are rejected;
-  temporary material is securely removed and no durable quarantine is kept. The INSTREAM adapter
-  scans directly from bounded memory and therefore creates no scanner-side application temporary
-  file.
+- Scan every conversion and template upload after bounded request reading and before validation,
+  processing, database reservation, or object persistence. Local ClamAV is the default boundary;
+  scanner unavailability, timeout, protocol error, and indeterminate results fail closed. An
+  explicit trusted-upstream mode may omit local ClamAV only when a proxy scans every upload before
+  forwarding and network policy makes direct or alternate access to the application impossible.
+  Selecting that mode is an operator assertion of this external security boundary and must emit a
+  startup warning. Infected uploads are rejected by the selected boundary; temporary material is
+  securely removed and no durable quarantine is kept. The ClamAV INSTREAM adapter scans directly
+  from bounded memory and therefore creates no scanner-side application temporary file.
 - The standalone target is RPO 24 hours and RTO 4 hours. The distributed target is RPO 1 hour and
   RTO 2 hours. Exercise each deployed profile at least quarterly with an automated isolated restore
   and readiness check. Retain an immutable report containing backup identity, timestamps, measured
@@ -319,8 +322,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T21 | Run rootless E2E for both profiles with three identities, real conversion, restart recovery, concurrency, and failure artifacts | T17, T20 |
 | T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `markweave` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
+| T24 | Support an explicit trusted-upstream malware-scanning boundary and a ClamAV-free Podman quickstart while preserving fail-closed ClamAV defaults | T23 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option (T24). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Deferred decisions and initial-scope exclusions
 

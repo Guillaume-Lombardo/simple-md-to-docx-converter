@@ -28,6 +28,13 @@ class StorageProfile(StrEnum):
     DISTRIBUTED = "distributed"
 
 
+class MalwareScanningMode(StrEnum):
+    """Operator-selected upload malware-scanning trust boundary."""
+
+    CLAMAV = "clamav"
+    TRUSTED_UPSTREAM = "trusted-upstream"
+
+
 class Settings(BaseSettings):
     """Security-sensitive application settings."""
 
@@ -123,6 +130,7 @@ class Settings(BaseSettings):
     audit_retention_seconds: int = Field(default=365 * 24 * 60 * 60, gt=0)
     readiness_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
     template_engine_workspace_root: Path | None = None
+    malware_scanning_mode: MalwareScanningMode = MalwareScanningMode.CLAMAV
     clamav_host: str = Field(default="127.0.0.1", min_length=1)
     clamav_port: int = Field(default=3310, ge=1, le=65_535)
     clamav_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)

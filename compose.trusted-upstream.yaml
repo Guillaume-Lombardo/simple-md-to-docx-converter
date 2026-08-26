@@ -1,0 +1,10 @@
+# Explicit deployment overlay for a non-bypassable upstream antivirus boundary.
+# The proxy must scan every upload before forwarding it to Markweave.
+services:
+  markweave:
+    depends_on: !reset {}
+    environment:
+      MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream
+  clamav:
+    profiles:
+      - local-antivirus
