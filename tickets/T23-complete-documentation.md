@@ -138,6 +138,10 @@ Complete English user, template, administrator, API, operations, storage, queue,
   permission. The automatic container call now grants that read-only permission explicitly, and
   the exact release policy rejects its removal. Reapplying `0.3.1` remains blocked until this
   startup correction passes protected review and a trusted-main canary.
+- 2026-08-26: PR #84 passed its complete hosted matrix and was squash-merged as `9220cd54`. A
+  protected metadata-only `pyproject.toml` change now triggers the corrected automatic workflow
+  while retaining version `0.3.0`; the detector must report no version transition and every
+  publication job must remain skipped before `0.3.1` is reapplied.
 
 ## Synchronization
 
