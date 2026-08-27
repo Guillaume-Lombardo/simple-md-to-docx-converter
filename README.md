@@ -4,9 +4,9 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.3.2` is the Python package release.
+The project is licensed under [Apache-2.0](LICENSE). Version `0.3.3` is the Python package release.
 Until its immutable image digest is available, the quickstart remains pinned to the published
-`0.3.1` container image.
+`0.3.2` container image.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.
@@ -56,7 +56,10 @@ This option neither pulls nor starts the ClamAV image. It is safe only when the 
 conversion and template upload before forwarding and host firewall or network policy prevents any
 direct or alternate route to Markweave. The helper and application print a warning because this is
 an operator-asserted external security boundary. Never use the option merely to work around an
-unavailable scanner.
+unavailable scanner. Under rootless Podman, this explicit mode requires `slirp4netns` and uses it
+directly instead of creating CNI bridge networks. This permits the loopback-only published port on
+hosts whose CNI `portmap` plugin cannot use nftables; the default ClamAV topology still requires
+Podman's normal container-network support.
 
 This uses an ordinary engine-managed named volume for disposable `/work` data. The application
 still runs as a non-root user with a read-only root filesystem, no Linux capabilities,

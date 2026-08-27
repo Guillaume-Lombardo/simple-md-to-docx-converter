@@ -323,8 +323,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T22 | Finalize selective CI/CD, scheduled full suite, targeted mutation testing, grouped dependency updates, release image, SBOM, provenance, and trusted publication of the verified `markweave` sdist and wheel to PyPI | T03, T21 |
 | T23 | Complete English user, template, administrator, API, operations, storage, queue, agent, recovery, and deployment documentation | T22 |
 | T24 | Support an explicit trusted-upstream malware-scanning boundary and a ClamAV-free Podman quickstart while preserving fail-closed ClamAV defaults | T23 |
+| T25 | Support a CNI-free `slirp4netns` Podman quickstart for trusted-upstream antivirus deployments and publish patch release `0.3.3` | T24 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option (T24). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option and its rootless compatibility correction (T24–T25). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Deferred decisions and initial-scope exclusions
 
