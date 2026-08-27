@@ -1,5 +1,6 @@
 """FastAPI application factory and versioned HTTP contract."""
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
@@ -45,7 +46,7 @@ from markweave.auth.service import (
     SecurityRuntime,
     SessionPolicy,
 )
-from markweave.config import Settings, StorageProfile
+from markweave.config import MalwareScanningMode, Settings, StorageProfile
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -70,6 +71,7 @@ from markweave.malware import (
     ClamAVUploadScanner,
     MalwareDetectedError,
     MalwareScannerUnavailableError,
+    TrustedUpstreamUploadScanner,
     TrustingUploadScanner,
     UploadScanner,
 )
@@ -863,6 +865,22 @@ class ProfileReadinessProbe:
         return self._database.is_ready() and self._objects.is_ready()
 
 
+def build_upload_scanner(settings: Settings) -> UploadScanner:
+    """Assemble the explicit upload-scanning trust boundary."""
+
+    if settings.malware_scanning_mode is MalwareScanningMode.TRUSTED_UPSTREAM:
+        log_event(
+            "malware_scanning_delegated_to_trusted_upstream",
+            level=logging.WARNING,
+        )
+        return TrustedUpstreamUploadScanner()
+    return ClamAVUploadScanner(
+        settings.clamav_host,
+        settings.clamav_port,
+        settings.clamav_timeout_seconds,
+    )
+
+
 def build_components(settings: Settings) -> AppComponents:
     """Assemble the selected coherent persistent storage profile."""
     job_policies = build_job_policies(settings)
@@ -974,11 +992,7 @@ def build_components(settings: Settings) -> AppComponents:
             ),
             object_store=object_store,
             jobs=jobs,
-            scanner=ClamAVUploadScanner(
-                settings.clamav_host,
-                settings.clamav_port,
-                settings.clamav_timeout_seconds,
-            ),
+            scanner=build_upload_scanner(settings),
             templates=templates,
             job_policies=job_policies,
             retention=retention,

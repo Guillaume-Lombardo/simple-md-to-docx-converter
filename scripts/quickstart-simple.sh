@@ -23,6 +23,7 @@ runtime_env=""
 starting=false
 start_succeeded=false
 compose_started=false
+trusted_upstream_antivirus=false
 
 fail() {
   echo "$1" >&2
@@ -194,6 +195,9 @@ compose() {
   if [[ "$runtime_name" == podman ]]; then
     files+=(--file "$repository/compose.podman.yaml")
   fi
+  if [[ "$trusted_upstream_antivirus" == true ]]; then
+    files+=(--file "$repository/compose.trusted-upstream.yaml")
+  fi
   "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$runtime_env" "$@"
 }
@@ -312,6 +316,16 @@ start_podman_stack() {
   wait_for_application
 }
 
+start_trusted_upstream_stack() {
+  # Remove a scanner left by an earlier default-mode start before recreating the
+  # application with its explicit trusted-upstream configuration.
+  if [[ -n "$(scanner_container)" ]]; then
+    compose rm --stop --force clamav >/dev/null
+  fi
+  compose up --detach markweave
+  wait_for_application
+}
+
 cleanup() {
   local exit_code=$?
   if [[ "$starting" == true && "$start_succeeded" != true ]]; then
@@ -365,10 +379,12 @@ start() {
     initialize_work_volume
   fi
   compose_started=true
-  if [[ "$runtime_name" == podman ]]; then
+  if [[ "$trusted_upstream_antivirus" == true ]]; then
+    start_trusted_upstream_stack
+  elif [[ "$runtime_name" == podman ]]; then
     start_podman_stack
   else
-    compose up --detach
+    compose up --detach markweave
     wait_for_application
   fi
   validate_work_volume
@@ -376,6 +392,10 @@ start() {
   echo "Markweave is ready with $runtime_name at http://localhost:$port"
   echo "Template: $template_file"
   echo "Warning: the simple /work volume has no physical capacity cap."
+  if [[ "$trusted_upstream_antivirus" == true ]]; then
+    echo "Warning: Trusted upstream antivirus mode is active; Markweave does not scan uploads."
+    echo "Warning: Keep Markweave unreachable except through a proxy that scans every upload."
+  fi
   echo "Show the administrator password with: scripts/quickstart-simple.sh password"
 }
 
@@ -411,7 +431,11 @@ compose_status() {
 
 case "${1:-}" in
   up)
-    [[ $# -eq 1 ]] || fail "usage: scripts/quickstart-simple.sh up"
+    if [[ $# -eq 2 && "${2:-}" == --trust-upstream-antivirus ]]; then
+      trusted_upstream_antivirus=true
+    elif [[ $# -ne 1 ]]; then
+      fail "usage: scripts/quickstart-simple.sh up [--trust-upstream-antivirus]"
+    fi
     start
     ;;
   down)
@@ -428,9 +452,9 @@ case "${1:-}" in
     ;;
   logs)
     [[ $# -eq 1 ]] || fail "usage: scripts/quickstart-simple.sh logs"
-    compose_status logs --follow clamav
+    compose_status logs --follow markweave clamav
     ;;
   *)
-    fail "usage: scripts/quickstart-simple.sh {up|down|password|ps|logs}"
+    fail "usage: scripts/quickstart-simple.sh {up [--trust-upstream-antivirus]|down|password|ps|logs}"
     ;;
 esac

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from markweave.config import ConfigurationError, Settings
+from markweave.config import ConfigurationError, MalwareScanningMode, Settings
 from tests.settings import template_settings
 
 TEMPLATE_REQUIRED_FIELDS = tuple(template_settings())
@@ -38,6 +38,7 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.audit_retention_seconds == 31_536_000
     assert (settings.clamav_host, settings.clamav_port) == ("127.0.0.1", 3310)
     assert settings.clamav_timeout_seconds == 5
+    assert settings.malware_scanning_mode is MalwareScanningMode.CLAMAV
     assert settings.public_origin is None
     assert secret not in repr(settings)
 
@@ -129,6 +130,7 @@ def test_public_origin_rejects_non_origin_urls(public_origin: str) -> None:
         {"worker_metrics_request_timeout_seconds": float("inf")},
         {"clamav_port": 65_536},
         {"clamav_timeout_seconds": float("inf")},
+        {"malware_scanning_mode": "disabled"},
     ],
 )
 def test_invalid_security_configuration_is_rejected(

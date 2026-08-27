@@ -1,5 +1,6 @@
 """Deterministic object-store and readiness adapter failures."""
 
+import logging
 from io import BytesIO
 from pathlib import Path
 from typing import cast
@@ -9,8 +10,9 @@ import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 from pytest_mock import MockerFixture
 
-from markweave.app import ProfileReadinessProbe, build_components
-from markweave.config import Settings
+from markweave.app import ProfileReadinessProbe, build_components, build_upload_scanner
+from markweave.config import MalwareScanningMode, Settings
+from markweave.malware import ClamAVUploadScanner, TrustedUpstreamUploadScanner
 from markweave.persistence.migrations import (
     POSTGRES_MIGRATION_LOCK,
     upgrade_database,
@@ -186,8 +188,8 @@ def test_profile_readiness_short_circuits_failed_metadata(
     assert ProfileReadinessProbe(database, objects).is_ready()
 
 
-def _standalone_component_settings() -> Settings:
-    return Settings(
+def _standalone_component_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = dict(
         **template_settings(),
         initial_admin_username="admin",
         initial_admin_password="admin-" + "password",
@@ -198,6 +200,8 @@ def _standalone_component_settings() -> Settings:
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
+    values.update(overrides)
+    return Settings.model_validate(values)
 
 
 @pytest.mark.unit
@@ -414,6 +418,31 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         mocker.call("s3", **common),
         mocker.call("s3", **common, config=mocker.ANY),
     ]
+
+
+@pytest.mark.unit
+def test_upload_scanner_assembly_defaults_to_fail_closed_clamav() -> None:
+    scanner = build_upload_scanner(_standalone_component_settings())
+
+    assert scanner == ClamAVUploadScanner("127.0.0.1", 3310, 5.0)
+
+
+@pytest.mark.unit
+def test_upload_scanner_assembly_accepts_explicit_trusted_upstream_boundary(
+    mocker: MockerFixture,
+) -> None:
+    settings = _standalone_component_settings(
+        malware_scanning_mode=MalwareScanningMode.TRUSTED_UPSTREAM
+    )
+    warning = mocker.patch("markweave.app.log_event")
+
+    scanner = build_upload_scanner(settings)
+
+    assert isinstance(scanner, TrustedUpstreamUploadScanner)
+    warning.assert_called_once_with(
+        "malware_scanning_delegated_to_trusted_upstream",
+        level=logging.WARNING,
+    )
 
 
 @pytest.mark.unit

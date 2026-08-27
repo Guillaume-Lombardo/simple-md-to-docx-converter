@@ -45,6 +45,7 @@ _LOG_EVENTS = frozenset(
         "job_processing_interrupted",
         "job_processing_started",
         "job_recovery_completed",
+        "malware_scanning_delegated_to_trusted_upstream",
         "readiness_failed",
         "worker_retry_scheduled",
     }

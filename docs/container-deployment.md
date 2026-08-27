@@ -34,13 +34,19 @@ Chrome seccomp profile is `spikes/toolchain/chrome-seccomp.json`; install that e
 on each worker node before applying a manifest. OpenShift validation remains deferred, so these
 manifests do not claim OpenShift compatibility.
 
-ClamAV is an external `clamd` service selected through `MD_CONVERTER_CLAMAV_HOST`, port, and timeout.
+Local ClamAV is the default upload-scanning boundary. Its external `clamd` service is selected
+through `MD_CONVERTER_CLAMAV_HOST`, port, and timeout, and its unavailability remains fail-closed.
+Set `MD_CONVERTER_MALWARE_SCANNING_MODE=trusted-upstream` only when an upstream proxy scans every
+conversion and template upload before forwarding and default-deny network policy makes direct or
+alternate application access impossible. This mode makes no ClamAV connection and logs a startup
+warning; it is not a general-purpose antivirus-disable switch.
+
 The operator must supply Services, ingress or routes, default-deny NetworkPolicies with explicit
-allowances, ConfigMaps, Secrets, and ClamAV. A distributed deployment also needs PostgreSQL and an
-S3-compatible store. Permit inbound API and metrics-scraper traffic and only the required DNS,
-ClamAV, PostgreSQL, and S3 egress. Input validation still forbids document-controlled remote access;
-do not grant general Internet egress to API or worker pods. Scanner unavailability remains
-fail-closed; the application keeps no durable quarantine.
+allowances, ConfigMaps, Secrets, and either ClamAV or the complete trusted-upstream boundary. A
+distributed deployment also needs PostgreSQL and an S3-compatible store. Permit inbound API and
+metrics-scraper traffic and only the required DNS, selected scanner boundary, PostgreSQL, and S3
+egress. Input validation still forbids document-controlled remote access; do not grant general
+Internet egress to API or worker pods. The application keeps no durable quarantine.
 
 Credentials and the initial administrator password belong in a Secret, never a ConfigMap, manifest,
 command line, or image. Inject them by the platform's secret mechanism and apply least-privilege
