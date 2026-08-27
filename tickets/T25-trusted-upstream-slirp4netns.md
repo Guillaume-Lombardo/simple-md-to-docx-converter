@@ -2,7 +2,7 @@
 ticket: T25
 linear_id: G1L-335
 linear_url: https://linear.app/g1lom/issue/G1L-335/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -25,8 +25,8 @@ and preserve the isolated ClamAV topology in the default mode.
 - Compose-contract and quickstart tests verify overlay selection, rendered network mode, published
   localhost port, and unchanged default topology.
 - User documentation explains the compatibility path and trusted-upstream security boundary.
-- The quickstart is repinned to the verified immutable `0.3.2` image that contains trusted-upstream
-  application support.
+- The quickstart is repinned to the verified immutable `0.3.3` image after its protected automatic
+  release succeeds.
 - Project, application, lock, README, and release-test version surfaces move from `0.3.2` to
   `0.3.3`.
 - Relevant canonical checks pass, with unavailable external-engine or service validation reported
@@ -53,6 +53,12 @@ and preserve the isolated ClamAV topology in the default mode.
   could not finish because `/var/tmp` had only 185 MiB free and the `0.3.2` image pull failed with
   `no space left on device`; PostgreSQL/RustFS settings and document engines are also unavailable
   for the remaining canonical suites.
+- 2026-08-27: Pull request #91 passed all 12 ready-PR jobs and was squash-merged to `main` at
+  `adaf16ed62eb88b50c6e5b45b0c612a36b898d7b`. The post-merge full-domain CI matrix also passed.
+  Automatic release run 33106024542 published final GitHub Release and tag `v0.3.3`, the PyPI wheel
+  and source distribution, and the attested GHCR image with SBOM and release evidence. The
+  quickstart now pins that image at registry digest
+  `sha256:dbd23aea3daee03255b803add829a087c0490b00db9bd342996fc5051b652ffc`.
 
 ## Synchronization
 
