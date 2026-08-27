@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import os
+import shutil
 import stat
 import subprocess
 import time
@@ -23,6 +24,7 @@ COMPOSE = ROOT / "compose.yaml"
 SIMPLE_OVERLAY = ROOT / "compose.simple.yaml"
 PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
+PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
 ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
@@ -43,8 +45,8 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.3.1@"
-    "sha256:3f50da7ef3664da6d73d4ad0cf0e9797f5a640f534114d179068cdc4c9f15a92"
+    "ghcr.io/guillaume-lombardo/md-converter:0.3.2@"
+    "sha256:4ae9b40d3265fab56655d3d998cb6dc236d99f9a1f510bf02872926d70bcd6dc"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
@@ -215,6 +217,14 @@ def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
     assert "local-antivirus" in overlay
 
 
+def test_podman_trusted_upstream_overlay_uses_rootless_user_mode_network() -> None:
+    overlay = PODMAN_TRUSTED_UPSTREAM_OVERLAY.read_text(encoding="utf-8")
+
+    assert "network_mode: slirp4netns" in overlay
+    assert "networks: !reset []" in overlay
+    assert "ports:" not in overlay
+
+
 def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
     overlay = PODMAN_OVERLAY.read_text(encoding="utf-8")
 
@@ -248,6 +258,11 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "--trust-upstream-antivirus" in script
     assert "trusted_upstream_antivirus=true" in script
     assert 'files+=(--file "$repository/compose.trusted-upstream.yaml")' in script
+    assert (
+        'files+=(--file "$repository/compose.podman-trusted-upstream.yaml")' in script
+    )
+    assert "command -v slirp4netns >/dev/null 2>&1" in script
+    assert "The trusted-upstream Podman quickstart requires slirp4netns." in script
     assert "compose rm --stop --force clamav" in script
     assert "Trusted upstream antivirus mode is active" in script
     assert "candidate=docker" in script
@@ -420,6 +435,44 @@ def test_simple_quickstart_rejects_a_concurrent_state_user(tmp_path: Path) -> No
     finally:
         holder.terminate()
         holder.wait(timeout=5)
+
+
+def test_trusted_upstream_podman_rejects_missing_slirp4netns(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for command_name in ("bash", "chmod", "dirname", "env", "flock", "mkdir"):
+        command = shutil.which(command_name)
+        assert command is not None
+        (fake_bin / command_name).symlink_to(command)
+    podman = fake_bin / "podman"
+    podman.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1 $2\" = 'info --format' ]; then printf 'true\\n'; fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    podman.chmod(0o755)
+
+    rejected = subprocess.run(
+        [str(SIMPLE_QUICKSTART), "up", "--trust-upstream-antivirus"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "HOME": str(tmp_path),
+            "MARKWEAVE_SIMPLE_RUNTIME": "podman",
+            "PATH": str(fake_bin),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+    )
+
+    assert rejected.returncode != 0
+    assert (
+        "The trusted-upstream Podman quickstart requires slirp4netns."
+        in rejected.stderr
+    )
 
 
 def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:

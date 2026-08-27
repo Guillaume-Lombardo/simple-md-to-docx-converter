@@ -70,6 +70,10 @@ select_runtime() {
       fi
       [[ "$(podman info --format '{{.Host.Security.Rootless}}')" == true ]] || \
         fail "The simple Podman quickstart supports rootless Podman only."
+      if [[ "$trusted_upstream_antivirus" == true ]]; then
+        command -v slirp4netns >/dev/null 2>&1 || \
+          fail "The trusted-upstream Podman quickstart requires slirp4netns."
+      fi
       runtime_name=podman
       runtime_command=(podman)
       start_private_podman_service
@@ -197,6 +201,9 @@ compose() {
   fi
   if [[ "$trusted_upstream_antivirus" == true ]]; then
     files+=(--file "$repository/compose.trusted-upstream.yaml")
+    if [[ "$runtime_name" == podman ]]; then
+      files+=(--file "$repository/compose.podman-trusted-upstream.yaml")
+    fi
   fi
   "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$runtime_env" "$@"

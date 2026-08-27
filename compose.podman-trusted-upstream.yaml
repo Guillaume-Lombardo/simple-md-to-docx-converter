@@ -1,0 +1,7 @@
+# Trusted-upstream mode has no container-to-container scanner dependency. Use
+# Podman's rootless user-mode network directly so hosts without a working CNI
+# portmap/iptables path can still publish the loopback-only evaluation port.
+services:
+  markweave:
+    network_mode: slirp4netns
+    networks: !reset []

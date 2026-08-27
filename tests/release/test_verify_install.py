@@ -28,7 +28,7 @@ def test_public_import_check_rejects_legacy_import_after_install(
 ) -> None:
     """The isolated verification script checks both the new and removed imports."""
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.2"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.3"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"
@@ -41,7 +41,7 @@ def test_public_import_check_rejects_application_version_mismatch(
 ) -> None:
     """Distribution and public application versions must identify one release."""
     monkeypatch.setattr(markweave, "__version__", "9.9.9")
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.2"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.3.3"])
 
     with pytest.raises(SystemExit, match=r"unexpected markweave\.__version__"):
         exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
