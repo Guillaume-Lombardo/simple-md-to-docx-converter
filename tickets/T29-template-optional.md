@@ -2,7 +2,7 @@
 ticket: T29
 linear_id: G1L-391
 linear_url: https://linear.app/g1lom/issue/G1L-391/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -89,6 +89,9 @@ remain reproducible and traceable.
   lease instead of assuming a background thread runs within a fixed 110 ms wall-clock window. The
   regression passes 50 consecutive runs, the exact 37-test `storage-standalone` CI domain, and all
   1,596 locally runnable tests; Ruff, `ty`, and the 23-test Web suite also pass.
+- 2026-08-28: PR #98 was independently approved and squash-merged as `0632d150` after every required
+  CI domain and the aggregate gate passed. The source branch was removed locally and remotely, and
+  Linear issue G1L-391 was marked `Done` after the merge was verified on `main`.
 
 ## Synchronization
 
