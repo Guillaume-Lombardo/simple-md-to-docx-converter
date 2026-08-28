@@ -57,8 +57,8 @@ backing_file() {
 
 write_fault_env() {
   local device="$1"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$port" "$device" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$port" "$device" >"$fault_env"
 }
 
 compose() {
