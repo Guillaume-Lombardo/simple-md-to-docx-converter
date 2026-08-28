@@ -31,10 +31,15 @@ does not authorize public exposure.
 | `MD_CONVERTER_SESSION_ABSOLUTE_SECONDS` | `28800`, positive | Both profiles; at least the idle lifetime |
 | `MD_CONVERTER_SESSION_COOKIE_NAME` | `md_converter_session`, nonblank | Both profiles |
 | `MD_CONVERTER_PUBLIC_ORIGIN` | Optional | Both profiles; exact HTTP(S) scheme, host, optional port only |
+| `MD_CONVERTER_INSECURE_EVALUATION_MODE` | `false` | Both profiles; explicit loopback-only test exception |
 
 `MD_CONVERTER_PUBLIC_ORIGIN` is authoritative for Origin checks behind a TLS-terminating proxy.
 Paths, queries, fragments, and user information are rejected. Forwarded headers remain untrusted.
 When it is unset, the direct ASGI request base URL is authoritative.
+Setting `MD_CONVERTER_INSECURE_EVALUATION_MODE=true` disables both this protection and upload
+malware scanning. That exception exists only for the loopback-bound
+`quickstart-simple.sh up --insecure` SSH-tunnel workflow. It must remain `false` in production and
+in every network-accessible deployment.
 
 ## Conversion and engine limits
 
@@ -134,6 +139,8 @@ In the default `clamav` mode, scanner unavailability fails closed. `trusted-upst
 local malware scan and must be selected only when a proxy scans every upload before forwarding it
 and network policy prevents all direct or alternate application access. Startup emits a warning in
 that mode because the operator, rather than Markweave, owns and asserts the scanning boundary.
+The separate `MD_CONVERTER_INSECURE_EVALUATION_MODE=true` exception also bypasses this scanner and
+emits an insecure-mode warning; it is limited to the documented loopback SSH-tunnel quickstart.
 Credentials or document content must never be placed in these settings.
 
 ## Storage profiles and secrets

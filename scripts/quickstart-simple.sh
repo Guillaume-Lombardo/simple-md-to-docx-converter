@@ -25,6 +25,7 @@ starting=false
 start_succeeded=false
 compose_started=false
 trusted_upstream_antivirus=false
+insecure=false
 
 fail() {
   echo "$1" >&2
@@ -75,7 +76,7 @@ select_runtime() {
         fail "The simple Podman quickstart supports rootless Podman only."
       if [[ "$trusted_upstream_antivirus" == true ]]; then
         command -v slirp4netns >/dev/null 2>&1 || \
-          fail "The trusted-upstream Podman quickstart requires slirp4netns."
+          fail "The ClamAV-free Podman quickstart requires slirp4netns."
       fi
       runtime_name=podman
       runtime_command=(podman)
@@ -183,18 +184,23 @@ prepare_template() {
 }
 
 write_runtime_env() {
+  local insecure_evaluation_mode=false
   local password
   if [[ -n "$runtime_env" && -f "$runtime_env" ]]; then
     rm -f -- "$runtime_env"
   fi
   runtime_env="$(mktemp "$state_directory/compose.XXXXXX")"
   password="$(sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' "$password_file")"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
-    "$password" "$port" "$public_origin" >"$runtime_env"
+  if [[ "$insecure" == true ]]; then
+    insecure_evaluation_mode=true
+  fi
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=%s\nMARKWEAVE_INSECURE_EVALUATION_MODE=%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
+    "$password" "$port" "$public_origin" "$insecure_evaluation_mode" >"$runtime_env"
   chmod 0600 -- "$runtime_env"
 }
 
 compose() {
+  local insecure_evaluation_mode=false
   local files=(
     --file "$repository/compose.yaml"
     --file "$repository/compose.simple.yaml"
@@ -208,7 +214,11 @@ compose() {
       files+=(--file "$repository/compose.podman-trusted-upstream.yaml")
     fi
   fi
+  if [[ "$insecure" == true ]]; then
+    insecure_evaluation_mode=true
+  fi
   MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
+    MARKWEAVE_INSECURE_EVALUATION_MODE="$insecure_evaluation_mode" \
     "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$runtime_env" "$@"
 }
@@ -322,8 +332,12 @@ wait_for_application() {
 
 verify_application_public_origin() {
   local container
+  local expected_insecure=false
   container="$(application_container)"
   [[ -n "$container" ]] || fail "The running Markweave container could not be resolved."
+  if [[ "$insecure" == true ]]; then
+    expected_insecure=true
+  fi
   "${runtime_command[@]}" exec "$container" python -c '
 import os
 import sys
@@ -332,25 +346,30 @@ import urllib.parse
 import urllib.request
 
 expected = sys.argv[1]
+insecure = sys.argv[2]
 if os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN") != expected:
     raise SystemExit(2)
-request = urllib.request.Request(
-    "http://127.0.0.1:8080/login",
-    data=urllib.parse.urlencode(
-        {"username": "origin-probe", "password": "invalid-origin-probe"}
-    ).encode(),
-    headers={"Origin": expected},
-    method="POST",
-)
-try:
-    urllib.request.urlopen(request, timeout=5)
-except urllib.error.HTTPError as error:
-    if error.code != 401:
-        raise SystemExit(3) from error
-else:
-    raise SystemExit(4)
-' "$public_origin" >/dev/null 2>&1 || \
-    fail "The running application rejected the configured public origin."
+if os.environ.get("MD_CONVERTER_INSECURE_EVALUATION_MODE") != insecure:
+    raise SystemExit(3)
+origins = ("null", "https://attacker.invalid") if insecure == "true" else (expected,)
+for origin in origins:
+    request = urllib.request.Request(
+        "http://127.0.0.1:8080/login",
+        data=urllib.parse.urlencode(
+            {"username": "origin-probe", "password": "invalid-origin-probe"}
+        ).encode(),
+        headers={"Origin": origin},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=5)
+    except urllib.error.HTTPError as error:
+        if error.code != 401:
+            raise SystemExit(4) from error
+    else:
+        raise SystemExit(5)
+' "$public_origin" "$expected_insecure" >/dev/null 2>&1 || \
+    fail "The running application does not match the requested login-origin policy."
 }
 
 start_podman_stack() {
@@ -362,7 +381,7 @@ start_podman_stack() {
 
 start_trusted_upstream_stack() {
   # Remove a scanner left by an earlier default-mode start before recreating the
-  # application with its explicit trusted-upstream configuration.
+  # application with its explicit ClamAV-free configuration.
   if [[ -n "$(scanner_container)" ]]; then
     compose rm --stop --force clamav >/dev/null
   fi
@@ -423,6 +442,10 @@ start() {
     initialize_work_volume
   fi
   compose_started=true
+  if [[ "$insecure" == true ]]; then
+    echo "Warning: INSECURE MODE is active; upload scanning and login-origin validation are disabled."
+    echo "Warning: Use only through a temporary SSH tunnel. Never expose this mode to a network or production."
+  fi
   if [[ "$trusted_upstream_antivirus" == true ]]; then
     start_trusted_upstream_stack
   elif [[ "$runtime_name" == podman ]]; then
@@ -437,7 +460,7 @@ start() {
   echo "Markweave is ready with $runtime_name at http://localhost:$port"
   echo "Template: $template_file"
   echo "Warning: the simple /work volume has no physical capacity cap."
-  if [[ "$trusted_upstream_antivirus" == true ]]; then
+  if [[ "$trusted_upstream_antivirus" == true && "$insecure" != true ]]; then
     echo "Warning: Trusted upstream antivirus mode is active; Markweave does not scan uploads."
     echo "Warning: Keep Markweave unreachable except through a proxy that scans every upload."
   fi
@@ -478,8 +501,11 @@ case "${1:-}" in
   up)
     if [[ $# -eq 2 && "${2:-}" == --trust-upstream-antivirus ]]; then
       trusted_upstream_antivirus=true
+    elif [[ $# -eq 2 && "${2:-}" == --insecure ]]; then
+      trusted_upstream_antivirus=true
+      insecure=true
     elif [[ $# -ne 1 ]]; then
-      fail "usage: scripts/quickstart-simple.sh up [--trust-upstream-antivirus]"
+      fail "usage: scripts/quickstart-simple.sh up [--trust-upstream-antivirus|--insecure]"
     fi
     start
     ;;
@@ -500,6 +526,6 @@ case "${1:-}" in
     compose_status logs --follow markweave clamav
     ;;
   *)
-    fail "usage: scripts/quickstart-simple.sh {up [--trust-upstream-antivirus]|down|password|ps|logs}"
+    fail "usage: scripts/quickstart-simple.sh {up [--trust-upstream-antivirus|--insecure]|down|password|ps|logs}"
     ;;
 esac

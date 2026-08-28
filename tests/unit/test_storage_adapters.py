@@ -446,6 +446,22 @@ def test_upload_scanner_assembly_accepts_explicit_trusted_upstream_boundary(
 
 
 @pytest.mark.unit
+def test_upload_scanner_assembly_accepts_explicit_insecure_evaluation_mode(
+    mocker: MockerFixture,
+) -> None:
+    settings = _standalone_component_settings(insecure_evaluation_mode=True)
+    warning = mocker.patch("markweave.app.log_event")
+
+    scanner = build_upload_scanner(settings)
+
+    assert isinstance(scanner, TrustedUpstreamUploadScanner)
+    warning.assert_called_once_with(
+        "insecure_evaluation_mode_enabled",
+        level=logging.WARNING,
+    )
+
+
+@pytest.mark.unit
 def test_postgresql_migrations_take_a_transaction_advisory_lock(
     mocker: MockerFixture,
 ) -> None:

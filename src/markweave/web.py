@@ -14,7 +14,7 @@ WEB_SECURITY_HEADERS = {
         "connect-src 'self'; img-src 'self' data:; form-action 'self'; "
         "base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
     ),
-    "Referrer-Policy": "no-referrer",
+    "Referrer-Policy": "same-origin",
     "X-Content-Type-Options": "nosniff",
 }
 

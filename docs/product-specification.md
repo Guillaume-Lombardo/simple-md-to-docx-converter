@@ -45,7 +45,7 @@ The product includes a conversion page, template administration, local authentic
 | Repository language | English for code, identifiers, docstrings, UI, errors, logs, documentation, commits, and pull requests |
 | Superseded template retention | 365 days; never delete the active version or ten newest versions per template |
 | Audit retention | Immutable for 365 days, then bounded traceable deletion |
-| Upload malware scanning | Local ClamAV before processing or durable persistence by default; an explicit trusted-upstream mode is permitted only behind a non-bypassable proxy that scans every upload before forwarding; fail closed in ClamAV mode; no durable quarantine |
+| Upload malware scanning | Local ClamAV before processing or durable persistence by default; an explicit trusted-upstream mode is permitted only behind a non-bypassable proxy that scans every upload before forwarding; the explicit insecure evaluation exception may omit scanning only while loopback-bound behind a temporary SSH tunnel; fail closed in ClamAV mode; no durable quarantine |
 | Recovery targets | Standalone RPO 24h/RTO 4h; distributed RPO 1h/RTO 2h; automated quarterly proof |
 
 Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
@@ -326,8 +326,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T25 | Support a CNI-free `slirp4netns` Podman quickstart for trusted-upstream antivirus deployments and publish patch release `0.3.3` | T24 |
 | T26 | Preserve strict login-origin validation on custom quickstart ports and same-host reverse proxies, and publish patch release `0.3.4` | T25 |
 | T27 | Cache checksum-locked LibreOffice CI artifacts and verify effective quickstart login origins across Compose providers | T22, T26 |
+| T28 | Add an explicit loopback-only insecure quickstart for temporary SSH-tunnel testing, fix native same-origin browser login, and publish patch release `0.3.5` | T24, T26, T27 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, and the CI/origin reliability follow-up (T24–T27). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, and the bounded SSH-tunnel evaluation mode (T24–T28). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Deferred decisions and initial-scope exclusions
 

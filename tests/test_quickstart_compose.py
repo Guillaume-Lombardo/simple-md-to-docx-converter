@@ -267,7 +267,7 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
         'files+=(--file "$repository/compose.podman-trusted-upstream.yaml")' in script
     )
     assert "command -v slirp4netns >/dev/null 2>&1" in script
-    assert "The trusted-upstream Podman quickstart requires slirp4netns." in script
+    assert "The ClamAV-free Podman quickstart requires slirp4netns." in script
     assert "compose rm --stop --force clamav" in script
     assert "Trusted upstream antivirus mode is active" in script
     assert "candidate=docker" in script
@@ -306,6 +306,15 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "down --volumes" not in script
     assert "no physical capacity cap" in script
     assert "Markweave is ready with $runtime_name" in script
+
+
+def test_simple_quickstart_has_an_explicit_warned_insecure_mode() -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+
+    assert "--insecure" in script
+    assert "insecure=true" in script
+    assert "INSECURE MODE is active" in script
+    assert "Never expose this mode to a network or production" in script
 
 
 def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() -> None:
@@ -370,8 +379,10 @@ def test_simple_quickstart_probes_the_browser_origin_before_readiness() -> None:
     script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
 
     assert 'os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN")' in script
-    assert 'headers={"Origin": expected}' in script
-    assert "running application rejected the configured public origin" in script
+    assert 'headers={"Origin": origin}' in script
+    assert 'os.environ.get("MD_CONVERTER_INSECURE_EVALUATION_MODE")' in script
+    assert '("null", "https://attacker.invalid")' in script
+    assert "does not match the requested login-origin policy" in script
 
 
 @pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
@@ -487,8 +498,10 @@ def test_simple_quickstart_rejects_a_concurrent_state_user(tmp_path: Path) -> No
         holder.wait(timeout=5)
 
 
-def test_trusted_upstream_podman_rejects_missing_slirp4netns(
+@pytest.mark.parametrize("flag", ["--trust-upstream-antivirus", "--insecure"])
+def test_clamav_free_podman_rejects_missing_slirp4netns(
     tmp_path: Path,
+    flag: str,
 ) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -506,7 +519,7 @@ def test_trusted_upstream_podman_rejects_missing_slirp4netns(
     podman.chmod(0o755)
 
     rejected = subprocess.run(
-        [str(SIMPLE_QUICKSTART), "up", "--trust-upstream-antivirus"],
+        [str(SIMPLE_QUICKSTART), "up", flag],
         check=False,
         capture_output=True,
         text=True,
@@ -519,10 +532,7 @@ def test_trusted_upstream_podman_rejects_missing_slirp4netns(
     )
 
     assert rejected.returncode != 0
-    assert (
-        "The trusted-upstream Podman quickstart requires slirp4netns."
-        in rejected.stderr
-    )
+    assert "The ClamAV-free Podman quickstart requires slirp4netns." in rejected.stderr
 
 
 def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
@@ -638,3 +648,8 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert "assert accepted_status == 200" in runner
     assert "assert hostile_status == 403" in runner
     assert '"LOGIN_ORIGIN_INVALID"' in runner
+    assert "MD_CONVERTER_INSECURE_EVALUATION_MODE=true" in runner
+    assert "verify-disabled-login-origin" in runner
+    assert '"event":"insecure_evaluation_mode_enabled"' in runner
+    assert "--publish 127.0.0.1::8080" in runner
+    assert 'podman rm --force "$application_name" "$clamav_name"' in runner

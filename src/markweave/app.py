@@ -868,6 +868,9 @@ class ProfileReadinessProbe:
 def build_upload_scanner(settings: Settings) -> UploadScanner:
     """Assemble the explicit upload-scanning trust boundary."""
 
+    if settings.insecure_evaluation_mode:
+        log_event("insecure_evaluation_mode_enabled", level=logging.WARNING)
+        return TrustedUpstreamUploadScanner()
     if settings.malware_scanning_mode is MalwareScanningMode.TRUSTED_UPSTREAM:
         log_event(
             "malware_scanning_delegated_to_trusted_upstream",
@@ -1098,6 +1101,8 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         return auth.authenticate(session_token(request))
 
     def enforce_login_origin(request: Request) -> None:
+        if resolved_settings.insecure_evaluation_mode:
+            return
         origin = request.headers.get("Origin")
         if origin is None:
             return
