@@ -76,7 +76,10 @@ export async function sessionRequest(page, pathName, options = {}) {
         method: options.method || "GET",
         headers,
       });
-      return { status: response.status };
+      return {
+        status: response.status,
+        body: options.json ? await response.json() : null,
+      };
     },
     { pathName, options },
   );

@@ -4,6 +4,7 @@ import hashlib
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Lock
@@ -51,6 +52,7 @@ from tests.job_repository_contracts import (
     TEMPLATE_ID,
     TEMPLATE_VERSION_ID,
     exercise_job_repository_contract,
+    submission,
 )
 from tests.sqlite_compatibility import (
     enforce_sqlite_334_alter_grammar,
@@ -66,6 +68,54 @@ INTEGRITY_COLUMNS = {
     "source_size",
     "result_manifest_object_id",
 }
+
+
+@pytest.mark.integration
+def test_optional_template_migration_round_trip(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("conversion_jobs")
+    }
+    assert columns["template_id"]["nullable"]
+    assert columns["template_version_id"]["nullable"]
+    assert any(
+        constraint["name"] == "ck_conversion_jobs_template_pair"
+        for constraint in inspect(engine).get_check_constraints("conversion_jobs")
+    )
+
+    downgrade_database(engine, "20260825_12")
+    downgraded = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("conversion_jobs")
+    }
+    assert not downgraded["template_id"]["nullable"]
+    assert not downgraded["template_version_id"]["nullable"]
+
+    upgrade_database(engine)
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_repository_persists_pandoc_default_job(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "default-owner", "hash:owner", Role.USER)
+    SqlUserRepository(engine).create(owner)
+
+    created, replayed = SqlJobRepository(engine).create(
+        replace(
+            submission(owner.id),
+            template_id=None,
+            template_version_id=None,
+        )
+    )
+
+    assert not replayed
+    assert created.template_id is None
+    assert created.template_version_id is None
+    engine.dispose()
 
 
 @pytest.mark.integration

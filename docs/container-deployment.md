@@ -135,10 +135,11 @@ by [releasing.md](releasing.md).
 
 ## Production conversion runtime
 
-The processor loads the frozen owner-scoped source and the exact verified template version, verifies
-the persisted filename, kind, size, and digest without inferring source type from content, and
-delegates validation, Mermaid rendering, DOCX creation, and PDF creation to the existing bounded
-adapters. PDF traceability is published as a canonical sidecar; `both` output is also a
+The processor loads the frozen owner-scoped source and, for versioned mode, the exact verified
+template version. Pandoc-default mode resolves no template. It verifies the persisted filename,
+kind, size, and digest without inferring source type from content, then delegates validation,
+Mermaid rendering, DOCX creation, and PDF creation to the existing bounded adapters. PDF
+traceability is published as a canonical sidecar; `both` output is also a
 deterministic ZIP containing `document.docx`, `document.pdf`, and `traceability.json`. Embedded
 worker failure makes standalone readiness fail. External workers expose process-local metrics and
 stop on SIGINT or SIGTERM.

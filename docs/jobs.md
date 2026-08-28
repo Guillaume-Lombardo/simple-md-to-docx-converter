@@ -3,7 +3,8 @@
 ## HTTP contract
 
 Authenticated clients submit multipart Markdown sources to `POST /api/v1/conversions` with a
-template identity, immutable template-version identity, and `docx`, `pdf`, or `both` output. The
+optional template identity and immutable template-version identity, and `docx`, `pdf`, or `both`
+output. Both identifiers are present for versioned styling or absent for Pandoc's native default. The
 source filename must end in `.md` or `.zip`; Markdown is decoded as strict UTF-8, while ZIP inputs
 are validated by the secure archive adapter before conversion. The validated private leaf filename,
 explicit source kind, byte size, and SHA-256 are persisted with the owner-bound object identifier.
@@ -11,8 +12,9 @@ Workers never infer the kind from magic bytes; they reject missing legacy metada
 filename/kind/content/size/digest mismatch with the safe `source_integrity` failure. Historical
 terminal jobs created before migration `20260825_12` remain readable, while an older non-terminal
 job without source metadata fails closed if claimed. The
-job transaction locks the template identity and accepts only the exact active, published current
-pair, preventing an archive or replacement race from changing the frozen selection. The server
+job transaction locks a supplied template identity and accepts only the exact active, published
+current pair; template-free jobs skip that lock. This prevents an archive or replacement race from
+changing a frozen versioned selection. The server
 then reserves a durable job row, atomically stores its source, and activates the queue row
 before returning `202 Accepted`, `Location`, and `Retry-After`. Abandoned source reservations are
 failed and cleaned by recovery, so a process crash cannot create an untracked private object.
@@ -22,8 +24,8 @@ request returns the original job, while changing its content or parameters retur
 Owners list their jobs and read status under `/api/v1/conversions`. Owners and administrators may
 read an individual job, request cancellation, and download a successful result. Unauthorized job
 identifiers are indistinguishable from absent ones. Responses expose only stable state, progress,
-attempt, template identifiers, and safe functional failures—never paths, SQL, leases, or worker
-identifiers. Status responses also include result expiration, the immutable template version, and
+attempt, explicit template mode, nullable template identifiers, and safe functional failures—never
+paths, SQL, leases, or worker identifiers. Status responses also include result expiration and
 the locked converter, Pandoc, Mermaid CLI, Chromium, and LibreOffice versions needed for
 traceability.
 PDF and combined results also expose their canonical external traceability JSON at
@@ -77,8 +79,9 @@ Distributed entrypoints use `AppComponents.build_external_worker_runtime`. That 
 the shared loop with the independently bound process-local metrics listener documented in
 `docs/observability.md`; calling the bare external loop does not satisfy the runtime contract.
 
-The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` resolves the
-exact frozen template pair through `TemplateService.resolve_frozen_version`, verifies the stored
+The processor port is intentionally storage-neutral. `FrozenTemplateJobProcessor` bypasses template
+storage for `pandoc-default` jobs. For `versioned` jobs it resolves the exact frozen template pair
+through `TemplateService.resolve_frozen_version`, verifies the stored
 size and SHA-256, and passes the immutable version metadata and bytes to the document processor;
 later replacement or restoration cannot change a queued job's reference bytes. It also passes the
 worker's absolute monotonic deadline so document processors can cap every engine invocation by the

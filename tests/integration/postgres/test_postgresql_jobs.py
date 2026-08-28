@@ -5,13 +5,14 @@ import json
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
 from uuid import UUID, uuid4
 
 import boto3
 import pytest
-from sqlalchemy import delete, inspect
+from sqlalchemy import delete, inspect, update
 
 from markweave.auth.models import Role, User
 from markweave.conversion.errors import ConversionErrorCode
@@ -22,6 +23,7 @@ from markweave.jobs.models import (
     JobRequest,
     JobState,
     JobStep,
+    LeaseHeartbeat,
 )
 from markweave.jobs.service import JobService, JobServicePolicy
 from markweave.jobs.worker import WorkerPolicy
@@ -238,6 +240,97 @@ def test_postgresql_job_contract_and_skip_locked_claims() -> None:
             connection.execute(
                 delete(UserRow).where(UserRow.id.in_((str(owner.id), str(other.id))))
             )
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_repository_persists_pandoc_default_job() -> None:
+    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    unique = uuid4().hex
+    owner = User(uuid4(), "Owner", f"default-{unique}", "hash:owner", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    repository = SqlJobRepository(engine)
+    try:
+        created, replayed = repository.create(
+            replace(
+                submission(owner.id),
+                template_id=None,
+                template_version_id=None,
+            )
+        )
+
+        persisted = repository.get(created.id)
+        assert not replayed
+        assert persisted is not None
+        assert persisted.template_id is None
+        assert persisted.template_version_id is None
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                delete(ConversionJobRow).where(
+                    ConversionJobRow.owner_id == str(owner.id)
+                )
+            )
+            connection.execute(delete(UserRow).where(UserRow.id == str(owner.id)))
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_job_progress_survives_template_archival() -> None:
+    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    unique = uuid4().hex
+    owner = User(uuid4(), "Owner", f"archived-{unique}", "hash:owner", Role.USER)
+    template_id = uuid4()
+    version_id = uuid4()
+    SqlUserRepository(engine).create(owner)
+    publish_template_pair(engine, owner.id, template_id, version_id)
+    repository = SqlJobRepository(engine)
+    queued = None
+    try:
+        queued, replayed = repository.create(
+            replace(
+                submission(owner.id),
+                template_id=template_id,
+                template_version_id=version_id,
+            )
+        )
+        assert not replayed
+        repository.activate_source(queued.id, NOW)
+        claimed = repository.claim(f"archived-{unique}", NOW, LEASE_END)
+        assert claimed is not None and claimed.lease_token is not None
+        with engine.begin() as connection:
+            connection.execute(
+                update(TemplateRow)
+                .where(TemplateRow.id == str(template_id))
+                .values(status="archived")
+            )
+
+        assert repository.heartbeat(
+            LeaseHeartbeat(
+                claimed.id,
+                f"archived-{unique}",
+                claimed.lease_token,
+                NOW + timedelta(seconds=1),
+                LEASE_END + timedelta(seconds=1),
+                JobStep.RENDERING,
+                40,
+            )
+        )
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                delete(ConversionJobRow).where(
+                    ConversionJobRow.owner_id == str(owner.id)
+                )
+            )
+            connection.execute(
+                delete(TemplateRow).where(TemplateRow.id == str(template_id))
+            )
+            connection.execute(delete(UserRow).where(UserRow.id == str(owner.id)))
         engine.dispose()
 
 

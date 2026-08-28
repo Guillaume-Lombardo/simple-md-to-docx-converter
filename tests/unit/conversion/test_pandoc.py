@@ -94,6 +94,27 @@ def test_adapter_uses_fixed_arguments_isolated_workspace_and_allowlisted_environ
 
 
 @pytest.mark.unit
+def test_adapter_uses_pandoc_default_when_reference_is_omitted(
+    tmp_path: Path, mocker
+) -> None:
+    output = minimal_docx()
+    process = mocker.Mock()
+    process.wait.return_value = 0
+
+    def start(arguments, **options):
+        workspace = options["cwd"]
+        assert not (workspace / "reference.docx").exists()
+        assert not any(
+            argument.startswith("--reference-doc=") for argument in arguments
+        )
+        (workspace / "output.docx").write_bytes(output)
+        return process
+
+    mocker.patch("markweave.conversion.pandoc.subprocess.Popen", side_effect=start)
+    assert converter(tmp_path).convert(ApprovedMarkdown("# Default"), None) == output
+
+
+@pytest.mark.unit
 def test_each_conversion_uses_a_distinct_cleaned_workspace(
     tmp_path: Path, mocker
 ) -> None:

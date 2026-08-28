@@ -87,10 +87,11 @@ deletes its globally selected candidates, removes the guard, and commits immutab
 cleanup evidence atomically. SQLite uses the same guard contract under its serialized write
 transaction.
 
-Conversion status continues to expose its immutable `template_version_id` and the sorted converter,
-Pandoc, Mermaid CLI, Chromium, and LibreOffice versions. It now also exposes the durable correlation
-identifier used by the worker. These values identify the execution inputs without exposing stored
-content or storage locations.
+Conversion status exposes `template_mode`; versioned jobs also expose their immutable
+`template_version_id`, while Pandoc-default jobs expose null template identifiers. Status includes
+the sorted converter, Pandoc, Mermaid CLI, Chromium, and LibreOffice versions and the durable
+correlation identifier used by the worker. These values identify the execution inputs without
+exposing stored content or storage locations.
 
 ## Readiness
 

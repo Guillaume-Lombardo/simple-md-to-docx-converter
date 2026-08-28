@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from time import monotonic
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import UUID
 
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
@@ -50,6 +51,19 @@ class TemplateAwareProcessor(Protocol):
     ) -> JobProcessResult: ...
 
 
+class TemplateOptionalProcessor(TemplateAwareProcessor, Protocol):
+    """Extended processor capable of using Pandoc's native reference document."""
+
+    def process_without_template(
+        self,
+        job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult: ...
+
+
 class FrozenTemplateJobProcessor(JobProcessor):
     """Resolve exactly the pair frozen at submission before processing starts."""
 
@@ -66,6 +80,25 @@ class FrozenTemplateJobProcessor(JobProcessor):
         cancelled: CancellationProbe,
         progress: Callable[[JobStep, int], None],
     ) -> JobProcessResult:
+        deadline = (
+            cancelled.budget.deadline_monotonic
+            if cancelled.budget is not None
+            else None
+        )
+        if job.template_id is None:
+            processor = cast("TemplateOptionalProcessor", self._processor)
+            return replace(
+                processor.process_without_template(
+                    job,
+                    cancelled=cancelled,
+                    deadline_monotonic=deadline,
+                    progress=progress,
+                ),
+                template_version=None,
+                template_sha256=None,
+            )
+        if job.template_version_id is None:
+            raise AssertionError("Conversion job contains a partial template pair")
         try:
             template, content = self._resolver.resolve_frozen_version(
                 job.template_id, job.template_version_id
@@ -75,17 +108,17 @@ class FrozenTemplateJobProcessor(JobProcessor):
                 ConversionErrorCode.TEMPLATE_INTEGRITY,
                 "Frozen template content could not be verified.",
             ) from None
-        return self._processor.process_with_template(
-            job,
-            template,
-            content,
-            cancelled=cancelled,
-            deadline_monotonic=(
-                cancelled.budget.deadline_monotonic
-                if cancelled.budget is not None
-                else None
+        return replace(
+            self._processor.process_with_template(
+                job,
+                template,
+                content,
+                cancelled=cancelled,
+                deadline_monotonic=deadline,
+                progress=progress,
             ),
-            progress=progress,
+            template_version=str(template.number),
+            template_sha256=template.sha256,
         )
 
 

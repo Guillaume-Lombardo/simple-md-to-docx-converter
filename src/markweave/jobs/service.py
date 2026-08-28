@@ -54,6 +54,31 @@ def _digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _request_digest(
+    request: JobRequest,
+    *,
+    source_sha256: str,
+    source_size: int,
+    include_template_mode: bool,
+) -> str:
+    fields = [
+        source_sha256.encode("ascii"),
+        str(source_size).encode("ascii"),
+        request.source_kind.value.encode("ascii"),
+    ]
+    if include_template_mode:
+        fields.append(request.template_mode.value.encode("ascii"))
+    fields.extend(
+        (
+            str(request.template_id or "").encode("ascii"),
+            str(request.template_version_id or "").encode("ascii"),
+            request.output.value.encode("ascii"),
+            repr(request.component_versions).encode("utf-8"),
+        )
+    )
+    return _digest(b"\0".join(fields))
+
+
 class JobService:
     """Persist sources and jobs before acknowledging owner-scoped submission."""
 
@@ -79,18 +104,11 @@ class JobService:
         idempotency_digest = self._idempotency_digest(idempotency_key)
         source_sha256 = _digest(request.source)
         source_size = len(request.source)
-        request_digest = _digest(
-            b"\0".join(
-                (
-                    source_sha256.encode("ascii"),
-                    str(source_size).encode("ascii"),
-                    request.source_kind.value.encode("ascii"),
-                    str(request.template_id).encode("ascii"),
-                    str(request.template_version_id).encode("ascii"),
-                    request.output.value.encode("ascii"),
-                    repr(request.component_versions).encode("utf-8"),
-                )
-            )
+        request_digest = _request_digest(
+            request,
+            source_sha256=source_sha256,
+            source_size=source_size,
+            include_template_mode=True,
         )
         job_id = uuid4()
         source_object_id = uuid4()
@@ -114,7 +132,17 @@ class JobService:
             )
         )
         if replayed:
-            if job.request_digest != request_digest:
+            accepted_digests = {request_digest}
+            if request.template_id is not None:
+                accepted_digests.add(
+                    _request_digest(
+                        request,
+                        source_sha256=source_sha256,
+                        source_size=source_size,
+                        include_template_mode=False,
+                    )
+                )
+            if job.request_digest not in accepted_digests:
                 raise JobConflictError("Idempotency key conflicts with its request")
             if job.source_ready:
                 return job, True

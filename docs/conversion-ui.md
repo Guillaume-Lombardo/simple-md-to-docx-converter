@@ -9,9 +9,9 @@ cancellation, and download behavior. Template and account administration remain 
 
 1. Choose or drop exactly one `.md` or `.zip` file. A standalone Markdown file cannot depend on local
    resources; use a ZIP package for Markdown plus images or other approved local assets.
-2. Keep the resolved preferred or system fallback template, or search active templates by name and
-   choose another result. The interface shows which kind of default was resolved. The submitted job
-   always carries the displayed immutable template-version identifier.
+2. Keep **Pandoc default**, keep the resolved preferred or system fallback template, or search active
+   templates by name and choose another result. **Use Pandoc default** clears a selected template.
+   The submitted job carries template identifiers only for an immutable selected version.
 3. Choose DOCX, PDF, or both. "Both" downloads as a ZIP archive.
 4. Select **Start conversion**. Submission returns immediately; the interface shows the safe job step
    and percentage while it polls with progressive backoff.

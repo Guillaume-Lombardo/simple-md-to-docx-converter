@@ -785,6 +785,33 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         assert manifest.json() == {"trace": True}
         assert manifest.headers["Cache-Control"] == "private, no-store"
         assert "traceability.json" in manifest.headers["Content-Disposition"]
+        template_free = job(
+            owner_id=admin.id,
+            template_id=None,
+            template_version_id=None,
+        )
+        jobs.submit.return_value = (template_free, False)
+        created_without_template = client.post(
+            "/api/v1/conversions",
+            headers=headers,
+            files={"source": ("source.md", b"# default")},
+            data={"output": "docx"},
+        )
+        assert created_without_template.status_code == 202
+        assert created_without_template.json()["template_mode"] == "pandoc-default"
+        submitted_request = jobs.submit.call_args.args[0]
+        assert submitted_request.template_id is None
+        assert submitted_request.template_version_id is None
+        jobs.submit.return_value = (queued, False)
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files={"source": ("source.md", b"# partial")},
+                data={"output": "docx", "template_id": str(queued.template_id)},
+            ).status_code
+            == 422
+        )
         assert (
             client.post(
                 "/api/v1/conversions",

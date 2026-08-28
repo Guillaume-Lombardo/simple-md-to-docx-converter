@@ -173,6 +173,19 @@ def test_traceability_context_rejects_unsafe_metadata(field: str, value: str) ->
         replace(TRACE, **{field: value})
 
 
+def test_traceability_context_accepts_only_consistent_pandoc_default_mode() -> None:
+    default = replace(
+        TRACE,
+        template_mode="pandoc-default",
+        template_id=None,
+        template_version=None,
+        template_sha256=None,
+    )
+    assert default.template_id is None
+    with pytest.raises(ValueError, match="Invalid PDF template traceability mode"):
+        replace(default, template_id="invented")
+
+
 def test_environment_is_allowlisted_and_workspace_scoped(tmp_path: Path) -> None:
     environment = libreoffice._environment(
         tmp_path,
@@ -206,11 +219,12 @@ def test_success_uses_fixed_isolated_arguments_and_canonical_manifest(
     artifact = _converter(tmp_path).convert(_docx(), TRACE)
     assert artifact.pdf == expected_pdf
     manifest = artifact.manifest
-    assert manifest.schema_version == 1
+    assert manifest.schema_version == 2
     assert manifest.output_pdf_bytes == len(expected_pdf)
     assert manifest.pages[0].width_points == 612
     decoded = json.loads(manifest.canonical_json())
     assert decoded["template_id"] == "template-id"
+    assert decoded["template_mode"] == "versioned"
     assert decoded["export_filter"] == "pdf:writer_pdf_Export"
     assert decoded["output_format"] == "pdf"
     assert decoded["source_docx_sha256"] != decoded["output_pdf_sha256"]

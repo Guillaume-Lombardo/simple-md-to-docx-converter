@@ -32,6 +32,8 @@ def test_processor_resolves_and_passes_exact_frozen_version(
     mocker: MockerFixture,
 ) -> None:
     frozen_job = job()
+    assert frozen_job.template_version_id is not None
+    assert frozen_job.template_id is not None
     version = TemplateVersion(
         frozen_job.template_version_id,
         frozen_job.template_id,
@@ -58,6 +60,8 @@ def test_processor_resolves_and_passes_exact_frozen_version(
     )
 
     assert result.content == b"result"
+    assert result.template_version == "7"
+    assert result.template_sha256 == "a" * 64
     resolver.resolve_frozen_version.assert_called_once_with(
         frozen_job.template_id, frozen_job.template_version_id
     )
@@ -93,3 +97,23 @@ def test_processor_sanitizes_integrity_failure_and_factory_wraps(
         policy=WorkerPolicy(2, 1, 60, 1),
     )
     assert isinstance(worker, ConversionWorker)
+
+
+@pytest.mark.unit
+def test_processor_bypasses_resolver_for_pandoc_default(mocker: MockerFixture) -> None:
+    template_free_job = job(template_id=None, template_version_id=None)
+    resolver = mocker.Mock()
+    delegate = mocker.Mock()
+    delegate.process_without_template.return_value = JobProcessResult(b"result")
+
+    result = FrozenTemplateJobProcessor(resolver, delegate).process(
+        template_free_job,
+        cancelled=NoBudgetProbe(),
+        progress=mocker.Mock(),
+    )
+
+    assert result.content == b"result"
+    assert result.template_version is None
+    assert result.template_sha256 is None
+    resolver.resolve_frozen_version.assert_not_called()
+    delegate.process_without_template.assert_called_once()

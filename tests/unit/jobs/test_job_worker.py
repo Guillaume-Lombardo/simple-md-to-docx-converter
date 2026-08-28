@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
@@ -41,6 +41,18 @@ from tests.unit.jobs.test_job_models import job
 
 pytestmark = pytest.mark.unit
 NOW = datetime(2026, 8, 24, tzinfo=UTC)
+TRACEABILITY_TEMPLATE_ID = UUID("00000000-0000-4000-8000-000000000029")
+TRACEABILITY_TEMPLATE_VERSION = "3"
+TRACEABILITY_TEMPLATE_SHA256 = "2" * 64
+
+
+def versioned_result(content: bytes, manifest: bytes | None = None) -> JobProcessResult:
+    return JobProcessResult(
+        content,
+        manifest,
+        template_version=TRACEABILITY_TEMPLATE_VERSION,
+        template_sha256=TRACEABILITY_TEMPLATE_SHA256,
+    )
 
 
 def worker(mocker: MockerFixture) -> tuple[ConversionWorker, Any, Any, Any]:
@@ -112,6 +124,7 @@ def test_worker_records_recovery_and_expiration_counts(mocker: MockerFixture) ->
 
 def running_job() -> ConversionJob:
     return job(
+        template_id=TRACEABILITY_TEMPLATE_ID,
         output=JobOutput.DOCX,
         state=JobState.RUNNING,
         step=JobStep.VALIDATING,
@@ -141,9 +154,9 @@ def traceability_manifest() -> bytes:
             "pandoc_version": "3.10.2",
             "schema_version": 1,
             "source_docx_sha256": "3" * 64,
-            "template_id": str(uuid4()),
-            "template_sha256": "2" * 64,
-            "template_version": "3",
+            "template_id": str(TRACEABILITY_TEMPLATE_ID),
+            "template_sha256": TRACEABILITY_TEMPLATE_SHA256,
+            "template_version": TRACEABILITY_TEMPLATE_VERSION,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -153,6 +166,17 @@ def traceability_manifest() -> bytes:
 def invalid_traceability_manifest(**changes: object) -> bytes:
     decoded = json.loads(traceability_manifest())
     decoded.update(changes)
+    return json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
+
+
+def traceability_manifest_v2(template_mode: str) -> bytes:
+    decoded = json.loads(traceability_manifest())
+    decoded["schema_version"] = 2
+    decoded["template_mode"] = template_mode
+    if template_mode == "pandoc-default":
+        decoded["template_id"] = None
+        decoded["template_version"] = None
+        decoded["template_sha256"] = None
     return json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
 
 
@@ -195,7 +219,7 @@ def test_worker_atomically_publishes_and_compensates_traceability_sidecar(
     claimed = replace(running_job(), output=JobOutput.PDF)
     repository.claim.return_value = claimed
     repository.heartbeat.return_value = True
-    processor.process.return_value = JobProcessResult(b"pdf", traceability_manifest())
+    processor.process.return_value = versioned_result(b"pdf", traceability_manifest())
 
     assert instance.run_once()
 
@@ -221,17 +245,90 @@ def test_worker_atomically_publishes_and_compensates_traceability_sidecar(
 
 
 @pytest.mark.parametrize(
+    "manifest_kind",
+    (
+        "v1-versioned",
+        "v2-versioned",
+        "v2-pandoc-default",
+    ),
+)
+def test_worker_accepts_traceability_manifest_v1_and_v2(
+    mocker: MockerFixture, manifest_kind: str
+) -> None:
+    instance, repository, _objects, processor = worker(mocker)
+    claimed = replace(running_job(), output=JobOutput.PDF)
+    if manifest_kind == "v1-versioned":
+        manifest = traceability_manifest()
+    elif manifest_kind == "v2-versioned":
+        manifest = traceability_manifest_v2("versioned")
+    else:
+        claimed = replace(claimed, template_id=None, template_version_id=None)
+        manifest = traceability_manifest_v2("pandoc-default")
+    repository.claim.return_value = claimed
+    repository.heartbeat.return_value = True
+    processor.process.return_value = (
+        JobProcessResult(b"pdf", manifest)
+        if manifest_kind == "v2-pandoc-default"
+        else versioned_result(b"pdf", manifest)
+    )
+
+    assert instance.run_once()
+    repository.succeed.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    (traceability_manifest(), traceability_manifest_v2("versioned")),
+)
+def test_worker_rejects_versioned_manifest_for_pandoc_default_job(
+    mocker: MockerFixture, manifest: bytes
+) -> None:
+    instance, repository, objects, processor = worker(mocker)
+    repository.claim.return_value = replace(
+        running_job(),
+        output=JobOutput.PDF,
+        template_id=None,
+        template_version_id=None,
+    )
+    repository.heartbeat.return_value = True
+    processor.process.return_value = versioned_result(b"pdf", manifest)
+
+    with pytest.raises(RuntimeError, match="canonical traceability"):
+        instance.run_once()
+
+    objects.put.assert_not_called()
+    repository.succeed.assert_not_called()
+
+
+@pytest.mark.parametrize(
     ("output", "manifest"),
     (
         (JobOutput.PDF, None),
         (JobOutput.BOTH, None),
         (JobOutput.PDF, b'{"not":"canonical"}'),
         (JobOutput.PDF, b"[]"),
+        (JobOutput.PDF, invalid_traceability_manifest(schema_version=True)),
+        (JobOutput.PDF, invalid_traceability_manifest(template_id="")),
+        (JobOutput.PDF, invalid_traceability_manifest(template_version="")),
+        (JobOutput.PDF, invalid_traceability_manifest(template_id=str(uuid4()))),
         (JobOutput.PDF, invalid_traceability_manifest(schema_version=2)),
+        (
+            JobOutput.PDF,
+            invalid_traceability_manifest(
+                schema_version=2,
+                template_mode="pandoc-default",
+            ),
+        ),
+        (
+            JobOutput.PDF,
+            traceability_manifest_v2("unsupported"),
+        ),
         (JobOutput.PDF, invalid_traceability_manifest(output_format="docx")),
         (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=True)),
         (JobOutput.PDF, invalid_traceability_manifest(output_pdf_bytes=0)),
         (JobOutput.PDF, invalid_traceability_manifest(template_sha256="invalid")),
+        (JobOutput.PDF, invalid_traceability_manifest(template_sha256="9" * 64)),
+        (JobOutput.PDF, invalid_traceability_manifest(template_version="4")),
         (JobOutput.PDF, invalid_traceability_manifest(pages=None)),
         (JobOutput.PDF, invalid_traceability_manifest(pages=[])),
         (JobOutput.PDF, invalid_traceability_manifest(pages=["invalid"])),
@@ -270,7 +367,7 @@ def test_worker_rejects_result_manifest_cardinality_before_publication(
     instance, repository, objects, processor = worker(mocker)
     repository.claim.return_value = replace(running_job(), output=output)
     repository.heartbeat.return_value = True
-    processor.process.return_value = JobProcessResult(b"result", manifest)
+    processor.process.return_value = versioned_result(b"result", manifest)
 
     with pytest.raises(RuntimeError, match="traceability manifest"):
         instance.run_once()
@@ -478,7 +575,11 @@ def test_worker_removes_published_objects_when_atomic_cancellation_wins(
     claimed = replace(running_job(), output=output)
     repository.claim.return_value = claimed
     repository.cancellation_requested.return_value = False
-    processor.process.return_value = JobProcessResult(b"result", manifest)
+    processor.process.return_value = (
+        JobProcessResult(b"result")
+        if output is JobOutput.DOCX
+        else versioned_result(b"result", manifest)
+    )
     repository.succeed.return_value = job(
         id=claimed.id,
         owner_id=claimed.owner_id,

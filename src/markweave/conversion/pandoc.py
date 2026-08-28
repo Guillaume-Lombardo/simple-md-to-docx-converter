@@ -111,7 +111,7 @@ class PandocDocxConverter:
     def convert(
         self,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -154,7 +154,7 @@ class PandocDocxConverter:
         self,
         workspace: Path,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None,
         cancellation_requested: Callable[[], bool] | None,
@@ -175,18 +175,20 @@ class PandocDocxConverter:
                 if resource_path.exists() or resource_path.is_symlink():
                     raise OSError
                 resource_path.write_bytes(resource.content)
-            reference_path.write_bytes(reference_docx)
+            if reference_docx is not None:
+                reference_path.write_bytes(reference_docx)
         except OSError:
             raise self._workspace_failure() from None
         arguments = [
             self._config.executable,
             f"--from={PANDOC_READER}",
             "--to=docx",
-            f"--reference-doc={reference_path}",
             f"--resource-path={markdown_path.parent}",
             f"--output={output_path}",
             str(markdown_path),
         ]
+        if reference_docx is not None:
+            arguments.insert(3, f"--reference-doc={reference_path}")
         process = self._start(arguments, workspace)
         self._wait(
             process,

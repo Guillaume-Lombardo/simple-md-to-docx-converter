@@ -47,7 +47,7 @@ class DocumentConverter(Protocol):
     def convert(
         self,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -376,7 +376,7 @@ class MermaidPreprocessingConverter:
     def convert(
         self,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,

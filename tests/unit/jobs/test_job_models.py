@@ -11,8 +11,10 @@ import pytest
 from markweave.jobs.models import (
     ConversionJob,
     JobOutput,
+    JobProcessResult,
     JobState,
     JobStep,
+    TemplateMode,
     result_object_id,
 )
 
@@ -58,6 +60,15 @@ def test_job_accepts_valid_queued_running_succeeded_and_failed_snapshots() -> No
         result_object_id=uuid4(),
         expires_at=NOW + timedelta(days=1),
     ).terminal
+
+
+def test_job_accepts_pandoc_default_and_rejects_partial_template_pair() -> None:
+    assert (
+        job(template_id=None, template_version_id=None).template_mode
+        is TemplateMode.PANDOC_DEFAULT
+    )
+    with pytest.raises(ValueError, match="both be present or both be absent"):
+        job(template_id=None)
     assert job(
         state=JobState.FAILED,
         error_code="CONVERSION_FAILED",
@@ -98,3 +109,18 @@ def test_attempt_result_identifiers_are_distinct_and_component_versions_are_stri
         job(component_versions=(("pandoc", "3.10.2"), ("app", "0.1.0")))
     with pytest.raises(ValueError, match="unique"):
         job(component_versions=(("app", "0.1.0"), ("app", "0.2.0")))
+
+
+def test_process_result_requires_complete_valid_template_evidence() -> None:
+    assert (
+        JobProcessResult(
+            b"result", template_version="7", template_sha256="a" * 64
+        ).template_version
+        == "7"
+    )
+    with pytest.raises(ValueError, match="must be complete"):
+        JobProcessResult(b"result", template_version="7")
+    with pytest.raises(ValueError, match="version is invalid"):
+        JobProcessResult(b"result", template_version="", template_sha256="a" * 64)
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        JobProcessResult(b"result", template_version="7", template_sha256="A" * 64)

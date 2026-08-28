@@ -51,10 +51,8 @@ def render_conversion_page(
         if selected is not None and selected.current_version_id is not None
         else ""
     )
-    selected_name = (
-        escape(selected.name) if selected is not None else "No template selected"
-    )
-    label = escape(selection_label or "Choose a template")
+    selected_name = escape(selected.name) if selected is not None else "Pandoc default"
+    label = escape(selection_label or "Document styling")
     recent = "".join(
         '<li><button type="button" class="job-link" '
         f'data-job-id="{job.id}">Conversion {str(job.id)[:8]} · '
@@ -83,8 +81,9 @@ def render_conversion_page(
 <label><input type="radio" name="output" value="pdf"> PDF</label><label><input type="radio" name="output" value="both"> DOCX and PDF (ZIP)</label></fieldset>
 <div><label for="template-search">Template</label><input id="template-search" type="search" autocomplete="off" placeholder="Search active templates">
 <p id="selected-template" class="selection" data-template-id="{selected_id}" data-version-id="{version_id}"><span>{label}</span><strong>{selected_name}</strong></p>
+<button id="use-pandoc-default" type="button">Use Pandoc default</button>
 <ul id="template-results" class="results" aria-label="Template search results"></ul></div>
-<button id="submit-conversion" type="submit"{"" if version_id else " disabled"}>Start conversion</button></form></section>
+<button id="submit-conversion" type="submit">Start conversion</button></form></section>
 <aside class="stack"><section class="panel" aria-labelledby="status-heading"><h2 id="status-heading">Conversion status</h2>
 <div id="job-status" aria-live="polite"><p class="muted">Submit a conversion or choose a recent one.</p></div>
 <progress id="job-progress" max="100" value="0" hidden>0%</progress>

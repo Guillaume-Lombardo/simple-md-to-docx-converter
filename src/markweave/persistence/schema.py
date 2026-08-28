@@ -287,6 +287,10 @@ class ConversionJobRow(Base):
             "idempotency_digest",
             name="uq_conversion_jobs_owner_idempotency",
         ),
+        CheckConstraint(
+            "(template_id IS NULL) = (template_version_id IS NULL)",
+            name="ck_conversion_jobs_template_pair",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -298,8 +302,8 @@ class ConversionJobRow(Base):
     source_kind: Mapped[str | None] = mapped_column(String(16))
     source_sha256: Mapped[str | None] = mapped_column(String(64))
     source_size: Mapped[int | None] = mapped_column(Integer)
-    template_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    template_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    template_id: Mapped[str | None] = mapped_column(String(36))
+    template_version_id: Mapped[str | None] = mapped_column(String(36))
     output: Mapped[str] = mapped_column(String(16), nullable=False)
     component_versions: Mapped[str] = mapped_column(String(), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(128))

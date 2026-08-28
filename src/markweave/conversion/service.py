@@ -25,7 +25,7 @@ class DocxConverter(Protocol):
     def convert(
         self,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -46,7 +46,7 @@ class DocxConversionService:
     def convert(
         self,
         markdown: str,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -64,7 +64,7 @@ class DocxConversionService:
     def convert_document(
         self,
         document: ApprovedDocument,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -84,7 +84,7 @@ class DocxConversionService:
     def convert_archive(  # noqa: PLR0913 - explicit archive and runtime policy
         self,
         archive: bytes,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         archive_limits: ArchiveLimits,
         image_limits: ImageLimits,
         *,

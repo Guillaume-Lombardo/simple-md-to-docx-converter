@@ -62,7 +62,7 @@ def test_login_and_conversion_pages_escape_persisted_identity_text() -> None:
 def test_conversion_page_has_explicit_empty_states() -> None:
     actor = User(uuid4(), "Alice", "alice", "hash", Role.USER)
     page = render_conversion_page(actor, None, None, (), maximum_upload_bytes=1024)
-    assert "No template selected" in page
+    assert "Pandoc default" in page
     assert "No recent conversions" in page
     assert "Start conversion</button>" in page
-    assert 'id="submit-conversion" type="submit" disabled' in page
+    assert 'id="submit-conversion" type="submit" disabled' not in page

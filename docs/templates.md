@@ -63,8 +63,9 @@ global administrators.
 
 Replacement always creates the next immutable version. Restoration reads a historical object and
 creates a new copy-forward version recording `restored_from_version_id`; it never rewrites
-history. Conversion submission locks and verifies one active, current, published template/version
-pair in the same transaction that freezes those identifiers on the job. Production workers are
+history. Conversion submission either omits both template identifiers to request Pandoc's native
+reference document, or locks and verifies one active, current, published template/version pair in
+the same transaction that freezes those identifiers on the job. Production workers are
 assembled through `build_template_conversion_worker`, which always installs
 `FrozenTemplateJobProcessor`; it uses `TemplateService.resolve_frozen_version` to give the
 conversion processor exactly those validated bytes after later replacements or restorations.

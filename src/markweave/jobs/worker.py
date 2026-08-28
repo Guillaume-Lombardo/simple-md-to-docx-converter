@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import Event, Lock, Thread
 from time import monotonic
-from typing import Protocol
+from typing import NotRequired, Protocol, TypedDict
 
 from markweave.conversion.errors import ConversionError
 from markweave.jobs.errors import JobLeaseLostError, JobProcessingCancelled
@@ -36,7 +36,9 @@ from markweave.observability import (
 )
 from markweave.storage import ObjectKey, ObjectScope, ObjectStore
 
-_TRACEABILITY_KEYS = frozenset(
+_TRACEABILITY_SCHEMA_V1 = 1
+_TRACEABILITY_SCHEMA_V2 = 2
+_TRACEABILITY_V1_KEYS = frozenset(
     {
         "schema_version",
         "application_version",
@@ -58,6 +60,7 @@ _TRACEABILITY_KEYS = frozenset(
         "output_format",
     }
 )
+_TRACEABILITY_V2_KEYS = _TRACEABILITY_V1_KEYS | {"template_mode"}
 
 
 def _reject_json_constant(_value: str) -> None:
@@ -72,22 +75,71 @@ def _is_sha256(value: object) -> bool:
     )
 
 
-def _is_canonical_traceability_manifest(content: bytes) -> bool:  # noqa: PLR0911
+def _has_valid_template_traceability(
+    decoded: dict[str, object], job: ConversionJob, result: JobProcessResult
+) -> bool:
+    schema_version = decoded.get("schema_version")
+    template_id = decoded.get("template_id")
+    template_version = decoded.get("template_version")
+    template_sha256 = decoded.get("template_sha256")
+    if schema_version == _TRACEABILITY_SCHEMA_V1:
+        return (
+            job.template_id is not None
+            and template_id == str(job.template_id)
+            and template_version == result.template_version
+            and template_sha256 == result.template_sha256
+            and _is_sha256(result.template_sha256)
+        )
+    if schema_version != _TRACEABILITY_SCHEMA_V2:
+        return False
+    template_mode = decoded.get("template_mode")
+    if template_mode == "pandoc-default":
+        return job.template_id is None and all(
+            value is None
+            for value in (
+                template_id,
+                template_version,
+                template_sha256,
+                result.template_version,
+                result.template_sha256,
+            )
+        )
+    return (
+        template_mode == "versioned"
+        and job.template_id is not None
+        and template_id == str(job.template_id)
+        and template_version == result.template_version
+        and template_sha256 == result.template_sha256
+        and _is_sha256(result.template_sha256)
+    )
+
+
+def _is_canonical_traceability_manifest(  # noqa: PLR0911
+    content: bytes, job: ConversionJob, result: JobProcessResult
+) -> bool:
     try:
         decoded = json.loads(content, parse_constant=_reject_json_constant)
     except json.JSONDecodeError, UnicodeDecodeError, ValueError:
         return False
-    if not isinstance(decoded, dict) or frozenset(decoded) != _TRACEABILITY_KEYS:
+    if not isinstance(decoded, dict):
+        return False
+    schema_version = decoded.get("schema_version")
+    if type(schema_version) is not int:
+        return False
+    expected_keys = {
+        _TRACEABILITY_SCHEMA_V1: _TRACEABILITY_V1_KEYS,
+        _TRACEABILITY_SCHEMA_V2: _TRACEABILITY_V2_KEYS,
+    }.get(schema_version)
+    if expected_keys is None or frozenset(decoded) != expected_keys:
         return False
     if (
-        decoded.get("schema_version") != 1
-        or decoded.get("output_format") != "pdf"
+        decoded.get("output_format") != "pdf"
         or type(decoded.get("output_pdf_bytes")) is not int
         or decoded["output_pdf_bytes"] <= 0
+        or not _has_valid_template_traceability(decoded, job, result)
         or not all(
             _is_sha256(decoded.get(name))
             for name in (
-                "template_sha256",
                 "source_docx_sha256",
                 "output_pdf_sha256",
                 "font_manifest_sha256",
@@ -118,13 +170,25 @@ def _validated_manifest(job: ConversionJob, result: JobProcessResult) -> bytes |
     manifest = result.progress_manifest
     requires_manifest = job.output in {JobOutput.PDF, JobOutput.BOTH}
     if requires_manifest:
-        if manifest is None or not _is_canonical_traceability_manifest(manifest):
+        if manifest is None or not _is_canonical_traceability_manifest(
+            manifest, job, result
+        ):
             raise RuntimeError(
                 "PDF conversion processor returned no canonical traceability manifest"
             )
     elif manifest is not None:
         raise RuntimeError("DOCX conversion processor returned a traceability manifest")
     return manifest
+
+
+class _TemplateLogFields(TypedDict):
+    version_id: NotRequired[str]
+
+
+def _template_log_fields(job: ConversionJob) -> _TemplateLogFields:
+    if job.template_version_id is None:
+        return {}
+    return {"version_id": str(job.template_version_id)}
 
 
 class MaintenanceCleaner(Protocol):
@@ -335,10 +399,10 @@ class ConversionWorker:
             "job_processing_started",
             job_id=str(job.id),
             owner_id=str(job.owner_id),
-            version_id=str(job.template_version_id),
             worker_id=self._worker_id,
             state=job.state.value,
             step=job.step.value,
+            **_template_log_fields(job),
         )
         keepalive_thread.start()
         try:
@@ -380,10 +444,10 @@ class ConversionWorker:
                         "job_processing_interrupted",
                         job_id=str(job.id),
                         owner_id=str(job.owner_id),
-                        version_id=str(job.template_version_id),
                         worker_id=self._worker_id,
                         state=job.state.value,
                         step=progress_state.step.value,
+                        **_template_log_fields(job),
                     )
                     keepalive_stop.set()
                     return True
@@ -454,10 +518,10 @@ class ConversionWorker:
                 "job_processing_completed",
                 job_id=str(job.id),
                 owner_id=str(job.owner_id),
-                version_id=str(job.template_version_id),
                 worker_id=self._worker_id,
                 state=finished_state.value,
                 step=finished_step.value,
+                **_template_log_fields(job),
             )
             return True
         finally:
@@ -544,10 +608,10 @@ class ConversionWorker:
             "job_processing_completed",
             job_id=str(job.id),
             owner_id=str(job.owner_id),
-            version_id=str(job.template_version_id),
             worker_id=self._worker_id,
             state=JobState.CANCELLED.value,
             step=job.step.value,
+            **_template_log_fields(job),
         )
 
     def _finish_failed(self, job: ConversionJob, error: ConversionError) -> None:
@@ -571,11 +635,11 @@ class ConversionWorker:
             "job_processing_failed",
             job_id=str(job.id),
             owner_id=str(job.owner_id),
-            version_id=str(job.template_version_id),
             worker_id=self._worker_id,
             state=JobState.FAILED.value,
             step=job.step.value,
             error_code=error.code.value,
+            **_template_log_fields(job),
         )
 
     def _finish_budget_exceeded(self, job: ConversionJob) -> None:
@@ -599,11 +663,11 @@ class ConversionWorker:
             "job_processing_failed",
             job_id=str(job.id),
             owner_id=str(job.owner_id),
-            version_id=str(job.template_version_id),
             worker_id=self._worker_id,
             state=JobState.FAILED.value,
             step=job.step.value,
             error_code="resource_budget_exceeded",
+            **_template_log_fields(job),
         )
 
     def _expires_at(self, now: datetime) -> datetime:

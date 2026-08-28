@@ -58,6 +58,9 @@ AUTH_AUDIT_REVISION: Any = importlib.import_module(
 JOB_INTEGRITY_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260825_12_job_integrity_metadata"
 )
+OPTIONAL_TEMPLATE_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260828_13_optional_job_template"
+)
 
 
 @pytest.mark.unit
@@ -504,3 +507,18 @@ def test_job_integrity_sqlite_downgrade_preserves_referencing_triggers(
         "CREATE TRIGGER conversion_guard AFTER INSERT ON users",
         "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs",
     ]
+
+
+@pytest.mark.unit
+def test_optional_template_postgresql_trigger_only_revalidates_changed_pair(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(OPTIONAL_TEMPLATE_REVISION, "op")
+    operations.get_bind.return_value.dialect.name = "postgresql"
+
+    OPTIONAL_TEMPLATE_REVISION._create_conversion_integrity()
+
+    statement = operations.execute.call_args.args[0]
+    assert "TG_OP = 'UPDATE'" in statement
+    assert "IS NOT DISTINCT FROM" in statement
+    assert "NEW.template_id IS NULL AND NEW.template_version_id IS NULL" in statement

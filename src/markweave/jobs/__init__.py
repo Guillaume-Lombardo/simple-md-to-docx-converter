@@ -5,6 +5,7 @@ from markweave.jobs.models import (
     JobOutput,
     JobState,
     JobStep,
+    TemplateMode,
 )
 
-__all__ = ["ConversionJob", "JobOutput", "JobState", "JobStep"]
+__all__ = ["ConversionJob", "JobOutput", "JobState", "JobStep", "TemplateMode"]

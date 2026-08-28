@@ -17,15 +17,15 @@ and reset passwords for local accounts from `/templates`.
 
 ## Convert a document
 
-Open `/convert`, select a Markdown file or a supported archive, choose the output format, and choose
-a template. DOCX and PDF are available individually; **both** produces a ZIP containing
+Open `/convert`, select a Markdown file or a supported archive, choose the output format, and keep
+**Pandoc default** or explicitly select a visible template. DOCX and PDF are available individually;
+**both** produces a ZIP containing
 `document.docx`, `document.pdf`, and `traceability.json`.
 
-The service resolves a template in this order:
-
-1. the explicitly selected visible template version;
-2. your preferred visible template;
-3. the active system fallback.
+Pandoc default requires no saved template and uses Pandoc's native reference document. When custom
+Word styles are required, select an explicit immutable template version. Preferred templates and
+the system fallback may be preselected when the page opens; choose **Use Pandoc default** to clear
+that selection. They remain convenient choices and never block a template-free conversion.
 
 The submission is asynchronous. Keep the conversion page open or reopen the job from its recent
 conversion list to see its state. A queued or running job can be cancelled. Cancellation is
@@ -56,5 +56,6 @@ are in [the template guide](templates.md).
 Every response carries a correlation identifier. Record it with the job identifier when reporting a
 problem. DOCX output embeds traceability metadata; PDF output has a canonical sidecar, and combined
 output includes the sidecar in its ZIP. These identifiers help an operator correlate the request,
-audit record, exact source, exact template version, and worker logs without logging document
-content.
+audit record, exact source, selected document-style mode, and worker logs without logging document
+content. Versioned jobs identify the exact template version; Pandoc-default jobs record null
+template fields instead of inventing an identity.
