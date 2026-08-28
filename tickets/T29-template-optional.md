@@ -83,6 +83,12 @@ remain reproducible and traceable.
   readers accept strict schema v1 only for the published pre-T29 versioned-image contract while
   retaining schema-v2 mode validation for new images and rejecting v1 for Pandoc-default jobs.
   Both readers require an exact integer schema and reject mixed v1/v2 fields.
+- 2026-08-28: Stabilized the standalone publication-heartbeat integration test after the ready PR
+  exposed a scheduler-dependent lease race. The test now waits for a real persisted heartbeat under
+  a controlled clock, then advances beyond the initial lease while remaining inside the renewed
+  lease instead of assuming a background thread runs within a fixed 110 ms wall-clock window. The
+  regression passes 50 consecutive runs, the exact 37-test `storage-standalone` CI domain, and all
+  1,596 locally runnable tests; Ruff, `ty`, and the 23-test Web suite also pass.
 
 ## Synchronization
 
