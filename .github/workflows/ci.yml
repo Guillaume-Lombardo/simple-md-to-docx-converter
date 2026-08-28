@@ -194,7 +194,6 @@ jobs:
           --health-timeout 2s
           --health-retries 30
     env:
-      MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
       MD_CONVERTER_TEST_POSTGRES_URL: postgresql+psycopg://postgres:t12-ci-password@127.0.0.1:5432/md_converter_test
       MD_CONVERTER_TEST_S3_ACCESS_KEY_ID: t12integration
       MD_CONVERTER_TEST_S3_BUCKET: md-converter-t12
@@ -229,6 +228,8 @@ jobs:
           key: ubuntu-24.04-amd64-libreoffice-deb-26.2.5-2f03bfb2ac9f33ea7c77331b4b7a23300fb0ed7443566046bf8b5bc51c1bed1e
       - name: Prepare verified LibreOffice DEB archive
         if: ${{ matrix.domain == 'document-engines' }}
+        env:
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: bash scripts/ci/prepare-libreoffice-archive.sh deb
       - name: Save verified LibreOffice DEB archive
         if: ${{ matrix.domain == 'document-engines' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
@@ -244,6 +245,8 @@ jobs:
           key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
       - name: Prepare verified LibreOffice RPM archive
         if: ${{ matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
+        env:
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: bash scripts/ci/prepare-libreoffice-archive.sh rpm
       - name: Save verified LibreOffice RPM archive
         if: ${{ matrix.domain == 'container' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
@@ -281,6 +284,7 @@ jobs:
         if: ${{ matrix.domain == 'document-engines' }}
         env:
           LIBREOFFICE_SHA256: 2f03bfb2ac9f33ea7c77331b4b7a23300fb0ed7443566046bf8b5bc51c1bed1e
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: |
           set -euo pipefail
           sudo bash spikes/toolchain/fonts/install-fonts.sh
@@ -347,6 +351,8 @@ jobs:
         if: ${{ startsWith(matrix.domain, 'e2e-') }}
         run: npm ci --ignore-scripts
       - name: Run selected domain suite without a shell
+        env:
+          MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}

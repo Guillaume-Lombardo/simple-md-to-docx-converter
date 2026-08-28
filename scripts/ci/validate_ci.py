@@ -91,6 +91,8 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
+        ("heavy", "Prepare verified LibreOffice DEB archive"),
+        ("heavy", "Prepare verified LibreOffice RPM archive"),
         ("heavy", "Install verified Pandoc for document-engine tests"),
         (
             "heavy",
@@ -98,6 +100,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
+        ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
         ("mutation", "Run a fresh, non-empty targeted mutation campaign"),
     }
@@ -295,7 +298,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="bf79b1a9c5782efc7011d57842873aed674daa10f3ecae0ec0c0fc4c4c37208f",
+        canonical_digest="331aa7470702735627e6ed1342ec7e18cda4e4327dfc2bbb0d7a2fca2c12366d",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
