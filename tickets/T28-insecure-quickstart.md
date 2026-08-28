@@ -2,7 +2,7 @@
 ticket: T28
 linear_id: G1L-390
 linear_url: https://linear.app/g1lom/issue/G1L-390/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -53,6 +53,12 @@ the normal mode.
   unavailable locally because PostgreSQL/RustFS settings are absent. The pinned-browser test is
   prepared to exercise the native form without an injected Origin but cannot run locally because
   the reviewed Chrome executable is not installed; CI owns that execution.
+- 2026-08-28: Pull request #96 passed its complete ready-PR matrix and independent review, then was
+  squash-merged to `main` at `3ac1066bcf1898e99cc860ce262d79b52e43a62b`. Automatic release run
+  33176613371 published final GitHub Release and tag `v0.3.5`, the PyPI wheel and source
+  distribution, and the attested GHCR image with SBOM and release evidence. The quickstart now
+  pins that anonymously readable image at registry digest
+  `sha256:2697d86ffddf51040d633614b66258e65308b94305cbef708d2631be9b9156d4`.
 
 ## Synchronization
 
