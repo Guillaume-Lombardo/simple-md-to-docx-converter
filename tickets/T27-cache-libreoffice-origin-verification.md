@@ -2,7 +2,7 @@
 ticket: T27
 linear_id: G1L-388
 linear_url: https://linear.app/g1lom/issue/G1L-388/
-status: Done
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -58,6 +58,10 @@ origin reaches the running application across supported Compose providers.
   the machine's unavailable PostgreSQL/RustFS configuration and external-engine environment. The
   distributed container smoke reproduces `mermaid_unavailable` unchanged with the published
   `0.3.4` image, confirming a local baseline limitation rather than this change.
+- 2026-08-28: Pull request #95's initial workflow was rejected before job creation because
+  `runner.temp` is unavailable in job-level `env`. The correction scopes that value to the exact
+  consuming steps and passes actionlint 1.7.12, the repository CI validator, and all 225 focused
+  tests locally. Publication is paused after the failed check under the explicit yolo guardrail.
 
 ## Synchronization
 
