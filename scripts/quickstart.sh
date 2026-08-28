@@ -295,7 +295,8 @@ write_runtime_env() {
 }
 
 compose() {
-  docker compose --project-name "$project" --project-directory "$repository" \
+  MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
+    docker compose --project-name "$project" --project-directory "$repository" \
     --file "$repository/compose.yaml" --env-file "$runtime_env" "$@"
 }
 
@@ -310,6 +311,17 @@ application_is_running() {
   container="$(application_container)"
   [[ -n "$container" ]] || return 1
   [[ "$(docker inspect --format '{{.State.Running}}' "$container")" == true ]]
+}
+
+verify_application_public_origin() {
+  local actual
+  local container
+  container="$(application_container)"
+  [[ -n "$container" ]] || fail "The running Markweave container could not be resolved."
+  actual="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    "$container" | sed -n 's/^MD_CONVERTER_PUBLIC_ORIGIN=//p')"
+  [[ "$actual" == "$public_origin" ]] || \
+    fail "The running application did not receive the configured public origin."
 }
 
 validate_current_work_volume() {
@@ -364,6 +376,7 @@ start() {
 
   compose_started=true
   compose up --detach
+  verify_application_public_origin
   start_succeeded=true
   echo "Markweave is starting at http://localhost:$port"
   echo "Template: $template_file"

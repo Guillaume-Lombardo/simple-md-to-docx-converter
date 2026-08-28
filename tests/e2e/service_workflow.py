@@ -1364,6 +1364,26 @@ def validate_recovery_attempt(job: dict[str, Any], *, previous_attempt: int) -> 
         raise WorkflowFailure("recovery: job was not reclaimed exactly once")
 
 
+def verify_login_origin(arguments: argparse.Namespace) -> None:
+    """Exercise the browser-origin boundary without requiring valid credentials."""
+    accepted = ServiceClient(arguments.base_url)
+    accepted.login(
+        "origin-probe",
+        "invalid-origin-probe",
+        origin=arguments.login_origin,
+        expected=401,
+    )
+    hostile = ServiceClient(arguments.base_url)
+    hostile_error = hostile.login(
+        "origin-probe",
+        "invalid-origin-probe",
+        origin="https://attacker.invalid",
+        expected=403,
+    )
+    if hostile_error.get("code") != "LOGIN_ORIGIN_INVALID":
+        raise WorkflowFailure("hostile login: stable origin error missing")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1372,6 +1392,7 @@ def build_parser() -> argparse.ArgumentParser:
             "exercise",
             "exercise-security-boundaries",
             "exercise-mermaid",
+            "verify-login-origin",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1379,6 +1400,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--login-origin")
     parser.add_argument(
         "--profile", required=True, choices=("standalone", "distributed")
     )
@@ -1433,7 +1455,11 @@ def validate_arguments(
         parser.error("--state-file is required for checkpoint and recovery commands")
     if arguments.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    if arguments.command == "verify-login-origin" and arguments.login_origin is None:
+        parser.error("--login-origin is required for verify-login-origin")
     urls = [arguments.base_url]
+    if arguments.login_origin is not None:
+        urls.append(arguments.login_origin)
     if arguments.api_metrics_url is not None:
         urls.append(arguments.api_metrics_url)
     urls.extend(arguments.worker_metrics_url or ())
@@ -1472,6 +1498,8 @@ def main(argv: list[str] | None = None) -> int:
             exercise_security_boundaries(arguments)
         elif arguments.command == "exercise-mermaid":
             exercise_mermaid(arguments)
+        elif arguments.command == "verify-login-origin":
+            verify_login_origin(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

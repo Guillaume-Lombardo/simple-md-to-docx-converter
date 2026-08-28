@@ -37,6 +37,16 @@ TRUSTED_CACHE_WRITE = (
     "save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
     "&& github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
 )
+TRUSTED_LIBREOFFICE_DEB_CACHE_WRITE = (
+    "${{ matrix.domain == 'document-engines' && github.event_name == 'push' "
+    "&& github.ref == 'refs/heads/main' && github.repository == "
+    "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
+)
+TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE = (
+    "${{ matrix.domain == 'container' && github.event_name == 'push' && "
+    "github.ref == 'refs/heads/main' && github.repository == "
+    "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
+)
 READ_ONLY_PERMISSIONS = {"contents": "read"}
 FORBIDDEN_WORKFLOW_KEYS = frozenset({"secrets"})
 FORBIDDEN_WORKFLOW_SCALARS = ("--privileged",)
@@ -81,6 +91,8 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
+        ("heavy", "Prepare verified LibreOffice DEB archive"),
+        ("heavy", "Prepare verified LibreOffice RPM archive"),
         ("heavy", "Install verified Pandoc for document-engine tests"),
         (
             "heavy",
@@ -88,6 +100,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
+        ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
         ("mutation", "Run a fresh, non-empty targeted mutation campaign"),
     }
@@ -155,6 +168,8 @@ READ_ONLY_WORKFLOW_POLICIES = {
         actions=frozenset(
             {
                 "actions/checkout",
+                "actions/cache/restore",
+                "actions/cache/save",
                 "actions/setup-node",
                 "actions/setup-python",
                 "actions/upload-artifact",
@@ -208,6 +223,36 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             (
                 "heavy",
+                "Restore verified LibreOffice DEB archive",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Prepare verified LibreOffice DEB archive",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Save verified LibreOffice DEB archive",
+            ): TRUSTED_LIBREOFFICE_DEB_CACHE_WRITE,
+            (
+                "heavy",
+                "Restore verified LibreOffice RPM archive",
+            ): (
+                "${{ matrix.domain == 'container' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Prepare verified LibreOffice RPM archive",
+            ): (
+                "${{ matrix.domain == 'container' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Save verified LibreOffice RPM archive",
+            ): TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE,
+            (
+                "heavy",
                 "Install rootless Podman for container validation",
             ): (
                 "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
@@ -253,7 +298,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="c0fa2619623a20fc230961beb8ac364d92d65afbc2f60180887e75500277206d",
+        canonical_digest="331aa7470702735627e6ed1342ec7e18cda4e4327dfc2bbb0d7a2fca2c12366d",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -722,6 +767,20 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
                 cache_writes.append(options["save-cache"])
     if cache_writes != [TRUSTED_CACHE_WRITE.removeprefix("save-cache: ")] * 2:
         errors.append("cache writes must be limited to trusted pushes on main")
+    libreoffice_cache_writes = [
+        step.get("if")
+        for job_name in jobs
+        for step in _job_steps(workflow, job_name)
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/cache/save@")
+    ]
+    if libreoffice_cache_writes != [
+        TRUSTED_LIBREOFFICE_DEB_CACHE_WRITE,
+        TRUSTED_LIBREOFFICE_RPM_CACHE_WRITE,
+    ]:
+        errors.append(
+            "LibreOffice cache writes must be limited to trusted main domains"
+        )
     return errors
 
 

@@ -6,6 +6,14 @@ the Mermaid npm graph, the `uv` binary, the Python lock, and the complete resolv
 Use `SOURCE_DATE_EPOCH` only when intentionally producing a new reviewed image identity; the
 default is fixed for reproducibility.
 
+The build helper keeps the official LibreOffice RPM archive in
+`${XDG_CACHE_HOME:-$HOME/.cache}/markweave/toolchain` by default. It verifies the reviewed SHA-256
+on every use and downloads from the publisher only when the exact regular cache file is absent.
+Set `MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY` to select another private cache directory. The archive is
+passed to Podman as a read-only named build context, so it is not copied into an image layer. CI
+uses the same contract for separate checksum-keyed RPM and DEB caches; untrusted runs restore only,
+and only a trusted push to `main` may populate them.
+
 The entrypoint accepts exactly `api`, `embedded-worker`, or `external-worker`. `api` serves HTTP
 without a worker. `embedded-worker` is the one-replica standalone process. `external-worker` is a
 distributed worker without HTTP. Both worker modes use the package-native `markweave.runtime`
