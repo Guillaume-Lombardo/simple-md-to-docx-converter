@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     session_absolute_seconds: int = Field(default=8 * 60 * 60, ge=1)
     session_cookie_name: str = Field(default="md_converter_session", min_length=1)
     public_origin: AnyHttpUrl | None = None
+    insecure_evaluation_mode: bool = False
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
     conversion_max_decompressed_bytes: int = Field(gt=0)

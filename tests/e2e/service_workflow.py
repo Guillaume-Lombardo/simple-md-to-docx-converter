@@ -1384,6 +1384,20 @@ def verify_login_origin(arguments: argparse.Namespace) -> None:
         raise WorkflowFailure("hostile login: stable origin error missing")
 
 
+def verify_disabled_login_origin(arguments: argparse.Namespace) -> None:
+    """Prove the explicit insecure mode reaches authentication for any origin."""
+    for origin in ("null", "https://attacker.invalid"):
+        client = ServiceClient(arguments.base_url)
+        error = client.login(
+            "origin-probe",
+            "invalid-origin-probe",
+            origin=origin,
+            expected=401,
+        )
+        if error.get("code") != "INVALID_CREDENTIALS":
+            raise WorkflowFailure(f"disabled login origin ({origin}): auth not reached")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1393,6 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
             "exercise-security-boundaries",
             "exercise-mermaid",
             "verify-login-origin",
+            "verify-disabled-login-origin",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1500,6 +1515,8 @@ def main(argv: list[str] | None = None) -> int:
             exercise_mermaid(arguments)
         elif arguments.command == "verify-login-origin":
             verify_login_origin(arguments)
+        elif arguments.command == "verify-disabled-login-origin":
+            verify_disabled_login_origin(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

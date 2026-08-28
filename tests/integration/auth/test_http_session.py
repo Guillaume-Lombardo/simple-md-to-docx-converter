@@ -134,3 +134,34 @@ def test_public_origin_is_enforced_across_real_http_boundary(tmp_path: Path) -> 
     assert accepted.status_code == 200
     assert spoofed.status_code == 403
     assert spoofed.json()["error"]["code"] == "LOGIN_ORIGIN_INVALID"
+
+
+@pytest.mark.integration
+def test_disabled_origin_validation_accepts_tunneled_browser_origins(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        public_origin="https://configured.example",
+        insecure_evaluation_mode=True,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+    payload = {"username": "origin-probe", "password": "invalid-origin-probe"}
+
+    with (
+        running_server(settings) as base_url,
+        httpx.Client(base_url=base_url) as client,
+    ):
+        responses = [
+            client.post("/api/v1/login", headers={"Origin": origin}, json=payload)
+            for origin in ("null", "https://attacker.example")
+        ]
+
+    assert [response.status_code for response in responses] == [401, 401]

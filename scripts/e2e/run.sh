@@ -14,6 +14,7 @@ readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly prefix="md-converter-t21-$profile"
 readonly network_name="$prefix"
 readonly application_name="$prefix-api"
+readonly insecure_application_name="$prefix-insecure-api"
 readonly clamav_name="$prefix-clamav"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
@@ -100,7 +101,7 @@ trap cleanup EXIT
 refuse_existing_resources() {
   local name
   for name in "$application_name" "$clamav_name" "$postgres_name" "$rustfs_name" \
-    "$worker_one_name" "$worker_two_name"; do
+    "$insecure_application_name" "$worker_one_name" "$worker_two_name"; do
     if podman container exists "$name"; then
       echo "Refusing to replace pre-existing container $name." >&2
       exit 1
@@ -456,6 +457,27 @@ uv run python -m tests.e2e.service_workflow verify-checkpoint \
   --base-url "$base_url" --profile "$profile" \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
+
+# Prove the final image's explicit insecure exception without a scanner. The
+# published port remains loopback-only even though login origins are ignored.
+podman rm --force "$application_name" "$clamav_name" >/dev/null
+created=("$insecure_application_name" "${created[@]}")
+podman run --detach --name "$insecure_application_name" --network "$network_name" \
+  --network-alias application --publish 127.0.0.1::8080 \
+  --env MD_CONVERTER_INSECURE_EVALUATION_MODE=true \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${E2E_SETTINGS[@]}" \
+  "$image" "$application_mode" >/dev/null
+insecure_application_port="$(podman port "$insecure_application_name" 8080/tcp | sed 's/.*://')"
+insecure_base_url="http://127.0.0.1:$insecure_application_port"
+test "$(podman port "$insecure_application_name" 8080/tcp)" = \
+  "127.0.0.1:$insecure_application_port"
+wait_for_url "$insecure_base_url/health/ready" "$insecure_application_name" \
+  '"status":"ready"'
+uv run python -m tests.e2e.service_workflow verify-disabled-login-origin \
+  --base-url "$insecure_base_url" --profile "$profile" \
+  --artifact-dir "$temporary_directory/browser-artifacts"
+podman logs "$insecure_application_name" 2>&1 | \
+  grep --quiet '"event":"insecure_evaluation_mode_enabled"'
 
 succeeded=true
 echo "Final-image $profile E2E workflow passed for $image."

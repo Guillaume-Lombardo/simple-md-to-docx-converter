@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import io
 import json
@@ -348,6 +349,39 @@ def test_final_image_runner_invokes_security_boundaries_for_each_profile() -> No
     assert runner.count("service_workflow exercise-security-boundaries") == 1
     assert '--base-url "$base_url" --profile "$profile"' in runner
     assert '--template "$evidence_directory/template.docx"' in runner
+
+
+@pytest.mark.unit
+def test_disabled_origin_probe_reaches_authentication_for_each_origin(
+    mocker: MockerFixture,
+) -> None:
+    client_type = mocker.patch("tests.e2e.service_workflow.ServiceClient")
+    client_type.return_value.login.return_value = {"code": "INVALID_CREDENTIALS"}
+
+    workflow.verify_disabled_login_origin(
+        argparse.Namespace(base_url="http://127.0.0.1:8080")
+    )
+
+    assert client_type.call_count == 2
+    assert [
+        call.kwargs["origin"] for call in client_type.return_value.login.call_args_list
+    ] == [
+        "null",
+        "https://attacker.invalid",
+    ]
+
+
+@pytest.mark.unit
+def test_disabled_origin_probe_rejects_an_origin_policy_failure(
+    mocker: MockerFixture,
+) -> None:
+    client_type = mocker.patch("tests.e2e.service_workflow.ServiceClient")
+    client_type.return_value.login.return_value = {"code": "LOGIN_ORIGIN_INVALID"}
+
+    with pytest.raises(workflow.WorkflowFailure, match="auth not reached"):
+        workflow.verify_disabled_login_origin(
+            argparse.Namespace(base_url="http://127.0.0.1:8080")
+        )
 
 
 @pytest.mark.unit

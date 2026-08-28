@@ -47,6 +47,7 @@ def isolated_client(
     ready: bool = True,
     scanner: UploadScanner | None = None,
     public_origin: str | None = None,
+    insecure_evaluation_mode: bool = False,
 ) -> tuple[TestClient, Any, User, User]:
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
@@ -64,6 +65,7 @@ def isolated_client(
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
         public_origin=public_origin,
+        insecure_evaluation_mode=insecure_evaluation_mode,
     )
     admin = User(uuid4(), "admin", "admin", "admin-hash", Role.ADMIN)
     alice = User(uuid4(), "Alice", "alice", "alice-hash", Role.USER)
@@ -420,6 +422,16 @@ def test_http_adapter_handles_browser_authentication_failure(
 
 
 @pytest.mark.unit
+def test_login_page_preserves_same_origin_form_origin(mocker: MockerFixture) -> None:
+    client, _, _, _ = isolated_client(mocker)
+
+    with client:
+        response = client.get("/login")
+
+    assert response.headers["Referrer-Policy"] == "same-origin"
+
+
+@pytest.mark.unit
 def test_login_origin_policy_rejects_hostile_and_allows_same_or_absent_origin(
     mocker: MockerFixture,
 ) -> None:
@@ -476,6 +488,28 @@ def test_configured_public_origin_ignores_internal_and_forwarded_origins(
     assert spoofed.status_code == 403
     assert spoofed.json()["error"]["code"] == "LOGIN_ORIGIN_INVALID"
     auth.login.assert_called_once()
+
+
+@pytest.mark.unit
+def test_explicitly_disabled_login_origin_policy_accepts_any_serialized_origin(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, _, _ = isolated_client(
+        mocker,
+        public_origin="https://configured.example",
+        insecure_evaluation_mode=True,
+    )
+    auth.login.side_effect = INVALID_CREDENTIALS.new()
+    payload = {"username": "origin-probe", "password": "invalid-origin-probe"}
+
+    with client:
+        responses = [
+            client.post("/api/v1/login", headers={"Origin": origin}, json=payload)
+            for origin in ("null", "https://attacker.example")
+        ]
+
+    assert [response.status_code for response in responses] == [401, 401]
+    assert auth.login.call_count == 2
 
 
 @pytest.mark.unit

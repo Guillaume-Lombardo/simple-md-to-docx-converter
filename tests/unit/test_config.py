@@ -40,6 +40,7 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.clamav_timeout_seconds == 5
     assert settings.malware_scanning_mode is MalwareScanningMode.CLAMAV
     assert settings.public_origin is None
+    assert settings.insecure_evaluation_mode is False
     assert secret not in repr(settings)
 
 
@@ -70,6 +71,33 @@ def test_public_origin_loads_from_environment_and_is_canonicalized(
     settings = Settings.load()
 
     assert str(settings.public_origin) == "https://converter.example:8443/"
+
+
+@pytest.mark.unit
+def test_insecure_evaluation_mode_can_be_explicitly_enabled_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "MD_CONVERTER_INITIAL_ADMIN_USERNAME": "admin",
+        "MD_CONVERTER_INITIAL_ADMIN_PASSWORD": "secret",
+        "MD_CONVERTER_STORAGE_PROFILE": "standalone",
+        "MD_CONVERTER_STANDALONE_DATA_DIRECTORY": "/data",
+        "MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES": "1000000",
+        "MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES": "1100000",
+        "MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS": "1",
+        "MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS": "3600",
+        "MD_CONVERTER_INSECURE_EVALUATION_MODE": "true",
+    }
+    values.update(
+        {
+            f"MD_CONVERTER_{name.upper()}": value
+            for name, value in template_settings().items()
+        }
+    )
+    for name, value in values.items():
+        monkeypatch.setenv(name, str(value))
+
+    assert Settings.load().insecure_evaluation_mode is True
 
 
 @pytest.mark.unit

@@ -4,7 +4,7 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.3.4` is the Python package and
+The project is licensed under [Apache-2.0](LICENSE). Version `0.3.5` is the Python package and
 container release. The quickstart pins that published container image by its immutable registry
 digest.
 
@@ -23,6 +23,7 @@ reviewed Chromium seccomp profile, then choose one of these local-evaluation pat
 | Simple | Docker Compose | `scripts/quickstart-simple.sh up` | Named volume; no physical cap |
 | Simple | Rootless Podman Compose | `MARKWEAVE_SIMPLE_RUNTIME=podman scripts/quickstart-simple.sh up` | Named volume; no physical cap |
 | Trusted upstream | Rootless Podman Compose | `MARKWEAVE_SIMPLE_RUNTIME=podman scripts/quickstart-simple.sh up --trust-upstream-antivirus` | Named volume; no physical cap |
+| Insecure SSH-tunnel test | Docker or rootless Podman Compose | `scripts/quickstart-simple.sh up --insecure` | Named volume; no physical cap |
 | Secure | Rootful Docker Compose only | `scripts/quickstart.sh up` | Exact 256 MiB ext4 filesystem |
 
 The simple path needs no `sudo` and is the easiest way to try Markweave:
@@ -45,6 +46,22 @@ Docker-compatible API. Podman's automatic Docker-API health metadata is not used
 ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
 bounded timeout.
 
+For a temporary test on a remote server reached only through an SSH tunnel, use the explicit
+insecure mode on that server:
+
+```bash
+MARKWEAVE_SIMPLE_RUNTIME=podman MARKWEAVE_SIMPLE_PORT=11279 \
+  scripts/quickstart-simple.sh up --insecure
+```
+
+Then create the tunnel from the browser machine with
+`ssh -L 11279:127.0.0.1:11279 user@server` and open <http://localhost:11279>. This mode neither
+starts ClamAV nor validates login origins, so `localhost`, `127.0.0.1`, a tunneled hostname, and
+browser requests serialized as `Origin: null` can reach authentication. It still publishes only
+on server loopback (`127.0.0.1`) and verifies the disabled-origin behavior before reporting
+readiness. **Never bind or proxy this mode to a network, and never use it in production.** Stop it
+with `scripts/quickstart-simple.sh down` as soon as the test is complete.
+
 Set `MARKWEAVE_SIMPLE_PORT` to publish the simple quickstart on another loopback port. The helper
 also configures that exact public origin so browser login keeps its strict same-origin check:
 
@@ -54,7 +71,8 @@ MARKWEAVE_SIMPLE_RUNTIME=podman MARKWEAVE_SIMPLE_PORT=11279 \
 ```
 
 Open <http://localhost:11279>; using a different hostname or IP address is intentionally rejected
-by the login origin check. Before reporting readiness, the simple helper verifies both the public
+by the login origin check in the normal and trusted-upstream modes. Before reporting readiness,
+the simple helper verifies both the public
 origin received by the container and a browser-equivalent login request carrying that origin. If
 the selected Compose provider drops or rewrites the value, startup fails instead of leaving a
 running stack whose login form always returns `LOGIN_ORIGIN_INVALID`.

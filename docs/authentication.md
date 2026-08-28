@@ -96,6 +96,12 @@ terminates TLS, set `MD_CONVERTER_PUBLIC_ORIGIN` to the exact browser-visible sc
 optional port. Forwarded headers remain untrusted. Without that setting, Origin validation uses the
 direct ASGI request URL. See [container deployment](container-deployment.md).
 
+The normal login page sends `Referrer-Policy: same-origin`, which preserves the browser's
+same-origin form origin without disclosing referrers cross-origin. The explicit loopback-only
+`quickstart-simple.sh up --insecure` evaluation mode disables login-origin validation for temporary
+SSH-tunnel tests. It is not an authentication deployment option and must never be exposed to a
+network or used in production.
+
 ## Verification inventory
 
 Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E cover:

@@ -82,6 +82,11 @@ Do not weaken Origin, CSRF, or Secure-cookie controls and do not enable broad pr
 a substitute. Restrict accepted hostnames at the ingress, forward only to the service, and keep the
 API unreachable over unintended plaintext paths.
 
+The repository's `quickstart-simple.sh up --insecure` mode is an explicit exception for temporary
+loopback-bound SSH-tunnel evaluation. It disables both local malware scanning and login-origin
+validation and is therefore prohibited behind an ingress, reverse proxy, or any production or
+network-accessible endpoint.
+
 ## Immutable rollout
 
 Deploy an approved registry digest such as `registry.example/image@sha256:...`, never a mutable tag.

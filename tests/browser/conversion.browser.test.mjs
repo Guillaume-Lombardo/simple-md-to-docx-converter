@@ -98,15 +98,11 @@ test("authenticated conversion workflow works in pinned Chromium", { timeout: 45
   assert.match(loginResponse.headers()["content-security-policy"], /script-src 'self'/);
   await page.type('input[name="username"]', "browser-admin");
   await page.type('input[name="password"]', "browser-password");
-  // Headless Chrome serializes form origins as `null` in this isolated
-  // arbitrary-UID container; provide the exact document origin through CDP.
-  await page.setExtraHTTPHeaders({ Origin: baseUrl });
   const [conversionResponse] = await Promise.all([
     page.waitForNavigation({ waitUntil: "networkidle0" }),
     page.click('button[type="submit"]'),
   ]);
   const loginDiagnostic = await serverState(page);
-  await page.setExtraHTTPHeaders({});
   assert.equal(
     page.url(),
     `${baseUrl}/convert`,
