@@ -2,7 +2,7 @@
 ticket: T26
 linear_id: G1L-384
 linear_url: https://linear.app/g1lom/issue/G1L-384/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,6 +52,12 @@ selected loopback port so browser login remains same-origin when `MARKWEAVE_SIMP
   suite reached 1,538 passing tests and 95.09% coverage but could not complete because PostgreSQL
   and RustFS configuration/services are unavailable (26 setup errors and 3 S3 failures). The full
   external-engine suite was not run because those required services are unavailable.
+- 2026-08-28: Pull request #93 passed its complete ready-PR matrix after rerunning three transient
+  LibreOffice download failures and was squash-merged to `main` at
+  `8ac413b77807c9ed2431924527a396619ea2d93e`. Automatic release run 33159815107 published final
+  GitHub Release and tag `v0.3.4`, the PyPI wheel and source distribution, and the attested GHCR
+  image with SBOM and release evidence. The quickstart now pins that anonymously readable image at
+  registry digest `sha256:2e525afc5c080326b712bf05fbe875879b2b8ea835692556fec51b7c875899f8`.
 
 ## Synchronization
 
