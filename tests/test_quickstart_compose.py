@@ -45,8 +45,8 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.3.4@"
-    "sha256:2e525afc5c080326b712bf05fbe875879b2b8ea835692556fec51b7c875899f8"
+    "ghcr.io/guillaume-lombardo/md-converter:0.3.5@"
+    "sha256:2697d86ffddf51040d633614b66258e65308b94305cbef708d2631be9b9156d4"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
