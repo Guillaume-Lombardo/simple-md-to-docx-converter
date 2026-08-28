@@ -12,7 +12,7 @@
 
 Build a Web service that converts Markdown documents to DOCX, PDF, or both through a browser interface and a documented HTTP API.
 
-The service accepts a standalone `.md` file or a `.zip` archive containing Markdown and local resources. Users select an administrable Word template. The service resolves and normalizes local images, renders Mermaid diagrams locally, applies template styles, and retains source and result files only for the configured asynchronous-processing and download period.
+The service accepts a standalone `.md` file or a `.zip` archive containing Markdown and local resources. Users may select an administrable Word template or use Pandoc's native default reference document. The service resolves and normalizes local images, renders Mermaid diagrams locally, applies the selected document-style mode, and retains source and result files only for the configured asynchronous-processing and download period.
 
 The product includes a conversion page, template administration, local authentication, two configurable storage profiles, a hardened UBI 9 image, selective GitHub Actions workflows, and an autonomous Codex development workflow.
 
@@ -59,11 +59,12 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 - Validate an archive before extraction and resolve only safe relative resources.
 - Support the approved Pandoc-compatible headings, lists, tables, links, footnotes, quotes, code blocks, image attributes, and metadata.
 - Render every Mermaid block locally.
-- Select an active template and immutable template version.
+- Use either Pandoc's native default reference document or an active immutable template version.
 - Produce DOCX, PDF, or a ZIP containing both.
 - Return a job identifier immediately and expose state, current step, progress, safe errors, cancellation, result download, and expiration.
 - Use states `queued`, `running`, `succeeded`, `failed`, `cancelled`, and `expired`.
-- Return the component and template versions needed to reproduce a conversion.
+- Return the component versions and explicit template mode needed to reproduce a conversion; a
+  versioned-template job also returns its immutable template identifiers.
 
 ### 3.2 Word templates
 
@@ -80,7 +81,9 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 
 Provide a login page and two main server-rendered pages:
 
-- **Convert:** upload or drag-and-drop, search and select a template, choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and display accessible English errors.
+- **Convert:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
+  choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
+  display accessible English errors.
 - **Templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
 
 Administrators also receive a users tab to create, search, activate, deactivate, and reset local accounts. Every permission is enforced server-side. Any application JavaScript receives its own tests and coverage checks.
@@ -116,7 +119,10 @@ Evaluate `pandoc --sandbox` in T00 with images and `reference.docx`; do not clai
 
 Render Mermaid through a locally installed Chromium; Puppeteer must never download a browser during build or runtime. Bound pixel resolution and physical document width/height while preserving aspect ratio. Chromium must work with arbitrary UID, writable HOME/XDG directories, bounded `/dev/shm`, read-only root filesystem, and no network. Keep Chromium's sandbox active and never use `--no-sandbox`. Develop and validate a minimal seccomp and user-namespace profile first on rootless Podman and then on k3s. OpenShift proof is explicitly deferred and remains required before claiming OpenShift compatibility.
 
-Generate DOCX with the selected reference document. Generate PDF from DOCX to preserve Word styling. Give every LibreOffice invocation an isolated temporary user profile and terminate its whole process group on timeout or cancellation.
+Generate DOCX without `--reference-doc` in Pandoc-default mode, or with the exact selected reference
+document in versioned-template mode. Generate PDF from DOCX to preserve Word styling. Give every
+LibreOffice invocation an isolated temporary user profile and terminate its whole process group on
+timeout or cancellation.
 
 Templates declare expected fonts. Package and validate Liberation plus Carlito/Caladea, use DejaVu as
 the fallback, and add Noto families only for scripts explicitly required by the approved corpus or
@@ -142,7 +148,10 @@ simultaneous duplicate execution.
 
 Expose repository and object-store interfaces with the same contract tests for both implementations. Select exactly one coherent profile at startup and fail fast on mixed or incomplete configuration. Manage schemas with Alembic. Document backup and restoration for both profiles.
 
-Persist users, templates, template versions, preferences, conversion jobs, job events or attempts, and audit records. Object keys and paths derive only from stable identifiers, never visible names.
+Persist users, templates, template versions, preferences, conversion jobs, job events or attempts,
+and audit records. A conversion job stores either both template identifiers or neither, enforced by
+the domain and both databases. Object keys and paths derive only from stable identifiers, never
+visible names.
 
 ## 7. HTTP API
 
@@ -327,8 +336,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T26 | Preserve strict login-origin validation on custom quickstart ports and same-host reverse proxies, and publish patch release `0.3.4` | T25 |
 | T27 | Cache checksum-locked LibreOffice CI artifacts and verify effective quickstart login origins across Compose providers | T22, T26 |
 | T28 | Add an explicit loopback-only insecure quickstart for temporary SSH-tunnel testing, fix native same-origin browser login, and publish patch release `0.3.5` | T24, T26, T27 |
+| T29 | Allow conversion without a template by using Pandoc's native default reference document while preserving optional immutable-template selection and traceability | T07, T10, T13, T15, T16, T21 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, and the bounded SSH-tunnel evaluation mode (T24–T28). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, and optional-template conversion (T24–T29). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Deferred decisions and initial-scope exclusions
 

@@ -15,6 +15,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
+TRACEABILITY_SCHEMA_VERSION = 2
+SHA256_CHARACTERS = 64
+
 
 class Client:
     """Small explicit HTTP client retaining the secure session cookie manually."""
@@ -193,7 +196,7 @@ def get_job(client: Client, location: str) -> dict[str, object]:
     return json.loads(content)
 
 
-def validate_result(  # noqa: PLR0912 - one assertion workflow covers all outputs
+def validate_result(  # noqa: PLR0912,PLR0915 - one assertion workflow covers all outputs
     client: Client, job: dict[str, object], output: str
 ) -> None:
     path = f"/api/v1/conversions/{job['id']}/result"
@@ -240,8 +243,47 @@ def validate_result(  # noqa: PLR0912 - one assertion workflow covers all output
         raise RuntimeError("PDF manifest digest mismatch")
     if decoded["output_pdf_bytes"] != len(pdf):
         raise RuntimeError("PDF manifest size mismatch")
-    if decoded["schema_version"] != 1 or decoded["output_format"] != "pdf":
+    schema_version = decoded["schema_version"]
+    job_template_mode = job.get("template_mode")
+    if type(schema_version) is not int:
+        template_mode = None
+        compatible_mode = False
+    elif schema_version == 1:
+        template_mode = "versioned"
+        compatible_mode = job_template_mode is None and "template_mode" not in decoded
+    else:
+        template_mode = decoded.get("template_mode")
+        compatible_mode = (
+            schema_version == TRACEABILITY_SCHEMA_VERSION
+            and template_mode == job_template_mode
+        )
+    if not compatible_mode or decoded["output_format"] != "pdf":
         raise RuntimeError("PDF manifest invariants mismatch")
+    if template_mode == "versioned":
+        template_id = decoded["template_id"]
+        if (
+            not isinstance(template_id, str)
+            or not template_id
+            or template_id != job.get("template_id")
+        ):
+            raise RuntimeError("PDF manifest template identifier mismatch")
+        if (
+            not isinstance(decoded["template_version"], str)
+            or not decoded["template_version"]
+        ):
+            raise RuntimeError("PDF manifest template version is invalid")
+        template_sha256 = decoded["template_sha256"]
+        if (
+            not isinstance(template_sha256, str)
+            or len(template_sha256) != SHA256_CHARACTERS
+            or any(character not in "0123456789abcdef" for character in template_sha256)
+        ):
+            raise RuntimeError("PDF manifest template digest is invalid")
+    elif any(
+        decoded[field] is not None
+        for field in ("template_id", "template_version", "template_sha256")
+    ):
+        raise RuntimeError("PDF manifest default-template identity is invalid")
     if embedded_manifest is not None and embedded_manifest != manifest:
         raise RuntimeError("combined and sidecar manifests differ")
 

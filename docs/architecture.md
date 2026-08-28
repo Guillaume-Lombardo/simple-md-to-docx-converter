@@ -16,8 +16,9 @@ local Mermaid CLI and sandboxed Chromium render diagrams, and headless LibreOffi
 - Document adapters run ClamAV, archive/image validation, Mermaid, Pandoc, and LibreOffice behind
   fixed argument vectors, allowlisted environments, bounded workspaces, deadlines, and structural
   output validation.
-- Workers claim durable leases, heartbeat, load the frozen owner-scoped source and exact template
-  version, publish output atomically, and recover interrupted work deterministically.
+- Workers claim durable leases, heartbeat, load the frozen owner-scoped source, resolve the exact
+  template version when selected or use Pandoc's default reference document, publish output
+  atomically, and recover interrupted work deterministically.
 
 The conversion path is:
 

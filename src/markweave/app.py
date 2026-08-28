@@ -60,6 +60,7 @@ from markweave.jobs.models import (
     JobOutput,
     JobPage,
     JobRequest,
+    TemplateMode,
     source_kind_for_filename,
 )
 from markweave.jobs.ports import JobRepository
@@ -292,8 +293,9 @@ class ConversionResponse(BaseModel):
 
     id: UUID
     owner_id: UUID
-    template_id: UUID
-    template_version_id: UUID
+    template_mode: TemplateMode
+    template_id: UUID | None
+    template_version_id: UUID | None
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
     correlation_id: str
@@ -1476,9 +1478,9 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         response: Response,
         actor: Annotated[User, Depends(mutation_actor)],
         source: Annotated[UploadFile, File()],
-        template_id: Annotated[UUID, Form()],
-        template_version_id: Annotated[UUID, Form()],
         output: Annotated[JobOutput, Form()],
+        template_id: Annotated[UUID | None, Form()] = None,
+        template_version_id: Annotated[UUID | None, Form()] = None,
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> ConversionResponse:
         correlation_id = getattr(request.state, CORRELATION_STATE_KEY)

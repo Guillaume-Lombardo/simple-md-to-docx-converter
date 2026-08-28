@@ -144,13 +144,12 @@ use `scripts/quickstart.sh ps` or `scripts/quickstart.sh logs` until both servic
 
 To make a first conversion:
 
-1. Open **Templates**, create a template, and select the generated template at the path printed by
-   the setup script (normally
-   `~/.local/state/markweave-quickstart-simple/quickstart-template.docx` for the simple path).
-   In **Expected fonts**, enter this exact comma-separated list:
-   `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
-2. Return to **Convert**, upload `examples/quickstart-source.md`, select your active template, and
+1. Open **Convert**, upload `examples/quickstart-source.md`, keep **Pandoc default** selected, and
    choose DOCX, PDF, or both.
+2. Optional: open **Templates**, create a template, and select the generated template at the path
+   printed by the setup script when you want custom Word styles. In **Expected fonts**, enter
+   `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
+   Return to **Convert** and select it.
 3. Start the conversion. When the job says it is ready, download the result.
 
 A tiny source file is enough to try the workflow; `examples/quickstart-source.md` contains:
@@ -227,9 +226,10 @@ the `_base` image and persistent database pattern in its
 
 The browser and HTTP API authenticate a local user, validate and scan the upload, and record a
 durable conversion job. A worker claims that job with a renewable lease, resolves the exact
-immutable template version, and runs the local Pandoc, Chromium/Mermaid, and LibreOffice engines
-inside bounded workspaces. Results and traceability metadata are retained for the configured
-period; document content is not written to logs.
+immutable template version when one was selected (or uses Pandoc's built-in default reference
+document), and runs the local Pandoc, Chromium/Mermaid, and LibreOffice engines inside bounded
+workspaces. Results and traceability metadata are retained for the configured period; document
+content is not written to logs.
 
 The standalone profile used by Compose keeps SQLite metadata and atomic objects under one `/data`
 volume and runs one embedded worker. The distributed profile separates API and worker processes,

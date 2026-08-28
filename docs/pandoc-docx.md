@@ -32,17 +32,19 @@ resource behavior.
 ## Process boundary
 
 Each conversion uses a new temporary workspace containing only the Markdown input, approved
-normalized resources, generated normalized Mermaid PNG resources, opaque reference DOCX,
-isolated home/cache/config/data/temp directories, and generated output. Pandoc receives no shell,
+normalized resources, generated normalized Mermaid PNG resources, an opaque reference DOCX when
+versioned-template mode is selected, isolated home/cache/config/data/temp directories, and
+generated output. Pandoc receives no shell,
 no standard input or captured document output, a
 process group of its own, and only the explicitly supplied `PATH`, fixed `LANG=C.UTF-8`,
 `LC_ALL=C.UTF-8`, and `TZ=UTC`, plus workspace-local directory variables. Host locale, timezone,
 and unrelated environment values are not inherited.
 
-The arguments are fixed to the approved reader, DOCX writer, workspace reference document,
-workspace resource path, and fixed input/output names. There are no user-controlled options,
-filters, or include files. Conversion and termination-grace timeouts are required configuration;
-the adapter does not select production values. A timed-out process group is
+The arguments are fixed to the approved reader, DOCX writer, workspace resource path, and fixed
+input/output names. Versioned-template mode adds the workspace reference document; Pandoc-default
+mode omits `--reference-doc`. There are no user-controlled options, filters, or include files.
+Conversion and termination-grace timeouts are required configuration; the adapter does not select
+production values. A timed-out process group is
 terminated and then killed after its configured grace period.
 
 ## Stable failures
@@ -61,7 +63,9 @@ Errors do not include Markdown, template bytes, subprocess output, or workspace 
 
 ## Ownership boundaries
 
-The reference DOCX is intentionally opaque to this adapter. Template validation owns fonts and
+When no reference DOCX is supplied, the adapter omits Pandoc's `--reference-doc` option so Pandoc
+uses its native default reference document. A supplied reference DOCX is intentionally opaque to
+this adapter. Template validation owns fonts and
 style policy. The archive/image, Mermaid, PDF, and resource-policy boundaries supply the validated inputs
 and production limits. The generated DOCX check here is therefore limited to
 safe ZIP member names and the minimum required OpenXML parts; it is not a substitute for template

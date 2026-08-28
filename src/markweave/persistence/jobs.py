@@ -61,8 +61,12 @@ def _job(row: ConversionJobRow) -> ConversionJob:
         else None,
         source_sha256=row.source_sha256,
         source_size=row.source_size,
-        template_id=UUID(row.template_id),
-        template_version_id=UUID(row.template_version_id),
+        template_id=UUID(row.template_id) if row.template_id is not None else None,
+        template_version_id=(
+            UUID(row.template_version_id)
+            if row.template_version_id is not None
+            else None
+        ),
         output=JobOutput(row.output),
         component_versions=_component_versions(row.component_versions),
         correlation_id=row.correlation_id or row.id,
@@ -133,8 +137,16 @@ class SqlJobRepository:
             source_kind=submission.source_kind.value,
             source_sha256=submission.source_sha256,
             source_size=submission.source_size,
-            template_id=str(submission.template_id),
-            template_version_id=str(submission.template_version_id),
+            template_id=(
+                str(submission.template_id)
+                if submission.template_id is not None
+                else None
+            ),
+            template_version_id=(
+                str(submission.template_version_id)
+                if submission.template_version_id is not None
+                else None
+            ),
             output=submission.output.value,
             component_versions=json.dumps(
                 submission.component_versions, separators=(",", ":")
@@ -159,26 +171,28 @@ class SqlJobRepository:
                 replay = self._find_idempotent(database, submission)
                 if replay is not None:
                     return replay, True
-                frozen = database.scalar(
-                    select(TemplateRow.id)
-                    .join(
-                        TemplateVersionRow,
-                        TemplateVersionRow.template_id == TemplateRow.id,
+                if submission.template_id is not None:
+                    frozen = database.scalar(
+                        select(TemplateRow.id)
+                        .join(
+                            TemplateVersionRow,
+                            TemplateVersionRow.template_id == TemplateRow.id,
+                        )
+                        .where(
+                            TemplateRow.id == str(submission.template_id),
+                            TemplateRow.status == "active",
+                            TemplateRow.publication_state == "published",
+                            TemplateRow.current_version_id
+                            == str(submission.template_version_id),
+                            TemplateVersionRow.id
+                            == str(submission.template_version_id),
+                            TemplateVersionRow.publication_state == "published",
+                            TemplateVersionRow.retention_token.is_(None),
+                        )
+                        .with_for_update()
                     )
-                    .where(
-                        TemplateRow.id == str(submission.template_id),
-                        TemplateRow.status == "active",
-                        TemplateRow.publication_state == "published",
-                        TemplateRow.current_version_id
-                        == str(submission.template_version_id),
-                        TemplateVersionRow.id == str(submission.template_version_id),
-                        TemplateVersionRow.publication_state == "published",
-                        TemplateVersionRow.retention_token.is_(None),
-                    )
-                    .with_for_update()
-                )
-                if frozen is None:
-                    raise JobRequestError
+                    if frozen is None:
+                        raise JobRequestError
                 self._enforce_admission(database, submission.owner_id)
                 database.add(row)
                 database.flush()

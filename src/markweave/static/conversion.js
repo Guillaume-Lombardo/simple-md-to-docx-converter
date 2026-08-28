@@ -82,6 +82,7 @@ export function createConversionController(doc, dependencies = {}) {
   const search = doc.querySelector("#template-search");
   const results = doc.querySelector("#template-results");
   const selected = doc.querySelector("#selected-template");
+  const usePandocDefault = doc.querySelector("#use-pandoc-default");
   const submit = doc.querySelector("#submit-conversion");
   const alert = doc.querySelector("#page-alert");
   const status = doc.querySelector("#job-status");
@@ -127,7 +128,7 @@ export function createConversionController(doc, dependencies = {}) {
   }
 
   function restoreSubmit() {
-    submit.disabled = !selected.dataset.versionId;
+    submit.disabled = false;
   }
 
   function showAmbiguousSubmission(message = "The conversion response could not be confirmed.") {
@@ -174,6 +175,15 @@ export function createConversionController(doc, dependencies = {}) {
     selected.querySelector("span").textContent = label;
     selected.querySelector("strong").textContent = template.name;
     submit.disabled = !template.current_version_id;
+    replaceChildren(results);
+    invalidateSubmission();
+  }
+
+  function chooseDefaultTemplate() {
+    selected.dataset.templateId = "";
+    selected.dataset.versionId = "";
+    selected.querySelector("span").textContent = "Document styling";
+    selected.querySelector("strong").textContent = "Pandoc default";
     replaceChildren(results);
     invalidateSubmission();
   }
@@ -275,7 +285,7 @@ export function createConversionController(doc, dependencies = {}) {
       schedulePoll(jobId, generation);
     } else {
       clearPollTimer();
-      submit.disabled = !selected.dataset.versionId;
+      restoreSubmit();
     }
   }
 
@@ -293,10 +303,6 @@ export function createConversionController(doc, dependencies = {}) {
       showError(invalid);
       return;
     }
-    if (!selected.dataset.versionId) {
-      showError("Choose an active template before starting the conversion.");
-      return;
-    }
     submissionGeneration += 1;
     const generation = submissionGeneration;
     abort(submissionAbort);
@@ -306,8 +312,10 @@ export function createConversionController(doc, dependencies = {}) {
     const requestKey = submissionKey;
     const data = new FormDataClass();
     data.append("source", file);
-    data.append("template_id", selected.dataset.templateId);
-    data.append("template_version_id", selected.dataset.versionId);
+    if (selected.dataset.versionId) {
+      data.append("template_id", selected.dataset.templateId);
+      data.append("template_version_id", selected.dataset.versionId);
+    }
     data.append("output", new FormDataClass(form).get("output"));
     submit.disabled = true;
     status.textContent = "Submitting your conversion…";
@@ -401,6 +409,7 @@ export function createConversionController(doc, dependencies = {}) {
   }
 
   form.addEventListener("submit", submitConversion);
+  usePandocDefault.addEventListener("click", chooseDefaultTemplate);
   cancel.addEventListener("click", cancelJob);
   search.addEventListener("input", () => {
     if (searchTimer !== null) cancelSchedule(searchTimer);
@@ -437,7 +446,14 @@ export function createConversionController(doc, dependencies = {}) {
     });
   }
 
-  return { cancelJob, chooseTemplate, pollJob, searchTemplates, submitConversion };
+  return {
+    cancelJob,
+    chooseDefaultTemplate,
+    chooseTemplate,
+    pollJob,
+    searchTemplates,
+    submitConversion,
+  };
 }
 
 /* node:coverage ignore next 3 */

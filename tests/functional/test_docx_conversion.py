@@ -10,13 +10,13 @@ from markweave.conversion.validation import ApprovedMarkdown
 
 class RecordingConverter:
     def __init__(self) -> None:
-        self.received: tuple[ApprovedMarkdown, bytes] | None = None
+        self.received: tuple[ApprovedMarkdown, bytes | None] | None = None
         self.deadline_monotonic: float | None = None
 
     def convert(
         self,
         markdown: ApprovedMarkdown,
-        reference_docx: bytes,
+        reference_docx: bytes | None,
         *,
         deadline_monotonic: float | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
@@ -52,3 +52,13 @@ def test_service_propagates_worker_deadline_to_docx_engine() -> None:
         == b"converted-docx"
     )
     assert converter.deadline_monotonic == 123.5
+
+
+@pytest.mark.functional
+def test_service_converts_with_pandoc_default_when_reference_is_absent() -> None:
+    converter = RecordingConverter()
+
+    result = DocxConversionService(converter).convert("# Pandoc default", None)
+
+    assert result == b"converted-docx"
+    assert converter.received == (ApprovedMarkdown("# Pandoc default"), None)

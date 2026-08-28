@@ -30,13 +30,15 @@ authorization from an HTTP status alone; clients should use both the status and 
 
 - `source`: the Markdown file or supported archive;
 - `output`: `docx`, `pdf`, or `both`;
-- `template_id` and `template_version_id`: the exact visible, active template pair resolved by the
-  client before submission.
+- `template_id` and `template_version_id`: optional as a pair. Omit both to use Pandoc's native
+  reference document, or provide both for the exact visible, active template resolved by the client.
 
 An `Idempotency-Key` header makes retries owner-scoped and payload-sensitive. Reusing a key with the
 same canonical request returns the existing submission; reusing it with different input is a
 conflict. A successful new submission returns `202 Accepted`, a `Location` header for the job, and
 `Retry-After` guidance.
+The response `template_mode` is `pandoc-default` or `versioned`; template identifiers are `null` in
+default mode.
 
 Use `GET /api/v1/conversions` for the current user's paginated list and
 `GET /api/v1/conversions/{job_id}` for one job. `DELETE` on the job requests cancellation.

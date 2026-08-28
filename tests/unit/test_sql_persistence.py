@@ -58,6 +58,9 @@ AUTH_AUDIT_REVISION: Any = importlib.import_module(
 JOB_INTEGRITY_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260825_12_job_integrity_metadata"
 )
+OPTIONAL_TEMPLATE_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260828_13_optional_job_template"
+)
 
 
 @pytest.mark.unit
@@ -504,3 +507,73 @@ def test_job_integrity_sqlite_downgrade_preserves_referencing_triggers(
         "CREATE TRIGGER conversion_guard AFTER INSERT ON users",
         "CREATE TRIGGER job_guard AFTER INSERT ON conversion_jobs",
     ]
+
+
+@pytest.mark.unit
+def test_optional_template_postgresql_trigger_only_revalidates_changed_pair(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(OPTIONAL_TEMPLATE_REVISION, "op")
+    operations.get_bind.return_value.dialect.name = "postgresql"
+
+    OPTIONAL_TEMPLATE_REVISION._create_conversion_integrity()
+
+    statement = operations.execute.call_args.args[0]
+    assert "TG_OP = 'UPDATE'" in statement
+    assert "IS NOT DISTINCT FROM" in statement
+    assert "NEW.template_id IS NULL AND NEW.template_version_id IS NULL" in statement
+
+
+@pytest.mark.unit
+def test_optional_template_sqlite_upgrade_and_downgrade_rebuild_integrity(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(OPTIONAL_TEMPLATE_REVISION, "op")
+    bind = mocker.MagicMock()
+    bind.dialect.name = "sqlite"
+    bind.execute.return_value.first.return_value = None
+    operations.get_bind.return_value = bind
+
+    OPTIONAL_TEMPLATE_REVISION.upgrade()
+    upgrade_batch = operations.batch_alter_table.return_value.__enter__.return_value
+    assert upgrade_batch.alter_column.call_count == 2
+    upgrade_batch.create_check_constraint.assert_called_once()
+    assert operations.batch_alter_table.call_args.kwargs["recreate"] == "always"
+
+    operations.reset_mock()
+    operations.get_bind.return_value = bind
+    OPTIONAL_TEMPLATE_REVISION.downgrade()
+    downgrade_batch = operations.batch_alter_table.return_value.__enter__.return_value
+    downgrade_batch.drop_constraint.assert_called_once_with(
+        "ck_conversion_jobs_template_pair", type_="check"
+    )
+    assert downgrade_batch.alter_column.call_count == 2
+    assert operations.batch_alter_table.call_args.kwargs["recreate"] == "always"
+
+
+@pytest.mark.unit
+def test_optional_template_downgrade_rejects_template_free_jobs(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(OPTIONAL_TEMPLATE_REVISION, "op")
+    bind = mocker.MagicMock()
+    bind.execute.return_value.first.return_value = (1,)
+    operations.get_bind.return_value = bind
+
+    with pytest.raises(RuntimeError, match="template-free conversion jobs exist"):
+        OPTIONAL_TEMPLATE_REVISION.downgrade()
+    operations.batch_alter_table.assert_not_called()
+
+
+@pytest.mark.unit
+def test_optional_template_postgresql_legacy_trigger_revalidates_changed_pair(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(OPTIONAL_TEMPLATE_REVISION, "op")
+    operations.get_bind.return_value.dialect.name = "postgresql"
+
+    OPTIONAL_TEMPLATE_REVISION._create_legacy_conversion_integrity()
+
+    statement = operations.execute.call_args.args[0]
+    assert "TG_OP = 'INSERT'" in statement
+    assert "IS DISTINCT FROM" in statement

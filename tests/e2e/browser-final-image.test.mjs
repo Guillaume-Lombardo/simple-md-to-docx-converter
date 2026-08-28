@@ -91,6 +91,26 @@ async function convertAndDownload(page, sourceFixture, output, timeout) {
   }, href);
   assert.equal(result.status, 200, `${output} result download failed`);
   assertDownloadedResult(output, result.headers, Buffer.from(result.body));
+  if (output !== "docx") {
+    const manifestResponse = await sessionRequest(
+      page,
+      `/api/v1/conversions/${job.id}/result/manifest`,
+      { json: true },
+    );
+    assert.equal(manifestResponse.status, 200, `${output} manifest download failed`);
+    const manifest = manifestResponse.body;
+    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.template_mode, job.template_mode);
+    if (job.template_mode === "pandoc-default") {
+      assert.equal(manifest.template_id, null);
+      assert.equal(manifest.template_version, null);
+      assert.equal(manifest.template_sha256, null);
+    } else {
+      assert.equal(manifest.template_id, job.template_id);
+      assert.ok(manifest.template_version);
+      assert.match(manifest.template_sha256, /^[0-9a-f]{64}$/);
+    }
+  }
   return job;
 }
 
@@ -192,11 +212,22 @@ test("final rootless image supports the three-identity browser workflow", async 
     await waitForText(bobPage, "#managed-template-list", identities.alice.username);
     assert.equal(await bobTemplate.locator("details").count(), 0);
 
-    step = "Alice converts and downloads DOCX, PDF, and combined results";
+    step = "Alice converts without a template, then with a versioned template";
     await alicePage.goto("/convert", { waitUntil: "networkidle" });
-    await selectTemplate(alicePage, templateName);
+    await alicePage.locator("#use-pandoc-default").click();
     const jobs = [];
     for (const output of ["docx", "pdf", "both"]) {
+      jobs.push(await convertAndDownload(
+        alicePage,
+        settings.sourceFixture,
+        output,
+        settings.timeoutMilliseconds,
+      ));
+      assert.equal(jobs.at(-1).template_mode, "pandoc-default");
+      assert.equal(jobs.at(-1).template_id, null);
+    }
+    await selectTemplate(alicePage, templateName);
+    for (const output of ["pdf", "both"]) {
       jobs.push(await convertAndDownload(
         alicePage,
         settings.sourceFixture,

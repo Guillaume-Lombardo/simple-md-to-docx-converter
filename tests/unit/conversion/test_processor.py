@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -92,6 +93,8 @@ def _job(
 
 
 def _template(job: ConversionJob, content: bytes) -> TemplateVersion:
+    assert job.template_version_id is not None
+    assert job.template_id is not None
     return TemplateVersion(
         id=job.template_version_id,
         template_id=job.template_id,
@@ -191,6 +194,25 @@ def test_processor_uses_frozen_source_template_and_traceability(
                 "traceability.json",
             ]
             assert archive.read("document.docx") == b"docx"
+
+
+def test_processor_uses_pandoc_default_and_nullable_traceability(mocker) -> None:
+    job = replace(_job(JobOutput.PDF), template_id=None, template_version_id=None)
+    processor, _objects, docx, pdf = _processor(mocker, b"# Frozen\n")
+
+    processor.process_without_template(
+        job,
+        cancelled=_Cancellation(),
+        deadline_monotonic=None,
+        progress=mocker.Mock(),
+    )
+
+    assert docx.convert.call_args.args[1] is None
+    context = pdf.convert.call_args.args[1]
+    assert context.template_mode == "pandoc-default"
+    assert context.template_id is None
+    assert context.template_version is None
+    assert context.template_sha256 is None
 
 
 def test_processor_archive_and_combined_output_are_deterministic(mocker) -> None:

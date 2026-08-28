@@ -39,6 +39,7 @@ from markweave.jobs.models import (
     JobProcessResult,
     JobStep,
     SourceKind,
+    TemplateMode,
     source_kind_for_filename,
 )
 from markweave.jobs.ports import CancellationProbe
@@ -88,6 +89,42 @@ class ProductionTemplateAwareProcessor:
         job: ConversionJob,
         template: TemplateVersion,
         template_content: bytes,
+        *,
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        return self._process(
+            job,
+            template,
+            template_content,
+            cancelled=cancelled,
+            deadline_monotonic=deadline_monotonic,
+            progress=progress,
+        )
+
+    def process_without_template(
+        self,
+        job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        return self._process(
+            job,
+            None,
+            None,
+            cancelled=cancelled,
+            deadline_monotonic=deadline_monotonic,
+            progress=progress,
+        )
+
+    def _process(  # noqa: PLR0913 - explicit worker boundary
+        self,
+        job: ConversionJob,
+        template: TemplateVersion | None,
+        template_content: bytes | None,
         *,
         cancelled: CancellationProbe,
         deadline_monotonic: float | None,
@@ -162,7 +199,7 @@ class ProductionTemplateAwareProcessor:
         self,
         source: bytes,
         source_kind: SourceKind | None,
-        template_content: bytes,
+        template_content: bytes | None,
         *,
         deadline_monotonic: float | None,
         cancellation_requested: CancellationProbe,
@@ -196,15 +233,20 @@ class ProductionTemplateAwareProcessor:
         )
 
     def _traceability_context(
-        self, job: ConversionJob, template: TemplateVersion
+        self, job: ConversionJob, template: TemplateVersion | None
     ) -> PdfTraceabilityContext:
         versions = dict(job.component_versions)
         return PdfTraceabilityContext(
             application_version=self._traceability.application_version,
             conversion_contract_version=self._traceability.conversion_contract_version,
-            template_id=str(template.template_id),
-            template_version=str(template.number),
-            template_sha256=template.sha256,
+            template_mode=(
+                TemplateMode.VERSIONED.value
+                if template is not None
+                else TemplateMode.PANDOC_DEFAULT.value
+            ),
+            template_id=str(template.template_id) if template is not None else None,
+            template_version=str(template.number) if template is not None else None,
+            template_sha256=template.sha256 if template is not None else None,
             pandoc_version=versions["pandoc"],
             pandoc_reader=self._traceability.pandoc_reader,
             mermaid_version=versions["mermaid-cli"],
@@ -322,7 +364,7 @@ def build_production_processor(
         image_limits=image_limits,
         traceability=ProcessorTraceability(
             application_version=VERSION,
-            conversion_contract_version="1",
+            conversion_contract_version="2",
             pandoc_reader=PANDOC_READER,
             font_manifest_sha256=hashlib.sha256(font_manifest).hexdigest(),
         ),

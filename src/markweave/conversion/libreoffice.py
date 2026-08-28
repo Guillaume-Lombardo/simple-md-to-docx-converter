@@ -182,21 +182,21 @@ class PdfTraceabilityContext:
 
     application_version: str
     conversion_contract_version: str
-    template_id: str
-    template_version: str
-    template_sha256: str
+    template_id: str | None
+    template_version: str | None
+    template_sha256: str | None
     pandoc_version: str
     pandoc_reader: str
     mermaid_version: str
     chromium_version: str
     font_manifest_sha256: str
+    template_mode: str = "versioned"
 
     def __post_init__(self) -> None:
         metadata = (
             self.application_version,
             self.conversion_contract_version,
-            self.template_id,
-            self.template_version,
+            self.template_mode,
             self.pandoc_version,
             self.pandoc_reader,
             self.mermaid_version,
@@ -204,9 +204,30 @@ class PdfTraceabilityContext:
         )
         if any(not _safe_metadata(value) for value in metadata):
             raise ValueError("PDF traceability metadata must be safe and non-empty")
-        if not _is_sha256(self.template_sha256) or not _is_sha256(
-            self.font_manifest_sha256
+        template_values = (
+            self.template_id,
+            self.template_version,
+            self.template_sha256,
+        )
+        if self.template_mode == "versioned":
+            template_id = self.template_id
+            template_version = self.template_version
+            template_sha256 = self.template_sha256
+            if (
+                template_id is None
+                or template_version is None
+                or template_sha256 is None
+            ):
+                raise ValueError("Versioned PDF traceability requires a template")
+            if not _safe_metadata(template_id) or not _safe_metadata(template_version):
+                raise ValueError("PDF traceability metadata must be safe and non-empty")
+            if not _is_sha256(template_sha256):
+                raise ValueError("PDF traceability digests must be lowercase SHA-256")
+        elif self.template_mode != "pandoc-default" or any(
+            value is not None for value in template_values
         ):
+            raise ValueError("Invalid PDF template traceability mode")
+        if not _is_sha256(self.font_manifest_sha256):
             raise ValueError("PDF traceability digests must be lowercase SHA-256")
 
 
@@ -225,9 +246,9 @@ class PdfTraceabilityManifest:
     schema_version: int
     application_version: str
     conversion_contract_version: str
-    template_id: str
-    template_version: str
-    template_sha256: str
+    template_id: str | None
+    template_version: str | None
+    template_sha256: str | None
     source_docx_sha256: str
     output_pdf_sha256: str
     output_pdf_bytes: int
@@ -240,6 +261,7 @@ class PdfTraceabilityManifest:
     font_manifest_sha256: str
     export_filter: str
     output_format: str
+    template_mode: str = "versioned"
 
     def canonical_json(self) -> bytes:
         """Serialize without timestamps, paths, user data, or unstable whitespace."""
@@ -720,9 +742,10 @@ class LibreOfficePdfConverter:
         pdf = _read_pdf(workspace / "output" / "source.pdf", self._limits.max_pdf_bytes)
         pages = _validate_pdf(pdf, self._limits)
         manifest = PdfTraceabilityManifest(
-            schema_version=1,
+            schema_version=2,
             application_version=traceability.application_version,
             conversion_contract_version=traceability.conversion_contract_version,
+            template_mode=traceability.template_mode,
             template_id=traceability.template_id,
             template_version=traceability.template_version,
             template_sha256=traceability.template_sha256,

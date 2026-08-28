@@ -51,7 +51,7 @@ class FakeDocument {
     this.elements = new Map();
     const selectors = [
       "#source", "#drop-zone", "#template-search", "#template-results",
-      "#selected-template", "#submit-conversion", "#page-alert", "#job-status",
+      "#selected-template", "#use-pandoc-default", "#submit-conversion", "#page-alert", "#job-status",
       "#job-progress", "#cancel-job", "#download-result",
     ];
     if (withForm) selectors.push("#conversion-form");
@@ -212,11 +212,10 @@ test("submission renews acknowledged keys and reuses only ambiguous requests", a
   await h.doc.querySelector("#conversion-form").dispatch("submit");
   source.files = [{ name: "source.md", size: 10 }];
   await h.doc.querySelector("#conversion-form").dispatch("submit");
-  assert.match(h.doc.querySelector("#page-alert").textContent, /active template/);
+  assert.match(h.doc.querySelector("#page-alert").textContent, /same request key/);
+  assert.equal(h.requests[0][1].body.values.some(([name]) => name === "template_id"), false);
   selected.dataset.templateId = "template";
   selected.dataset.versionId = "version";
-  await h.doc.querySelector("#conversion-form").dispatch("submit");
-  assert.match(h.doc.querySelector("#page-alert").textContent, /same request key/);
   await h.doc.querySelector("#conversion-form").dispatch("submit");
   assert.match(h.doc.querySelector("#page-alert").textContent, /temporarily unavailable/);
   await h.doc.querySelector("#conversion-form").dispatch("submit");

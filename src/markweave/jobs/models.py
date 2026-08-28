@@ -14,6 +14,7 @@ COMPLETE_PROGRESS = 100
 RESULT_OBJECT_NAME_PREFIX = "result-attempt:"
 RESULT_MANIFEST_OBJECT_NAME_PREFIX = "result-manifest-attempt:"
 MAX_SOURCE_FILENAME_CHARACTERS = 255
+MAX_TEMPLATE_VERSION_CHARACTERS = 255
 FIRST_CONTROL_CODEPOINT = 32
 DELETE_CODEPOINT = 127
 
@@ -65,6 +66,13 @@ class JobOutput(StrEnum):
     BOTH = "both"
 
 
+class TemplateMode(StrEnum):
+    """Immutable document-style mode selected for one conversion."""
+
+    PANDOC_DEFAULT = "pandoc-default"
+    VERSIONED = "versioned"
+
+
 class SourceKind(StrEnum):
     """Persisted source interpretation selected from the admitted filename."""
 
@@ -102,6 +110,22 @@ def _validate_sha256(value: str) -> None:
         raise ValueError("Job digests must be lowercase SHA-256")
 
 
+def _validate_template_pair(
+    template_id: UUID | None, template_version_id: UUID | None
+) -> None:
+    if (template_id is None) is not (template_version_id is None):
+        raise ValueError("Template identifiers must both be present or both be absent")
+
+
+def _template_mode(
+    template_id: UUID | None, template_version_id: UUID | None
+) -> TemplateMode:
+    _validate_template_pair(template_id, template_version_id)
+    return (
+        TemplateMode.PANDOC_DEFAULT if template_id is None else TemplateMode.VERSIONED
+    )
+
+
 TERMINAL_JOB_STATES = frozenset(
     {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.EXPIRED}
 )
@@ -120,8 +144,8 @@ class JobSubmission:
     id: UUID
     owner_id: UUID
     source_object_id: UUID
-    template_id: UUID
-    template_version_id: UUID
+    template_id: UUID | None
+    template_version_id: UUID | None
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
     request_digest: str
@@ -140,6 +164,7 @@ class JobSubmission:
             self, "correlation_id", require_correlation_id(correlation_id)
         )
         _validate_component_versions(self.component_versions)
+        _validate_template_pair(self.template_id, self.template_version_id)
         if source_kind_for_filename(self.source_filename) is not self.source_kind:
             raise ValueError("Source filename and kind do not match")
         _validate_sha256(self.source_sha256)
@@ -157,8 +182,8 @@ class ConversionJob:
     id: UUID
     owner_id: UUID
     source_object_id: UUID
-    template_id: UUID
-    template_version_id: UUID
+    template_id: UUID | None
+    template_version_id: UUID | None
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
     state: JobState
@@ -194,6 +219,7 @@ class ConversionJob:
         self._normalize_timestamps()
         self._validate_progress()
         _validate_component_versions(self.component_versions)
+        _validate_template_pair(self.template_id, self.template_version_id)
         self._validate_source()
         self._validate_lease()
         self._validate_result()
@@ -269,6 +295,12 @@ class ConversionJob:
     def terminal(self) -> bool:
         return self.state in TERMINAL_JOB_STATES
 
+    @property
+    def template_mode(self) -> TemplateMode:
+        """Return the persisted style mode without inventing template identifiers."""
+
+        return _template_mode(self.template_id, self.template_version_id)
+
 
 @dataclass(frozen=True, slots=True)
 class JobPage:
@@ -286,6 +318,24 @@ class JobProcessResult:
 
     content: bytes
     progress_manifest: bytes | None = None
+    template_version: str | None = None
+    template_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.template_version is None) is not (self.template_sha256 is None):
+            raise ValueError("Result template traceability metadata must be complete")
+        if self.template_version is not None:
+            if (
+                not self.template_version
+                or len(self.template_version) > MAX_TEMPLATE_VERSION_CHARACTERS
+            ):
+                raise ValueError("Result template version is invalid")
+            template_sha256 = self.template_sha256
+            if template_sha256 is None:
+                raise ValueError(
+                    "Result template traceability metadata must be complete"
+                )
+            _validate_sha256(template_sha256)
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,8 +344,8 @@ class JobRequest:
 
     owner_id: UUID
     source: bytes
-    template_id: UUID
-    template_version_id: UUID
+    template_id: UUID | None
+    template_version_id: UUID | None
     output: JobOutput
     component_versions: tuple[tuple[str, str], ...]
     now: datetime
@@ -306,8 +356,13 @@ class JobRequest:
     def __post_init__(self) -> None:
         if self.correlation_id:
             require_correlation_id(self.correlation_id)
+        _validate_template_pair(self.template_id, self.template_version_id)
         if source_kind_for_filename(self.source_filename) is not self.source_kind:
             raise ValueError("Source filename and kind do not match")
+
+    @property
+    def template_mode(self) -> TemplateMode:
+        return _template_mode(self.template_id, self.template_version_id)
 
 
 @dataclass(frozen=True, slots=True)

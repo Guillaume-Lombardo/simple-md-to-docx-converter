@@ -107,6 +107,49 @@ def test_submission_rejects_conflict_before_writing_source(
     objects.put.assert_not_called()
 
 
+def test_submission_replays_pre_template_mode_digest(mocker: MockerFixture) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    objects = mocker.Mock(spec=ObjectStore)
+    existing = job()
+    request = JobRequest(
+        owner_id=existing.owner_id,
+        source=b"legacy source",
+        template_id=existing.template_id,
+        template_version_id=existing.template_version_id,
+        output=existing.output,
+        component_versions=COMPONENT_VERSIONS,
+        now=NOW,
+    )
+    source_sha256 = hashlib.sha256(request.source).hexdigest()
+    legacy_digest = hashlib.sha256(
+        b"\0".join(
+            (
+                source_sha256.encode("ascii"),
+                str(len(request.source)).encode("ascii"),
+                request.source_kind.value.encode("ascii"),
+                str(request.template_id).encode("ascii"),
+                str(request.template_version_id).encode("ascii"),
+                request.output.value.encode("ascii"),
+                repr(request.component_versions).encode("utf-8"),
+            )
+        )
+    ).hexdigest()
+    replay = job(
+        owner_id=existing.owner_id,
+        template_id=existing.template_id,
+        template_version_id=existing.template_version_id,
+        output=existing.output,
+        request_digest=legacy_digest,
+    )
+    repository.create.return_value = (replay, True)
+
+    result, replayed = service(repository, objects).submit(request, "legacy-key")
+
+    assert result is replay
+    assert replayed
+    objects.put.assert_not_called()
+
+
 def test_failed_source_upload_leaves_a_recoverable_durable_reservation(
     mocker: MockerFixture,
 ) -> None:

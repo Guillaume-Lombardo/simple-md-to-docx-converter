@@ -539,7 +539,7 @@ def retain_conversion_artifact(
     os.chmod(path, 0o600)
 
 
-def validate_result(
+def validate_result(  # noqa: PLR0912 - one final artifact contract covers all outputs
     client: ServiceClient,
     job: dict[str, Any],
     output: str,
@@ -583,13 +583,42 @@ def validate_result(
     manifest_result = client.request("GET", f"{path}/manifest")
     expect(manifest_result, 200, f"download {output} manifest")
     manifest = decode_object(manifest_result, f"download {output} manifest")
+    schema_version = manifest.get("schema_version")
+    job_template_mode = job.get("template_mode")
+    if type(schema_version) is not int:
+        template_mode = None
+        compatible_mode = False
+    elif schema_version == 1:
+        template_mode = "versioned"
+        compatible_mode = job_template_mode is None and "template_mode" not in manifest
+    else:
+        template_mode = manifest.get("template_mode")
+        compatible_mode = schema_version == 2 and template_mode == job_template_mode
     if (
-        manifest.get("schema_version") != 1
+        not compatible_mode
         or manifest.get("output_format") != "pdf"
         or manifest.get("output_pdf_sha256") != hashlib.sha256(pdf).hexdigest()
         or manifest.get("output_pdf_bytes") != len(pdf)
     ):
         raise WorkflowFailure(f"download {output}: manifest invariants mismatch")
+    template_values = (
+        manifest.get("template_id"),
+        manifest.get("template_version"),
+        manifest.get("template_sha256"),
+    )
+    if template_mode == "pandoc-default":
+        if any(value is not None for value in template_values):
+            raise WorkflowFailure(
+                f"download {output}: default manifest invented template identity"
+            )
+    elif (
+        template_mode != "versioned"
+        or manifest.get("template_id") != job.get("template_id")
+        or not all(isinstance(value, str) and value for value in template_values)
+    ):
+        raise WorkflowFailure(
+            f"download {output}: versioned manifest identity mismatch"
+        )
     if embedded_manifest is not None and embedded_manifest != manifest_result.body:
         raise WorkflowFailure("BOTH result: embedded and sidecar manifests differ")
 

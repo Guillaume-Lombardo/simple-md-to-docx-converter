@@ -32,11 +32,14 @@ def _repository(
     users = SqlUserRepository(engine)
     users.create(User(owner_id, "Owner", f"owner-{owner_id}", "hash", Role.USER))
     users.create(User(other_id, "Other", f"other-{other_id}", "hash", Role.USER))
+    template_submission = submission(owner_id)
+    assert template_submission.template_id is not None
+    assert template_submission.template_version_id is not None
     publish_template_pair(
         engine,
         owner_id,
-        submission(owner_id).template_id,
-        submission(owner_id).template_version_id,
+        template_submission.template_id,
+        template_submission.template_version_id,
     )
     return engine, SqlJobRepository(engine, policy), owner_id, other_id
 

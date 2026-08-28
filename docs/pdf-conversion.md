@@ -29,9 +29,10 @@ embedded, over-deep, over-object, over-page, and non-finite-page outputs.
 
 The returned external manifest is canonical JSON without timestamps, paths, user identifiers,
 filenames, or document content. It records source and output digests, output size and page geometry,
-application and conversion-contract versions, immutable template identity/version/digest, the
-Pandoc reader and engine versions, the font-manifest digest, and the fixed LibreOffice export
-filter. The production worker persists the canonical JSON in a deterministic owner-bound sidecar
+application and conversion-contract versions, the explicit template mode, the Pandoc reader and
+engine versions, the font-manifest digest, and the fixed LibreOffice export filter. Versioned mode
+records the immutable template identity/version/digest; Pandoc-default mode records null template
+fields. The production worker persists the canonical JSON in a deterministic owner-bound sidecar
 and publishes its identifier atomically with the primary result and durable succeeded state. Owners
 and administrators can inspect it through the authenticated conversion manifest endpoint; failed
 publication, cancellation, and expiration compensate or remove both objects together.
