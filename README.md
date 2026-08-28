@@ -4,9 +4,9 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.3.3` is the Python package and
-container release. The quickstart pins that published container image by its immutable registry
-digest.
+The project is licensed under [Apache-2.0](LICENSE). The source and Python package version is
+`0.3.4`. Until that patch is published, the quickstart keeps the last published `0.3.3` container
+image pinned by its immutable registry digest.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.
@@ -44,6 +44,30 @@ Chromium seccomp profile because Docker Compose cannot pass that local profile d
 Docker-compatible API. Podman's automatic Docker-API health metadata is not used; the helper polls
 ClamAV directly before starting Markweave, then polls Markweave's local readiness endpoint with a
 bounded timeout.
+
+Set `MARKWEAVE_SIMPLE_PORT` to publish the simple quickstart on another loopback port. The helper
+also configures that exact public origin so browser login keeps its strict same-origin check:
+
+```bash
+MARKWEAVE_SIMPLE_RUNTIME=podman MARKWEAVE_SIMPLE_PORT=11279 \
+  scripts/quickstart-simple.sh up --trust-upstream-antivirus
+```
+
+Open <http://localhost:11279>; using a different hostname or IP address is intentionally rejected
+by the login origin check.
+
+When a same-host reverse proxy exposes Markweave through HTTPS, set `MARKWEAVE_PUBLIC_ORIGIN` to
+the exact browser-visible origin (scheme, host, and optional port, without a path):
+
+```bash
+MARKWEAVE_SIMPLE_RUNTIME=podman MARKWEAVE_SIMPLE_PORT=11279 \
+MARKWEAVE_PUBLIC_ORIGIN=https://converter.example \
+  scripts/quickstart-simple.sh up --trust-upstream-antivirus
+```
+
+The proxy can forward to `http://127.0.0.1:11279`; Markweave validates login against the configured
+public origin instead of trusting forwarded-host headers. In trusted-upstream antivirus mode, the
+proxy must also scan every upload and remain the only route to Markweave.
 
 If an upstream proxy already scans every upload, the Podman quickstart can omit ClamAV entirely:
 

@@ -136,6 +136,9 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     assert environment["MD_CONVERTER_INITIAL_ADMIN_PASSWORD"].startswith(
         "${MARKWEAVE_INITIAL_ADMIN_PASSWORD:?"
     )
+    assert environment["MD_CONVERTER_PUBLIC_ORIGIN"] == (
+        "${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:8080}"
+    )
     assert environment["MD_CONVERTER_CLAMAV_HOST"] == "clamav"
     assert environment["MD_CONVERTER_STORAGE_PROFILE"] == "standalone"
     assert environment["MD_CONVERTER_STANDALONE_DATA_DIRECTORY"] == "/data"
@@ -178,6 +181,8 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "no physical capacity cap" in readme
     assert "Rootless Podman Compose" in readme
     assert "MARKWEAVE_SIMPLE_RUNTIME=podman" in readme
+    assert "MARKWEAVE_SIMPLE_PORT=11279" in readme
+    assert "http://localhost:11279" in readme
     assert "up --trust-upstream-antivirus" in readme
     assert "neither pulls nor starts the ClamAV image" in readme
     assert "prevents any direct or alternate route to Markweave" in " ".join(
@@ -345,6 +350,41 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert "/quickstart-template.docx" in (ROOT / ".gitignore").read_text()
 
 
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_pass_the_exact_public_origin_to_compose(
+    quickstart: Path,
+) -> None:
+    script = quickstart.read_text(encoding="utf-8")
+
+    assert (
+        'readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"'
+        in script
+    )
+    assert "MARKWEAVE_PUBLIC_ORIGIN=%s" in script
+    assert "The public origin must be a single-line HTTP origin." in script
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_reject_multiline_public_origins(
+    tmp_path: Path,
+    quickstart: Path,
+) -> None:
+    rejected = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_PUBLIC_ORIGIN": "https://converter.example\nINJECTED=value",
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+    )
+
+    assert rejected.returncode != 0
+    assert "The public origin must be a single-line HTTP origin." in rejected.stderr
+
+
 @pytest.mark.parametrize(
     ("quickstart", "directory"),
     [
@@ -485,6 +525,7 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert runner.count("quickstart up") == 5
     assert runner.count("quickstart down") >= 2
     assert "docker compose" in runner
+    assert "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
     assert 'docker port "$application_id" 8080/tcp' in runner
@@ -535,6 +576,7 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert '"MARKWEAVE_SIMPLE_PROJECT=$project"' in runner
     assert '"MARKWEAVE_SIMPLE_PORT=$port"' in runner
     assert '"MARKWEAVE_SIMPLE_RUNTIME=$runtime"' in runner
+    assert "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s" in runner
     assert "MARKWEAVE_SIMPLE_E2E_RUNTIME" in runner
     assert "runtime_command=(docker)" in runner
     assert "runtime_command=(podman)" in runner

@@ -12,6 +12,7 @@ readonly template_file="$state_directory/quickstart-template.docx"
 readonly work_bytes=268435456
 readonly project="${MARKWEAVE_QUICKSTART_PROJECT:-markweave}"
 readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"
+readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"
 readonly work_volume="${project}_markweave-work"
 readonly blkid=/usr/sbin/blkid
 readonly losetup=/usr/sbin/losetup
@@ -35,6 +36,8 @@ validate_project_and_port() {
     fail "The quickstart project name must contain only lowercase letters, numbers, underscores, and hyphens."
   [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || \
     fail "The quickstart port must be an integer from 1 through 65535."
+  [[ "$public_origin" != *$'\n'* && "$public_origin" != *$'\r'* ]] || \
+    fail "The public origin must be a single-line HTTP origin."
 }
 
 require_supported_host() {
@@ -286,8 +289,8 @@ write_runtime_env() {
   fi
   runtime_env="$(mktemp "$state_directory/compose.XXXXXX")"
   password="$(sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' "$password_file")"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$port" "$device" >"$runtime_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$public_origin" "$device" >"$runtime_env"
   chmod 0600 -- "$runtime_env"
 }
 

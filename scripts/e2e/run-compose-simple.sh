@@ -71,8 +71,8 @@ quickstart() {
 }
 
 write_fault_env() {
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
-    "$password" "$port" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
+    "$password" "$port" "$port" >"$fault_env"
 }
 
 compose() {
