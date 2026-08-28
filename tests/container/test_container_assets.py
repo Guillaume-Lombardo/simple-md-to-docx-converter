@@ -14,9 +14,48 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.container import integrity, summarize_supply_chain, verify_supply_chain
+from scripts.container import (
+    api_workflow_smoke,
+    integrity,
+    summarize_supply_chain,
+    verify_supply_chain,
+)
 
 pytestmark = pytest.mark.unit
+LEGACY_TEMPLATE_ID = "00000000-0000-4000-8000-000000000029"
+
+
+def smoke_pdf_client(
+    mocker,
+    schema_version: object,
+    job_template_mode: str | None,
+    manifest_template_mode: str | None = None,
+):
+    pdf = b"%PDF-legacy"
+    payload: dict[str, object] = {
+        "schema_version": schema_version,
+        "output_format": "pdf",
+        "output_pdf_sha256": hashlib.sha256(pdf).hexdigest(),
+        "output_pdf_bytes": len(pdf),
+        "template_id": LEGACY_TEMPLATE_ID,
+        "template_version": "3",
+        "template_sha256": "a" * 64,
+    }
+    job: dict[str, object] = {
+        "id": "legacy-job",
+        "template_id": LEGACY_TEMPLATE_ID,
+    }
+    if job_template_mode is not None:
+        job["template_mode"] = job_template_mode
+    resolved_manifest_mode = manifest_template_mode or job_template_mode
+    if resolved_manifest_mode is not None:
+        payload["template_mode"] = resolved_manifest_mode
+    client = mocker.Mock(spec=api_workflow_smoke.Client)
+    client.request.side_effect = (
+        (200, {"cache-control": "private, no-store"}, pdf),
+        (200, {}, json.dumps(payload).encode()),
+    )
+    return client, job
 
 
 def test_container_domain_is_active_and_runs_rootless_harness() -> None:
@@ -26,6 +65,40 @@ def test_container_domain_is_active_and_runs_rootless_harness() -> None:
         "command": ["bash", "scripts/container/run-ci.sh"],
         "status": "active",
     }
+
+
+@pytest.mark.parametrize(
+    ("job_template_mode", "accepted"), ((None, True), ("versioned", False))
+)
+def test_container_workflow_limits_legacy_manifest_to_pre_t29_api(
+    mocker, job_template_mode: str | None, accepted: bool
+) -> None:
+    client, job = smoke_pdf_client(mocker, 1, job_template_mode)
+    if accepted:
+        api_workflow_smoke.validate_result(client, job, "pdf")
+    else:
+        with pytest.raises(RuntimeError, match="manifest invariants mismatch"):
+            api_workflow_smoke.validate_result(client, job, "pdf")
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "job_template_mode"),
+    ((True, None), (1.0, None), (2.0, "versioned")),
+)
+def test_container_workflow_rejects_non_integer_manifest_schema(
+    mocker, schema_version: object, job_template_mode: str | None
+) -> None:
+    client, job = smoke_pdf_client(mocker, schema_version, job_template_mode)
+
+    with pytest.raises(RuntimeError, match="manifest invariants mismatch"):
+        api_workflow_smoke.validate_result(client, job, "pdf")
+
+
+def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
+    client, job = smoke_pdf_client(mocker, 1, None, "versioned")
+
+    with pytest.raises(RuntimeError, match="manifest invariants mismatch"):
+        api_workflow_smoke.validate_result(client, job, "pdf")
 
 
 @pytest.mark.parametrize(

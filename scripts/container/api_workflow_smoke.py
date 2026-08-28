@@ -243,15 +243,29 @@ def validate_result(  # noqa: PLR0912,PLR0915 - one assertion workflow covers al
         raise RuntimeError("PDF manifest digest mismatch")
     if decoded["output_pdf_bytes"] != len(pdf):
         raise RuntimeError("PDF manifest size mismatch")
-    if (
-        decoded["schema_version"] != TRACEABILITY_SCHEMA_VERSION
-        or decoded["output_format"] != "pdf"
-    ):
+    schema_version = decoded["schema_version"]
+    job_template_mode = job.get("template_mode")
+    if type(schema_version) is not int:
+        template_mode = None
+        compatible_mode = False
+    elif schema_version == 1:
+        template_mode = "versioned"
+        compatible_mode = job_template_mode is None and "template_mode" not in decoded
+    else:
+        template_mode = decoded.get("template_mode")
+        compatible_mode = (
+            schema_version == TRACEABILITY_SCHEMA_VERSION
+            and template_mode == job_template_mode
+        )
+    if not compatible_mode or decoded["output_format"] != "pdf":
         raise RuntimeError("PDF manifest invariants mismatch")
-    if decoded["template_mode"] != job["template_mode"]:
-        raise RuntimeError("PDF manifest template mode mismatch")
-    if decoded["template_mode"] == "versioned":
-        if decoded["template_id"] != job["template_id"]:
+    if template_mode == "versioned":
+        template_id = decoded["template_id"]
+        if (
+            not isinstance(template_id, str)
+            or not template_id
+            or template_id != job.get("template_id")
+        ):
             raise RuntimeError("PDF manifest template identifier mismatch")
         if (
             not isinstance(decoded["template_version"], str)

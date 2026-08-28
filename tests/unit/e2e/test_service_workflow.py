@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import stat
@@ -279,6 +280,117 @@ def test_docx_validation_accepts_required_parts_and_rejects_other_bytes() -> Non
     workflow.validate_docx(output.getvalue(), "test document")
     with pytest.raises(workflow.WorkflowFailure, match="invalid OpenXML"):
         workflow.validate_docx(b"not a ZIP", "test document")
+
+
+def pdf_result_client(
+    mocker: MockerFixture, job: dict[str, Any], manifest: dict[str, Any]
+) -> tuple[Any, bytes]:
+    pdf = b"%PDF-compatible"
+    manifest |= {
+        "output_format": "pdf",
+        "output_pdf_sha256": hashlib.sha256(pdf).hexdigest(),
+        "output_pdf_bytes": len(pdf),
+    }
+    client = mocker.Mock(spec=workflow.ServiceClient)
+    client.request.side_effect = (
+        workflow.HttpResult(200, {"cache-control": "private, no-store"}, pdf, ()),
+        workflow.HttpResult(200, {}, json.dumps(manifest).encode(), ()),
+    )
+    return client, pdf
+
+
+@pytest.mark.unit
+def test_result_validation_accepts_strict_legacy_versioned_manifest(
+    mocker: MockerFixture,
+) -> None:
+    template_id = identifier()
+    job = {"id": identifier(), "template_id": template_id}
+    client, _pdf = pdf_result_client(
+        mocker,
+        job,
+        {
+            "schema_version": 1,
+            "template_id": template_id,
+            "template_version": "3",
+            "template_sha256": "a" * 64,
+        },
+    )
+
+    workflow.validate_result(client, job, "pdf")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("template_mode", ("pandoc-default", "versioned"))
+def test_result_validation_rejects_legacy_manifest_for_t29_job(
+    mocker: MockerFixture, template_mode: str
+) -> None:
+    job = {
+        "id": identifier(),
+        "template_mode": template_mode,
+        "template_id": None,
+    }
+    client, _pdf = pdf_result_client(
+        mocker,
+        job,
+        {
+            "schema_version": 1,
+            "template_id": identifier(),
+            "template_version": "3",
+            "template_sha256": "a" * 64,
+        },
+    )
+
+    with pytest.raises(workflow.WorkflowFailure, match="manifest invariants mismatch"):
+        workflow.validate_result(client, job, "pdf")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("schema_version", "job_template_mode"),
+    ((True, None), (1.0, None), (2.0, "versioned")),
+)
+def test_result_validation_rejects_non_integer_manifest_schema(
+    mocker: MockerFixture,
+    schema_version: object,
+    job_template_mode: str | None,
+) -> None:
+    template_id = identifier()
+    job: dict[str, Any] = {"id": identifier(), "template_id": template_id}
+    manifest: dict[str, Any] = {
+        "schema_version": schema_version,
+        "template_id": template_id,
+        "template_version": "3",
+        "template_sha256": "a" * 64,
+    }
+    if job_template_mode is not None:
+        job["template_mode"] = job_template_mode
+        manifest["template_mode"] = job_template_mode
+    client, _pdf = pdf_result_client(mocker, job, manifest)
+
+    with pytest.raises(workflow.WorkflowFailure, match="manifest invariants mismatch"):
+        workflow.validate_result(client, job, "pdf")
+
+
+@pytest.mark.unit
+def test_result_validation_rejects_mixed_v1_v2_manifest(
+    mocker: MockerFixture,
+) -> None:
+    template_id = identifier()
+    job = {"id": identifier(), "template_id": template_id}
+    client, _pdf = pdf_result_client(
+        mocker,
+        job,
+        {
+            "schema_version": 1,
+            "template_mode": "versioned",
+            "template_id": template_id,
+            "template_version": "3",
+            "template_sha256": "a" * 64,
+        },
+    )
+
+    with pytest.raises(workflow.WorkflowFailure, match="manifest invariants mismatch"):
+        workflow.validate_result(client, job, "pdf")
 
 
 @pytest.mark.unit

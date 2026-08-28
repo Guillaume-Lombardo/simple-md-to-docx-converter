@@ -77,6 +77,12 @@ remain reproducible and traceable.
   modes. Ruff formatting/linting, `ty`, 23 Web tests, 74 focused tests, and all 1,580 locally
   runnable Python tests pass with 95.05% coverage. PostgreSQL/RustFS and final-image execution
   remain assigned to CI.
+- 2026-08-28: Resolved the first ready-PR CI findings without weakening any gate. Unit coverage now
+  exercises SQLite upgrade/downgrade, downgrade refusal, and both PostgreSQL trigger variants for
+  migration 13, raising changed-line coverage from 87.98% to 96.72%. Compose and container E2E
+  readers accept strict schema v1 only for the published pre-T29 versioned-image contract while
+  retaining schema-v2 mode validation for new images and rejecting v1 for Pandoc-default jobs.
+  Both readers require an exact integer schema and reject mixed v1/v2 fields.
 
 ## Synchronization
 
