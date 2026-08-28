@@ -54,7 +54,10 @@ MARKWEAVE_SIMPLE_RUNTIME=podman MARKWEAVE_SIMPLE_PORT=11279 \
 ```
 
 Open <http://localhost:11279>; using a different hostname or IP address is intentionally rejected
-by the login origin check.
+by the login origin check. Before reporting readiness, the simple helper verifies both the public
+origin received by the container and a browser-equivalent login request carrying that origin. If
+the selected Compose provider drops or rewrites the value, startup fails instead of leaving a
+running stack whose login form always returns `LOGIN_ORIGIN_INVALID`.
 
 When a same-host reverse proxy exposes Markweave through HTTPS, set `MARKWEAVE_PUBLIC_ORIGIN` to
 the exact browser-visible origin (scheme, host, and optional port, without a path):

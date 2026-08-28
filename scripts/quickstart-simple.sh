@@ -208,7 +208,8 @@ compose() {
       files+=(--file "$repository/compose.podman-trusted-upstream.yaml")
     fi
   fi
-  "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
+  MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
+    "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$runtime_env" "$@"
 }
 
@@ -319,6 +320,39 @@ wait_for_application() {
   fail "Timed out waiting for Markweave readiness."
 }
 
+verify_application_public_origin() {
+  local container
+  container="$(application_container)"
+  [[ -n "$container" ]] || fail "The running Markweave container could not be resolved."
+  "${runtime_command[@]}" exec "$container" python -c '
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+expected = sys.argv[1]
+if os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN") != expected:
+    raise SystemExit(2)
+request = urllib.request.Request(
+    "http://127.0.0.1:8080/login",
+    data=urllib.parse.urlencode(
+        {"username": "origin-probe", "password": "invalid-origin-probe"}
+    ).encode(),
+    headers={"Origin": expected},
+    method="POST",
+)
+try:
+    urllib.request.urlopen(request, timeout=5)
+except urllib.error.HTTPError as error:
+    if error.code != 401:
+        raise SystemExit(3) from error
+else:
+    raise SystemExit(4)
+' "$public_origin" >/dev/null 2>&1 || \
+    fail "The running application rejected the configured public origin."
+}
+
 start_podman_stack() {
   compose up --detach clamav
   wait_for_podman_scanner
@@ -397,6 +431,7 @@ start() {
     compose up --detach markweave
     wait_for_application
   fi
+  verify_application_public_origin
   validate_work_volume
   start_succeeded=true
   echo "Markweave is ready with $runtime_name at http://localhost:$port"

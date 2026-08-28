@@ -52,15 +52,13 @@ RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     && ! ldd /opt/google/chrome/chrome | grep -Fq 'not found' \
     && rm /tmp/google-chrome.rpm
 
-RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-        "https://download.documentfoundation.org/libreoffice/stable/${LIBREOFFICE_VERSION}/rpm/x86_64/LibreOffice_${LIBREOFFICE_VERSION}_Linux_x86-64_rpm.tar.gz" \
-        --output /tmp/libreoffice.tar.gz \
-    && echo "${LIBREOFFICE_SHA256}  /tmp/libreoffice.tar.gz" | sha256sum --check --strict \
+RUN --mount=type=bind,from=libreoffice-archive,source=LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz,target=/tmp/libreoffice.tar.gz,ro \
+    echo "${LIBREOFFICE_SHA256}  /tmp/libreoffice.tar.gz" | sha256sum --check --strict \
     && mkdir /tmp/libreoffice \
     && tar --extract --gzip --file /tmp/libreoffice.tar.gz --strip-components=1 --directory /tmp/libreoffice \
     && dnf install -y /tmp/libreoffice/RPMS/*.rpm \
     && dnf clean all \
-    && rm -rf /var/cache/dnf /tmp/libreoffice /tmp/libreoffice.tar.gz \
+    && rm -rf /var/cache/dnf /tmp/libreoffice \
     && ln -s "/opt/libreoffice${LIBREOFFICE_VERSION%.*}/program/soffice" /usr/local/bin/soffice \
     && ! ldd "/opt/libreoffice${LIBREOFFICE_VERSION%.*}/program/oosplash" | grep -Fq 'not found'
 

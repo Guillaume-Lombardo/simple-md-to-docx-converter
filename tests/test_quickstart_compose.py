@@ -361,7 +361,17 @@ def test_quickstarts_pass_the_exact_public_origin_to_compose(
         in script
     )
     assert "MARKWEAVE_PUBLIC_ORIGIN=%s" in script
+    assert 'MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin"' in script
+    assert "verify_application_public_origin" in script
     assert "The public origin must be a single-line HTTP origin." in script
+
+
+def test_simple_quickstart_probes_the_browser_origin_before_readiness() -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+
+    assert 'os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN")' in script
+    assert 'headers={"Origin": expected}' in script
+    assert "running application rejected the configured public origin" in script
 
 
 @pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
@@ -577,6 +587,7 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert '"MARKWEAVE_SIMPLE_PORT=$port"' in runner
     assert '"MARKWEAVE_SIMPLE_RUNTIME=$runtime"' in runner
     assert "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s" in runner
+    assert "--login-origin" in runner
     assert "MARKWEAVE_SIMPLE_E2E_RUNTIME" in runner
     assert "runtime_command=(docker)" in runner
     assert "runtime_command=(podman)" in runner

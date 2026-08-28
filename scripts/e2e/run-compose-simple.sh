@@ -236,6 +236,14 @@ verify_podman_mermaid() {
       --artifact-dir "$artifact_directory"
 }
 
+verify_login_origin() {
+  uv run python -m tests.e2e.service_workflow verify-login-origin \
+    --base-url "http://127.0.0.1:$port" \
+    --login-origin "http://localhost:$port" \
+    --profile standalone \
+    --artifact-dir "$artifact_directory"
+}
+
 verify_checkpoint() {
   MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
   MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
@@ -250,6 +258,7 @@ mkdir -p -- "$artifact_directory"
 
 quickstart up
 verify_helper_service_stopped
+verify_login_origin
 password="$(quickstart password)"
 write_fault_env
 compose config --quiet

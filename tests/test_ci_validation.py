@@ -368,6 +368,21 @@ def test_validator_rejects_broad_cache_writes() -> None:
 
 
 @pytest.mark.unit
+def test_validator_rejects_broad_libreoffice_cache_writes() -> None:
+    """Toolchain archives must never be written by pull requests or forks."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "matrix.domain == 'container' && github.event_name == 'push'",
+        "github.event_name != 'pull_request'",
+        1,
+    )
+
+    assert "LibreOffice cache writes must be limited to trusted main domains" in (
+        validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 def test_gate_rejects_skipped_active_domain() -> None:
     """A selected active domain cannot be accepted as planned or skipped by the gate."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
