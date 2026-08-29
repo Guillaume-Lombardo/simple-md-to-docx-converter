@@ -16,6 +16,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from markweave.auth.models import USERNAME_MAX_LENGTH
+
 
 class Base(DeclarativeBase):
     """Declarative metadata root used by Alembic."""
@@ -27,9 +29,9 @@ class UserRow(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(USERNAME_MAX_LENGTH), nullable=False)
     normalized_username: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True
+        String(USERNAME_MAX_LENGTH), nullable=False, unique=True
     )
     password_hash: Mapped[str] = mapped_column(String(1024), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)

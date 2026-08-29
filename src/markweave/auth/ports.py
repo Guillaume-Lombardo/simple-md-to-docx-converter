@@ -49,6 +49,16 @@ class UserRepository(Protocol):
         """Atomically validate account state/version and optionally replace its hash."""
         ...
 
+    def commit_password_change(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        password_hash: str,
+        audit: AuthenticationAuditContext,
+    ) -> User | None:
+        """Compare-and-set a required password renewal and its audit record."""
+        ...
+
     def update_security(
         self,
         user_id: UUID,

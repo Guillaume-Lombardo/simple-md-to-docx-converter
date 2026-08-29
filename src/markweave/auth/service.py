@@ -287,11 +287,11 @@ class AuthenticationService:
             raise PASSWORD_INVALID.new()
         if password != confirmation:
             raise PASSWORD_CONFIRMATION_INVALID.new()
-        changed = self.users.update_security(
+        changed = self.users.commit_password_change(
             user.id,
-            password_hash=self.hasher.hash(password),
-            password_change_required=False,
-            audit=self._audit(user, AuthenticationAuditOperation.CHANGE_PASSWORD),
+            user.auth_version,
+            self.hasher.hash(password),
+            self._audit(user, AuthenticationAuditOperation.CHANGE_PASSWORD),
         )
         if changed is None:
             raise AUTHENTICATION_REQUIRED.new()

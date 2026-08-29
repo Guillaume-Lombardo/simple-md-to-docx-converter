@@ -8,6 +8,9 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+USERNAME_MAX_LENGTH = 255
+SYSTEM_ACTOR_ID = UUID(int=0)
+
 
 class Role(StrEnum):
     """Application-wide authorization roles."""

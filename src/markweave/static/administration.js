@@ -417,6 +417,7 @@ export function createAdministrationController(doc, dependencies = {}) {
         if (response) {
           resetForm.reset();
           showMessage(`Password reset completed for ${user.username}.`, false);
+          await loadUsers();
         }
       });
     }

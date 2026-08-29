@@ -163,6 +163,33 @@ class MemoryUserRepository:
             self._users[user.id] = user
             return replace(user)
 
+    def commit_password_change(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        password_hash: str,
+        audit: AuthenticationAuditContext,
+    ) -> User | None:
+        """Commit renewal only while the authenticated snapshot remains current."""
+        del audit
+        with self._lock:
+            user = self._users.get(user_id)
+            if (
+                user is None
+                or not user.active
+                or not user.password_change_required
+                or user.auth_version != expected_auth_version
+            ):
+                return None
+            changed = replace(
+                user,
+                password_hash=password_hash,
+                password_change_required=False,
+                auth_version=user.auth_version + 1,
+            )
+            self._users[user.id] = changed
+            return replace(changed)
+
 
 class MemorySessionRepository:
     """Thread-safe session adapter storing only token digests."""

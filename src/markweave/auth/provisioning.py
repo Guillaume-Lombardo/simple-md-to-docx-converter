@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import csv
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from markweave.auth.models import Role, normalize_username
+from markweave.auth.models import USERNAME_MAX_LENGTH, Role, normalize_username
 from markweave.config import ConfigurationError
 
 CSV_FIELDS = (
@@ -57,7 +58,15 @@ def _parse_row(row: dict[str, str | None]) -> UserProvisioningInput:
     username = str(row["username"]).strip()
     password = str(row["password"])
     normalized = normalize_username(username)
-    if not normalized or not password:
+    if (
+        not normalized
+        or not password
+        or len(username) > USERNAME_MAX_LENGTH
+        or len(normalized) > USERNAME_MAX_LENGTH
+        or _contains_control_character(username)
+        or _contains_control_character(normalized)
+        or _contains_control_character(password)
+    ):
         raise ConfigurationError("Invalid user provisioning file")
     try:
         role = Role(str(row["role"]))
@@ -79,3 +88,7 @@ def _boolean(value: str | None) -> bool:
     if value == "false":
         return False
     raise ConfigurationError("Invalid user provisioning file")
+
+
+def _contains_control_character(value: str) -> bool:
+    return any(unicodedata.category(character).startswith("C") for character in value)

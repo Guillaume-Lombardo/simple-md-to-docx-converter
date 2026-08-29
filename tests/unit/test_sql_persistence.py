@@ -12,6 +12,7 @@ from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from markweave.auth.models import (
+    SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
     ProvisionedUser,
@@ -239,6 +240,80 @@ def test_inprocess_sql_user_provisioning_creates_and_replaces_accounts() -> None
     assert provisioned[0].password_change_required
     assert sessions.get("a" * 64) is None
     assert users.get_by_normalized_username("bob") == provisioned[1]
+    with engine.connect() as connection:
+        audit_rows = tuple(
+            connection.execute(
+                select(AuthenticationAuditRow).where(
+                    AuthenticationAuditRow.operation.in_(
+                        ["user_provision_create", "user_provision_update"]
+                    )
+                )
+            ).mappings()
+        )
+    assert {row["actor_id"] for row in audit_rows} == {str(SYSTEM_ACTOR_ID)}
+    assert not any(row["administrator_intervention"] for row in audit_rows)
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_sql_password_renewal_is_compare_and_set_and_self_audited() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    user = User(
+        uuid4(),
+        "Alice",
+        "alice",
+        "hash:old",
+        Role.USER,
+        password_change_required=True,
+    )
+    users.create(user)
+    stale = users.get_by_id(user.id)
+    assert stale is not None
+    reset = users.update_security(
+        user.id,
+        password_hash="hash:" + "administrator-reset",
+        password_change_required=True,
+    )
+    assert reset is not None
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    stale_change = users.commit_password_change(
+        stale.id,
+        stale.auth_version,
+        "hash:stale-request-wins",
+        AuthenticationAuditContext(
+            uuid4(), stale.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert stale_change is None
+    current = users.get_by_id(user.id)
+    assert current is not None
+    assert current.password_hash == "hash:" + "administrator-reset"
+
+    changed = users.commit_password_change(
+        current.id,
+        current.auth_version,
+        "hash:renewed",
+        AuthenticationAuditContext(
+            uuid4(), current.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert changed is not None
+    assert changed.password_hash == "hash:" + "renewed"
+    assert not changed.password_change_required
+    with engine.connect() as connection:
+        audit_row = (
+            connection.execute(
+                select(AuthenticationAuditRow).where(
+                    AuthenticationAuditRow.operation == "user_password_change"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert audit_row["actor_id"] == str(user.id)
+    assert not audit_row["administrator_intervention"]
     engine.dispose()
 
 
@@ -421,11 +496,28 @@ def test_every_repository_operation_sanitizes_sqlalchemy_failures(
         "markweave.persistence.sql.DatabaseSession",
         side_effect=SQLAlchemyError("private SQL parameters"),
     )
+    audit_context = AuthenticationAuditContext(
+        uuid4(), user.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+    )
     operations = (
         lambda: users.get_by_id(user.id),
         lambda: users.get_by_normalized_username(user.normalized_username),
         users.list,
+        lambda: users.provision(
+            [
+                ProvisionedUser(
+                    user.username,
+                    user.normalized_username,
+                    private_hash,
+                    user.role,
+                    user.active,
+                    True,
+                )
+            ],
+            now,
+        ),
         lambda: users.commit_verified_login(user.id, 0, private_hash),
+        lambda: users.commit_password_change(user.id, 0, private_hash, audit_context),
         lambda: users.update_security(user.id, password_hash=private_hash),
         lambda: sessions.create(session),
         lambda: sessions.get(session.token_digest),

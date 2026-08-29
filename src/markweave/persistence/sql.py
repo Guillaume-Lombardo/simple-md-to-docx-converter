@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session as DatabaseSession
 from sqlalchemy.sql.dml import Update
 
 from markweave.auth.models import (
+    SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
     ProvisionedUser,
@@ -290,7 +291,7 @@ class SqlUserRepository:
                         self._audit_row(
                             user,
                             AuthenticationAuditContext(
-                                uuid4(), user.id, operation, now
+                                uuid4(), SYSTEM_ACTOR_ID, operation, now
                             ),
                         )
                     )
@@ -358,6 +359,39 @@ class SqlUserRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def commit_password_change(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        password_hash: str,
+        audit: AuthenticationAuditContext,
+    ) -> User | None:
+        """Compare-and-set required renewal against the authenticated snapshot."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                result = self._update_user_row(
+                    database,
+                    update(UserRow)
+                    .where(
+                        UserRow.id == str(user_id),
+                        UserRow.active.is_(True),
+                        UserRow.password_change_required.is_(True),
+                        UserRow.auth_version == expected_auth_version,
+                    )
+                    .values(
+                        password_hash=password_hash,
+                        password_change_required=False,
+                        auth_version=UserRow.auth_version + 1,
+                    ),
+                    str(user_id),
+                )
+                if result is not None:
+                    database.add(self._audit_row(_user(result), audit))
+                return _user(result) if result is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def _update_user_row(
         self,
         database: DatabaseSession,
@@ -382,10 +416,14 @@ class SqlUserRepository:
             operation=audit.operation.value,
             target_id=str(user.id),
             auth_version=user.auth_version,
-            administrator_intervention=(
-                audit.operation
-                is not AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE
-            ),
+            administrator_intervention=audit.operation
+            in {
+                AuthenticationAuditOperation.CREATE,
+                AuthenticationAuditOperation.DEACTIVATE,
+                AuthenticationAuditOperation.REACTIVATE,
+                AuthenticationAuditOperation.RESET_PASSWORD,
+                AuthenticationAuditOperation.REQUIRE_PASSWORD_CHANGE,
+            },
             created_at=audit.created_at,
         )
 

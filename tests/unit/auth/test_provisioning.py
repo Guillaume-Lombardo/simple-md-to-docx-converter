@@ -41,6 +41,9 @@ def test_strict_csv_parses_normalized_users_without_persisting_material(
         HEADER + "Alice,secret,user,yes,true\n",
         HEADER + "Alice,secret,user,true,true,unexpected\n",
         HEADER + "Alice,one,user,true,true\n\uff21LICE,two,user,true,true\n",
+        HEADER + f"{'A' * 256},secret,user,true,true\n",
+        HEADER + "Ali\x00ce,secret,user,true,true\n",
+        HEADER + "Alice,sec\x00ret,user,true,true\n",
     ],
 )
 def test_strict_csv_rejects_invalid_batches_without_reflecting_values(

@@ -220,6 +220,10 @@ test("administrator controller exercises template and account workflows", async 
       users[1] = { ...users[1], password_change_required: !users[1].password_change_required };
       return response(200, users[1]);
     }
+    if (url.endsWith("/password") && method === "POST") {
+      users[1] = { ...users[1], password_change_required: true };
+      return response(204);
+    }
     if (url === "/api/v1/admin/users" && method === "POST") {
       users.push({ id: "bob", username: "Bob", role: "user", active: true, password_change_required: true });
       return response(201);
@@ -281,7 +285,18 @@ test("administrator controller exercises template and account workflows", async 
   await byText(userList, "Require password change", "button").dispatch("click");
   const resetForm = descendants(userList).find((child) => child.className === "inline-form");
   resetForm.elements.password.value = "new-password";
+  resetForm.elements.password_change_required.checked = true;
+  const userLoadsBeforeReset = requests.filter(
+    ([url, options]) => url === "/api/v1/admin/users" && (options.method || "GET") === "GET",
+  ).length;
   await resetForm.dispatch("submit");
+  const userLoadsAfterReset = requests.filter(
+    ([url, options]) => url === "/api/v1/admin/users" && (options.method || "GET") === "GET",
+  ).length;
+  assert.equal(userLoadsAfterReset, userLoadsBeforeReset + 1);
+  assert.ok(descendants(userList).some(
+    (child) => child.textContent.includes("password change required"),
+  ));
   const createUser = doc.querySelector("#create-user-form");
   createUser.elements.username.value = "Bob";
   createUser.elements.password.value = "bob-password";

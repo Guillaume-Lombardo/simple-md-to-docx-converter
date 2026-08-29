@@ -10,6 +10,9 @@ const REQUIRED_ENVIRONMENT = [
   "MD_CONVERTER_E2E_TEMPLATE_FIXTURE",
   "MD_CONVERTER_E2E_ADMIN_USERNAME",
   "MD_CONVERTER_E2E_ADMIN_PASSWORD",
+  "MD_CONVERTER_E2E_PROVISIONED_USERNAME",
+  "MD_CONVERTER_E2E_PROVISIONED_PASSWORD",
+  "MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD",
 ];
 
 export async function configuration(environment = process.env) {
@@ -40,6 +43,10 @@ export async function configuration(environment = process.env) {
     templateFixture,
     adminUsername: environment.MD_CONVERTER_E2E_ADMIN_USERNAME,
     adminPassword: environment.MD_CONVERTER_E2E_ADMIN_PASSWORD,
+    provisionedUsername: environment.MD_CONVERTER_E2E_PROVISIONED_USERNAME,
+    provisionedPassword: environment.MD_CONVERTER_E2E_PROVISIONED_PASSWORD,
+    provisionedRenewedPassword:
+      environment.MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD,
     chromiumExecutable: environment.MD_CONVERTER_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
     timeoutMilliseconds: timeoutSeconds * 1_000,
   };
@@ -49,12 +56,10 @@ export async function login(page, baseUrl, username, password) {
   await page.goto("/login", { waitUntil: "networkidle" });
   await page.locator('input[name="username"]').fill(username);
   await page.locator('input[name="password"]').fill(password);
-  await page.setExtraHTTPHeaders({ Origin: baseUrl });
   await Promise.all([
     page.waitForURL("**/convert"),
     page.getByRole("button", { name: "Sign in" }).click(),
   ]);
-  await page.setExtraHTTPHeaders({});
   assert.equal(page.url(), `${baseUrl}/convert`, "login did not reach the conversion page");
 }
 

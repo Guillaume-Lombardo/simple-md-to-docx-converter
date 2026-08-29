@@ -10,7 +10,14 @@ from uuid import uuid4
 import pytest
 
 from markweave.auth.errors import AuthenticationError
-from markweave.auth.models import ProvisionedUser, Role, Session, User
+from markweave.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    ProvisionedUser,
+    Role,
+    Session,
+    User,
+)
 from markweave.auth.ports import SessionRepository, UserRepository
 from markweave.config import ConfigurationError
 from markweave.storage import (
@@ -173,6 +180,37 @@ def exercise_user_provisioning_repository_contract(
     final_new = users.get_by_id(new_user.id)
     assert final_existing is not None and final_existing.auth_version == 5
     assert final_new is not None and final_new.auth_version == 4
+
+    stale = final_existing
+    reset = users.update_security(
+        stale.id,
+        password_hash="hash:" + "administrator-reset",
+        password_change_required=True,
+    )
+    assert reset is not None
+    stale_audit = AuthenticationAuditContext(
+        uuid4(), stale.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+    )
+    assert (
+        users.commit_password_change(
+            stale.id, stale.auth_version, "hash:stale-request-wins", stale_audit
+        )
+        is None
+    )
+    current = users.get_by_id(stale.id)
+    assert current is not None
+    assert current.password_hash == "hash:" + "administrator-reset"
+    renewed = users.commit_password_change(
+        current.id,
+        current.auth_version,
+        "hash:renewed",
+        AuthenticationAuditContext(
+            uuid4(), current.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert renewed is not None
+    assert renewed.password_hash == "hash:" + "renewed"
+    assert not renewed.password_change_required
 
 
 def exercise_object_store_contract(store: ObjectStore) -> None:

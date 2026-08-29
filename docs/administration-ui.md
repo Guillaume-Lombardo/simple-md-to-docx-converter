@@ -69,7 +69,9 @@ archive/deletion, CSRF and revoked-session denial, account creation and search, 
 password reset. It also checks that duplicate form submission does not create duplicate mutations.
 The final-image browser workflow additionally requires password renewal, proves that the current
 password must succeed before the restricted page is shown, confirms that normal application routes
-remain unavailable, renews the password, and verifies the required fresh login.
+remain unavailable, renews the password, and verifies the required fresh login. In both storage
+profiles it also mounts a startup CSV into the rootless API container, exercises its provisioned
+account, replaces the mounted password, restarts the image, and proves the old password was revoked.
 
 The browser suite requires the repository Python environment, the pinned Puppeteer dependency, and
 the pinned Chrome version installed by CI. Its committed CI-equivalent invocation is:

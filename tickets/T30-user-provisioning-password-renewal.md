@@ -80,6 +80,12 @@ password.
   Added direct revision coverage plus in-process SQL upsert and protected-route cases. The unit
   suite now passes 1,412 tests, the migration reports 100% coverage, and changed application-line
   coverage passes at 90.04% (208/231).
+- 2026-08-29: Independent review found and reproduced a stale-renewal race plus final-image,
+  validation, audit-attribution, and administration-refresh gaps. Renewal now uses compare-and-set
+  semantics across memory, SQLite, and PostgreSQL; CSV usernames share the database length/control
+  contract; startup and self-service audits identify system/user actors accurately; reset reloads
+  the account card; and both final rootless profiles mount, apply, replace, and restart with a real
+  provisioning CSV. Regression tests cover every finding.
 
 ## Synchronization
 

@@ -310,6 +310,41 @@ def test_administrator_can_require_password_change_and_revoke_sessions() -> None
 
 
 @pytest.mark.unit
+def test_stale_renewal_cannot_overwrite_an_administrator_password_reset() -> None:
+    service, _, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    user = service.create_user(
+        admin,
+        "Alice",
+        "old-password",
+        password_change_required=True,
+    )
+    restricted = service.login("alice", "old-password")
+    stale_actor = service.authenticate(
+        restricted.session_token, allow_password_change=True
+    )
+
+    service.reset_password(
+        admin,
+        user.id,
+        "administrator-reset",
+        password_change_required=True,
+    )
+
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.change_password(
+            stale_actor, "stale-request-wins", "stale-request-wins"
+        ),
+    )
+    assert_error(
+        "INVALID_CREDENTIALS",
+        lambda: service.login("alice", "stale-request-wins"),
+    )
+    assert service.login("alice", "administrator-reset").user.password_change_required
+
+
+@pytest.mark.unit
 def test_startup_provisioning_creates_then_replaces_memory_accounts(
     tmp_path: Path,
 ) -> None:
