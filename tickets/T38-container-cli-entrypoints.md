@@ -18,7 +18,7 @@ Make the final container expose the same supported `markweave` commands used by 
 * Use `markweave serve` and `markweave worker` for standalone and distributed container roles while preserving command override support.
 * Ensure doctor, migrate, backup, restore, and HTTP client commands are available in the final image without adding unsafe privileges or writable paths.
 * Keep arbitrary-UID, read-only-root, capability, seccomp, signal, shutdown, health, and resource-bound behavior unchanged.
-* Update Compose, smoke, quickstart, deployment, and recovery flows to call the supported CLI.
+* Update Containerfile, Compose, smoke, quickstart, and executable deployment/recovery flows to call the supported CLI without editing shared documentation navigation.
 * Run both-profile final-image E2E for every operational role and representative remote-client commands.
 
 ## Dependencies
@@ -34,12 +34,14 @@ Make the final container expose the same supported `markweave` commands used by 
 
 ## Implementation boundary
 
-* Own Containerfile, Compose, quickstart, container smoke/E2E, and deployment command wiring.
+* Own Containerfile, Compose and quickstart manifests, container smoke/E2E, and executable deployment/recovery command wiring.
+* Do not edit README, `docs/index.md`, changelog, upgrade guidance, security/support policy, or shared cross-guide links; T50 owns their final integration.
 * Treat CLI internals and configuration alias behavior as upstream contracts; do not refactor them here.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Final audit follow-up excluded shared documentation navigation and assigned it to T50.
 
 ## Coordination
 

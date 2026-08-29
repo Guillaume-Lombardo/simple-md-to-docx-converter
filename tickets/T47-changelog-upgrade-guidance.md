@@ -18,8 +18,8 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 * Add a maintained changelog focused on user-visible, operational, security, deprecation, and compatibility changes rather than ticket implementation detail.
 * Document supported upgrade paths, schema migration ordering, backup prerequisites, rollback limitations, container/package version alignment, and 0.x compatibility policy.
 * Document `MD_CONVERTER_*` to `MARKWEAVE_*` migration and removal at 1.0 without inventing other unresolved product values.
-* Integrate changelog checks into the release process so a material version transition cannot omit its entry.
-* Link upgrade guidance from README, deployment, configuration, recovery, and release documentation.
+* Add `scripts/release/check_changelog.py` and `tests/release/test_check_changelog.py` so a material version transition cannot omit its entry, without editing T40's release-install verifier.
+* Create stable changelog and upgrade-guide link targets; T50 owns links from README, deployment, configuration, recovery, release documentation, and the documentation index.
 
 ## Dependencies
 
@@ -29,12 +29,14 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 
 ## Implementation boundary
 
-* Own changelog, upgrade/migration guidance, and release checks for required entries.
+* Exclusively own `CHANGELOG.md`, `docs/upgrading.md`, `scripts/release/check_changelog.py`, and `tests/release/test_check_changelog.py`.
+* Do not edit README, `docs/index.md`, deployment/configuration/recovery/release guides, T40's release-install verifier, or security/support policy files; T50 owns cross-guide navigation.
 * Do not select a release version or implement configuration aliases.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Final audit follow-up assigned shared documentation navigation exclusively to T50 and restricted T47 to dedicated files.
 
 ## Coordination
 

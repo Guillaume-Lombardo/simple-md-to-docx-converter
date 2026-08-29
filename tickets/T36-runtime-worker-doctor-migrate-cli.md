@@ -30,12 +30,13 @@ Replace package-internal runtime invocation with supported operational CLI comma
 
 ## Implementation boundary
 
-* Own runtime-facing CLI adapters, diagnostics, migrations, and package runtime compatibility.
-* Do not edit container/Compose entrypoints or backup/restore workflows.
+* Exclusively own T31's pre-registered `src/markweave/cli/commands/runtime.py` family, runtime-facing CLI adapters, diagnostics, migrations, package runtime compatibility, and their domain tests/documentation.
+* Do not edit the root registry, shared help snapshots, documentation index, recovery-operations family, container/Compose entrypoints, or backup/restore workflows.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Final audit follow-up assigned the pre-registered runtime-operations family exclusively to T36.
 
 ## Coordination
 

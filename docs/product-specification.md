@@ -113,8 +113,12 @@ under the XDG directories in atomic owner-only `0600` files. They never retain t
 verification is enabled by default. API tokens are outside this delivery scope.
 
 T31 owns the root command registry and pre-registers stable, initially unavailable command-family
-modules for authentication, conversions/jobs, templates, administration/audit/health, and local
-operations. Downstream CLI tickets replace only their assigned family implementation and tests;
+modules for authentication, conversions/jobs, templates, administration/audit/health, runtime
+operations, and recovery operations. T36 exclusively fills the runtime-operations family for
+`serve`, `worker`, `doctor`, and `migrate` in `src/markweave/cli/commands/runtime.py`; T37
+exclusively fills the recovery-operations family for `backup` and `restore` in
+`src/markweave/cli/commands/recovery.py`. Downstream CLI tickets replace only their assigned family
+implementation and tests;
 they do not edit the root registry or shared help snapshots. T50 owns the final cross-family help
 and end-to-end integration snapshots.
 
@@ -413,15 +417,19 @@ Recommended delivery order: T00 and T01 can start in parallel, and T00 may conti
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
 fixtures pre-registered by T31; they never edit the root registry or shared help snapshots. T36 and
-T37 may run in parallel after T31 and T39. T40 follows the CLI and configuration foundations and is
+T37 may run in parallel after T31 and T39 because they fill separate pre-registered runtime- and
+recovery-operations families. T40 follows the CLI and configuration foundations and is
 the sole owner of `pyproject.toml`, package extras/metadata, and release-install verification after
 T31's initial entry-point change. T41 and T43 follow T44 and run independently. T42 follows T43 so
 the worker decomposition consumes finalized ports without concurrent port edits. T45 follows T41;
-T46 and T49 follow T40 and run in parallel on policy links and namespace-cleanliness checks without
-editing distribution metadata or release-install verification; T47 follows T39; T48 waits for the
-refactored mutation targets. T38 integrates the finished CLI into containers, and T50 performs
-final cross-surface acceptance. Each ticket lists its exclusive files or components; a worker must
-stop and resynchronize the ticket before touching any path owned by another active ticket.
+T46 and T49 follow T40 and run in parallel on dedicated policy files and namespace-cleanliness
+checks without editing distribution metadata or release-install verification. T47 follows T39 and
+owns only its dedicated changelog, upgrade guide, and changelog-check files. T48 waits for the
+refactored mutation targets. T38 integrates the finished CLI into container assets and executable
+deployment/recovery tests without editing shared documentation navigation. T50 performs final
+cross-surface acceptance and exclusively owns README, `docs/index.md`, and cross-guide navigation
+updates. Each ticket lists its exclusive files or components; a worker must stop and resynchronize
+the ticket before touching any path owned by another active ticket.
 
 ## 14. Deferred decisions and initial-scope exclusions
 

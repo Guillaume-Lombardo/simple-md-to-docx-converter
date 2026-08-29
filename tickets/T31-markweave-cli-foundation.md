@@ -19,7 +19,7 @@ Provide the installed `markweave` executable and a stable command framework shar
 * Define stable command groups, help, version output, exit codes, stdout/stderr rules, JSON and human-readable output, timeouts, and non-interactive behavior.
 * Keep password and secret values out of arguments, logs, tracebacks, shell completion, and process listings.
 * Expose reusable typed command, output, configuration-profile, and error abstractions without importing every optional backend eagerly.
-* Own the root registry and pre-register stable placeholder modules for authentication, conversions/jobs, templates, administration/audit/health, and operational commands so downstream workers never edit the registry or shared help snapshots.
+* Own the root registry and pre-register stable placeholder modules for authentication, conversions/jobs, templates, administration/audit/health, runtime operations at `src/markweave/cli/commands/runtime.py`, and recovery operations at `src/markweave/cli/commands/recovery.py` so downstream workers never edit the registry or shared help snapshots.
 * Add unit, packaging, clean-wheel installation, and shell-invocation tests; document the CLI contract for downstream tickets.
 
 ## Dependencies
@@ -38,6 +38,7 @@ Provide the installed `markweave` executable and a stable command framework shar
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up assigned the root registry, shared help snapshots, and pre-registered command-family placeholders exclusively to T31 so parallel CLI workers do not edit shared files.
+* 2026-08-29: Final audit follow-up split operational registration into an exclusive T36 runtime family and T37 recovery family.
 
 ## Coordination
 

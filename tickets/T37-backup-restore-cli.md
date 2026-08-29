@@ -34,13 +34,14 @@ Expose the approved standalone and distributed backup/restore workflows through 
 
 ## Implementation boundary
 
-* Own recovery-facing CLI adapters, provider-neutral backup/restore ports, the production standalone adapter, configured distributed provider adapters, manifests, and reusable orchestration.
-* Do not edit general runtime commands or container entrypoints.
+* Exclusively own T31's pre-registered `src/markweave/cli/commands/recovery.py` family, recovery-facing CLI adapters, provider-neutral backup/restore ports, the production standalone adapter, configured distributed provider adapters, manifests, reusable orchestration, and their domain tests/documentation.
+* Do not edit the root registry, shared help snapshots, documentation index, runtime-operations family, general runtime commands, or container entrypoints.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed distinct production contracts for standalone and distributed backup sets and excluded test-only and arbitrary-shell recovery paths.
+* 2026-08-29: Final audit follow-up assigned the pre-registered recovery-operations family exclusively to T37.
 
 ## Coordination
 

@@ -19,7 +19,7 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 * Verify human and JSON CLI contracts, exit codes, authentication-profile security, HTTP-only business operations, operational direct-access boundaries, and container parity.
 * Verify OpenAPI compatibility, configuration aliases, optional dependencies, resource-warning enforcement, mutation domains, namespace cleanliness, and documentation links.
 * Record exact commands, artifacts, skipped prerequisites, residual limitations, and independent review; do not select or publish a release version without explicit product-manager approval.
-* Update the product specification, README, documentation index, and ticket evidence so autonomous workers can verify the complete delivered contract.
+* Exclusively update README, `docs/index.md`, and cross-guide navigation for container, recovery, configuration, upgrade, changelog, security, support, and release documentation; update the product specification and ticket evidence so autonomous workers can verify the complete delivered contract.
 
 ## Dependencies
 
@@ -36,12 +36,13 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 
 ## Implementation boundary
 
-* Own final cross-surface acceptance, evidence, integration documentation, and residual-gap reporting.
+* Own final cross-surface acceptance, evidence, integration documentation, residual-gap reporting, README, `docs/index.md`, and every cross-guide navigation edit deferred by T38, T46, and T47.
 * Do not absorb unfinished implementation from dependencies or select/publish a release version without explicit approval.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Final audit follow-up made T50 the exclusive integration owner for shared documentation navigation.
 
 ## Coordination
 
