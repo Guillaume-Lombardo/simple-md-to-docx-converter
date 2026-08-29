@@ -61,6 +61,9 @@ JOB_INTEGRITY_REVISION: Any = importlib.import_module(
 OPTIONAL_TEMPLATE_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260828_13_optional_job_template"
 )
+PASSWORD_CHANGE_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260829_14_password_change_required"
+)
 
 
 @pytest.mark.unit
@@ -177,6 +180,25 @@ def test_password_change_required_migration_has_a_real_downgrade_path() -> None:
         column["name"] for column in inspect(engine).get_columns("users")
     }
     engine.dispose()
+
+
+@pytest.mark.unit
+def test_password_change_required_revision_is_directly_verifiable(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(PASSWORD_CHANGE_REVISION, "op")
+    batch = operations.batch_alter_table.return_value.__enter__.return_value
+
+    PASSWORD_CHANGE_REVISION.upgrade()
+    operations.add_column.assert_called_once()
+    table, column = operations.add_column.call_args.args
+    assert table == "users"
+    assert column.name == "password_change_required"
+    assert not column.nullable
+
+    PASSWORD_CHANGE_REVISION.downgrade()
+    operations.batch_alter_table.assert_called_once_with("users", recreate="auto")
+    batch.drop_column.assert_called_once_with("password_change_required")
 
 
 @pytest.mark.unit

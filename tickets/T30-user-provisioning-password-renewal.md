@@ -75,6 +75,10 @@ password.
   duplicate in-memory users, missing account mutations, empty renewal passwords, stale renewal
   actors, and absent sessions. The exact `pytest -m unit` CI command now passes 1,410 tests with
   90.11% branch coverage and 93.26% combined coverage.
+- 2026-08-29: The next ready run passed global branch coverage but exposed that Alembic's normal
+  loader did not attribute revision 14 to `coverage.json`, so changed-line coverage failed closed.
+  Added a direct mocked upgrade/downgrade test for the revision; the migration file now reports
+  100% unit coverage and the unit suite passes 1,411 tests with 90.11% branch coverage.
 
 ## Synchronization
 
