@@ -404,6 +404,9 @@ def test_password_change_required_browser_and_api_routes_are_isolated(
         conversion = client.get("/convert", follow_redirects=False)
         assert conversion.status_code == 303
         assert conversion.headers["location"] == "/change-password"
+        templates = client.get("/templates", follow_redirects=False)
+        assert templates.status_code == 303
+        assert templates.headers["location"] == "/change-password"
 
 
 @pytest.mark.unit
