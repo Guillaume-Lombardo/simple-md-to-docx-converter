@@ -408,6 +408,11 @@ def test_password_change_required_browser_and_api_routes_are_isolated(
         assert templates.status_code == 303
         assert templates.headers["location"] == "/change-password"
 
+        auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
+        unauthenticated = client.get("/change-password", follow_redirects=False)
+        assert unauthenticated.status_code == 303
+        assert unauthenticated.headers["location"] == "/login"
+
 
 @pytest.mark.unit
 def test_authenticated_conversion_page_and_assets_are_hardened(

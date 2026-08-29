@@ -77,8 +77,9 @@ password.
   90.11% branch coverage and 93.26% combined coverage.
 - 2026-08-29: The next ready run passed global branch coverage but exposed that Alembic's normal
   loader did not attribute revision 14 to `coverage.json`, so changed-line coverage failed closed.
-  Added a direct mocked upgrade/downgrade test for the revision; the migration file now reports
-  100% unit coverage and the unit suite passes 1,411 tests with 90.11% branch coverage.
+  Added direct revision coverage plus in-process SQL upsert and protected-route cases. The unit
+  suite now passes 1,412 tests, the migration reports 100% coverage, and changed application-line
+  coverage passes at 90.04% (208/231).
 
 ## Synchronization
 

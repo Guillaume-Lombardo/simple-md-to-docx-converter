@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from markweave.auth.models import (
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    ProvisionedUser,
     Role,
     Session,
     User,
@@ -199,6 +200,46 @@ def test_password_change_required_revision_is_directly_verifiable(
     PASSWORD_CHANGE_REVISION.downgrade()
     operations.batch_alter_table.assert_called_once_with("users", recreate="auto")
     batch.drop_column.assert_called_once_with("password_change_required")
+
+
+@pytest.mark.unit
+def test_inprocess_sql_user_provisioning_creates_and_replaces_accounts() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    sessions = SqlSessionRepository(engine)
+    existing = User(uuid4(), "Alice", "alice", "hash:old", Role.USER)
+    users.create(existing)
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    sessions.create(
+        Session(
+            token_digest="a" * 64,
+            csrf_digest="b" * 64,
+            user_id=existing.id,
+            auth_version=0,
+            created_at=now,
+            last_seen_at=now,
+            idle_expires_at=now + timedelta(minutes=30),
+            absolute_expires_at=now + timedelta(hours=8),
+        )
+    )
+
+    provisioned = users.provision(
+        [
+            ProvisionedUser("Alice", "alice", "hash:new", Role.ADMIN, True, True),
+            ProvisionedUser("Bob", "bob", "hash:bob", Role.USER, True, False),
+        ],
+        now,
+    )
+
+    assert [user.normalized_username for user in provisioned] == ["alice", "bob"]
+    assert provisioned[0].id == existing.id
+    assert provisioned[0].auth_version == 1
+    assert provisioned[0].role is Role.ADMIN
+    assert provisioned[0].password_change_required
+    assert sessions.get("a" * 64) is None
+    assert users.get_by_normalized_username("bob") == provisioned[1]
+    engine.dispose()
 
 
 @pytest.mark.unit
