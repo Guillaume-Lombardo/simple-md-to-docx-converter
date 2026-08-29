@@ -1,0 +1,48 @@
+---
+ticket: T44
+linear_id: G1L-420
+linear_url: https://linear.app/g1lom/issue/G1L-420/t44-eliminate-database-resource-lifecycle-warnings
+status: Backlog
+priority: High
+project: Markdown to DOCX and PDF Converter
+---
+
+# T44 - Eliminate database resource lifecycle warnings
+
+## Objective
+
+Close every database and component resource deterministically and turn current unclosed-resource warnings into enforced regressions.
+
+## Acceptance criteria
+
+* Reproduce and eliminate the SQLite `ResourceWarning` cases observed in functional, integration, and release tests.
+* Make application, repositories, engines, fixtures, threads, cursors, temporary files, and failure paths expose and use deterministic close/dispose lifecycles.
+* Ensure cleanup remains bounded and safe during partial startup, cancellation, exceptions, and test teardown.
+* Enable targeted warning-as-error enforcement for `ResourceWarning` without hiding legitimate third-party warnings globally.
+* Add regression tests and run repeated/parallel test selections to detect lifecycle leaks.
+
+## Dependencies
+
+* T06
+* T12
+
+## Implementation boundary
+
+* Own deterministic component/database lifecycle fixes and warning enforcement.
+* Complete before T41 and T43 touch the same lifecycle and persistence components.
+
+## Progress
+
+* 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+
+## Coordination
+
+* Status: Backlog.
+* One worker owns this ticket's implementation files at a time.
+* Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
+* All repository artifacts and user-facing text are English.
+
+## Synchronization
+
+Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
+
