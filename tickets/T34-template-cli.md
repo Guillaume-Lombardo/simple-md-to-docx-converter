@@ -28,12 +28,13 @@ Expose visible-template discovery, preferences, ownership mutations, and immutab
 
 ## Implementation boundary
 
-* Own only template/preference CLI modules and their tests/documentation.
+* Own only T31's pre-registered template/preference family modules and domain tests/documentation; do not edit the root registry, shared help snapshots, documentation index, or other command families.
 * Do not refactor template services or persistence in this ticket.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up restricted this worker to T31's template family and excluded shared registry, help, and documentation-index files.
 
 ## Coordination
 

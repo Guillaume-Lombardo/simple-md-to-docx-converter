@@ -25,15 +25,17 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 
 * T13
 * T21
+* T43
 
 ## Implementation boundary
 
-* Own `jobs/worker.py` decomposition and new worker orchestration modules/tests.
-* Do not edit HTTP routers, CLI modules, or persistence layout except minimal port typing agreed before work.
+* Own `jobs/worker.py` decomposition and new worker orchestration modules/tests after T43 finalizes persistence ports.
+* Do not edit HTTP routers, CLI modules, persistence layout, `jobs/ports.py`, or `templates/ports.py`; consume the finalized port contract and open a separately synchronized defect if it is insufficient.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up serialized T42 after T43 and prohibited concurrent edits to persistence ports.
 
 ## Coordination
 

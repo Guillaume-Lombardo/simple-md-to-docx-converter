@@ -24,15 +24,18 @@ Remove residual `md_converter` build/runtime artifacts and prevent the retired n
 ## Dependencies
 
 * T22
+* T40
 
 ## Implementation boundary
 
-* Own safe legacy-artifact cleanup, namespace checks, package contamination tests, and durable orchestration-note refresh.
+* Own safe legacy-artifact cleanup, a dedicated namespace-check script and dedicated namespace-contamination tests, and durable orchestration-note refresh after T40 finalizes distribution artifacts.
+* Do not edit `pyproject.toml`, `scripts/release/verify_install.py`, its tests, package metadata, extras, README, or the documentation index; consume T40's built artifacts as read-only test inputs.
 * Preserve historical release evidence and all 0.x legacy environment aliases.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up serialized cleanup after T40 and assigned dedicated namespace checks without shared distribution files.
 
 ## Coordination
 

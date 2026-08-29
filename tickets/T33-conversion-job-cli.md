@@ -29,12 +29,13 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 
 ## Implementation boundary
 
-* Own only conversion/job CLI modules and their tests/documentation.
+* Own only T31's pre-registered conversion/job family modules and domain tests/documentation; do not edit the root registry, shared help snapshots, documentation index, or other command families.
 * Do not change server business behavior except for a separately documented contract defect that blocks the HTTP client.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up restricted this worker to T31's conversion/job family and excluded shared registry, help, and documentation-index files.
 
 ## Coordination
 

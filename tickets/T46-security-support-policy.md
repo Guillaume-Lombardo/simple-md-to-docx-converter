@@ -18,22 +18,24 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 * Add `SECURITY.md` with private reporting instructions that do not request secrets or hostile document contents through public issues.
 * Define supported release lines, security update expectations, disclosure coordination, dependency/container triage, and scope boundaries.
 * Document where deployment, configuration, backup, and usage support belongs and what information can be shared safely.
-* Link the policies from README, PyPI metadata, documentation index, and repository community surfaces where applicable.
+* Link the policies from README, documentation index, and repository community surfaces; verify the PyPI metadata link already owned and added by T40 without editing `pyproject.toml`.
 * Validate links and ensure all content is English, actionable, and consistent with the product specification.
 
 ## Dependencies
 
 * T22
 * T23
+* T40
 
 ## Implementation boundary
 
-* Own `SECURITY.md`, support policy content, and their links/metadata.
+* Own `SECURITY.md`, support policy content, README/documentation-index links, and repository community surfaces; do not edit package metadata or release-install verification owned by T40.
 * Do not change runtime security behavior or release versioning.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up serialized policy links after T40 and removed package metadata from T46 ownership.
 
 ## Coordination
 

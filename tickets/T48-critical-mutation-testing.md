@@ -15,11 +15,11 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Acceptance criteria
 
-* Define a reviewed risk-ranked mutation scope and deterministic per-domain commands with bounded runtime.
+* Define a reviewed risk-ranked mutation scope and deterministic per-domain commands with bounded runtime; the gate passes only when every selected non-equivalent mutant is killed, while each excluded/equivalent mutant requires a reviewed technical justification recorded in the artifact.
 * Cover authentication/session versioning, origin/CSRF checks, archive/path/SVG validation, job leases/fencing/idempotency, retention, and storage integrity.
 * Add or strengthen tests to kill relevant surviving mutants without asserting implementation trivia.
 * Run affected mutation domains on pull requests and a broader bounded matrix on schedule, preserving one required gate and useful artifacts.
-* Document exclusions with technical justification and track mutation score without weakening existing coverage thresholds.
+* Fail on surviving, untested, timed-out, or suspicious selected mutants; document reviewed exclusions with technical justification and track the exact killed/selected counts without weakening existing coverage thresholds.
 
 ## Dependencies
 
@@ -37,6 +37,7 @@ Extend bounded mutation testing from observability to the security, authenticati
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up made zero surviving selected non-equivalent mutants the deterministic gate.
 
 ## Coordination
 

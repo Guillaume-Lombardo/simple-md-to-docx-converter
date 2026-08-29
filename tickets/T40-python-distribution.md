@@ -15,8 +15,8 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 
 ## Acceptance criteria
 
-* Define and document the supported public Python API and state clearly when the container remains the recommended deployment.
-* Split backend-only dependencies into reviewed extras such as standalone, distributed, and all/full without breaking runtime imports or the final image.
+* Define the supported Python API as exactly `import markweave` and `markweave.__version__`; the installed CLI is the supported programmatic operation surface, all other modules remain internal until separately documented, and the final container remains the recommended production deployment.
+* Make the base install the remote HTTP CLI and shared types only; define exact `server`, `standalone`, `distributed`, and `all` extras, where `server` adds common API/worker dependencies, each profile extra includes `server` plus only its SQLite/filesystem or PostgreSQL/S3 dependencies, and `all` is the union used by the final image.
 * Ensure missing optional dependencies produce precise startup/command errors only when their feature is selected.
 * Add maintainers/authors, classifiers, keywords, support and documentation URLs, and complete Apache-2.0 metadata to PyPI artifacts.
 * Verify sdist/wheel contents, clean Python 3.14 installation for each supported extra, CLI availability, import isolation, and container dependency completeness.
@@ -29,12 +29,13 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 
 ## Implementation boundary
 
-* Own `pyproject.toml`, dependency groups/extras, package metadata, release-install verification, and PyPI-facing documentation.
+* Exclusively own `pyproject.toml`, dependency groups/extras, package metadata, `scripts/release/verify_install.py`, its tests, and PyPI-facing documentation after T31 merges.
 * Treat CLI and configuration behavior as upstream contracts; do not implement feature commands.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up fixed the public Python surface, exact extras matrix, and exclusive distribution-file ownership.
 
 ## Coordination
 

@@ -15,11 +15,12 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Acceptance criteria
 
-* Implement `markweave login`, `logout`, and `whoami` against the documented HTTP API without adding API tokens.
+* Implement `markweave login`, `logout`, `whoami`, and `password change` against the documented HTTP API without adding API tokens.
 * Prompt passwords through a non-echoing terminal path and reject password arguments and environment persistence.
 * Store URL, opaque session state, and CSRF state under the XDG directories with owner-only `0600` files and safe atomic replacement; never store the password.
+* In a restricted renewal session, prompt current password, new password, and confirmation without echo; submit the existing CSRF-protected renewal endpoint, discard the restricted session on success, and require a fresh login.
 * Support named profiles, explicit profile selection, TLS verification by default, session expiration, forced password renewal, and deterministic non-interactive failures.
-* Test file permissions, symlink/path attacks, hostile profile data, CSRF renewal, redaction, and real HTTP behavior.
+* Test file permissions, symlink/path attacks, hostile profile data, CSRF renewal, password-renewal success and mismatch/failure, redaction, and real HTTP behavior.
 
 ## Dependencies
 
@@ -29,12 +30,13 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Implementation boundary
 
-* Own CLI HTTP transport, XDG profiles, session/CSRF handling, and login/logout/whoami commands.
+* Own CLI HTTP transport, XDG profiles, session/CSRF handling, and login/logout/whoami/password-change commands inside T31's pre-registered authentication family.
 * Do not add API tokens, change server authentication semantics, or implement resource commands.
 
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up made self-service password renewal an explicit restricted-session CLI workflow.
 
 ## Coordination
 

@@ -16,10 +16,12 @@ Adopt the Markweave brand for application configuration while preserving determi
 ## Acceptance criteria
 
 * Introduce documented `MARKWEAVE_*` names for every public application setting, runtime host/port, cookie default, and applicable operator surface.
-* Accept legacy `MD_CONVERTER_*` aliases for all 0.x releases; when both names are present with unequal values, fail closed without exposing values.
+* Accept legacy `MD_CONVERTER_*` aliases for all 0.x releases; parse both definitions independently through the same field validator and compare canonical typed values, except that secrets and opaque tokens compare exact raw strings; unequal definitions fail closed without exposing values.
 * Prefer only `MARKWEAVE_*` in new documentation, examples, Compose, quickstarts, tests, and emitted diagnostics; clearly mark legacy names deprecated until 1.0.
 * Preserve secret handling, case rules, profile validation, existing deployments, and deterministic precedence for equal dual definitions.
-* Test every alias class, conflicts, secrets, container/Compose propagation, and upgrade behavior.
+* Preserve the existing `md_converter_session` and `__Host-md_converter_csrf` cookie defaults throughout 0.x so the environment-prefix migration does not silently revoke sessions; document their explicit 1.0 migration boundary.
+* Keep the existing `ghcr.io/guillaume-lombardo/md-converter` image name throughout 0.x; an image rename requires a separate dual-publication migration and is not implicit in this ticket.
+* Test every alias class, semantically equal typed spellings, raw secret conflicts, cookie compatibility, container/Compose propagation, and upgrade behavior.
 
 ## Dependencies
 
@@ -35,6 +37,7 @@ Adopt the Markweave brand for application configuration while preserving determi
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-29: Audit follow-up fixed typed alias comparison and preserved 0.x cookie and GHCR identities explicitly.
 
 ## Coordination
 

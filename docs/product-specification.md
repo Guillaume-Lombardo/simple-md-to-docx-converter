@@ -97,7 +97,8 @@ Administrators also receive a users tab to create, search, activate, deactivate,
 Installations and final containers expose the same `markweave` executable. Its remote-client
 commands cover login, logout, session inspection, conversion submission, job lifecycle and
 downloads, template discovery and administration, user administration, audit, health, readiness,
-and metrics. These commands use only the documented HTTP API and preserve the same authorization,
+metrics, and self-service password renewal, including restricted sessions that require renewal.
+These commands use only the documented HTTP API and preserve the same authorization,
 CSRF, optimistic-concurrency, idempotency, pagination, retry, and safe-error contracts as browser
 and direct API clients.
 
@@ -110,6 +111,12 @@ non-interactive execution, and retain arbitrary-UID and read-only-root behavior 
 process argument. Named remote profiles keep the service URL, opaque session state, and CSRF state
 under the XDG directories in atomic owner-only `0600` files. They never retain the password. TLS
 verification is enabled by default. API tokens are outside this delivery scope.
+
+T31 owns the root command registry and pre-registers stable, initially unavailable command-family
+modules for authentication, conversions/jobs, templates, administration/audit/health, and local
+operations. Downstream CLI tickets replace only their assigned family implementation and tests;
+they do not edit the root registry or shared help snapshots. T50 owns the final cross-family help
+and end-to-end integration snapshots.
 
 ## 4. Input contract
 
@@ -261,6 +268,18 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
   RTO 2 hours. Exercise each deployed profile at least quarterly with an automated isolated restore
   and readiness check. Retain an immutable report containing backup identity, timestamps, measured
   RPO/RTO, readiness evidence identity, and pass/fail status.
+- `markweave backup` and `markweave restore` are production operational front ends, not aliases for
+  destructive E2E helpers or the restore-exercise wrapper. In standalone mode they create or
+  restore one content-addressed, checksummed set containing an SQLite online snapshot and the
+  complete stable object tree; restore requires an offline application, an empty destination, and
+  an identity/integrity check before migration and readiness. In distributed mode they orchestrate
+  typed, explicitly configured PostgreSQL and S3-provider backup adapters, bind both provider
+  recovery-point identities into one signed-or-checksummed manifest, and fail closed when either
+  adapter, quiescence proof, identity, or integrity proof is missing. They never execute an
+  operator-provided shell string. Restore targets isolated empty database and bucket destinations,
+  verifies stable object references before migration/readiness, and never switches production
+  traffic. The quarterly exercise consumes these commands and records evidence; test-only S3
+  helpers remain forbidden for production recovery.
 
 ## 9. Repository and autonomous development
 
@@ -369,7 +388,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T29 | Allow conversion without a template by using Pandoc's native default reference document while preserving optional immutable-template selection and traceability | T07, T10, T13, T15, T16, T21 |
 | T30 | Provision users from a startup CSV, replace existing passwords, require restricted-session password renewal, and publish minor release `0.4.0` | T06, T12, T17, T21 |
 | T31 | Build the installed `markweave` CLI foundation, stable output/error contract, and clean-package entry point | T01, T06, T22 |
-| T32 | Add secure HTTP login/logout/session commands and owner-only XDG connection profiles without API tokens | T06, T30, T31 |
+| T32 | Add secure HTTP login/logout/session/password-renewal commands and owner-only XDG connection profiles without API tokens | T06, T30, T31 |
 | T33 | Add HTTP-only conversion submission and complete user-owned job lifecycle commands | T13, T29, T32 |
 | T34 | Add HTTP-only template, version, preference, and fallback administration commands | T15, T32 |
 | T35 | Add HTTP-only user administration, audit, health, readiness, and metrics commands | T17, T19, T30, T32 |
@@ -379,26 +398,30 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T39 | Make `MARKWEAVE_*` canonical while preserving fail-closed `MD_CONVERTER_*` compatibility throughout 0.x | T06, T20, T26 |
 | T40 | Clarify the supported Python API, split optional backend extras, and complete PyPI metadata and installation verification | T22, T31, T39 |
 | T41 | Decompose the FastAPI application into routers, schemas, dependencies, error handling, lifecycle, and a small composition root | T06, T44 |
-| T42 | Decompose worker claim, heartbeat, execution, publication, cancellation, recovery, and cleanup orchestration | T13, T21 |
+| T42 | Decompose worker claim, heartbeat, execution, publication, cancellation, recovery, and cleanup orchestration against the finalized persistence ports | T13, T21, T43 |
 | T43 | Decompose job and template persistence by responsibility while preserving cross-profile contracts and transactional invariants | T12, T15, T44 |
 | T44 | Eliminate unclosed database/component resources and enforce targeted `ResourceWarning` regressions | T06, T12 |
 | T45 | Commit and validate a deterministic OpenAPI artifact and block accidental incompatible HTTP changes | T06, T41 |
-| T46 | Add security reporting, supported-version, disclosure, and operational-support policies | T22, T23 |
+| T46 | Add security reporting, supported-version, disclosure, and operational-support policies | T22, T23, T40 |
 | T47 | Add a user-facing changelog and deterministic package/container/database upgrade and rollback guidance | T22, T23, T39 |
 | T48 | Expand bounded mutation testing across authentication, input security, queue, worker, retention, and storage invariants | T05, T22, T41, T42, T43 |
-| T49 | Remove residual retired-package artifacts and enforce clean `markweave` namespace and release outputs | T22 |
+| T49 | Remove residual retired-package artifacts and enforce clean `markweave` namespace and release outputs | T22, T40 |
 | T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T48, T49 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30).
 
-For T31–T50, begin T31, T39, T42, T44, T46, and T49 in parallel because their implementation
-boundaries do not overlap. T32 follows T31. T33, T34, and T35 then run in parallel on distinct HTTP
-client command modules. T36 and T37 may run in parallel after T31 and T39. T40 follows the CLI and
-configuration foundations. T41 and T43 follow T44 and run independently from each other and from
-the worker decomposition. T45 follows T41; T47 follows T39; T48 waits for the refactored mutation
-targets. T38 integrates the finished CLI into containers, and T50 performs final cross-surface
-acceptance. Each worker owns only the implementation boundary recorded in its synchronized ticket;
-shared files are reassigned only after the blocking ticket merges.
+For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
+follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
+fixtures pre-registered by T31; they never edit the root registry or shared help snapshots. T36 and
+T37 may run in parallel after T31 and T39. T40 follows the CLI and configuration foundations and is
+the sole owner of `pyproject.toml`, package extras/metadata, and release-install verification after
+T31's initial entry-point change. T41 and T43 follow T44 and run independently. T42 follows T43 so
+the worker decomposition consumes finalized ports without concurrent port edits. T45 follows T41;
+T46 and T49 follow T40 and run in parallel on policy links and namespace-cleanliness checks without
+editing distribution metadata or release-install verification; T47 follows T39; T48 waits for the
+refactored mutation targets. T38 integrates the finished CLI into containers, and T50 performs
+final cross-surface acceptance. Each ticket lists its exclusive files or components; a worker must
+stop and resynchronize the ticket before touching any path owned by another active ticket.
 
 ## 14. Deferred decisions and initial-scope exclusions
 
