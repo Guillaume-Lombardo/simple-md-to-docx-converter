@@ -349,6 +349,8 @@ def test_authorization_and_missing_account_fail_stably() -> None:
     admin = service.bootstrap_admin("admin", "correct")
     user = User(uuid4(), "user", "user", hasher.hash("password"), Role.USER)
     service.users.create(user)
+    with pytest.raises(KeyError, match="user"):
+        service.users.create(user)
 
     AuthorizationService.require_admin(admin)
     AuthorizationService.require_owner_or_admin(user, user.id)
@@ -361,6 +363,20 @@ def test_authorization_and_missing_account_fail_stably() -> None:
         "USER_NOT_FOUND", lambda: service.set_active(admin, uuid4(), active=False)
     )
     assert_error("PASSWORD_INVALID", lambda: service.reset_password(admin, user.id, ""))
+    assert_error(
+        "USER_NOT_FOUND", lambda: service.reset_password(admin, uuid4(), "replacement")
+    )
+    assert_error(
+        "USER_NOT_FOUND",
+        lambda: service.set_password_change_required(admin, uuid4(), required=True),
+    )
+    assert_error("PASSWORD_INVALID", lambda: service.change_password(user, "", ""))
+    missing = User(uuid4(), "missing", "missing", hasher.hash("old"), Role.USER)
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.change_password(missing, "replacement", "replacement"),
+    )
+    assert_error("AUTHENTICATION_REQUIRED", lambda: service.authenticate(None))
 
 
 @pytest.mark.unit

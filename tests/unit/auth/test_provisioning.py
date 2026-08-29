@@ -39,6 +39,7 @@ def test_strict_csv_parses_normalized_users_without_persisting_material(
         HEADER + "Alice,,user,true,true\n",
         HEADER + "Alice,secret,owner,true,true\n",
         HEADER + "Alice,secret,user,yes,true\n",
+        HEADER + "Alice,secret,user,true,true,unexpected\n",
         HEADER + "Alice,one,user,true,true\n\uff21LICE,two,user,true,true\n",
     ],
 )

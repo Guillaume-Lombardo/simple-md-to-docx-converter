@@ -70,6 +70,11 @@ password.
   document-engine tests fail because their pinned engines/fonts are unavailable, and browser tests
   cannot start because Chromium is not installed. The final-image browser scenario was extended
   and syntax-checked but was not executed locally.
+- 2026-08-29: PR #100's first ready run exposed a unit branch-coverage gap: all 1,409 tests passed,
+  but branch coverage was 89.72%. Added focused negative-path coverage for malformed CSV rows,
+  duplicate in-memory users, missing account mutations, empty renewal passwords, stale renewal
+  actors, and absent sessions. The exact `pytest -m unit` CI command now passes 1,410 tests with
+  90.11% branch coverage and 93.26% combined coverage.
 
 ## Synchronization
 
