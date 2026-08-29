@@ -7,7 +7,13 @@ from dataclasses import replace
 from threading import RLock
 from uuid import UUID, uuid4
 
-from markweave.auth.models import AuthenticationAuditContext, Role, Session, User
+from markweave.auth.models import (
+    AuthenticationAuditContext,
+    ProvisionedUser,
+    Role,
+    Session,
+    User,
+)
 from markweave.config import ConfigurationError
 
 
@@ -71,6 +77,41 @@ class MemoryUserRepository:
                 key=lambda user: user.normalized_username,
             )
 
+    def provision(
+        self, records: builtins.list[ProvisionedUser], now: object
+    ) -> builtins.list[User]:
+        """Apply a validated provisioning batch while holding the repository lock."""
+        del now
+        with self._lock:
+            provisioned: list[User] = []
+            for record in records:
+                existing_id = self._normalized_ids.get(record.normalized_username)
+                if existing_id is None:
+                    user = User(
+                        id=uuid4(),
+                        username=record.username,
+                        normalized_username=record.normalized_username,
+                        password_hash=record.password_hash,
+                        role=record.role,
+                        active=record.active,
+                        password_change_required=record.password_change_required,
+                    )
+                    self._normalized_ids[user.normalized_username] = user.id
+                else:
+                    previous = self._users[existing_id]
+                    user = replace(
+                        previous,
+                        username=record.username,
+                        password_hash=record.password_hash,
+                        role=record.role,
+                        active=record.active,
+                        password_change_required=record.password_change_required,
+                        auth_version=previous.auth_version + 1,
+                    )
+                self._users[user.id] = replace(user)
+                provisioned.append(replace(user))
+            return provisioned
+
     def commit_verified_login(
         self,
         user_id: UUID,
@@ -97,6 +138,7 @@ class MemoryUserRepository:
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        password_change_required: bool | None = None,
         audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         """Atomically change account security state and invalidate older sessions."""
@@ -110,6 +152,11 @@ class MemoryUserRepository:
                 active=user.active if active is None else active,
                 password_hash=(
                     user.password_hash if password_hash is None else password_hash
+                ),
+                password_change_required=(
+                    user.password_change_required
+                    if password_change_required is None
+                    else password_change_required
                 ),
                 auth_version=user.auth_version + 1,
             )

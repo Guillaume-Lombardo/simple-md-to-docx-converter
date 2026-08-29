@@ -32,7 +32,11 @@ from sqlalchemy import Engine
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from markweave.auth.errors import LOGIN_ORIGIN_INVALID, AuthenticationError
+from markweave.auth.errors import (
+    LOGIN_ORIGIN_INVALID,
+    PASSWORD_CHANGE_REQUIRED,
+    AuthenticationError,
+)
 from markweave.auth.models import Role, User
 from markweave.auth.ports import ReadinessProbe
 from markweave.auth.security import (
@@ -142,6 +146,7 @@ from markweave.web import (
     WEB_SECURITY_HEADERS,
     render_conversion_page,
     render_login_page,
+    render_password_change_page,
     render_templates_page,
 )
 
@@ -248,6 +253,7 @@ class UserCreateRequest(BaseModel):
 
     username: str
     password: str
+    password_change_required: bool = False
 
 
 class ActiveUpdateRequest(BaseModel):
@@ -260,6 +266,20 @@ class PasswordResetRequest(BaseModel):
     """Administrator password reset request."""
 
     password: str
+    password_change_required: bool = False
+
+
+class PasswordChangeRequirementRequest(BaseModel):
+    """Administrator password-renewal requirement request."""
+
+    required: bool
+
+
+class PasswordChangeRequest(BaseModel):
+    """Authenticated self-service password renewal request."""
+
+    password: str
+    confirmation: str
 
 
 class UserResponse(BaseModel):
@@ -271,6 +291,7 @@ class UserResponse(BaseModel):
     username: str
     role: Role
     active: bool
+    password_change_required: bool
 
 
 class LoginResponse(BaseModel):
@@ -1045,6 +1066,8 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
             resolved_settings.initial_admin_username,
             resolved_settings.initial_admin_password.get_secret_value(),
         )
+        if resolved_settings.user_provisioning_file is not None:
+            auth.provision_users(resolved_settings.user_provisioning_file)
     except Exception:
         if owns_components:
             resolved_components.close()
@@ -1099,6 +1122,9 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
     def session_token(request: Request) -> str | None:
         return request.cookies.get(resolved_settings.session_cookie_name)
 
+    def authenticated_user(request: Request) -> User:
+        return auth.authenticate(session_token(request), allow_password_change=True)
+
     def current_user(request: Request) -> User:
         return auth.authenticate(session_token(request))
 
@@ -1118,6 +1144,15 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
     ) -> User:
         token = session_token(request)
         user = auth.authenticate(token)
+        auth.validate_csrf(token, csrf_token)
+        return user
+
+    def password_change_actor(
+        request: Request,
+        csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+    ) -> User:
+        token = session_token(request)
+        user = auth.authenticate(token, allow_password_change=True)
         auth.validate_csrf(token, csrf_token)
         return user
 
@@ -1305,11 +1340,69 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
     def login_page() -> HTMLResponse:
         return web_response(render_login_page())
 
+    @app.get("/change-password", response_class=HTMLResponse, include_in_schema=False)
+    def password_change_page(request: Request) -> Response:
+        try:
+            actor = authenticated_user(request)
+        except AuthenticationError:
+            return RedirectResponse("/login", status_code=303)
+        if not actor.password_change_required:
+            return RedirectResponse("/convert", status_code=303)
+        csrf_token = request.cookies.get(CSRF_COOKIE_NAME)
+        if not csrf_token:
+            auth.logout(session_token(request))
+            response = RedirectResponse("/login", status_code=303)
+            clear_session_cookie(response)
+            return response
+        return web_response(render_password_change_page(actor, csrf_token))
+
+    @app.post("/change-password", include_in_schema=False)
+    def browser_password_change(
+        request: Request,
+        password: Annotated[str, Form()],
+        confirmation: Annotated[str, Form()],
+        csrf_token: Annotated[str, Form()],
+    ) -> Response:
+        token = session_token(request)
+        try:
+            actor = auth.authenticate(token, allow_password_change=True)
+            auth.validate_csrf(token, csrf_token)
+            auth.change_password(actor, password, confirmation)
+        except AuthenticationError as error:
+            if error.status_code == status.HTTP_401_UNAUTHORIZED:
+                return RedirectResponse("/login", status_code=303)
+            return web_response(
+                render_password_change_page(
+                    actor,
+                    csrf_token,
+                    invalid=True,
+                ),
+                status_code=error.status_code,
+            )
+        response = RedirectResponse("/login", status_code=303)
+        clear_session_cookie(response)
+        return response
+
+    @app.post("/logout", include_in_schema=False)
+    def browser_logout(
+        request: Request,
+        csrf_token: Annotated[str, Form()],
+    ) -> Response:
+        token = session_token(request)
+        auth.authenticate(token, allow_password_change=True)
+        auth.validate_csrf(token, csrf_token)
+        auth.logout(token)
+        response = RedirectResponse("/login", status_code=303)
+        clear_session_cookie(response)
+        return response
+
     @app.get("/convert", response_class=HTMLResponse, include_in_schema=False)
     def conversion_page(request: Request) -> Response:
         try:
             actor = current_user(request)
-        except AuthenticationError:
+        except AuthenticationError as error:
+            if error.code == PASSWORD_CHANGE_REQUIRED.code:
+                return RedirectResponse("/change-password", status_code=303)
             return RedirectResponse("/login", status_code=303)
         runtime = template_runtime()
         selected = runtime.resolve(actor)
@@ -1331,7 +1424,9 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
     def templates_page(request: Request) -> Response:
         try:
             actor = current_user(request)
-        except AuthenticationError:
+        except AuthenticationError as error:
+            if error.code == PASSWORD_CHANGE_REQUIRED.code:
+                return RedirectResponse("/change-password", status_code=303)
             return RedirectResponse("/login", status_code=303)
         runtime = template_runtime()
         selected = runtime.resolve(actor)
@@ -1362,7 +1457,10 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
             )
         except AuthenticationError:
             return web_response(render_login_page(invalid=True), status_code=401)
-        response = RedirectResponse("/convert", status_code=status.HTTP_303_SEE_OTHER)
+        destination = (
+            "/change-password" if result.user.password_change_required else "/convert"
+        )
+        response = RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
         set_session_cookie(response, result.session_token)
         set_csrf_cookie(response, result.csrf_token)
         return response
@@ -1400,7 +1498,7 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
     def api_logout(
         request: Request,
         response: Response,
-        _actor: Annotated[User, Depends(mutation_actor)],
+        _actor: Annotated[User, Depends(password_change_actor)],
     ) -> None:
         auth.logout(session_token(request))
         clear_session_cookie(response)
@@ -1411,8 +1509,24 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         tags=["authentication"],
         responses=error_responses(401),
     )
-    def api_session(user: Annotated[User, Depends(current_user)]) -> UserResponse:
+    def api_session(
+        user: Annotated[User, Depends(authenticated_user)],
+    ) -> UserResponse:
         return UserResponse.model_validate(user)
+
+    @app.post(
+        "/api/v1/password",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["authentication"],
+        responses=error_responses(401, 403, 422),
+    )
+    def change_own_password(
+        payload: PasswordChangeRequest,
+        response: Response,
+        actor: Annotated[User, Depends(password_change_actor)],
+    ) -> None:
+        auth.change_password(actor, payload.password, payload.confirmation)
+        clear_session_cookie(response)
 
     @app.get(
         "/api/v1/admin/users",
@@ -1435,7 +1549,12 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         actor: Annotated[User, Depends(admin_actor)],
     ) -> UserResponse:
         return UserResponse.model_validate(
-            auth.create_user(actor, payload.username, payload.password)
+            auth.create_user(
+                actor,
+                payload.username,
+                payload.password,
+                password_change_required=payload.password_change_required,
+            )
         )
 
     @app.patch(
@@ -1464,7 +1583,27 @@ def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composi
         payload: PasswordResetRequest,
         actor: Annotated[User, Depends(admin_actor)],
     ) -> None:
-        auth.reset_password(actor, user_id, payload.password)
+        auth.reset_password(
+            actor,
+            user_id,
+            payload.password,
+            password_change_required=payload.password_change_required,
+        )
+
+    @app.patch(
+        "/api/v1/admin/users/{user_id}/password-change-required",
+        response_model=UserResponse,
+        tags=["administration"],
+        responses=error_responses(401, 403, 404, 422),
+    )
+    def set_user_password_change_required(
+        user_id: UUID,
+        payload: PasswordChangeRequirementRequest,
+        actor: Annotated[User, Depends(admin_actor)],
+    ) -> UserResponse:
+        return UserResponse.model_validate(
+            auth.set_password_change_required(actor, user_id, required=payload.required)
+        )
 
     @app.post(
         "/api/v1/conversions",

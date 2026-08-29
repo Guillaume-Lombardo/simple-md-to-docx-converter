@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from markweave.app import AppComponents, build_components, create_app
 from markweave.auth.memory import MemoryReadinessProbe
-from markweave.config import Settings
+from markweave.config import ConfigurationError, Settings
 from tests.settings import template_settings
 
 
@@ -60,6 +60,26 @@ def session_cookie(client: TestClient) -> str:
 def use_session(client: TestClient, token: str) -> None:
     client.cookies.clear()
     client.cookies.set("md_converter_session", token)
+
+
+def provisioning_settings(data_directory: Path, source: Path | None) -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="Admin",
+        initial_admin_password="admin-password",  # noqa: S106 - test credential
+        user_provisioning_file=source,
+        argon2_memory_cost=8,
+        argon2_time_cost=1,
+        argon2_parallelism=1,
+        session_idle_seconds=60,
+        session_absolute_seconds=300,
+        storage_profile="standalone",
+        standalone_data_directory=data_directory,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
 
 
 @pytest.mark.functional
@@ -124,8 +144,95 @@ def test_json_login_sets_hardened_cookie_without_exposing_session_token(
         assert "Max-Age=300" in cookie
         body = response.json()
         assert set(body) == {"user", "csrf_token"}
-        assert "password" not in response.text.casefold()
+        assert "admin-password" not in response.text.casefold()
+        assert "argon2" not in response.text.casefold()
         assert client.get("/api/v1/session").json()["username"] == "Admin"
+
+
+@pytest.mark.functional
+def test_startup_csv_upsert_and_required_password_renewal_workflow(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "users.csv"
+    source.write_text(
+        "username,password,role,active,password_change_required\n"
+        "Alice,temporary-password,user,true,true\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "data"
+    settings = provisioning_settings(data, source)
+
+    with TestClient(create_app(settings), base_url="https://testserver") as client:
+        authenticated = login(client, "alice", "temporary-password")
+        assert authenticated["user"]["password_change_required"] is True
+        assert client.get("/api/v1/session").status_code == 200
+        restricted = client.get("/convert", follow_redirects=False)
+        assert restricted.status_code == 303
+        assert restricted.headers["location"] == "/change-password"
+        page = client.get("/change-password")
+        assert page.status_code == 200
+        assert "current password was accepted" in page.text
+        assert client.get("/api/v1/admin/users").status_code == 403
+
+        mismatch = client.post(
+            "/api/v1/password",
+            headers=csrf(authenticated),
+            json={"password": "renewed-password", "confirmation": "different"},
+        )
+        assert mismatch.status_code == 422
+        changed = client.post(
+            "/api/v1/password",
+            headers=csrf(authenticated),
+            json={
+                "password": "renewed-password",
+                "confirmation": "renewed-password",
+            },
+        )
+        assert changed.status_code == 204
+        assert client.get("/api/v1/session").status_code == 401
+        assert (
+            client.post(
+                "/api/v1/login",
+                json={"username": "alice", "password": "temporary-password"},
+            ).status_code
+            == 401
+        )
+        renewed = login(client, "alice", "renewed-password")
+        assert renewed["user"]["password_change_required"] is False
+
+    with TestClient(create_app(settings), base_url="https://testserver") as client:
+        assert (
+            client.post(
+                "/api/v1/login",
+                json={"username": "alice", "password": "renewed-password"},
+            ).status_code
+            == 401
+        )
+        reprovisioned = login(client, "alice", "temporary-password")
+        assert reprovisioned["user"]["password_change_required"] is True
+
+
+@pytest.mark.functional
+def test_invalid_csv_fails_startup_without_partial_user_batch(tmp_path: Path) -> None:
+    source = tmp_path / "users.csv"
+    source.write_text(
+        "username,password,role,active,password_change_required\n"
+        "Alice,first-password,user,true,true\n"
+        "\uff21LICE,second-password,user,true,false\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "data"
+
+    with pytest.raises(ConfigurationError, match="Invalid user provisioning file"):
+        create_app(provisioning_settings(data, source))
+
+    with TestClient(
+        create_app(provisioning_settings(data, None)),
+        base_url="https://testserver",
+    ) as client:
+        admin = login(client)
+        users = client.get("/api/v1/admin/users", headers=csrf(admin)).json()
+        assert [user["username"] for user in users] == ["Admin"]
 
 
 @pytest.mark.functional

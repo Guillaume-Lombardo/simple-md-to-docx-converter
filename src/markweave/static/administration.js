@@ -57,7 +57,7 @@ export function validTemplatePage(page) {
 export function validUsers(users) {
   return Array.isArray(users) && users.every((user) => user && typeof user.id === "string"
     && typeof user.username === "string" && ["admin", "user"].includes(user.role)
-    && typeof user.active === "boolean");
+    && typeof user.active === "boolean" && typeof user.password_change_required === "boolean");
 }
 
 export function validVersions(versions) {
@@ -361,7 +361,8 @@ export function createAdministrationController(doc, dependencies = {}) {
     for (const user of visible) {
       const item = appendText(userList, "li", "", "management-card");
       appendText(item, "h3", user.username);
-      appendText(item, "p", `${user.role} · ${user.active ? "active" : "inactive"}`, "muted");
+      const renewal = user.password_change_required ? " · password change required" : "";
+      appendText(item, "p", `${user.role} · ${user.active ? "active" : "inactive"}${renewal}`, "muted");
       const actions = appendText(item, "div", "", "actions wrap");
       if (user.role !== "admin") {
         actionButton(actions, user.active ? "Deactivate" : "Reactivate", async () => {
@@ -375,6 +376,23 @@ export function createAdministrationController(doc, dependencies = {}) {
           }
         }, user.active ? "danger" : "");
       }
+      actionButton(
+        actions,
+        user.password_change_required ? "Cancel required change" : "Require password change",
+        async () => {
+          const response = await request(
+            `/api/v1/admin/users/${user.id}/password-change-required`,
+            {
+              method: "PATCH", headers: csrfHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ required: !user.password_change_required }),
+            },
+          );
+          if (response) {
+            showMessage(`Password renewal requirement updated for ${user.username}.`, false);
+            await loadUsers();
+          }
+        },
+      );
       const resetForm = appendText(item, "form", "", "inline-form");
       const label = appendText(resetForm, "label", "New password");
       const password = appendText(label, "input", "");
@@ -382,11 +400,19 @@ export function createAdministrationController(doc, dependencies = {}) {
       password.name = "password";
       password.autocomplete = "new-password";
       password.required = true;
+      const renewalLabel = appendText(resetForm, "label", "Require change at next sign-in");
+      const forceChange = appendText(renewalLabel, "input", "");
+      forceChange.type = "checkbox";
+      forceChange.name = "password_change_required";
+      forceChange.checked = false;
       appendText(resetForm, "button", "Reset password").type = "submit";
       guardedSubmit(resetForm, async () => {
         const response = await request(`/api/v1/admin/users/${user.id}/password`, {
           method: "POST", headers: csrfHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ password: password.value }),
+          body: JSON.stringify({
+            password: password.value,
+            password_change_required: forceChange.checked,
+          }),
         });
         if (response) {
           resetForm.reset();
@@ -441,6 +467,7 @@ export function createAdministrationController(doc, dependencies = {}) {
       body: JSON.stringify({
         username: createUserForm.elements.username.value,
         password: createUserForm.elements.password.value,
+        password_change_required: createUserForm.elements.password_change_required.checked,
       }),
     });
     if (response) {

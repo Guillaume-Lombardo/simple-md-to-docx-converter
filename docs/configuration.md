@@ -23,6 +23,7 @@ does not authorize public exposure.
 | --- | --- | --- |
 | `MD_CONVERTER_INITIAL_ADMIN_USERNAME` | Required, nonblank | Both profiles; secret-adjacent bootstrap input |
 | `MD_CONVERTER_INITIAL_ADMIN_PASSWORD` | Required, nonblank | Both profiles; Secret, rotate after bootstrap |
+| `MD_CONVERTER_USER_PROVISIONING_FILE` | Optional path | Both profiles; strict UTF-8 startup CSV mounted as a secret |
 | `MD_CONVERTER_ARGON2_MEMORY_COST` | `19456`, minimum 8 | Both profiles |
 | `MD_CONVERTER_ARGON2_TIME_COST` | `2`, minimum 1 | Both profiles |
 | `MD_CONVERTER_ARGON2_PARALLELISM` | `1`, minimum 1 | Both profiles |
@@ -40,6 +41,11 @@ Setting `MD_CONVERTER_INSECURE_EVALUATION_MODE=true` disables both this protecti
 malware scanning. That exception exists only for the loopback-bound
 `quickstart-simple.sh up --insecure` SSH-tunnel workflow. It must remain `false` in production and
 in every network-accessible deployment.
+
+`MD_CONVERTER_USER_PROVISIONING_FILE` is applied after migration and initial-administrator
+bootstrap but before requests are served. See [local authentication](authentication.md) for the
+exact CSV contract, replacement behavior, concurrent-start serialization, and plaintext-secret
+handling requirements.
 
 ## Conversion and engine limits
 

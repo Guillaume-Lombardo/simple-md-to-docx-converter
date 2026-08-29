@@ -47,3 +47,9 @@ USERNAME_TAKEN = ErrorSpec(
 )
 USER_NOT_FOUND = ErrorSpec("USER_NOT_FOUND", "The account was not found.", 404)
 PASSWORD_INVALID = ErrorSpec("PASSWORD_INVALID", "The password must not be blank.", 422)
+PASSWORD_CONFIRMATION_INVALID = ErrorSpec(
+    "PASSWORD_CONFIRMATION_INVALID", "The new passwords do not match.", 422
+)
+PASSWORD_CHANGE_REQUIRED = ErrorSpec(
+    "PASSWORD_CHANGE_REQUIRED", "A password change is required.", 403
+)

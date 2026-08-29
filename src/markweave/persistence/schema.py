@@ -35,6 +35,9 @@ class UserRow(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     auth_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    password_change_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
 
 class SessionRow(Base):

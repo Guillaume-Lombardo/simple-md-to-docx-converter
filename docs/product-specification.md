@@ -210,6 +210,13 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
   reflect submitted passwords or Pydantic validation input.
 - T06 uses temporary in-memory account and session adapters behind persistence ports; T12 replaces
   them with profile implementations without changing the authentication service contract.
+- An optional strict UTF-8 CSV path provisions users at startup. The complete file is validated
+  before one atomic cross-profile upsert; existing normalized usernames receive the supplied
+  password and security attributes, their authentication version advances, and sessions are
+  revoked. Concurrent PostgreSQL startups serialize this operation.
+- Administrators can require password renewal. The user first authenticates with the current
+  password, receives a restricted CSRF-protected session, changes and confirms the password, and
+  must then log in again with the new password before accessing other workflows.
 
 ### 8.2 Retention, malware scanning, and recovery proof
 
@@ -337,8 +344,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T27 | Cache checksum-locked LibreOffice CI artifacts and verify effective quickstart login origins across Compose providers | T22, T26 |
 | T28 | Add an explicit loopback-only insecure quickstart for temporary SSH-tunnel testing, fix native same-origin browser login, and publish patch release `0.3.5` | T24, T26, T27 |
 | T29 | Allow conversion without a template by using Pandoc's native default reference document while preserving optional immutable-template selection and traceability | T07, T10, T13, T15, T16, T21 |
+| T30 | Provision users from a startup CSV, replace existing passwords, require restricted-session password renewal, and publish minor release `0.4.0` | T06, T12, T17, T21 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, and optional-template conversion (T24–T29). Stabilize contracts and ownership boundaries before parallel work.
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). Stabilize contracts and ownership boundaries before parallel work.
 
 ## 14. Deferred decisions and initial-scope exclusions
 

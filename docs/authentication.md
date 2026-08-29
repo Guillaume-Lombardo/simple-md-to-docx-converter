@@ -12,6 +12,36 @@ The bootstrap operation is atomic and idempotent within the selected repository 
 changes an existing administrator password at application restart. SQLite and PostgreSQL preserve
 accounts and sessions across process restarts and implement the same storage-neutral contract.
 
+### Startup CSV provisioning
+
+Set `MD_CONVERTER_USER_PROVISIONING_FILE` to an absolute path for a strict UTF-8 CSV available
+inside the API container. The file must be a regular file, must not be a symbolic link, and must
+use this exact header and lowercase Boolean values:
+
+```csv
+username,password,role,active,password_change_required
+Alice,replace-this-temporary-password,user,true,true
+Operations admin,replace-this-administrator-password,admin,true,false
+```
+
+Markweave parses the complete file before changing an account. Empty files, unknown or reordered
+columns, blank usernames or passwords, invalid roles or Booleans, malformed UTF-8/CSV, and
+duplicate usernames after Unicode normalization stop startup with the content-free
+`Invalid user provisioning file` error.
+
+After validation, Markweave hashes every password with the configured Argon2id profile and applies
+the complete batch in one database transaction. Missing normalized usernames are created. Existing
+user identifiers remain stable, while display name, password, role, active state, and renewal
+requirement are replaced; the authentication version advances and prior sessions are revoked.
+PostgreSQL serializes concurrent API startups with a transaction-scoped advisory lock. Reapplying
+the file deliberately reapplies every password and revokes sessions, even when its bytes did not
+change.
+
+The CSV contains plaintext credentials. Supply it through the deployment secret mechanism, mount
+it read-only, and exclude it from images, source control, backups, and logs. Markweave never copies
+or deletes the source file. Remove the setting or rotate the file when continuous startup
+reconciliation is not wanted. Readiness is not exposed if provisioning fails.
+
 Usernames are displayed after surrounding whitespace is removed. Uniqueness and login use Unicode
 NFKC normalization, surrounding-whitespace removal, and case folding. Values such as `Alice`,
 `ALICE`, and compatible full-width spellings therefore collide.
@@ -54,6 +84,13 @@ The cookie name defaults to `md_converter_session` and is configurable with
 `/`. Successful JSON login returns a separate, session-bound CSRF token once. Every authenticated
 mutation requires it in `X-CSRF-Token`; a token from another session is rejected.
 
+An administrator can require password renewal when creating or resetting an account, or toggle the
+requirement independently. The user first completes normal login with the current password, then
+receives a restricted session and is directed to `/change-password`. That session can access only
+session inspection, logout, and password renewal. Renewal is session-bound and CSRF-protected,
+requires matching nonblank new-password fields, stores the new Argon2id hash, clears the requirement
+atomically, revokes the restricted session, and returns the user to login with the new password.
+
 Both login POST routes reject an `Origin` that differs from the request origin before credentials
 are evaluated. An exact same-origin value is allowed, as is absence of `Origin` for non-browser API
 clients. Deployment proxies must preserve the external scheme and host so Uvicorn constructs the
@@ -64,9 +101,11 @@ browser into the attacker's account.
 
 - `GET /login` and `POST /login`: browser login and redirect to the conversion interface
 - `POST /api/v1/login`, `POST /api/v1/logout`, `GET /api/v1/session`: session lifecycle
+- `GET /change-password`, `POST /change-password`, `POST /api/v1/password`: password renewal
 - `GET /api/v1/admin/users`, `POST /api/v1/admin/users`: account list and creation
 - `PATCH /api/v1/admin/users/{id}/active`: activation and deactivation
 - `POST /api/v1/admin/users/{id}/password`: administrative password reset
+- `PATCH /api/v1/admin/users/{id}/password-change-required`: renewal requirement
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
 
 Every successful administrator account creation, deactivation, reactivation, and password reset is
@@ -112,5 +151,9 @@ Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E c
 - non-administrator account-management denial;
 - missing, hostile, cross-session, and replayed CSRF token denial;
 - session rotation at login and all-session revocation after deactivation and password reset;
+- strict startup CSV validation, atomic create/update, concurrent reapplication, and session
+  revocation in both persistence profiles;
+- restricted-session password renewal, CSRF and confirmation failures, administrator requirements,
+  and forced relogin with the new password;
 - startup failure for absent or invalid bootstrap secrets without secret or hash leakage;
 - liveness and readiness behavior in both standalone and distributed profiles.

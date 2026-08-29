@@ -92,6 +92,9 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "source_size",
         "result_manifest_object_id",
     } <= job_columns
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
     assert DatabaseReadinessProbe(engine).is_ready()
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
@@ -154,6 +157,25 @@ def test_inprocess_sql_repository_control_flow() -> None:
     sessions.revoke("missing")
     sessions.revoke_user(regular.id)
     assert sessions.get(session.token_digest) is None
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_password_change_required_migration_has_a_real_downgrade_path() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+
+    downgrade_database(engine, "20260828_13")
+    assert "password_change_required" not in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+    upgrade_database(engine)
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
     engine.dispose()
 
 

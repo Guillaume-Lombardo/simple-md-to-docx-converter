@@ -4,7 +4,7 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.3.5` is the Python package and
+The project is licensed under [Apache-2.0](LICENSE). Version `0.4.0` is the Python package and
 container release. The quickstart pins that published container image by its immutable registry
 digest.
 
@@ -214,6 +214,7 @@ the `_base` image and persistent database pattern in its
 
 ## Use and operate Markweave
 
+- [Provision users from a startup CSV and require password renewal](docs/authentication.md#startup-csv-provisioning)
 - [Conversion interface](docs/conversion-ui.md)
 - [Template administration](docs/administration-ui.md)
 - [Supported Markdown and DOCX behavior](docs/pandoc-docx.md)
