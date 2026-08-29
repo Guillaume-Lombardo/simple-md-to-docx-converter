@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
 from markweave.app import AppComponents, ErrorResponse, create_app, error_responses
-from markweave.auth.errors import INVALID_CREDENTIALS
+from markweave.auth.errors import (
+    INVALID_CREDENTIALS,
+    PASSWORD_CHANGE_REQUIRED,
+    PASSWORD_CONFIRMATION_INVALID,
+)
 from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
 from markweave.auth.service import AuthenticationService
@@ -76,6 +80,7 @@ def isolated_client(
     auth.list_users.return_value = [admin, alice]
     auth.create_user.return_value = alice
     auth.set_active.return_value = alice
+    auth.set_password_change_required.return_value = alice
     app = create_app(
         settings,
         components=AppComponents(
@@ -306,6 +311,14 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
             ).status_code
             == 204
         )
+        assert (
+            client.patch(
+                f"/api/v1/admin/users/{alice.id}/password-change-required",
+                headers=headers,
+                json={"required": True},
+            ).status_code
+            == 200
+        )
         logout = client.post("/api/v1/logout", headers=headers)
         assert logout.status_code == 204
         assert any(
@@ -314,8 +327,91 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
         )
 
     auth.validate_csrf.assert_called()
-    auth.reset_password.assert_called_once_with(admin, alice.id, "replacement-password")
+    auth.reset_password.assert_called_once_with(
+        admin,
+        alice.id,
+        "replacement-password",
+        password_change_required=False,
+    )
+    auth.set_password_change_required.assert_called_once_with(
+        admin, alice.id, required=True
+    )
     auth.logout.assert_called()
+
+
+@pytest.mark.unit
+def test_password_change_required_browser_and_api_routes_are_isolated(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, admin, _alice = isolated_client(mocker)
+    required = User(
+        admin.id,
+        admin.username,
+        admin.normalized_username,
+        admin.password_hash,
+        admin.role,
+        password_change_required=True,
+    )
+    auth.login.return_value = LoginResult(required, "session-token", "csrf-token")
+    auth.authenticate.return_value = required
+
+    with client:
+        login_response = client.post(
+            "/login",
+            data={"username": "admin", "password": "admin-password"},
+            follow_redirects=False,
+        )
+        assert login_response.headers["location"] == "/change-password"
+        page = client.get("/change-password")
+        assert page.status_code == 200
+        assert "current password was accepted" in page.text
+
+        auth.change_password.side_effect = PASSWORD_CONFIRMATION_INVALID.new()
+        rejected = client.post(
+            "/change-password",
+            data={
+                "password": "new-password",
+                "confirmation": "different",
+                "csrf_token": "csrf-token",
+            },
+        )
+        assert rejected.status_code == 422
+        assert "do not match" in rejected.text
+
+        auth.change_password.side_effect = None
+        changed = client.post(
+            "/api/v1/password",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "password": "new-password",
+                "confirmation": "new-password",
+            },
+        )
+        assert changed.status_code == 204
+        assert any(
+            "md_converter_session=" in cookie and "Max-Age=0" in cookie
+            for cookie in changed.headers.get_list("set-cookie")
+        )
+
+        def restricted_authenticate(
+            _token: str | None, *, allow_password_change: bool = False
+        ) -> User:
+            if allow_password_change:
+                return required
+            raise PASSWORD_CHANGE_REQUIRED.new()
+
+        auth.authenticate.side_effect = restricted_authenticate
+        conversion = client.get("/convert", follow_redirects=False)
+        assert conversion.status_code == 303
+        assert conversion.headers["location"] == "/change-password"
+        templates = client.get("/templates", follow_redirects=False)
+        assert templates.status_code == 303
+        assert templates.headers["location"] == "/change-password"
+
+        auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
+        unauthenticated = client.get("/change-password", follow_redirects=False)
+        assert unauthenticated.status_code == 303
+        assert unauthenticated.headers["location"] == "/login"
 
 
 @pytest.mark.unit

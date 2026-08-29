@@ -146,7 +146,21 @@ async function resetPassword(page, username, password) {
   );
 }
 
-test("final rootless image supports the three-identity browser workflow", async () => {
+async function requirePasswordChange(page, username) {
+  await page.locator("#user-search").fill(username);
+  const card = page.locator("#user-list .management-card").filter({ hasText: username });
+  await card.waitFor();
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().includes("/api/v1/admin/users/")
+      && response.url().endsWith("/password-change-required")
+      && response.request().method() === "PATCH",
+  );
+  await card.getByRole("button", { name: "Require password change" }).click();
+  assert.equal((await responsePromise).status(), 200, "password renewal requirement failed");
+  await waitForText(page, "#administration-alert", "Password renewal requirement updated");
+}
+
+test("final rootless image supports provisioning and the browser workflow", async () => {
   const settings = await configuration();
   const suffix = `${settings.profile}-${randomUUID().slice(0, 8)}`;
   const identities = {
@@ -176,6 +190,7 @@ test("final rootless image supports the three-identity browser workflow", async 
       pages.push({ name, page });
     }
     const [adminPage, alicePage, bobPage] = pages.map(({ page }) => page);
+    const provisionedPage = bobPage;
 
     step = "administrator login and cookie contract";
     await login(adminPage, settings.baseUrl, settings.adminUsername, settings.adminPassword);
@@ -185,6 +200,40 @@ test("final rootless image supports the three-identity browser workflow", async 
     assert.equal(sessionCookie.httpOnly, true);
     assert.equal(sessionCookie.secure, true);
     assert.equal(sessionCookie.sameSite, "Lax");
+
+    step = "startup CSV account enters the restricted renewal flow";
+    await provisionedPage.goto("/login", { waitUntil: "networkidle" });
+    await provisionedPage.locator('input[name="username"]').fill(settings.provisionedUsername);
+    await provisionedPage.locator('input[name="password"]').fill(settings.provisionedPassword);
+    await Promise.all([
+      provisionedPage.waitForURL("**/change-password"),
+      provisionedPage.getByRole("button", { name: "Sign in" }).click(),
+    ]);
+    const provisionedSession = await sessionRequest(
+      provisionedPage, "/api/v1/session", { json: true },
+    );
+    assert.equal(provisionedSession.status, 200);
+    assert.equal(provisionedSession.body.password_change_required, true);
+    assert.equal(
+      (await sessionRequest(provisionedPage, "/api/v1/admin/users")).status,
+      403,
+    );
+    await provisionedPage.locator('input[name="password"]').fill(
+      settings.provisionedRenewedPassword,
+    );
+    await provisionedPage.locator('input[name="confirmation"]').fill(
+      settings.provisionedRenewedPassword,
+    );
+    await Promise.all([
+      provisionedPage.waitForURL("**/login"),
+      provisionedPage.getByRole("button", { name: "Change password" }).click(),
+    ]);
+    await login(
+      provisionedPage,
+      settings.baseUrl,
+      settings.provisionedUsername,
+      settings.provisionedRenewedPassword,
+    );
 
     step = "administrator creates Alice and Bob";
     await adminPage.goto("/templates", { waitUntil: "networkidle" });
@@ -277,6 +326,32 @@ test("final rootless image supports the three-identity browser workflow", async 
     );
     assert.equal((await sessionRequest(alicePage, "/api/v1/session")).status, 401);
 
+    step = "required password renewal restricts then releases Alice";
+    await requirePasswordChange(adminPage, identities.alice.username);
+    await alicePage.goto("/login", { waitUntil: "networkidle" });
+    await alicePage.locator('input[name="username"]').fill(identities.alice.username);
+    await alicePage.locator('input[name="password"]').fill(resetPasswordValue);
+    await Promise.all([
+      alicePage.waitForURL("**/change-password"),
+      alicePage.getByRole("button", { name: "Sign in" }).click(),
+    ]);
+    assert.equal((await sessionRequest(alicePage, "/api/v1/session", { json: true })).body.password_change_required, true);
+    await alicePage.goto("/convert", { waitUntil: "networkidle" });
+    assert.equal(alicePage.url(), `${settings.baseUrl}/change-password`);
+    const renewedPasswordValue = `Renewed-${suffix}-password`;
+    await alicePage.locator('input[name="password"]').fill(renewedPasswordValue);
+    await alicePage.locator('input[name="confirmation"]').fill(renewedPasswordValue);
+    await Promise.all([
+      alicePage.waitForURL("**/login"),
+      alicePage.getByRole("button", { name: "Change password" }).click(),
+    ]);
+    await login(
+      alicePage,
+      settings.baseUrl,
+      identities.alice.username,
+      renewedPasswordValue,
+    );
+
     step = "browser session expires at the configured boundary";
     const expiringContext = await browser.newContext({
       baseURL: settings.baseUrl,
@@ -290,7 +365,7 @@ test("final rootless image supports the three-identity browser workflow", async 
       expiringPage,
       settings.baseUrl,
       identities.alice.username,
-      resetPasswordValue,
+      renewedPasswordValue,
     );
     await expiringPage.waitForTimeout(61_000);
     assert.equal((await sessionRequest(expiringPage, "/api/v1/session")).status, 401);

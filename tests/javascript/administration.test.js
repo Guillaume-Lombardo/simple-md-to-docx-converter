@@ -104,7 +104,7 @@ class FakeDocument {
   }
   addCreateUserFields() {
     const form = this.nodes.get("#create-user-form");
-    for (const name of ["username", "password"]) {
+    for (const name of ["username", "password", "password_change_required"]) {
       const input = new FakeElement(this, "input");
       input.name = name;
       form.appendChild(input);
@@ -172,8 +172,8 @@ test("administration helpers validate safe filtering and concurrency metadata", 
   assert.equal(validTemplatePage({ items: [item], total: 1 }), true);
   assert.equal(validTemplatePage({ items: [], total: -1 }), false);
   assert.equal(validTemplatePage({ items: [{}], total: 1 }), false);
-  assert.equal(validUsers([{ id: "a", username: "A", role: "user", active: true }]), true);
-  assert.equal(validUsers([{ id: "a", username: "A", role: "owner", active: true }]), false);
+  assert.equal(validUsers([{ id: "a", username: "A", role: "user", active: true, password_change_required: false }]), true);
+  assert.equal(validUsers([{ id: "a", username: "A", role: "owner", active: true, password_change_required: false }]), false);
   assert.equal(validVersions([{ id: "v", number: 1, size: 1, created_at: "now" }]), true);
   assert.equal(validVersions([{ id: "v", number: "1", size: 1, created_at: "now" }]), false);
   assert.equal(createAdministrationController({ querySelector: () => null }), null);
@@ -187,8 +187,8 @@ test("administrator controller exercises template and account workflows", async 
     name: "Alice brief", description: "", current_version_id: "version-a",
   })];
   let users = [
-    { id: "admin-id", username: "Admin", role: "admin", active: true },
-    { id: "alice-id", username: "Alice", role: "user", active: true },
+    { id: "admin-id", username: "Admin", role: "admin", active: true, password_change_required: false },
+    { id: "alice-id", username: "Alice", role: "user", active: true, password_change_required: false },
   ];
   const fetch = async (url, options = {}) => {
     requests.push([url, options]);
@@ -216,8 +216,16 @@ test("administrator controller exercises template and account workflows", async 
       users[1] = { ...users[1], active: !users[1].active };
       return response(200);
     }
+    if (url.includes("/password-change-required")) {
+      users[1] = { ...users[1], password_change_required: !users[1].password_change_required };
+      return response(200, users[1]);
+    }
+    if (url.endsWith("/password") && method === "POST") {
+      users[1] = { ...users[1], password_change_required: true };
+      return response(204);
+    }
     if (url === "/api/v1/admin/users" && method === "POST") {
-      users.push({ id: "bob", username: "Bob", role: "user", active: true });
+      users.push({ id: "bob", username: "Bob", role: "user", active: true, password_change_required: true });
       return response(201);
     }
     return response(method === "DELETE" ? 204 : 200);
@@ -274,12 +282,25 @@ test("administrator controller exercises template and account workflows", async 
   doc.querySelector("#user-search").value = "Alice";
   await doc.querySelector("#user-search").dispatch("input");
   await byText(userList, "Deactivate", "button").dispatch("click");
+  await byText(userList, "Require password change", "button").dispatch("click");
   const resetForm = descendants(userList).find((child) => child.className === "inline-form");
   resetForm.elements.password.value = "new-password";
+  resetForm.elements.password_change_required.checked = true;
+  const userLoadsBeforeReset = requests.filter(
+    ([url, options]) => url === "/api/v1/admin/users" && (options.method || "GET") === "GET",
+  ).length;
   await resetForm.dispatch("submit");
+  const userLoadsAfterReset = requests.filter(
+    ([url, options]) => url === "/api/v1/admin/users" && (options.method || "GET") === "GET",
+  ).length;
+  assert.equal(userLoadsAfterReset, userLoadsBeforeReset + 1);
+  assert.ok(descendants(userList).some(
+    (child) => child.textContent.includes("password change required"),
+  ));
   const createUser = doc.querySelector("#create-user-form");
   createUser.elements.username.value = "Bob";
   createUser.elements.password.value = "bob-password";
+  createUser.elements.password_change_required.checked = true;
   await createUser.dispatch("submit");
   assert.equal(users.length, 3);
   assert.ok(requests.every(([, options]) => !options.headers?.["X-CSRF-Token"] || options.headers["X-CSRF-Token"] === "csrf token"));
@@ -423,9 +444,9 @@ test("late user and version loads cannot overwrite newer administration state", 
   });
   const newerUsers = userController.loadUsers();
   assert.equal(userSignals[0].aborted, true);
-  secondUsers.resolve(response(200, [{ id: "new", username: "Newest", role: "user", active: true }]));
+  secondUsers.resolve(response(200, [{ id: "new", username: "Newest", role: "user", active: true, password_change_required: false }]));
   await newerUsers;
-  firstUsers.resolve(response(200, [{ id: "old", username: "Stale", role: "user", active: true }]));
+  firstUsers.resolve(response(200, [{ id: "old", username: "Stale", role: "user", active: true, password_change_required: false }]));
   await settle();
   assert.match(userDoc.querySelector("#user-list").children[0].children[0].textContent, /Newest/);
 
@@ -577,7 +598,7 @@ test("password reset suppresses concurrent duplicate mutations", async () => {
         return mutation.promise;
       }
       if (url === "/api/v1/admin/users") {
-        return response(200, [{ id: "alice", username: "Alice", role: "user", active: true }]);
+        return response(200, [{ id: "alice", username: "Alice", role: "user", active: true, password_change_required: false }]);
       }
       return response(200, { items: [], total: 0 });
     },

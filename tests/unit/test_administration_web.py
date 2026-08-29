@@ -6,7 +6,7 @@ import pytest
 
 from markweave.auth.models import Role, User
 from markweave.templates.models import TemplateIdentity, TemplateStatus
-from markweave.web import render_templates_page
+from markweave.web import render_password_change_page, render_templates_page
 
 
 @pytest.mark.unit
@@ -49,3 +49,24 @@ def test_template_page_exposes_admin_users_tab_without_false_preference() -> Non
     assert 'data-preferred-template-id=""' in page
     assert 'id="users"' in page
     assert "Create an account" in page
+    assert 'name="password_change_required"' in page
+
+
+@pytest.mark.unit
+def test_password_change_page_escapes_identity_and_csrf_material() -> None:
+    actor = User(
+        uuid4(),
+        '<script id="actor">',
+        "actor",
+        "hash",
+        Role.USER,
+        password_change_required=True,
+    )
+
+    page = render_password_change_page(actor, '"><script id="csrf">')
+
+    assert '<script id="actor">' not in page
+    assert '<script id="csrf">' not in page
+    assert "&lt;script" in page
+    assert 'action="/change-password"' in page
+    assert 'autocomplete="new-password"' in page

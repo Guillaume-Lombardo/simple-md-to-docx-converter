@@ -12,8 +12,10 @@ from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from markweave.auth.models import (
+    SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    ProvisionedUser,
     Role,
     Session,
     User,
@@ -61,6 +63,9 @@ JOB_INTEGRITY_REVISION: Any = importlib.import_module(
 OPTIONAL_TEMPLATE_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260828_13_optional_job_template"
 )
+PASSWORD_CHANGE_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260829_14_password_change_required"
+)
 
 
 @pytest.mark.unit
@@ -92,6 +97,9 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "source_size",
         "result_manifest_object_id",
     } <= job_columns
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
     assert DatabaseReadinessProbe(engine).is_ready()
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
@@ -154,6 +162,158 @@ def test_inprocess_sql_repository_control_flow() -> None:
     sessions.revoke("missing")
     sessions.revoke_user(regular.id)
     assert sessions.get(session.token_digest) is None
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_password_change_required_migration_has_a_real_downgrade_path() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+
+    downgrade_database(engine, "20260828_13")
+    assert "password_change_required" not in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+    upgrade_database(engine)
+    assert "password_change_required" in {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_password_change_required_revision_is_directly_verifiable(
+    mocker: MockerFixture,
+) -> None:
+    operations = mocker.patch.object(PASSWORD_CHANGE_REVISION, "op")
+    batch = operations.batch_alter_table.return_value.__enter__.return_value
+
+    PASSWORD_CHANGE_REVISION.upgrade()
+    operations.add_column.assert_called_once()
+    table, column = operations.add_column.call_args.args
+    assert table == "users"
+    assert column.name == "password_change_required"
+    assert not column.nullable
+
+    PASSWORD_CHANGE_REVISION.downgrade()
+    operations.batch_alter_table.assert_called_once_with("users", recreate="auto")
+    batch.drop_column.assert_called_once_with("password_change_required")
+
+
+@pytest.mark.unit
+def test_inprocess_sql_user_provisioning_creates_and_replaces_accounts() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    sessions = SqlSessionRepository(engine)
+    existing = User(uuid4(), "Alice", "alice", "hash:old", Role.USER)
+    users.create(existing)
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    sessions.create(
+        Session(
+            token_digest="a" * 64,
+            csrf_digest="b" * 64,
+            user_id=existing.id,
+            auth_version=0,
+            created_at=now,
+            last_seen_at=now,
+            idle_expires_at=now + timedelta(minutes=30),
+            absolute_expires_at=now + timedelta(hours=8),
+        )
+    )
+
+    provisioned = users.provision(
+        [
+            ProvisionedUser("Alice", "alice", "hash:new", Role.ADMIN, True, True),
+            ProvisionedUser("Bob", "bob", "hash:bob", Role.USER, True, False),
+        ],
+        now,
+    )
+
+    assert [user.normalized_username for user in provisioned] == ["alice", "bob"]
+    assert provisioned[0].id == existing.id
+    assert provisioned[0].auth_version == 1
+    assert provisioned[0].role is Role.ADMIN
+    assert provisioned[0].password_change_required
+    assert sessions.get("a" * 64) is None
+    assert users.get_by_normalized_username("bob") == provisioned[1]
+    with engine.connect() as connection:
+        audit_rows = tuple(
+            connection.execute(
+                select(AuthenticationAuditRow).where(
+                    AuthenticationAuditRow.operation.in_(
+                        ["user_provision_create", "user_provision_update"]
+                    )
+                )
+            ).mappings()
+        )
+    assert {row["actor_id"] for row in audit_rows} == {str(SYSTEM_ACTOR_ID)}
+    assert not any(row["administrator_intervention"] for row in audit_rows)
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_sql_password_renewal_is_compare_and_set_and_self_audited() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    user = User(
+        uuid4(),
+        "Alice",
+        "alice",
+        "hash:old",
+        Role.USER,
+        password_change_required=True,
+    )
+    users.create(user)
+    stale = users.get_by_id(user.id)
+    assert stale is not None
+    reset = users.update_security(
+        user.id,
+        password_hash="hash:" + "administrator-reset",
+        password_change_required=True,
+    )
+    assert reset is not None
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    stale_change = users.commit_password_change(
+        stale.id,
+        stale.auth_version,
+        "hash:stale-request-wins",
+        AuthenticationAuditContext(
+            uuid4(), stale.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert stale_change is None
+    current = users.get_by_id(user.id)
+    assert current is not None
+    assert current.password_hash == "hash:" + "administrator-reset"
+
+    changed = users.commit_password_change(
+        current.id,
+        current.auth_version,
+        "hash:renewed",
+        AuthenticationAuditContext(
+            uuid4(), current.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert changed is not None
+    assert changed.password_hash == "hash:" + "renewed"
+    assert not changed.password_change_required
+    with engine.connect() as connection:
+        audit_row = (
+            connection.execute(
+                select(AuthenticationAuditRow).where(
+                    AuthenticationAuditRow.operation == "user_password_change"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert audit_row["actor_id"] == str(user.id)
+    assert not audit_row["administrator_intervention"]
     engine.dispose()
 
 
@@ -336,11 +496,28 @@ def test_every_repository_operation_sanitizes_sqlalchemy_failures(
         "markweave.persistence.sql.DatabaseSession",
         side_effect=SQLAlchemyError("private SQL parameters"),
     )
+    audit_context = AuthenticationAuditContext(
+        uuid4(), user.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+    )
     operations = (
         lambda: users.get_by_id(user.id),
         lambda: users.get_by_normalized_username(user.normalized_username),
         users.list,
+        lambda: users.provision(
+            [
+                ProvisionedUser(
+                    user.username,
+                    user.normalized_username,
+                    private_hash,
+                    user.role,
+                    user.active,
+                    True,
+                )
+            ],
+            now,
+        ),
         lambda: users.commit_verified_login(user.id, 0, private_hash),
+        lambda: users.commit_password_change(user.id, 0, private_hash, audit_context),
         lambda: users.update_security(user.id, password_hash=private_hash),
         lambda: sessions.create(session),
         lambda: sessions.get(session.token_digest),

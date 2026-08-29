@@ -10,7 +10,14 @@ from uuid import uuid4
 import pytest
 
 from markweave.auth.errors import AuthenticationError
-from markweave.auth.models import Role, Session, User
+from markweave.auth.models import (
+    AuthenticationAuditContext,
+    AuthenticationAuditOperation,
+    ProvisionedUser,
+    Role,
+    Session,
+    User,
+)
 from markweave.auth.ports import SessionRepository, UserRepository
 from markweave.config import ConfigurationError
 from markweave.storage import (
@@ -105,6 +112,105 @@ def exercise_auth_repository_contract(
     assert sessions.get(first.token_digest) is None
     sessions.revoke_user(admin.id)
     assert sessions.get(second.token_digest) is None
+
+    exercise_user_provisioning_repository_contract(users, sessions)
+
+
+def exercise_user_provisioning_repository_contract(
+    users: UserRepository, sessions: SessionRepository
+) -> None:
+    """Verify atomic replacement, session revocation, and serialized reapplication."""
+    suffix = uuid4().hex
+    normalized_existing = f"provisioned-existing-{suffix}"
+    normalized_new = f"provisioned-new-{suffix}"
+    existing = User(
+        uuid4(),
+        "Existing",
+        normalized_existing,
+        "hash:original",
+        Role.USER,
+    )
+    users.create(existing)
+
+    now = datetime(2026, 8, 23, tzinfo=UTC)
+    provisioned_session = Session(
+        token_digest="e" * 64,
+        csrf_digest="f" * 64,
+        user_id=existing.id,
+        auth_version=existing.auth_version,
+        created_at=now,
+        last_seen_at=now,
+        idle_expires_at=now + timedelta(minutes=30),
+        absolute_expires_at=now + timedelta(hours=8),
+    )
+    sessions.create(provisioned_session)
+    records = [
+        ProvisionedUser(
+            "Existing",
+            normalized_existing,
+            "hash:provisioned-admin",
+            Role.USER,
+            True,
+            True,
+        ),
+        ProvisionedUser(
+            "New",
+            normalized_new,
+            "hash:provisioned-bob",
+            Role.USER,
+            True,
+            False,
+        ),
+    ]
+    batch = users.provision(records, now)
+    assert [user.normalized_username for user in batch] == [
+        normalized_existing,
+        normalized_new,
+    ]
+    provisioned_existing, new_user = batch
+    assert provisioned_existing.password_hash == "hash:provisioned-admin"  # noqa: S105
+    assert provisioned_existing.password_change_required
+    assert new_user.auth_version == 0
+    assert sessions.get(provisioned_session.token_digest) is None
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        repeated = list(executor.map(lambda _: users.provision(records, now), range(4)))
+    assert all(batch[0].password_change_required for batch in repeated)
+    final_existing = users.get_by_id(existing.id)
+    final_new = users.get_by_id(new_user.id)
+    assert final_existing is not None and final_existing.auth_version == 5
+    assert final_new is not None and final_new.auth_version == 4
+
+    stale = final_existing
+    reset = users.update_security(
+        stale.id,
+        password_hash="hash:" + "administrator-reset",
+        password_change_required=True,
+    )
+    assert reset is not None
+    stale_audit = AuthenticationAuditContext(
+        uuid4(), stale.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+    )
+    assert (
+        users.commit_password_change(
+            stale.id, stale.auth_version, "hash:stale-request-wins", stale_audit
+        )
+        is None
+    )
+    current = users.get_by_id(stale.id)
+    assert current is not None
+    assert current.password_hash == "hash:" + "administrator-reset"
+    renewed = users.commit_password_change(
+        current.id,
+        current.auth_version,
+        "hash:renewed",
+        AuthenticationAuditContext(
+            uuid4(), current.id, AuthenticationAuditOperation.CHANGE_PASSWORD, now
+        ),
+    )
+    assert renewed is not None
+    assert renewed.password_hash == "hash:" + "renewed"
+    assert not renewed.password_change_required
 
 
 def exercise_object_store_contract(store: ObjectStore) -> None:

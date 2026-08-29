@@ -33,6 +33,11 @@ clamav_script="$temporary_directory/fake-clamav.py"
 browser_runtime_directory="$temporary_directory/e2e"
 node_runtime_directory="$temporary_directory/node_modules"
 browser_session_directory="$temporary_directory/browser-session"
+provisioning_file="$temporary_directory/users.csv"
+provisioned_username="e2e-provisioned-$profile"
+provisioned_initial_password="Provisioned-$profile-initial"
+provisioned_renewed_password="Provisioned-$profile-browser-renewed"
+provisioned_replacement_password="Provisioned-$profile-replacement"
 created=()
 succeeded=false
 
@@ -167,6 +172,10 @@ mkdir -p -- "$data_directory" "$evidence_directory" \
 chmod 0770 "$data_directory"
 chmod 0777 "$evidence_directory" "$temporary_directory/browser-artifacts" \
   "$browser_session_directory"
+printf '%s\n%s,%s,user,true,true\n' \
+  'username,password,role,active,password_change_required' \
+  "$provisioned_username" "$provisioned_initial_password" >"$provisioning_file"
+chmod 0444 "$provisioning_file"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
 PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
@@ -242,6 +251,7 @@ application_volumes=(
   --volume "$evidence_directory:/evidence:rw,Z"
   --volume "$temporary_directory/browser-artifacts:/browser-artifacts:rw,Z"
   --volume "$browser_session_directory:/browser-session:rw,Z"
+  --volume "$provisioning_file:/run/secrets/users.csv:ro,Z"
 )
 if [[ "$profile" == standalone ]]; then
   application_volumes+=(--volume "$data_directory:/data:rw,Z")
@@ -251,10 +261,14 @@ application_mode=api
 if [[ "$profile" == standalone ]]; then
   application_mode=embedded-worker
 fi
+application_settings=(
+  "${E2E_SETTINGS[@]}"
+  --env MD_CONVERTER_USER_PROVISIONING_FILE=/run/secrets/users.csv
+)
 created=("$application_name" "${created[@]}")
 podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
-  "${hardened_runtime[@]}" "${application_volumes[@]}" "${E2E_SETTINGS[@]}" \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null
 
 if [[ "$profile" == distributed ]]; then
@@ -341,7 +355,25 @@ podman exec \
   --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MD_CONVERTER_E2E_ADMIN_USERNAME=e2e-admin \
   --env MD_CONVERTER_E2E_ADMIN_PASSWORD=e2e-admin-password \
+  --env MD_CONVERTER_E2E_PROVISIONED_USERNAME="$provisioned_username" \
+  --env MD_CONVERTER_E2E_PROVISIONED_PASSWORD="$provisioned_initial_password" \
+  --env MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD="$provisioned_renewed_password" \
   "$application_name" node --test /e2e/browser-final-image.test.mjs
+
+chmod 0644 "$provisioning_file"
+printf '%s\n%s,%s,user,true,true\n' \
+  'username,password,role,active,password_change_required' \
+  "$provisioned_username" "$provisioned_replacement_password" >"$provisioning_file"
+chmod 0444 "$provisioning_file"
+podman restart --time 15 "$application_name" >/dev/null
+wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+podman exec \
+  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MD_CONVERTER_E2E_PROFILE="$profile" \
+  --env MD_CONVERTER_E2E_PROVISIONED_USERNAME="$provisioned_username" \
+  --env MD_CONVERTER_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
+  --env MD_CONVERTER_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
+  "$application_name" node --test /e2e/browser-provisioning-restart.test.mjs
 
 uv run python -m tests.e2e.service_workflow submit-recovery \
   --base-url "$base_url" --profile "$profile" --output both \
@@ -465,7 +497,7 @@ created=("$insecure_application_name" "${created[@]}")
 podman run --detach --name "$insecure_application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
   --env MD_CONVERTER_INSECURE_EVALUATION_MODE=true \
-  "${hardened_runtime[@]}" "${application_volumes[@]}" "${E2E_SETTINGS[@]}" \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null
 insecure_application_port="$(podman port "$insecure_application_name" 8080/tcp | sed 's/.*://')"
 insecure_base_url="http://127.0.0.1:$insecure_application_port"
@@ -477,7 +509,7 @@ uv run python -m tests.e2e.service_workflow verify-disabled-login-origin \
   --base-url "$insecure_base_url" --profile "$profile" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 podman logs "$insecure_application_name" 2>&1 | \
-  grep --quiet '"event":"insecure_evaluation_mode_enabled"'
+  grep '"event":"insecure_evaluation_mode_enabled"' >/dev/null
 
 succeeded=true
 echo "Final-image $profile E2E workflow passed for $image."

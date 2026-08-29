@@ -17,8 +17,10 @@ from sqlalchemy.orm import Session as DatabaseSession
 from sqlalchemy.sql.dml import Update
 
 from markweave.auth.models import (
+    SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    ProvisionedUser,
     Role,
     Session,
     User,
@@ -131,6 +133,7 @@ def _user(row: UserRow) -> User:
         role=Role(row.role),
         active=row.active,
         auth_version=row.auth_version,
+        password_change_required=row.password_change_required,
     )
 
 
@@ -200,6 +203,7 @@ class SqlUserRepository:
                         role=user.role.value,
                         active=user.active,
                         auth_version=user.auth_version,
+                        password_change_required=user.password_change_required,
                     )
                 )
                 if audit is not None:
@@ -239,6 +243,65 @@ class SqlUserRepository:
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def provision(
+        self, records: builtins.list[ProvisionedUser], now: datetime
+    ) -> builtins.list[User]:
+        """Apply the whole startup file under one profile-neutral transaction."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                if self._engine.dialect.name == "postgresql":
+                    database.execute(text("SELECT pg_advisory_xact_lock(1296914258)"))
+                provisioned: list[User] = []
+                for record in records:
+                    row = database.scalar(
+                        select(UserRow)
+                        .where(
+                            UserRow.normalized_username == record.normalized_username
+                        )
+                        .with_for_update()
+                    )
+                    if row is None:
+                        row = UserRow(
+                            id=str(uuid4()),
+                            username=record.username,
+                            normalized_username=record.normalized_username,
+                            password_hash=record.password_hash,
+                            role=record.role.value,
+                            active=record.active,
+                            auth_version=0,
+                            password_change_required=(record.password_change_required),
+                        )
+                        database.add(row)
+                        database.flush()
+                        operation = AuthenticationAuditOperation.PROVISION_CREATE
+                    else:
+                        row.username = record.username
+                        row.password_hash = record.password_hash
+                        row.role = record.role.value
+                        row.active = record.active
+                        row.password_change_required = record.password_change_required
+                        row.auth_version += 1
+                        database.execute(
+                            delete(SessionRow).where(SessionRow.user_id == row.id)
+                        )
+                        operation = AuthenticationAuditOperation.PROVISION_UPDATE
+                    user = _user(row)
+                    database.add(
+                        self._audit_row(
+                            user,
+                            AuthenticationAuditContext(
+                                uuid4(), SYSTEM_ACTOR_ID, operation, now
+                            ),
+                        )
+                    )
+                    provisioned.append(user)
+                return provisioned
+        except IntegrityError:
+            raise ConfigurationError("Invalid user provisioning file") from None
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def commit_verified_login(
         self,
         user_id: UUID,
@@ -272,6 +335,7 @@ class SqlUserRepository:
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        password_change_required: bool | None = None,
         audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         values: dict[str, object] = {"auth_version": UserRow.auth_version + 1}
@@ -279,6 +343,8 @@ class SqlUserRepository:
             values["active"] = active
         if password_hash is not None:
             values["password_hash"] = password_hash
+        if password_change_required is not None:
+            values["password_change_required"] = password_change_required
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
@@ -288,6 +354,39 @@ class SqlUserRepository:
                     str(user_id),
                 )
                 if result is not None and audit is not None:
+                    database.add(self._audit_row(_user(result), audit))
+                return _user(result) if result is not None else None
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def commit_password_change(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        password_hash: str,
+        audit: AuthenticationAuditContext,
+    ) -> User | None:
+        """Compare-and-set required renewal against the authenticated snapshot."""
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                result = self._update_user_row(
+                    database,
+                    update(UserRow)
+                    .where(
+                        UserRow.id == str(user_id),
+                        UserRow.active.is_(True),
+                        UserRow.password_change_required.is_(True),
+                        UserRow.auth_version == expected_auth_version,
+                    )
+                    .values(
+                        password_hash=password_hash,
+                        password_change_required=False,
+                        auth_version=UserRow.auth_version + 1,
+                    ),
+                    str(user_id),
+                )
+                if result is not None:
                     database.add(self._audit_row(_user(result), audit))
                 return _user(result) if result is not None else None
         except SQLAlchemyError:
@@ -317,10 +416,14 @@ class SqlUserRepository:
             operation=audit.operation.value,
             target_id=str(user.id),
             auth_version=user.auth_version,
-            administrator_intervention=(
-                audit.operation
-                is not AuthenticationAuditOperation.BOOTSTRAP_ADMIN_CREATE
-            ),
+            administrator_intervention=audit.operation
+            in {
+                AuthenticationAuditOperation.CREATE,
+                AuthenticationAuditOperation.DEACTIVATE,
+                AuthenticationAuditOperation.REACTIVATE,
+                AuthenticationAuditOperation.RESET_PASSWORD,
+                AuthenticationAuditOperation.REQUIRE_PASSWORD_CHANGE,
+            },
             created_at=audit.created_at,
         )
 

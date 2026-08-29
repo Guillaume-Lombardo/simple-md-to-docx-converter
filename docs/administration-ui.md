@@ -44,6 +44,11 @@ creation, deactivation, reactivation, and password reset. Account status changes
 resets revoke the affected sessions through the authentication service. The interface never
 receives password hashes, session tokens, or authentication versions.
 
+Account creation and password reset can require renewal at the next sign-in. Administrators can
+also add or cancel that requirement independently from an account card; changing it revokes
+existing sessions. A required user authenticates with the current password, chooses and confirms a
+new password on the dedicated page, and then signs in again with the new password.
+
 ## Errors and accessibility
 
 The page has an assertive live error region and a polite live result list. Expected API failures use
@@ -62,6 +67,11 @@ HTTP server through template creation and invalid uploads, download, metadata ch
 stale `If-Match`, replacement, version history and restoration, preference changes, guarded
 archive/deletion, CSRF and revoked-session denial, account creation and search, status changes, and
 password reset. It also checks that duplicate form submission does not create duplicate mutations.
+The final-image browser workflow additionally requires password renewal, proves that the current
+password must succeed before the restricted page is shown, confirms that normal application routes
+remain unavailable, renews the password, and verifies the required fresh login. In both storage
+profiles it also mounts a startup CSV into the rootless API container, exercises its provisioned
+account, replaces the mounted password, restarts the image, and proves the old password was revoked.
 
 The browser suite requires the repository Python environment, the pinned Puppeteer dependency, and
 the pinned Chrome version installed by CI. Its committed CI-equivalent invocation is:

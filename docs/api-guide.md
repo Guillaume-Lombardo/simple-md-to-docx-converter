@@ -9,7 +9,13 @@ prefix: `/health/live`, `/health/ready`, and `/metrics`.
 `POST /api/v1/login` creates a local session. Preserve the returned Secure session cookie and CSRF
 token. Send that token in the documented CSRF header for every state-changing request, including
 logout. `GET /api/v1/session` returns the current principal and `POST /api/v1/logout` ends the
-session.
+session. Its user representation includes `password_change_required`.
+
+When that flag is true, successful credential verification creates a restricted session. Only
+session inspection, logout, and `POST /api/v1/password` are available until the user submits
+matching `password` and `confirmation` values with the session CSRF header. Success clears the
+requirement, revokes that session, and requires a new login with the new password. Browser clients
+use the equivalent `/change-password` page.
 
 Browser form login is also available at `POST /login`. The service is intended for same-origin
 HTTPS use. Do not disable TLS, the Secure cookie, Origin validation, or CSRF validation to make an
@@ -68,9 +74,11 @@ retention, and exact endpoint behavior.
 
 ## Administration and audit
 
-Administrators can list and create users, change active state, and reset a password under
-`/api/v1/admin/users`. Security mutations invalidate affected sessions through the account's
-authentication version. `GET /api/v1/audit` exposes paginated audit records to authorized
+Administrators can list and create users, change active state, reset a password, and set or cancel
+the next-login renewal requirement under `/api/v1/admin/users`. Creation and reset payloads accept
+`password_change_required`; `PATCH /api/v1/admin/users/{id}/password-change-required` accepts
+`required`. Security mutations invalidate affected sessions through the account's authentication
+version. `GET /api/v1/audit` exposes paginated audit records to authorized
 administrators; records contain identifiers and action metadata, not document bodies or passwords.
 
 The generated OpenAPI document is the exact source for request schemas, response status codes,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from markweave.auth.errors import (
@@ -12,6 +13,8 @@ from markweave.auth.errors import (
     CSRF_REQUIRED,
     FORBIDDEN,
     INVALID_CREDENTIALS,
+    PASSWORD_CHANGE_REQUIRED,
+    PASSWORD_CONFIRMATION_INVALID,
     PASSWORD_INVALID,
     USER_NOT_FOUND,
     USERNAME_INVALID,
@@ -21,6 +24,7 @@ from markweave.auth.models import (
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
     LoginResult,
+    ProvisionedUser,
     Role,
     Session,
     User,
@@ -33,6 +37,7 @@ from markweave.auth.ports import (
     TokenGenerator,
     UserRepository,
 )
+from markweave.auth.provisioning import load_user_provisioning_csv
 from markweave.auth.security import digest_token
 
 
@@ -94,6 +99,25 @@ class AuthenticationService:
             username, normalized, self.hasher.hash(password)
         )
 
+    def provision_users(self, path: Path) -> list[User]:
+        """Validate, hash, and atomically apply a startup CSV batch."""
+        inputs = load_user_provisioning_csv(path)
+        records = [
+            ProvisionedUser(
+                username=record.username,
+                normalized_username=record.normalized_username,
+                password_hash=self.hasher.hash(record.password),
+                role=record.role,
+                active=record.active,
+                password_change_required=record.password_change_required,
+            )
+            for record in inputs
+        ]
+        users = self.users.provision(records, self.clock.now())
+        for user in users:
+            self.sessions.revoke_user(user.id)
+        return users
+
     def login(
         self, username: str, password: str, *, previous_session_token: str | None = None
     ) -> LoginResult:
@@ -136,12 +160,16 @@ class AuthenticationService:
             csrf_token=csrf_token,
         )
 
-    def authenticate(self, session_token: str | None) -> User:
+    def authenticate(
+        self, session_token: str | None, *, allow_password_change: bool = False
+    ) -> User:
         session = self._active_session(session_token)
         user = self.users.get_by_id(session.user_id)
         if user is None or not user.active or user.auth_version != session.auth_version:
             self.sessions.revoke(session.token_digest)
             raise AUTHENTICATION_REQUIRED.new()
+        if user.password_change_required and not allow_password_change:
+            raise PASSWORD_CHANGE_REQUIRED.new()
         now = self.clock.now()
         session.last_seen_at = now
         session.idle_expires_at = min(
@@ -160,7 +188,14 @@ class AuthenticationService:
         if session_token:
             self.sessions.revoke(digest_token(session_token))
 
-    def create_user(self, actor: User, username: str, password: str) -> User:
+    def create_user(
+        self,
+        actor: User,
+        username: str,
+        password: str,
+        *,
+        password_change_required: bool = False,
+    ) -> User:
         AuthorizationService.require_admin(actor)
         normalized = normalize_username(username)
         if not normalized:
@@ -175,6 +210,7 @@ class AuthenticationService:
             normalized_username=normalized,
             password_hash=self.hasher.hash(password),
             role=Role.USER,
+            password_change_required=password_change_required,
         )
         try:
             self.users.create(
@@ -204,17 +240,61 @@ class AuthenticationService:
         self.sessions.revoke_user(user.id)
         return user
 
-    def reset_password(self, actor: User, user_id: UUID, password: str) -> None:
+    def reset_password(
+        self,
+        actor: User,
+        user_id: UUID,
+        password: str,
+        *,
+        password_change_required: bool = False,
+    ) -> None:
         AuthorizationService.require_admin(actor)
         if not password:
             raise PASSWORD_INVALID.new()
         user = self.users.update_security(
             user_id,
             password_hash=self.hasher.hash(password),
+            password_change_required=password_change_required,
             audit=self._audit(actor, AuthenticationAuditOperation.RESET_PASSWORD),
         )
         if user is None:
             raise USER_NOT_FOUND.new()
+        self.sessions.revoke_user(user.id)
+
+    def set_password_change_required(
+        self, actor: User, user_id: UUID, *, required: bool
+    ) -> User:
+        AuthorizationService.require_admin(actor)
+        user = self.users.update_security(
+            user_id,
+            password_change_required=required,
+            audit=self._audit(
+                actor, AuthenticationAuditOperation.REQUIRE_PASSWORD_CHANGE
+            ),
+        )
+        if user is None:
+            raise USER_NOT_FOUND.new()
+        self.sessions.revoke_user(user.id)
+        return user
+
+    def change_password(
+        self,
+        user: User,
+        password: str,
+        confirmation: str,
+    ) -> None:
+        if not password:
+            raise PASSWORD_INVALID.new()
+        if password != confirmation:
+            raise PASSWORD_CONFIRMATION_INVALID.new()
+        changed = self.users.commit_password_change(
+            user.id,
+            user.auth_version,
+            self.hasher.hash(password),
+            self._audit(user, AuthenticationAuditOperation.CHANGE_PASSWORD),
+        )
+        if changed is None:
+            raise AUTHENTICATION_REQUIRED.new()
         self.sessions.revoke_user(user.id)
 
     def _audit(

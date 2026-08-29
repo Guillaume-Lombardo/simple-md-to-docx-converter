@@ -36,6 +36,32 @@ def render_login_page(*, invalid: bool = False) -> str:
 <button type="submit">Sign in</button></form></section></main></body></html>"""
 
 
+def render_password_change_page(
+    user: User,
+    csrf_token: str,
+    *,
+    invalid: bool = False,
+) -> str:
+    """Render the only browser workflow available to a restricted session."""
+    error = (
+        '<p class="alert" role="alert">The new passwords are invalid or do not match.</p>'
+        if invalid
+        else ""
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change password · Markdown Converter</title><link rel="stylesheet" href="/static/conversion.css"></head>
+<body><main class="auth-shell"><section class="panel"><p class="eyebrow">Markdown Converter</p><h1>Change your password</h1>
+<p>{escape(user.username)}, your current password was accepted. Choose a new password before continuing.</p>{error}
+<form method="post" action="/change-password" class="stack">
+<input type="hidden" name="csrf_token" value="{escape(csrf_token, quote=True)}">
+<label>New password <input name="password" type="password" autocomplete="new-password" required></label>
+<label>Confirm new password <input name="confirmation" type="password" autocomplete="new-password" required></label>
+<button type="submit">Change password</button></form>
+<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{escape(csrf_token, quote=True)}">
+<button type="submit">Sign out</button></form></section></main></body></html>"""
+
+
 def render_conversion_page(
     user: User,
     selected: TemplateIdentity | None,
@@ -116,6 +142,7 @@ def render_templates_page(
 <form id="create-user-form" class="stack"><h3>Create an account</h3>
 <label>Username <input name="username" autocomplete="off" required></label>
 <label>Temporary password <input name="password" type="password" autocomplete="new-password" required></label>
+<label class="checkbox"><input name="password_change_required" type="checkbox"> Require password change at next sign-in</label>
 <button type="submit">Create account</button></form></section>"""
     admin_nav = '<a href="#users">Users</a>' if user.role is Role.ADMIN else ""
     return f"""<!doctype html>

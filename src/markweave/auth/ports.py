@@ -9,7 +9,12 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from markweave.auth.models import AuthenticationAuditContext, Session, User
+    from markweave.auth.models import (
+        AuthenticationAuditContext,
+        ProvisionedUser,
+        Session,
+        User,
+    )
 
 
 class UserRepository(Protocol):
@@ -29,6 +34,12 @@ class UserRepository(Protocol):
 
     def list(self) -> builtins.list[User]: ...
 
+    def provision(
+        self, records: builtins.list[ProvisionedUser], now: datetime
+    ) -> builtins.list[User]:
+        """Atomically create or replace a complete startup provisioning batch."""
+        ...
+
     def commit_verified_login(
         self,
         user_id: UUID,
@@ -38,12 +49,23 @@ class UserRepository(Protocol):
         """Atomically validate account state/version and optionally replace its hash."""
         ...
 
+    def commit_password_change(
+        self,
+        user_id: UUID,
+        expected_auth_version: int,
+        password_hash: str,
+        audit: AuthenticationAuditContext,
+    ) -> User | None:
+        """Compare-and-set a required password renewal and its audit record."""
+        ...
+
     def update_security(
         self,
         user_id: UUID,
         *,
         active: bool | None = None,
         password_hash: str | None = None,
+        password_change_required: bool | None = None,
         audit: AuthenticationAuditContext | None = None,
     ) -> User | None:
         """Atomically mutate security state and increment its revocation version."""

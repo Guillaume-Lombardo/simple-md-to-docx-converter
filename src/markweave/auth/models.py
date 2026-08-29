@@ -8,6 +8,9 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+USERNAME_MAX_LENGTH = 255
+SYSTEM_ACTOR_ID = UUID(int=0)
+
 
 class Role(StrEnum):
     """Application-wide authorization roles."""
@@ -24,6 +27,10 @@ class AuthenticationAuditOperation(StrEnum):
     DEACTIVATE = "user_deactivate"
     REACTIVATE = "user_reactivate"
     RESET_PASSWORD = "user_password_reset"  # noqa: S105 - audit operation, not a secret
+    REQUIRE_PASSWORD_CHANGE = "user_password_change_required"  # noqa: S105
+    CHANGE_PASSWORD = "user_password_change"  # noqa: S105
+    PROVISION_CREATE = "user_provision_create"
+    PROVISION_UPDATE = "user_provision_update"
 
 
 def normalize_username(username: str) -> str:
@@ -42,6 +49,19 @@ class User:
     role: Role
     active: bool = True
     auth_version: int = 0
+    password_change_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionedUser:
+    """Validated startup account input with password material already hashed."""
+
+    username: str
+    normalized_username: str
+    password_hash: str
+    role: Role
+    active: bool
+    password_change_required: bool
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from itertools import count
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -245,11 +246,146 @@ def test_admin_account_lifecycle_revokes_all_sessions() -> None:
 
 
 @pytest.mark.unit
+def test_required_password_change_restricts_session_until_atomic_renewal() -> None:
+    service, _, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    user = service.create_user(
+        admin,
+        "Alice",
+        "temporary",
+        password_change_required=True,
+    )
+
+    login = service.login("alice", "temporary")
+    assert login.user.password_change_required
+    assert (
+        service.authenticate(login.session_token, allow_password_change=True).id
+        == user.id
+    )
+    assert_error(
+        "PASSWORD_CHANGE_REQUIRED",
+        lambda: service.authenticate(login.session_token),
+    )
+    service.validate_csrf(login.session_token, login.csrf_token)
+    assert_error(
+        "PASSWORD_CONFIRMATION_INVALID",
+        lambda: service.change_password(user, "new", "different"),
+    )
+
+    service.change_password(user, "new", "new")
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(login.session_token, allow_password_change=True),
+    )
+    assert_error("INVALID_CREDENTIALS", lambda: service.login("alice", "temporary"))
+    renewed = service.login("alice", "new")
+    assert not renewed.user.password_change_required
+
+
+@pytest.mark.unit
+def test_administrator_can_require_password_change_and_revoke_sessions() -> None:
+    service, _, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    user = service.create_user(admin, "Alice", "password")
+    active = service.login("alice", "password")
+
+    required = service.set_password_change_required(admin, user.id, required=True)
+    assert required.password_change_required
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(active.session_token, allow_password_change=True),
+    )
+    reset = service.login("alice", "password")
+    service.reset_password(
+        admin,
+        user.id,
+        "temporary",
+        password_change_required=True,
+    )
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(reset.session_token, allow_password_change=True),
+    )
+    assert service.login("alice", "temporary").user.password_change_required
+
+
+@pytest.mark.unit
+def test_stale_renewal_cannot_overwrite_an_administrator_password_reset() -> None:
+    service, _, _ = build_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    user = service.create_user(
+        admin,
+        "Alice",
+        "old-password",
+        password_change_required=True,
+    )
+    restricted = service.login("alice", "old-password")
+    stale_actor = service.authenticate(
+        restricted.session_token, allow_password_change=True
+    )
+
+    service.reset_password(
+        admin,
+        user.id,
+        "administrator-reset",
+        password_change_required=True,
+    )
+
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.change_password(
+            stale_actor, "stale-request-wins", "stale-request-wins"
+        ),
+    )
+    assert_error(
+        "INVALID_CREDENTIALS",
+        lambda: service.login("alice", "stale-request-wins"),
+    )
+    assert service.login("alice", "administrator-reset").user.password_change_required
+
+
+@pytest.mark.unit
+def test_startup_provisioning_creates_then_replaces_memory_accounts(
+    tmp_path: Path,
+) -> None:
+    service, hasher, _ = build_service()
+    admin = service.bootstrap_admin("admin", "original")
+    active = service.login("admin", "original")
+    source = tmp_path / "users.csv"
+    source.write_text(
+        "username,password,role,active,password_change_required\n"
+        "Admin,replacement,admin,true,true\n"
+        "Alice,temporary,user,false,false\n",
+        encoding="utf-8",
+    )
+
+    first = service.provision_users(source)
+    assert [user.normalized_username for user in first] == ["admin", "alice"]
+    assert first[0].id == admin.id
+    assert first[0].password_hash == hasher.hash("replacement")
+    assert first[0].auth_version == 1
+    assert first[0].password_change_required
+    assert not first[1].active
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(active.session_token, allow_password_change=True),
+    )
+
+    second = service.provision_users(source)
+    assert second[0].id == admin.id
+    assert second[0].auth_version == 2
+    assert second[1].id == first[1].id
+    assert second[1].auth_version == 1
+
+
+@pytest.mark.unit
 def test_authorization_and_missing_account_fail_stably() -> None:
     service, hasher, _ = build_service()
     admin = service.bootstrap_admin("admin", "correct")
     user = User(uuid4(), "user", "user", hasher.hash("password"), Role.USER)
     service.users.create(user)
+    with pytest.raises(KeyError, match="user"):
+        service.users.create(user)
 
     AuthorizationService.require_admin(admin)
     AuthorizationService.require_owner_or_admin(user, user.id)
@@ -262,6 +398,20 @@ def test_authorization_and_missing_account_fail_stably() -> None:
         "USER_NOT_FOUND", lambda: service.set_active(admin, uuid4(), active=False)
     )
     assert_error("PASSWORD_INVALID", lambda: service.reset_password(admin, user.id, ""))
+    assert_error(
+        "USER_NOT_FOUND", lambda: service.reset_password(admin, uuid4(), "replacement")
+    )
+    assert_error(
+        "USER_NOT_FOUND",
+        lambda: service.set_password_change_required(admin, uuid4(), required=True),
+    )
+    assert_error("PASSWORD_INVALID", lambda: service.change_password(user, "", ""))
+    missing = User(uuid4(), "missing", "missing", hasher.hash("old"), Role.USER)
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.change_password(missing, "replacement", "replacement"),
+    )
+    assert_error("AUTHENTICATION_REQUIRED", lambda: service.authenticate(None))
 
 
 @pytest.mark.unit

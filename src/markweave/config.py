@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     initial_admin_username: str = Field(min_length=1)
     initial_admin_password: SecretStr
+    user_provisioning_file: Path | None = None
     argon2_memory_cost: int = Field(default=19_456, ge=8)
     argon2_time_cost: int = Field(default=2, ge=1)
     argon2_parallelism: int = Field(default=1, ge=1)
