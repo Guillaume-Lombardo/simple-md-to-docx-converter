@@ -46,4 +46,3 @@ Split oversized job and template persistence adapters into cohesive repositories
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

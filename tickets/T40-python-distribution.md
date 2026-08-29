@@ -46,4 +46,3 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

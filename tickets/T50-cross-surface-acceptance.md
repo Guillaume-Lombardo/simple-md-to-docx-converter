@@ -53,4 +53,3 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

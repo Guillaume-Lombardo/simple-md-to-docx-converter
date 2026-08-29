@@ -47,4 +47,3 @@ Expose user administration, audit inspection, service health, readiness, and met
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

@@ -45,4 +45,3 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

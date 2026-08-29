@@ -45,4 +45,3 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

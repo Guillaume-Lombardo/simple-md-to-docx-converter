@@ -45,4 +45,3 @@ Commit a deterministic OpenAPI artifact and block accidental incompatible HTTP c
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

@@ -46,4 +46,3 @@ Provide the installed `markweave` executable and a stable command framework shar
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

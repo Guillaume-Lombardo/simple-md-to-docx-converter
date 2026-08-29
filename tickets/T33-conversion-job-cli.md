@@ -46,4 +46,3 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

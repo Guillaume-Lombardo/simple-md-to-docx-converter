@@ -46,4 +46,3 @@ Adopt the Markweave brand for application configuration while preserving determi
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

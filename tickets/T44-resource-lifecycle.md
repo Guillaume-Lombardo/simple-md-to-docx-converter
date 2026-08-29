@@ -45,4 +45,3 @@ Close every database and component resource deterministically and turn current u
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

@@ -48,4 +48,3 @@ Extend bounded mutation testing from observability to the security, authenticati
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

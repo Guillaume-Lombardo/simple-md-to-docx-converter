@@ -44,4 +44,3 @@ Remove residual `md_converter` build/runtime artifacts and prevent the retired n
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

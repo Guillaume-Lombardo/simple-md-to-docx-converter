@@ -45,4 +45,3 @@ Split the oversized FastAPI composition module into stable routers, schemas, dep
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

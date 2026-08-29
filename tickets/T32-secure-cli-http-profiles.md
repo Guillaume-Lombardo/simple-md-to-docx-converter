@@ -46,4 +46,3 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-

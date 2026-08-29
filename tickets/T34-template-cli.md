@@ -45,4 +45,3 @@ Expose visible-template discovery, preferences, ownership mutations, and immutab
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
-
