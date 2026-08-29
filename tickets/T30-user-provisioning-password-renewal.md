@@ -2,7 +2,7 @@
 ticket: T30
 linear_id: G1L-398
 linear_url: https://linear.app/g1lom/issue/G1L-398/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -86,6 +86,10 @@ password.
   contract; startup and self-service audits identify system/user actors accurately; reset reloads
   the account card; and both final rootless profiles mount, apply, replace, and restart with a real
   provisioning CSV. Regression tests cover every finding.
+- 2026-08-29: PR #100 passed its follow-up independent review and all 13 required CI checks, then
+  squash-merged as `c5a7639d` after the exact head was verified mergeable. The feature branch was
+  removed locally and remotely, and Linear issue G1L-398 was marked `Done` after the merge was
+  verified on `main`.
 
 ## Synchronization
 
