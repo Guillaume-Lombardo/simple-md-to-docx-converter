@@ -143,8 +143,11 @@ def test_postgresql_template_contract_constraints_and_immutability() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_template_versions_and_concurrent_replacement() -> None:  # noqa: PLR0915
+def test_distributed_template_versions_and_concurrent_replacement(  # noqa: PLR0915
+    request: pytest.FixtureRequest,
+) -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
     upgrade_database(engine)
     clear_template_test_data(engine)
     owner = User(uuid4(), "Owner", f"owner-{uuid4()}", "hash", Role.USER)
@@ -159,6 +162,7 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:  # 
         ),
         os.environ["MARKWEAVE_TEST_S3_BUCKET"],
     )
+    request.addfinalizer(objects.close)
     service = TemplateService(
         catalog=SqlTemplateCatalogRepository(engine),
         selections=SqlTemplateSelectionRepository(engine),
@@ -478,4 +482,3 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:  # 
         service.delete(owner, other_template.id, expected_revision=2)
     finally:
         clear_template_test_data(engine)
-        engine.dispose()

@@ -269,9 +269,14 @@ def test_workspace_failures_have_stable_content_free_error(
             "markweave.conversion.pandoc.Path.read_bytes", side_effect=sensitive
         )
     else:
+        workspace = tmp_path / "cleanup-workspace"
+        workspace.mkdir()
+        temporary = mocker.Mock(name=str(workspace))
+        temporary.name = str(workspace)
+        temporary.cleanup.side_effect = sensitive
         mocker.patch(
-            "markweave.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
-            side_effect=sensitive,
+            "markweave.conversion.pandoc.tempfile.TemporaryDirectory",
+            return_value=temporary,
         )
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
@@ -286,9 +291,14 @@ def test_cleanup_failure_replaces_conversion_failure_with_workspace_error(
     process = mocker.Mock()
     process.wait.return_value = 23
     mocker.patch("markweave.conversion.pandoc.subprocess.Popen", return_value=process)
+    workspace = tmp_path / "cleanup-workspace"
+    workspace.mkdir()
+    temporary = mocker.Mock(name=str(workspace))
+    temporary.name = str(workspace)
+    temporary.cleanup.side_effect = OSError("sensitive cleanup path")
     mocker.patch(
-        "markweave.conversion.pandoc.tempfile.TemporaryDirectory.cleanup",
-        side_effect=OSError("sensitive cleanup path"),
+        "markweave.conversion.pandoc.tempfile.TemporaryDirectory",
+        return_value=temporary,
     )
     with pytest.raises(ConversionError) as captured:
         converter(tmp_path).convert(ApprovedMarkdown("# Safe"), minimal_docx())
