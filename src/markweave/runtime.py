@@ -79,19 +79,33 @@ def run_external_worker(settings: Settings | None = None) -> None:
         components.close()
 
 
+def run_http_service(settings: Settings | None = None) -> StorageProfile:
+    """Run the selected profile's API using the existing application assembly."""
+    resolved = settings or Settings.load()
+    app = (
+        build_embedded_app(resolved)
+        if resolved.storage_profile is StorageProfile.STANDALONE
+        else create_app(resolved)
+    )
+    uvicorn.run(
+        app,
+        host=resolved.host,
+        port=resolved.port,
+        proxy_headers=False,
+        server_header=False,
+    )
+    return resolved.storage_profile
+
+
 def main(arguments: Sequence[str] | None = None) -> int:
     """Dispatch exactly one package runtime mode for the container entrypoint."""
 
     selected = tuple(sys.argv[1:] if arguments is None else arguments)
     if selected == ("embedded-worker",):
         settings = Settings.load()
-        uvicorn.run(
-            build_embedded_app(settings),
-            host=settings.host,
-            port=settings.port,
-            proxy_headers=False,
-            server_header=False,
-        )
+        if settings.storage_profile is not StorageProfile.STANDALONE:
+            raise ConfigurationError("Embedded worker requires standalone storage")
+        run_http_service(settings)
         return 0
     if selected == ("external-worker",):
         run_external_worker()
