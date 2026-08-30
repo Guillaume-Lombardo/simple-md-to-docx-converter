@@ -81,31 +81,35 @@ def _versioned_service(
     engine = create_database_engine(
         f"sqlite+pysqlite:///{tmp_path / 'metadata.sqlite3'}"
     )
-    upgrade_database(engine)
-    owner = User(uuid4(), "Owner", "engine-owner", "hash", Role.USER)
-    with Session(engine) as database, database.begin():
-        database.add(
-            UserRow(
-                id=str(owner.id),
-                username=owner.username,
-                normalized_username=owner.normalized_username,
-                password_hash=owner.password_hash,
-                role=owner.role.value,
-                active=True,
-                auth_version=0,
+    try:
+        upgrade_database(engine)
+        owner = User(uuid4(), "Owner", "engine-owner", "hash", Role.USER)
+        with Session(engine) as database, database.begin():
+            database.add(
+                UserRow(
+                    id=str(owner.id),
+                    username=owner.username,
+                    normalized_username=owner.normalized_username,
+                    password_hash=owner.password_hash,
+                    role=owner.role.value,
+                    active=True,
+                    auth_version=0,
+                )
             )
+        catalog = SqlTemplateCatalogRepository(engine)
+        service = TemplateService(
+            catalog=catalog,
+            selections=SqlTemplateSelectionRepository(engine),
+            objects=FilesystemObjectStore(tmp_path),
+            validate_content=lambda data, declaration: validate_template_for_activation(
+                data, declaration, context
+            ),
+            recovery_policy=TemplateRecoveryPolicy(60),
         )
-    catalog = SqlTemplateCatalogRepository(engine)
-    service = TemplateService(
-        catalog=catalog,
-        selections=SqlTemplateSelectionRepository(engine),
-        objects=FilesystemObjectStore(tmp_path),
-        validate_content=lambda data, declaration: validate_template_for_activation(
-            data, declaration, context
-        ),
-        recovery_policy=TemplateRecoveryPolicy(60),
-    )
-    return service, catalog, owner, engine
+        return service, catalog, owner, engine
+    except Exception:
+        engine.dispose()
+        raise
 
 
 def _default_reference() -> bytes:
@@ -456,24 +460,27 @@ def test_versioned_api_service_publishes_only_after_real_engine_activation(
         TemplateEngineConfig("pandoc", "soffice", 30.0, 2.0, tmp_path),
         os.environ,
     )
-    service, _catalog, owner, _engine = _versioned_service(tmp_path, context)
-    candidate = _candidate_reference()
+    service, _catalog, owner, engine = _versioned_service(tmp_path, context)
+    try:
+        candidate = _candidate_reference()
 
-    template, version = service.create_versioned(
-        owner,
-        TemplateCreate(uuid4(), "Real activation", "T15 boundary"),
-        candidate,
-        DEFAULT_REFERENCE_FONTS.families,
-    )
+        template, version = service.create_versioned(
+            owner,
+            TemplateCreate(uuid4(), "Real activation", "T15 boundary"),
+            candidate,
+            DEFAULT_REFERENCE_FONTS.families,
+        )
 
-    assert template.current_version_id == version.id
-    assert version.declared_fonts == DEFAULT_REFERENCE_FONTS.families
-    assert version.validation_trace == (
-        "static_ooxml",
-        "pandoc_blank_conversion",
-        "libreoffice_open_save",
-    )
-    assert service.download(owner, template.id)[2] == candidate
+        assert template.current_version_id == version.id
+        assert version.declared_fonts == DEFAULT_REFERENCE_FONTS.families
+        assert version.validation_trace == (
+            "static_ooxml",
+            "pandoc_blank_conversion",
+            "libreoffice_open_save",
+        )
+        assert service.download(owner, template.id)[2] == candidate
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize("failed_engine", ["pandoc", "libreoffice"])
@@ -496,23 +503,27 @@ def test_real_activation_engine_failure_never_publishes_template_or_object(
     )
     service, catalog, owner, engine = _versioned_service(tmp_path, context)
 
-    with pytest.raises(TemplateValidationError):
-        service.create_versioned(
-            owner,
-            TemplateCreate(uuid4(), "Rejected", "Engine failure"),
-            _candidate_reference(),
-            DEFAULT_REFERENCE_FONTS.families,
-        )
+    try:
+        with pytest.raises(TemplateValidationError):
+            service.create_versioned(
+                owner,
+                TemplateCreate(uuid4(), "Rejected", "Engine failure"),
+                _candidate_reference(),
+                DEFAULT_REFERENCE_FONTS.families,
+            )
 
-    assert (
-        catalog.search(
-            TemplateSearch(), viewer_id=owner.id, viewer_is_admin=False
-        ).total
-        == 0
-    )
-    with Session(engine) as database:
         assert (
-            database.scalar(select(func.count()).select_from(TemplateVersionRow)) == 0
+            catalog.search(
+                TemplateSearch(), viewer_id=owner.id, viewer_is_admin=False
+            ).total
+            == 0
         )
-    object_root = tmp_path / "objects" / "template-versions"
-    assert not object_root.exists() or not any(object_root.rglob("*"))
+        with Session(engine) as database:
+            assert (
+                database.scalar(select(func.count()).select_from(TemplateVersionRow))
+                == 0
+            )
+        object_root = tmp_path / "objects" / "template-versions"
+        assert not object_root.exists() or not any(object_root.rglob("*"))
+    finally:
+        engine.dispose()

@@ -337,8 +337,11 @@ def test_postgresql_job_progress_survives_template_archival() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
+def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries(
+    request: pytest.FixtureRequest,
+) -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
     upgrade_database(engine)
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"worker-{unique}", "hash:owner", Role.USER)
@@ -361,6 +364,7 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
         aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
     objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
+    request.addfinalizer(objects.close)
     template_key = ObjectKey(
         ObjectScope.TEMPLATE_VERSION, owner.id, TEMPLATE_VERSION_ID
     )
@@ -466,4 +470,3 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
                 delete(TemplateRow).where(TemplateRow.id == str(TEMPLATE_ID))
             )
             connection.execute(delete(UserRow).where(UserRow.id == str(owner.id)))
-        engine.dispose()

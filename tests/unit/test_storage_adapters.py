@@ -140,9 +140,12 @@ def test_s3_missing_object_mapping(mocker: MockerFixture, code: str) -> None:
     client.head_object.side_effect = client_error(code)
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.RESULT, uuid4(), uuid4())
-    with pytest.raises(ObjectNotFoundError, match="Object does not exist"):
-        store.get(key)
-    assert not store.exists(key)
+    try:
+        with pytest.raises(ObjectNotFoundError, match="Object does not exist"):
+            store.get(key)
+        assert not store.exists(key)
+    finally:
+        store.close()
 
 
 @pytest.mark.unit
@@ -160,10 +163,13 @@ def test_s3_adapter_sanitizes_provider_failures(
     getattr(client, method_name).side_effect = client_error("AccessDenied")
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
-    with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
-        getattr(store, operation)(key, b"content") if operation == "put" else getattr(
-            store, operation
-        )(key)
+    try:
+        with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
+            getattr(store, operation)(
+                key, b"content"
+            ) if operation == "put" else getattr(store, operation)(key)
+    finally:
+        store.close()
 
 
 @pytest.mark.unit
@@ -172,7 +178,11 @@ def test_s3_transport_failure_and_database_failure_make_readiness_false(
 ) -> None:
     client = mocker.Mock()
     client.head_bucket.side_effect = EndpointConnectionError(endpoint_url="test")
-    assert not S3ObjectStore(client, "bucket").is_ready()
+    store = S3ObjectStore(client, "bucket")
+    try:
+        assert not store.is_ready()
+    finally:
+        store.close()
 
     engine = mocker.MagicMock()
     engine.connect.side_effect = RuntimeError("unavailable")
@@ -187,10 +197,13 @@ def test_s3_response_body_closes_when_reading_fails(mocker: MockerFixture) -> No
     client.get_object.return_value = {"Body": body}
     store = S3ObjectStore(client, "bucket")
 
-    with pytest.raises(RuntimeError, match="stream failed"):
-        store.get(ObjectKey(ObjectScope.RESULT, uuid4(), uuid4()))
+    try:
+        with pytest.raises(RuntimeError, match="stream failed"):
+            store.get(ObjectKey(ObjectScope.RESULT, uuid4(), uuid4()))
 
-    body.close.assert_called_once_with()
+        body.close.assert_called_once_with()
+    finally:
+        store.close()
 
 
 @pytest.mark.unit

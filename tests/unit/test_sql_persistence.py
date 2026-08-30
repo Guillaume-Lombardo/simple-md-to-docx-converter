@@ -322,6 +322,7 @@ def test_sql_password_renewal_is_compare_and_set_and_self_audited() -> None:
 @pytest.mark.unit
 def test_database_engine_applies_profile_bounded_timeouts(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     created = mocker.patch("markweave.persistence.sql.create_engine")
     listen = mocker.patch("markweave.persistence.sql.event.listen")
@@ -329,6 +330,7 @@ def test_database_engine_applies_profile_bounded_timeouts(
     sqlite_engine = create_database_engine(
         "sqlite+pysqlite:///:memory:", timeout_seconds=0.5
     )
+    request.addfinalizer(sqlite_engine.dispose)
     assert sqlite_engine is created.return_value
     assert created.call_args.kwargs["connect_args"] == {
         "check_same_thread": False,
@@ -336,10 +338,11 @@ def test_database_engine_applies_profile_bounded_timeouts(
     }
     listen.assert_called_once()
 
-    create_database_engine(
+    postgres_engine = create_database_engine(
         "postgresql+psycopg://database/app?options=-csearch_path%3Disolated",
         timeout_seconds=0.5,
     )
+    request.addfinalizer(postgres_engine.dispose)
     assert created.call_args.args[0].query["options"] == "-csearch_path=isolated"
     assert created.call_args.kwargs["connect_args"] == {"connect_timeout": 1}
     assert created.call_args.kwargs["pool_timeout"] == 0.5
@@ -617,8 +620,12 @@ def test_alembic_environment_rejects_an_unmanaged_connection(
     with pytest.raises(RuntimeError, match="application-managed"):
         run_migration_environment(context)
 
-    with pytest.raises(ValueError, match="must not be blank"):
-        downgrade_database(create_database_engine("sqlite+pysqlite://"), " ")
+    engine = create_database_engine("sqlite+pysqlite://")
+    try:
+        with pytest.raises(ValueError, match="must not be blank"):
+            downgrade_database(engine, " ")
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.unit
