@@ -17,8 +17,10 @@ Last verified: 2026-08-30
 
 ## Hold
 
-- Keep Relectio PR #106 and branch `fix/t51-finite-template-ratio` unchanged. Do not publish,
-  merge, close, or delete them during T41.
+- Relectio PR #106 is `OPEN` and `DRAFT` on branch `fix/t51-finite-template-ratio` at exact head
+  `11aeb899e046db9c21f5e426d1275a240b8852f3`. Do not edit, publish, merge, close, or delete the PR
+  or branch. This hold survives T41 and ends only when the Relectio pilot completes or the user
+  explicitly releases it.
 
 ## Next Action
 
