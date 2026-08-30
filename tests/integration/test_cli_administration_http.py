@@ -76,6 +76,14 @@ def _save_login(url: str, name: str, username: str, password: str) -> None:
     ProfileStore().save(ConnectionProfile(name, url, response.session, csrf))
 
 
+def _session_status(url: str, name: str) -> tuple[int, str | None]:
+    profile = ProfileStore().load(name)
+    response = HttpTransport(url, verify_tls=False, timeout=2).session(profile)
+    error = response.payload.get("error") if response.payload is not None else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return response.status, code if isinstance(code, str) else None
+
+
 def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
     administration_service, monkeypatch, mocker, tmp_path: Path, capsys
 ) -> None:
@@ -148,6 +156,7 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
         == 0
     )
     capsys.readouterr()
+    assert _session_status(url, "alice") == (401, "AUTHENTICATION_REQUIRED")
     assert (
         main(
             (
@@ -163,6 +172,7 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
         == 0
     )
     capsys.readouterr()
+    _save_login(url, "alice", "alice", "alice-password")
     assert (
         main(
             (
@@ -186,6 +196,7 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
     assert prompt.call_count == 3
     output = capsys.readouterr()
     assert "reset-password" not in output.out + output.err
+    assert _session_status(url, "alice") == (401, "AUTHENTICATION_REQUIRED")
 
     assert (
         main(

@@ -77,6 +77,60 @@ def test_users_list_has_deterministic_human_and_json_output(remote, capsys) -> N
     client.request.assert_called_with("GET", "/api/v1/admin/users", profile=_profile())
 
 
+def test_remote_usernames_are_escaped_in_every_human_output_but_not_json(
+    remote, capsys
+) -> None:
+    _store, _constructor, client = remote
+    hostile = "alice\tadmin\n\x1b[31mred\x00"
+    payload = _user(username=hostile)
+    escaped = r"alice\tadmin\n\u001b[31mred\u0000"
+
+    client.request.return_value = _response(200, [payload])
+    assert main(("users", "list")) == 0
+    rendered = capsys.readouterr().out
+    assert rendered == f"{ALICE_ID}\t{escaped}\tuser\tactive\tcurrent\n"
+    assert "\x1b" not in rendered
+
+    client.request.return_value = _response(200, [payload])
+    assert main(("--json", "users", "list")) == 0
+    assert json.loads(capsys.readouterr().out)["users"][0]["username"] == hostile
+
+    mutations = (
+        (("users", "activate", ALICE_ID, "--force"), "active"),
+        (
+            ("users", "require-password-change", ALICE_ID, "--force"),
+            "Password renewal is required",
+        ),
+    )
+    for arguments, expected in mutations:
+        client.request.return_value = _response(200, payload)
+        assert main(("--non-interactive", *arguments)) == 0
+        rendered = capsys.readouterr().out
+        assert escaped in rendered and expected in rendered
+        assert "\x1b" not in rendered
+
+
+def test_created_remote_username_is_escaped_in_human_output(
+    remote, mocker, capsys
+) -> None:
+    _store, _constructor, client = remote
+    hostile = "created\r\n\x1b]8;;https://attacker.invalid\x07link"
+    client.request.return_value = _response(201, _user(username=hostile))
+    mocker.patch.object(
+        administration,
+        "_prompt",
+        side_effect=("yes", "submitted-password", "submitted-password"),
+    )
+
+    assert main(("users", "create", "--username", "safe-request")) == 0
+    rendered = capsys.readouterr().out
+    assert (
+        r"Created user created\r\n\u001b]8;;https://attacker.invalid\u0007link."
+        in rendered
+    )
+    assert "\x1b" not in rendered
+
+
 def test_create_prompts_securely_confirms_and_never_prints_password(
     remote, mocker, capsys
 ) -> None:

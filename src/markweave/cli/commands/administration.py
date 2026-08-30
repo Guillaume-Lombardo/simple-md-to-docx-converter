@@ -304,7 +304,7 @@ def _create_user(
     user = _user(
         _require_object(response, expected=_CREATED, fallback="user_create_failed")
     )
-    writer.success(f"Created user {user['username']}.", {"user": user})
+    writer.success(f"Created user {_human_text(user['username'])}.", {"user": user})
 
 
 def _activate_user(
@@ -335,7 +335,7 @@ def _set_active(
     )
     user = _user(_require_object(response, expected=_OK, fallback="user_update_failed"))
     state = "active" if active else "inactive"
-    writer.success(f"User {user['username']} is {state}.", {"user": user})
+    writer.success(f"User {_human_text(user['username'])} is {state}.", {"user": user})
 
 
 def _reset_password(
@@ -380,7 +380,8 @@ def _set_password_requirement(
     user = _user(_require_object(response, expected=_OK, fallback="user_update_failed"))
     state = "required" if required else "not required"
     writer.success(
-        f"Password renewal is {state} for {user['username']}.", {"user": user}
+        f"Password renewal is {state} for {_human_text(user['username'])}.",
+        {"user": user},
     )
 
 
@@ -549,7 +550,15 @@ def _audit_record(value: Any) -> dict[str, Any]:
 def _human_user(user: Mapping[str, Any]) -> str:
     active = "active" if user["active"] else "inactive"
     renewal = "renewal-required" if user["password_change_required"] else "current"
-    return f"{user['id']}\t{user['username']}\t{user['role']}\t{active}\t{renewal}"
+    username = _human_text(user["username"])
+    return f"{user['id']}\t{username}\t{user['role']}\t{active}\t{renewal}"
+
+
+def _human_text(value: Any) -> str:
+    """Escape one remote string so it cannot alter terminal structure or state."""
+    if not isinstance(value, str):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    return json.dumps(value, ensure_ascii=True)[1:-1]
 
 
 def _human_audit(record: Mapping[str, Any]) -> str:
