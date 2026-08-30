@@ -2,7 +2,7 @@
 ticket: T31
 linear_id: G1L-406
 linear_url: https://linear.app/g1lom/issue/G1L-406/t31-build-the-markweave-cli-foundation
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,7 @@ Provide the installed `markweave` executable and a stable command framework shar
 
 ## Progress
 
+* 2026-08-30: Completed in pull request #104 and squash-merged to `main` as `23abb36832a3d8358700b2d97eee66e75d7fd077`. The exact-main CI run `33299385896` passed every implemented domain and its final gate; CodeRabbit's packaging finding was resolved before merge and the independent reviewer approved the final head.
 * 2026-08-30: Addressed independent review findings: package import is now lazy so CLI help/version avoid the server and optional backends; error detail rendering omits untrusted details; and clean-wheel verification executes the generated console script for both version and help. Focused tests, package/release integration, `uv sync --all-groups`, Ruff formatting/linting, and `ty check` passed. The canonical Pytest commands still cannot pass in this environment because PostgreSQL/RustFS and the document engines are unavailable.
 * 2026-08-30: Implemented the console entry point, root registry, typed command/output/profile/error contracts, pre-registered unavailable family modules, CLI contract documentation, help snapshot, shell invocation coverage, and clean-wheel entry-point verification. `uv sync --all-groups`, Ruff formatting/linting, `ty check`, targeted CLI tests, and the clean-wheel release integration passed. Both canonical Pytest commands exercised this scope but remain red because this environment lacks Pandoc, Mermaid/Chromium, LibreOffice, PostgreSQL, and RustFS; no T31 failure was observed.
 * 2026-08-30: Started implementation on `feat/T31-cli-foundation` from verified `main` at `381e74e9`; this workstream exclusively owns the CLI framework, root registry, shared help contract, command-family placeholders, initial console entry point, and its tests and documentation.
@@ -45,7 +46,7 @@ Provide the installed `markweave` executable and a stable command framework shar
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
