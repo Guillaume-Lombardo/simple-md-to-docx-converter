@@ -1,6 +1,7 @@
 """Fast in-process tests for SQL repository control flow."""
 
 import importlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from markweave.persistence.sql import (
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
+    managed_database_engine,
     standalone_database_url,
 )
 
@@ -353,6 +355,42 @@ def test_database_engine_applies_profile_bounded_timeouts(
     assert postgres_connection.autocommit is False
     with pytest.raises(ValueError, match="timeout"):
         create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
+
+
+@pytest.mark.unit
+def test_managed_database_engine_disposes_after_success_and_failure(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.patch(
+        "markweave.persistence.sql.create_database_engine"
+    ).return_value
+
+    with managed_database_engine("sqlite+pysqlite://") as yielded:
+        assert yielded is engine
+    with (
+        pytest.raises(RuntimeError, match="operation failed"),
+        managed_database_engine("sqlite+pysqlite://"),
+    ):
+        raise RuntimeError("operation failed")
+
+    assert engine.dispose.call_count == 2
+
+
+@pytest.mark.unit
+def test_managed_sqlite_engines_close_across_repeated_parallel_use(
+    tmp_path: Path,
+) -> None:
+    def exercise(index: int) -> int:
+        directory = tmp_path / str(index)
+        directory.mkdir()
+        with managed_database_engine(standalone_database_url(directory)) as engine:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE TABLE lifecycle (value INTEGER)"))
+            with engine.connect() as connection:
+                return int(connection.scalar(text("SELECT 1")))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert list(executor.map(exercise, range(12))) == [1] * 12
 
 
 @pytest.mark.unit

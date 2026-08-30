@@ -2,7 +2,7 @@
 ticket: T44
 linear_id: G1L-420
 linear_url: https://linear.app/g1lom/issue/G1L-420/t44-eliminate-database-resource-lifecycle-warnings
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -33,11 +33,12 @@ Close every database and component resource deterministically and turn current u
 
 ## Progress
 
+* 2026-08-30: Started implementation on `fix/T44-resource-lifecycle` from verified `main` at `381e74e9`; this workstream exclusively owns deterministic component/database lifecycle fixes, targeted warning enforcement, and leak regressions before T41/T43.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

@@ -72,6 +72,7 @@ def test_distributed_fixture_drops_schema_when_bucket_creation_fails(
         next(generator)
 
     client.delete_bucket.assert_called_once()
+    client.close.assert_called_once_with()
     assert execute.call_count == 2
     engine.dispose.assert_called_once_with()
 
@@ -94,3 +95,4 @@ def test_distributed_fixture_drops_schema_when_s3_cleanup_fails(
 
     assert execute.call_count == 2
     engine.dispose.assert_called_once_with()
+    client.close.assert_called_once_with()

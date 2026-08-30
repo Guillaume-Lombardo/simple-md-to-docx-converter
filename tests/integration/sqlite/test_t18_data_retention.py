@@ -146,6 +146,7 @@ def test_retention_preserves_current_and_ten_newest_and_traces_audit_cleanup(
         database.begin(),
     ):
         database.execute(delete(RetentionCleanupRunRow))
+    engine.dispose()
 
 
 @pytest.mark.integration

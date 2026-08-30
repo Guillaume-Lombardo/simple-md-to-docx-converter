@@ -68,6 +68,7 @@ def isolated_postgresql_and_s3_resources(
                     "MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"
                 ],
             )
+            cleanup.callback(s3_client.close)
             bucket = f"test-{uuid4().hex}"
             cleanup.callback(_delete_bucket, s3_client, bucket)
             s3_client.create_bucket(Bucket=bucket)

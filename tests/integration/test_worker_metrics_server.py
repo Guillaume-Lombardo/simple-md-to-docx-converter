@@ -77,7 +77,8 @@ def _get(url: str) -> tuple[int, str]:
         with urlopen(url, timeout=2) as response:  # noqa: S310 - fixed loopback test
             return response.status, response.read().decode()
     except HTTPError as error:
-        return error.code, error.read().decode()
+        with error:
+            return error.code, error.read().decode()
 
 
 def test_worker_metrics_server_is_independently_and_concurrently_scrapeable() -> None:

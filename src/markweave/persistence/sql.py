@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import builtins
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -77,6 +79,26 @@ def create_database_engine(
         return engine
     except SQLAlchemyError:
         raise PersistenceError from None
+
+
+@contextmanager
+def managed_database_engine(
+    database_url: str | URL,
+    *,
+    timeout_seconds: float | None = None,
+    pool_pre_ping: bool = True,
+) -> Iterator[Engine]:
+    """Yield one engine and dispose its complete pool on every exit path."""
+
+    engine = create_database_engine(
+        database_url,
+        timeout_seconds=timeout_seconds,
+        pool_pre_ping=pool_pre_ping,
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 def serialize_sqlite_write(database: DatabaseSession, engine: Engine) -> None:
