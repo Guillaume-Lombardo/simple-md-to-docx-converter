@@ -236,6 +236,9 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     );
 
     step = "administrator creates Alice and Bob";
+    // The startup renewal flow intentionally consumes a substantial part of the
+    // 60-second absolute session lifetime exercised by this scenario.
+    await login(adminPage, settings.baseUrl, settings.adminUsername, settings.adminPassword);
     await adminPage.goto("/templates", { waitUntil: "networkidle" });
     await waitForText(adminPage, "body", "Local accounts");
     await createAccount(adminPage, identities.alice.username, identities.alice.password);
@@ -295,6 +298,9 @@ test("final rootless image supports provisioning and the browser workflow", asyn
       (await sessionRequest(bobPage, `/api/v1/conversions/${privateJob.id}/result`)).status,
       404,
     );
+    // Renew the administrator's deliberately short-lived E2E session after the
+    // document-engine workload before checking privileged cross-owner access.
+    await login(adminPage, settings.baseUrl, settings.adminUsername, settings.adminPassword);
     assert.equal(
       (await sessionRequest(adminPage, `/api/v1/conversions/${privateJob.id}`)).status,
       200,
