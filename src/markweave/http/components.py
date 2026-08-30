@@ -100,7 +100,11 @@ class AppComponents:
     def close(self) -> None:
         """Cancel observations and close every application-owned resource."""
 
-        if not self.owned_engines and not self.owned_resources:
+        if (
+            not self.owned_engines
+            and not self.owned_resources
+            and self.queue_observer is None
+        ):
             return
         with self._close_lock:
             if self._closed.is_set():
@@ -290,15 +294,15 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
                 else ""
             )
         object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
-        readiness_client_options = {
-            **client_options,
-            "config": config_class(
-                connect_timeout=settings.readiness_timeout_seconds,
-                read_timeout=settings.readiness_timeout_seconds,
-                retries={"max_attempts": 0},
-            ),
-        }
         try:
+            readiness_client_options = {
+                **client_options,
+                "config": config_class(
+                    connect_timeout=settings.readiness_timeout_seconds,
+                    read_timeout=settings.readiness_timeout_seconds,
+                    retries={"max_attempts": 0},
+                ),
+            }
             object_readiness = S3ObjectStore(
                 boto3.client("s3", **readiness_client_options), bucket
             )

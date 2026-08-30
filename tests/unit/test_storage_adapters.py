@@ -444,6 +444,28 @@ def test_distributed_component_partial_startup_closes_created_s3_clients(
 
 
 @pytest.mark.unit
+def test_distributed_readiness_config_failure_closes_created_s3_client(
+    mocker: MockerFixture,
+) -> None:
+    normal_client = mocker.Mock()
+    boto3 = mocker.Mock()
+    boto3.client.return_value = normal_client
+    config_class = mocker.Mock(side_effect=RuntimeError("readiness config failed"))
+    mocker.patch(
+        "markweave.http.components._load_distributed_dependencies",
+        return_value=(boto3, config_class),
+    )
+    create_engine = mocker.patch("markweave.http.components.create_database_engine")
+
+    with pytest.raises(RuntimeError, match="readiness config failed"):
+        build_components(_distributed_component_settings())
+
+    boto3.client.assert_called_once_with("s3")
+    normal_client.close.assert_called_once_with()
+    create_engine.assert_not_called()
+
+
+@pytest.mark.unit
 def test_distributed_component_database_failure_closes_both_s3_clients(
     mocker: MockerFixture,
 ) -> None:

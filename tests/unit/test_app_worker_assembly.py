@@ -108,6 +108,19 @@ def test_owned_database_engines_close_once_after_observation_cancellation(
         engine.dispose.assert_called_once_with()
 
 
+def test_queue_observer_cancels_without_owned_storage_resources(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    observer = mocker.Mock(spec=QueueObserver)
+    components = replace(components, queue_observer=observer)
+
+    components.close()
+    components.close()
+
+    observer.cancel_observations.assert_called_once_with(timeout_seconds=2.0)
+
+
 def test_owned_database_engine_cleanup_continues_after_one_dispose_failure(
     mocker: MockerFixture,
 ) -> None:
