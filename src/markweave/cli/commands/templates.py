@@ -703,7 +703,10 @@ def _read_upload(value: Any) -> bytes:
         metadata = path.lstat()
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
             raise CliError("invalid_upload", "The upload must be a regular file.")
-        with path.open("rb") as stream:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise CliError("invalid_upload", "The upload must be a regular file.")
             content = stream.read(_DOCUMENT_LIMIT + 1)
     except CliError:
         raise
