@@ -257,10 +257,7 @@ if [[ "$profile" == standalone ]]; then
   application_volumes+=(--volume "$data_directory:/data:rw,Z")
 fi
 
-application_mode=api
-if [[ "$profile" == standalone ]]; then
-  application_mode=embedded-worker
-fi
+application_mode=serve
 application_settings=(
   "${E2E_SETTINGS[@]}"
   --env MARKWEAVE_USER_PROVISIONING_FILE=/run/secrets/users.csv
@@ -276,13 +273,39 @@ if [[ "$profile" == distributed ]]; then
     created=("$worker" "${created[@]}")
     podman run --detach --name "$worker" --network "$network_name" \
       --publish 127.0.0.1::9464 "${hardened_runtime[@]}" "${E2E_SETTINGS[@]}" \
-      "$image" external-worker >/dev/null
+      "$image" worker >/dev/null
   done
 fi
 
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+podman exec "$application_name" python -c '
+from pathlib import Path
+
+arguments = Path("/proc/1/cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+assert any(value.endswith(b"/markweave") for value in arguments), arguments
+assert arguments[-1] == b"serve", arguments
+'
+if [[ "$profile" == distributed ]]; then
+  for worker in "$worker_one_name" "$worker_two_name"; do
+    podman exec "$worker" python -c '
+from pathlib import Path
+
+arguments = Path("/proc/1/cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+assert any(value.endswith(b"/markweave") for value in arguments), arguments
+assert arguments[-1] == b"worker", arguments
+'
+  done
+fi
+podman run --rm --network "container:$application_name" \
+  "${hardened_runtime[@]}" \
+  "$image" --json health live --url http://127.0.0.1:8080 \
+  | grep -Fq '"status":"ok"'
+podman run --rm --network "container:$application_name" \
+  "${hardened_runtime[@]}" \
+  "$image" --json health ready --url http://127.0.0.1:8080 \
+  | grep -Fq '"status":"ready"'
 
 if [[ "$profile" == standalone ]]; then
   podman exec "$application_name" /opt/md-converter/venv/bin/python -c '

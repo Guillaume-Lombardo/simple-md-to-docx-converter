@@ -50,6 +50,8 @@ readonly run_id="$$"
 readonly network="markweave-t37-${run_id}"
 readonly postgres="markweave-t37-postgres-${run_id}"
 readonly rustfs="markweave-t37-rustfs-${run_id}"
+readonly runtime_uid="${T38_RECOVERY_RUNTIME_UID:-54000}"
+readonly seccomp_profile="$PWD/spikes/toolchain/chrome-seccomp.json"
 workspace="$(mktemp -d -t markweave-t37-e2e.XXXXXXXX)"
 readonly workspace
 readonly setup_script="$PWD/tests/e2e/recovery_cli_setup.py"
@@ -107,7 +109,13 @@ run_cli() {
     shift
   done
   shift
-  podman run --rm --network "$network" --entrypoint markweave \
+  podman run --rm --network "$network" \
+    --user "$runtime_uid:0" --read-only --cap-drop=all \
+    --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
+    --memory=768m --cpus=2 --pids-limit=256 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+    --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+    --shm-size=128m \
     --volume "$workspace:/e2e:U,Z" "${container_arguments[@]}" "$image" "$@"
 }
 

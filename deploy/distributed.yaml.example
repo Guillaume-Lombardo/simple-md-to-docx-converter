@@ -18,7 +18,7 @@ spec:
       containers:
         - name: application
           image: ${MARKWEAVE_IMAGE}
-          args: [api]
+          args: [serve]
           envFrom:
             - configMapRef: {name: md-converter}
             - secretRef: {name: md-converter}
@@ -69,7 +69,7 @@ spec:
       containers:
         - name: worker
           image: ${MARKWEAVE_IMAGE}
-          args: [external-worker]
+          args: [worker]
           envFrom:
             - configMapRef: {name: md-converter}
             - secretRef: {name: md-converter}

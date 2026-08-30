@@ -52,13 +52,13 @@ run_hardened --env "EXPECTED_APPLICATION_VERSION=$application_version" \
 '
 
 if podman run --rm --user 0 --read-only --cap-drop=all \
-  --security-opt=no-new-privileges "$image" api >/dev/null 2>&1; then
+  --security-opt=no-new-privileges "$image" serve >/dev/null 2>&1; then
   echo "Root execution unexpectedly succeeded." >&2
   exit 1
 fi
 
 if podman run --rm --user "$runtime_uid:0" --read-only --cap-drop=all \
-  "$image" api >/dev/null 2>&1; then
+  "$image" serve >/dev/null 2>&1; then
   echo "Execution without no-new-privileges unexpectedly succeeded." >&2
   exit 1
 fi

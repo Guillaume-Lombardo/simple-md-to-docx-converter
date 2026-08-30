@@ -137,4 +137,4 @@ WORKDIR /work
 USER 1001:0
 EXPOSE 8080
 ENTRYPOINT ["md-converter-entrypoint"]
-CMD ["api"]
+CMD ["serve"]
