@@ -2,7 +2,7 @@
 ticket: T45
 linear_id: G1L-422
 linear_url: https://linear.app/g1lom/issue/G1L-422/t45-version-and-validate-the-openapi-contract
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,10 +34,12 @@ Commit a deterministic OpenAPI artifact and block accidental incompatible HTTP c
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-30: Implementation started from `main` at `c1cae3b6ca1d2f8eb6e680eec26f444ea92332c5` on `feat/T45-openapi-contract`.
+* 2026-08-30: Added the deterministic `openapi/v1.json` artifact, infrastructure-free generation, runtime and T41 normalized-equivalence tests, compatibility classification and rejection, CLI route coverage, CI enforcement, ETag documentation, and the versioning/review guide. Formatting, lint, types, browser tests, CI policy validation, 1,729 unit tests, and 100% changed application coverage passed. The canonical default and full suites otherwise reached 1,949 and 1,956 passing tests respectively, but could not complete PostgreSQL/RustFS suites without their test environment; the full suite also lacked the pinned Pandoc, Mermaid/Chromium, LibreOffice, and font runtime.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
