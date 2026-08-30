@@ -42,7 +42,7 @@ def isolated_postgresql_and_s3_resources(
 ) -> Iterator[None]:
     """Give every distributed test unique resources and deterministic teardown."""
 
-    base_url = make_url(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    base_url = make_url(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     schema = f"test_{uuid4().hex}"
     with ExitStack() as cleanup:
         admin_engine = create_database_engine(base_url)
@@ -54,23 +54,21 @@ def isolated_postgresql_and_s3_resources(
             {"options": f"-csearch_path={schema}"}
         )
         monkeypatch.setenv(
-            "MD_CONVERTER_TEST_POSTGRES_URL",
+            "MARKWEAVE_TEST_POSTGRES_URL",
             isolated_url.render_as_string(hide_password=False),
         )
 
         if request.node.get_closest_marker("requires_s3") is not None:
             s3_client = boto3.client(
                 "s3",
-                endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-                region_name=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-                aws_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-                aws_secret_access_key=os.environ[
-                    "MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"
-                ],
+                endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+                region_name=os.environ["MARKWEAVE_TEST_S3_REGION"],
+                aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+                aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
             )
             bucket = f"test-{uuid4().hex}"
             cleanup.callback(_delete_bucket, s3_client, bucket)
             s3_client.create_bucket(Bucket=bucket)
-            monkeypatch.setenv("MD_CONVERTER_TEST_S3_BUCKET", bucket)
+            monkeypatch.setenv("MARKWEAVE_TEST_S3_BUCKET", bucket)
 
         yield

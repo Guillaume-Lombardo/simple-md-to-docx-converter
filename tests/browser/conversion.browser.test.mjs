@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const puppeteerModule = process.env.MD_CONVERTER_TEST_PUPPETEER || path.join(
+const puppeteerModule = process.env.MARKWEAVE_TEST_PUPPETEER || path.join(
   repository,
   "spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js",
 );
@@ -62,7 +62,7 @@ test("authenticated conversion workflow works in pinned Chromium", { timeout: 45
 
   const port = await availablePort();
   const baseUrl = `http://localhost:${port}`;
-  const python = process.env.MD_CONVERTER_TEST_PYTHON || path.join(repository, ".venv/bin/python");
+  const python = process.env.MARKWEAVE_TEST_PYTHON || path.join(repository, ".venv/bin/python");
   const server = spawn(python, [
     "-m", "tests.browser.server", "--port", String(port),
     "--data", path.join(temporary, "data"),
@@ -84,7 +84,7 @@ test("authenticated conversion workflow works in pinned Chromium", { timeout: 45
 
   const puppeteer = (await import(pathToFileURL(puppeteerModule).href)).default;
   const browser = await puppeteer.launch({
-    executablePath: process.env.MD_CONVERTER_TEST_CHROMIUM || "/usr/bin/google-chrome-stable",
+    executablePath: process.env.MARKWEAVE_TEST_CHROMIUM || "/usr/bin/google-chrome-stable",
     headless: "shell",
   });
   context.after(() => browser.close());

@@ -2,7 +2,7 @@
 ticket: T39
 linear_id: G1L-417
 linear_url: https://linear.app/g1lom/issue/G1L-417/t39-migrate-configuration-to-markweave-names
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,12 +36,20 @@ Adopt the Markweave brand for application configuration while preserving determi
 
 ## Progress
 
+* 2026-08-30: Implemented the canonical `MARKWEAVE_*` environment surface with deprecated 0.x
+  `MD_CONVERTER_*` aliases. Startup independently validates both aliases, compares typed canonical
+  values (or exact raw secrets), and fails closed without values on conflicts. Updated Compose,
+  quickstarts, deployment examples, container and CI surfaces, documentation, and compatibility
+  tests. Preserved `md_converter_session`, `__Host-md_converter_csrf`, and
+  `ghcr.io/guillaume-lombardo/md-converter`; validated targeted configuration, documentation,
+  quickstart, and Compose-rendering tests.
+* 2026-08-30: Started implementation on `feat/T39-configuration-names` from verified `main` at `381e74e9`; this workstream exclusively owns settings aliases, public environment names, Compose/quickstart propagation, compatibility tests, and configuration migration documentation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed typed alias comparison and preserved 0.x cookie and GHCR identities explicitly.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

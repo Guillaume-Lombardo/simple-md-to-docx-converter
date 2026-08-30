@@ -44,12 +44,12 @@ backend and must not sum the database-derived gauges across API replicas.
 
 Each external-worker process must run the lifecycle returned by
 `AppComponents.build_external_worker_runtime`, not the bare loop. It binds a process-local HTTP
-listener at `MD_CONVERTER_WORKER_METRICS_BIND_HOST` and
-`MD_CONVERTER_WORKER_METRICS_PORT`, serves only `GET /metrics`, and starts and stops with the worker
-loop. `MD_CONVERTER_WORKER_METRICS_MAX_CONNECTIONS` fixes request concurrency,
-`MD_CONVERTER_WORKER_METRICS_OBSERVATION_LIMIT` separately caps simultaneous queue queries,
-`MD_CONVERTER_WORKER_METRICS_ACCEPT_QUEUE_SIZE` bounds the kernel accept queue, and
-`MD_CONVERTER_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS` applies both one absolute
+listener at `MARKWEAVE_WORKER_METRICS_BIND_HOST` and
+`MARKWEAVE_WORKER_METRICS_PORT`, serves only `GET /metrics`, and starts and stops with the worker
+loop. `MARKWEAVE_WORKER_METRICS_MAX_CONNECTIONS` fixes request concurrency,
+`MARKWEAVE_WORKER_METRICS_OBSERVATION_LIMIT` separately caps simultaneous queue queries,
+`MARKWEAVE_WORKER_METRICS_ACCEPT_QUEUE_SIZE` bounds the kernel accept queue, and
+`MARKWEAVE_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS` applies both one absolute
 request-line/header deadline and the queue-observation database budget. PostgreSQL applies a
 statement timeout and bounded pool checkout; SQLite applies an interruptible progress deadline.
 Listener shutdown first rejects new observations, then interrupts active driver calls before
@@ -102,7 +102,7 @@ and S3 clients: migrations and normal SQL/object operations retain their normal 
 retry behavior. Only the readiness database client disables pool pre-ping and applies a bounded
 connect/statement budget; only the readiness S3 client disables retries and applies bounded
 connect/read budgets. These probe-only clients use the required positive finite
-`MD_CONVERTER_READINESS_TIMEOUT_SECONDS`; S3 readiness disables retries so one probe remains one
+`MARKWEAVE_READINESS_TIMEOUT_SECONDS`; S3 readiness disables retries so one probe remains one
 bounded provider operation. Any component failure returns the stable content-free `NOT_READY`
 response. Liveness remains independent at `GET /health/live`.
 

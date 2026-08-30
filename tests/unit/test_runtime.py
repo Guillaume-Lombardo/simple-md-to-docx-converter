@@ -111,9 +111,11 @@ def test_external_runtime_runs_signal_aware_loop_and_closes_components(
     components.close.assert_called_once_with()
 
 
-def test_main_dispatches_only_the_two_worker_modes(mocker) -> None:
+def test_main_dispatches_only_the_two_worker_modes(mocker, tmp_path: Path) -> None:
     app = mocker.Mock()
+    settings = _settings(tmp_path, profile="standalone")
     mocker.patch("markweave.runtime.build_embedded_app", return_value=app)
+    mocker.patch("markweave.runtime.Settings.load", return_value=settings)
     serve = mocker.patch("markweave.runtime.uvicorn.run")
     external = mocker.patch("markweave.runtime.run_external_worker")
 

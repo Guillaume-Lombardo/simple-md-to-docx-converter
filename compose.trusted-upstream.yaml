@@ -4,7 +4,7 @@ services:
   markweave:
     depends_on: !reset {}
     environment:
-      MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream
+      MARKWEAVE_MALWARE_SCANNING_MODE: trusted-upstream
   clamav:
     profiles:
       - local-antivirus

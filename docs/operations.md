@@ -7,7 +7,7 @@ by its profile and fails when standalone's embedded worker is unhealthy. Route t
 ready replicas. Do not use liveness to decide whether storage is safe.
 
 The API exposes Prometheus text at `/metrics`. Each distributed external worker exposes its own
-process-local metrics listener, configured by `MD_CONVERTER_WORKER_METRICS_*`; it is not an
+process-local metrics listener, configured by `MARKWEAVE_WORKER_METRICS_*`; it is not an
 in-process aggregate. Scrape API and worker targets separately and aggregate in the monitoring
 system. The default worker bind address is `127.0.0.1`, so a pod scraper needs an intentional bind
 and network-policy decision. Keep the observation limit no greater than the connection limit.
