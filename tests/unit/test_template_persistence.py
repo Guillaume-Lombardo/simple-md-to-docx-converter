@@ -99,6 +99,40 @@ def test_inprocess_template_repository_control_flow() -> None:
     selections.set_preferred(owner.id, other.id)
     assert selections.preferred_id(owner.id) == other.id
     assert selections.resolve(owner.id) == other
+    preferred_audit = TemplateAuditRecord(
+        uuid4(),
+        owner.id,
+        owner.id,
+        active.id,
+        "set_preferred",
+        None,
+        False,
+        datetime.now(UTC),
+    )
+    selections.set_preferred_audited(owner.id, active.id, preferred_audit)
+    clear_audit = TemplateAuditRecord(
+        uuid4(),
+        owner.id,
+        owner.id,
+        active.id,
+        "clear_preferred",
+        None,
+        False,
+        datetime.now(UTC),
+    )
+    selections.clear_preferred_audited(owner.id, clear_audit)
+    selections.clear_preferred_audited(owner.id, clear_audit)
+    fallback_audit = TemplateAuditRecord(
+        uuid4(),
+        owner.id,
+        viewer.id,
+        other.id,
+        "set_system_fallback",
+        None,
+        True,
+        datetime.now(UTC),
+    )
+    selections.set_system_fallback_audited(other.id, fallback_audit)
     selections.clear_preferred(owner.id)
     assert selections.preferred_id(owner.id) is None
     with pytest.raises(TemplateUnavailableError):
