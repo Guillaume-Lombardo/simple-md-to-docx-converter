@@ -2,7 +2,7 @@
 ticket: T40
 linear_id: G1L-418
 linear_url: https://linear.app/g1lom/issue/G1L-418/t40-clarify-and-optimize-the-python-distribution
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -44,10 +44,11 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 * 2026-08-30: Integrated the merged T36/T37 runtime and recovery commands from `main`. Their initial recovery registry eagerly imported server configuration and broke the dependency-free base CLI, so recovery-only profile and manifest dependencies now load after an operational command is selected. The lightweight CLI import regression now forbids configuration, recovery, Pydantic, and backend modules; the real five-profile wheel/sdist installation passed, the expanded focused distribution/container suite passed 93 tests with `--no-cov`, and all 1,663 unit tests passed with 93.67% application coverage.
 * 2026-08-30: Addressed independent review feedback for base-only recovery invocations. Selected `backup` and `restore` commands now report the stable `optional_dependency_missing` contract with explicit `markweave[server]` installation guidance before loading recovery-domain modules, while unexpected internal `ModuleNotFoundError` exceptions remain generic internal failures and do not trigger recovery-manifest classification. The real base-wheel verifier covers both commands, all five installation profiles pass, and all 1,669 unit tests pass with 93.70% application coverage.
 * 2026-08-30: Completed the recovery profile dependency boundary after review found that the shared adapter module still imported the distributed S3 SDK for standalone operations. Boto3, Botocore configuration, and provider exception types now load only when an S3 recovery adapter is constructed; missing distributed roots receive explicit `markweave[distributed]` guidance, while unexpected transitive import failures remain unmasked. The unchanged extras matrix was verified through all five clean wheel installations: standalone performed a real SQLite/filesystem backup and restore without Boto3, Botocore, or Psycopg, and distributed/all constructed the S3 adapter. The release suite passed 147 tests, and all 1,680 unit tests passed with 93.69% application coverage.
+* 2026-08-30: Verified complete on `main` at `6902f75`. PR #115 passed CI and CodeRabbit at exact head `2eb0b72` and squash-merged as `becfee1`; the later current-main CI run `33317110884` passed after T37's unrelated recovery-smoke startup correction.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * T44 released `app.py` and storage lifecycle ownership on `main`; T40 preserves its resource cleanup while limiting its edits to optional backend loading.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
