@@ -13,8 +13,8 @@ from markweave.version import VERSION
 pytestmark = pytest.mark.integration
 
 
-def test_installed_console_script_reports_version_and_safe_unavailability() -> None:
-    """The console wrapper uses the stable root registry, not package internals."""
+def test_installed_console_script_reports_version_and_login_argument_errors() -> None:
+    """The console wrapper exposes the implemented authentication parser."""
     executable = Path(sys.executable).with_name("markweave")
     version = subprocess.run(
         (str(executable), "--version"), capture_output=True, check=False, text=True
@@ -23,14 +23,12 @@ def test_installed_console_script_reports_version_and_safe_unavailability() -> N
     assert version.stdout == f"markweave {VERSION}\n"
     assert version.stderr == ""
 
-    unavailable = subprocess.run(
+    invalid_login = subprocess.run(
         (str(executable), "--json", "login"),
         capture_output=True,
         check=False,
         text=True,
     )
-    assert unavailable.returncode == 3
-    assert unavailable.stdout == ""
-    assert unavailable.stderr == (
-        '{"error":{"code":"command_unavailable","message":"The \'login\' command is not available in this release."}}\n'
-    )
+    assert invalid_login.returncode == 2
+    assert invalid_login.stdout == ""
+    assert "--url" in invalid_login.stderr
