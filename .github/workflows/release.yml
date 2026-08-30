@@ -48,6 +48,13 @@ jobs:
           uv run python -m scripts.release.detect_version
           --before "$BEFORE_SHA" --head "$HEAD_SHA"
           --github-output "$GITHUB_OUTPUT"
+      - name: Require a changelog entry for a material version transition
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: >-
+          uv run python -m scripts.release.check_changelog
+          --before "$BEFORE_SHA" --head "$HEAD_SHA"
       - name: Reject an existing tag, release, or PyPI version
         if: ${{ steps.version.outputs.changed == 'true' }}
         env:

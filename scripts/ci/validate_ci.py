@@ -148,7 +148,7 @@ CONTAINER_RELEASE_CANONICAL_DIGEST = (
     "5c67726f99574a9a28b8ec773294651e3cac5ed7677eee8f05e08dd031f5a9b4"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "6b2450bfe139fced0ae234d3dba83a0aeb71c290d7a74e28ed30a4a93622542c"
+    "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
 )
 
 
@@ -1713,7 +1713,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     return errors
 
 
-def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: PLR0912
+def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
+    text: str,
+) -> list[str]:
     """Validate the exact trusted-main automatic publication orchestrator."""
     workflow, errors = _load_workflow(text)
     if workflow is None:
@@ -1791,6 +1793,7 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
         errors.append("automatic release workflow must not access stored secrets")
     required_contracts = (
         "scripts.release.detect_version",
+        "scripts.release.check_changelog",
         "github.event.before",
         "needs.detect.outputs.changed == 'true'",
         "/git/ref/tags/$RELEASE_TAG",
@@ -1807,6 +1810,24 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
     for required in required_contracts:
         if required not in text:
             errors.append(f"automatic release is missing contract: {required}")
+    detect_steps = _job_steps(workflow, "detect")
+    step_names = [step.get("name") for step in detect_steps]
+    required_order = (
+        "Detect an exact final-version transition",
+        "Require a changelog entry for a material version transition",
+        "Reject an existing tag, release, or PyPI version",
+    )
+    try:
+        indices = [step_names.index(name) for name in required_order]
+    except ValueError:
+        errors.append(
+            "automatic release must gate remote checks on changelog validation"
+        )
+    else:
+        if indices != sorted(indices):
+            errors.append(
+                "automatic release must gate remote checks on changelog validation"
+            )
     create_steps = [
         step
         for step in _job_steps(workflow, "create-release")
