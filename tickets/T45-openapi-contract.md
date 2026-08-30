@@ -2,7 +2,7 @@
 ticket: T45
 linear_id: G1L-422
 linear_url: https://linear.app/g1lom/issue/G1L-422/t45-version-and-validate-the-openapi-contract
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -43,10 +43,11 @@ Commit a deterministic OpenAPI artifact and block accidental incompatible HTTP c
 * 2026-08-30: Reconciled final current `main` at `d82d4d585f5be69684726c674d47201613142827` through a normal merge. The only incoming change records T49's verified completion in its ticket mirror, with no T45 overlap. Ruff, `ty`, 287 focused contract/T41/CI tests, generator freshness and equality, CI policy validation, and all 8 package-namespace tests passed.
 * 2026-08-30: Reconciled current `main` at `8f3b792ec41b10467c771c543a292929b0fa985a` through a normal merge after T34 and T42 completion. The incoming files had no overlap with T45: T34's template CLI consumes existing artifact-covered HTTP routes without changing them, while T42 only decomposes internal worker orchestration. Ruff, `ty`, 287 focused contract/T41/CI tests, generator freshness and equality, CI policy validation, 113 template-CLI/worker tests, all 8 package-namespace tests, and 1,783 unit tests passed with 90.42% application branch coverage and 100% changed application coverage.
 * 2026-08-30: Resolved the remaining review finding by locating Git through `PATH` for baseline comparisons instead of assuming `/usr/bin/git`, while retaining the shell-free `git show` argument contract and adding a deterministic missing-Git error. Ruff, `ty`, 289 focused contract/T41/CI tests, generator freshness, a real current-main baseline comparison, artifact equality, and CI policy validation passed.
+* 2026-08-30: Verified delivery on `main`. PR #125 implementation head `08da5a8175f90fec170d57afa46c98b2577ade6b` passed independent review, CodeRabbit, zero unresolved threads, and exact-head CI [33331560500](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33331560500), then squash-merged as `88d9af833d45a19d6a5d81e5f1f51db2a990689f`. Exact-main CI [33332422420](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33332422420) passed on failed-only attempt 2 at that unchanged squash SHA; the first Compose attempt had completed every Docker scenario before the runner exited during the Docker-to-Podman transition. The source branch and worktree were removed locally and remotely.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
