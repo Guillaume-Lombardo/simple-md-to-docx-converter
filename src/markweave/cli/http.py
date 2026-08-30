@@ -31,8 +31,8 @@ class ApiResponse:
     """Decoded bounded response data needed by the authentication family."""
 
     status: int
-    payload: dict[str, Any] | None
-    session: str | None = None
+    payload: dict[str, Any] | None = field(repr=False)
+    session: str | None = field(default=None, repr=False)
     cookies: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
 

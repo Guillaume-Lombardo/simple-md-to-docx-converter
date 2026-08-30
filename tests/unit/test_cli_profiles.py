@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 
@@ -96,6 +97,43 @@ def test_hostile_profile_data_and_relative_xdg_home_fail_closed(
 
 
 @pytest.mark.parametrize(
+    ("session_state", "csrf_state"),
+    (
+        ("session=opaque\r\nX-Injected: true", "csrf-value"),
+        ("session=opaque", "csrf-value\nnext"),
+        ("not-a-cookie", "csrf-value"),
+        ("session=opaque; extra=value", "csrf-value"),
+        ("session=opaque", "csrf value"),
+    ),
+)
+def test_malformed_profile_state_fails_with_the_stable_profile_code(
+    tmp_path, session_state: str, csrf_state: str
+) -> None:
+    """Persisted values cannot become HTTP-header syntax or split headers."""
+    directory = tmp_path / "markweave" / "profiles"
+    directory.mkdir(parents=True, mode=0o700)
+    path = directory / "default.json"
+    path.write_text(
+        json.dumps(
+            {
+                "csrf_state": csrf_state,
+                "name": "default",
+                "service_url": "https://converter.example",
+                "session_state": session_state,
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+    with pytest.raises(CliError) as raised:
+        ProfileStore(tmp_path).load("default")
+
+    assert raised.value.code == "profile_invalid"
+
+
+@pytest.mark.parametrize(
     ("url", "code"),
     (
         ("http://converter.example", "tls_required"),
@@ -137,3 +175,28 @@ def test_profile_replacement_leaves_no_temporary_file(tmp_path) -> None:
         os.getuid()
         == (tmp_path / "markweave" / "profiles" / "default.json").stat().st_uid
     )
+
+
+def test_failed_replacement_preserves_a_different_service_profile(
+    tmp_path, mocker
+) -> None:
+    """An interrupted service move leaves the prior connection state intact."""
+    store = ProfileStore(tmp_path)
+    original = _profile()
+    store.save(original)
+    mocker.patch(
+        "markweave.cli.profiles.os.replace", side_effect=OSError("simulated failure")
+    )
+
+    with pytest.raises(CliError) as raised:
+        store.save(
+            ConnectionProfile(
+                name="default",
+                service_url="https://other.example",
+                session_state="md_converter_session=new-session",
+                csrf_state="new-csrf",
+            )
+        )
+
+    assert raised.value.code == "profile_write_failed"
+    assert store.load("default") == original

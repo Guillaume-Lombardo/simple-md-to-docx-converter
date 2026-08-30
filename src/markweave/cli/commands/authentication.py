@@ -7,6 +7,7 @@ import getpass
 import sys
 import warnings
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -144,9 +145,10 @@ def _profile_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def _reject_password_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--password", action=_RejectPasswordArgument)
-    parser.add_argument("--current-password", action=_RejectPasswordArgument)
-    parser.add_argument("--new-password", action=_RejectPasswordArgument)
+    for option in ("--password", "--current-password", "--new-password"):
+        parser.add_argument(
+            option, action=_RejectPasswordArgument, help=argparse.SUPPRESS
+        )
 
 
 def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> None:
@@ -182,12 +184,13 @@ def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> 
     try:
         store.save(saved_profile)
     except CliError:
-        HttpTransport(
-            service_url,
-            verify_tls=True,
-            timeout=context.timeout_seconds,
-            session_cookie_name=session_cookie_name,
-        ).logout(saved_profile)
+        with suppress(CliError):
+            HttpTransport(
+                service_url,
+                verify_tls=True,
+                timeout=context.timeout_seconds,
+                session_cookie_name=session_cookie_name,
+            ).logout(saved_profile)
         raise
     username_value = user.get("username")
     safe_username = username_value if isinstance(username_value, str) else "user"
@@ -293,7 +296,8 @@ def _change_password(
         renewal_profile, new_password, confirmation
     )
     if response.status != _NO_CONTENT:
-        _transport(renewal_profile, context).logout(renewal_profile)
+        with suppress(CliError):
+            _transport(renewal_profile, context).logout(renewal_profile)
         raise api_error(response, fallback="password_change_failed")
     store.delete(profile_name)
     writer.success(

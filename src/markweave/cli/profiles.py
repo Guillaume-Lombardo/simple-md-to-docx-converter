@@ -24,6 +24,8 @@ _SCHEMA_VERSION = 1
 _PROFILE_FILE_MODE = 0o600
 _ASCII_CONTROL_MAX = 32
 _ASCII_DELETE = 127
+_ASCII_PRINTABLE_MIN = 33
+_COOKIE_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+\Z")
 
 
 def validate_profile_name(name: str) -> str:
@@ -256,15 +258,7 @@ def _check_profile_metadata(metadata: os.stat_result) -> None:
 
 def _encode_profile(profile: ConnectionProfile) -> str:
     service_url = validate_service_url(profile.service_url, verify_tls=True)
-    if (
-        profile.session_state is None
-        or profile.csrf_state is None
-        or not profile.session_state
-        or not profile.csrf_state
-        or len(profile.session_state) > _MAX_SECRET_LENGTH
-        or len(profile.csrf_state) > _MAX_SECRET_LENGTH
-    ):
-        raise CliError("profile_invalid", "The connection profile is invalid.")
+    _validate_profile_state(profile.session_state, profile.csrf_state)
     data = {
         "csrf_state": profile.csrf_state,
         "name": validate_profile_name(profile.name),
@@ -297,16 +291,44 @@ def _decode_profile(content: str, expected_name: str) -> ConnectionProfile:
     service_url = data.get("service_url")
     if not all(isinstance(value, str) for value in (session, csrf, service_url)):
         raise CliError("profile_invalid", "The selected connection profile is invalid.")
-    if (
-        not session
-        or not csrf
-        or len(session) > _MAX_SECRET_LENGTH
-        or len(csrf) > _MAX_SECRET_LENGTH
-    ):
-        raise CliError("profile_invalid", "The selected connection profile is invalid.")
-    return ConnectionProfile(
-        name=expected_name,
-        service_url=validate_service_url(service_url, verify_tls=True),
-        session_state=session,
-        csrf_state=csrf,
+    try:
+        _validate_profile_state(session, csrf)
+        normalized_url = validate_service_url(service_url, verify_tls=True)
+    except CliError as error:
+        raise CliError(
+            "profile_invalid", "The selected connection profile is invalid."
+        ) from error
+    return ConnectionProfile(expected_name, normalized_url, session, csrf)
+
+
+def _validate_profile_state(session: str | None, csrf: str | None) -> None:
+    """Reject header-breaking or malformed opaque profile state."""
+    if not _is_valid_cookie_pair(session) or not _is_valid_opaque_state(csrf):
+        raise CliError("profile_invalid", "The connection profile is invalid.")
+
+
+def _is_valid_cookie_pair(value: str | None) -> bool:
+    if not isinstance(value, str) or not _is_valid_opaque_state(value):
+        return False
+    name, separator, cookie_value = value.partition("=")
+    return (
+        bool(separator)
+        and bool(cookie_value)
+        and _COOKIE_NAME.fullmatch(name) is not None
+        and all(
+            character not in '";,\\\\' and not character.isspace()
+            for character in cookie_value
+        )
+    )
+
+
+def _is_valid_opaque_state(value: str | None) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and len(value) <= _MAX_SECRET_LENGTH
+        and all(
+            _ASCII_PRINTABLE_MIN <= ord(character) < _ASCII_DELETE
+            for character in value
+        )
     )

@@ -77,6 +77,21 @@ def test_login_prompts_without_echo_and_persists_only_session(mocker, capsys) ->
     assert "secret" not in capsys.readouterr().err
 
 
+def test_password_injection_options_are_hidden_but_rejected_safely(capsys) -> None:
+    """Secret values cannot enter public help, shell discovery, or diagnostics."""
+    with pytest.raises(SystemExit) as raised:
+        main(("login", "--help"))
+    assert raised.value.code == 0
+    assert "--password" not in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as raised:
+        main(("password", "change", "--current-password", "not-disclosed"))
+    assert raised.value.code == 2
+    captured = capsys.readouterr()
+    assert "--current-password" not in captured.err
+    assert "not-disclosed" not in captured.err
+
+
 def test_non_interactive_login_and_password_change_fail_before_prompt(
     mocker, capsys
 ) -> None:
@@ -121,6 +136,59 @@ def test_relogin_reuses_only_the_same_service_profile(mocker) -> None:
         == 0
     )
     assert transport.login.call_args.kwargs == {"previous_profile": _profile()}
+
+
+def test_relogin_to_a_different_service_never_sends_or_overwrites_old_state(
+    mocker,
+) -> None:
+    """A same-named profile is only reusable when its canonical service matches."""
+    old_profile = _profile()
+    store = mocker.Mock(load=mocker.Mock(return_value=old_profile))
+    transport = mocker.Mock(login=mocker.Mock(return_value=_login_response()))
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+    mocker.patch.object(authentication.getpass, "getpass", return_value="password")
+
+    assert (
+        main(
+            (
+                "login",
+                "--url",
+                "https://other.example",
+                "--username",
+                "alice",
+            )
+        )
+        == 0
+    )
+    assert transport.login.call_args.kwargs == {"previous_profile": None}
+    assert store.save.call_args.args[0].service_url == "https://other.example"
+
+
+def test_login_save_failure_revokes_the_unpersisted_remote_session(
+    mocker, capsys
+) -> None:
+    """A failed atomic replacement cannot leave an untracked usable session behind."""
+    store = mocker.Mock(
+        load=mocker.Mock(
+            side_effect=authentication.CliError("profile_not_found", "missing")
+        ),
+        save=mocker.Mock(
+            side_effect=authentication.CliError("profile_write_failed", "save failed")
+        ),
+    )
+    transport = mocker.Mock(login=mocker.Mock(return_value=_login_response()))
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+    mocker.patch.object(authentication.getpass, "getpass", return_value="password")
+
+    assert (
+        main(("login", "--url", "https://converter.example", "--username", "alice"))
+        == 1
+    )
+    saved = store.save.call_args.args[0]
+    transport.logout.assert_called_once_with(saved)
+    assert capsys.readouterr().err == "error: save failed\n"
 
 
 def test_whoami_reports_only_safe_session_fields(mocker, capsys) -> None:
@@ -217,6 +285,31 @@ def test_password_change_rejects_mismatch_without_a_network_request(
         capsys.readouterr().err
         == "error: The new password confirmation does not match.\n"
     )
+
+
+def test_failed_renewal_revokes_the_transient_reauthentication_session(mocker) -> None:
+    """A remote renewal failure never leaves the new restricted session usable."""
+    store = mocker.Mock(load=mocker.Mock(return_value=_profile()))
+    transport = mocker.Mock(
+        session=mocker.Mock(
+            return_value=ApiResponse(
+                200,
+                {"username": "alice", "role": "user", "password_change_required": True},
+            )
+        ),
+        login=mocker.Mock(return_value=_login_response(renewal=True)),
+        change_password=mocker.Mock(return_value=ApiResponse(503, None)),
+    )
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+    mocker.patch.object(
+        authentication.getpass, "getpass", side_effect=("current", "new", "new")
+    )
+
+    assert main(("password", "change")) == 1
+    renewal_profile = transport.change_password.call_args.args[0]
+    transport.logout.assert_called_once_with(renewal_profile)
+    store.delete.assert_not_called()
 
 
 def test_server_error_envelopes_are_safe(mocker, capsys) -> None:

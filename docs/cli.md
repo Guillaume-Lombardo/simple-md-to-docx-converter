@@ -68,6 +68,12 @@ in `$XDG_STATE_HOME/markweave/profiles` (or `~/.local/state` when unset). Each
 file is atomically replaced with mode `0600`; the profile directory is owner-only.
 Passwords are never written, displayed, or accepted from environment variables.
 
+TLS verification is always enabled. The sole evaluation exception is a literal
+loopback URL, `http://127.0.0.1` or `http://[::1]`, for the rootless final-image
+workflow; `localhost` and all other HTTP hosts are rejected. The default session
+cookie name is `md_converter_session`; use `--session-cookie-name` only when the
+remote service has explicitly configured a different session-cookie name.
+
 `password change` is available only for a restricted password-renewal session. It
 prompts for the current password, new password, and confirmation, verifies the
 current password through a fresh restricted session, sends the CSRF-protected
