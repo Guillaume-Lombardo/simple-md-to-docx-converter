@@ -2,7 +2,7 @@
 ticket: T33
 linear_id: G1L-408
 linear_url: https://linear.app/g1lom/issue/G1L-408/t33-add-conversion-and-job-cli-commands
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -48,10 +48,11 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 * 2026-08-30: Reconciled current `main` at `6f8ceb77950385787bd458bfad56357c17af2ccc` through a normal HTTPS-fetched merge after T45 and T52 landed. The incoming delta preserves all 12 T45 OpenAPI artifact, generator, application-schema, CI, documentation, fixture, test, and ticket paths plus the T52 ticket mirror, with no conversion-CLI implementation overlap. Ruff, `ty`, canonical OpenAPI freshness and compatibility against `origin/main`, CI policy validation, 123 focused topology/namespace/contract/T33 tests, and 255 functional HTTP/CI tests passed. The final image was not rebuilt because the merge was conflict-free and changed no T33 runtime or runner path.
 * 2026-08-30: Closed PR #130's unit branch-coverage gap with conversion/job CLI regressions for retry exhaustion, defensive source and multipart handling, HTTPS error responses, idempotency headers, and cleanup failures. The 47 focused tests pass, and the exact light-CI unit command passes 1,834 tests at 90.04% application branch coverage without changing application code or coverage thresholds.
 * 2026-08-30: Verified five additional CodeRabbit findings. Python 3.14.6 compiled both unparenthesized multi-exception handlers, confirming the two syntax reports as PEP 758 false positives. Fixed invocation-local parser request state, deterministic safe fallback errors for failed jobs without service error strings, and the integration server's loopback allocation race by passing Uvicorn its still-reserved bound socket. Ruff, `ty`, 49 focused unit/integration tests, and 1,835 unit tests passed at 90.12% application branch coverage.
+* 2026-08-30: Delivered by squash merge in PR #130 as `fd816c87fe0977e4a6d667b88fece722e21f2cf2`. The exact merge commit passed the complete CI matrix, including light checks, document engines, functional tests, standalone and distributed storage, standalone and distributed final-image E2E, and the required gate in run `33335413529`.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
