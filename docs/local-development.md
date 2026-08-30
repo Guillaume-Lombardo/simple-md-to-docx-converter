@@ -114,8 +114,9 @@ coverage, an explicit branch-only JSON check, changed application line coverage,
 and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
 
 `.github/workflows/mutation.yml` runs an independent, read-only mutation gate. Pull requests
-select reviewed affected domains; scheduled and manual runs execute all five bounded domains:
-observability, authentication/session, archive/SVG, job integrity, and retention/storage. The
+select reviewed affected domains; the scheduled run executes all five bounded domains, and manual
+dispatch selects its `domain` input (defaulting to `all`): observability, authentication/session,
+archive/SVG, job integrity, and retention/storage. The
 observability domain preserves the original
 `markweave.observability.x__normalize_method__mutmut_*` target and
 `tests/unit/test_observability.py`. Its JSON evidence records the exact selected and killed counts;
