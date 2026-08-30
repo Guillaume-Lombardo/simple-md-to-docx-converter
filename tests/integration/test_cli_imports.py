@@ -22,7 +22,18 @@ for arguments in (("--version",), ("--help",)):
     except SystemExit as error:
         if error.code != 0:
             raise
-for forbidden in ("markweave.app", "boto3", "sqlalchemy", "fastapi"):
+for forbidden in (
+    "markweave.app",
+    "markweave.config",
+    "markweave.recovery",
+    "markweave.recovery_manifest",
+    "boto3",
+    "botocore",
+    "pydantic",
+    "psycopg",
+    "sqlalchemy",
+    "fastapi",
+):
     if forbidden in sys.modules:
         raise SystemExit(f"unexpected eager import: {forbidden}")
 """
