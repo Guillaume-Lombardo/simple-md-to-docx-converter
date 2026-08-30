@@ -1,8 +1,8 @@
 # Command-line interface
 
 `markweave` is the supported command-line program. The initial T31 release fixes
-its command names and shared behavior; each listed command currently reports that
-it is unavailable until its assigned command-family ticket implements it.
+its command names and shared behavior; command families become available through
+their assigned tickets.
 
 ## Command registry
 
@@ -42,7 +42,33 @@ is the default. `--timeout SECONDS` accepts only a positive finite value and is
 passed to the selected command; no global timeout default is imposed by T31.
 `--non-interactive` tells implemented commands to fail instead of prompting.
 
-Remote command families will use only the documented HTTP API. T32 will add
+Remote command families use only the documented HTTP API. Authentication uses
 non-echoing password prompts and owner-only XDG profile persistence; passwords are
 never command arguments. Runtime and recovery commands are the only families
 allowed to access runtime or storage services directly.
+
+## Authentication profiles
+
+`login`, `logout`, `whoami`, and `password change` use the documented HTTPS API.
+Start a profile with the exact HTTPS service URL, then select it by name when
+needed:
+
+```text
+markweave login --url https://converter.example --username alice --profile work
+markweave whoami --profile work
+markweave password change --profile work
+markweave logout --profile work
+```
+
+The profile defaults to `default`. Login prompts for a password through the
+terminal's non-echoing path; it has no password option and rejects password-like
+arguments. `--non-interactive` fails rather than reading any prompt. The profile
+keeps only the HTTPS base URL, the opaque session-cookie pair, and its CSRF value
+in `$XDG_STATE_HOME/markweave/profiles` (or `~/.local/state` when unset). Each
+file is atomically replaced with mode `0600`; the profile directory is owner-only.
+Passwords are never written, displayed, or accepted from environment variables.
+
+`password change` is available only for a restricted password-renewal session. It
+prompts for the current password, new password, and confirmation, verifies the
+current password through a fresh restricted session, sends the CSRF-protected
+renewal request, removes the local profile, and requires a fresh login.
