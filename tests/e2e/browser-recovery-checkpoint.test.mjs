@@ -12,12 +12,12 @@ import {
   startTrace,
 } from "./browser-helpers.mjs";
 
-const baseUrl = process.env.MD_CONVERTER_E2E_BASE_URL;
-const recoveryState = process.env.MD_CONVERTER_E2E_RECOVERY_STATE;
-const username = process.env.MD_CONVERTER_E2E_ADMIN_USERNAME;
-const password = process.env.MD_CONVERTER_E2E_ADMIN_PASSWORD;
-const profile = process.env.MD_CONVERTER_E2E_PROFILE;
-const artifactRoot = process.env.MD_CONVERTER_E2E_ARTIFACT_DIR;
+const baseUrl = process.env.MARKWEAVE_E2E_BASE_URL;
+const recoveryState = process.env.MARKWEAVE_E2E_RECOVERY_STATE;
+const username = process.env.MARKWEAVE_E2E_ADMIN_USERNAME;
+const password = process.env.MARKWEAVE_E2E_ADMIN_PASSWORD;
+const profile = process.env.MARKWEAVE_E2E_PROFILE;
+const artifactRoot = process.env.MARKWEAVE_E2E_ARTIFACT_DIR;
 
 test("authenticated browser state is checkpointed before forced restart", {
   skip: baseUrl && recoveryState && username && password && profile && artifactRoot
@@ -36,7 +36,7 @@ test("authenticated browser state is checkpointed before forced restart", {
   let step = "launch Chromium for recovery checkpoint";
   try {
     browser = await chromium.launch({
-      executablePath: process.env.MD_CONVERTER_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
+      executablePath: process.env.MARKWEAVE_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
       headless: true,
     });
     context = await browser.newContext({ baseURL: baseUrl, serviceWorkers: "block" });

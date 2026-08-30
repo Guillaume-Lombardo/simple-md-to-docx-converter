@@ -63,7 +63,7 @@ INTEGRITY_COLUMNS = {
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_integrity_revision_round_trip_preserves_postgresql_schema() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     before = inspect(engine)
     expected_foreign_keys = before.get_foreign_keys("conversion_jobs")
@@ -158,7 +158,7 @@ def race_recovery(barrier: Barrier, repository: SqlJobRepository) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_job_contract_and_skip_locked_claims() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"owner-{unique}", "hash:owner", Role.USER)
@@ -246,7 +246,7 @@ def test_postgresql_job_contract_and_skip_locked_claims() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_repository_persists_pandoc_default_job() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"default-{unique}", "hash:owner", Role.USER)
@@ -280,7 +280,7 @@ def test_postgresql_repository_persists_pandoc_default_job() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_job_progress_survives_template_archival() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"archived-{unique}", "hash:owner", Role.USER)
@@ -338,7 +338,7 @@ def test_postgresql_job_progress_survives_template_archival() -> None:
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     unique = uuid4().hex
     owner = User(uuid4(), "Owner", f"worker-{unique}", "hash:owner", Role.USER)
@@ -355,12 +355,12 @@ def test_distributed_worker_crosses_real_postgresql_and_s3_boundaries() -> None:
     repository = SqlJobRepository(engine)
     client = boto3.client(
         "s3",
-        endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-        region_name=os.environ.get("MD_CONVERTER_TEST_S3_REGION", "us-east-1"),
-        aws_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+        endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+        region_name=os.environ.get("MARKWEAVE_TEST_S3_REGION", "us-east-1"),
+        aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
-    objects = S3ObjectStore(client, os.environ["MD_CONVERTER_TEST_S3_BUCKET"])
+    objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
     template_key = ObjectKey(
         ObjectScope.TEMPLATE_VERSION, owner.id, TEMPLATE_VERSION_ID
     )

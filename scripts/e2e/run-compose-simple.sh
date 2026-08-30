@@ -214,8 +214,8 @@ verify_helper_service_stopped() {
 }
 
 write_checkpoint() {
-  MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
-  MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
+  MARKWEAVE_E2E_ADMIN_USERNAME=admin \
+  MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow checkpoint \
       --base-url "http://127.0.0.1:$port" \
       --profile standalone \
@@ -227,8 +227,8 @@ write_checkpoint() {
 
 verify_podman_mermaid() {
   [[ "$runtime" == podman ]] || return 0
-  MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
-  MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
+  MARKWEAVE_E2E_ADMIN_USERNAME=admin \
+  MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow exercise-mermaid \
       --base-url "http://127.0.0.1:$port" \
       --profile standalone \
@@ -245,8 +245,8 @@ verify_login_origin() {
 }
 
 verify_checkpoint() {
-  MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
-  MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
+  MARKWEAVE_E2E_ADMIN_USERNAME=admin \
+  MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow verify-checkpoint \
       --base-url "http://127.0.0.1:$port" \
       --profile standalone \

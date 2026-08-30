@@ -45,7 +45,7 @@ resolution against the pinned manifest, a blank Pandoc conversion using the cand
 fonts, resolved substitutions, and the successful validation-stage trace. Missing or unsupported
 font declarations and engine failures return sanitized validation errors and publish neither
 metadata nor bytes. All safety ceilings and engine paths/timeouts are required
-`MD_CONVERTER_TEMPLATE_*` settings; operators retain approval of their production values.
+`MARKWEAVE_TEMPLATE_*` settings; operators retain approval of their production values.
 
 Every identity response carries an `ETag` of the form
 `"template-<template UUID>-<revision>"`. Metadata updates, replacements, restorations, archive, and

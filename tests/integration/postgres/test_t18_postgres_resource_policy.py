@@ -77,7 +77,7 @@ def test_distributed_asgi_enforces_owner_and_global_admission(  # noqa: PLR0915
     unique = uuid4().hex
     admin_username = f"t18-api-{unique}"
     password = "admin-" + "password"
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     app = create_app(
         Settings(
             **template_settings(
@@ -90,11 +90,11 @@ def test_distributed_asgi_enforces_owner_and_global_admission(  # noqa: PLR0915
             argon2_time_cost=1,
             storage_profile="distributed",
             distributed_database_url=database_url,
-            s3_bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
-            s3_endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-            s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-            s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-            s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+            s3_bucket=os.environ["MARKWEAVE_TEST_S3_BUCKET"],
+            s3_endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+            s3_region=os.environ["MARKWEAVE_TEST_S3_REGION"],
+            s3_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+            s3_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
             conversion_upload_max_bytes=128,
             conversion_request_max_bytes=2_000,
             conversion_retry_after_seconds=9,
@@ -230,7 +230,7 @@ class FailOnceResultDeleteStore:
 @pytest.mark.requires_postgres
 @pytest.mark.slow
 def test_postgresql_short_load_serializes_global_capacity(tmp_path: Path) -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     suffix = uuid4().hex
     users = tuple(
@@ -357,7 +357,7 @@ def test_postgresql_short_load_serializes_global_capacity(tmp_path: Path) -> Non
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_distributed_retention_cleanup_removes_rustfs_source() -> None:  # noqa: PLR0915
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     suffix = uuid4().hex
     owner = User(uuid4(), "Cleanup", f"t18-cleanup-{suffix}", "hash", Role.USER)
@@ -368,12 +368,12 @@ def test_distributed_retention_cleanup_removes_rustfs_source() -> None:  # noqa:
     repository = SqlJobRepository(engine, JobAdmissionPolicy(1, 2))
     client = boto3.client(
         "s3",
-        endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-        region_name=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-        aws_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+        endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+        region_name=os.environ["MARKWEAVE_TEST_S3_REGION"],
+        aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
-    objects = S3ObjectStore(client, os.environ["MD_CONVERTER_TEST_S3_BUCKET"])
+    objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
     service = JobService(repository, objects, JobServicePolicy(10))
     queued, _ = service.submit(
         JobRequest(

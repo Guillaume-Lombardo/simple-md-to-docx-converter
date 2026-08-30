@@ -1458,14 +1458,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--admin-username",
         default=os.getenv(
-            "MD_CONVERTER_E2E_ADMIN_USERNAME",
+            "MARKWEAVE_E2E_ADMIN_USERNAME",
             os.getenv("T21_ADMIN_USERNAME", "e2e-admin"),
         ),
     )
     parser.add_argument(
         "--admin-password",
         default=os.getenv(
-            "MD_CONVERTER_E2E_ADMIN_PASSWORD",
+            "MARKWEAVE_E2E_ADMIN_PASSWORD",
             os.getenv("T21_ADMIN_PASSWORD", "e2e-admin-password"),
         ),
     )

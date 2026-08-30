@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const puppeteerModule = process.env.MD_CONVERTER_TEST_PUPPETEER || path.join(
+const puppeteerModule = process.env.MARKWEAVE_TEST_PUPPETEER || path.join(
   repository, "spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js",
 );
 
@@ -64,7 +64,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
   const temporary = await mkdtemp(path.join(os.tmpdir(), "md-converter-admin-browser-"));
   const port = await availablePort();
   const baseUrl = `http://localhost:${port}`;
-  const python = process.env.MD_CONVERTER_TEST_PYTHON || path.join(repository, ".venv/bin/python");
+  const python = process.env.MARKWEAVE_TEST_PYTHON || path.join(repository, ".venv/bin/python");
   const docxResult = spawnSync(python, ["-c", "import base64; from tests.unit.test_template_validation import _docx; print(base64.b64encode(_docx()).decode())"], { cwd: repository, encoding: "utf8" });
   assert.equal(docxResult.status, 0, docxResult.stderr);
   const templateFile = path.join(temporary, "template.docx");
@@ -92,7 +92,7 @@ test("owner and administrator workflows work in pinned Chromium", { timeout: 90_
 
   const puppeteer = (await import(pathToFileURL(puppeteerModule).href)).default;
   const browser = await puppeteer.launch({
-    executablePath: process.env.MD_CONVERTER_TEST_CHROMIUM || "/usr/bin/google-chrome-stable",
+    executablePath: process.env.MARKWEAVE_TEST_CHROMIUM || "/usr/bin/google-chrome-stable",
     headless: "shell",
   });
   context.after(() => browser.close());

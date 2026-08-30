@@ -194,12 +194,12 @@ jobs:
           --health-timeout 2s
           --health-retries 30
     env:
-      MD_CONVERTER_TEST_POSTGRES_URL: postgresql+psycopg://postgres:t12-ci-password@127.0.0.1:5432/md_converter_test
-      MD_CONVERTER_TEST_S3_ACCESS_KEY_ID: t12integration
-      MD_CONVERTER_TEST_S3_BUCKET: md-converter-t12
-      MD_CONVERTER_TEST_S3_ENDPOINT_URL: http://127.0.0.1:9000
-      MD_CONVERTER_TEST_S3_REGION: us-east-1
-      MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY: t12integrationsecret
+      MARKWEAVE_TEST_POSTGRES_URL: postgresql+psycopg://postgres:t12-ci-password@127.0.0.1:5432/md_converter_test
+      MARKWEAVE_TEST_S3_ACCESS_KEY_ID: t12integration
+      MARKWEAVE_TEST_S3_BUCKET: md-converter-t12
+      MARKWEAVE_TEST_S3_ENDPOINT_URL: http://127.0.0.1:9000
+      MARKWEAVE_TEST_S3_REGION: us-east-1
+      MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY: t12integrationsecret
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -341,7 +341,7 @@ jobs:
       - name: Run authenticated conversion workflow in pinned Chrome
         if: ${{ matrix.domain == 'document-engines' }}
         env:
-          MD_CONVERTER_TEST_CHROMIUM: /usr/bin/google-chrome-stable
+          MARKWEAVE_TEST_CHROMIUM: /usr/bin/google-chrome-stable
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: npm run test:web-browser
       - name: Prepare the RustFS test bucket

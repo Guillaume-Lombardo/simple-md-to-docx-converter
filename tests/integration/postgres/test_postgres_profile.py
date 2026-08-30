@@ -36,7 +36,7 @@ from tests.storage_contracts import exercise_auth_repository_contract
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_authentication_repository_contract() -> None:
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     upgrade_database(engine)
     with engine.begin() as connection:
@@ -52,7 +52,7 @@ def test_postgresql_authentication_repository_contract() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_failed_transaction_rolls_back_and_repository_recovers() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     first = User(uuid4(), "Conflict", "conflict", "hash:first", Role.USER)
@@ -68,7 +68,7 @@ def test_postgresql_failed_transaction_rolls_back_and_repository_recovers() -> N
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_foreign_key_failure_and_user_delete_cascade() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     sessions = SqlSessionRepository(engine)
@@ -110,7 +110,7 @@ def test_postgresql_foreign_key_failure_and_user_delete_cascade() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE IF EXISTS retention_cleanup_runs CASCADE"))
@@ -192,7 +192,7 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_cleanup_evidence_trigger_has_a_real_downgrade_path() -> None:
-    base_url = make_url(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    base_url = make_url(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     schema = f"retention_migration_{uuid4().hex}"
     admin_engine = create_database_engine(base_url)
     with admin_engine.begin() as connection:
@@ -237,7 +237,7 @@ def test_postgresql_cleanup_evidence_trigger_has_a_real_downgrade_path() -> None
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_real_database_outage_fails_readiness_and_operations() -> None:
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     target = create_database_engine(database_url)
     target_database = target.url.database
     assert target_database is not None
@@ -282,7 +282,7 @@ def test_postgresql_real_database_outage_fails_readiness_and_operations() -> Non
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     upgrade_database(engine)
     with engine.begin() as connection:
@@ -298,11 +298,11 @@ def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
         argon2_time_cost=1,
         storage_profile="distributed",
         distributed_database_url=database_url,
-        s3_bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
-        s3_endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-        s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-        s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-        s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+        s3_bucket=os.environ["MARKWEAVE_TEST_S3_BUCKET"],
+        s3_endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+        s3_region=os.environ["MARKWEAVE_TEST_S3_REGION"],
+        s3_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+        s3_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
         conversion_retry_after_seconds=1,

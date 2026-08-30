@@ -22,7 +22,7 @@ spec:
           localhostProfile: profiles/md-converter-chrome.json
       containers:
         - name: application
-          image: ${MD_CONVERTER_IMAGE}
+          image: ${MARKWEAVE_IMAGE}
           imagePullPolicy: IfNotPresent
           args: [embedded-worker]
           envFrom:
@@ -31,11 +31,11 @@ spec:
             - secretRef:
                 name: md-converter
           env:
-            - name: MD_CONVERTER_STORAGE_PROFILE
+            - name: MARKWEAVE_STORAGE_PROFILE
               value: standalone
-            - name: MD_CONVERTER_STANDALONE_DATA_DIRECTORY
+            - name: MARKWEAVE_STANDALONE_DATA_DIRECTORY
               value: /data
-            - name: MD_CONVERTER_CLAMAV_HOST
+            - name: MARKWEAVE_CLAMAV_HOST
               value: ${CLAMAV_SERVICE}
           ports:
             - name: http

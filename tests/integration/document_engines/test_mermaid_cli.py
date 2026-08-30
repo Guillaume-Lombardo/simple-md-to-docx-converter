@@ -42,10 +42,8 @@ WORDPROCESSING_DRAWING_NAMESPACE = (
 def _renderer(timeout: float = 30.0) -> MermaidCliRenderer:
     return MermaidCliRenderer(
         MermaidConfig(
-            os.environ.get("MD_CONVERTER_TEST_MMDC", "mmdc"),
-            os.environ.get(
-                "MD_CONVERTER_TEST_CHROMIUM", "/usr/bin/google-chrome-stable"
-            ),
+            os.environ.get("MARKWEAVE_TEST_MMDC", "mmdc"),
+            os.environ.get("MARKWEAVE_TEST_CHROMIUM", "/usr/bin/google-chrome-stable"),
             timeout,
             2.0,
             800,
@@ -280,16 +278,14 @@ def test_pandoc_preserves_ratio_and_physical_dimension_caps(
 
 def test_real_mermaid_versions_match_t00_artifacts() -> None:
     mmdc = subprocess.run(
-        [os.environ.get("MD_CONVERTER_TEST_MMDC", "mmdc"), "--version"],
+        [os.environ.get("MARKWEAVE_TEST_MMDC", "mmdc"), "--version"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
     chrome = subprocess.run(
         [
-            os.environ.get(
-                "MD_CONVERTER_TEST_CHROMIUM", "/usr/bin/google-chrome-stable"
-            ),
+            os.environ.get("MARKWEAVE_TEST_CHROMIUM", "/usr/bin/google-chrome-stable"),
             "--version",
         ],
         check=True,

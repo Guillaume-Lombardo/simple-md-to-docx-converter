@@ -33,7 +33,7 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
     unique = uuid4().hex
     username = f"ui-{unique}"
     password = "distributed-" + "password"
-    database_url = os.environ["MD_CONVERTER_TEST_POSTGRES_URL"]
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     app = create_app(
         Settings(
             **template_settings(),
@@ -43,11 +43,11 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
             argon2_time_cost=1,
             storage_profile="distributed",
             distributed_database_url=database_url,
-            s3_bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
-            s3_endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-            s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-            s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-            s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+            s3_bucket=os.environ["MARKWEAVE_TEST_S3_BUCKET"],
+            s3_endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+            s3_region=os.environ["MARKWEAVE_TEST_S3_REGION"],
+            s3_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+            s3_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
             conversion_upload_max_bytes=128,
             conversion_request_max_bytes=2_000,
             conversion_retry_after_seconds=1,
