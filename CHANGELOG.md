@@ -1,0 +1,99 @@
+<a id="changelog"></a>
+
+# Changelog
+
+All notable user-visible, operational, security, compatibility, and deprecation
+changes are recorded here. Entries use the release version as their stable link
+target. Internal ticket choreography is intentionally excluded.
+
+## Unreleased
+
+### Changed
+
+- No released changes yet.
+
+<a id="release-0-4-0"></a>
+
+## [0.4.0] - 2026-08-29
+
+### Added
+
+- Startup CSV user provisioning can create or update local accounts atomically.
+- Administrators can require password renewal; affected users receive a restricted
+  session until they choose a new password and sign in again.
+
+### Security
+
+- Provisioning updates advance account authentication state and revoke existing
+  sessions, preventing stale credentials from retaining access.
+
+<a id="release-0-3-5"></a>
+
+## [0.3.5] - 2026-08-28
+
+### Added
+
+- A loopback-only insecure SSH-tunnel evaluation mode is available for temporary
+  testing. It is not a production deployment mode.
+
+<a id="release-0-3-4"></a>
+
+## [0.3.4] - 2026-08-28
+
+### Security
+
+- Quickstart login-origin validation now preserves explicitly configured custom
+  loopback ports and same-host reverse-proxy origins.
+
+<a id="release-0-3-3"></a>
+
+## [0.3.3] - 2026-08-27
+
+### Changed
+
+- The trusted-upstream antivirus quickstart uses `slirp4netns` where rootless
+  Podman cannot provide the required CNI port mapping.
+
+<a id="release-0-3-2"></a>
+
+## [0.3.2] - 2026-08-27
+
+### Added
+
+- An explicitly configured trusted-upstream malware-scanning boundary is
+  supported for the rootless Podman quickstart.
+
+### Security
+
+- The default local ClamAV boundary remains fail closed; trusted upstream mode
+  requires an operator-controlled proxy that scans every upload and prevents
+  direct application access.
+
+<a id="release-0-3-1"></a>
+
+## [0.3.1] - 2026-08-26
+
+### Fixed
+
+- Release-publication recovery handles a queued publication without changing the
+  released package contract.
+
+<a id="release-0-3-0"></a>
+
+## [0.3.0] - 2026-08-25
+
+### Added
+
+- The first approved public Markweave release established protected automatic
+  package and container publication from an exact `main` version transition.
+
+## Link targets
+
+- [Changelog top](#changelog)
+- [0.4.0](#release-0-4-0)
+- [0.3.5](#release-0-3-5)
+- [0.3.4](#release-0-3-4)
+- [0.3.3](#release-0-3-3)
+- [0.3.2](#release-0-3-2)
+- [0.3.1](#release-0-3-1)
+- [0.3.0](#release-0-3-0)

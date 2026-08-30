@@ -2,7 +2,7 @@
 ticket: T47
 linear_id: G1L-419
 linear_url: https://linear.app/g1lom/issue/G1L-419/t47-add-changelog-and-upgrade-compatibility-guidance
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -37,10 +37,12 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Final audit follow-up assigned shared documentation navigation exclusively to T50 and restricted T47 to dedicated files.
+* 2026-08-30: Implementation started on `feat/T47-upgrade-guidance` from verified main `d3c7a2f`. This workstream owns only the changelog, upgrade guide, changelog checker, its tests, and this ticket mirror.
+* 2026-08-30: Added release-focused changelog history, deterministic upgrade and rollback guidance, canonical configuration migration guidance, and a tested fail-closed checker for dated material-version entries. Targeted documentation and checker tests, Ruff, and ty passed; repository-wide suites still require unavailable external engines and services.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
