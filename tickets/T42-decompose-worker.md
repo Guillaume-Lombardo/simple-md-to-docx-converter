@@ -2,7 +2,7 @@
 ticket: T42
 linear_id: G1L-416
 linear_url: https://linear.app/g1lom/issue/G1L-416/t42-decompose-the-conversion-worker-orchestration
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,12 +34,18 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 
 ## Progress
 
+* 2026-08-30: Reconciled through a normal merge with exact `main` SHA `60fecb44`, which delivers T34's template CLI across nine CLI, E2E, test, documentation, and ticket files. There is no file overlap with T42's worker modules or tests; the behavioral overlap is additive because T34's final-image template workflow exercises the preserved worker/template boundary. Ruff, ty, 86 focused worker/quality tests, 21 assembly/runtime/SQLite tests, eight namespace tests, the canonical namespace check, and 61 focused T34 tests pass; the four changed worker modules retain 98% branch coverage. The combined tree did not rerun complete final-image recovery because neither side changed the other's implementation files; both T42 profiles and both delivered T34 profiles were already validated independently, so combined final-image execution remains the independent-review limitation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized T42 after T43 and prohibited concurrent edits to persistence ports.
+* 2026-08-30: Implementation started on `refactor/T42-decompose-worker` from exact `main` SHA `c1cae3b6`. The work owns worker orchestration decomposition and focused tests while preserving finalized persistence ports, public contracts, and both embedded and external worker behavior.
+* 2026-08-30: Decomposed claim, heartbeat, execution, failure resolution, fenced publication, recovery, and cleanup into independently tested services while retaining `ConversionWorker` as the shared embedded/external composition root. Historical and focused worker tests pass, real SQLite/PostgreSQL/S3 integrations pass, both final-image recovery profiles pass, and changed worker modules retain 99–100% coverage. The full host suite reached 1,983 passes and 95.99% total coverage; 37 document-engine checks require the pinned final-image engines and one Argon2 timing median was load-sensitive. A baseline zero-byte E2E restart artifact was isolated outside T42 and synchronized separately as T52 / G1L-459.
+* 2026-08-30: Merged exact current `main` SHA `7850ab69` without rebasing; its delta contained only verified T24/T27 ticket closure notes. Post-merge Ruff formatting and lint, `ty`, 62 focused worker tests, and 25 worker assembly/runtime/SQLite tests pass. The T42 topology remains clean and excludes T52.
+* 2026-08-30: Reconciled without rebasing to exact `main` SHA `3546ce11`; the incoming delta was limited to T49 package-namespace checks, tests, and its ticket mirror with no worker overlap. Post-merge Ruff formatting and lint, `ty`, all 86 focused worker/quality tests, eight package-namespace tests, and the namespace CLI check pass.
+* 2026-08-30: Reconciled without rebasing to exact `main` SHA `d82d4d58`; the only incoming change was T49's verified-delivery ticket update. Ruff formatting and lint, `ty`, all 86 focused worker/quality tests, eight package-namespace tests, and the namespace CLI check remain green.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
