@@ -143,17 +143,16 @@ podman run --detach \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --tmpfs /data:rw,nosuid,nodev,noexec,size=64m,mode=0770 \
   --shm-size=128m \
-  --publish 127.0.0.1::18080 \
   "${legacy_settings[@]}" \
-  --env MD_CONVERTER_HOST=0.0.0.0 \
+  --env MD_CONVERTER_HOST=127.0.0.1 \
   --env MD_CONVERTER_PORT=18080 \
   "$image" embedded-worker >/dev/null
 legacy_created=true
 
-legacy_port="$(podman port "$legacy_container_name" 18080/tcp | sed 's/.*://')"
 for _ in $(seq 1 60); do
-  if curl --fail --silent --show-error "http://127.0.0.1:$legacy_port/health/live" \
-      | grep -Fq '"status":"ok"'; then
+  if podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
+      'import urllib.request; assert b"\"status\":\"ok\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/live", timeout=1).read()' \
+      >/dev/null 2>&1; then
     break
   fi
   if ! podman container exists "$legacy_container_name" || \
@@ -163,10 +162,10 @@ for _ in $(seq 1 60); do
   fi
   sleep 0.25
 done
-curl --fail --silent --show-error "http://127.0.0.1:$legacy_port/health/ready" \
-  | grep -Fq '"status":"ready"'
 podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
-  'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("0.0.0.0", 18080)'
+  'import urllib.request; assert b"\"status\":\"ready\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/ready", timeout=2).read()'
+podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
+  'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)'
 podman rm --force "$legacy_container_name" >/dev/null
 legacy_created=false
 echo "Final-image legacy configuration smoke passed for $image."
