@@ -32,6 +32,58 @@ from markweave.recovery_service import RestoreResult
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--json", "--non-interactive", "backup"),
+        (
+            "--json",
+            "--non-interactive",
+            "restore",
+            "--profile",
+            "standalone",
+            "--source",
+            "/recovery-set",
+            "--offline-proof",
+            "test-window",
+            "--yes",
+        ),
+    ),
+)
+def test_base_recovery_commands_report_required_server_extra(
+    arguments: tuple[str, ...], mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mocker.patch("markweave.cli.commands.recovery.find_spec", return_value=None)
+
+    assert main(arguments) is ExitCode.FAILURE
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"optional_dependency_missing",'
+        '"message":"Recovery commands require server dependencies; '
+        "install 'markweave[server]'." + '"}}\n',
+    )
+
+
+def test_unexpected_recovery_import_failure_is_not_reclassified(
+    mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mocker.patch(
+        "markweave.cli.commands.recovery._backup",
+        side_effect=ModuleNotFoundError("unexpected internal import"),
+    )
+    imported = mocker.patch("builtins.__import__", wraps=__import__)
+
+    assert main(("--json", "--non-interactive", "backup")) is ExitCode.FAILURE
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"internal_error","message":"An internal error occurred."}}\n',
+    )
+    assert all(
+        call.args[0] != "markweave.recovery_manifest"
+        for call in imported.call_args_list
+    )
+
+
 def test_manifest_verification_dependency_loads_only_for_restore(
     tmp_path: Path, mocker
 ) -> None:

@@ -16,6 +16,7 @@ from scripts.release.artifacts import ArtifactError, ArtifactSet
 from scripts.release.verify_install import (
     BASE_FORBIDDEN_MODULES,
     BASE_ISOLATION_CHECK,
+    BASE_RECOVERY_CHECK,
     CONSOLE_TIMEOUT_SECONDS,
     ENVIRONMENT_TIMEOUT_SECONDS,
     EXTRA_IMPORT_CHECK,
@@ -28,6 +29,11 @@ from scripts.release.verify_install import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_base_recovery_check_is_valid_isolated_python() -> None:
+    """The real-wheel recovery contract must remain an executable verifier."""
+    compile(BASE_RECOVERY_CHECK, "<base-recovery-check>", "exec")
 
 
 def test_public_import_check_rejects_legacy_import_after_install(
@@ -152,6 +158,11 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
                     if profile.name == "base"
                     else f"isolated {profile.name} optional dependency check"
                 ),
+                *(
+                    ["base recovery optional dependency error check"]
+                    if profile.name == "base"
+                    else []
+                ),
                 f"isolated {profile.name} console version check",
                 f"isolated {profile.name} console help check",
             ]
@@ -208,16 +219,21 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     )
     console = environment / "bin" / "markweave"
     assert calls[4] == (
-        (str(python), "-I", str(console), "--version"),
+        (str(python), "-I", "-c", BASE_RECOVERY_CHECK),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
     assert calls[5] == (
+        (str(python), "-I", str(console), "--version"),
+        root,
+        CONSOLE_TIMEOUT_SECONDS,
+    )
+    assert calls[6] == (
         (str(python), "-I", str(console), "--help"),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
-    distributed_install = calls[19]
+    distributed_install = calls[20]
     assert distributed_install[0][-1] == f"{private_wheel}[distributed]"
     assert distributed_install[2] == INSTALL_TIMEOUT_SECONDS
     assert all(cwd == root for _, cwd, _ in calls)
@@ -279,7 +295,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     run.assert_not_called()
 
 
-@pytest.mark.parametrize("failing_call", range(1, 31))
+@pytest.mark.parametrize("failing_call", range(1, 32))
 def test_subprocess_failure_stops_later_steps_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture, failing_call: int
 ) -> None:

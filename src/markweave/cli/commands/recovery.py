@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
+from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 
 _ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _STORAGE_PROFILES = ("standalone", "distributed")
+_RECOVERY_SERVER_MODULES = ("pydantic", "pydantic_settings")
 CONTROL_CHARACTER_LIMIT = 32
 
 
@@ -51,17 +53,30 @@ class _Invocation:
     def __call__(
         self, context: CommandContext, writer: OutputWriter, _command: str
     ) -> None:
+        _require_recovery_backend()
         try:
             if self.operation == "backup":
                 _backup(context, writer, self.values)
             else:
                 _restore(context, writer, self.values)
+        except ModuleNotFoundError:
+            raise
         except Exception as error:
             from markweave.recovery_manifest import RecoveryError  # noqa: PLC0415
 
             if not isinstance(error, RecoveryError):
                 raise
             raise CliError("recovery_failed", str(error)) from None
+
+
+def _require_recovery_backend() -> None:
+    """Fail precisely before importing recovery modules from a base-only install."""
+    if any(find_spec(module) is None for module in _RECOVERY_SERVER_MODULES):
+        raise CliError(
+            "optional_dependency_missing",
+            "Recovery commands require server dependencies; "
+            "install 'markweave[server]'.",
+        )
 
 
 class _BoundStore(argparse.Action):

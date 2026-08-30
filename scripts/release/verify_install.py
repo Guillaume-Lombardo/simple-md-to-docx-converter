@@ -69,6 +69,35 @@ for module in sys.argv[1:]:
         raise SystemExit(f"base install unexpectedly contains optional dependency: {module}")
 """
 
+BASE_RECOVERY_CHECK = """\
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from markweave.cli.main import main
+
+expected = (
+    '{"error":{"code":"optional_dependency_missing",'
+    '"message":"Recovery commands require server dependencies; '
+    "install 'markweave[server]'." + '"}}\\n'
+)
+commands = (
+    ("--json", "--non-interactive", "backup"),
+    (
+        "--json", "--non-interactive", "restore",
+        "--profile", "standalone", "--source", "/recovery-set",
+        "--offline-proof", "test-window", "--yes",
+    ),
+)
+for command in commands:
+    stdout, stderr = StringIO(), StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = main(command)
+    if result != 1 or stdout.getvalue() or stderr.getvalue() != expected:
+        raise SystemExit(
+            f"unexpected base recovery failure: {command!r} "
+            f"code={result!r} stdout={stdout.getvalue()!r} stderr={stderr.getvalue()!r}"
+        )
+"""
+
 BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg")
 
 
@@ -256,6 +285,12 @@ def verify_clean_install(
                     cwd=root,
                     label="base optional dependency isolation check",
                     timeout=IMPORT_TIMEOUT_SECONDS,
+                )
+                run_command(
+                    (str(python), "-I", "-c", BASE_RECOVERY_CHECK),
+                    cwd=root,
+                    label="base recovery optional dependency error check",
+                    timeout=CONSOLE_TIMEOUT_SECONDS,
                 )
             elif profile.required_modules:
                 run_command(
