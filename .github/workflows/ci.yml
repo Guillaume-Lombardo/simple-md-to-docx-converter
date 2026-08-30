@@ -106,6 +106,15 @@ jobs:
         run: uv run ruff check .
       - name: Check types
         run: uv run ty check
+      - name: Validate the canonical OpenAPI contract
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          uv run python -m scripts.openapi_contract check
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            uv run python -m scripts.openapi_contract compare --baseline-git-ref "$BASE_SHA"
+          fi
       - name: Run native browser-module tests with coverage gates
         run: |
           npm ci --ignore-scripts

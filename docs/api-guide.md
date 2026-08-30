@@ -84,3 +84,7 @@ administrators; records contain identifiers and action metadata, not document bo
 The generated OpenAPI document is the exact source for request schemas, response status codes,
 field names, and header names. Pin or regenerate a client against the deployed release rather than
 assuming an undocumented compatibility contract.
+
+The repository commits the normalized v1 artifact and validates compatible evolution in CI. See
+[OpenAPI contract maintenance](openapi-contract.md) for regeneration, review, and intentional
+major-version change procedures.
