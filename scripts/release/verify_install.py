@@ -23,6 +23,7 @@ from scripts.release.process import run_command
 ENVIRONMENT_TIMEOUT_SECONDS = 120
 INSTALL_TIMEOUT_SECONDS = 300
 IMPORT_TIMEOUT_SECONDS = 60
+CONSOLE_TIMEOUT_SECONDS = 60
 
 PUBLIC_IMPORT_CHECK = """\
 from importlib.metadata import version
@@ -159,6 +160,23 @@ def verify_clean_install(
             label="isolated public import check",
             timeout=IMPORT_TIMEOUT_SECONDS,
         )
+        console = environment / "bin" / "markweave"
+        for arguments, label in (
+            (
+                (str(python), "-I", str(console), "--version"),
+                "isolated console version check",
+            ),
+            (
+                (str(python), "-I", str(console), "--help"),
+                "isolated console help check",
+            ),
+        ):
+            run_command(
+                arguments,
+                cwd=root,
+                label=label,
+                timeout=CONSOLE_TIMEOUT_SECONDS,
+            )
     return CleanInstallResult(wheel_name=artifacts.wheel.name, sha256=wheel_digest)
 
 

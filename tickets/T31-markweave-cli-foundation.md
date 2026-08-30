@@ -2,7 +2,7 @@
 ticket: T31
 linear_id: G1L-406
 linear_url: https://linear.app/g1lom/issue/G1L-406/t31-build-the-markweave-cli-foundation
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,13 +36,16 @@ Provide the installed `markweave` executable and a stable command framework shar
 
 ## Progress
 
+* 2026-08-30: Addressed independent review findings: package import is now lazy so CLI help/version avoid the server and optional backends; error detail rendering omits untrusted details; and clean-wheel verification executes the generated console script for both version and help. Focused tests, package/release integration, `uv sync --all-groups`, Ruff formatting/linting, and `ty check` passed. The canonical Pytest commands still cannot pass in this environment because PostgreSQL/RustFS and the document engines are unavailable.
+* 2026-08-30: Implemented the console entry point, root registry, typed command/output/profile/error contracts, pre-registered unavailable family modules, CLI contract documentation, help snapshot, shell invocation coverage, and clean-wheel entry-point verification. `uv sync --all-groups`, Ruff formatting/linting, `ty check`, targeted CLI tests, and the clean-wheel release integration passed. Both canonical Pytest commands exercised this scope but remain red because this environment lacks Pandoc, Mermaid/Chromium, LibreOffice, PostgreSQL, and RustFS; no T31 failure was observed.
+* 2026-08-30: Started implementation on `feat/T31-cli-foundation` from verified `main` at `381e74e9`; this workstream exclusively owns the CLI framework, root registry, shared help contract, command-family placeholders, initial console entry point, and its tests and documentation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up assigned the root registry, shared help snapshots, and pre-registered command-family placeholders exclusively to T31 so parallel CLI workers do not edit shared files.
 * 2026-08-29: Final audit follow-up split operational registration into an exclusive T36 runtime family and T37 recovery family.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

@@ -30,6 +30,9 @@ dependencies = [
     "uvicorn>=0.35,<1",
 ]
 
+[project.scripts]
+markweave = "markweave.cli.main:main"
+
 [project.urls]
 Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter#readme"
 Issues = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues"
