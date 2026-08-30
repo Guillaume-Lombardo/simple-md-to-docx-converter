@@ -88,7 +88,7 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     assert "--mode changed" in text
     assert "--base-sha" in text
     assert "--head-sha" in text
-    assert "actions/upload-artifact@043fb4608a7c11565688c193ef1d7a58c880d6f0" in text
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.7.0"' in pyproject
