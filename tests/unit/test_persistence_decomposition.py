@@ -12,9 +12,12 @@ from markweave.jobs.ports import (
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.templates import SqlTemplateCatalogRepository
 from markweave.templates.ports import (
+    TemplateCatalogRepository,
     TemplateIdentityRepository,
+    TemplatePublicationRecoveryRepository,
     TemplatePublicationRepository,
     TemplateSearchRepository,
+    TemplateVersionQueryRepository,
 )
 
 pytestmark = pytest.mark.unit
@@ -48,7 +51,7 @@ def test_job_facade_delegates_to_bounded_modules(method: str, module: str) -> No
         ("add", "markweave.persistence.templates.identity"),
         ("update_metadata", "markweave.persistence.templates.identity"),
         ("begin_delete", "markweave.persistence.templates.identity"),
-        ("get", "markweave.persistence.templates.search"),
+        ("get", "markweave.persistence.templates.identity"),
         ("search", "markweave.persistence.templates.search"),
         ("reserve_create", "markweave.persistence.templates.publication"),
         ("finalize_version", "markweave.persistence.templates.publication"),
@@ -74,14 +77,39 @@ def test_provider_neutral_ports_are_split_by_responsibility() -> None:
         "expire_terminal",
         "complete_cleanup",
     }
-    assert set(TemplateIdentityRepository.__dict__) >= {
+    assert _public_methods(TemplateIdentityRepository) == {
         "add",
+        "get",
         "update_metadata",
+        "set_status",
+        "delete_guarded",
         "begin_delete",
+        "finalize_delete",
     }
-    assert set(TemplateSearchRepository.__dict__) >= {"get", "search"}
-    assert set(TemplatePublicationRepository.__dict__) >= {
+    assert _public_methods(TemplateSearchRepository) == {"search"}
+    assert _public_methods(TemplatePublicationRepository) == {
+        "create_versioned",
         "reserve_create",
+        "reserve_version",
         "finalize_version",
+        "publish_version",
+    }
+    assert _public_methods(TemplatePublicationRecoveryRepository) == {
+        "abort_pending",
+        "claim_stale_pending",
+        "release_pending_claim",
+        "pending_deletions",
+    }
+    assert _public_methods(TemplateVersionQueryRepository) == {
+        "get_version",
         "list_versions",
+    }
+    assert _public_methods(TemplateCatalogRepository) == set()
+
+
+def _public_methods(protocol: type[object]) -> set[str]:
+    return {
+        name
+        for name, value in protocol.__dict__.items()
+        if callable(value) and not name.startswith("_")
     }

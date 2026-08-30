@@ -14,7 +14,6 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.templates.common import _SqlTemplateStore, _template
 from markweave.templates.models import (
-    TemplateIdentity,
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
@@ -25,19 +24,7 @@ SYSTEM_TEMPLATE_SELECTION_ID = 1
 
 
 class _TemplateSearchRepository(_SqlTemplateStore):
-    """Bounded provider-neutral template lookup and filtered pagination."""
-
-    def get(self, template_id: UUID) -> TemplateIdentity | None:
-        try:
-            with DatabaseSession(self._engine) as database:
-                row = database.get(TemplateRow, str(template_id))
-                return (
-                    _template(row)
-                    if row is not None and row.publication_state == "published"
-                    else None
-                )
-        except SQLAlchemyError:
-            raise PersistenceError from None
+    """Bounded provider-neutral filtered template pagination."""
 
     def search(
         self,

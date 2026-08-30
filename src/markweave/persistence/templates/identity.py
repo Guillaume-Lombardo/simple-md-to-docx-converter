@@ -64,6 +64,18 @@ class _TemplateIdentityRepository(_SqlTemplateStore):
         except SQLAlchemyError:
             raise PersistenceError from None
 
+    def get(self, template_id: UUID) -> TemplateIdentity | None:
+        try:
+            with DatabaseSession(self._engine) as database:
+                row = database.get(TemplateRow, str(template_id))
+                return (
+                    _template(row)
+                    if row is not None and row.publication_state == "published"
+                    else None
+                )
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
     def update_metadata(
         self,
         template_id: UUID,

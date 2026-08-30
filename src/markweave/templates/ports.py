@@ -61,9 +61,7 @@ class TemplateIdentityRepository(Protocol):
 
 
 class TemplateSearchRepository(Protocol):
-    """Visibility-aware identity lookup and bounded search."""
-
-    def get(self, template_id: UUID) -> TemplateIdentity | None: ...
+    """Visibility-aware bounded identity search."""
 
     def search(
         self,
@@ -75,7 +73,7 @@ class TemplateSearchRepository(Protocol):
 
 
 class TemplatePublicationRepository(Protocol):
-    """Atomic version reservation, publication, recovery, and history."""
+    """Atomic version reservation and publication."""
 
     def create_versioned(
         self,
@@ -102,6 +100,19 @@ class TemplatePublicationRepository(Protocol):
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity: ...
 
+    def publish_version(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        version: TemplateVersion,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+
+class TemplatePublicationRecoveryRepository(Protocol):
+    """Recovery leases and cleanup discovery for interrupted publication."""
+
     def abort_pending(
         self, template_id: UUID, version_id: UUID, publication_token: UUID
     ) -> bool: ...
@@ -127,14 +138,9 @@ class TemplatePublicationRepository(Protocol):
         self,
     ) -> tuple[tuple[UUID, tuple[TemplateVersion, ...]], ...]: ...
 
-    def publish_version(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        version: TemplateVersion,
-        audit: TemplateAuditRecord,
-    ) -> TemplateIdentity: ...
+
+class TemplateVersionQueryRepository(Protocol):
+    """Immutable published-version lookup and history."""
 
     def get_version(
         self, template_id: UUID, version_id: UUID
@@ -147,6 +153,8 @@ class TemplateCatalogRepository(
     TemplateIdentityRepository,
     TemplateSearchRepository,
     TemplatePublicationRepository,
+    TemplatePublicationRecoveryRepository,
+    TemplateVersionQueryRepository,
     Protocol,
 ):
     """Complete catalog contract composed from bounded responsibilities."""
