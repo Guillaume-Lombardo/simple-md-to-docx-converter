@@ -8,7 +8,6 @@ import json
 import os
 import ssl
 import stat
-import tempfile
 import urllib.parse
 from collections.abc import Mapping
 from contextlib import suppress
@@ -752,30 +751,47 @@ def _download_to(writer: OutputWriter, command: _Command, response: _Response) -
 
 def _atomic_write(path: Path, content: bytes, *, force: bool) -> None:
     directory = path.parent
+    directory_descriptor = -1
     temporary: str | None = None
     try:
-        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
+        directory_descriptor = os.open(
+            directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        temporary = f".{path.name}.{uuid4().hex}"
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_descriptor,
+        )
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
         if force:
-            os.replace(temporary, path)
+            os.replace(
+                temporary,
+                path.name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+            )
         else:
             try:
-                os.link(temporary, path, follow_symlinks=False)
+                os.link(
+                    temporary,
+                    path.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
             except FileExistsError as error:
                 raise CliError(
                     "output_exists",
                     "The output path already exists; use --force to replace it.",
                 ) from error
-            os.unlink(temporary)
+            os.unlink(temporary, dir_fd=directory_descriptor)
         temporary = None
-        directory_descriptor = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(directory_descriptor)
-        finally:
-            os.close(directory_descriptor)
+        os.fsync(directory_descriptor)
     except OSError as error:
         raise CliError(
             "download_write_failed", "The download could not be saved."
@@ -783,7 +799,9 @@ def _atomic_write(path: Path, content: bytes, *, force: bool) -> None:
     finally:
         if temporary is not None:
             with suppress(FileNotFoundError):
-                os.unlink(temporary)
+                os.unlink(temporary, dir_fd=directory_descriptor)
+        if directory_descriptor >= 0:
+            os.close(directory_descriptor)
 
 
 def _confirm(context: CommandContext, command: _Command, prompt: str) -> None:

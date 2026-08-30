@@ -322,9 +322,22 @@ def test_download_without_force_never_overwrites_a_concurrently_created_target(
     _install(mocker, transport)
     real_link = os.link
 
-    def publish_after_competitor(source, destination, *, follow_symlinks=True):
-        Path(destination).write_bytes(b"concurrent-writer")
-        return real_link(source, destination, follow_symlinks=follow_symlinks)
+    def publish_after_competitor(
+        source,
+        destination,
+        *,
+        src_dir_fd=None,
+        dst_dir_fd=None,
+        follow_symlinks=True,
+    ):
+        output.write_bytes(b"concurrent-writer")
+        return real_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
 
     mocker.patch("markweave.cli.commands.templates.os.link", publish_after_competitor)
 
@@ -343,6 +356,67 @@ def test_download_without_force_never_overwrites_a_concurrently_created_target(
     assert output.read_bytes() == b"concurrent-writer"
     assert not list(tmp_path.glob(".template.docx.*"))
     assert "already exists" in capsys.readouterr().err
+
+
+def test_download_keeps_publication_and_cleanup_on_one_parent_directory(
+    mocker, tmp_path: Path, capsys
+) -> None:
+    content = b"immutable-docx"
+    digest = hashlib.sha256(content).hexdigest()
+    parent = tmp_path / "download"
+    parent.mkdir()
+    moved_parent = tmp_path / "download-moved"
+    output = parent / "result.docx"
+    transport = _Transport(
+        _response(
+            200,
+            headers={"content-type": DOCX_TYPE, "etag": f'"sha256-{digest}"'},
+            content=content,
+        )
+    )
+    _install(mocker, transport)
+    real_link = os.link
+
+    def publish_after_parent_replacement(
+        source,
+        destination,
+        *,
+        src_dir_fd=None,
+        dst_dir_fd=None,
+        follow_symlinks=True,
+    ):
+        parent.rename(moved_parent)
+        parent.mkdir()
+        (parent / "replacement-marker").write_bytes(b"replacement")
+        return real_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    mocker.patch(
+        "markweave.cli.commands.templates.os.link", publish_after_parent_replacement
+    )
+
+    assert (
+        main(
+            (
+                "templates",
+                "download",
+                TEMPLATE_ID,
+                "--output",
+                str(output),
+            )
+        )
+        == 0
+    )
+    assert (moved_parent / "result.docx").read_bytes() == content
+    assert (parent / "replacement-marker").read_bytes() == b"replacement"
+    assert not list(moved_parent.glob(".result.docx.*"))
+    assert not list(parent.glob(".result.docx.*"))
+    assert not capsys.readouterr().err
 
 
 def test_integrity_failure_never_creates_download(
