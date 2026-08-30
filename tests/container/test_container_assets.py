@@ -126,7 +126,7 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
         assert f"ARG {artifact}_SHA256=" in containerfile
     assert "rpm --checksig /tmp/google-chrome.rpm" in containerfile
     assert "RPM_INVENTORY_SHA256" in containerfile
-    assert "uv sync --locked --no-dev --no-editable" in containerfile
+    assert "uv sync --locked --no-dev --no-editable --extra all" in containerfile
 
 
 def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:

@@ -1,16 +1,7 @@
-"""Markdown to DOCX and PDF converter."""
+"""Markweave's intentionally small supported Python import surface."""
 
-from markweave.version import VERSION
+from markweave.version import VERSION as _VERSION
 
-__version__ = VERSION
+__version__ = _VERSION
 
-__all__ = ["__version__", "create_app"]
-
-
-def __getattr__(name: str) -> object:
-    """Load the optional server factory only when public callers request it."""
-    if name == "create_app":
-        from markweave.app import create_app  # noqa: PLC0415 - intentional lazy import
-
-        return create_app
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["__version__"]

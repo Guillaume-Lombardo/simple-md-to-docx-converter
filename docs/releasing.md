@@ -128,8 +128,8 @@ For released version `<version>`:
 
 - verify `https://pypi.org/project/markweave/<version>/` shows Apache-2.0 metadata, the exact wheel
   and sdist, and attestations;
-- install the wheel into a fresh Python 3.14 environment and verify
-  `from markweave import __version__, create_app`, the exact version, and callable factory;
+- install the wheel into fresh Python 3.14 environments for the base package and every supported
+  extra, then verify `from markweave import __version__`, the exact version, and the installed CLI;
 - verify GHCR tag `<version>` resolves to the workflow digest and is anonymously pullable;
 - verify provenance identifies this repository and reviewed main SHA;
 - verify the GitHub tag `v<version>` targets that same SHA and every release evidence file is

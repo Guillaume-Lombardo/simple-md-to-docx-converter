@@ -24,6 +24,8 @@ ENVIRONMENT_TIMEOUT_SECONDS = 120
 INSTALL_TIMEOUT_SECONDS = 300
 IMPORT_TIMEOUT_SECONDS = 60
 CONSOLE_TIMEOUT_SECONDS = 60
+CONTAINERFILE_NAME = "Containerfile"
+FINAL_IMAGE_INSTALL_COMMAND = "uv sync --locked --no-dev --no-editable --extra all"
 
 PUBLIC_IMPORT_CHECK = """\
 from importlib.metadata import version
@@ -33,14 +35,73 @@ import sys
 installed = version(sys.argv[1])
 if installed != sys.argv[2]:
     raise SystemExit(f"unexpected installed version: {installed}")
-from markweave import __version__, create_app
+import markweave
+from markweave import __version__
 if __version__ != sys.argv[2]:
     raise SystemExit(f"unexpected markweave.__version__: {__version__}")
-if not callable(create_app):
-    raise SystemExit("markweave.create_app is not callable")
+if markweave.__all__ != ["__version__"]:
+    raise SystemExit("markweave exposes an unsupported Python API")
+if hasattr(markweave, "create_app"):
+    raise SystemExit("markweave exposes an unsupported server factory")
 if find_spec("md_converter") is not None:
     raise SystemExit("legacy md_converter import remains installed")
 """
+
+EXTRA_IMPORT_CHECK = """\
+from importlib.util import find_spec
+import sys
+
+for module in sys.argv[1:]:
+    if find_spec(module) is None:
+        raise SystemExit(f"missing required optional dependency: {module}")
+"""
+
+BASE_ISOLATION_CHECK = """\
+from importlib.util import find_spec
+import sys
+
+for module in sys.argv[1:]:
+    if find_spec(module) is not None:
+        raise SystemExit(f"base install unexpectedly contains optional dependency: {module}")
+"""
+
+BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg")
+
+
+@dataclass(frozen=True)
+class InstallationProfile:
+    """One supported wheel-installation dependency surface."""
+
+    name: str
+    extra: str | None
+    required_modules: tuple[str, ...]
+
+
+_SERVER_MODULES = (
+    "alembic",
+    "argon2",
+    "cairosvg",
+    "fastapi",
+    "markdown_it",
+    "mdit_py_plugins",
+    "PIL",
+    "pydantic_settings",
+    "pypdf",
+    "multipart",
+    "yaml",
+    "sqlalchemy",
+    "tinycss2",
+    "uvicorn",
+)
+SUPPORTED_INSTALLATION_PROFILES = (
+    InstallationProfile("base", None, ()),
+    InstallationProfile("server", "server", _SERVER_MODULES),
+    InstallationProfile("standalone", "standalone", _SERVER_MODULES),
+    InstallationProfile(
+        "distributed", "distributed", (*_SERVER_MODULES, "boto3", "psycopg")
+    ),
+    InstallationProfile("all", "all", (*_SERVER_MODULES, "boto3", "psycopg")),
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +110,19 @@ class CleanInstallResult:
 
     wheel_name: str
     sha256: str
+
+
+def verify_final_image_dependency_union(project_root: Path) -> None:
+    """Require the final image to install the complete supported dependency union."""
+    containerfile = project_root / CONTAINERFILE_NAME
+    try:
+        if not containerfile.is_file() or containerfile.is_symlink():
+            raise OSError("Containerfile is not a regular file")
+        content = containerfile.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ArtifactError(f"cannot read final image definition: {error}") from error
+    if FINAL_IMAGE_INSTALL_COMMAND not in content:
+        raise ArtifactError("final image does not install the markweave[all] union")
 
 
 def _copy_manifest_bound_wheel(source: Path, destination: Path, digest: str) -> None:
@@ -99,8 +173,9 @@ def verify_clean_install(
     expected_name: str,
     expected_version: str,
     manifest_name: str = MANIFEST_NAME,
+    project_root: Path | None = None,
 ) -> CleanInstallResult:
-    """Verify integrity, copy by digest, then install and import in isolation."""
+    """Verify integrity and every supported clean wheel-installation profile."""
     artifacts = verify_release(
         directory,
         expected_name=expected_name,
@@ -111,6 +186,7 @@ def verify_clean_install(
     uv = shutil.which("uv")
     if uv is None:
         raise ArtifactError("uv executable was not found")
+    verify_final_image_dependency_union(project_root or Path.cwd())
 
     with tempfile.TemporaryDirectory(prefix="md-converter-wheel-") as temporary:
         root = Path(temporary)
@@ -118,65 +194,95 @@ def verify_clean_install(
         private_artifacts.mkdir(mode=0o700)
         private_wheel = private_artifacts / artifacts.wheel.name
         _copy_manifest_bound_wheel(artifacts.wheel, private_wheel, wheel_digest)
-        environment = root / "venv"
-        python = environment / "bin" / "python"
-        run_command(
-            (
-                uv,
-                "venv",
-                "--python",
-                "3.14",
-                "--no-project",
-                str(environment),
-            ),
-            cwd=root,
-            label="clean environment creation",
-            timeout=ENVIRONMENT_TIMEOUT_SECONDS,
-        )
-        run_command(
-            (
-                uv,
-                "pip",
-                "install",
-                "--python",
-                str(python),
-                "--strict",
-                str(private_wheel),
-            ),
-            cwd=root,
-            label="exact wheel installation",
-            timeout=INSTALL_TIMEOUT_SECONDS,
-        )
-        run_command(
-            (
-                str(python),
-                "-I",
-                "-c",
-                PUBLIC_IMPORT_CHECK,
-                expected_name,
-                expected_version,
-            ),
-            cwd=root,
-            label="isolated public import check",
-            timeout=IMPORT_TIMEOUT_SECONDS,
-        )
-        console = environment / "bin" / "markweave"
-        for arguments, label in (
-            (
-                (str(python), "-I", str(console), "--version"),
-                "isolated console version check",
-            ),
-            (
-                (str(python), "-I", str(console), "--help"),
-                "isolated console help check",
-            ),
-        ):
+        for profile in SUPPORTED_INSTALLATION_PROFILES:
+            environment = root / f"venv-{profile.name}"
+            python = environment / "bin" / "python"
             run_command(
-                arguments,
+                (
+                    uv,
+                    "venv",
+                    "--python",
+                    "3.14",
+                    "--no-project",
+                    str(environment),
+                ),
                 cwd=root,
-                label=label,
-                timeout=CONSOLE_TIMEOUT_SECONDS,
+                label=f"clean {profile.name} environment creation",
+                timeout=ENVIRONMENT_TIMEOUT_SECONDS,
             )
+            requirement = str(private_wheel)
+            if profile.extra is not None:
+                requirement = f"{requirement}[{profile.extra}]"
+            run_command(
+                (
+                    uv,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(python),
+                    "--strict",
+                    requirement,
+                ),
+                cwd=root,
+                label=f"exact {profile.name} wheel installation",
+                timeout=INSTALL_TIMEOUT_SECONDS,
+            )
+            run_command(
+                (
+                    str(python),
+                    "-I",
+                    "-c",
+                    PUBLIC_IMPORT_CHECK,
+                    expected_name,
+                    expected_version,
+                ),
+                cwd=root,
+                label=f"isolated {profile.name} public import check",
+                timeout=IMPORT_TIMEOUT_SECONDS,
+            )
+            if profile.name == "base":
+                run_command(
+                    (
+                        str(python),
+                        "-I",
+                        "-c",
+                        BASE_ISOLATION_CHECK,
+                        *BASE_FORBIDDEN_MODULES,
+                    ),
+                    cwd=root,
+                    label="base optional dependency isolation check",
+                    timeout=IMPORT_TIMEOUT_SECONDS,
+                )
+            elif profile.required_modules:
+                run_command(
+                    (
+                        str(python),
+                        "-I",
+                        "-c",
+                        EXTRA_IMPORT_CHECK,
+                        *profile.required_modules,
+                    ),
+                    cwd=root,
+                    label=f"isolated {profile.name} optional dependency check",
+                    timeout=IMPORT_TIMEOUT_SECONDS,
+                )
+            console = environment / "bin" / "markweave"
+            for arguments, label in (
+                (
+                    (str(python), "-I", str(console), "--version"),
+                    f"isolated {profile.name} console version check",
+                ),
+                (
+                    (str(python), "-I", str(console), "--help"),
+                    f"isolated {profile.name} console help check",
+                ),
+            ):
+                run_command(
+                    arguments,
+                    cwd=root,
+                    label=label,
+                    timeout=CONSOLE_TIMEOUT_SECONDS,
+                )
     return CleanInstallResult(wheel_name=artifacts.wheel.name, sha256=wheel_digest)
 
 

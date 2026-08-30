@@ -2,7 +2,7 @@
 ticket: T40
 linear_id: G1L-418
 linear_url: https://linear.app/g1lom/issue/G1L-418/t40-clarify-and-optimize-the-python-distribution
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,11 +36,14 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed the public Python surface, exact extras matrix, and exclusive distribution-file ownership.
+* 2026-08-30: Implementation started on `feat/T40-python-distribution` from `d3c7a2f`. This work owns package metadata, optional dependency groups, release-install verification, and narrowly scoped PyPI distribution documentation.
+* 2026-08-30: Implemented the public `markweave.__version__` surface, base/server/profile/all extras, PyPI metadata, clean-install verification, and final-image `all` selection. The real release-artifact test verified all five clean installation profiles. A minimal deferred-import integration remains after T44 releases `app.py`: it must load S3 dependencies only for the distributed profile so `server` stays S3-free and selected missing backends produce feature-local guidance.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
+* T44 temporarily owns `app.py` and storage lifecycle changes; T40 must not edit those files until that ownership is released.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
 
