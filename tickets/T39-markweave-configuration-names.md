@@ -43,6 +43,11 @@ Adopt the Markweave brand for application configuration while preserving determi
   tests. Preserved `md_converter_session`, `__Host-md_converter_csrf`, and
   `ghcr.io/guillaume-lombardo/md-converter`; validated targeted configuration, documentation,
   quickstart, and Compose-rendering tests.
+* 2026-08-30: Removed baked canonical host/port image environment defaults so legacy-only upgraded
+  deployments do not acquire accidental dual definitions. The final-image API smoke now launches a
+  complete legacy-only configuration with `MD_CONVERTER_HOST=0.0.0.0` and
+  `MD_CONVERTER_PORT=18080`, verifies live/ready endpoints and resolved settings, then continues
+  with the canonical workflow.
 * 2026-08-30: Started implementation on `feat/T39-configuration-names` from verified `main` at `381e74e9`; this workstream exclusively owns settings aliases, public environment names, Compose/quickstart propagation, compatibility tests, and configuration migration documentation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed typed alias comparison and preserved 0.x cookie and GHCR identities explicitly.

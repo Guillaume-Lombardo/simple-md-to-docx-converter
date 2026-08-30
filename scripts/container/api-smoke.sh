@@ -3,12 +3,14 @@ set -euo pipefail
 
 readonly image="${1:-localhost/md-converter:t20}"
 readonly container_name=md-converter-t20-api-smoke
+readonly legacy_container_name=md-converter-t20-legacy-api-smoke
 readonly clamav_name=md-converter-t20-api-smoke-clamav
 readonly network_name=md-converter-t20-api-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=false
+legacy_created=false
 clamav_created=false
 network_created=false
 template_directory="$(mktemp -d)"
@@ -16,6 +18,9 @@ template_directory="$(mktemp -d)"
 cleanup() {
   if [[ "$created" == true ]]; then
     podman rm --force "$container_name" >/dev/null 2>&1 || true
+  fi
+  if [[ "$legacy_created" == true ]]; then
+    podman rm --force "$legacy_container_name" >/dev/null 2>&1 || true
   fi
   if [[ "$clamav_created" == true ]]; then
     podman rm --force "$clamav_name" >/dev/null 2>&1 || true
@@ -27,7 +32,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for name in "$container_name" "$clamav_name"; do
+for name in "$container_name" "$legacy_container_name" "$clamav_name"; do
   if podman container exists "$name"; then
     echo "Refusing to replace pre-existing container $name." >&2
     exit 1
@@ -117,6 +122,54 @@ settings=(
   --env MARKWEAVE_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=60
   --env MARKWEAVE_CLAMAV_HOST=clamav
 )
+
+legacy_settings=()
+for setting in "${settings[@]}"; do
+  legacy_settings+=("${setting/MARKWEAVE_/MD_CONVERTER_}")
+done
+
+podman run --detach \
+  --name "$legacy_container_name" \
+  --network "$network_name" \
+  --user "$runtime_uid:0" \
+  --read-only \
+  --cap-drop=all \
+  --security-opt=no-new-privileges \
+  --security-opt="seccomp=$seccomp_profile" \
+  --memory=768m \
+  --cpus=2 \
+  --pids-limit=256 \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+  --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
+  --tmpfs /data:rw,nosuid,nodev,noexec,size=64m,mode=0770 \
+  --shm-size=128m \
+  --publish 127.0.0.1::18080 \
+  "${legacy_settings[@]}" \
+  --env MD_CONVERTER_HOST=0.0.0.0 \
+  --env MD_CONVERTER_PORT=18080 \
+  "$image" embedded-worker >/dev/null
+legacy_created=true
+
+legacy_port="$(podman port "$legacy_container_name" 18080/tcp | sed 's/.*://')"
+for _ in $(seq 1 60); do
+  if curl --fail --silent --show-error "http://127.0.0.1:$legacy_port/health/live" \
+      | grep -Fq '"status":"ok"'; then
+    break
+  fi
+  if ! podman container exists "$legacy_container_name" || \
+     [[ "$(podman inspect "$legacy_container_name" --format '{{.State.Running}}')" != true ]]; then
+    podman logs "$legacy_container_name" >&2
+    exit 1
+  fi
+  sleep 0.25
+done
+curl --fail --silent --show-error "http://127.0.0.1:$legacy_port/health/ready" \
+  | grep -Fq '"status":"ready"'
+podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
+  'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("0.0.0.0", 18080)'
+podman rm --force "$legacy_container_name" >/dev/null
+legacy_created=false
+echo "Final-image legacy configuration smoke passed for $image."
 
 podman run --detach \
   --name "$container_name" \

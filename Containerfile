@@ -125,9 +125,7 @@ ENV PATH=/opt/md-converter/venv/bin:/usr/local/bin:/usr/bin \
     XDG_CACHE_HOME=/work/xdg/cache \
     XDG_CONFIG_HOME=/work/xdg/config \
     XDG_DATA_HOME=/work/xdg/data \
-    XDG_RUNTIME_DIR=/work/xdg/runtime \
-    MARKWEAVE_HOST=0.0.0.0 \
-    MARKWEAVE_PORT=8080
+    XDG_RUNTIME_DIR=/work/xdg/runtime
 
 ARG BASE_IMAGE
 LABEL org.opencontainers.image.title="Markdown to DOCX and PDF Converter" \
