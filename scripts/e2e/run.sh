@@ -349,6 +349,9 @@ uv run python -m tests.e2e.service_workflow exercise \
 
 uv run python -m tests.e2e.cli_workflow --container "$application_name" --profile "$profile"
 
+uv run python -m tests.e2e.conversion_cli_workflow \
+  --container "$application_name" --profile "$profile"
+
 podman exec \
   --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
