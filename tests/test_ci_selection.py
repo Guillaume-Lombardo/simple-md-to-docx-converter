@@ -113,6 +113,24 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "src/markweave/recovery.py",
+        "src/markweave/recovery_service.py",
+        "src/markweave/recovery_manifest.py",
+        "src/markweave/cli/commands/recovery.py",
+    ],
+)
+def test_recovery_behavior_changes_select_final_image_validation(path: str) -> None:
+    """Recovery behavior always exercises both profiles in the final image."""
+    selected = select_domains([path])
+    assert "container" in selected
+    assert "e2e-distributed" in selected
+    assert "e2e-standalone" in selected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
         ".github/ci/domains.json",
         ".github/workflows/ci.yml",
         "scripts/ci/run_domain.py",
