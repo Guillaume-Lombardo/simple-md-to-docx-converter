@@ -16,7 +16,7 @@ from markweave.cli.commands.conversion_http import (
     ConversionHttpClient,
     ConversionHttpResponse,
 )
-from markweave.cli.errors import CliError, unavailable
+from markweave.cli.errors import CliError
 from markweave.cli.output import OutputWriter
 from markweave.cli.profiles import ProfileStore, validate_profile_name
 from markweave.cli.types import CommandContext
@@ -85,9 +85,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         ),
         command_handler=_convert,
     )
-    convert.add_argument(
-        "source", nargs="?", action=_RequestOption, help="Markdown or ZIP input."
-    )
+    convert.add_argument("source", action=_RequestOption, help="Markdown or ZIP input.")
     convert.add_argument(
         "--output",
         choices=("docx", "pdf", "both"),
@@ -129,7 +127,6 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "jobs wait",
         _wait_job,
         defaults={"poll_interval": str(_DEFAULT_POLL_INTERVAL)},
-        required=False,
     )
     wait.add_argument(
         "--poll-interval",
@@ -177,15 +174,9 @@ def _job_command(
     handler,
     *,
     defaults: dict[str, Any] | None = None,
-    required: bool = True,
 ) -> None:
     _configure(parser, command, handler, defaults=defaults)
-    parser.add_argument(
-        "job_id",
-        nargs=None if required else "?",
-        action=_RequestOption,
-        metavar="JOB_ID",
-    )
+    parser.add_argument("job_id", action=_RequestOption, metavar="JOB_ID")
     _profile_argument(parser)
 
 
@@ -202,8 +193,6 @@ def _download_command(parser: argparse.ArgumentParser, command: str, handler) ->
 
 
 def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -> None:
-    if request.values.get("source") is None:
-        raise unavailable("convert")
     source_path = Path(_string(request, "source"))
     source_kind, source = _read_source(source_path)
     output = _string(request, "output")
@@ -276,8 +265,6 @@ def _show_job(context: CommandContext, writer: OutputWriter, request: _Request) 
 
 
 def _wait_job(context: CommandContext, writer: OutputWriter, request: _Request) -> None:
-    if request.values.get("job_id") is None:
-        raise unavailable("jobs wait")
     if context.timeout_seconds is None:
         raise CliError(
             "wait_timeout_required",

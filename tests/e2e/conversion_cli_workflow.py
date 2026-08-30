@@ -27,8 +27,8 @@ def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
     )
     arguments = parser.parse_args()
     prefix = _exec_prefix(arguments.container, tty=False)
-    username = "admin"
-    password = "t20-test-password"  # noqa: S105 - final-image fixture only
+    username = "e2e-admin"
+    password = "e2e-admin-password"  # noqa: S105 - final-image fixture only
     setup = _inside(
         arguments.container,
         "from pathlib import Path; "
@@ -143,6 +143,7 @@ def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
     )
     if cleanup.returncode != 0:
         return _failure("cleanup", cleanup.returncode)
+    print(f"Conversion CLI final-image E2E passed for {arguments.profile}.")
     return 0
 
 

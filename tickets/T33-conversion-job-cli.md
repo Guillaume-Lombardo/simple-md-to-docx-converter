@@ -40,6 +40,8 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 * 2026-08-30: Implemented HTTP-only conversion submission, owner-scoped job inspection/control, bounded polling, safe idempotent retry, and atomic result/manifest downloads with dedicated unit, real-HTTP integration, and final-image drivers.
 * 2026-08-30: Verified 1,216 unit tests and 1,971 locally runnable tests at 95.19% branch coverage; the focused T33 modules reach 91%. The exact final image passed the standalone and distributed T33 drivers. The canonical suite remains externally blocked by absent PostgreSQL/S3 test settings, and the existing distributed API smoke fails after the T33 driver on `mermaid_unavailable`.
 * 2026-08-30: Kept `tests/unit/test_cli.py` and shared container smoke scripts identical to the branch base pending the approved T34 -> T33 -> T35 integration order; final shared-runner wiring is deferred until T34 is merged into `main`.
+* 2026-08-30: Integrated current `main` through T34 and the T42 worker decomposition without conflicts, removed only T33's obsolete shared placeholder cases, and added exactly one conversion-driver invocation to the final-image runner.
+* 2026-08-30: Verified the complete standalone and distributed final-image runners on post-T42 image `a520ed460bf749e5acb26e629de5eb1add2b81290e2b7517e4295698715800e1`; both T33 drivers and all surrounding security, browser, template, restart, recovery, and checkpoint workflows passed. Current `main` at `c6a7e22` is an ancestor of the implementation branch.
 
 ## Coordination
 

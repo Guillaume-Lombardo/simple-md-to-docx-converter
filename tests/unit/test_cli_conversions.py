@@ -19,7 +19,7 @@ from markweave.cli.commands.conversion_http import (
     _validate_destination,
 )
 from markweave.cli.errors import CliError
-from markweave.cli.main import main
+from markweave.cli.main import build_parser, main
 from markweave.cli.types import ConnectionProfile
 
 pytestmark = pytest.mark.unit
@@ -28,6 +28,16 @@ JOB_ID = "11111111-1111-4111-8111-111111111111"
 CORRELATION_ID = "22222222-2222-4222-8222-222222222222"
 TEMPLATE_ID = "33333333-3333-4333-8333-333333333333"
 VERSION_ID = "44444444-4444-4444-8444-444444444444"
+
+
+@pytest.mark.parametrize("arguments", (("convert",), ("jobs", "wait")))
+def test_conversion_commands_require_their_positional_operands(
+    arguments: tuple[str, ...],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(arguments)
+
+    assert raised.value.code == 2
 
 
 def _job(state: str = "queued", *, progress: int = 0) -> dict[str, object]:
