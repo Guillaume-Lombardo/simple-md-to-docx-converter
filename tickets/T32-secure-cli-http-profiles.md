@@ -35,6 +35,7 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Progress
 
+* 2026-08-30: Added the rootless final-image CLI workflow to the existing Podman E2E harness. It drives the installed executable through a PTY, sends the fixture password only after the non-echoing prompt, verifies login/whoami/logout, and asserts non-interactive renewal fails safely.
 * 2026-08-30: Implemented the authentication command family on this branch: HTTPS-only standard-library transport, atomic owner-only XDG profiles, non-echoing prompts, login/logout/session inspection, and restricted-session password renewal with a mandatory fresh login. Added unit, shell, and real loopback-HTTP coverage for safe profile handling, path/symlink attacks, hostile state, CSRF, redaction, mismatch, expiration cleanup, and transport serialization. Pending independent review and full repository validation before publication.
 * 2026-08-30: Started implementation on `feat/T32-secure-cli-profiles` from verified `main` at `ca3fe44`; this workstream owns the pre-registered authentication command family, HTTP transport, and secure XDG profile storage, and must not modify T39-owned configuration files.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
