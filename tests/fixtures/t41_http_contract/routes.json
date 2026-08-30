@@ -1,0 +1,496 @@
+[
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "openapi",
+    "path": "/openapi.json",
+    "response_class": null,
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "swagger_ui_html",
+    "path": "/docs",
+    "response_class": null,
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "swagger_ui_redirect",
+    "path": "/docs/oauth2-redirect",
+    "response_class": null,
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "name": "redoc_html",
+    "path": "/redoc",
+    "response_class": null,
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "live",
+    "path": "/health/live",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "ready",
+    "path": "/health/ready",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "metrics",
+    "path": "/metrics",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_audit_records",
+    "path": "/api/v1/audit",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "browser_root",
+    "path": "/",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "conversion_stylesheet",
+    "path": "/static/conversion.css",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "conversion_javascript",
+    "path": "/static/conversion.js",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "administration_stylesheet",
+    "path": "/static/administration.css",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "administration_javascript",
+    "path": "/static/administration.js",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "login_page",
+    "path": "/login",
+    "response_class": "HTMLResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "password_change_page",
+    "path": "/change-password",
+    "response_class": "HTMLResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "POST"
+    ],
+    "name": "browser_password_change",
+    "path": "/change-password",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "POST"
+    ],
+    "name": "browser_logout",
+    "path": "/logout",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "conversion_page",
+    "path": "/convert",
+    "response_class": "HTMLResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "GET"
+    ],
+    "name": "templates_page",
+    "path": "/templates",
+    "response_class": "HTMLResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": false,
+    "methods": [
+      "POST"
+    ],
+    "name": "browser_login",
+    "path": "/login",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "api_login",
+    "path": "/api/v1/login",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "api_logout",
+    "path": "/api/v1/logout",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "api_session",
+    "path": "/api/v1/session",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "change_own_password",
+    "path": "/api/v1/password",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_users",
+    "path": "/api/v1/admin/users",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "create_user",
+    "path": "/api/v1/admin/users",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 201
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PATCH"
+    ],
+    "name": "set_user_active",
+    "path": "/api/v1/admin/users/{user_id}/active",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "reset_user_password",
+    "path": "/api/v1/admin/users/{user_id}/password",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PATCH"
+    ],
+    "name": "set_user_password_change_required",
+    "path": "/api/v1/admin/users/{user_id}/password-change-required",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "create_conversion",
+    "path": "/api/v1/conversions",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 202
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_conversions",
+    "path": "/api/v1/conversions",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "get_conversion",
+    "path": "/api/v1/conversions/{job_id}",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "DELETE"
+    ],
+    "name": "cancel_conversion",
+    "path": "/api/v1/conversions/{job_id}",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_conversion",
+    "path": "/api/v1/conversions/{job_id}/result",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_conversion_manifest",
+    "path": "/api/v1/conversions/{job_id}/result/manifest",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_templates",
+    "path": "/api/v1/templates",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "create_template",
+    "path": "/api/v1/templates",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 201
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "get_template",
+    "path": "/api/v1/templates/{template_id}",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PATCH"
+    ],
+    "name": "update_template",
+    "path": "/api/v1/templates/{template_id}",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PUT"
+    ],
+    "name": "replace_template",
+    "path": "/api/v1/templates/{template_id}/content",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 201
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_template_versions",
+    "path": "/api/v1/templates/{template_id}/versions",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_current_template",
+    "path": "/api/v1/templates/{template_id}/content",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_template_version",
+    "path": "/api/v1/templates/{template_id}/versions/{version_id}/content",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "restore_template_version",
+    "path": "/api/v1/templates/{template_id}/versions/{version_id}/restore",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 201
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "POST"
+    ],
+    "name": "archive_template",
+    "path": "/api/v1/templates/{template_id}/archive",
+    "response_class": "DefaultPlaceholder",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "DELETE"
+    ],
+    "name": "delete_template",
+    "path": "/api/v1/templates/{template_id}",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PUT"
+    ],
+    "name": "set_preferred_template",
+    "path": "/api/v1/templates/{template_id}/preferred",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "DELETE"
+    ],
+    "name": "clear_preferred_template",
+    "path": "/api/v1/template-preference",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PUT"
+    ],
+    "name": "set_system_fallback_template",
+    "path": "/api/v1/templates/{template_id}/system-fallback",
+    "response_class": "DefaultPlaceholder",
+    "status_code": 204
+  }
+]

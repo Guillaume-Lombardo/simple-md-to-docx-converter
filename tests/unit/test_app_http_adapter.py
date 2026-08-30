@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -48,6 +48,64 @@ from markweave.templates.models import (
 from markweave.templates.service import TemplateService
 from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
+
+_HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+def _load_http_contract_fixture(filename: str) -> Any:
+    return json.loads((_HTTP_CONTRACT_FIXTURES / filename).read_text(encoding="utf-8"))
+
+
+def _assert_json_contract(actual: Any, expected: Any, *, location: str) -> None:
+    assert type(actual) is type(expected), (
+        f"{location} type changed: expected {type(expected).__name__}, "
+        f"got {type(actual).__name__}"
+    )
+    if isinstance(expected, dict):
+        missing = sorted(set(expected) - set(actual))
+        unexpected = sorted(set(actual) - set(expected))
+        assert not missing and not unexpected, (
+            f"{location} keys changed: missing={missing}, unexpected={unexpected}"
+        )
+        for key in sorted(expected):
+            _assert_json_contract(
+                actual[key], expected[key], location=f"{location}/{key}"
+            )
+        return
+    if isinstance(expected, list):
+        assert len(actual) == len(expected), (
+            f"{location} length changed: expected {len(expected)}, got {len(actual)}"
+        )
+        for index, (actual_item, expected_item) in enumerate(
+            zip(actual, expected, strict=True)
+        ):
+            _assert_json_contract(
+                actual_item, expected_item, location=f"{location}/{index}"
+            )
+        return
+    assert actual == expected, (
+        f"{location} changed: expected {expected!r}, got {actual!r}"
+    )
+
+
+def _route_manifest(app: FastAPI) -> list[dict[str, Any]]:
+    manifest = []
+    for route in app.routes:
+        response_class = getattr(route, "response_class", None)
+        response_class_name = getattr(response_class, "__name__", None)
+        if response_class is not None and response_class_name is None:
+            response_class_name = type(response_class).__name__
+        manifest.append(
+            {
+                "path": getattr(route, "path", None),
+                "methods": sorted(getattr(route, "methods", ()) or ()),
+                "name": getattr(route, "name", None),
+                "include_in_schema": getattr(route, "include_in_schema", None),
+                "status_code": getattr(route, "status_code", None),
+                "response_class": response_class_name,
+            }
+        )
+    return manifest
 
 
 def isolated_client(
@@ -807,6 +865,19 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
 
 @pytest.mark.unit
+def test_http_contract_difference_reports_changed_element() -> None:
+    with pytest.raises(
+        AssertionError,
+        match="contract/routes/0/name changed: expected 'live', got 'ready'",
+    ):
+        _assert_json_contract(
+            [{"name": "ready"}],
+            [{"name": "live"}],
+            location="contract/routes",
+        )
+
+
+@pytest.mark.unit
 def test_http_contract_is_unchanged_for_both_storage_profiles(
     mocker: MockerFixture,
 ) -> None:
@@ -819,27 +890,18 @@ def test_http_contract_is_unchanged_for_both_storage_profiles(
         components=_lifecycle_components(mocker, mocker.Mock()),
     )
 
-    def contract(app: FastAPI) -> tuple[str, str]:
-        schema = json.dumps(
-            app.openapi(), sort_keys=True, separators=(",", ":")
-        ).encode()
-        routes = [
-            (
-                getattr(route, "path", None),
-                sorted(getattr(route, "methods", ()) or ()),
-                getattr(route, "name", None),
-            )
-            for route in app.routes
-        ]
-        manifest = json.dumps(routes, separators=(",", ":")).encode()
-        return hashlib.sha256(schema).hexdigest(), hashlib.sha256(manifest).hexdigest()
+    expected_openapi = _load_http_contract_fixture("openapi.json")
+    expected_routes = _load_http_contract_fixture("routes.json")
 
-    expected = (
-        "271f640246d8c24adfbc14cf24e6d44ceec86fd0f7b5e28a996a726709d44c0d",
-        "ba5b919325987dbc702bcfae264d67e26d2ff6dab3fbbf3968c8a668c933ce33",
-    )
-    assert contract(standalone) == expected
-    assert contract(distributed) == expected
+    for profile, app in (("standalone", standalone), ("distributed", distributed)):
+        _assert_json_contract(
+            app.openapi(), expected_openapi, location=f"{profile}/openapi"
+        )
+        _assert_json_contract(
+            _route_manifest(app),
+            expected_routes,
+            location=f"{profile}/routes",
+        )
 
 
 @pytest.mark.unit
