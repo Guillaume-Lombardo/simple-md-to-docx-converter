@@ -100,6 +100,7 @@ class _PostgreSQLEngine:
 
 class _S3:
     def __init__(self) -> None:
+        self.closed = False
         self.buckets: dict[str, dict[str, bytes]] = {
             "source": {},
             "target": {},
@@ -130,6 +131,9 @@ class _S3:
 
     def delete_object(self, *, Bucket, Key):
         self.buckets[Bucket].pop(Key, None)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _database(path: Path, username: str):
@@ -220,6 +224,8 @@ def test_s3_adapter_copies_checksums_and_removes_failed_restore_objects(
     assert fake.buckets["target"][key] == b"provider-object"
     target.remove(keys)
     assert fake.buckets["target"] == {}
+    target.close()
+    assert fake.closed
 
 
 @pytest.mark.parametrize(

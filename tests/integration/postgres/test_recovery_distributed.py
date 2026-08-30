@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, closing
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,6 +36,17 @@ def _client():
         aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
+
+
+@pytest.fixture
+def s3_client() -> Iterator[object]:
+    """Own the real provider client for the complete integration test."""
+
+    client = _client()
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 def _configuration(bucket: str) -> S3Configuration:
@@ -102,8 +114,9 @@ def _prepare_source(client, bucket: str) -> tuple[str, bytes]:
 
 def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
     tmp_path: Path,
+    s3_client,
 ) -> None:
-    client = _client()
+    client = s3_client
     source_bucket = os.environ["MARKWEAVE_TEST_S3_BUCKET"]
     key, content = _prepare_source(client, source_bucket)
     service = RecoveryService()
@@ -137,9 +150,8 @@ def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
             )
         )
         assert result.backup_id == manifest.backup_id
-        assert (
-            client.get_object(Bucket=target_bucket, Key=key)["Body"].read() == content
-        )
+        with closing(client.get_object(Bucket=target_bucket, Key=key)["Body"]) as body:
+            assert body.read() == content
         engine = create_database_engine(target_database)
         try:
             with engine.connect() as connection:
@@ -150,8 +162,9 @@ def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
 
 def test_distributed_restore_cleans_target_bucket_when_database_is_not_isolated(
     tmp_path: Path,
+    s3_client,
 ) -> None:
-    client = _client()
+    client = s3_client
     source_bucket = os.environ["MARKWEAVE_TEST_S3_BUCKET"]
     _prepare_source(client, source_bucket)
     service = RecoveryService()

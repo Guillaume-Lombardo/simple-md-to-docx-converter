@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,7 +127,10 @@ class RecoveryService:
                 s3_configuration = _required(request.s3)
                 consistency_proof = _required(request.consistency_proof)
                 database = self._postgresql.backup(database_url, staging, deadline)
-                objects = S3RecoveryAdapter(s3_configuration, deadline).backup(staging)
+                with closing(
+                    S3RecoveryAdapter(s3_configuration, deadline)
+                ) as s3_adapter:
+                    objects = s3_adapter.backup(staging)
                 consistency = consistency_proof
             manifest = build_manifest(
                 request.profile,
@@ -179,23 +183,23 @@ class RecoveryService:
         else:
             database_url = _required(request.database_url)
             s3_configuration = _required(request.s3)
-            s3 = S3RecoveryAdapter(s3_configuration, deadline)
-            object_evidence, object_keys = s3.ensure_empty_and_restore(
-                request.source,
-                manifest.members,
-                source_identity=object_source,
-            )
-            try:
-                database_evidence = self._postgresql.restore(
-                    database_url,
-                    request.source / "database/metadata.json",
-                    source_identity=database_source,
-                    object_keys=object_keys,
-                    deadline=deadline,
+            with closing(S3RecoveryAdapter(s3_configuration, deadline)) as s3:
+                object_evidence, object_keys = s3.ensure_empty_and_restore(
+                    request.source,
+                    manifest.members,
+                    source_identity=object_source,
                 )
-            except BaseException:
-                s3.remove(object_keys)
-                raise
+                try:
+                    database_evidence = self._postgresql.restore(
+                        database_url,
+                        request.source / "database/metadata.json",
+                        source_identity=database_source,
+                        object_keys=object_keys,
+                        deadline=deadline,
+                    )
+                except BaseException:
+                    s3.remove(object_keys)
+                    raise
             evidence = f"{database_evidence}.{object_evidence}"
         evidence = hashlib.sha256(
             canonical_json([evidence, request.offline_proof])

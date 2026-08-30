@@ -432,6 +432,11 @@ class S3RecoveryAdapter:
         self._configuration = configuration
         self._deadline = deadline
 
+    def close(self) -> None:
+        """Release the provider client's HTTP connection pools."""
+
+        self._client.close()
+
     def backup(self, staging: Path) -> AdapterBackup:
         before = self._inventory()
         members: list[RecoveryMember] = []
