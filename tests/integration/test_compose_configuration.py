@@ -10,12 +10,27 @@ from typing import Any
 
 import pytest
 
+from markweave.config import MalwareScanningMode, Settings
+
 pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_trusted_upstream_podman_renders_custom_public_origin() -> None:
+def _load_rendered_settings(
+    monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]
+) -> Settings:
+    for field_name in Settings.model_fields:
+        monkeypatch.delenv(f"MARKWEAVE_{field_name.upper()}", raising=False)
+        monkeypatch.delenv(f"MD_CONVERTER_{field_name.upper()}", raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    return Settings.load()
+
+
+def test_trusted_upstream_podman_renders_custom_public_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Keep the published port and strict login origin aligned."""
     result = subprocess.run(
         [
@@ -60,6 +75,20 @@ def test_trusted_upstream_podman_renders_custom_public_origin() -> None:
     assert application["environment"]["MARKWEAVE_INSECURE_EVALUATION_MODE"] == "false"
     assert (
         application["environment"]["MD_CONVERTER_INSECURE_EVALUATION_MODE"] == "false"
+    )
+    assert (
+        application["environment"]["MARKWEAVE_MALWARE_SCANNING_MODE"]
+        == "trusted-upstream"
+    )
+    assert (
+        application["environment"]["MD_CONVERTER_MALWARE_SCANNING_MODE"]
+        == "trusted-upstream"
+    )
+    assert (
+        _load_rendered_settings(
+            monkeypatch, application["environment"]
+        ).malware_scanning_mode
+        is MalwareScanningMode.TRUSTED_UPSTREAM
     )
     assert application["ports"] == [
         {

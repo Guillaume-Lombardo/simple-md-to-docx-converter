@@ -237,6 +237,7 @@ def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
 
     assert "depends_on: !reset {}" in overlay
     assert "MARKWEAVE_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
+    assert "MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
     assert "profiles:" in overlay
     assert "local-antivirus" in overlay
 
