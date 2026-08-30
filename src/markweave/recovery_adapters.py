@@ -13,14 +13,12 @@ from collections.abc import Iterator, Mapping
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path, PurePosixPath
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol, cast
 from uuid import UUID
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import Connection, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -40,6 +38,42 @@ DATABASE_PAYLOAD = "database/metadata.json"
 SQLITE_PAYLOAD = "database/metadata.sqlite3"
 _SCOPES = frozenset(scope.value for scope in ObjectScope)
 OBJECT_KEY_PARTS = 3
+_S3_DEPENDENCY_ROOTS = frozenset(("boto3", "botocore"))
+
+
+class _Boto3Module(Protocol):
+    def client(self, service_name: str, **options: Any) -> Any: ...
+
+
+class _ConfigFactory(Protocol):
+    def __call__(self, **options: Any) -> Any: ...
+
+
+def _load_s3_dependencies() -> tuple[
+    _Boto3Module,
+    _ConfigFactory,
+    type[BaseException],
+    type[BaseException],
+]:
+    """Load the distributed object-store SDK only when S3 recovery is selected."""
+    try:
+        boto3 = import_module("boto3")
+        config = import_module("botocore.config")
+        exceptions = import_module("botocore.exceptions")
+    except ModuleNotFoundError as error:
+        missing_root = error.name.split(".", 1)[0] if error.name is not None else None
+        if missing_root in _S3_DEPENDENCY_ROOTS:
+            raise RecoveryError(
+                "S3 recovery requires the 'distributed' extra; "
+                "install 'markweave[distributed]'."
+            ) from None
+        raise
+    return (
+        cast(_Boto3Module, boto3),
+        cast(_ConfigFactory, config.Config),
+        cast(type[BaseException], exceptions.BotoCoreError),
+        cast(type[BaseException], exceptions.ClientError),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,8 +446,9 @@ class S3RecoveryAdapter:
     ) -> None:
         if not configuration.bucket.strip():
             raise RecoveryError("S3 bucket is invalid")
+        boto3, config_factory, boto_core_error, client_error = _load_s3_dependencies()
         options: dict[str, Any] = {
-            "config": Config(
+            "config": config_factory(
                 connect_timeout=max(1, min(deadline.remaining(), 30)),
                 read_timeout=max(1, min(deadline.remaining(), 30)),
                 retries={"max_attempts": 1},
@@ -431,6 +466,9 @@ class S3RecoveryAdapter:
         self._client = boto3.client("s3", **options)
         self._configuration = configuration
         self._deadline = deadline
+        self._boto_core_error = boto_core_error
+        self._client_error = client_error
+        self._provider_errors = (boto_core_error, client_error)
 
     def close(self) -> None:
         """Release the provider client's HTTP connection pools."""
@@ -471,7 +509,7 @@ class S3RecoveryAdapter:
                 )
             if before != self._inventory():
                 raise RecoveryError("S3 bucket changed during backup")
-        except BotoCoreError, ClientError, OSError:
+        except (*self._provider_errors, OSError):
             raise RecoveryError("S3 backup failed") from None
         identity = hashlib.sha256(canonical_json(before)).hexdigest()
         return AdapterBackup(identity, self._resource_identity(), tuple(members))
@@ -525,11 +563,11 @@ class S3RecoveryAdapter:
             return hashlib.sha256(canonical_json(inventory)).hexdigest(), keys
         except BaseException as error:
             for key in reversed(placed):
-                with suppress(BotoCoreError, ClientError):
+                with suppress(*self._provider_errors):
                     self._client.delete_object(
                         Bucket=self._configuration.bucket, Key=key
                     )
-            if isinstance(error, (BotoCoreError, ClientError, OSError)):
+            if isinstance(error, (*self._provider_errors, OSError)):
                 raise RecoveryError("S3 restore failed") from None
             raise
 
@@ -537,7 +575,7 @@ class S3RecoveryAdapter:
         for key in keys:
             try:
                 self._client.delete_object(Bucket=self._configuration.bucket, Key=key)
-            except BotoCoreError, ClientError:
+            except self._provider_errors:
                 raise RecoveryError("Distributed restore cleanup failed") from None
 
     def _inventory(self) -> tuple[tuple[str, int, str], ...]:
@@ -559,7 +597,7 @@ class S3RecoveryAdapter:
                 continuation = response.get("NextContinuationToken")
                 if not isinstance(continuation, str):
                     raise RecoveryError("S3 listing is incomplete")
-        except BotoCoreError, ClientError, KeyError, TypeError, ValueError:
+        except (*self._provider_errors, KeyError, TypeError, ValueError):
             raise RecoveryError("S3 inventory failed") from None
         return tuple(sorted(observed))
 

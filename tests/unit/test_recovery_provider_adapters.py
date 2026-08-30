@@ -11,7 +11,8 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import func, insert, select
 from sqlalchemy import inspect as sqlalchemy_inspect
 
@@ -27,6 +28,7 @@ from markweave.recovery_adapters import (
     _decode,
     _encode,
     _load_database_payload,
+    _load_s3_dependencies,
     _referenced_keys_from_rows,
     _safe_absolute_directory,
     _safe_new_destination,
@@ -138,6 +140,53 @@ class _S3:
         self.closed = True
 
 
+def _patch_s3_dependencies(mocker, client: Any):
+    boto3 = mocker.Mock()
+    boto3.client.return_value = client
+    mocker.patch(
+        "markweave.recovery_adapters._load_s3_dependencies",
+        return_value=(boto3, Config, BotoCoreError, ClientError),
+    )
+    return boto3.client
+
+
+@pytest.mark.parametrize("missing_root", ("boto3", "botocore"))
+def test_s3_dependency_loader_reports_only_missing_distributed_roots(
+    missing_root: str, mocker
+) -> None:
+    missing = ModuleNotFoundError(
+        f"No module named '{missing_root}'", name=missing_root
+    )
+
+    def load(module: str):
+        if module.split(".", 1)[0] == missing_root:
+            raise missing
+        return mocker.Mock()
+
+    imported = mocker.patch(
+        "markweave.recovery_adapters.import_module", side_effect=load
+    )
+
+    with pytest.raises(
+        RecoveryError,
+        match=r"S3 recovery requires the 'distributed' extra; "
+        r"install 'markweave\[distributed\]'",
+    ):
+        _load_s3_dependencies()
+
+    assert imported.call_args_list[-1].args[0].split(".", 1)[0] == missing_root
+
+
+def test_s3_dependency_loader_does_not_mask_unexpected_import_failure(mocker) -> None:
+    unexpected = ModuleNotFoundError("No module named 'jmespath'", name="jmespath")
+    mocker.patch("markweave.recovery_adapters.import_module", side_effect=unexpected)
+
+    with pytest.raises(ModuleNotFoundError) as captured:
+        _load_s3_dependencies()
+
+    assert captured.value is unexpected
+
+
 def _database(path: Path, username: str):
     engine = create_database_engine(standalone_database_url(path))
     upgrade_database(engine)
@@ -206,7 +255,7 @@ def test_s3_adapter_copies_checksums_and_removes_failed_restore_objects(
     fake = _S3()
     key = f"uploads/{uuid4()}/{uuid4()}"
     fake.buckets["source"][key] = b"provider-object"
-    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    _patch_s3_dependencies(mocker, fake)
     staging = tmp_path / "staging"
     staging.mkdir()
     source = S3RecoveryAdapter(
@@ -265,7 +314,7 @@ def test_deadline_configuration_and_scalar_encodings(mocker) -> None:
     with pytest.raises(RecoveryError, match="invalid"):
         _decode({"$bytes": "!"})
 
-    client = mocker.patch("markweave.recovery_adapters.boto3.client")
+    client = _patch_s3_dependencies(mocker, mocker.Mock())
     configuration = S3Configuration(
         "bucket",
         "https://objects.example",
@@ -354,7 +403,7 @@ def test_s3_inventory_pagination_and_restore_failures_cleanup(
     fake = _S3()
     key = f"uploads/{uuid4()}/{uuid4()}"
     fake.buckets["target"][key] = b"occupied"
-    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    _patch_s3_dependencies(mocker, fake)
     target = S3RecoveryAdapter(
         S3Configuration("target", None, None), RecoveryDeadline.after(30)
     )
@@ -390,7 +439,7 @@ def test_s3_restore_translates_provider_failure_after_rollback(
         len(b"expected"),
         "0" * 64,
     )
-    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    _patch_s3_dependencies(mocker, fake)
     mocker.patch.object(
         fake,
         "head_object",
@@ -412,7 +461,7 @@ def test_s3_restore_translates_provider_failure_after_rollback(
 
 def test_s3_inventory_rejects_incomplete_pagination(mocker) -> None:
     fake = _S3()
-    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    _patch_s3_dependencies(mocker, fake)
     mocker.patch.object(
         fake,
         "list_objects_v2",
@@ -537,7 +586,7 @@ def test_s3_restore_skips_database_members_and_inventory_paginates(
     listing = mocker.patch.object(
         fake, "list_objects_v2", side_effect=lambda **_arguments: next(responses)
     )
-    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    _patch_s3_dependencies(mocker, fake)
     adapter = S3RecoveryAdapter(
         S3Configuration("target", None, None), RecoveryDeadline.after(30)
     )

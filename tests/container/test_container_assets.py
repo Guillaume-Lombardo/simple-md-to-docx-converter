@@ -128,7 +128,7 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
         assert f"ARG {artifact}_SHA256=" in containerfile
     assert "rpm --checksig /tmp/google-chrome.rpm" in containerfile
     assert "RPM_INVENTORY_SHA256" in containerfile
-    assert "uv sync --locked --no-dev --no-editable" in containerfile
+    assert "uv sync --locked --no-dev --no-editable --extra all" in containerfile
 
 
 def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
@@ -229,6 +229,9 @@ def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
     assert "api|embedded-worker|external-worker" in entrypoint
     assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
+    assert "exec uvicorn markweave.app:create_app" in entrypoint
+    assert "uvicorn markweave:create_app" not in entrypoint
+    assert "--factory" in entrypoint
 
 
 def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:

@@ -24,7 +24,7 @@ for directory in \
 done
 
 if [[ "$mode" == api ]]; then
-  exec uvicorn markweave:create_app \
+  exec uvicorn markweave.app:create_app \
     --factory \
     --host "${MARKWEAVE_HOST:-${MD_CONVERTER_HOST:-0.0.0.0}}" \
     --port "${MARKWEAVE_PORT:-${MD_CONVERTER_PORT:-8080}}" \
