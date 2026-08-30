@@ -39,6 +39,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 * 2026-08-29: Final audit follow-up moved shared documentation navigation exclusively to T50.
 * 2026-08-30: Started implementation on `docs/T46-security-support-policy` from `c1cae3b6ca1d2f8eb6e680eec26f444ea92332c5`; G1L-421 is In Progress. This ticket exclusively owns `SECURITY.md`, `SUPPORT.md`, and this mirror.
 * 2026-08-30: Added the dedicated private vulnerability-reporting, supported-release, coordinated-disclosure, dependency/container-triage, deployment, backup, and safe-information policies. Dedicated policy links resolve; T40's existing PyPI `Support` metadata URL was verified read-only. Ruff format/lint and `ty` pass.
+* 2026-08-30: Reconciled normally with exact `main` `7850ab695ec278012b3db6e00a854b1c9dcf2360`; the merge integrated only the T24 and T27 ticket mirrors. On the merged tree, Ruff format/lint and `ty` pass. The canonical non-engine Pytest command completed with 1,937 passed, 44 deselected, 3 failed, and 32 errors in 13m40s at 95.42% coverage; all failures/errors require unavailable RustFS/S3 or PostgreSQL environment variables (`MARKWEAVE_TEST_S3_*` and `MARKWEAVE_TEST_POSTGRES_URL`), not T46 policy content.
 
 ## Coordination
 
