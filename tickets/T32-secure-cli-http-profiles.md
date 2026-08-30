@@ -2,7 +2,7 @@
 ticket: T32
 linear_id: G1L-407
 linear_url: https://linear.app/g1lom/issue/G1L-407/t32-add-secure-http-login-and-cli-profiles
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -35,6 +35,7 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Progress
 
+* 2026-08-30: Squash-merged PR #107 verified the secure CLI authentication and profile workflow on `main` at `e453a28e1efc6a617f93c417ab52b5628114132b`. Complete CI run `33305588346` passed; T32 is complete.
 * 2026-08-30: Review follow-up makes named profiles fail closed before prompting or sending a login when the stored service URL differs, preserving the existing reachable session. Added a real loopback proxy-bypass regression with both proxy variables set and both bypass variables empty; the target receives login directly while the proxy receives no request or password body.
 * 2026-08-30: Completed review hardening on `feat/T32-secure-cli-profiles`: real Uvicorn command-path coverage now exercises password-change prompts, success, mismatch, reauthentication failure, fresh-login requirement, and profile cleanup. Profiles reject malformed cookie/CSRF state with stable errors; secret-bearing transport fields are non-representable; failed profile writes and failed renewal cleanup are covered. The final-image PTY workflow now inspects blocked process arguments/environment, drains safely, handles PTY hangup, reaps timeouts, and checks output and logs for the fixture secret. Pending independent review, full validation, and publication.
 * 2026-08-30: Added the rootless final-image CLI workflow to the existing Podman E2E harness. It drives the installed executable through a PTY, sends the fixture password only after the non-echoing prompt, verifies login/whoami/logout, and asserts non-interactive renewal fails safely.
@@ -45,7 +46,7 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done; merged and verified on `main` by PR #107, squash commit `e453a28e1efc6a617f93c417ab52b5628114132b`, and complete CI run `33305588346`.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
