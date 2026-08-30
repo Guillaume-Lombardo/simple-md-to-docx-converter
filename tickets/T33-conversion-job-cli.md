@@ -2,7 +2,7 @@
 ticket: T33
 linear_id: G1L-408
 linear_url: https://linear.app/g1lom/issue/G1L-408/t33-add-conversion-and-job-cli-commands
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,10 +36,14 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up restricted this worker to T31's conversion/job family and excluded shared registry, help, and documentation-index files.
+* 2026-08-30: Implementation started on `feat/T33-conversion-job-cli` from verified `main` at `c1cae3b`. Scope remains limited to the pre-registered conversion/job command family, its domain-specific tests, and dedicated CLI documentation.
+* 2026-08-30: Implemented HTTP-only conversion submission, owner-scoped job inspection/control, bounded polling, safe idempotent retry, and atomic result/manifest downloads with dedicated unit, real-HTTP integration, and final-image drivers.
+* 2026-08-30: Verified 1,216 unit tests and 1,971 locally runnable tests at 95.19% branch coverage; the focused T33 modules reach 91%. The exact final image passed the standalone and distributed T33 drivers. The canonical suite remains externally blocked by absent PostgreSQL/S3 test settings, and the existing distributed API smoke fails after the T33 driver on `mermaid_unavailable`.
+* 2026-08-30: Kept `tests/unit/test_cli.py` and shared container smoke scripts identical to the branch base pending the approved T34 -> T33 -> T35 integration order; final shared-runner wiring is deferred until T34 is merged into `main`.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
