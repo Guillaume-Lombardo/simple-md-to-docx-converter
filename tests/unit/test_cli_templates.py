@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import cast
 from urllib.error import URLError
@@ -303,6 +304,45 @@ def test_download_verifies_digest_and_atomically_replaces_only_with_force(
     assert not list(tmp_path.glob(".template.docx.*"))
     captured = capsys.readouterr()
     assert "already exists" in captured.err
+
+
+def test_download_without_force_never_overwrites_a_concurrently_created_target(
+    mocker, tmp_path: Path, capsys
+) -> None:
+    content = b"immutable-docx"
+    digest = hashlib.sha256(content).hexdigest()
+    output = tmp_path / "template.docx"
+    transport = _Transport(
+        _response(
+            200,
+            headers={"content-type": DOCX_TYPE, "etag": f'"sha256-{digest}"'},
+            content=content,
+        )
+    )
+    _install(mocker, transport)
+    real_link = os.link
+
+    def publish_after_competitor(source, destination, *, follow_symlinks=True):
+        Path(destination).write_bytes(b"concurrent-writer")
+        return real_link(source, destination, follow_symlinks=follow_symlinks)
+
+    mocker.patch("markweave.cli.commands.templates.os.link", publish_after_competitor)
+
+    assert (
+        main(
+            (
+                "templates",
+                "download",
+                TEMPLATE_ID,
+                "--output",
+                str(output),
+            )
+        )
+        == 1
+    )
+    assert output.read_bytes() == b"concurrent-writer"
+    assert not list(tmp_path.glob(".template.docx.*"))
+    assert "already exists" in capsys.readouterr().err
 
 
 def test_integrity_failure_never_creates_download(

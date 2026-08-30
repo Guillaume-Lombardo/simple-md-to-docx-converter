@@ -52,3 +52,13 @@ def test_template_cli_e2e_never_places_the_admin_password_in_commands() -> None:
     assert '"--password"' not in source
     assert '"Password: "' not in source
     assert "_run_pty" in source
+
+
+def test_template_cli_e2e_sends_regular_user_credentials_only_over_stdin() -> None:
+    driver = _driver_module()
+    command = driver._user_setup_command("markweave-standalone")
+
+    assert "T34Owner-standalone-Fixture9!" not in "\0".join(command)
+    assert "T34Other-standalone-Fixture9!" not in "\0".join(command)
+    assert "--interactive" in command
+    assert "-c" in command

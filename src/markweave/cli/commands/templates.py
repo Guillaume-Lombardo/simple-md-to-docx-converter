@@ -751,11 +751,6 @@ def _download_to(writer: OutputWriter, command: _Command, response: _Response) -
 
 
 def _atomic_write(path: Path, content: bytes, *, force: bool) -> None:
-    if os.path.lexists(path) and not force:
-        raise CliError(
-            "output_exists",
-            "The output path already exists; use --force to replace it.",
-        )
     directory = path.parent
     temporary: str | None = None
     try:
@@ -764,7 +759,17 @@ def _atomic_write(path: Path, content: bytes, *, force: bool) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        if force:
+            os.replace(temporary, path)
+        else:
+            try:
+                os.link(temporary, path, follow_symlinks=False)
+            except FileExistsError as error:
+                raise CliError(
+                    "output_exists",
+                    "The output path already exists; use --force to replace it.",
+                ) from error
+            os.unlink(temporary)
         temporary = None
         directory_descriptor = os.open(directory, os.O_RDONLY)
         try:
