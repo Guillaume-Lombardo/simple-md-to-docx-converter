@@ -74,17 +74,23 @@ def _validated(data: bytes, _declaration: object) -> ValidatedTemplate:
 
 def _app(settings: Settings) -> tuple[FastAPI, AppComponents]:
     built = build_components(settings)
-    user_repository = cast(SqlUserRepository, built.authentication.users)
-    engine = user_repository._engine
-    templates = TemplateService(
-        catalog=SqlTemplateCatalogRepository(engine),
-        selections=SqlTemplateSelectionRepository(engine),
-        objects=built.object_store,
-        validate_content=_validated,
-        recovery_policy=TemplateRecoveryPolicy(60),
-    )
-    components = replace(built, templates=templates, scanner=TrustingUploadScanner())
-    return create_app(settings, components=components), components
+    try:
+        user_repository = cast(SqlUserRepository, built.authentication.users)
+        engine = user_repository._engine
+        templates = TemplateService(
+            catalog=SqlTemplateCatalogRepository(engine),
+            selections=SqlTemplateSelectionRepository(engine),
+            objects=built.object_store,
+            validate_content=_validated,
+            recovery_policy=TemplateRecoveryPolicy(60),
+        )
+        components = replace(
+            built, templates=templates, scanner=TrustingUploadScanner()
+        )
+        return create_app(settings, components=components), components
+    except Exception:
+        built.close()
+        raise
 
 
 def _login(client: TestClient, username: str, password: str) -> tuple[str, UUID]:
@@ -116,7 +122,7 @@ def _create_template(client: TestClient, csrf: str, name: str) -> dict[str, obje
     return response.json()
 
 
-def _cleanup(components: AppComponents, user_ids: set[UUID]) -> None:
+def _cleanup_data(components: AppComponents, user_ids: set[UUID]) -> None:
     user_repository = cast(SqlUserRepository, components.authentication.users)
     engine = user_repository._engine
     with engine.begin() as connection:
@@ -155,7 +161,13 @@ def _cleanup(components: AppComponents, user_ids: set[UUID]) -> None:
                 delete(TemplateRow).where(TemplateRow.id.in_(template_ids))
             )
         connection.execute(delete(UserRow).where(UserRow.id.in_(serialized_user_ids)))
-    engine.dispose()
+
+
+def _cleanup(components: AppComponents, user_ids: set[UUID]) -> None:
+    try:
+        _cleanup_data(components, user_ids)
+    finally:
+        components.close()
 
 
 def test_distributed_administration_pages_owner_search_and_authorization() -> None:
