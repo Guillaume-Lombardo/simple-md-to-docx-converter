@@ -1,0 +1,183 @@
+"""Stable request and response schemas for the HTTP contract."""
+
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from markweave.auth.models import Role
+from markweave.jobs.models import JobOutput, TemplateMode
+from markweave.templates.models import TemplateStatus
+
+
+class LoginRequest(BaseModel):
+    """JSON local-login request."""
+
+    username: str
+    password: str
+
+
+class UserCreateRequest(BaseModel):
+    """Administrator local-account creation request."""
+
+    username: str
+    password: str
+    password_change_required: bool = False
+
+
+class ActiveUpdateRequest(BaseModel):
+    """Administrator account status request."""
+
+    active: bool
+
+
+class PasswordResetRequest(BaseModel):
+    """Administrator password reset request."""
+
+    password: str
+    password_change_required: bool = False
+
+
+class PasswordChangeRequirementRequest(BaseModel):
+    """Administrator password-renewal requirement request."""
+
+    required: bool
+
+
+class PasswordChangeRequest(BaseModel):
+    """Authenticated self-service password renewal request."""
+
+    password: str
+    confirmation: str
+
+
+class UserResponse(BaseModel):
+    """Public local-account representation without password material."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    username: str
+    role: Role
+    active: bool
+    password_change_required: bool
+
+
+class LoginResponse(BaseModel):
+    """Successful login response containing the session-bound CSRF token once."""
+
+    user: UserResponse
+    csrf_token: str = Field(
+        description=(
+            "Send as X-CSRF-Token for authenticated mutations. Browser clients also "
+            "receive the same value in the Secure, SameSite=Lax "
+            "__Host-md_converter_csrf cookie."
+        )
+    )
+
+
+class ConversionResponse(BaseModel):
+    """Safe persistent conversion snapshot."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    owner_id: UUID
+    template_mode: TemplateMode
+    template_id: UUID | None
+    template_version_id: UUID | None
+    output: JobOutput
+    component_versions: tuple[tuple[str, str], ...]
+    correlation_id: str
+    state: str
+    step: str
+    progress: int
+    created_at: datetime
+    updated_at: datetime
+    attempt: int
+    cancel_requested: bool
+    error_code: str | None
+    error_message: str | None
+    expires_at: datetime | None
+
+
+class ConversionPageResponse(BaseModel):
+    """Paginated owner conversion response."""
+
+    items: tuple[ConversionResponse, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+class TemplateResponse(BaseModel):
+    """Visible template identity and optimistic-concurrency revision."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    owner_id: UUID
+    name: str
+    description: str
+    status: TemplateStatus
+    revision: int
+    current_version_id: UUID | None
+    owner_username: str
+
+
+class TemplatePageResponse(BaseModel):
+    items: tuple[TemplateResponse, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+class TemplateVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    template_id: UUID
+    number: int
+    sha256: str
+    size: int
+    created_at: datetime
+    created_by: UUID
+    restored_from_version_id: UUID | None
+    declared_fonts: tuple[str, ...]
+    resolved_fonts: tuple[tuple[str, str], ...]
+    validation_trace: tuple[str, ...]
+
+
+class AuditRecordResponse(BaseModel):
+    """Administrator-visible content-free immutable audit evidence."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    actor_id: UUID
+    owner_id: UUID
+    operation: str
+    target_id: UUID
+    target_type: str
+    target_version: str | None
+    version_id: UUID | None
+    administrator_intervention: bool
+    created_at: datetime
+
+
+class TemplateMetadataRequest(BaseModel):
+    name: str
+    description: str
+
+
+class ErrorDetail(BaseModel):
+    """Stable machine-readable functional error detail."""
+
+    code: str
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    """Stable error envelope used for every expected HTTP failure."""
+
+    error: ErrorDetail

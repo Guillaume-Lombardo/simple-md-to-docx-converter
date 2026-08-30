@@ -11,8 +11,12 @@ from botocore.config import Config
 from botocore.exceptions import ClientError, EndpointConnectionError
 from pytest_mock import MockerFixture
 
-from markweave.app import ProfileReadinessProbe, build_components, build_upload_scanner
 from markweave.config import ConfigurationError, MalwareScanningMode, Settings
+from markweave.http.components import (
+    ProfileReadinessProbe,
+    build_components,
+    build_upload_scanner,
+)
 from markweave.malware import ClamAVUploadScanner, TrustedUpstreamUploadScanner
 from markweave.persistence.migrations import (
     POSTGRES_MIGRATION_LOCK,
@@ -258,7 +262,7 @@ def _mock_distributed_s3(mocker: MockerFixture, *, side_effect: object = None) -
     if side_effect is not None:
         boto3.client.side_effect = side_effect
     mocker.patch(
-        "markweave.app._load_distributed_dependencies",
+        "markweave.http.components._load_distributed_dependencies",
         return_value=(boto3, Config),
     )
     return boto3.client
@@ -269,8 +273,10 @@ def test_distributed_profile_reports_missing_postgresql_extra(
     mocker: MockerFixture,
 ) -> None:
     missing = ModuleNotFoundError("No module named 'psycopg'", name="psycopg")
-    imported = mocker.patch("markweave.app.import_module", side_effect=missing)
-    engine = mocker.patch("markweave.app.create_database_engine")
+    imported = mocker.patch(
+        "markweave.http.components.import_module", side_effect=missing
+    )
+    engine = mocker.patch("markweave.http.components.create_database_engine")
 
     with pytest.raises(
         ConfigurationError,
@@ -293,8 +299,10 @@ def test_distributed_profile_reports_missing_s3_extra(
             return mocker.Mock()
         raise missing
 
-    import_module = mocker.patch("markweave.app.import_module", side_effect=imported)
-    engine = mocker.patch("markweave.app.create_database_engine")
+    import_module = mocker.patch(
+        "markweave.http.components.import_module", side_effect=imported
+    )
+    engine = mocker.patch("markweave.http.components.create_database_engine")
 
     with pytest.raises(
         ConfigurationError,
@@ -339,7 +347,9 @@ def test_s3_adapter_reports_missing_distributed_extra(mocker: MockerFixture) -> 
 def test_component_assembly_disposes_each_created_engine_on_failure(
     mocker: MockerFixture, failure_stage: str, created_count: int
 ) -> None:
-    mocker.patch("markweave.app.FilesystemObjectStore", return_value=mocker.Mock())
+    mocker.patch(
+        "markweave.http.components.FilesystemObjectStore", return_value=mocker.Mock()
+    )
     disposed: list[str] = []
     engines = tuple(
         mocker.MagicMock(name=name) for name in ("main", "readiness", "observation")
@@ -353,12 +363,12 @@ def test_component_assembly_disposes_each_created_engine_on_failure(
     if failure_stage in {"main_engine", "readiness_engine", "observation_engine"}:
         created.append(RuntimeError(f"{failure_stage} failed"))
     create_engine = mocker.patch(
-        "markweave.app.create_database_engine", side_effect=created
+        "markweave.http.components.create_database_engine", side_effect=created
     )
-    upgrade = mocker.patch("markweave.app.upgrade_database")
-    validator = mocker.patch("markweave.app.build_template_validator")
-    reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
-    components = mocker.patch("markweave.app.AppComponents", wraps=None)
+    upgrade = mocker.patch("markweave.http.components.upgrade_database")
+    validator = mocker.patch("markweave.http.components.build_template_validator")
+    reclaim = mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
+    components = mocker.patch("markweave.http.components.AppComponents", wraps=None)
     if failure_stage == "migration":
         upgrade.side_effect = RuntimeError("migration failed")
     elif failure_stage == "validator":
@@ -383,7 +393,9 @@ def test_component_assembly_disposes_each_created_engine_on_failure(
 def test_component_assembly_attempts_every_engine_disposal_when_one_fails(
     mocker: MockerFixture,
 ) -> None:
-    mocker.patch("markweave.app.FilesystemObjectStore", return_value=mocker.Mock())
+    mocker.patch(
+        "markweave.http.components.FilesystemObjectStore", return_value=mocker.Mock()
+    )
     disposed: list[str] = []
     engines = tuple(
         mocker.MagicMock(name=name) for name in ("main", "readiness", "observation")
@@ -398,11 +410,13 @@ def test_component_assembly_attempts_every_engine_disposal_when_one_fails(
         raise RuntimeError("dispose failed")
 
     engines[1].dispose.side_effect = fail_readiness_disposal
-    mocker.patch("markweave.app.create_database_engine", side_effect=engines)
-    mocker.patch("markweave.app.upgrade_database")
-    mocker.patch("markweave.app.TemplateService.reclaim_pending")
     mocker.patch(
-        "markweave.app.AppComponents",
+        "markweave.http.components.create_database_engine", side_effect=engines
+    )
+    mocker.patch("markweave.http.components.upgrade_database")
+    mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
+    mocker.patch(
+        "markweave.http.components.AppComponents",
         side_effect=RuntimeError("components failed"),
     )
 
@@ -430,6 +444,28 @@ def test_distributed_component_partial_startup_closes_created_s3_clients(
 
 
 @pytest.mark.unit
+def test_distributed_readiness_config_failure_closes_created_s3_client(
+    mocker: MockerFixture,
+) -> None:
+    normal_client = mocker.Mock()
+    boto3 = mocker.Mock()
+    boto3.client.return_value = normal_client
+    config_class = mocker.Mock(side_effect=RuntimeError("readiness config failed"))
+    mocker.patch(
+        "markweave.http.components._load_distributed_dependencies",
+        return_value=(boto3, config_class),
+    )
+    create_engine = mocker.patch("markweave.http.components.create_database_engine")
+
+    with pytest.raises(RuntimeError, match="readiness config failed"):
+        build_components(_distributed_component_settings())
+
+    boto3.client.assert_called_once_with("s3")
+    normal_client.close.assert_called_once_with()
+    create_engine.assert_not_called()
+
+
+@pytest.mark.unit
 def test_distributed_component_database_failure_closes_both_s3_clients(
     mocker: MockerFixture,
 ) -> None:
@@ -440,7 +476,7 @@ def test_distributed_component_database_failure_closes_both_s3_clients(
         side_effect=(normal_client, readiness_client),
     )
     mocker.patch(
-        "markweave.app.create_database_engine",
+        "markweave.http.components.create_database_engine",
         side_effect=RuntimeError("database failed"),
     )
 
@@ -456,7 +492,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     mocker: MockerFixture,
     request: pytest.FixtureRequest,
 ) -> None:
-    reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
+    reclaim = mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
     database_url = "postgresql+psycopg://database/app"
     settings = Settings(
         **template_settings(),
@@ -477,10 +513,10 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     observation_engine = mocker.MagicMock()
     observation_engine.dialect.name = "postgresql"
     create_engine = mocker.patch(
-        "markweave.app.create_database_engine",
+        "markweave.http.components.create_database_engine",
         side_effect=(engine, readiness_engine, observation_engine),
     )
-    upgrade = mocker.patch("markweave.app.upgrade_database")
+    upgrade = mocker.patch("markweave.http.components.upgrade_database")
     normal_s3 = mocker.Mock()
     readiness_s3 = mocker.Mock()
     s3_client = _mock_distributed_s3(mocker, side_effect=(normal_s3, readiness_s3))
@@ -523,15 +559,17 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker: MockerFixture,
     request: pytest.FixtureRequest,
 ) -> None:
-    reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
+    reclaim = mocker.patch("markweave.http.components.TemplateService.reclaim_pending")
     engine = mocker.Mock()
     engine.dialect.name = "sqlite"
-    mocker.patch("markweave.app.create_database_engine", return_value=engine)
-    mocker.patch("markweave.app.upgrade_database")
+    mocker.patch(
+        "markweave.http.components.create_database_engine", return_value=engine
+    )
+    mocker.patch("markweave.http.components.upgrade_database")
     normal_files = mocker.Mock()
     readiness_files = mocker.Mock()
     files = mocker.patch(
-        "markweave.app.FilesystemObjectStore",
+        "markweave.http.components.FilesystemObjectStore",
         side_effect=(normal_files, readiness_files),
     )
     standalone = Settings(
@@ -600,7 +638,7 @@ def test_upload_scanner_assembly_accepts_explicit_trusted_upstream_boundary(
     settings = _standalone_component_settings(
         malware_scanning_mode=MalwareScanningMode.TRUSTED_UPSTREAM
     )
-    warning = mocker.patch("markweave.app.log_event")
+    warning = mocker.patch("markweave.http.components.log_event")
 
     scanner = build_upload_scanner(settings)
 
@@ -616,7 +654,7 @@ def test_upload_scanner_assembly_accepts_explicit_insecure_evaluation_mode(
     mocker: MockerFixture,
 ) -> None:
     settings = _standalone_component_settings(insecure_evaluation_mode=True)
-    warning = mocker.patch("markweave.app.log_event")
+    warning = mocker.patch("markweave.http.components.log_event")
 
     scanner = build_upload_scanner(settings)
 

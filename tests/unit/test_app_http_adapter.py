@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from markweave.app import AppComponents, ErrorResponse, create_app, error_responses
+from markweave.app import AppComponents, create_app
 from markweave.auth.errors import (
     INVALID_CREDENTIALS,
     PASSWORD_CHANGE_REQUIRED,
@@ -20,6 +24,8 @@ from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
+from markweave.http.errors import error_responses
+from markweave.http.schemas import ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
@@ -43,6 +49,66 @@ from markweave.templates.models import (
 from markweave.templates.service import TemplateService
 from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
+
+_HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+def _load_http_contract_fixture(filename: str) -> Any:
+    return json.loads((_HTTP_CONTRACT_FIXTURES / filename).read_text(encoding="utf-8"))
+
+
+def _assert_json_contract(actual: Any, expected: Any, *, location: str) -> None:
+    assert type(actual) is type(expected), (
+        f"{location} type changed: expected {type(expected).__name__}, "
+        f"got {type(actual).__name__}"
+    )
+    if isinstance(expected, dict):
+        missing = sorted(set(expected) - set(actual))
+        unexpected = sorted(set(actual) - set(expected))
+        assert not missing and not unexpected, (
+            f"{location} keys changed: missing={missing}, unexpected={unexpected}"
+        )
+        for key in sorted(expected):
+            _assert_json_contract(
+                actual[key], expected[key], location=f"{location}/{key}"
+            )
+        return
+    if isinstance(expected, list):
+        assert len(actual) == len(expected), (
+            f"{location} length changed: expected {len(expected)}, got {len(actual)}"
+        )
+        for index, (actual_item, expected_item) in enumerate(
+            zip(actual, expected, strict=True)
+        ):
+            _assert_json_contract(
+                actual_item, expected_item, location=f"{location}/{index}"
+            )
+        return
+    assert actual == expected, (
+        f"{location} changed: expected {expected!r}, got {actual!r}"
+    )
+
+
+def _route_manifest(app: FastAPI) -> list[dict[str, Any]]:
+    manifest = []
+    for route in app.routes:
+        response_class = getattr(route, "response_class", None)
+        if isinstance(response_class, DefaultPlaceholder):
+            response_class = response_class.value
+        response_class_name = getattr(response_class, "__name__", None)
+        if response_class is not None and response_class_name is None:
+            response_class_name = type(response_class).__name__
+        manifest.append(
+            {
+                "path": getattr(route, "path", None),
+                "methods": sorted(getattr(route, "methods", ()) or ()),
+                "name": getattr(route, "name", None),
+                "include_in_schema": getattr(route, "include_in_schema", None),
+                "status_code": getattr(route, "status_code", None),
+                "response_class": response_class_name,
+            }
+        )
+    return manifest
 
 
 def isolated_client(
@@ -101,6 +167,21 @@ def _lifecycle_settings() -> Settings:
         initial_admin_password="admin-" + "password",
         storage_profile="standalone",
         standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+
+
+def _distributed_http_settings() -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        storage_profile="distributed",
+        distributed_database_url="postgresql+psycopg://database/app",
+        s3_bucket="objects",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
         conversion_retry_after_seconds=1,
@@ -784,6 +865,71 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "format": "binary",
         }
         assert {"401", "404", "422", "503"} <= responses.keys()
+
+
+@pytest.mark.unit
+def test_route_manifest_records_effective_default_response_class(
+    mocker: MockerFixture,
+) -> None:
+    app = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    routes_by_name = {route["name"]: route for route in _route_manifest(app)}
+    assert routes_by_name["live"]["response_class"] == "JSONResponse"
+    assert routes_by_name["browser_root"] == {
+        "path": "/",
+        "methods": ["GET"],
+        "name": "browser_root",
+        "include_in_schema": False,
+        "status_code": None,
+        "response_class": "JSONResponse",
+    }
+    assert all(
+        route["response_class"] != "DefaultPlaceholder"
+        for route in routes_by_name.values()
+    )
+
+
+@pytest.mark.unit
+def test_http_contract_difference_reports_changed_element() -> None:
+    with pytest.raises(
+        AssertionError,
+        match="contract/routes/0/name changed: expected 'live', got 'ready'",
+    ):
+        _assert_json_contract(
+            [{"name": "ready"}],
+            [{"name": "live"}],
+            location="contract/routes",
+        )
+
+
+@pytest.mark.unit
+def test_http_contract_is_unchanged_for_both_storage_profiles(
+    mocker: MockerFixture,
+) -> None:
+    standalone = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+    distributed = create_app(
+        _distributed_http_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    expected_openapi = _load_http_contract_fixture("openapi.json")
+    expected_routes = _load_http_contract_fixture("routes.json")
+
+    for profile, app in (("standalone", standalone), ("distributed", distributed)):
+        _assert_json_contract(
+            app.openapi(), expected_openapi, location=f"{profile}/openapi"
+        )
+        _assert_json_contract(
+            _route_manifest(app),
+            expected_routes,
+            location=f"{profile}/routes",
+        )
 
 
 @pytest.mark.unit

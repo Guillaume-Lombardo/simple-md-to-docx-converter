@@ -1,0 +1,5186 @@
+{
+  "components": {
+    "schemas": {
+      "ActiveUpdateRequest": {
+        "description": "Administrator account status request.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "title": "ActiveUpdateRequest",
+        "type": "object"
+      },
+      "AuditRecordResponse": {
+        "description": "Administrator-visible content-free immutable audit evidence.",
+        "properties": {
+          "actor_id": {
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "administrator_intervention": {
+            "title": "Administrator Intervention",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          },
+          "target_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "actor_id",
+          "owner_id",
+          "operation",
+          "target_id",
+          "target_type",
+          "target_version",
+          "version_id",
+          "administrator_intervention",
+          "created_at"
+        ],
+        "title": "AuditRecordResponse",
+        "type": "object"
+      },
+      "Body_create_conversion_api_v1_conversions_post": {
+        "properties": {
+          "output": {
+            "$ref": "#/components/schemas/JobOutput"
+          },
+          "source": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Source",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "template_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Version Id"
+          }
+        },
+        "required": [
+          "source",
+          "output"
+        ],
+        "title": "Body_create_conversion_api_v1_conversions_post",
+        "type": "object"
+      },
+      "Body_create_template_api_v1_templates_post": {
+        "properties": {
+          "content": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Content",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expected_fonts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Fonts",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "expected_fonts",
+          "content"
+        ],
+        "title": "Body_create_template_api_v1_templates_post",
+        "type": "object"
+      },
+      "Body_replace_template_api_v1_templates__template_id__content_put": {
+        "properties": {
+          "content": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_fonts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Fonts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "content",
+          "expected_fonts"
+        ],
+        "title": "Body_replace_template_api_v1_templates__template_id__content_put",
+        "type": "object"
+      },
+      "ConversionPageResponse": {
+        "description": "Paginated owner conversion response.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ConversionPageResponse",
+        "type": "object"
+      },
+      "ConversionResponse": {
+        "description": "Safe persistent conversion snapshot.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "component_versions": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Component Versions",
+            "type": "array"
+          },
+          "correlation_id": {
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/JobOutput"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "template_mode": {
+            "$ref": "#/components/schemas/TemplateMode"
+          },
+          "template_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Version Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "template_mode",
+          "template_id",
+          "template_version_id",
+          "output",
+          "component_versions",
+          "correlation_id",
+          "state",
+          "step",
+          "progress",
+          "created_at",
+          "updated_at",
+          "attempt",
+          "cancel_requested",
+          "error_code",
+          "error_message",
+          "expires_at"
+        ],
+        "title": "ConversionResponse",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "description": "Stable machine-readable functional error detail.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "Stable error envelope used for every expected HTTP failure.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "JobOutput": {
+        "description": "Requested immutable result format.",
+        "enum": [
+          "docx",
+          "pdf",
+          "both"
+        ],
+        "title": "JobOutput",
+        "type": "string"
+      },
+      "LoginRequest": {
+        "description": "JSON local-login request.",
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginResponse": {
+        "description": "Successful login response containing the session-bound CSRF token once.",
+        "properties": {
+          "csrf_token": {
+            "description": "Send as X-CSRF-Token for authenticated mutations. Browser clients also receive the same value in the Secure, SameSite=Lax __Host-md_converter_csrf cookie.",
+            "title": "Csrf Token",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          }
+        },
+        "required": [
+          "user",
+          "csrf_token"
+        ],
+        "title": "LoginResponse",
+        "type": "object"
+      },
+      "PasswordChangeRequest": {
+        "description": "Authenticated self-service password renewal request.",
+        "properties": {
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password",
+          "confirmation"
+        ],
+        "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PasswordChangeRequirementRequest": {
+        "description": "Administrator password-renewal requirement request.",
+        "properties": {
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required"
+        ],
+        "title": "PasswordChangeRequirementRequest",
+        "type": "object"
+      },
+      "PasswordResetRequest": {
+        "description": "Administrator password reset request.",
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "password_change_required": {
+            "default": false,
+            "title": "Password Change Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "PasswordResetRequest",
+        "type": "object"
+      },
+      "Role": {
+        "description": "Application-wide authorization roles.",
+        "enum": [
+          "user",
+          "admin"
+        ],
+        "title": "Role",
+        "type": "string"
+      },
+      "TemplateMetadataRequest": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "TemplateMetadataRequest",
+        "type": "object"
+      },
+      "TemplateMode": {
+        "description": "Immutable document-style mode selected for one conversion.",
+        "enum": [
+          "pandoc-default",
+          "versioned"
+        ],
+        "title": "TemplateMode",
+        "type": "string"
+      },
+      "TemplatePageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "TemplatePageResponse",
+        "type": "object"
+      },
+      "TemplateResponse": {
+        "description": "Visible template identity and optimistic-concurrency revision.",
+        "properties": {
+          "current_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_username": {
+            "title": "Owner Username",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TemplateStatus"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "description",
+          "status",
+          "revision",
+          "current_version_id",
+          "owner_username"
+        ],
+        "title": "TemplateResponse",
+        "type": "object"
+      },
+      "TemplateStatus": {
+        "description": "Visibility lifecycle available before T15 adds version mutations.",
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "TemplateStatus",
+        "type": "string"
+      },
+      "TemplateVersionResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "declared_fonts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Declared Fonts",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "resolved_fonts": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Resolved Fonts",
+            "type": "array"
+          },
+          "restored_from_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From Version Id"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "template_id": {
+            "format": "uuid",
+            "title": "Template Id",
+            "type": "string"
+          },
+          "validation_trace": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Trace",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "template_id",
+          "number",
+          "sha256",
+          "size",
+          "created_at",
+          "created_by",
+          "restored_from_version_id",
+          "declared_fonts",
+          "resolved_fonts",
+          "validation_trace"
+        ],
+        "title": "TemplateVersionResponse",
+        "type": "object"
+      },
+      "UserCreateRequest": {
+        "description": "Administrator local-account creation request.",
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "password_change_required": {
+            "default": false,
+            "title": "Password Change Required",
+            "type": "boolean"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "UserCreateRequest",
+        "type": "object"
+      },
+      "UserResponse": {
+        "description": "Public local-account representation without password material.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "password_change_required": {
+            "title": "Password Change Required",
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "role",
+          "active",
+          "password_change_required"
+        ],
+        "title": "UserResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Markdown Converter API",
+    "version": "0.4.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/users": {
+      "get": {
+        "operationId": "list_users_api_v1_admin_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserResponse"
+                  },
+                  "title": "Response List Users Api V1 Admin Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Users",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_user_api_v1_admin_users_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request conflicts with current state",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create User",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/active": {
+      "patch": {
+        "operationId": "set_user_active_api_v1_admin_users__user_id__active_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set User Active",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/password": {
+      "post": {
+        "operationId": "reset_user_password_api_v1_admin_users__user_id__password_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reset User Password",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/password-change-required": {
+      "patch": {
+        "operationId": "set_user_password_change_required_api_v1_admin_users__user_id__password_change_required_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequirementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set User Password Change Required",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "operationId": "list_audit_records_api_v1_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditRecordResponse"
+                  },
+                  "title": "Response List Audit Records Api V1 Audit Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Audit Records",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/api/v1/conversions": {
+      "get": {
+        "operationId": "list_conversions_api_v1_conversions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Conversions",
+        "tags": [
+          "conversions"
+        ]
+      },
+      "post": {
+        "operationId": "create_conversion_api_v1_conversions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_conversion_api_v1_conversions_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request conflicts with current state",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller has exceeded a configured quota",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create Conversion",
+        "tags": [
+          "conversions"
+        ]
+      }
+    },
+    "/api/v1/conversions/{job_id}": {
+      "delete": {
+        "operationId": "cancel_conversion_api_v1_conversions__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Cancel Conversion",
+        "tags": [
+          "conversions"
+        ]
+      },
+      "get": {
+        "operationId": "get_conversion_api_v1_conversions__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Conversion",
+        "tags": [
+          "conversions"
+        ]
+      }
+    },
+    "/api/v1/conversions/{job_id}/result": {
+      "get": {
+        "operationId": "download_conversion_api_v1_conversions__job_id__result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Immutable conversion result",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request conflicts with current state",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download Conversion",
+        "tags": [
+          "conversions"
+        ]
+      }
+    },
+    "/api/v1/conversions/{job_id}/result/manifest": {
+      "get": {
+        "operationId": "download_conversion_manifest_api_v1_conversions__job_id__result_manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Canonical PDF traceability manifest",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request conflicts with current state",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download Conversion Manifest",
+        "tags": [
+          "conversions"
+        ]
+      }
+    },
+    "/api/v1/login": {
+      "post": {
+        "operationId": "api_login_api_v1_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Api Login",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/logout": {
+      "post": {
+        "operationId": "api_logout_api_v1_logout_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Api Logout",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/password": {
+      "post": {
+        "operationId": "change_own_password_api_v1_password_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Change Own Password",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/session": {
+      "get": {
+        "operationId": "api_session_api_v1_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Api Session",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/template-preference": {
+      "delete": {
+        "operationId": "clear_preferred_template_api_v1_template_preference_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Clear Preferred Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "operationId": "list_templates_api_v1_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "description",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TemplateStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "operationId": "create_template_api_v1_templates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_template_api_v1_templates_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_template_api_v1_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Delete Template",
+        "tags": [
+          "templates"
+        ]
+      },
+      "get": {
+        "operationId": "get_template_api_v1_templates__template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "templates"
+        ]
+      },
+      "patch": {
+        "operationId": "update_template_api_v1_templates__template_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateMetadataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/archive": {
+      "post": {
+        "operationId": "archive_template_api_v1_templates__template_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Archive Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/content": {
+      "get": {
+        "operationId": "download_current_template_api_v1_templates__template_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Immutable current Word template",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download Current Template",
+        "tags": [
+          "templates"
+        ]
+      },
+      "put": {
+        "operationId": "replace_template_api_v1_templates__template_id__content_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_replace_template_api_v1_templates__template_id__content_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is too large",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Replace Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/preferred": {
+      "put": {
+        "operationId": "set_preferred_template_api_v1_templates__template_id__preferred_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set Preferred Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/system-fallback": {
+      "put": {
+        "operationId": "set_system_fallback_template_api_v1_templates__template_id__system_fallback_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set System Fallback Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/versions": {
+      "get": {
+        "operationId": "list_template_versions_api_v1_templates__template_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionResponse"
+                  },
+                  "title": "Response List Template Versions Api V1 Templates  Template Id  Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Template Versions",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/versions/{version_id}/content": {
+      "get": {
+        "operationId": "download_template_version_api_v1_templates__template_id__versions__version_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Immutable historical Word template",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download Template Version",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}/versions/{version_id}/restore": {
+      "post": {
+        "operationId": "restore_template_version_api_v1_templates__template_id__versions__version_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The operation is forbidden",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The requested resource was not found",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A request precondition failed",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request is invalid",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The request requires a precondition",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Restore Template Version",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Live Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Live",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Metrics",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}
