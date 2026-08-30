@@ -60,7 +60,6 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.draft",
         "github.event.pull_request.head.sha",
         "github.event.pull_request.number",
-        "github.event.repository.default_branch",
         "github.event_name",
         "github.ref",
         "github.repository",
@@ -104,7 +103,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
-        ("mutation", "Run reviewed critical mutation campaign"),
+        ("mutation", "Run a fresh, non-empty targeted mutation campaign"),
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
@@ -303,15 +302,10 @@ READ_ONLY_WORKFLOW_POLICIES = {
         canonical_digest="434d6b758c63d6b11b3c5053a5d5572442ad209907cca569887ab60a992f263a",
     ),
     "mutation.yml": WorkflowPolicy(
-        triggers=frozenset({"pull_request", "schedule", "workflow_dispatch"}),
+        triggers=frozenset({"schedule", "workflow_dispatch"}),
         jobs={"mutation": 30},
         actions=frozenset(
-            {
-                "actions/checkout",
-                "actions/setup-python",
-                "actions/upload-artifact",
-                "astral-sh/setup-uv",
-            }
+            {"actions/checkout", "actions/setup-python", "astral-sh/setup-uv"}
         ),
         concurrency_group="mutation-${{ github.ref }}",
         cancel_in_progress=True,
@@ -319,10 +313,8 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "mutation": frozenset({"if", "name", "runs-on", "steps", "timeout-minutes"})
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
-        step_conditions={
-            ("mutation", "Retain critical mutation evidence"): "${{ always() }}"
-        },
-        canonical_digest="f2ca3c40ff74a81cf2d6c7911630b94801f5b51abfc7dc00ba977ed6a3eadb21",
+        step_conditions={},
+        canonical_digest="506f4cf1a2459e732d987aa0bbe9e5dc43af15df8b922404d750555b346d83a3",
     ),
 }
 

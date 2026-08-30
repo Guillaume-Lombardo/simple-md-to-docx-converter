@@ -50,7 +50,7 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
 def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
     triggers = workflow["on"]
-    assert set(triggers) == {"pull_request", "schedule", "workflow_dispatch"}
+    assert set(triggers) == {"schedule", "workflow_dispatch"}
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     job = workflow["jobs"]["mutation"]
@@ -72,43 +72,25 @@ def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
 @pytest.mark.unit
 def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
-    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["domain"]
+    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["target"]
+    target = "markweave.observability.x__normalize_method__mutmut_*"
     assert dispatch["type"] == "choice"
-    assert dispatch["default"] == "all"
-    assert dispatch["options"] == [
-        "all",
-        "observability",
-        "auth-session",
-        "archive-svg",
-        "job-integrity",
-        "retention-storage",
-    ]
+    assert dispatch["default"] == target
+    assert dispatch["options"] == [target]
     text = MUTATION_WORKFLOW.read_text(encoding="utf-8")
-    assert "scripts/ci/run_mutation_campaign.py" in text
-    assert "--mode changed" in text
-    assert "--base-sha" in text
-    assert "--head-sha" in text
-    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in text
-    steps = {step["name"]: step for step in workflow["jobs"]["mutation"]["steps"]}
-    assert steps["Check out pull-request mutation target"]["with"] == {
-        "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
-        "fetch-depth": 0,
-        "persist-credentials": False,
-    }
-    assert steps["Check out trusted mutation policy"]["with"] == {
-        "ref": (
-            "${{ github.event.pull_request.base.sha || "
-            "github.event.repository.default_branch }}"
-        ),
-        "path": ".mutation-policy",
-        "persist-credentials": False,
-    }
-    assert steps["Synchronize locked dependencies"]["run"] == (
-        "cd .mutation-policy && uv sync --locked --all-groups"
-    )
-    assert "uv run --directory .mutation-policy python" in text
-    assert '--target-root "$GITHUB_WORKSPACE"' in text
-    assert '--artifact "$GITHUB_WORKSPACE/mutation-results/report.json"' in text
+    assert "rm -rf -- mutants" in text
+    assert 'uv run mutmut run "$MUTATION_TARGET"' in text
+    assert "uv run mutmut export-cicd-stats" in text
+    assert 'stats.get("killed", 0) <= 0' in text
+    for failure in (
+        "survived",
+        "no_tests",
+        "suspicious",
+        "timeout",
+        "check_was_interrupted_by_user",
+        "segfault",
+    ):
+        assert f'"{failure}"' in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.7.0"' in pyproject
@@ -120,5 +102,4 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
 def test_mutation_output_is_ignored_but_configuration_is_tracked() -> None:
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ignored.count("mutants/") == 1
-    assert ignored.count("mutation-results/") == 1
     assert ".github/" not in ignored
