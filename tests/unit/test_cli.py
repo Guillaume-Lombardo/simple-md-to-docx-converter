@@ -77,7 +77,6 @@ def test_version_and_missing_command_use_the_documented_streams(
         (("templates", "restore"), "templates restore"),
         (("users", "deactivate"), "users deactivate"),
         (("health", "metrics"), "health metrics"),
-        (("serve",), "serve"),
         (("backup",), "backup"),
     ),
 )

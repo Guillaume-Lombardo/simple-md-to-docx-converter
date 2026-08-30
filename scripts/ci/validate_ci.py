@@ -145,7 +145,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "5c67726f99574a9a28b8ec773294651e3cac5ed7677eee8f05e08dd031f5a9b4"
+    "2645ebf0f05beb703e8e86912041475895ba9087e3c3a42736a137981a448f91"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
@@ -1531,6 +1531,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
         '"localhost/md-converter:$RELEASE_VERSION"',
+        'bash scripts/container/recovery-cli-smoke.sh "$image"',
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
         "skopeo --version",
@@ -1596,6 +1597,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
         'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
+        'bash scripts/container/recovery-cli-smoke.sh "$image"',
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"automatic container build is missing: {required}")
