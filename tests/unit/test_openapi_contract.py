@@ -236,6 +236,35 @@ def test_request_constraints_and_required_body_are_directionally_incompatible() 
 
 
 @pytest.mark.unit
+def test_added_nested_request_schemas_are_incompatible() -> None:
+    baseline = _artifact()
+
+    closed_object = deepcopy(baseline)
+    closed_object["components"]["schemas"]["LoginRequest"]["additionalProperties"] = (
+        False
+    )
+    assert any(
+        change.severity == "incompatible"
+        and change.location == "components/schemas/LoginRequest/additionalProperties"
+        for change in classify_changes(baseline, closed_object)
+    )
+
+    expected_fonts = baseline["components"]["schemas"][
+        "Body_create_template_api_v1_templates_post"
+    ]["properties"]["expected_fonts"]
+    expected_fonts.pop("items")
+    constrained_array = deepcopy(baseline)
+    constrained_array["components"]["schemas"][
+        "Body_create_template_api_v1_templates_post"
+    ]["properties"]["expected_fonts"]["items"] = {"type": "string"}
+    assert any(
+        change.severity == "incompatible"
+        and change.location.endswith("properties/expected_fonts/items")
+        for change in classify_changes(baseline, constrained_array)
+    )
+
+
+@pytest.mark.unit
 def test_request_enum_changes_follow_accepted_input_direction() -> None:
     baseline = _artifact()
     username = baseline["components"]["schemas"]["LoginRequest"]["properties"][

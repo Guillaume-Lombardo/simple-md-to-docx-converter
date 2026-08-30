@@ -158,6 +158,38 @@ def _constraint_change(  # noqa: PLR0913 - explicit compatibility inputs
     )
 
 
+def _nested_schema_changes(
+    old_child: object,
+    new_child: object,
+    location: str,
+    *,
+    direction: SchemaDirection,
+) -> list[Change]:
+    if isinstance(old_child, dict) and isinstance(new_child, dict):
+        return _schema_changes(
+            old_child,
+            new_child,
+            location,
+            direction=direction,
+        )
+    if old_child == new_child:
+        return []
+    if old_child is None:
+        request_incompatible = new_child is not None
+    elif new_child is None:
+        request_incompatible = False
+    else:
+        request_incompatible = True
+    return [
+        Change(
+            _directional_severity(direction, request_incompatible=request_incompatible),
+            "schema",
+            location,
+            f"{direction} nested schema changed",
+        )
+    ]
+
+
 def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sections
     baseline: Mapping[str, Any],
     current: Mapping[str, Any],
@@ -318,28 +350,14 @@ def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sectio
         )
 
     for keyword in ("items", "additionalProperties"):
-        old_child = baseline.get(keyword)
-        new_child = current.get(keyword)
-        if isinstance(old_child, dict) and isinstance(new_child, dict):
-            changes.extend(
-                _schema_changes(
-                    old_child,
-                    new_child,
-                    f"{location}/{keyword}",
-                    direction=direction,
-                )
+        changes.extend(
+            _nested_schema_changes(
+                baseline.get(keyword),
+                current.get(keyword),
+                f"{location}/{keyword}",
+                direction=direction,
             )
-        elif old_child != new_child and old_child is not None:
-            changes.append(
-                Change(
-                    _directional_severity(
-                        direction, request_incompatible=new_child is not None
-                    ),
-                    "schema",
-                    f"{location}/{keyword}",
-                    f"{direction} {keyword} changed",
-                )
-            )
+        )
     return changes
 
 
