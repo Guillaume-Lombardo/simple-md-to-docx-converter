@@ -2,7 +2,7 @@
 ticket: T47
 linear_id: G1L-419
 linear_url: https://linear.app/g1lom/issue/G1L-419/t47-add-changelog-and-upgrade-compatibility-guidance
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -43,10 +43,11 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 * 2026-08-30: Independent review clarified that automatic enforcement is inherent in the checker acceptance criterion. T47 therefore owns the minimal release detect-job hook and its policy tests; publication and mutation logic remain out of scope.
 * 2026-08-30: Review corrections added the automatic hook before remote release checks, real-Git boundary coverage, Markdown/date fail-closed parsing, explicit upgrade anchors, accurate T39 equal-alias guidance, and updated changelog history. Targeted checker, Git integration, workflow-policy, and documentation tests passed.
 * 2026-08-30: Final review corrections reject nested blockquote and list headings and make the stable-link list use the explicit upgrade and configuration anchors.
+* 2026-08-30: Verified complete on `main` at `6902f75`. PR #109 passed CI and CodeRabbit at exact head `58e77f0`, squash-merged as `cfbbac7`, and its exact merge SHA passed main CI run `33308625386`.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

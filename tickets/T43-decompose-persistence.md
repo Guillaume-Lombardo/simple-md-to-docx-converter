@@ -2,7 +2,7 @@
 ticket: T43
 linear_id: G1L-415
 linear_url: https://linear.app/g1lom/issue/G1L-415/t43-decompose-persistence-adapters-by-responsibility
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,7 @@ Split oversized job and template persistence adapters into cohesive repositories
 
 ## Progress
 
+* 2026-08-30: Verified complete on `main` at `6902f75`. PR #116 passed CI and CodeRabbit at exact head `ed56433`, squash-merged as the current main commit `6902f75`, and exact-main CI run `33317110884` passed.
 * 2026-08-30: Closed the follow-up publication race identified by CodeRabbit. Finalization now atomically claims the pending version with its publication token before updating the template or inserting audit evidence, so concurrent PostgreSQL transactions produce exactly one winner and one audit record while SQLite retains its `BEGIN IMMEDIATE` serialization. A barrier-driven real PostgreSQL regression forces both transactions to read the same pending row without sleeps; it produces two winners against the previous implementation and one winner with the fix. Ruff, `ty`, 49 focused SQLite/unit/architecture tests, 6 real PostgreSQL/RustFS template and recovery tests, and 211 T40/T43 distribution and recovery compatibility tests pass.
 * 2026-08-30: Addressed every valid CodeRabbit review finding. SQLite selection mutations now reserve writes before any read or mutation, with a deterministic real-concurrency regression that reproduces `SQLITE_BUSY` when the reservation is removed. Initial publication preserves caller-supplied revisions, PostgreSQL recovery claims have deterministic ordering, audited preference clearing verifies prior-target substitution and no-op behavior, and decomposed modules reuse shared primitives without copied artifacts. Python 3.14.6 confirms that the reported unparenthesized multi-exception handler is valid PEP 758 syntax. Ruff, `ty`, 1,656 unit tests (94.23% coverage), 1,909 canonical non-document-engine tests against real PostgreSQL/RustFS (95.77% coverage), and the targeted mutation check all pass.
 * 2026-08-30: Completed the responsibility split without changing public repository imports or HTTP/CLI/worker behavior. Job persistence is composed from submission, query, claim/lease, terminal-lifecycle, and cleanup stores; template persistence is composed from identity, search, publication, publication-recovery, immutable-version query, selection, and audit modules. The aggregate provider-neutral ports now inherit explicit bounded protocols, with no temporary compatibility layer.
@@ -46,7 +47,7 @@ Split oversized job and template persistence adapters into cohesive repositories
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
