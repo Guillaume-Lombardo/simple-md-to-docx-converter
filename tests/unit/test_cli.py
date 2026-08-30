@@ -166,7 +166,7 @@ def test_output_writer_success_details_and_interrupt_are_safe(
     machine.error(CliError("invalid", "Safe.", details={"field": "value"}))
     assert capsys.readouterr() == (
         '{"status":"ok"}\n',
-        '{"error":{"code":"invalid","details":{"field":"value"},"message":"Safe."}}\n',
+        '{"error":{"code":"invalid","message":"Safe."}}\n',
     )
 
     parser = build_parser()
@@ -187,3 +187,34 @@ def test_connection_profile_keeps_opaque_session_values_out_of_repr() -> None:
         csrf_state="csrf-secret",
     )
     assert "secret" not in repr(profile)
+
+
+@pytest.mark.parametrize("output_format", (OutputFormat.HUMAN, OutputFormat.JSON))
+def test_error_rendering_ignores_unserializable_sensitive_details(
+    output_format: OutputFormat, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Controlled details cannot cause a traceback or disclose their contents."""
+
+    class UnserializableDetail:
+        def __repr__(self) -> str:
+            return "password=do-not-disclose"
+
+        def __str__(self) -> str:
+            return "password=do-not-disclose"
+
+    OutputWriter(output_format).error(
+        CliError(
+            "invalid_request",
+            "Request could not be completed.",
+            details={"cause": UnserializableDetail()},
+        )
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "password=do-not-disclose" not in captured.err
+    if output_format is OutputFormat.JSON:
+        assert captured.err == (
+            '{"error":{"code":"invalid_request","message":"Request could not be completed."}}\n'
+        )
+    else:
+        assert captured.err == "error: Request could not be completed.\n"

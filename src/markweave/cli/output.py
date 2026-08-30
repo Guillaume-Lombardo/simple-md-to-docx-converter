@@ -33,16 +33,15 @@ class OutputWriter:
             self._stdout.write(f"{human}\n")
 
     def error(self, error: CliError) -> None:
-        """Write one safe error envelope without a traceback."""
+        """Write one safe error envelope without a traceback or error details."""
+        code = error.code if isinstance(error.code, str) else "command_failed"
+        message = error.message if isinstance(error.message, str) else "Command failed."
         if self._output_format is OutputFormat.JSON:
-            payload: dict[str, dict[str, Any]] = {
-                "error": {"code": error.code, "message": error.message}
-            }
-            if error.details is not None:
-                payload["error"]["details"] = error.details
-            self._write_json(self._stderr, payload)
+            self._write_json(
+                self._stderr, {"error": {"code": code, "message": message}}
+            )
         else:
-            self._stderr.write(f"error: {error.message}\n")
+            self._stderr.write(f"error: {message}\n")
 
     @staticmethod
     def _write_json(stream: TextIO, payload: Mapping[str, Any]) -> None:
