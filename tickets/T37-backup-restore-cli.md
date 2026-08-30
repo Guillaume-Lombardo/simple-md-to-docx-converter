@@ -2,7 +2,7 @@
 ticket: T37
 linear_id: G1L-412
 linear_url: https://linear.app/g1lom/issue/G1L-412/t37-add-backup-and-restore-cli-commands
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -42,10 +42,14 @@ Expose the approved standalone and distributed backup/restore workflows through 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed distinct production contracts for standalone and distributed backup sets and excluded test-only and arbitrary-shell recovery paths.
 * 2026-08-29: Final audit follow-up assigned the pre-registered recovery-operations family exclusively to T37.
+* 2026-08-30: Implementation started on `feat/T37-backup-restore` from verified `main` after T31 and T39 completed; ownership is limited to the recovery command family, provider-neutral recovery services/adapters, dedicated tests, and narrowly relevant recovery documentation.
+* 2026-08-30: Implemented guarded production backup and restore commands for both profiles, authenticated content-addressed manifests, online SQLite and repeatable-read PostgreSQL snapshots, stable filesystem/S3 object recovery, isolated-target validation, rollback cleanup, structured quarterly exercise delegation, and operator documentation.
+* 2026-08-30: Integrated verified `main` at `e453a28` after T32 through a normal HTTPS fast-forward and passed 90 focused CLI compatibility tests without changing T32-owned files.
+* 2026-08-30: Verified Ruff formatting/lint, ty, 1,565 unit tests with the required line and branch coverage, 1,810 default tests against real PostgreSQL 18 and RustFS, 23 browser tests, and standalone/distributed success and failure workflows in the rebuilt rootless final image. The unfiltered engine suite remains unavailable on the host because Pandoc, Mermaid/Chromium, and LibreOffice executables are not installed locally; those boundaries are covered by the final-image smoke test and their existing image jobs.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
