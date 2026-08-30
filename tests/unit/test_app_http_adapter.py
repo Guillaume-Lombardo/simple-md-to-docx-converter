@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from markweave.app import AppComponents, ErrorResponse, create_app, error_responses
+from markweave.app import AppComponents, create_app
 from markweave.auth.errors import (
     INVALID_CREDENTIALS,
     PASSWORD_CHANGE_REQUIRED,
@@ -20,6 +23,8 @@ from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
+from markweave.http.errors import error_responses
+from markweave.http.schemas import ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
@@ -101,6 +106,21 @@ def _lifecycle_settings() -> Settings:
         initial_admin_password="admin-" + "password",
         storage_profile="standalone",
         standalone_data_directory="/data",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+
+
+def _distributed_http_settings() -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        storage_profile="distributed",
+        distributed_database_url="postgresql+psycopg://database/app",
+        s3_bucket="objects",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
         conversion_retry_after_seconds=1,
@@ -784,6 +804,42 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "format": "binary",
         }
         assert {"401", "404", "422", "503"} <= responses.keys()
+
+
+@pytest.mark.unit
+def test_http_contract_is_unchanged_for_both_storage_profiles(
+    mocker: MockerFixture,
+) -> None:
+    standalone = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+    distributed = create_app(
+        _distributed_http_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    def contract(app: FastAPI) -> tuple[str, str]:
+        schema = json.dumps(
+            app.openapi(), sort_keys=True, separators=(",", ":")
+        ).encode()
+        routes = [
+            (
+                getattr(route, "path", None),
+                sorted(getattr(route, "methods", ()) or ()),
+                getattr(route, "name", None),
+            )
+            for route in app.routes
+        ]
+        manifest = json.dumps(routes, separators=(",", ":")).encode()
+        return hashlib.sha256(schema).hexdigest(), hashlib.sha256(manifest).hexdigest()
+
+    expected = (
+        "271f640246d8c24adfbc14cf24e6d44ceec86fd0f7b5e28a996a726709d44c0d",
+        "ba5b919325987dbc702bcfae264d67e26d2ff6dab3fbbf3968c8a668c933ce33",
+    )
+    assert contract(standalone) == expected
+    assert contract(distributed) == expected
 
 
 @pytest.mark.unit

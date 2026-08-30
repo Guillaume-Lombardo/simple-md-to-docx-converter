@@ -2,7 +2,7 @@
 ticket: T41
 linear_id: G1L-414
 linear_url: https://linear.app/g1lom/issue/G1L-414/t41-decompose-the-fastapi-application-module
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,10 +34,12 @@ Split the oversized FastAPI composition module into stable routers, schemas, dep
 ## Progress
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
+* 2026-08-30: Implementation started on `refactor/T41-decompose-fastapi` from `becfee1b`. The work owns the FastAPI composition root and new HTTP-layer modules/tests while preserving the complete HTTP, OpenAPI, dependency-injection, observability, and shutdown contracts.
+* 2026-08-30: Decomposed the 2,178-line application module into explicit HTTP components and a 98-line composition root. Focused tests pass, Ruff and ty pass, and both storage profiles retain the baseline 49-route manifest and OpenAPI digest. The broad local suite passed 1,900 tests at 94.98% coverage; PostgreSQL/S3 tests require unavailable local service variables. Both final-image profiles passed service and security workflows, while their browser journeys ended in environment-sensitive UI/template timeouts after reaching the expected pages and API routes.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
