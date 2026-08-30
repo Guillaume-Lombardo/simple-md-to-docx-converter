@@ -13,4 +13,5 @@ bash scripts/container/smoke.sh "$final_image"
 bash tests/e2e/runtime-operations-final-image.sh "$final_image"
 bash scripts/container/api-smoke.sh "$final_image"
 bash scripts/container/distributed-api-smoke.sh "$final_image"
+bash scripts/container/recovery-cli-smoke.sh "$final_image"
 bash scripts/container/supply-chain.sh "$final_image" artifacts/container
