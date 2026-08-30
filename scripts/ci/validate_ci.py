@@ -90,6 +90,7 @@ READ_ONLY_ENV_STEPS = frozenset(
     {
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
+        ("light", "Validate the canonical OpenAPI contract"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
         ("heavy", "Prepare verified LibreOffice DEB archive"),
         ("heavy", "Prepare verified LibreOffice RPM archive"),
@@ -298,7 +299,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="699aa2513e22d562b48382cf45809ad4dd9f68cd7858851db34668ff8e963e56",
+        canonical_digest="434d6b758c63d6b11b3c5053a5d5572442ad209907cca569887ab60a992f263a",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"pull_request", "schedule", "workflow_dispatch"}),
@@ -695,6 +696,15 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "uv run python -m scripts.ci.check_changed_coverage "
             '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
             "--source-root src/markweave --fail-under 90"
+        ),
+        ("light", "Validate the canonical OpenAPI contract"): (
+            "set -euo pipefail\n"
+            "uv run python -m scripts.openapi_contract check\n"
+            'if [[ -n "$BASE_SHA" && "$BASE_SHA" != '
+            '"0000000000000000000000000000000000000000" ]]; then\n'
+            "  uv run python -m scripts.openapi_contract compare "
+            '--baseline-git-ref "$BASE_SHA"\n'
+            "fi\n"
         ),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
             "npm run test:web-browser"

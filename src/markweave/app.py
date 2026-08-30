@@ -8,7 +8,7 @@ from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import install_error_handlers
 from markweave.http.lifecycle import build_lifespan, resolve_components
 from markweave.http.middleware import BoundedRequestBody
-from markweave.http.openapi import document_correlation_headers
+from markweave.http.openapi import document_openapi_contract
 from markweave.http.routers import (
     administration,
     audit_observability,
@@ -94,5 +94,7 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     )
     for router in routers:
         app.router.routes.extend(router.routes)
-    document_correlation_headers(app)
+    document_openapi_contract(
+        app, session_cookie_name=resolved_settings.session_cookie_name
+    )
     return app
