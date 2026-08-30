@@ -2,7 +2,7 @@
 ticket: T46
 linear_id: G1L-421
 linear_url: https://linear.app/g1lom/issue/G1L-421/t46-add-security-reporting-and-support-policies
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -37,10 +37,12 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized policy links after T40 and removed package metadata from T46 ownership.
 * 2026-08-29: Final audit follow-up moved shared documentation navigation exclusively to T50.
+* 2026-08-30: Started implementation on `docs/T46-security-support-policy` from `c1cae3b6ca1d2f8eb6e680eec26f444ea92332c5`; G1L-421 is In Progress. This ticket exclusively owns `SECURITY.md`, `SUPPORT.md`, and this mirror.
+* 2026-08-30: Added the dedicated private vulnerability-reporting, supported-release, coordinated-disclosure, dependency/container-triage, deployment, backup, and safe-information policies. Dedicated policy links resolve; T40's existing PyPI `Support` metadata URL was verified read-only. Ruff format/lint and `ty` pass.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
