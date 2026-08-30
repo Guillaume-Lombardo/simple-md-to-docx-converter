@@ -2,7 +2,7 @@
 ticket: T42
 linear_id: G1L-416
 linear_url: https://linear.app/g1lom/issue/G1L-416/t42-decompose-the-conversion-worker-orchestration
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,7 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 
 ## Progress
 
+* 2026-08-30: Completed after verification on `main`. PR #123 exact head `5da754ff8c6df06802010c687f08bef089795760` was squash-merged as `754e0f731268a1404a704ad5aa2a01e1fcb43df2`; exact-head CI run `33329168654` and exact-main CI run `33329628413` both passed. CodeRabbit reported no new exact-head findings, both review threads are resolved, and its Python 3.14 PEP 758 and separately owned T52 findings were explicitly refuted and withdrawn. Cleanup is exact: the implementation source branch is absent locally and remotely and its worktree was removed. Current `main` at `c6a7e22e445b7e77f9c5550773cf7dfeb9c1f648` adds only the verified T34 completion ticket and does not alter T42.
 * 2026-08-30: Reconciled through a normal merge with exact `main` SHA `60fecb44`, which delivers T34's template CLI across nine CLI, E2E, test, documentation, and ticket files. There is no file overlap with T42's worker modules or tests; the behavioral overlap is additive because T34's final-image template workflow exercises the preserved worker/template boundary. Ruff, ty, 86 focused worker/quality tests, 21 assembly/runtime/SQLite tests, eight namespace tests, the canonical namespace check, and 61 focused T34 tests pass; the four changed worker modules retain 98% branch coverage. The combined tree did not rerun complete final-image recovery because neither side changed the other's implementation files; both T42 profiles and both delivered T34 profiles were already validated independently, so combined final-image execution remains the independent-review limitation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized T42 after T43 and prohibited concurrent edits to persistence ports.
@@ -45,7 +46,7 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
