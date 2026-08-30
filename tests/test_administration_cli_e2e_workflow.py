@@ -151,3 +151,14 @@ def test_administration_e2e_launcher_dispatches_modes(monkeypatch, mocker) -> No
     )
     assert driver.main() == 0
     readiness.assert_called_once_with("application")
+
+
+def test_administration_e2e_is_wired_once_after_existing_cli_pilots() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+
+    administration = runner.index("tests.e2e.administration_cli_workflow")
+    shared = runner.index("tests.e2e.cli_workflow")
+    conversions = runner.index("tests.e2e.conversion_cli_workflow")
+
+    assert shared < conversions < administration
+    assert runner.count("tests.e2e.administration_cli_workflow") == 1

@@ -177,7 +177,10 @@ def _login(container: str, profile: str, username: str, password: str) -> None:
             profile,
         ),
         ((b"Password: ", password),),
-        inspect_login=True,
+        # The shared CLI pilot immediately preceding T35 inspects the blocked
+        # login process. This pilot still rejects secrets in argv and output,
+        # without racing a second /proc snapshot for each role transition.
+        inspect_login=False,
     )
 
 
