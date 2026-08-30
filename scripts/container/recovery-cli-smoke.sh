@@ -1,6 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ensure_postgres_database() {
+  local container="$1"
+  local database="$2"
+  local _attempt
+  local failure=""
+  local ready_failures=0
+
+  if [[ ! "$database" =~ ^[a-z][a-z0-9_]*$ ]]; then
+    printf 'Invalid PostgreSQL database name: %s\n' "$database" >&2
+    return 2
+  fi
+  for _attempt in {1..60}; do
+    if failure="$(podman exec "$container" createdb \
+      --username postgres "$database" 2>&1)"; then
+      return 0
+    fi
+    if podman exec "$container" psql --username postgres --dbname postgres \
+      --tuples-only --no-align \
+      --command "SELECT 1 FROM pg_database WHERE datname = '$database'" \
+      2>/dev/null | grep -qx 1; then
+      return 0
+    fi
+    if podman exec "$container" pg_isready --username postgres \
+      --dbname postgres >/dev/null 2>&1; then
+      ready_failures=$((ready_failures + 1))
+      if ((ready_failures >= 2)); then
+        printf '%s\n' "$failure" >&2
+        return 1
+      fi
+    else
+      ready_failures=0
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$failure" >&2
+  return 1
+}
+
+if [[ "${BASH_SOURCE[0]-}" != "$0" ]]; then
+  return 0
+fi
+
 readonly image="${1:?usage: recovery-cli-smoke.sh IMAGE}"
 readonly postgres_image="docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8"
 readonly rustfs_image="ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04"
@@ -8,8 +50,9 @@ readonly run_id="$$"
 readonly network="markweave-t37-${run_id}"
 readonly postgres="markweave-t37-postgres-${run_id}"
 readonly rustfs="markweave-t37-rustfs-${run_id}"
-readonly workspace="$(mktemp -d -t markweave-t37-e2e.XXXXXXXX)"
-readonly setup_script="$(pwd)/tests/e2e/recovery_cli_setup.py"
+workspace="$(mktemp -d -t markweave-t37-e2e.XXXXXXXX)"
+readonly workspace
+readonly setup_script="$PWD/tests/e2e/recovery_cli_setup.py"
 
 cleanup() {
   podman rm --force "$postgres" "$rustfs" >/dev/null 2>&1 || true
@@ -43,7 +86,7 @@ for _attempt in {1..60}; do
   sleep 1
 done
 [[ "$ready" == true ]]
-podman exec "$postgres" createdb -U postgres target
+ensure_postgres_database "$postgres" target
 
 run_setup() {
   local -a container_arguments=()
