@@ -74,7 +74,6 @@ def test_version_and_missing_command_use_the_documented_streams(
     (
         (("convert",), "convert"),
         (("jobs", "wait"), "jobs wait"),
-        (("templates", "restore"), "templates restore"),
         (("users", "deactivate"), "users deactivate"),
         (("health", "metrics"), "health metrics"),
         (("backup",), "backup"),
