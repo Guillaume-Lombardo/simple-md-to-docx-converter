@@ -145,6 +145,25 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     assert environment["MARKWEAVE_JOB_RESULT_RETENTION_SECONDS"] == "600"
 
 
+def test_published_compose_bridge_keeps_legacy_aliases_equal_to_canonical_values() -> (
+    None
+):
+    environment = _compose()["services"]["markweave"]["environment"]
+    canonical = {
+        key.removeprefix("MARKWEAVE_"): value
+        for key, value in environment.items()
+        if key.startswith("MARKWEAVE_")
+    }
+    legacy = {
+        key.removeprefix("MD_CONVERTER_"): value
+        for key, value in environment.items()
+        if key.startswith("MD_CONVERTER_")
+    }
+
+    assert canonical == legacy
+    assert len(canonical) == len(legacy) == 73
+
+
 def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> None:
     encoded = TEMPLATE.read_bytes()
     template = base64.b64decode(b"".join(encoded.splitlines()), validate=True)

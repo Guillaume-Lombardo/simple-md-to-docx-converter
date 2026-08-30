@@ -48,6 +48,10 @@ Adopt the Markweave brand for application configuration while preserving determi
   complete legacy-only configuration with `MD_CONVERTER_HOST=127.0.0.1` and
   `MD_CONVERTER_PORT=18080`, verifies live/ready endpoints from inside the container namespace,
   and checks the resolved settings before continuing with the canonical workflow.
+* 2026-08-30: Diagnosed ready-CI Compose job `99227321692`: the pinned published 0.3.5 quickstart
+  image predates T39 and therefore rejects a canonical-only environment. Added a tested equal-value
+  legacy bridge generated exclusively from the canonical Compose inputs; both the pinned image and
+  T39-capable upgraded images start safely without operator-managed legacy variables.
 * 2026-08-30: Started implementation on `feat/T39-configuration-names` from verified `main` at `381e74e9`; this workstream exclusively owns settings aliases, public environment names, Compose/quickstart propagation, compatibility tests, and configuration migration documentation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up fixed typed alias comparison and preserved 0.x cookie and GHCR identities explicitly.
