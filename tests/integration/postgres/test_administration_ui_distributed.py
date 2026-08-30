@@ -74,17 +74,23 @@ def _validated(data: bytes, _declaration: object) -> ValidatedTemplate:
 
 def _app(settings: Settings) -> tuple[FastAPI, AppComponents]:
     built = build_components(settings)
-    user_repository = cast(SqlUserRepository, built.authentication.users)
-    engine = user_repository._engine
-    templates = TemplateService(
-        catalog=SqlTemplateCatalogRepository(engine),
-        selections=SqlTemplateSelectionRepository(engine),
-        objects=built.object_store,
-        validate_content=_validated,
-        recovery_policy=TemplateRecoveryPolicy(60),
-    )
-    components = replace(built, templates=templates, scanner=TrustingUploadScanner())
-    return create_app(settings, components=components), components
+    try:
+        user_repository = cast(SqlUserRepository, built.authentication.users)
+        engine = user_repository._engine
+        templates = TemplateService(
+            catalog=SqlTemplateCatalogRepository(engine),
+            selections=SqlTemplateSelectionRepository(engine),
+            objects=built.object_store,
+            validate_content=_validated,
+            recovery_policy=TemplateRecoveryPolicy(60),
+        )
+        components = replace(
+            built, templates=templates, scanner=TrustingUploadScanner()
+        )
+        return create_app(settings, components=components), components
+    except Exception:
+        built.close()
+        raise
 
 
 def _login(client: TestClient, username: str, password: str) -> tuple[str, UUID]:

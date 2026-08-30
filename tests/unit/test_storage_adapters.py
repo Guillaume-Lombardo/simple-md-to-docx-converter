@@ -114,13 +114,14 @@ def test_s3_success_uses_only_the_stable_identifier_key(
     client.get_object.return_value = {"Body": body}
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.TEMPLATE_VERSION, uuid4(), uuid4())
-
-    store.put(key, b"content")
-    assert store.get(key) == b"content"
-    assert store.exists(key)
-    store.delete(key)
-    assert store.is_ready()
-    store.close()
+    try:
+        store.put(key, b"content")
+        assert store.get(key) == b"content"
+        assert store.exists(key)
+        store.delete(key)
+        assert store.is_ready()
+    finally:
+        store.close()
     expected = key.as_posix()
     client.put_object.assert_called_once_with(
         Bucket="bucket", Key=expected, Body=b"content"
@@ -382,6 +383,7 @@ def test_distributed_component_database_failure_closes_both_s3_clients(
 @pytest.mark.unit
 def test_distributed_wiring_allows_aws_credential_provider_defaults(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
     database_url = "postgresql+psycopg://database/app"
@@ -414,6 +416,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
         "markweave.app.boto3.client", side_effect=(normal_s3, readiness_s3)
     )
     components = build_components(settings)
+    request.addfinalizer(components.close)
     assert create_engine.call_args_list == [
         mocker.call(database_url),
         mocker.call(database_url, timeout_seconds=2.0, pool_pre_ping=False),
@@ -449,6 +452,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
 @pytest.mark.unit
 def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
     engine = mocker.Mock()
@@ -473,6 +477,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         job_result_retention_seconds=3_600,
     )
     standalone_components = build_components(standalone)
+    request.addfinalizer(standalone_components.close)
     assert standalone_components.object_store is normal_files
     standalone_readiness = cast(ProfileReadinessProbe, standalone_components.readiness)
     assert standalone_readiness._objects is readiness_files
@@ -496,6 +501,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         job_result_retention_seconds=3_600,
     )
     distributed_components = build_components(distributed)
+    request.addfinalizer(distributed_components.close)
     assert reclaim.call_count == 2
     common = {
         "endpoint_url": "http://s3.test",
