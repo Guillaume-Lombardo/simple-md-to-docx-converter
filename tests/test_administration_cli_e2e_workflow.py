@@ -153,12 +153,30 @@ def test_administration_e2e_launcher_dispatches_modes(monkeypatch, mocker) -> No
     readiness.assert_called_once_with("application")
 
 
-def test_administration_e2e_is_wired_once_after_existing_cli_pilots() -> None:
+def test_administration_e2e_modes_are_wired_at_healthy_and_failed_boundaries() -> None:
     runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
 
-    administration = runner.index("tests.e2e.administration_cli_workflow")
+    exercise = runner.index(
+        'tests.e2e.administration_cli_workflow \\\n  --container "$application_name"\n'
+    )
+    readiness = runner.index(
+        "tests.e2e.administration_cli_workflow \\\n"
+        '  --container "$application_name" expect-readiness-failure'
+    )
     shared = runner.index("tests.e2e.cli_workflow")
     conversions = runner.index("tests.e2e.conversion_cli_workflow")
+    failed_http = runner.index('require_http_status "$base_url/health/ready" 503')
+    standalone_failure = runner.index('chmod 000 "$data_directory"')
+    distributed_failure = runner.index(
+        'podman stop --time 10 "$rustfs_name" >/dev/null'
+    )
+    standalone_restore = runner.index('chmod 0770 "$data_directory"', readiness)
+    distributed_restore = runner.index(
+        'podman start "$rustfs_name" >/dev/null', readiness
+    )
 
-    assert shared < conversions < administration
-    assert runner.count("tests.e2e.administration_cli_workflow") == 1
+    assert shared < conversions < exercise < standalone_failure
+    assert standalone_failure < failed_http < readiness < standalone_restore
+    assert distributed_failure < failed_http < readiness < distributed_restore
+    assert runner.count("tests.e2e.administration_cli_workflow") == 2
+    assert runner.count("expect-readiness-failure") == 1
