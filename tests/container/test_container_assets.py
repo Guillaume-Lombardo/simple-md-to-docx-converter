@@ -181,6 +181,9 @@ def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
     assert "api|embedded-worker|external-worker" in entrypoint
     assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
+    assert "exec uvicorn markweave.app:create_app" in entrypoint
+    assert "uvicorn markweave:create_app" not in entrypoint
+    assert "--factory" in entrypoint
 
 
 def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:

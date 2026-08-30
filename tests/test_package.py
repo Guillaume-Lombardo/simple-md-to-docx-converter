@@ -1,6 +1,7 @@
 """Tests for package metadata."""
 
 import tomllib
+from importlib import import_module
 from importlib.metadata import version
 from importlib.util import find_spec
 from pathlib import Path
@@ -19,6 +20,13 @@ def test_package_version_matches_distribution_metadata() -> None:
     assert not hasattr(markweave, "create_app")
     assert not hasattr(markweave, "VERSION")
     assert find_spec("md_converter") is None
+
+
+@pytest.mark.unit
+def test_internal_runtime_factory_is_not_reexported_as_public_api() -> None:
+    """The image can resolve its factory without widening the root package API."""
+    assert callable(import_module("markweave.app").create_app)
+    assert not hasattr(markweave, "create_app")
 
 
 @pytest.mark.unit

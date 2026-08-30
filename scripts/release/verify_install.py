@@ -56,6 +56,8 @@ for module in sys.argv[1:]:
         raise SystemExit(f"missing required optional dependency: {module}")
 import markweave.app
 import markweave.storage
+if not callable(markweave.app.create_app):
+    raise SystemExit("server install does not expose its internal ASGI factory")
 """
 
 BASE_ISOLATION_CHECK = """\

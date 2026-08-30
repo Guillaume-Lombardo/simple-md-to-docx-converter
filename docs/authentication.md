@@ -133,11 +133,13 @@ error objects or submitted values, so malformed payloads, passwords, and invalid
 are not reflected. OpenAPI declares this envelope for validation, authentication, administration,
 and readiness failures, including the real readiness `503` response.
 
-The ASGI factory is `markweave:create_app`; Uvicorn is included as the runtime server. Deploy it
-behind the profile's TLS endpoint because authentication cookies are always secure. When a proxy
-terminates TLS, set `MARKWEAVE_PUBLIC_ORIGIN` to the exact browser-visible scheme, host, and
-optional port. Forwarded headers remain untrusted. Without that setting, Origin validation uses the
-direct ASGI request URL. See [container deployment](container-deployment.md).
+The final-image entrypoint resolves its internal ASGI factory as
+`markweave.app:create_app`; this module path is a container runtime detail, not part of the supported
+Python API. Uvicorn is included as the runtime server. Deploy it behind the profile's TLS endpoint
+because authentication cookies are always secure. When a proxy terminates TLS, set
+`MARKWEAVE_PUBLIC_ORIGIN` to the exact browser-visible scheme, host, and optional port. Forwarded
+headers remain untrusted. Without that setting, Origin validation uses the direct ASGI request URL.
+See [container deployment](container-deployment.md).
 
 The normal login page sends `Referrer-Policy: same-origin`, which preserves the browser's
 same-origin form origin without disclosing referrers cross-origin. The explicit loopback-only
