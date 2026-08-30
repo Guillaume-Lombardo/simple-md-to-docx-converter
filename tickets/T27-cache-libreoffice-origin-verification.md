@@ -2,7 +2,7 @@
 ticket: T27
 linear_id: G1L-388
 linear_url: https://linear.app/g1lom/issue/G1L-388/
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -62,6 +62,10 @@ origin reaches the running application across supported Compose providers.
   `runner.temp` is unavailable in job-level `env`. The correction scopes that value to the exact
   consuming steps and passes actionlint 1.7.12, the repository CI validator, and all 225 focused
   tests locally. Publication is paused after the failed check under the explicit yolo guardrail.
+- 2026-08-30: Closure audit at immutable `main` commit
+  `c1cae3b6ca1d2f8eb6e680eec26f444ea92332c5`: corrected PR #95 merged as `8c32b54`, its complete
+  hosted CI matrix passed, and the subsequent main CI run passed. All T27 acceptance criteria are
+  complete on main.
 
 ## Synchronization
 
