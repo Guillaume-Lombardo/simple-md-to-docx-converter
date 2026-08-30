@@ -9,7 +9,12 @@ import pytest
 
 from markweave.app import AppComponents
 from markweave.config import ConfigurationError, Settings
-from markweave.runtime import build_embedded_app, main, run_external_worker
+from markweave.runtime import (
+    build_embedded_app,
+    main,
+    run_external_worker,
+    run_http_service,
+)
 from tests.settings import template_settings
 
 pytestmark = pytest.mark.unit
@@ -116,19 +121,47 @@ def test_main_dispatches_only_the_two_worker_modes(mocker, tmp_path: Path) -> No
     settings = _settings(tmp_path, profile="standalone")
     mocker.patch("markweave.runtime.build_embedded_app", return_value=app)
     mocker.patch("markweave.runtime.Settings.load", return_value=settings)
-    serve = mocker.patch("markweave.runtime.uvicorn.run")
+    serve = mocker.patch("markweave.runtime.run_http_service")
     external = mocker.patch("markweave.runtime.run_external_worker")
 
     assert main(("embedded-worker",)) == 0
     serve.assert_called_once()
-    assert serve.call_args.args[0] is app
-    assert serve.call_args.kwargs == {
-        "host": "0.0.0.0",  # noqa: S104 - asserting the container default
-        "port": 8080,
-        "proxy_headers": False,
-        "server_header": False,
-    }
+    serve.assert_called_once_with(settings)
     assert main(("external-worker",)) == 0
     external.assert_called_once_with()
     with pytest.raises(SystemExit, match="usage"):
         main(("api",))
+
+
+def test_http_service_uses_embedded_or_api_assembly_by_profile(
+    mocker, tmp_path: Path
+) -> None:
+    standalone = _settings(tmp_path, profile="standalone")
+    distributed = _settings(tmp_path, profile="distributed")
+    embedded_app = mocker.Mock()
+    distributed_app = mocker.Mock()
+    embedded = mocker.patch(
+        "markweave.runtime.build_embedded_app", return_value=embedded_app
+    )
+    create = mocker.patch("markweave.runtime.create_app", return_value=distributed_app)
+    serve = mocker.patch("markweave.runtime.uvicorn.run")
+
+    assert run_http_service(standalone).value == "standalone"
+    embedded.assert_called_once_with(standalone)
+    serve.assert_called_with(
+        embedded_app,
+        host="0.0.0.0",  # noqa: S104 - asserting the configured container bind
+        port=8080,
+        proxy_headers=False,
+        server_header=False,
+    )
+
+    assert run_http_service(distributed).value == "distributed"
+    create.assert_called_once_with(distributed)
+    serve.assert_called_with(
+        distributed_app,
+        host="0.0.0.0",  # noqa: S104 - asserting the configured container bind
+        port=8080,
+        proxy_headers=False,
+        server_header=False,
+    )
