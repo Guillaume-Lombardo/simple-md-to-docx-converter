@@ -96,6 +96,7 @@ def test_root_containerfile_selects_container_domain() -> None:
     [
         ".containerignore",
         "container/entrypoint.sh",
+        "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/smoke.sh",
         "tests/container/test_container_assets.py",
     ],

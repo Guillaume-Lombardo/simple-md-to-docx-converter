@@ -12,4 +12,5 @@ bash scripts/container/build.sh "$final_image"
 bash scripts/container/smoke.sh "$final_image"
 bash scripts/container/api-smoke.sh "$final_image"
 bash scripts/container/distributed-api-smoke.sh "$final_image"
+bash scripts/container/recovery-cli-smoke.sh "$final_image"
 bash scripts/container/supply-chain.sh "$final_image" artifacts/container
