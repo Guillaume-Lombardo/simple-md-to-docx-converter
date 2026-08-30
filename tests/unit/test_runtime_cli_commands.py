@@ -50,6 +50,29 @@ def test_runtime_configuration_failures_are_redacted(mocker, capsys) -> None:
     assert "password" not in captured.err
 
 
+def test_serve_sanitizes_uvicorn_startup_exit_without_swallowing_clean_exit(
+    mocker, capsys
+) -> None:
+    serve = mocker.patch(
+        "markweave.runtime.run_http_service", side_effect=SystemExit(1)
+    )
+
+    assert main(("serve",)) is ExitCode.FAILURE
+    assert capsys.readouterr() == ("", "error: Runtime operation failed.\n")
+
+    assert main(("--json", "serve")) is ExitCode.FAILURE
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"runtime_failure","message":"Runtime operation failed."}}\n',
+    )
+
+    serve.side_effect = SystemExit(0)
+    with pytest.raises(SystemExit) as raised:
+        main(("serve",))
+    assert raised.value.code == 0
+    assert capsys.readouterr() == ("", "")
+
+
 @pytest.mark.parametrize(
     ("failure", "code"),
     (

@@ -33,6 +33,10 @@ def _serve(context: CommandContext, writer: OutputWriter, command: str) -> None:
         from markweave.runtime import run_http_service  # noqa: PLC0415
 
         profile = run_http_service()
+    except SystemExit as error:
+        if not isinstance(error.code, int) or error.code == 0:
+            raise
+        raise CliError("runtime_failure", "Runtime operation failed.") from None
     except Exception as error:
         raise _runtime_error(error) from None
     writer.success(
