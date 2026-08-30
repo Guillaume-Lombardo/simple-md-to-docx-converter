@@ -166,10 +166,22 @@ class _TemplatePublicationRepository(_SqlTemplateStore):
                 )
                 if version is None:
                     raise TemplateConflictError
-                version.publication_state = "published"
-                version.publication_token = None
-                version.publication_lease_expires_at = None
-                database.flush()
+                claimed = database.execute(
+                    update(TemplateVersionRow)
+                    .where(
+                        TemplateVersionRow.id == str(version_id),
+                        TemplateVersionRow.template_id == str(template_id),
+                        TemplateVersionRow.publication_state == "pending",
+                        TemplateVersionRow.publication_token == str(publication_token),
+                    )
+                    .values(
+                        publication_state="published",
+                        publication_token=None,
+                        publication_lease_expires_at=None,
+                    )
+                )
+                if getattr(claimed, "rowcount", 0) != 1:
+                    raise TemplateConflictError
                 result = database.execute(
                     update(TemplateRow)
                     .where(

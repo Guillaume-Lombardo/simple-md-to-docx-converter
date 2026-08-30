@@ -324,6 +324,75 @@ def test_initial_publication_preserves_caller_revision() -> None:
 
 
 @pytest.mark.unit
+def test_sqlite_initial_publication_token_is_single_use_and_audited_once() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "owner-single-token", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    now = datetime.now(UTC)
+    template_id = uuid4()
+    version_id = uuid4()
+    token = uuid4()
+    template = TemplateIdentity(
+        template_id,
+        owner.id,
+        "Single use",
+        "Publication token",
+        TemplateStatus.ACTIVE,
+        current_version_id=version_id,
+    )
+    version = TemplateVersion(
+        version_id,
+        template_id,
+        1,
+        owner.id,
+        "a" * 64,
+        10,
+        now,
+        owner.id,
+        publication_state=TemplatePublicationState.PENDING,
+        publication_token=token,
+        publication_lease_expires_at=now + timedelta(minutes=1),
+    )
+
+    def audit() -> TemplateAuditRecord:
+        return TemplateAuditRecord(
+            uuid4(), owner.id, owner.id, template_id, "create", version_id, False, now
+        )
+
+    catalog.reserve_create(template, version)
+    published = catalog.finalize_version(
+        template_id,
+        expected_revision=template.revision,
+        version_id=version_id,
+        publication_token=token,
+        audit=audit(),
+    )
+    with pytest.raises(TemplateConflictError):
+        catalog.finalize_version(
+            template_id,
+            expected_revision=template.revision,
+            version_id=version_id,
+            publication_token=token,
+            audit=audit(),
+        )
+
+    assert published == template
+    with Session(engine) as database:
+        records = tuple(
+            database.scalars(
+                select(TemplateAuditRow).where(
+                    TemplateAuditRow.template_id == str(template_id),
+                    TemplateAuditRow.operation == "create",
+                )
+            )
+        )
+    assert len(records) == 1
+    engine.dispose()
+
+
+@pytest.mark.unit
 def test_pending_publication_claims_are_atomic_and_fenced() -> None:
     engine = create_database_engine("sqlite+pysqlite://")
     upgrade_database(engine)

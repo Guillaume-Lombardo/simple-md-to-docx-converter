@@ -4,11 +4,12 @@ import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier, current_thread
 from uuid import UUID, uuid4
 
 import boto3
 import pytest
-from sqlalchemy import Engine, delete, update
+from sqlalchemy import Engine, delete, event, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from markweave.persistence.schema import (
     ConversionJobRow,
     SessionRow,
     SystemTemplateSelectionRow,
+    TemplateAuditRow,
     TemplatePreferenceRow,
     TemplateRow,
     TemplateVersionRow,
@@ -35,6 +37,7 @@ from markweave.persistence.templates import (
 from markweave.storage import ObjectKey, ObjectScope, S3ObjectStore
 from markweave.templates.errors import TemplateConflictError
 from markweave.templates.models import (
+    TemplateAuditRecord,
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
@@ -187,6 +190,110 @@ def test_postgresql_pending_publication_claims_are_deterministically_ordered() -
     finally:
         clear_template_test_data(engine)
         engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_initial_publication_token_has_one_concurrent_winner(
+    request: pytest.FixtureRequest,
+) -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
+    request.addfinalizer(lambda: clear_template_test_data(engine))
+    upgrade_database(engine)
+    clear_template_test_data(engine)
+    owner = User(uuid4(), "Owner", f"publish-owner-{uuid4()}", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    now = datetime.now(UTC)
+    template_id = uuid4()
+    version_id = uuid4()
+    token = uuid4()
+    template = TemplateIdentity(
+        template_id,
+        owner.id,
+        "Concurrent publication",
+        "Single token winner",
+        TemplateStatus.ACTIVE,
+        current_version_id=version_id,
+    )
+    version = TemplateVersion(
+        version_id,
+        template_id,
+        1,
+        owner.id,
+        "a" * 64,
+        1,
+        now,
+        owner.id,
+        publication_state=TemplatePublicationState.PENDING,
+        publication_token=token,
+        publication_lease_expires_at=now + timedelta(minutes=1),
+    )
+    audits = tuple(
+        TemplateAuditRecord(
+            uuid4(), owner.id, owner.id, template_id, "create", version_id, False, now
+        )
+        for _index in range(2)
+    )
+    pending_reads = Barrier(2)
+
+    def synchronize_pending_reads(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.split()).upper()
+        if (
+            current_thread().name.startswith("template-finalize")
+            and normalized.startswith("SELECT TEMPLATE_VERSIONS")
+            and "PUBLICATION_TOKEN" in normalized
+        ):
+            pending_reads.wait(timeout=5)
+
+    def finalize(audit: TemplateAuditRecord) -> TemplateIdentity | None:
+        try:
+            return catalog.finalize_version(
+                template_id,
+                expected_revision=template.revision,
+                version_id=version_id,
+                publication_token=token,
+                audit=audit,
+            )
+        except TemplateConflictError:
+            return None
+
+    catalog.reserve_create(template, version)
+    event.listen(engine, "after_cursor_execute", synchronize_pending_reads)
+    try:
+        with ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="template-finalize"
+        ) as executor:
+            outcomes = tuple(executor.map(finalize, audits))
+    finally:
+        event.remove(engine, "after_cursor_execute", synchronize_pending_reads)
+
+    assert sum(outcome is not None for outcome in outcomes) == 1
+    with Session(engine) as database:
+        stored = database.get(TemplateRow, str(template_id))
+        stored_version = database.get(TemplateVersionRow, str(version_id))
+        records = tuple(
+            database.scalars(
+                select(TemplateAuditRow).where(
+                    TemplateAuditRow.id.in_(tuple(str(audit.id) for audit in audits))
+                )
+            )
+        )
+    assert stored is not None
+    assert stored.revision == template.revision
+    assert stored.current_version_id == str(version_id)
+    assert stored_version is not None
+    assert stored_version.publication_state == "published"
+    assert stored_version.publication_token is None
+    assert len(records) == 1
 
 
 @pytest.mark.integration
