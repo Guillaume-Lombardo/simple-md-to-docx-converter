@@ -33,6 +33,7 @@ Close every database and component resource deterministically and turn current u
 
 ## Progress
 
+* 2026-08-30: Implemented deterministic application-owned SQL/S3 cleanup, managed test-engine lifecycles, streaming-body and HTTP-error closure, partial-startup cleanup, and targeted `ResourceWarning`/unraisable-finalizer enforcement. Reconciled the work with verified `main` at `66a0cff` while preserving canonical `MARKWEAVE_*` test configuration. Focused lifecycle coverage passes 272 tests; the locally runnable canonical matrix passes 1,666 tests with 95.16% application coverage, Ruff and `ty` pass, and all 23 Web tests pass. PostgreSQL/RustFS and Pandoc/Mermaid/Chromium/LibreOffice validation remains unavailable locally because their required services and executables are absent; exact-main CI `33302570018` passed before this branch was reconciled.
 * 2026-08-30: Started implementation on `fix/T44-resource-lifecycle` from verified `main` at `381e74e9`; this workstream exclusively owns deterministic component/database lifecycle fixes, targeted warning enforcement, and leak regressions before T41/T43.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 
