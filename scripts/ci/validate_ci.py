@@ -321,7 +321,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         step_conditions={
             ("mutation", "Retain critical mutation evidence"): "${{ always() }}"
         },
-        canonical_digest="c27f0442cab7b65893dd5afd0d2be8418bdbd8cefbb1f1a8d8906977532d8dd3",
+        canonical_digest="39ec296d35aca15ba9f9e4af65b7b897ec0dad21690df678c4666551a10802fa",
     ),
 }
 

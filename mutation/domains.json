@@ -21,8 +21,25 @@
   ],
   "domains": [
     {
-      "name": "auth-session",
+      "name": "observability",
       "priority": 1,
+      "paths": [
+        "src/markweave/observability.py",
+        "tests/unit/test_observability.py"
+      ],
+      "mutants": [
+        "markweave.observability.x__normalize_method__mutmut_1",
+        "markweave.observability.x__normalize_method__mutmut_2",
+        "markweave.observability.x__normalize_method__mutmut_3",
+        "markweave.observability.x__normalize_method__mutmut_4"
+      ],
+      "review_notes": [
+        "Preserves the pre-existing bounded observability target markweave.observability.x__normalize_method__mutmut_* with its dedicated unit suite."
+      ]
+    },
+    {
+      "name": "auth-session",
+      "priority": 2,
       "paths": [
         "src/markweave/auth/**",
         "src/markweave/http/**",
@@ -44,7 +61,7 @@
     },
     {
       "name": "archive-svg",
-      "priority": 2,
+      "priority": 3,
       "paths": [
         "src/markweave/conversion/archive.py",
         "src/markweave/conversion/images.py",
@@ -65,7 +82,7 @@
     },
     {
       "name": "job-integrity",
-      "priority": 3,
+      "priority": 4,
       "paths": [
         "src/markweave/jobs/**",
         "src/markweave/persistence/jobs/**",
@@ -87,7 +104,7 @@
     },
     {
       "name": "retention-storage",
-      "priority": 4,
+      "priority": 5,
       "paths": [
         "src/markweave/retention.py",
         "src/markweave/storage.py",

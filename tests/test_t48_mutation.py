@@ -23,18 +23,38 @@ MANIFEST = ROOT / "mutation/domains.json"
 def test_manifest_is_risk_ranked_exact_and_reviews_every_critical_domain() -> None:
     manifest = load_manifest(MANIFEST)
     assert [domain.name for domain in manifest.domains] == [
+        "observability",
         "auth-session",
         "archive-svg",
         "job-integrity",
         "retention-storage",
     ]
-    assert [domain.priority for domain in manifest.domains] == [1, 2, 3, 4]
-    assert sum(len(domain.mutants) for domain in manifest.domains) == 21
+    assert [domain.priority for domain in manifest.domains] == [1, 2, 3, 4, 5]
+    assert sum(len(domain.mutants) for domain in manifest.domains) == 25
     assert (
-        len({mutant for domain in manifest.domains for mutant in domain.mutants}) == 21
+        len({mutant for domain in manifest.domains for mutant in domain.mutants}) == 25
     )
     assert all(domain.review_notes for domain in manifest.domains)
     assert manifest.failure_statuses == FAILURE_STATUSES
+
+
+@pytest.mark.unit
+def test_observability_domain_preserves_the_preexisting_bounded_target() -> None:
+    manifest = load_manifest(MANIFEST)
+    observability = manifest.domains[0]
+    assert observability.name == "observability"
+    assert observability.paths == (
+        "src/markweave/observability.py",
+        "tests/unit/test_observability.py",
+    )
+    assert observability.mutants == tuple(
+        f"markweave.observability.x__normalize_method__mutmut_{index}"
+        for index in range(1, 5)
+    )
+    assert (
+        "markweave.observability.x__normalize_method__mutmut_*"
+        in (observability.review_notes[0])
+    )
 
 
 @pytest.mark.unit
@@ -48,6 +68,12 @@ def test_changed_paths_select_only_affected_domains_and_global_files_select_all(
         changed_paths=("src/markweave/auth/service.py", "docs/unrelated.md"),
     )
     assert [domain.name for domain in selected] == ["auth-session"]
+    selected = select_domains(
+        manifest,
+        mode="changed",
+        changed_paths=("tests/unit/test_observability.py",),
+    )
+    assert [domain.name for domain in selected] == ["observability"]
     assert (
         select_domains(manifest, mode="changed", changed_paths=("docs/unrelated.md",))
         == ()

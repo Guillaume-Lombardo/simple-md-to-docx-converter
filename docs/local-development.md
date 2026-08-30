@@ -113,6 +113,14 @@ browser-module tests with independent coverage gates, unit tests with blocking o
 coverage, an explicit branch-only JSON check, changed application line coverage, lock validation,
 and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
 
+`.github/workflows/mutation.yml` runs an independent, read-only mutation gate. Pull requests
+select reviewed affected domains; scheduled and manual runs execute all five bounded domains:
+observability, authentication/session, archive/SVG, job integrity, and retention/storage. The
+observability domain preserves the original
+`markweave.observability.x__normalize_method__mutmut_*` target and
+`tests/unit/test_observability.py`. Its JSON evidence records the exact selected and killed counts;
+the gate rejects every surviving, untested, suspicious, timed-out, interrupted, or crashing mutant.
+
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least
 90% of changed executable lines under `src/markweave` must be covered. The checker uses a

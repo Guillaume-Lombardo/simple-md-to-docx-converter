@@ -13,6 +13,7 @@ on:
         default: all
         options:
           - all
+          - observability
           - auth-session
           - archive-svg
           - job-integrity

@@ -179,6 +179,7 @@ pytest_add_cli_args = [
     "-c",
     "/dev/null",
     "-q",
+    "tests/unit/test_observability.py",
     "tests/unit/auth/test_service.py",
     "tests/unit/conversion/test_archive.py",
     "tests/unit/conversion/test_images.py",

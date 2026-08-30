@@ -77,6 +77,7 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     assert dispatch["default"] == "all"
     assert dispatch["options"] == [
         "all",
+        "observability",
         "auth-session",
         "archive-svg",
         "job-integrity",
