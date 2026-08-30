@@ -792,6 +792,14 @@
         "title": "UserResponse",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "SessionCookie": {
+        "description": "Opaque authenticated Markweave session cookie.",
+        "in": "cookie",
+        "name": "md_converter_session",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -2516,6 +2524,7 @@
             }
           }
         },
+        "security": [],
         "summary": "Api Login",
         "tags": [
           "authentication"
@@ -5149,6 +5158,7 @@
             }
           }
         },
+        "security": [],
         "summary": "Live",
         "tags": [
           "health"
@@ -5196,6 +5206,7 @@
             }
           }
         },
+        "security": [],
         "summary": "Ready",
         "tags": [
           "health"
@@ -5224,11 +5235,17 @@
             }
           }
         },
+        "security": [],
         "summary": "Metrics",
         "tags": [
           "health"
         ]
       }
     }
-  }
+  },
+  "security": [
+    {
+      "SessionCookie": []
+    }
+  ]
 }

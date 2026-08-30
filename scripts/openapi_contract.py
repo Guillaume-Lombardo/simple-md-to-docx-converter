@@ -54,7 +54,7 @@ def _contract_settings() -> Settings:
         template_metadata_request_max_bytes=4_096,
         template_max_name_characters=100,
         template_max_description_characters=1_000,
-        session_cookie_name="markweave_contract_session",
+        session_cookie_name="md_converter_session",
         public_origin=None,
         insecure_evaluation_mode=False,
     )
@@ -108,80 +108,176 @@ class Change:
     message: str
 
 
+SchemaDirection = Literal["request", "response"]
+
+
 def _mapping(value: object) -> Mapping[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _directional_severity(
+    direction: SchemaDirection, *, request_incompatible: bool
+) -> Literal["compatible", "incompatible"]:
+    incompatible = (
+        request_incompatible if direction == "request" else not request_incompatible
+    )
+    return "incompatible" if incompatible else "compatible"
+
+
+def _constraint_change(  # noqa: PLR0913 - explicit compatibility inputs
+    keyword: str,
+    old_value: object,
+    new_value: object,
+    *,
+    direction: SchemaDirection,
+    lower_bound: bool,
+    location: str,
+) -> Change | None:
+    if old_value == new_value:
+        return None
+    if old_value is None:
+        request_incompatible = new_value is not None
+    elif new_value is None:
+        request_incompatible = False
+    elif isinstance(old_value, int | float) and isinstance(new_value, int | float):
+        request_incompatible = (
+            new_value > old_value if lower_bound else new_value < old_value
+        )
+    else:
+        return Change(
+            "incompatible",
+            "schema",
+            f"{location}/{keyword}",
+            f"validation keyword {keyword} changed incompatibly",
+        )
+    return Change(
+        _directional_severity(direction, request_incompatible=request_incompatible),
+        "schema",
+        f"{location}/{keyword}",
+        f"{direction} validation keyword {keyword} changed",
+    )
+
+
 def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sections
-    baseline: Mapping[str, Any], current: Mapping[str, Any], location: str
+    baseline: Mapping[str, Any],
+    current: Mapping[str, Any],
+    location: str,
+    *,
+    direction: SchemaDirection,
 ) -> list[Change]:
     changes: list[Change] = []
     for keyword in ("type", "format", "$ref"):
-        if keyword in baseline and current.get(keyword) != baseline[keyword]:
+        old_value = baseline.get(keyword)
+        new_value = current.get(keyword)
+        if old_value != new_value:
+            if old_value is None or new_value is None:
+                severity = _directional_severity(
+                    direction, request_incompatible=new_value is not None
+                )
+            else:
+                severity = "incompatible"
             changes.append(
                 Change(
-                    "incompatible",
+                    severity,
                     "schema",
                     location,
-                    f"{keyword} changed from {baseline[keyword]!r} to {current.get(keyword)!r}",
+                    f"{direction} {keyword} changed from {old_value!r} to {new_value!r}",
                 )
             )
-    for keyword in (
-        "allOf",
-        "anyOf",
-        "exclusiveMaximum",
-        "exclusiveMinimum",
-        "maxItems",
-        "maxLength",
-        "maximum",
-        "minItems",
-        "minLength",
-        "minimum",
-        "not",
-        "oneOf",
-        "pattern",
-    ):
-        if keyword in baseline and current.get(keyword) != baseline[keyword]:
+    for keyword in ("minimum", "exclusiveMinimum", "minLength", "minItems"):
+        change = _constraint_change(
+            keyword,
+            baseline.get(keyword),
+            current.get(keyword),
+            direction=direction,
+            lower_bound=True,
+            location=location,
+        )
+        if change is not None:
+            changes.append(change)
+    for keyword in ("maximum", "exclusiveMaximum", "maxLength", "maxItems"):
+        change = _constraint_change(
+            keyword,
+            baseline.get(keyword),
+            current.get(keyword),
+            direction=direction,
+            lower_bound=False,
+            location=location,
+        )
+        if change is not None:
+            changes.append(change)
+    for keyword in ("allOf", "anyOf", "not", "oneOf", "pattern"):
+        old_value = baseline.get(keyword)
+        new_value = current.get(keyword)
+        if old_value != new_value:
+            severity = (
+                _directional_severity(
+                    direction, request_incompatible=new_value is not None
+                )
+                if old_value is None or new_value is None
+                else "incompatible"
+            )
             changes.append(
                 Change(
-                    "incompatible",
+                    severity,
                     "schema",
                     f"{location}/{keyword}",
-                    f"validation keyword {keyword} changed",
+                    f"{direction} validation keyword {keyword} changed",
                 )
             )
     old_enum = baseline.get("enum")
     new_enum = current.get("enum")
     if isinstance(old_enum, list) and isinstance(new_enum, list):
         removed = sorted(set(old_enum) - set(new_enum), key=repr)
+        added = sorted(set(new_enum) - set(old_enum), key=repr)
         if removed:
             changes.append(
                 Change(
-                    "incompatible",
+                    _directional_severity(direction, request_incompatible=True),
                     "schema",
                     location,
-                    f"enum values removed: {removed!r}",
+                    f"{direction} enum values removed: {removed!r}",
                 )
             )
+        if added:
+            changes.append(
+                Change(
+                    _directional_severity(direction, request_incompatible=False),
+                    "schema",
+                    location,
+                    f"{direction} enum values added: {added!r}",
+                )
+            )
+    elif old_enum != new_enum:
+        changes.append(
+            Change(
+                _directional_severity(
+                    direction, request_incompatible=new_enum is not None
+                ),
+                "schema",
+                location,
+                f"{direction} enum constraint changed",
+            )
+        )
 
     old_required = set(baseline.get("required", []))
     new_required = set(current.get("required", []))
     for name in sorted(new_required - old_required):
         changes.append(
             Change(
-                "incompatible",
+                _directional_severity(direction, request_incompatible=True),
                 "required-field",
                 f"{location}/{name}",
-                "field became required",
+                f"{direction} field became required",
             )
         )
     for name in sorted(old_required - new_required):
         changes.append(
             Change(
-                "compatible",
+                _directional_severity(direction, request_incompatible=False),
                 "required-field",
                 f"{location}/{name}",
-                "field became optional",
+                f"{direction} field became optional",
             )
         )
 
@@ -197,12 +293,18 @@ def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sectio
             )
         )
     for name in sorted(new_properties.keys() - old_properties.keys()):
-        severity: Literal["compatible", "incompatible"] = (
-            "incompatible" if name in new_required else "compatible"
+        severity = _directional_severity(
+            direction,
+            request_incompatible=(direction == "request" and name in new_required),
         )
+        if direction == "response":
+            severity = "compatible"
         changes.append(
             Change(
-                severity, "schema", f"{location}/properties/{name}", "property added"
+                severity,
+                "schema",
+                f"{location}/properties/{name}",
+                f"{direction} property added",
             )
         )
     for name in sorted(old_properties.keys() & new_properties.keys()):
@@ -211,6 +313,7 @@ def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sectio
                 _mapping(old_properties[name]),
                 _mapping(new_properties[name]),
                 f"{location}/properties/{name}",
+                direction=direction,
             )
         )
 
@@ -219,15 +322,22 @@ def _schema_changes(  # noqa: PLR0912 - mirrors JSON Schema compatibility sectio
         new_child = current.get(keyword)
         if isinstance(old_child, dict) and isinstance(new_child, dict):
             changes.extend(
-                _schema_changes(old_child, new_child, f"{location}/{keyword}")
+                _schema_changes(
+                    old_child,
+                    new_child,
+                    f"{location}/{keyword}",
+                    direction=direction,
+                )
             )
         elif old_child != new_child and old_child is not None:
             changes.append(
                 Change(
-                    "incompatible",
+                    _directional_severity(
+                        direction, request_incompatible=new_child is not None
+                    ),
                     "schema",
                     f"{location}/{keyword}",
-                    f"{keyword} changed",
+                    f"{direction} {keyword} changed",
                 )
             )
     return changes
@@ -304,6 +414,7 @@ def _operation_changes(  # noqa: PLR0912 - mirrors OpenAPI operation sections
                 _mapping(old_parameter.get("schema")),
                 _mapping(new_parameter.get("schema")),
                 parameter_location,
+                direction="request",
             )
         )
 
@@ -316,6 +427,20 @@ def _operation_changes(  # noqa: PLR0912 - mirrors OpenAPI operation sections
                 "schema",
                 f"{location}/requestBody",
                 "request body removed",
+            )
+        )
+    elif new_body and not old_body:
+        severity: Literal["compatible", "incompatible"] = (
+            "incompatible" if new_body.get("required") else "compatible"
+        )
+        changes.append(
+            Change(
+                severity,
+                "required-field" if new_body.get("required") else "schema",
+                f"{location}/requestBody",
+                "required request body added"
+                if new_body.get("required")
+                else "optional request body added",
             )
         )
     elif old_body:
@@ -345,6 +470,7 @@ def _operation_changes(  # noqa: PLR0912 - mirrors OpenAPI operation sections
                         _mapping(_mapping(old_media).get("schema")),
                         _mapping(new_media.get("schema")),
                         f"{location}/requestBody/{media_type}",
+                        direction="request",
                     )
                 )
 
@@ -398,6 +524,7 @@ def _operation_changes(  # noqa: PLR0912 - mirrors OpenAPI operation sections
                     _mapping(_mapping(old_headers[name]).get("schema")),
                     _mapping(_mapping(new_headers[name]).get("schema")),
                     f"{response_location}/headers/{name}",
+                    direction="response",
                 )
             )
         old_content = _mapping(old_response.get("content"))
@@ -417,9 +544,52 @@ def _operation_changes(  # noqa: PLR0912 - mirrors OpenAPI operation sections
                     _mapping(_mapping(old_content[media_type]).get("schema")),
                     _mapping(_mapping(new_content[media_type]).get("schema")),
                     f"{response_location}/content/{media_type}",
+                    direction="response",
                 )
             )
     return changes
+
+
+def _schema_references(value: object) -> set[str]:
+    references: set[str] = set()
+    if isinstance(value, dict):
+        reference = value.get("$ref")
+        prefix = "#/components/schemas/"
+        if isinstance(reference, str) and reference.startswith(prefix):
+            references.add(reference.removeprefix(prefix))
+        for child in value.values():
+            references.update(_schema_references(child))
+    elif isinstance(value, list):
+        for child in value:
+            references.update(_schema_references(child))
+    return references
+
+
+def _component_schema_roles(
+    document: Mapping[str, Any],
+) -> dict[str, set[SchemaDirection]]:
+    roles: dict[str, set[SchemaDirection]] = {}
+    components = _mapping(_mapping(document.get("components")).get("schemas"))
+
+    def assign(value: object, direction: SchemaDirection) -> None:
+        pending = list(_schema_references(value))
+        while pending:
+            name = pending.pop()
+            assigned = roles.setdefault(name, set())
+            if direction in assigned:
+                continue
+            assigned.add(direction)
+            pending.extend(_schema_references(components.get(name)))
+
+    for path_item in _mapping(document.get("paths")).values():
+        for method, operation_value in _mapping(path_item).items():
+            if method not in HTTP_METHODS:
+                continue
+            operation = _mapping(operation_value)
+            assign(operation.get("parameters", []), "request")
+            assign(operation.get("requestBody"), "request")
+            assign(operation.get("responses"), "response")
+    return roles
 
 
 def classify_changes(  # noqa: PLR0912 - mirrors OpenAPI compatibility sections
@@ -473,6 +643,8 @@ def classify_changes(  # noqa: PLR0912 - mirrors OpenAPI compatibility sections
 
     old_schemas = _mapping(_mapping(baseline.get("components")).get("schemas"))
     new_schemas = _mapping(_mapping(current.get("components")).get("schemas"))
+    old_roles = _component_schema_roles(baseline)
+    new_roles = _component_schema_roles(current)
     old_security = _mapping(_mapping(baseline.get("components")).get("securitySchemes"))
     new_security = _mapping(_mapping(current.get("components")).get("securitySchemes"))
     for name in sorted(old_security.keys() - new_security.keys()):
@@ -513,13 +685,17 @@ def classify_changes(  # noqa: PLR0912 - mirrors OpenAPI compatibility sections
             )
         )
     for name in sorted(old_schemas.keys() & new_schemas.keys()):
-        changes.extend(
-            _schema_changes(
-                _mapping(old_schemas[name]),
-                _mapping(new_schemas[name]),
-                f"components/schemas/{name}",
+        roles = old_roles.get(name, set()) | new_roles.get(name, set())
+        directions: set[SchemaDirection] = roles or {"request", "response"}
+        for direction in sorted(directions):
+            changes.extend(
+                _schema_changes(
+                    _mapping(old_schemas[name]),
+                    _mapping(new_schemas[name]),
+                    f"components/schemas/{name}",
+                    direction=direction,
+                )
             )
-        )
     return sorted(set(changes))
 
 

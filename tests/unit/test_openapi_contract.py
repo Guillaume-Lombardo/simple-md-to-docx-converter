@@ -55,6 +55,27 @@ def test_artifact_covers_cross_cutting_http_contracts() -> None:
     paths = contract["paths"]
     schemas = contract["components"]["schemas"]
 
+    assert contract["components"]["securitySchemes"] == {
+        "SessionCookie": {
+            "description": "Opaque authenticated Markweave session cookie.",
+            "in": "cookie",
+            "name": "md_converter_session",
+            "type": "apiKey",
+        }
+    }
+    assert contract["security"] == [{"SessionCookie": []}]
+    public_operations = {
+        ("post", "/api/v1/login"),
+        ("get", "/health/live"),
+        ("get", "/health/ready"),
+        ("get", "/metrics"),
+    }
+    assert all(
+        paths[path][method]["security"] == [] for method, path in public_operations
+    )
+    assert "security" not in paths["/api/v1/session"]["get"]
+    assert "security" not in paths["/api/v1/admin/users"]["get"]
+
     conversion_body = schemas["Body_create_conversion_api_v1_conversions_post"]
     assert set(conversion_body["required"]) == {"source", "output"}
     assert {"template_id", "template_version_id"}.issubset(
@@ -138,9 +159,7 @@ def test_cli_http_endpoints_are_declared_by_durable_artifact() -> None:
         ),
         (
             "security",
-            lambda value: value["paths"]["/health/ready"]["get"].update(
-                security=[{"cookieAuth": []}]
-            ),
+            lambda value: value["paths"]["/api/v1/session"]["get"].update(security=[]),
         ),
         (
             "schema",
@@ -184,6 +203,123 @@ def test_compatibility_gate_classifies_compatible_additions() -> None:
     assert changes
     assert {change.severity for change in changes} == {"compatible"}
     assert {change.category for change in changes} == {"route", "schema"}
+
+
+@pytest.mark.unit
+def test_request_constraints_and_required_body_are_directionally_incompatible() -> None:
+    baseline = _artifact()
+
+    constrained = deepcopy(baseline)
+    constrained["components"]["schemas"]["LoginRequest"]["properties"]["username"][
+        "minLength"
+    ] = 1
+    changes = classify_changes(baseline, constrained)
+    assert any(
+        change.severity == "incompatible"
+        and change.location.endswith("LoginRequest/properties/username/minLength")
+        and "request validation" in change.message
+        for change in changes
+    )
+
+    body_added = deepcopy(baseline)
+    body_added["paths"]["/health/live"]["get"]["requestBody"] = {
+        "required": True,
+        "content": {"application/json": {"schema": {"type": "object"}}},
+    }
+    changes = classify_changes(baseline, body_added)
+    assert any(
+        change.severity == "incompatible"
+        and change.category == "required-field"
+        and change.location == "GET /health/live/requestBody"
+        for change in changes
+    )
+
+
+@pytest.mark.unit
+def test_request_enum_changes_follow_accepted_input_direction() -> None:
+    baseline = _artifact()
+    username = baseline["components"]["schemas"]["LoginRequest"]["properties"][
+        "username"
+    ]
+    username["enum"] = ["alice", "bob"]
+
+    narrowed = deepcopy(baseline)
+    narrowed["components"]["schemas"]["LoginRequest"]["properties"]["username"][
+        "enum"
+    ] = ["alice"]
+    assert any(
+        change.severity == "incompatible"
+        and "request enum values removed" in change.message
+        for change in classify_changes(baseline, narrowed)
+    )
+
+    widened = deepcopy(baseline)
+    widened["components"]["schemas"]["LoginRequest"]["properties"]["username"][
+        "enum"
+    ].append("charlie")
+    username_changes = [
+        change
+        for change in classify_changes(baseline, widened)
+        if "LoginRequest/properties/username" in change.location
+    ]
+    assert username_changes
+    assert {change.severity for change in username_changes} == {"compatible"}
+
+
+@pytest.mark.unit
+def test_response_enum_and_required_fields_follow_output_direction() -> None:
+    baseline = _artifact()
+
+    constrained = deepcopy(baseline)
+    constrained["components"]["schemas"]["ErrorDetail"]["properties"]["code"][
+        "minLength"
+    ] = 1
+    response_constraint_changes = [
+        change
+        for change in classify_changes(baseline, constrained)
+        if change.location.endswith("ErrorDetail/properties/code/minLength")
+    ]
+    assert response_constraint_changes
+    assert {change.severity for change in response_constraint_changes} == {"compatible"}
+
+    unconstrained = deepcopy(constrained)
+    unconstrained["components"]["schemas"]["ErrorDetail"]["properties"]["code"].pop(
+        "minLength"
+    )
+    assert any(
+        change.severity == "incompatible" and "response validation" in change.message
+        for change in classify_changes(constrained, unconstrained)
+    )
+
+    narrowed = deepcopy(baseline)
+    narrowed["components"]["schemas"]["TemplateMode"]["enum"].remove("versioned")
+    template_changes = [
+        change
+        for change in classify_changes(baseline, narrowed)
+        if change.location == "components/schemas/TemplateMode"
+    ]
+    assert template_changes
+    assert {change.severity for change in template_changes} == {"compatible"}
+
+    widened = deepcopy(baseline)
+    widened["components"]["schemas"]["TemplateMode"]["enum"].append("future")
+    assert any(
+        change.severity == "incompatible"
+        and "response enum values added" in change.message
+        for change in classify_changes(baseline, widened)
+    )
+
+    missing_required = deepcopy(baseline)
+    error_detail = missing_required["components"]["schemas"]["ErrorDetail"]
+    error_detail["required"].remove("code")
+    error_detail["properties"].pop("code")
+    assert any(
+        change.severity == "incompatible"
+        and change.category == "required-field"
+        and change.location == "components/schemas/ErrorDetail/code"
+        and "response field became optional" in change.message
+        for change in classify_changes(baseline, missing_required)
+    )
 
 
 @pytest.mark.unit

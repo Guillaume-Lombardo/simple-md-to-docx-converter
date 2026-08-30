@@ -17,12 +17,21 @@ generator fails if it appears in the artifact. JSON object keys, UTF-8 encoding,
 the final newline are canonical. Tests also fetch runtime `/openapi.json`, normalize it with the
 same function, and require byte equality with the artifact for both storage profiles.
 
+The document declares the existing opaque session cookie as the global security requirement.
+Login, liveness, readiness, and metrics explicitly opt out with an empty operation-level security
+requirement; every other documented operation inherits authenticated-session security. The cookie
+name in the durable artifact is the canonical configuration default, while a runtime configured
+with another supported cookie name truthfully exposes that effective name in its own schema.
+
 ## Compatibility review
 
 CI regenerates the contract and fails if the working tree artifact is stale. For pull requests and
 merge groups it compares `openapi/v1.json` with the target revision. The comparison reports
 compatible additions and rejects incompatible route, method, schema, response-status, response-
-header, security-requirement, parameter, request-body, and required-field changes.
+header, security-requirement, parameter, request-body, and required-field changes. Schema
+comparison is directional: restricting accepted request values or broadening emitted response
+values is incompatible, while broadening accepted inputs or narrowing emitted outputs is
+compatible.
 
 Review the generated diff together with the route implementation. In particular, confirm optional
 template selection, restricted authentication sessions, pagination, `ETag`/`If-Match`, stable
