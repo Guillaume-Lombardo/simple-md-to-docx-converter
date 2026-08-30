@@ -981,7 +981,7 @@ def test_workflow_scan_includes_both_supported_yaml_extensions(tmp_path: Path) -
 def test_mutation_policy_rejects_trigger_permission_and_job_drift() -> None:
     """The maintenance workflow remains exactly bounded and read-only."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
-    weakened = workflow.replace("  schedule:\n", "  pull_request:\n", 1).replace(
+    weakened = workflow.replace("  schedule:\n", "  push:\n", 1).replace(
         "permissions:\n  contents: read",
         "permissions:\n  contents: write",
         1,
@@ -1201,6 +1201,7 @@ def test_action_pin_validation_uses_parsed_yaml(flow_style: bool) -> None:
             "      - name: Check out reviewed source\n"
             f"        uses: {pinned} # v7.0.1\n"
             "        with:\n"
+            "          fetch-depth: 0\n"
             "          persist-credentials: false",
             "      - {uses: actions/checkout@v7, with: {persist-credentials: false}}",
         )

@@ -155,6 +155,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/ci/check_changed_coverage.py" = ["S603", "S607"]
+"scripts/ci/run_mutation_campaign.py" = ["PLR0913", "S603", "S607"]
 "scripts/ci/run_domain.py" = ["S603"]
 "tests/**/*.py" = ["PLR2004", "S101", "S603", "S607"]
 
@@ -178,7 +179,14 @@ pytest_add_cli_args = [
     "-c",
     "/dev/null",
     "-q",
-    "tests/unit/test_observability.py",
+    "tests/unit/auth/test_service.py",
+    "tests/unit/conversion/test_archive.py",
+    "tests/unit/conversion/test_images.py",
+    "tests/unit/jobs/test_job_service.py",
+    "tests/unit/jobs/test_job_worker.py",
+    "tests/unit/test_retention.py",
+    "tests/unit/test_storage_adapters.py",
+    "tests/integration/sqlite/test_sqlite_jobs.py",
 ]
 timeout_constant = 5.0
 timeout_multiplier = 3.0

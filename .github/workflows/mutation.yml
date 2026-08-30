@@ -1,17 +1,22 @@
 name: Mutation testing
 
 on:
+  pull_request:
   schedule:
     - cron: "43 4 * * 2"
   workflow_dispatch:
     inputs:
-      target:
-        description: Bounded Python symbol pattern to mutate
+      domain:
+        description: Reviewed critical mutation domain
         required: true
         type: choice
-        default: markweave.observability.x__normalize_method__mutmut_*
+        default: all
         options:
-          - markweave.observability.x__normalize_method__mutmut_*
+          - all
+          - auth-session
+          - archive-svg
+          - job-integrity
+          - retention-storage
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ concurrency:
 
 jobs:
   mutation:
-    name: Mutation / targeted
+    name: Mutation / critical gate
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -30,6 +35,7 @@ jobs:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -43,36 +49,28 @@ jobs:
           enable-cache: false
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
-      - name: Run a fresh, non-empty targeted mutation campaign
+      - name: Run reviewed critical mutation campaign
         env:
-          MUTATION_TARGET: ${{ inputs.target || 'markweave.observability.x__normalize_method__mutmut_*' }}
+          MUTATION_EVENT: ${{ github.event_name }}
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_DOMAIN: ${{ inputs.domain || 'all' }}
         run: |
           set -euo pipefail
-          rm -rf -- mutants
-          uv run mutmut run "$MUTATION_TARGET"
-          uv run mutmut export-cicd-stats
-          uv run python - <<'PY'
-          import json
-          from pathlib import Path
-
-          stats = json.loads(
-              Path("mutants/mutmut-cicd-stats.json").read_text(encoding="utf-8")
-          )
-          if stats.get("killed", 0) <= 0:
-              raise SystemExit("Mutation campaign produced no killed mutants.")
-          failures = {
-              name: stats.get(name, 0)
-              for name in (
-                  "survived",
-                  "no_tests",
-                  "suspicious",
-                  "timeout",
-                  "check_was_interrupted_by_user",
-                  "segfault",
-              )
-              if stats.get(name, 0) != 0
-          }
-          if failures:
-              raise SystemExit(f"Mutation campaign left non-killed mutants: {failures}")
-          print(f"Mutation campaign killed {stats['killed']} mutants.")
-          PY
+          if [[ "$MUTATION_EVENT" == "pull_request" ]]; then
+            uv run python scripts/ci/run_mutation_campaign.py \
+              --mode changed \
+              --base-sha "$MUTATION_BASE_SHA" \
+              --head-sha "$MUTATION_HEAD_SHA"
+          else
+            uv run python scripts/ci/run_mutation_campaign.py \
+              --mode "$MUTATION_DOMAIN"
+          fi
+      - name: Retain critical mutation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb4608a7c11565688c193ef1d7a58c880d6f0 # v4.6.2
+        with:
+          name: critical-mutation-evidence
+          path: mutation-results/report.json
+          if-no-files-found: error
+          retention-days: 14

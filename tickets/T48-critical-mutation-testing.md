@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,12 +36,15 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Progress
 
+* 2026-08-30: Implemented the reviewed four-domain campaign with 21 exact mutants, pull-request affected-domain selection, the full scheduled/manual campaign, one stable read-only gate, and always-retained JSON evidence. A fresh real mutmut 3.7.0 run killed all 21 selected mutants with every failure status at zero. Mutation-driven tests now lock session/authentication/CSRF, archive/SVG, request identity/idempotency, lease recovery/fencing, retention, and filesystem storage behavior; the frozen-slots origin dependency that mutmut cannot transform is documented in the evidence with its direct functional/integration coverage retained. No production code was refactored.
+* 2026-08-30: Verification passed `uv sync --all-groups`, Ruff formatting and linting, `ty check`, the real 21/21 mutation campaign, CI policy validation, and a 327-test targeted unit/integration suite. The canonical engine-excluded suite reached 1,999 passing tests and 95.68% coverage; its only failures were 3 RustFS tests and 32 PostgreSQL setup errors because `MARKWEAVE_TEST_S3_ENDPOINT_URL` and `MARKWEAVE_TEST_POSTGRES_URL` are not configured. Pandoc, Mermaid/Chromium, and LibreOffice are also unavailable locally, so the external-engine/full-suite paths remain for CI.
+* 2026-08-30: Started implementation on `chore/T48-critical-mutation-testing` from exact verified `main` SHA `8f3b792ec41b10467c771c543a292929b0fa985a`. T05, T22, T41, T42, and T43 are all `Done`; scope remains limited to risk-ranked mutation configuration, CI scheduling and evidence, and mutation-driven tests without production refactoring.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up made zero surviving selected non-equivalent mutants the deterministic gate.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

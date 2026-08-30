@@ -50,7 +50,7 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
 def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
     triggers = workflow["on"]
-    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    assert set(triggers) == {"pull_request", "schedule", "workflow_dispatch"}
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     job = workflow["jobs"]["mutation"]
@@ -72,25 +72,22 @@ def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
 @pytest.mark.unit
 def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
-    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["target"]
-    target = "markweave.observability.x__normalize_method__mutmut_*"
+    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["domain"]
     assert dispatch["type"] == "choice"
-    assert dispatch["default"] == target
-    assert dispatch["options"] == [target]
+    assert dispatch["default"] == "all"
+    assert dispatch["options"] == [
+        "all",
+        "auth-session",
+        "archive-svg",
+        "job-integrity",
+        "retention-storage",
+    ]
     text = MUTATION_WORKFLOW.read_text(encoding="utf-8")
-    assert "rm -rf -- mutants" in text
-    assert 'uv run mutmut run "$MUTATION_TARGET"' in text
-    assert "uv run mutmut export-cicd-stats" in text
-    assert 'stats.get("killed", 0) <= 0' in text
-    for failure in (
-        "survived",
-        "no_tests",
-        "suspicious",
-        "timeout",
-        "check_was_interrupted_by_user",
-        "segfault",
-    ):
-        assert f'"{failure}"' in text
+    assert "scripts/ci/run_mutation_campaign.py" in text
+    assert "--mode changed" in text
+    assert "--base-sha" in text
+    assert "--head-sha" in text
+    assert "actions/upload-artifact@043fb4608a7c11565688c193ef1d7a58c880d6f0" in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.7.0"' in pyproject
@@ -102,4 +99,5 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
 def test_mutation_output_is_ignored_but_configuration_is_tracked() -> None:
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ignored.count("mutants/") == 1
+    assert ignored.count("mutation-results/") == 1
     assert ".github/" not in ignored
