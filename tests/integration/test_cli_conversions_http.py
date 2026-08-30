@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import socket
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Thread
@@ -33,9 +32,6 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def running_conversion_service(tmp_path: Path):
     """Run the production standalone assembly over real loopback HTTP."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
     settings = Settings(
         **template_settings(job_active_limit_per_user=1, job_global_queue_capacity=2),
         initial_admin_username="Admin",
@@ -51,21 +47,22 @@ def running_conversion_service(tmp_path: Path):
         job_result_retention_seconds=3_600,
     )
     application = create_app(settings, scanner=TrustingUploadScanner())
-    server = uvicorn.Server(
-        uvicorn.Config(application, host="127.0.0.1", port=port, log_level="error")
-    )
-    thread = Thread(target=server.run, daemon=True)
-    thread.start()
-    try:
-        for _ in range(500):
-            if server.started:
-                break
-            sleep(0.01)
-        assert server.started
-        yield f"http://127.0.0.1:{port}", application, settings
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
+    config = uvicorn.Config(application, host="127.0.0.1", port=0, log_level="error")
+    server = uvicorn.Server(config)
+    with config.bind_socket() as listener:
+        port = listener.getsockname()[1]
+        thread = Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        thread.start()
+        try:
+            for _ in range(500):
+                if server.started:
+                    break
+                sleep(0.01)
+            assert server.started
+            yield f"http://127.0.0.1:{port}", application, settings
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
 
 
 def _save_login(

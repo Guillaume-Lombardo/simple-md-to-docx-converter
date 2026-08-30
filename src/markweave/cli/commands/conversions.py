@@ -54,9 +54,7 @@ class _RequestOption(argparse.Action):
     ) -> None:
         del parser, option_string
         setattr(namespace, self.dest, values)
-        request = namespace.command_name
-        if isinstance(request, _Request):
-            request.values[self.dest] = values
+        _set_request_value(namespace, self.dest, values)
 
 
 class _FlagOption(argparse.Action):
@@ -72,9 +70,16 @@ class _FlagOption(argparse.Action):
     ) -> None:
         del parser, values, option_string
         setattr(namespace, self.dest, True)
-        request = namespace.command_name
-        if isinstance(request, _Request):
-            request.values[self.dest] = True
+        _set_request_value(namespace, self.dest, True)
+
+
+def _set_request_value(namespace: argparse.Namespace, key: str, value: Any) -> None:
+    """Copy parser defaults before recording one invocation-local value."""
+    request = namespace.command_name
+    if isinstance(request, _Request):
+        namespace.command_name = _Request(
+            request.command, {**request.values, key: value}
+        )
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -472,6 +477,8 @@ def _raise_terminal_failure(job: dict[str, Any]) -> None:
     correlation = job["correlation_id"]
     if state == "failed" and isinstance(message, str) and isinstance(code, str):
         raise CliError(code.lower(), f"{message} Correlation ID: {correlation}.")
+    if state == "failed":
+        raise CliError("job_failed", f"The job failed. Correlation ID: {correlation}.")
     messages = {
         "cancelled": "The job was cancelled.",
         "expired": "The job expired before it could be downloaded.",

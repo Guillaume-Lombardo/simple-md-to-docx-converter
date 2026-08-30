@@ -42,6 +42,47 @@ def test_conversion_commands_require_their_positional_operands(
     assert raised.value.code == 2
 
 
+def test_conversion_parser_keeps_request_values_local_to_each_parse() -> None:
+    parser = build_parser()
+
+    first = parser.parse_args(
+        (
+            "convert",
+            "first.md",
+            "--output",
+            "pdf",
+            "--template-id",
+            TEMPLATE_ID,
+            "--template-version-id",
+            VERSION_ID,
+        )
+    )
+    second = parser.parse_args(("convert", "second.md"))
+
+    assert first.command_name.values == {
+        "profile": "default",
+        "output": "pdf",
+        "retries": "0",
+        "source": "first.md",
+        "template_id": TEMPLATE_ID,
+        "template_version_id": VERSION_ID,
+    }
+    assert second.command_name.values == {
+        "profile": "default",
+        "output": "docx",
+        "retries": "0",
+        "source": "second.md",
+    }
+
+    overwritten = parser.parse_args(
+        ("jobs", "download", JOB_ID, "first.docx", "--overwrite")
+    )
+    safe_default = parser.parse_args(("jobs", "download", JOB_ID, "second.docx"))
+
+    assert overwritten.command_name.values["overwrite"] is True
+    assert safe_default.command_name.values["overwrite"] is False
+
+
 def _job(state: str = "queued", *, progress: int = 0) -> dict[str, object]:
     return {
         "id": JOB_ID,
@@ -316,6 +357,10 @@ def test_wait_is_bounded_and_preserves_terminal_safe_failures(mocker, capsys) ->
     assert main(("--timeout", "2", "jobs", "wait", JOB_ID)) == 1
     client.get_job.return_value = _response(payload=_job("expired"))
     assert main(("--timeout", "2", "jobs", "wait", JOB_ID)) == 1
+
+    client.get_job.return_value = _response(payload=_job("failed", progress=100))
+    assert main(("--timeout", "2", "jobs", "wait", JOB_ID)) == 1
+    assert "The job failed." in capsys.readouterr().err
 
 
 def test_server_errors_preserve_safe_message_and_correlation_id(mocker, capsys) -> None:
