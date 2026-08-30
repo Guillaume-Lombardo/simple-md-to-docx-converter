@@ -43,6 +43,8 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "container/**",
         "containers/**",
         "deploy/**",
+        "src/markweave/cli/commands/recovery.py",
+        "src/markweave/recovery*.py",
         "scripts/container/**",
         "tests/container/**",
     ),

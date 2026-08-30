@@ -102,6 +102,7 @@ jobs:
           bash scripts/container/smoke.sh "$image"
           bash scripts/container/api-smoke.sh "$image"
           bash scripts/container/distributed-api-smoke.sh "$image"
+          bash scripts/container/recovery-cli-smoke.sh "$image"
       - name: Generate and verify release SBOM evidence
         env:
           RELEASE_VERSION: ${{ inputs.version }}

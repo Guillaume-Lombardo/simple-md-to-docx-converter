@@ -102,11 +102,11 @@ Conversion inputs and results use the `uploads` and `results` namespaces. Durabl
 leases, heartbeats, cancellation flags, attempts, safe failures, and expiration metadata remain in
 the same SQLite database and therefore belong to the same coordinated recovery set.
 
-For a consistent backup, stop application and worker writes or use SQLite's online backup API,
-then copy both the database and the complete objects directory as one recovery set. Preserve file
-ownership and modes. To restore, keep the application stopped, restore both parts to an empty data
-directory, verify ownership for the arbitrary runtime UID, start the application, allow Alembic to
-upgrade older metadata, and require `/health/ready` to succeed before admitting traffic.
+`markweave backup --profile standalone` uses SQLite's online backup API and publishes the database
+plus complete stable object tree as one checksummed, content-addressed recovery set. Restore keeps
+the application offline, requires an absent isolated data destination, verifies every member and
+stable reference, then applies Alembic migrations and produces storage-readiness evidence before
+the operator admits traffic.
 
 ## Distributed
 
@@ -125,11 +125,10 @@ used, `MARKWEAVE_S3_ACCESS_KEY_ID` and `MARKWEAVE_S3_SECRET_ACCESS_KEY` must be 
 together through secrets. RustFS is the CI and k3s implementation, but application code uses only
 AWS S3-compatible operations and contains no RustFS-specific API.
 
-Back up PostgreSQL with the platform's supported physical backup or `pg_dump` procedure and protect
-the S3-compatible bucket with the provider's backup/versioning facilities. A recovery point must
-pair database state with object versions from the same coordinated window. Restore into isolated
-database and bucket targets first, run the application migration against the restored database,
-verify representative stable object identifiers, and require readiness before switching traffic.
+`markweave backup --profile distributed` pairs a repeatable-read PostgreSQL logical snapshot with a
+stable S3-compatible inventory and requires a named quiescence/provider-consistency proof. Restore
+requires an isolated empty database/schema and bucket, verifies all stable references, applies the
+application migration, and emits readiness evidence without switching traffic.
 Do not rewrite object keys from usernames, filenames, or template names during backup or restore.
 Template identities, versions, audit, preferences, and fallback selection are part of the
 PostgreSQL recovery set. Immutable template bytes use the same stable key layout in S3 as on the
@@ -142,10 +141,12 @@ bucket platforms provide a consistent cross-service recovery point.
 
 Standalone recovery must meet RPO 24 hours and RTO 4 hours; distributed recovery must meet RPO 1
 hour and RTO 2 hours. Run an automated isolated restore for each deployed profile at least once per
-calendar quarter with `scripts/run_restore_exercise.py`. The restore command owns backup restoration,
-stable-object verification, and readiness verification. The runner measures RTO with an elapsed
-monotonic clock, records UTC timestamps, and writes an immutable, owner-only report containing no
-document content or credentials. Retain
+calendar quarter with the production `markweave restore` command and its report options. The
+compatibility `scripts/run_restore_exercise.py` wrapper delegates only to that structured command
+and accepts no arbitrary executable. The restore command owns backup restoration, stable-object
+verification, and readiness verification. It measures RTO with an elapsed monotonic clock, records
+UTC timestamps, and writes an immutable, owner-only report containing no document content or
+credentials. Retain
 reports in protected durable operational storage outside application cleanup.
 
 Both boundaries are contract-tested and exercised in the hardened rootless image. Production backup
