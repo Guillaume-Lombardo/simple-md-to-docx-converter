@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import math
+import os
 import stat
 import time
 from collections.abc import Sequence
@@ -365,25 +367,38 @@ def _client(
 
 
 def _read_source(path: Path) -> tuple[str, bytes]:
-    try:
-        metadata = path.lstat()
-    except OSError as error:
-        raise CliError(
-            "source_unavailable", "The conversion source is unavailable."
-        ) from error
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-        raise CliError("source_unsafe", "The conversion source is unsafe.")
     source_kind = path.suffix.lower().removeprefix(".")
     if source_kind not in {"md", "zip"}:
         raise CliError(
             "source_type_invalid", "The conversion source must be Markdown or ZIP."
         )
+    descriptor = -1
     try:
-        content = path.read_bytes()
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CliError("source_unsafe", "The conversion source is unsafe.")
+            if metadata.st_size == 0:
+                raise CliError("source_empty", "The conversion source is empty.")
+            content = stream.read()
+    except CliError:
+        raise
     except OSError as error:
+        if error.errno in {errno.ELOOP, errno.ENODEV, errno.ENXIO}:
+            raise CliError(
+                "source_unsafe", "The conversion source is unsafe."
+            ) from error
         raise CliError(
             "source_unavailable", "The conversion source is unavailable."
         ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if not content:
         raise CliError("source_empty", "The conversion source is empty.")
     return source_kind, content

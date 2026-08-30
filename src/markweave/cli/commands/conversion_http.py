@@ -6,7 +6,6 @@ import json
 import os
 import ssl
 import stat
-import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,28 +154,34 @@ class ConversionHttpClient:
         self, path: str, destination: Path, *, overwrite: bool
     ) -> ConversionHttpResponse:
         """Stream a successful response into one atomic owner-only destination."""
-        _validate_destination(destination, overwrite=overwrite)
-        response = self._open("GET", path)
-        headers = _headers(response)
-        if response.status != _OK:
-            try:
+        directory_descriptor = _open_destination(destination, overwrite=overwrite)
+        response = None
+        try:
+            response = self._open("GET", path)
+            headers = _headers(response)
+            if response.status != _OK:
                 content = _read_bounded(response, _MAX_JSON_BYTES)
                 return ConversionHttpResponse(
                     response.status, _decode_payload(content), headers
                 )
-            finally:
-                response.close()
-        try:
-            written = _atomic_stream(response, destination, overwrite=overwrite)
-        except (TimeoutError, URLError, OSError) as error:
-            raise CliError(
-                "download_failed", "The download could not be completed."
-            ) from error
+            try:
+                written = _atomic_stream(
+                    response,
+                    destination,
+                    overwrite=overwrite,
+                    directory_descriptor=directory_descriptor,
+                )
+            except (TimeoutError, URLError, OSError) as error:
+                raise CliError(
+                    "download_failed", "The download could not be completed."
+                ) from error
+            return ConversionHttpResponse(
+                response.status, headers=headers, bytes_written=written
+            )
         finally:
-            response.close()
-        return ConversionHttpResponse(
-            response.status, headers=headers, bytes_written=written
-        )
+            if response is not None:
+                response.close()
+            os.close(directory_descriptor)
 
     def _open(
         self,
@@ -283,21 +288,43 @@ def _headers(response: Any) -> dict[str, str]:
 
 
 def _validate_destination(destination: Path, *, overwrite: bool) -> None:
-    parent = destination.parent
+    directory_descriptor = _open_destination(destination, overwrite=overwrite)
+    os.close(directory_descriptor)
+
+
+def _open_destination(destination: Path, *, overwrite: bool) -> int:
+    if destination.name in {"", ".", ".."}:
+        raise CliError(
+            "download_destination_invalid", "The download destination is invalid."
+        )
+    directory_descriptor = -1
+    opened = False
     try:
-        parent_metadata = parent.lstat()
+        directory_descriptor = os.open(
+            destination.parent,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+        _validate_destination_name(
+            directory_descriptor, destination.name, overwrite=overwrite
+        )
+        opened = True
+        return directory_descriptor
+    except CliError:
+        raise
     except OSError as error:
         raise CliError(
             "download_destination_invalid", "The download destination is invalid."
         ) from error
-    if stat.S_ISLNK(parent_metadata.st_mode) or not stat.S_ISDIR(
-        parent_metadata.st_mode
-    ):
-        raise CliError(
-            "download_destination_invalid", "The download destination is invalid."
-        )
+    finally:
+        if directory_descriptor >= 0 and not opened:
+            os.close(directory_descriptor)
+
+
+def _validate_destination_name(
+    directory_descriptor: int, name: str, *, overwrite: bool
+) -> None:
     try:
-        metadata = destination.lstat()
+        metadata = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
     except FileNotFoundError:
         return
     except OSError as error:
@@ -315,14 +342,26 @@ def _validate_destination(destination: Path, *, overwrite: bool) -> None:
         )
 
 
-def _atomic_stream(response: BinaryIO, destination: Path, *, overwrite: bool) -> int:
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".markweave-download-", dir=destination.parent
-    )
-    temporary = Path(temporary_name)
+def _atomic_stream(
+    response: BinaryIO,
+    destination: Path,
+    *,
+    overwrite: bool,
+    directory_descriptor: int | None = None,
+) -> int:
+    owned_directory_descriptor = directory_descriptor is None
+    if directory_descriptor is None:
+        directory_descriptor = _open_destination(destination, overwrite=overwrite)
+    temporary = f".markweave-download-{uuid4().hex}"
+    descriptor = -1
     written = 0
     try:
-        os.fchmod(descriptor, _PRIVATE_FILE_MODE)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            _PRIVATE_FILE_MODE,
+            dir_fd=directory_descriptor,
+        )
         with os.fdopen(descriptor, "wb") as output:
             descriptor = -1
             while chunk := response.read(_DOWNLOAD_CHUNK_BYTES):
@@ -331,19 +370,36 @@ def _atomic_stream(response: BinaryIO, destination: Path, *, overwrite: bool) ->
             output.flush()
             os.fsync(output.fileno())
         if overwrite:
-            os.replace(temporary, destination)
+            os.replace(
+                temporary,
+                destination.name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+            )
         else:
             try:
-                os.link(temporary, destination, follow_symlinks=False)
+                os.link(
+                    temporary,
+                    destination.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
             except FileExistsError as error:
                 raise CliError(
                     "download_exists",
                     "The download destination already exists; use --overwrite to replace it.",
                 ) from error
-            temporary.unlink()
+            os.unlink(temporary, dir_fd=directory_descriptor)
+        temporary = ""
+        os.fsync(directory_descriptor)
         return written
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-        with suppress(FileNotFoundError):
-            temporary.unlink()
+        if temporary:
+            with suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=directory_descriptor)
+            os.fsync(directory_descriptor)
+        if owned_directory_descriptor:
+            os.close(directory_descriptor)

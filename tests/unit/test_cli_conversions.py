@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 from typing import BinaryIO, cast
 from urllib.error import URLError
@@ -144,6 +145,31 @@ def test_convert_retries_only_ambiguous_network_failures_with_explicit_key(
     assert client.submit.call_count == 2
     assert main(("convert", str(source), "--retries", "1")) == 1
     assert client.submit.call_count == 2
+
+
+def test_conversion_source_read_stays_on_open_descriptor_during_symlink_swap(
+    tmp_path: Path, mocker
+) -> None:
+    source = tmp_path / "source.md"
+    source.write_bytes(b"anchored source")
+    opened_source = tmp_path / "opened-source.md"
+    replacement = tmp_path / "replacement.md"
+    replacement.write_bytes(b"replacement secret")
+    real_fstat = conversions.os.fstat
+    swapped = False
+
+    def swap_path_after_open(descriptor: int):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            source.rename(opened_source)
+            source.symlink_to(replacement)
+        return real_fstat(descriptor)
+
+    mocker.patch.object(conversions.os, "fstat", swap_path_after_open)
+
+    assert conversions._read_source(source) == ("md", b"anchored source")
+    assert source.read_bytes() == b"replacement secret"
 
 
 @pytest.mark.parametrize(
@@ -315,6 +341,43 @@ def test_atomic_stream_cleans_partial_file_after_interruption(tmp_path: Path) ->
         _atomic_stream(cast(BinaryIO, Interrupted()), destination, overwrite=False)
     assert not destination.exists()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_atomic_stream_keeps_publication_and_cleanup_on_open_parent_descriptor(
+    tmp_path: Path, mocker
+) -> None:
+    parent = tmp_path / "download"
+    parent.mkdir()
+    moved_parent = tmp_path / "download-moved"
+    destination = parent / "result.bin"
+    real_link = os.link
+
+    def publish_after_parent_replacement(
+        source,
+        target,
+        *,
+        src_dir_fd=None,
+        dst_dir_fd=None,
+        follow_symlinks=True,
+    ):
+        parent.rename(moved_parent)
+        parent.mkdir()
+        (parent / "replacement-marker").write_bytes(b"replacement")
+        return real_link(
+            source,
+            target,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    mocker.patch.object(conversion_http.os, "link", publish_after_parent_replacement)
+
+    assert _atomic_stream(io.BytesIO(b"anchored"), destination, overwrite=False) == 8
+    assert (moved_parent / "result.bin").read_bytes() == b"anchored"
+    assert (parent / "replacement-marker").read_bytes() == b"replacement"
+    assert not list(moved_parent.glob(".markweave-download-*"))
+    assert not list(parent.glob(".markweave-download-*"))
 
 
 def test_download_destination_rejects_symlinks_and_non_directories(
