@@ -62,3 +62,13 @@ def test_template_cli_e2e_sends_regular_user_credentials_only_over_stdin() -> No
     assert "T34Other-standalone-Fixture9!" not in "\0".join(command)
     assert "--interactive" in command
     assert "-c" in command
+
+
+def test_template_cli_e2e_runs_after_browser_workflow_and_before_restart() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    browser = runner.index("/e2e/browser-final-image.test.mjs")
+    templates = runner.index("tests.e2e.template_cli_workflow")
+    restart = runner.index('podman restart --time 15 "$application_name"')
+
+    assert browser < templates < restart
+    assert runner.count("tests.e2e.template_cli_workflow") == 1
