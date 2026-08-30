@@ -14,6 +14,7 @@ from markweave.cli.commands.recovery import (
     _distributed_configuration,
     _environment_name,
     _secret_environment,
+    load_and_verify_manifest,
 )
 from markweave.cli.main import main
 from markweave.cli.types import ExitCode
@@ -29,6 +30,19 @@ from markweave.recovery_manifest import (
 from markweave.recovery_service import RestoreResult
 
 pytestmark = pytest.mark.unit
+
+
+def test_manifest_verification_dependency_loads_only_for_restore(
+    tmp_path: Path, mocker
+) -> None:
+    verify = mocker.patch(
+        "markweave.recovery_manifest.load_and_verify_manifest",
+        return_value=mocker.sentinel.manifest,
+    )
+    source = tmp_path / "recovery-set"
+
+    assert load_and_verify_manifest(source) is mocker.sentinel.manifest
+    verify.assert_called_once_with(source)
 
 
 def test_backup_requires_explicit_coherent_profile_configuration(
