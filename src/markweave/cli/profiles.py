@@ -8,6 +8,7 @@ import re
 import stat
 import tempfile
 from contextlib import suppress
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -64,12 +65,25 @@ def validate_service_url(value: str, *, verify_tls: bool) -> str:
             "invalid_service_url",
             "The service URL must not contain a query or fragment.",
         )
-    if parsed.scheme == "http" and verify_tls:
+    if (
+        parsed.scheme == "http"
+        and verify_tls
+        and not _is_loopback_host(parsed.hostname)
+    ):
         raise CliError(
             "tls_required",
-            "HTTPS is required unless --insecure is explicitly selected.",
+            "HTTPS is required except for a loopback-only evaluation service.",
         )
     return value.rstrip("/")
+
+
+def _is_loopback_host(hostname: str | None) -> bool:
+    if hostname == "localhost":
+        return True
+    try:
+        return hostname is not None and ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class ProfileStore:
