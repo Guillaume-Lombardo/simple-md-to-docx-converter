@@ -10,6 +10,7 @@ podman pull --quiet "$base_image"
 test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
 bash scripts/container/build.sh "$final_image"
 bash scripts/container/smoke.sh "$final_image"
+bash tests/e2e/runtime-operations-final-image.sh "$final_image"
 bash scripts/container/api-smoke.sh "$final_image"
 bash scripts/container/distributed-api-smoke.sh "$final_image"
 bash scripts/container/supply-chain.sh "$final_image" artifacts/container
