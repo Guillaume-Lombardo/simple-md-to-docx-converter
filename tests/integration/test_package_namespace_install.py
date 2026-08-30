@@ -29,15 +29,26 @@ def _run(*command: str, cwd: Path, environment: dict[str, str] | None = None) ->
     )
 
 
-def _assert_no_retired_import(python: Path, *, environment: dict[str, str]) -> None:
+def _without_pythonpath(environment: dict[str, str]) -> dict[str, str]:
+    """Return an environment that cannot import an inherited checkout."""
+    return {name: value for name, value in environment.items() if name != "PYTHONPATH"}
+
+
+def _assert_no_retired_import(
+    python: Path, *, environment: dict[str, str], package_root: Path
+) -> None:
     _run(
         str(python),
         "-c",
         (
-            "from importlib.util import find_spec; import markweave; "
+            "from importlib.util import find_spec; from pathlib import Path; "
+            "import markweave; import sys; "
             "assert find_spec('md_converter') is None; "
-            f"assert markweave.__version__ == {markweave.__version__!r}"
+            f"assert markweave.__version__ == {markweave.__version__!r}; "
+            "assert Path(markweave.__file__).resolve().is_relative_to("
+            "Path(sys.argv[1]).resolve())"
         ),
+        str(package_root),
         cwd=python.parent,
         environment=environment,
     )
@@ -61,8 +72,19 @@ def test_clean_source_sdist_wheel_and_editable_installs_have_no_retired_namespac
     source_environment = tmp_path / "source-environment"
     _run(uv, "venv", str(source_environment), "--python", "3.14", cwd=tmp_path)
     _assert_no_retired_import(
-        source_environment / "bin" / "python", environment=clean_environment
+        source_environment / "bin" / "python",
+        environment=clean_environment,
+        package_root=ROOT / "src",
     )
+    poisoned_checkout = tmp_path / "poisoned-checkout" / "markweave"
+    poisoned_checkout.mkdir(parents=True)
+    (poisoned_checkout / "__init__.py").write_text(
+        '__version__ = "masked"\n', encoding="utf-8"
+    )
+    inherited_environment = {
+        **os.environ,
+        "PYTHONPATH": str(poisoned_checkout.parent),
+    }
     for name, package in (
         ("sdist", artifacts.sdist),
         ("wheel", artifacts.wheel),
@@ -75,4 +97,9 @@ def test_clean_source_sdist_wheel_and_editable_installs_have_no_retired_namespac
         if name == "editable":
             install = (*install, "-e")
         _run(*install, str(package), cwd=tmp_path)
-        _assert_no_retired_import(python, environment=os.environ.copy())
+        package_root = ROOT / "src" if name == "editable" else environment
+        _assert_no_retired_import(
+            python,
+            environment=_without_pythonpath(inherited_environment),
+            package_root=package_root,
+        )

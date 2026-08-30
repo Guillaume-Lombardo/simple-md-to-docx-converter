@@ -40,6 +40,7 @@ Remove residual `md_converter` build/runtime artifacts and prevent the retired n
 * 2026-08-30: Reconciled the implementation with main `7850ab695ec278012b3db6e00a854b1c9dcf2360` by a normal merge. Post-merge Ruff, type, and focused namespace checks passed. The full default non-engine Pytest command completed with 1,943 passed, 3 failed, and 32 errors because local PostgreSQL and RustFS services were unavailable; the T49 namespace tests passed in that run.
 * 2026-08-30: Tightened review findings: the checker now requires the exact `markweave` project name, and cleanup targets only syntactically valid legacy wheels or source distributions. Regression coverage proves a user file such as `dist/md_converter-customer-backup.gz` is preserved.
 * 2026-08-30: Replaced heuristic artifact matching with `packaging` standard wheel and source-distribution filename parsers, requiring the canonical retired distribution name. Cleanup now preserves malformed names including `md_converter-1customer-py3-none-any.whl`, `md_converter-1customer.tar.gz`, and `md_converter-1-customer-py3-none-any.whl`.
+* 2026-08-30: Isolated installed-artifact import assertions from inherited `PYTHONPATH`; only the explicit source check retains it. Regression coverage poisons `PYTHONPATH` with a fake checkout package and verifies sdist, wheel, and editable assertions use their intended package roots.
 
 ## Coordination
 
