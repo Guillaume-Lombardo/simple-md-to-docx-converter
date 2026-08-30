@@ -2,7 +2,7 @@
 ticket: T34
 linear_id: G1L-410
 linear_url: https://linear.app/g1lom/issue/G1L-410/t34-add-template-cli-commands
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -42,10 +42,11 @@ Expose visible-template discovery, preferences, ownership mutations, and immutab
 * 2026-08-30: Started implementation on `feat/T34-template-cli` from verified `main` at `c1cae3b`. Scope remains limited to the pre-registered HTTP-only template, version, preference, and fallback CLI family plus its domain-specific tests and documentation.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up restricted this worker to T31's template family and excluded shared registry, help, and documentation-index files.
+* 2026-08-30: Verified delivery on main. PR #127 implementation head `808445bd1f4668d8f30d268a8592895762507282` merged as `60fecb44cfaccaf2dd4254006f7c0c1f15049d59`. Exact-head CI [33328064488](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33328064488) succeeded: standalone passed on attempt 1 and distributed passed on attempt 2 after an external TLS reset. Exact-main CI [33328867647](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33328867647) succeeded. CodeRabbit and independent review completed with zero unresolved threads; final-image cleanup remained bounded to harness-owned resources.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
