@@ -4,10 +4,11 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, current_thread
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Engine, delete, func, select, update
+from sqlalchemy import Engine, delete, event, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ from markweave.templates.errors import (
     TemplateUnavailableError,
 )
 from markweave.templates.models import (
+    TemplateAuditRecord,
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
@@ -46,6 +48,66 @@ from markweave.templates.validation import ValidatedTemplate
 from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 
 pytestmark = pytest.mark.integration
+
+
+class _PreferenceWriteRace:
+    """Coordinate the SQLite read-to-write upgrade race without sleeps."""
+
+    def __init__(self) -> None:
+        self.clear_read_started = Event()
+        self.writer_started = Event()
+        self.allow_writer_commit = Event()
+
+    def before_cursor_execute(
+        self,
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.split()).upper()
+        thread_name = current_thread().name
+        if (
+            thread_name.startswith("preference-clear")
+            and normalized.startswith("SELECT")
+            and "TEMPLATE_PREFERENCES" in normalized
+        ):
+            self.clear_read_started.set()
+            if not self.writer_started.wait(timeout=5):
+                raise RuntimeError("Concurrent preference writer did not start")
+        if thread_name.startswith("preference-set") and (
+            normalized == "BEGIN IMMEDIATE"
+            or normalized.startswith("INSERT INTO TEMPLATE_PREFERENCES")
+        ):
+            self.writer_started.set()
+
+    def after_cursor_execute(
+        self,
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.split()).upper()
+        if (
+            current_thread().name.startswith("preference-set")
+            and normalized.startswith("INSERT INTO TEMPLATE_PREFERENCES")
+            and not self.allow_writer_commit.wait(timeout=10)
+        ):
+            raise RuntimeError("Concurrent preference clear did not finish")
+
+    def attach(self, engine: Engine) -> None:
+        event.listen(engine, "before_cursor_execute", self.before_cursor_execute)
+        event.listen(engine, "after_cursor_execute", self.after_cursor_execute)
+
+    def detach(self, engine: Engine) -> None:
+        self.allow_writer_commit.set()
+        event.remove(engine, "before_cursor_execute", self.before_cursor_execute)
+        event.remove(engine, "after_cursor_execute", self.after_cursor_execute)
 
 
 def _validated(data: bytes) -> ValidatedTemplate:
@@ -285,6 +347,7 @@ def test_preference_set_and_clear_are_audited_with_prior_target(tmp_path: Path) 
     )
     service.set_preferred(owner, template.id)
     service.clear_preferred(owner)
+    service.clear_preferred(owner)
 
     with Session(engine) as database:
         records = tuple(
@@ -300,8 +363,81 @@ def test_preference_set_and_clear_are_audited_with_prior_target(tmp_path: Path) 
         "set_preferred",
         "clear_preferred",
     }
+    assert len(records) == 2
     assert all(record.template_id == str(template.id) for record in records)
     assert all(record.owner_id == str(owner.id) for record in records)
+    engine.dispose()
+
+
+def test_sqlite_preference_read_then_write_is_serialized(tmp_path: Path) -> None:
+    service, engine, owner, _other, _admin = _service(tmp_path)
+    first, _first_version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "First preference", "Concurrent clear target"),
+        b"first",
+        ("Calibri",),
+    )
+    second, _second_version = service.create_versioned(
+        owner,
+        TemplateCreate(uuid4(), "Second preference", "Concurrent set target"),
+        b"second",
+        ("Calibri",),
+    )
+    selections = SqlTemplateSelectionRepository(engine)
+    selections.set_preferred(owner.id, first.id)
+    now = datetime.now(UTC)
+    clear_audit = TemplateAuditRecord(
+        uuid4(), owner.id, owner.id, UUID(int=0), "clear_preferred", None, False, now
+    )
+    set_audit = TemplateAuditRecord(
+        uuid4(), owner.id, owner.id, second.id, "set_preferred", None, False, now
+    )
+    race = _PreferenceWriteRace()
+    race.attach(engine)
+
+    def clear_preference() -> None:
+        try:
+            selections.clear_preferred_audited(owner.id, clear_audit)
+        finally:
+            race.allow_writer_commit.set()
+
+    try:
+        with (
+            ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="preference-clear"
+            ) as clear_executor,
+            ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="preference-set"
+            ) as set_executor,
+        ):
+            cleared = clear_executor.submit(clear_preference)
+            assert race.clear_read_started.wait(timeout=5)
+            preferred = set_executor.submit(
+                selections.set_preferred_audited, owner.id, second.id, set_audit
+            )
+            cleared.result(timeout=15)
+            preferred.result(timeout=15)
+    finally:
+        race.detach(engine)
+
+    assert selections.preferred_id(owner.id) == second.id
+    with Session(engine) as database:
+        records = tuple(
+            database.scalars(
+                select(TemplateAuditRow).where(
+                    TemplateAuditRow.id.in_((str(clear_audit.id), str(set_audit.id)))
+                )
+            )
+        )
+    assert {record.operation for record in records} == {
+        "clear_preferred",
+        "set_preferred",
+    }
+    cleared_record = next(
+        record for record in records if record.operation == "clear_preferred"
+    )
+    assert cleared_record.owner_id == str(owner.id)
+    assert cleared_record.template_id == str(first.id)
     engine.dispose()
 
 

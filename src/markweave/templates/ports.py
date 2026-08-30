@@ -1,4 +1,4 @@
-"""Persistence ports for template identity and user selection."""
+"""Provider-neutral persistence ports for template responsibilities."""
 
 from __future__ import annotations
 
@@ -15,12 +15,53 @@ from markweave.templates.models import (
 )
 
 
-class TemplateCatalogRepository(Protocol):
-    """Immutable-owner template identity and visibility queries."""
+class TemplateIdentityRepository(Protocol):
+    """Identity metadata, optimistic updates, status, and guarded deletion."""
 
     def add(self, template: TemplateIdentity) -> None: ...
 
     def get(self, template_id: UUID) -> TemplateIdentity | None: ...
+
+    def update_metadata(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        name: str,
+        description: str,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def set_status(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        status: str,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+    def delete_guarded(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        audit: TemplateAuditRecord,
+    ) -> tuple[TemplateVersion, ...]: ...
+
+    def begin_delete(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        audit: TemplateAuditRecord,
+    ) -> tuple[TemplateVersion, ...]: ...
+
+    def finalize_delete(self, template_id: UUID) -> None: ...
+
+
+class TemplateSearchRepository(Protocol):
+    """Visibility-aware bounded identity search."""
 
     def search(
         self,
@@ -29,6 +70,10 @@ class TemplateCatalogRepository(Protocol):
         viewer_id: UUID,
         viewer_is_admin: bool,
     ) -> TemplatePage: ...
+
+
+class TemplatePublicationRepository(Protocol):
+    """Atomic version reservation and publication."""
 
     def create_versioned(
         self,
@@ -55,6 +100,19 @@ class TemplateCatalogRepository(Protocol):
         audit: TemplateAuditRecord,
     ) -> TemplateIdentity: ...
 
+    def publish_version(
+        self,
+        template_id: UUID,
+        *,
+        expected_revision: int,
+        version: TemplateVersion,
+        audit: TemplateAuditRecord,
+    ) -> TemplateIdentity: ...
+
+
+class TemplatePublicationRecoveryRepository(Protocol):
+    """Recovery leases and cleanup discovery for interrupted publication."""
+
     def abort_pending(
         self, template_id: UUID, version_id: UUID, publication_token: UUID
     ) -> bool: ...
@@ -80,57 +138,26 @@ class TemplateCatalogRepository(Protocol):
         self,
     ) -> tuple[tuple[UUID, tuple[TemplateVersion, ...]], ...]: ...
 
-    def begin_delete(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        audit: TemplateAuditRecord,
-    ) -> tuple[TemplateVersion, ...]: ...
 
-    def finalize_delete(self, template_id: UUID) -> None: ...
-
-    def update_metadata(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        name: str,
-        description: str,
-        audit: TemplateAuditRecord,
-    ) -> TemplateIdentity: ...
-
-    def publish_version(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        version: TemplateVersion,
-        audit: TemplateAuditRecord,
-    ) -> TemplateIdentity: ...
-
-    def set_status(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        status: str,
-        audit: TemplateAuditRecord,
-    ) -> TemplateIdentity: ...
-
-    def delete_guarded(
-        self,
-        template_id: UUID,
-        *,
-        expected_revision: int,
-        audit: TemplateAuditRecord,
-    ) -> tuple[TemplateVersion, ...]: ...
+class TemplateVersionQueryRepository(Protocol):
+    """Immutable published-version lookup and history."""
 
     def get_version(
         self, template_id: UUID, version_id: UUID
     ) -> TemplateVersion | None: ...
 
     def list_versions(self, template_id: UUID) -> tuple[TemplateVersion, ...]: ...
+
+
+class TemplateCatalogRepository(
+    TemplateIdentityRepository,
+    TemplateSearchRepository,
+    TemplatePublicationRepository,
+    TemplatePublicationRecoveryRepository,
+    TemplateVersionQueryRepository,
+    Protocol,
+):
+    """Complete catalog contract composed from bounded responsibilities."""
 
 
 class TemplateSelectionRepository(Protocol):
