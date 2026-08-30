@@ -356,8 +356,11 @@ def test_postgresql_short_load_serializes_global_capacity(tmp_path: Path) -> Non
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_retention_cleanup_removes_rustfs_source() -> None:  # noqa: PLR0915
+def test_distributed_retention_cleanup_removes_rustfs_source(  # noqa: PLR0915
+    request: pytest.FixtureRequest,
+) -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
     upgrade_database(engine)
     suffix = uuid4().hex
     owner = User(uuid4(), "Cleanup", f"t18-cleanup-{suffix}", "hash", Role.USER)
@@ -374,6 +377,7 @@ def test_distributed_retention_cleanup_removes_rustfs_source() -> None:  # noqa:
         aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
     objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
+    request.addfinalizer(objects.close)
     service = JobService(repository, objects, JobServicePolicy(10))
     queued, _ = service.submit(
         JobRequest(
@@ -457,4 +461,3 @@ def test_distributed_retention_cleanup_removes_rustfs_source() -> None:  # noqa:
                 delete(TemplateRow).where(TemplateRow.id == str(template_id))
             )
             connection.execute(delete(UserRow).where(UserRow.id == str(owner.id)))
-        engine.dispose()

@@ -108,6 +108,7 @@ def test_sqlite_queue_metrics_correlation_and_audit_are_content_free(
     assert record.version_id == version_id
     assert not hasattr(record, "content")
     assert not hasattr(record, "filename")
+    engine.dispose()
 
 
 def test_sqlite_observation_failure_is_sanitized() -> None:
@@ -118,6 +119,7 @@ def test_sqlite_observation_failure_is_sanitized() -> None:
         SqlAuditReader(engine).list_recent(offset=0, limit=10)
     with pytest.raises(ValueError, match="pagination"):
         SqlAuditReader(engine).list_recent(offset=-1, limit=10)
+    engine.dispose()
 
 
 def test_sqlite_authentication_audit_shares_bounded_retention_order(
