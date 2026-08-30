@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -718,8 +719,13 @@ def classify_changes(  # noqa: PLR0912 - mirrors OpenAPI compatibility sections
 
 
 def _baseline_from_git(reference: str, artifact: Path) -> bytes | None:
-    completed = subprocess.run(  # noqa: S603 - fixed executable and no shell
-        ["/usr/bin/git", "show", f"{reference}:{artifact.as_posix()}"],
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError(
+            "git executable not found on PATH; cannot load baseline OpenAPI contract"
+        )
+    completed = subprocess.run(  # noqa: S603 - PATH-resolved executable, no shell
+        [git, "show", f"{reference}:{artifact.as_posix()}"],
         check=False,
         capture_output=True,
     )

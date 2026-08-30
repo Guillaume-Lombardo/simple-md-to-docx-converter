@@ -10,9 +10,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pytest_mock import MockerFixture
 
 from scripts.openapi_contract import (
     ARTIFACT,
+    _baseline_from_git,
     build_contract,
     build_contract_app,
     canonical_bytes,
@@ -357,3 +359,40 @@ def test_check_command_rejects_stale_artifact(tmp_path: Path, capsys) -> None:
     artifact.write_text("{}\n", encoding="utf-8")
     assert main(["check", "--artifact", str(artifact)]) == 1
     assert "is stale" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_git_baseline_uses_path_resolved_executable(mocker: MockerFixture) -> None:
+    which = mocker.patch(
+        "scripts.openapi_contract.shutil.which", return_value="/tools/git"
+    )
+    completed = mocker.Mock(returncode=0, stdout=b'{"openapi":"3.1.0"}\n', stderr=b"")
+    run = mocker.patch(
+        "scripts.openapi_contract.subprocess.run", return_value=completed
+    )
+
+    baseline = _baseline_from_git("origin/main", Path("openapi/v1.json"))
+
+    assert baseline == b'{"openapi":"3.1.0"}\n'
+    which.assert_called_once_with("git")
+    run.assert_called_once_with(
+        ["/tools/git", "show", "origin/main:openapi/v1.json"],
+        check=False,
+        capture_output=True,
+    )
+
+
+@pytest.mark.unit
+def test_git_baseline_fails_clearly_when_git_is_missing(
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch("scripts.openapi_contract.shutil.which", return_value=None)
+    run = mocker.patch("scripts.openapi_contract.subprocess.run")
+
+    with pytest.raises(
+        RuntimeError,
+        match="git executable not found on PATH; cannot load baseline OpenAPI contract",
+    ):
+        _baseline_from_git("origin/main", Path("openapi/v1.json"))
+
+    run.assert_not_called()
