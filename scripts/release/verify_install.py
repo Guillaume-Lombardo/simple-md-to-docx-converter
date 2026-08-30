@@ -162,8 +162,14 @@ def verify_clean_install(
         )
         console = environment / "bin" / "markweave"
         for arguments, label in (
-            ((str(console), "--version"), "isolated console version check"),
-            ((str(console), "--help"), "isolated console help check"),
+            (
+                (str(python), "-I", str(console), "--version"),
+                "isolated console version check",
+            ),
+            (
+                (str(python), "-I", str(console), "--help"),
+                "isolated console help check",
+            ),
         ):
             run_command(
                 arguments,

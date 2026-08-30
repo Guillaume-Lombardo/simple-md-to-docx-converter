@@ -68,7 +68,7 @@ def artifacts(tmp_path: Path) -> ArtifactSet:
 def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture
 ) -> None:
-    """Only a private copy matching the manifest reaches uv and isolated Python."""
+    """Only a private copy matching the manifest reaches isolated Python paths."""
     events: list[str] = []
 
     def verified(*args: object, **kwargs: object) -> ArtifactSet:
@@ -156,12 +156,12 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     )
     console = environment / "bin" / "markweave"
     assert calls[3] == (
-        (str(console), "--version"),
+        (str(python), "-I", str(console), "--version"),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
     assert calls[4] == (
-        (str(console), "--help"),
+        (str(python), "-I", str(console), "--help"),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
