@@ -38,7 +38,7 @@ async function createAccount(page, username, password) {
   return response.json();
 }
 
-async function createTemplate(page, templateName, templateFixture) {
+async function createTemplate(page, templateName, templateFixture, timeout) {
   const form = page.locator("#create-template-form");
   await form.locator('input[name="name"]').fill(templateName);
   await form.locator('textarea[name="description"]').fill("Final-image browser acceptance");
@@ -47,6 +47,7 @@ async function createTemplate(page, templateName, templateFixture) {
   const responsePromise = page.waitForResponse(
     (response) => response.url().endsWith("/api/v1/templates")
       && response.request().method() === "POST",
+    { timeout },
   );
   await form.getByRole("button", { name: "Create template" }).click();
   const response = await responsePromise;
@@ -254,7 +255,17 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     step = "Alice creates a visible template";
     await alicePage.goto("/templates", { waitUntil: "networkidle" });
     assert.equal(await alicePage.locator("[data-admin-users]").count(), 0);
-    const template = await createTemplate(alicePage, templateName, settings.templateFixture);
+    const template = await createTemplate(
+      alicePage,
+      templateName,
+      settings.templateFixture,
+      settings.timeoutMilliseconds,
+    );
+    // Template activation invokes both document engines. Renew the regular-user
+    // sessions because this constrained-image validation can span their short
+    // absolute E2E lifetime.
+    await login(alicePage, settings.baseUrl, identities.alice.username, identities.alice.password);
+    await login(bobPage, settings.baseUrl, identities.bob.username, identities.bob.password);
 
     step = "Bob sees but cannot manage Alice's template";
     await bobPage.goto("/templates", { waitUntil: "networkidle" });
