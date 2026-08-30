@@ -43,6 +43,10 @@ def test_real_build_validation_clean_install_and_tamper_failure(
     with zipfile.ZipFile(verified.wheel) as wheel:
         names = set(wheel.namelist())
         assert "markweave/__init__.py" in names
+        entry_points = wheel.read("markweave-0.4.0.dist-info/entry_points.txt").decode()
+        assert (
+            entry_points == "[console_scripts]\nmarkweave = markweave.cli.main:main\n"
+        )
         assert not any(name.startswith("md_converter/") for name in names)
         assert "md_converter.py" not in names
         assert not any(
