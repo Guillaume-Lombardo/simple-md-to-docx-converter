@@ -2,7 +2,7 @@
 ticket: T49
 linear_id: G1L-423
 linear_url: https://linear.app/g1lom/issue/G1L-423/t49-remove-legacy-package-artifacts-and-enforce-namespace-cleanliness
-status: Backlog
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,10 +36,16 @@ Remove residual `md_converter` build/runtime artifacts and prevent the retired n
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized cleanup after T40 and assigned dedicated namespace checks without shared distribution files.
+* 2026-08-30: Started implementation. Added the dedicated namespace checker and clean source, sdist, wheel, and editable-install contamination coverage. Used its dry-run then constrained cleanup to remove only the ignored `src/md_converter` bytecode tree and obsolete `dist/md_converter-0.1.0` artifacts from the maintained checkout; legacy environment compatibility aliases and historical evidence remain untouched.
+* 2026-08-30: Reconciled the implementation with main `7850ab695ec278012b3db6e00a854b1c9dcf2360` by a normal merge. Post-merge Ruff, type, and focused namespace checks passed. The full default non-engine Pytest command completed with 1,943 passed, 3 failed, and 32 errors because local PostgreSQL and RustFS services were unavailable; the T49 namespace tests passed in that run.
+* 2026-08-30: Tightened review findings: the checker now requires the exact `markweave` project name, and cleanup targets only syntactically valid legacy wheels or source distributions. Regression coverage proves a user file such as `dist/md_converter-customer-backup.gz` is preserved.
+* 2026-08-30: Replaced heuristic artifact matching with `packaging` standard wheel and source-distribution filename parsers, requiring the canonical retired distribution name. Cleanup now preserves malformed names including `md_converter-1customer-py3-none-any.whl`, `md_converter-1customer.tar.gz`, and `md_converter-1-customer-py3-none-any.whl`.
+* 2026-08-30: Isolated installed-artifact import assertions from inherited `PYTHONPATH`; only the explicit source check retains it. Regression coverage poisons `PYTHONPATH` with a fake checkout package and verifies sdist, wheel, and editable assertions use their intended package roots.
+* 2026-08-30: Verified delivery on main. PR #122 implementation head `1574d762ee4d516d032ca4928f6f0c1fa8b61df6` merged as `3546ce1189d18992316abef1636ac89e247a0a10`; PR CI [33323413614](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33323413614) and exact-main CI [33324326123](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/33324326123) both succeeded. CodeRabbit and independent review completed with zero unresolved findings. The constrained cleanup removed only the legacy bytecode tree and obsolete `md_converter-0.1.0` wheel/sdist; legacy compatibility aliases and historical evidence remain preserved.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

@@ -2,7 +2,7 @@
 ticket: T33
 linear_id: G1L-408
 linear_url: https://linear.app/g1lom/issue/G1L-408/t33-add-conversion-and-job-cli-commands
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,10 +36,22 @@ Expose conversion submission and the complete user-owned job lifecycle through H
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up restricted this worker to T31's conversion/job family and excluded shared registry, help, and documentation-index files.
+* 2026-08-30: Implementation started on `feat/T33-conversion-job-cli` from verified `main` at `c1cae3b`. Scope remains limited to the pre-registered conversion/job command family, its domain-specific tests, and dedicated CLI documentation.
+* 2026-08-30: Implemented HTTP-only conversion submission, owner-scoped job inspection/control, bounded polling, safe idempotent retry, and atomic result/manifest downloads with dedicated unit, real-HTTP integration, and final-image drivers.
+* 2026-08-30: Verified 1,216 unit tests and 1,971 locally runnable tests at 95.19% branch coverage; the focused T33 modules reach 91%. The exact final image passed the standalone and distributed T33 drivers. The canonical suite remains externally blocked by absent PostgreSQL/S3 test settings, and the existing distributed API smoke fails after the T33 driver on `mermaid_unavailable`.
+* 2026-08-30: Kept `tests/unit/test_cli.py` and shared container smoke scripts identical to the branch base pending the approved T34 -> T33 -> T35 integration order; final shared-runner wiring is deferred until T34 is merged into `main`.
+* 2026-08-30: Integrated current `main` through T34 and the T42 worker decomposition without conflicts, removed only T33's obsolete shared placeholder cases, and added exactly one conversion-driver invocation to the final-image runner.
+* 2026-08-30: Verified the complete standalone and distributed final-image runners on post-T42 image `a520ed460bf749e5acb26e629de5eb1add2b81290e2b7517e4295698715800e1`; both T33 drivers and all surrounding security, browser, template, restart, recovery, and checkpoint workflows passed. Current `main` at `8f3b792` is an ancestor of the implementation branch.
+* 2026-08-30: Addressed the independent CodeRabbit request changes by opening conversion sources once with no-follow descriptor semantics and validating and reading that same descriptor, and by anchoring download validation, temporary-file creation, publication, cleanup, and directory synchronization to one no-follow parent-directory descriptor. Added deterministic source-swap and parent-replacement regression tests.
+* 2026-08-30: Reverified 34 focused tests at 91% branch coverage, 126 T33/shared workflow tests, Ruff formatting and linting, `ty`, and shell syntax. The rebuilt final image `fbca168bce652aa3b5f511000238f83a0a5b71c10bab6b1d73003df6dfa2665c` passed the complete standalone and distributed runners, including security, API, conversion CLI, browser, restart, recovery, and checkpoint workflows; exact generated artifacts and image tags were removed afterward.
+* 2026-08-30: Hardened exceptional-path resource cleanup so response-close, temporary unlink, directory synchronization, and descriptor-close failures cannot prevent the owned parent-directory descriptor from being closed, while an active request or stream error remains authoritative. Added repeated `/proc/self/fd` leak detection and deterministic cleanup-failure regressions; 38 focused tests pass at 91% branch coverage and 130 T33/shared workflow tests pass with Ruff, `ty`, and shell syntax checks. The complete final-image runners were not repeated because this follow-up changes only mocked exceptional cleanup paths and leaves the already-verified happy-path bytecode and runner behavior unchanged.
+* 2026-08-30: Reconciled current `main` at `6f8ceb77950385787bd458bfad56357c17af2ccc` through a normal HTTPS-fetched merge after T45 and T52 landed. The incoming delta preserves all 12 T45 OpenAPI artifact, generator, application-schema, CI, documentation, fixture, test, and ticket paths plus the T52 ticket mirror, with no conversion-CLI implementation overlap. Ruff, `ty`, canonical OpenAPI freshness and compatibility against `origin/main`, CI policy validation, 123 focused topology/namespace/contract/T33 tests, and 255 functional HTTP/CI tests passed. The final image was not rebuilt because the merge was conflict-free and changed no T33 runtime or runner path.
+* 2026-08-30: Closed PR #130's unit branch-coverage gap with conversion/job CLI regressions for retry exhaustion, defensive source and multipart handling, HTTPS error responses, idempotency headers, and cleanup failures. The 47 focused tests pass, and the exact light-CI unit command passes 1,834 tests at 90.04% application branch coverage without changing application code or coverage thresholds.
+* 2026-08-30: Verified five additional CodeRabbit findings. Python 3.14.6 compiled both unparenthesized multi-exception handlers, confirming the two syntax reports as PEP 758 false positives. Fixed invocation-local parser request state, deterministic safe fallback errors for failed jobs without service error strings, and the integration server's loopback allocation race by passing Uvicorn its still-reserved bound socket. Ruff, `ty`, 49 focused unit/integration tests, and 1,835 unit tests passed at 90.12% application branch coverage.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
