@@ -3,15 +3,16 @@
 import logging
 from io import BytesIO
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from botocore.config import Config
 from botocore.exceptions import ClientError, EndpointConnectionError
 from pytest_mock import MockerFixture
 
 from markweave.app import ProfileReadinessProbe, build_components, build_upload_scanner
-from markweave.config import MalwareScanningMode, Settings
+from markweave.config import ConfigurationError, MalwareScanningMode, Settings
 from markweave.malware import ClamAVUploadScanner, TrustedUpstreamUploadScanner
 from markweave.persistence.migrations import (
     POSTGRES_MIGRATION_LOCK,
@@ -252,6 +253,76 @@ def _distributed_component_settings() -> Settings:
     )
 
 
+def _mock_distributed_s3(mocker: MockerFixture, *, side_effect: object = None) -> Any:
+    boto3 = mocker.Mock()
+    if side_effect is not None:
+        boto3.client.side_effect = side_effect
+    mocker.patch(
+        "markweave.app._load_distributed_dependencies",
+        return_value=(boto3, Config),
+    )
+    return boto3.client
+
+
+@pytest.mark.unit
+def test_distributed_profile_reports_missing_postgresql_extra(
+    mocker: MockerFixture,
+) -> None:
+    missing = ModuleNotFoundError("No module named 'psycopg'", name="psycopg")
+    imported = mocker.patch("markweave.app.import_module", side_effect=missing)
+    engine = mocker.patch("markweave.app.create_database_engine")
+
+    with pytest.raises(
+        ConfigurationError,
+        match=r"PostgreSQL storage requires the 'distributed' extra",
+    ):
+        build_components(_distributed_component_settings())
+
+    imported.assert_called_once_with("psycopg")
+    engine.assert_not_called()
+
+
+@pytest.mark.unit
+def test_distributed_profile_reports_missing_s3_extra(
+    mocker: MockerFixture,
+) -> None:
+    missing = ModuleNotFoundError("No module named 'boto3'", name="boto3")
+
+    def imported(name: str) -> object:
+        if name == "psycopg":
+            return mocker.Mock()
+        raise missing
+
+    import_module = mocker.patch("markweave.app.import_module", side_effect=imported)
+    engine = mocker.patch("markweave.app.create_database_engine")
+
+    with pytest.raises(
+        ConfigurationError,
+        match=r"S3 object storage requires the 'distributed' extra",
+    ):
+        build_components(_distributed_component_settings())
+
+    assert import_module.call_args_list == [
+        mocker.call("psycopg"),
+        mocker.call("boto3"),
+    ]
+    engine.assert_not_called()
+
+
+@pytest.mark.unit
+def test_s3_adapter_reports_missing_distributed_extra(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "markweave.storage.import_module",
+        side_effect=ModuleNotFoundError("No module named 'botocore'", name="botocore"),
+    )
+
+    with pytest.raises(
+        ObjectStoreError,
+        match=r"S3 object storage requires the 'distributed' extra",
+    ):
+        S3ObjectStore(mocker.Mock(), "bucket")
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("failure_stage", "created_count"),
@@ -346,8 +417,8 @@ def test_distributed_component_partial_startup_closes_created_s3_clients(
     mocker: MockerFixture,
 ) -> None:
     normal_client = mocker.Mock()
-    client = mocker.patch(
-        "markweave.app.boto3.client",
+    client = _mock_distributed_s3(
+        mocker,
         side_effect=(normal_client, RuntimeError("readiness client failed")),
     )
 
@@ -364,8 +435,8 @@ def test_distributed_component_database_failure_closes_both_s3_clients(
 ) -> None:
     normal_client = mocker.Mock()
     readiness_client = mocker.Mock()
-    mocker.patch(
-        "markweave.app.boto3.client",
+    _mock_distributed_s3(
+        mocker,
         side_effect=(normal_client, readiness_client),
     )
     mocker.patch(
@@ -412,9 +483,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     upgrade = mocker.patch("markweave.app.upgrade_database")
     normal_s3 = mocker.Mock()
     readiness_s3 = mocker.Mock()
-    s3_client = mocker.patch(
-        "markweave.app.boto3.client", side_effect=(normal_s3, readiness_s3)
-    )
+    s3_client = _mock_distributed_s3(mocker, side_effect=(normal_s3, readiness_s3))
     components = build_components(settings)
     request.addfinalizer(components.close)
     assert create_engine.call_args_list == [
@@ -483,7 +552,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     assert standalone_readiness._objects is readiness_files
     assert files.call_args_list == [mocker.call(Path("/data"))] * 2
 
-    s3_client = mocker.patch("markweave.app.boto3.client")
+    s3_client = _mock_distributed_s3(mocker)
     distributed = Settings(
         **template_settings(),
         initial_admin_username="admin",

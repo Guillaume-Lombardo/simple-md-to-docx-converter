@@ -38,12 +38,13 @@ Make the PyPI distribution a coherent supported deployment surface with clear me
 * 2026-08-29: Audit follow-up fixed the public Python surface, exact extras matrix, and exclusive distribution-file ownership.
 * 2026-08-30: Implementation started on `feat/T40-python-distribution` from `d3c7a2f`. This work owns package metadata, optional dependency groups, release-install verification, and narrowly scoped PyPI distribution documentation.
 * 2026-08-30: Implemented the public `markweave.__version__` surface, base/server/profile/all extras, PyPI metadata, clean-install verification, and final-image `all` selection. The real release-artifact test verified all five clean installation profiles. A minimal deferred-import integration remains after T44 releases `app.py`: it must load S3 dependencies only for the distributed profile so `server` stays S3-free and selected missing backends produce feature-local guidance.
+* 2026-08-30: Integrated T44 from `main` and completed the deferred backend boundary. Server and standalone imports no longer load boto3 or botocore, distributed startup loads PostgreSQL and S3 clients only after profile selection, and missing backend extras produce precise `markweave[distributed]` guidance. The clean-artifact integration test passed for all five installation profiles; 1,545 unit tests passed with 93.72% total application coverage. The canonical non-engine command additionally passed 1,757 tests but could not run 31 PostgreSQL/RustFS boundary tests because the local service environment variables were unavailable.
 
 ## Coordination
 
 * Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
-* T44 temporarily owns `app.py` and storage lifecycle changes; T40 must not edit those files until that ownership is released.
+* T44 released `app.py` and storage lifecycle ownership on `main`; T40 preserves its resource cleanup while limiting its edits to optional backend loading.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
 

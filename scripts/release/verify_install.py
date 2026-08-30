@@ -54,6 +54,8 @@ import sys
 for module in sys.argv[1:]:
     if find_spec(module) is None:
         raise SystemExit(f"missing required optional dependency: {module}")
+import markweave.app
+import markweave.storage
 """
 
 BASE_ISOLATION_CHECK = """\
