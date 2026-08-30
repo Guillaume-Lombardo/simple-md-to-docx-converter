@@ -1,4 +1,4 @@
-"""Atomic template version reservation and object publication persistence."""
+"""Pending publication lease recovery and deletion discovery."""
 
 from __future__ import annotations
 
@@ -22,8 +22,6 @@ from markweave.persistence.templates.common import (
 from markweave.templates.models import (
     TemplateVersion,
 )
-
-SYSTEM_TEMPLATE_SELECTION_ID = 1
 
 
 class _TemplatePublicationRecoveryRepository(_SqlTemplateStore):
@@ -110,8 +108,15 @@ class _TemplatePublicationRecoveryRepository(_SqlTemplateStore):
                         )
                     )
                 return tuple(
-                    _version(row)
-                    for row in database.scalars(mutation.returning(TemplateVersionRow))
+                    sorted(
+                        (
+                            _version(row)
+                            for row in database.scalars(
+                                mutation.returning(TemplateVersionRow)
+                            )
+                        ),
+                        key=lambda version: version.id,
+                    )
                 )
         except SQLAlchemyError:
             raise PersistenceError from None

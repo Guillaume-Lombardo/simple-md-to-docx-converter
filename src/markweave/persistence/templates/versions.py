@@ -1,4 +1,4 @@
-"""Atomic template version reservation and object publication persistence."""
+"""Published template-version lookup and immutable history persistence."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ from markweave.persistence.templates.common import (
 from markweave.templates.models import (
     TemplateVersion,
 )
-
-SYSTEM_TEMPLATE_SELECTION_ID = 1
 
 
 class _TemplateVersionQueryRepository(_SqlTemplateStore):

@@ -34,8 +34,6 @@ from markweave.templates.models import (
     normalize_template_text,
 )
 
-SYSTEM_TEMPLATE_SELECTION_ID = 1
-
 
 class _TemplateIdentityRepository(_SqlTemplateStore):
     """Identity creation, metadata CAS, status, and guarded deletion."""

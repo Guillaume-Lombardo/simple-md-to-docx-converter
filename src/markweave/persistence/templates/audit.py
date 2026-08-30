@@ -9,8 +9,6 @@ from markweave.templates.models import (
     TemplateAuditRecord,
 )
 
-SYSTEM_TEMPLATE_SELECTION_ID = 1
-
 
 def _audit_row(audit: TemplateAuditRecord) -> TemplateAuditRow:
     """Map a content-free domain audit record into its immutable SQL row."""

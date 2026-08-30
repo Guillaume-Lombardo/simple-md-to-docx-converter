@@ -142,6 +142,55 @@ def test_postgresql_template_contract_constraints_and_immutability() -> None:
 
 @pytest.mark.integration
 @pytest.mark.requires_postgres
+def test_postgresql_pending_publication_claims_are_deterministically_ordered() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    clear_template_test_data(engine)
+    owner = User(uuid4(), "Owner", f"claim-owner-{uuid4()}", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    now = datetime.now(UTC)
+    version_ids = (UUID(int=2), UUID(int=1))
+    try:
+        for index, version_id in enumerate(version_ids, start=1):
+            template = TemplateIdentity(
+                uuid4(),
+                owner.id,
+                f"Pending {index}",
+                "Deterministic PostgreSQL claim",
+                TemplateStatus.ACTIVE,
+            )
+            catalog.reserve_create(
+                template,
+                TemplateVersion(
+                    version_id,
+                    template.id,
+                    1,
+                    owner.id,
+                    "a" * 64,
+                    1,
+                    now,
+                    owner.id,
+                    publication_state=TemplatePublicationState.PENDING,
+                    publication_token=uuid4(),
+                    publication_lease_expires_at=now - timedelta(seconds=1),
+                ),
+            )
+
+        claimed = catalog.claim_stale_pending(
+            stale_before=now,
+            lease_expires_at=now + timedelta(minutes=1),
+            publication_token=uuid4(),
+        )
+
+        assert tuple(version.id for version in claimed) == tuple(sorted(version_ids))
+    finally:
+        clear_template_test_data(engine)
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_distributed_template_versions_and_concurrent_replacement(  # noqa: PLR0915
     request: pytest.FixtureRequest,

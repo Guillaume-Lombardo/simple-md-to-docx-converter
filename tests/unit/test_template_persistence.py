@@ -7,11 +7,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from markweave.auth.models import Role, User
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import TemplateAuditRow
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.persistence.templates import (
     SqlTemplateCatalogRepository,
@@ -110,18 +113,21 @@ def test_inprocess_template_repository_control_flow() -> None:
         datetime.now(UTC),
     )
     selections.set_preferred_audited(owner.id, active.id, preferred_audit)
+    assert selections.preferred_id(owner.id) == active.id
     clear_audit = TemplateAuditRecord(
         uuid4(),
         owner.id,
-        owner.id,
-        active.id,
+        viewer.id,
+        other.id,
         "clear_preferred",
         None,
         False,
         datetime.now(UTC),
     )
     selections.clear_preferred_audited(owner.id, clear_audit)
+    assert selections.preferred_id(owner.id) is None
     selections.clear_preferred_audited(owner.id, clear_audit)
+    assert selections.preferred_id(owner.id) is None
     fallback_audit = TemplateAuditRecord(
         uuid4(),
         owner.id,
@@ -133,6 +139,31 @@ def test_inprocess_template_repository_control_flow() -> None:
         datetime.now(UTC),
     )
     selections.set_system_fallback_audited(other.id, fallback_audit)
+    with Session(engine) as database:
+        audited = tuple(
+            database.scalars(
+                select(TemplateAuditRow)
+                .where(
+                    TemplateAuditRow.id.in_(
+                        (
+                            str(preferred_audit.id),
+                            str(clear_audit.id),
+                            str(fallback_audit.id),
+                        )
+                    )
+                )
+                .order_by(TemplateAuditRow.operation)
+            )
+        )
+    assert tuple(record.operation for record in audited) == (
+        "clear_preferred",
+        "set_preferred",
+        "set_system_fallback",
+    )
+    cleared = audited[0]
+    assert cleared.owner_id == str(owner.id)
+    assert cleared.template_id == str(active.id)
+    assert sum(record.id == str(clear_audit.id) for record in audited) == 1
     selections.clear_preferred(owner.id)
     assert selections.preferred_id(owner.id) is None
     with pytest.raises(TemplateUnavailableError):
@@ -246,6 +277,49 @@ def test_inprocess_versioned_template_compare_and_swap_and_guards() -> None:
     assert catalog.get(template_id) is None
     with pytest.raises(TemplateConflictError):
         catalog.delete_guarded(template_id, expected_revision=4, audit=audit("delete"))
+    engine.dispose()
+
+
+@pytest.mark.unit
+def test_initial_publication_preserves_caller_revision() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "owner-initial-revision", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    template_id = uuid4()
+    version_id = uuid4()
+    template = TemplateIdentity(
+        template_id,
+        owner.id,
+        "Imported",
+        "Preserved revision",
+        TemplateStatus.ACTIVE,
+        7,
+        version_id,
+    )
+    version = TemplateVersion(
+        version_id,
+        template_id,
+        1,
+        owner.id,
+        "a" * 64,
+        10,
+        datetime.now(UTC),
+        owner.id,
+    )
+    audit = TemplateAuditRecord(
+        uuid4(),
+        owner.id,
+        owner.id,
+        template_id,
+        "create",
+        version_id,
+        False,
+        datetime.now(UTC),
+    )
+
+    assert catalog.create_versioned(template, version, audit) == template
     engine.dispose()
 
 

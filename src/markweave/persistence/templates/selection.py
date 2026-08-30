@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import UUID
 
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,8 +18,13 @@ from markweave.persistence.schema import (
     TemplatePreferenceRow,
     TemplateRow,
 )
+from markweave.persistence.sql import serialize_sqlite_write
 from markweave.persistence.templates.audit import _audit_row
-from markweave.persistence.templates.common import _template
+from markweave.persistence.templates.common import (
+    SYSTEM_TEMPLATE_SELECTION_ID,
+    _SqlTemplateStore,
+    _template,
+)
 from markweave.templates.errors import (
     TemplateUnavailableError,
 )
@@ -29,18 +34,14 @@ from markweave.templates.models import (
     TemplateStatus,
 )
 
-SYSTEM_TEMPLATE_SELECTION_ID = 1
 
-
-class SqlTemplateSelectionRepository:
+class SqlTemplateSelectionRepository(_SqlTemplateStore):
     """Preference and singleton fallback operations with active checks."""
-
-    def __init__(self, engine: Engine) -> None:
-        self._engine = engine
 
     def set_preferred(self, user_id: UUID, template_id: UUID) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 self._require_active(database, template_id)
                 statement = self._preference_upsert(user_id, template_id)
                 database.execute(statement)
@@ -52,6 +53,7 @@ class SqlTemplateSelectionRepository:
     ) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 self._require_active(database, template_id)
                 database.execute(self._preference_upsert(user_id, template_id))
                 database.add(_audit_row(audit))
@@ -61,6 +63,7 @@ class SqlTemplateSelectionRepository:
     def clear_preferred(self, user_id: UUID) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 database.execute(
                     delete(TemplatePreferenceRow).where(
                         TemplatePreferenceRow.user_id == str(user_id)
@@ -74,6 +77,7 @@ class SqlTemplateSelectionRepository:
     ) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 selected = database.scalar(
                     select(TemplateRow)
                     .join(
@@ -117,6 +121,7 @@ class SqlTemplateSelectionRepository:
     def set_system_fallback(self, template_id: UUID) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 self._require_active(database, template_id)
                 database.execute(self._fallback_upsert(template_id))
         except SQLAlchemyError:
@@ -127,6 +132,7 @@ class SqlTemplateSelectionRepository:
     ) -> None:
         try:
             with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
                 self._require_active(database, template_id)
                 database.execute(self._fallback_upsert(template_id))
                 database.add(_audit_row(audit))

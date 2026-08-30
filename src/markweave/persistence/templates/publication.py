@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -32,8 +32,6 @@ from markweave.templates.models import (
     TemplateVersion,
 )
 
-SYSTEM_TEMPLATE_SELECTION_ID = 1
-
 
 class _TemplatePublicationRepository(_SqlTemplateStore):
     """Version numbering, byte publication finalization, and audit coupling."""
@@ -55,7 +53,7 @@ class _TemplatePublicationRepository(_SqlTemplateStore):
         self.reserve_create(template, pending)
         return self.finalize_version(
             template.id,
-            expected_revision=1,
+            expected_revision=template.revision,
             version_id=version.id,
             publication_token=self._publication_token(pending),
             audit=audit,
@@ -184,10 +182,9 @@ class _TemplatePublicationRepository(_SqlTemplateStore):
                         current_version_id=str(version_id),
                         publication_state="published",
                         revision=TemplateRow.revision
-                        + (
-                            0
-                            if expected_revision == 1 and version.version_number == 1
-                            else 1
+                        + case(
+                            (TemplateRow.publication_state == "pending", 0),
+                            else_=1,
                         ),
                     )
                 )
