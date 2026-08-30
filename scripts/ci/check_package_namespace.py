@@ -10,6 +10,7 @@ legacy source tree that contains files other than bytecode caches.
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import tomllib
@@ -19,8 +20,13 @@ from scripts.release.artifacts import ArtifactError, verify_release
 
 PUBLIC_NAMESPACE = "markweave"
 RETIRED_NAMESPACE = "md_converter"
-LEGACY_DIST_PREFIXES = ("md_converter-", "md-converter-")
 BUILD_OUTPUT_DIRECTORIES = frozenset({"artifacts", "build", "dist"})
+VERSION = r"[0-9][A-Za-z0-9.!+_-]*"
+WHEEL = re.compile(
+    rf"md_converter-{VERSION}-(?:[0-9][A-Za-z0-9_.]*-)?"
+    r"[A-Za-z0-9_.]+-[A-Za-z0-9_.]+-[A-Za-z0-9_.]+\.whl\Z"
+)
+SDIST = re.compile(rf"(?:md_converter|md-converter)-{VERSION}\.tar\.gz\Z")
 
 
 class NamespaceError(ValueError):
@@ -36,6 +42,8 @@ def _project_identity(root: Path) -> tuple[str, str]:
         raise NamespaceError(f"cannot read project identity: {error}") from error
     if not isinstance(name, str) or not isinstance(version, str):
         raise NamespaceError("project identity must contain string name and version")
+    if name != PUBLIC_NAMESPACE:
+        raise NamespaceError(f"project name must be {PUBLIC_NAMESPACE!r}, not {name!r}")
     return name, version
 
 
@@ -109,7 +117,7 @@ def _check_artifact_directory(
     stale = sorted(
         path.name
         for path in directory.iterdir()
-        if path.is_file() and path.name.startswith(LEGACY_DIST_PREFIXES)
+        if path.is_file() and _is_legacy_distribution_artifact(path)
     )
     if stale:
         raise NamespaceError("stale legacy package artifacts: " + ", ".join(stale))
@@ -119,6 +127,11 @@ def _check_artifact_directory(
         )
     except ArtifactError as error:
         raise NamespaceError(f"invalid package artifacts: {error}") from error
+
+
+def _is_legacy_distribution_artifact(path: Path) -> bool:
+    """Return whether a basename is a syntactically valid retired artifact."""
+    return bool(WHEEL.fullmatch(path.name) or SDIST.fullmatch(path.name))
 
 
 def check_namespace(root: Path, artifact_directories: tuple[Path, ...] = ()) -> None:
@@ -161,9 +174,7 @@ def legacy_cleanup_paths(root: Path) -> tuple[Path, ...]:
             sorted(
                 path
                 for path in dist.iterdir()
-                if path.is_file()
-                and path.name.startswith(LEGACY_DIST_PREFIXES)
-                and path.suffix in {".whl", ".gz"}
+                if path.is_file() and _is_legacy_distribution_artifact(path)
             )
         )
     return tuple(paths)

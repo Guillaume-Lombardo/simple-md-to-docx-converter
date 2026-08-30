@@ -16,10 +16,10 @@ from scripts.ci.check_package_namespace import (
 pytestmark = pytest.mark.unit
 
 
-def _project(root: Path, *, version: str = "0.4.0") -> None:
+def _project(root: Path, *, name: str = "markweave", version: str = "0.4.0") -> None:
     (root / "src" / "markweave").mkdir(parents=True)
     (root / "pyproject.toml").write_text(
-        f'[project]\nname = "markweave"\nversion = "{version}"\n', encoding="utf-8"
+        f'[project]\nname = "{name}"\nversion = "{version}"\n', encoding="utf-8"
     )
     (root / "src" / "markweave" / "version.py").write_text(
         f'VERSION = "{version}"\n', encoding="utf-8"
@@ -37,6 +37,14 @@ def test_namespace_check_rejects_retired_source_namespace(tmp_path: Path) -> Non
     (tmp_path / "src" / "md_converter").mkdir()
 
     with pytest.raises(NamespaceError, match="unexpected source namespaces"):
+        check_namespace(tmp_path)
+
+
+def test_namespace_check_rejects_an_unexpected_project_name(tmp_path: Path) -> None:
+    """The public import and distribution identities cannot diverge."""
+    _project(tmp_path, name="another-project")
+
+    with pytest.raises(NamespaceError, match="project name must be"):
         check_namespace(tmp_path)
 
 
@@ -67,6 +75,8 @@ def test_legacy_cleanup_removes_only_bytecode_and_obsolete_distributions(
     retired_sdist.write_bytes(b"sdist")
     preserved = dist / "markweave-0.4.0-py3-none-any.whl"
     preserved.write_bytes(b"current")
+    customer_backup = dist / "md_converter-customer-backup.gz"
+    customer_backup.write_bytes(b"customer data")
 
     planned = legacy_cleanup_paths(tmp_path)
     assert planned == (tmp_path / "src" / "md_converter", retired_wheel, retired_sdist)
@@ -78,6 +88,30 @@ def test_legacy_cleanup_removes_only_bytecode_and_obsolete_distributions(
     assert not retired_wheel.exists()
     assert not retired_sdist.exists()
     assert preserved.exists()
+    assert customer_backup.exists()
+
+
+def test_legacy_cleanup_recognizes_only_valid_legacy_distribution_names(
+    tmp_path: Path,
+) -> None:
+    """Unrelated files with a retired-looking prefix are never cleanup targets."""
+    _project(tmp_path)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    valid_wheel = dist / "md_converter-1.2.3-py3-none-any.whl"
+    valid_sdist = dist / "md-converter-1.2.3.tar.gz"
+    invalid_wheel = dist / "md_converter-backup-py3-none-any.whl"
+    backup = dist / "md_converter-customer-backup.gz"
+    for path in (valid_wheel, valid_sdist, invalid_wheel, backup):
+        path.write_bytes(b"artifact")
+
+    assert legacy_cleanup_paths(tmp_path) == (valid_sdist, valid_wheel)
+
+    cleanup_legacy_artifacts(tmp_path, dry_run=False)
+    assert not valid_wheel.exists()
+    assert not valid_sdist.exists()
+    assert invalid_wheel.exists()
+    assert backup.exists()
 
 
 def test_legacy_cleanup_refuses_untracked_source_code(tmp_path: Path) -> None:
