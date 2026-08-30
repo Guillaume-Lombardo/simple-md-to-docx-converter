@@ -352,6 +352,9 @@ uv run python -m tests.e2e.cli_workflow --container "$application_name" --profil
 uv run python -m tests.e2e.conversion_cli_workflow \
   --container "$application_name" --profile "$profile"
 
+uv run python -m tests.e2e.administration_cli_workflow \
+  --container "$application_name"
+
 podman exec \
   --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
@@ -424,13 +427,16 @@ podman exec \
 require_http_status "$base_url/health/live" 200
 if [[ "$profile" == standalone ]]; then
   chmod 000 "$data_directory"
-  require_http_status "$base_url/health/ready" 503
-  require_http_status "$base_url/health/live" 200
-  chmod 0770 "$data_directory"
 else
   podman stop --time 10 "$rustfs_name" >/dev/null
-  require_http_status "$base_url/health/ready" 503
-  require_http_status "$base_url/health/live" 200
+fi
+require_http_status "$base_url/health/ready" 503
+require_http_status "$base_url/health/live" 200
+uv run python -m tests.e2e.administration_cli_workflow \
+  --container "$application_name" expect-readiness-failure
+if [[ "$profile" == standalone ]]; then
+  chmod 0770 "$data_directory"
+else
   podman start "$rustfs_name" >/dev/null
   wait_for_url "http://127.0.0.1:$rustfs_port/health" "$rustfs_name" ""
   wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'

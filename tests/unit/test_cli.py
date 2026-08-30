@@ -69,26 +69,16 @@ def test_version_and_missing_command_use_the_documented_streams(
     assert captured.err.startswith("usage: markweave")
 
 
-@pytest.mark.parametrize(
-    ("arguments", "expected_command"),
-    (
-        (("users", "deactivate"), "users deactivate"),
-        (("health", "metrics"), "health metrics"),
-        (("backup",), "backup"),
-    ),
-)
-def test_pre_registered_commands_fail_stably(
-    arguments: tuple[str, ...],
-    expected_command: str,
+def test_remaining_recovery_placeholder_fails_stably(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Family placeholders never accidentally execute a backend."""
-    assert main(arguments) is ExitCode.UNAVAILABLE
+    """The remaining family placeholder never accidentally executes a backend."""
+    assert main(("backup",)) is ExitCode.UNAVAILABLE
     captured = capsys.readouterr()
     assert captured.out == ""
     assert (
         captured.err
-        == f"error: The '{expected_command}' command is not available in this release.\n"
+        == "error: The 'backup' command is not available in this release.\n"
     )
 
 
