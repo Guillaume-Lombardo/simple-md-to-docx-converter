@@ -119,12 +119,15 @@ def test_readiness_failure_is_cheap_and_stable(tmp_path: Path) -> None:
         object_store=built.object_store,
         jobs=built.jobs,
     )
-    with TestClient(
-        create_app(settings, components=components), base_url="https://testserver"
-    ) as client:
-        response = client.get("/health/ready")
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "NOT_READY"
+    try:
+        with TestClient(
+            create_app(settings, components=components), base_url="https://testserver"
+        ) as client:
+            response = client.get("/health/ready")
+            assert response.status_code == 503
+            assert response.json()["error"]["code"] == "NOT_READY"
+    finally:
+        built.close()
 
 
 @pytest.mark.functional

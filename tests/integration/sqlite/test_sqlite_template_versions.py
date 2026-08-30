@@ -169,10 +169,11 @@ def test_version_lifecycle_is_immutable_atomic_audited_and_guarded(
         )
         assert len(audits) == 6
         assert sum(record.administrator_intervention for record in audits) == 2
+    engine.dispose()
 
 
 def test_delete_is_guarded_by_preference_and_archive_state(tmp_path: Path) -> None:
-    service, _engine, owner, _other, _admin = _service(tmp_path)
+    service, engine, owner, _other, _admin = _service(tmp_path)
     template, _version = service.create_versioned(
         owner,
         TemplateCreate(uuid4(), "Guarded", "Selected"),
@@ -185,12 +186,13 @@ def test_delete_is_guarded_by_preference_and_archive_state(tmp_path: Path) -> No
     service.archive(owner, template.id, expected_revision=1)
     with pytest.raises(TemplateConflictError):
         service.delete(owner, template.id, expected_revision=2)
+    engine.dispose()
 
 
 def test_template_reads_detect_tampering_before_download_restore_or_processing(
     tmp_path: Path,
 ) -> None:
-    service, _engine, owner, _other, _admin = _service(tmp_path)
+    service, engine, owner, _other, _admin = _service(tmp_path)
     template, version = service.create_versioned(
         owner,
         TemplateCreate(uuid4(), "Integrity", "Verified"),
@@ -207,6 +209,7 @@ def test_template_reads_detect_tampering_before_download_restore_or_processing(
         service.restore(owner, template.id, version.id, expected_revision=1)
     with pytest.raises(TemplateIntegrityError):
         service.resolve_frozen_version(template.id, version.id)
+    engine.dispose()
 
 
 def test_database_rejects_owner_restore_and_current_template_corruption(
@@ -269,6 +272,7 @@ def test_database_rejects_owner_restore_and_current_template_corruption(
             .where(TemplateRow.id == str(first.id))
             .values(publication_state="pending")
         )
+    engine.dispose()
 
 
 def test_preference_set_and_clear_are_audited_with_prior_target(tmp_path: Path) -> None:
@@ -298,12 +302,13 @@ def test_preference_set_and_clear_are_audited_with_prior_target(tmp_path: Path) 
     }
     assert all(record.template_id == str(template.id) for record in records)
     assert all(record.owner_id == str(owner.id) for record in records)
+    engine.dispose()
 
 
 def test_concurrent_filesystem_replacement_has_one_winner_and_no_loser_object(
     tmp_path: Path,
 ) -> None:
-    service, _engine, owner, _other, _admin = _service(tmp_path)
+    service, engine, owner, _other, _admin = _service(tmp_path)
     template, _version = service.create_versioned(
         owner,
         TemplateCreate(uuid4(), "Concurrent", "CAS"),
@@ -331,6 +336,7 @@ def test_concurrent_filesystem_replacement_has_one_winner_and_no_loser_object(
     assert service.reclaim_pending() == 0
     object_files = tuple((tmp_path / "objects" / "template-versions").rglob("*"))
     assert sum(path.is_file() for path in object_files) == 2
+    engine.dispose()
 
 
 def test_submission_races_template_mutations_without_dangling_pairs(
