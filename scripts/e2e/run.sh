@@ -203,9 +203,9 @@ podman run --detach --name "$clamav_name" --network "$network_name" \
 e2e_runtime_settings
 if [[ "$profile" == standalone ]]; then
   E2E_SETTINGS+=(
-    --env MD_CONVERTER_STORAGE_PROFILE=standalone
-    --env MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
-    --env MD_CONVERTER_PUBLIC_ORIGIN=http://127.0.0.1:8080
+    --env MARKWEAVE_STORAGE_PROFILE=standalone
+    --env MARKWEAVE_STANDALONE_DATA_DIRECTORY=/data
+    --env MARKWEAVE_PUBLIC_ORIGIN=http://127.0.0.1:8080
   )
 else
   created=("$postgres_name" "${created[@]}")
@@ -228,20 +228,20 @@ else
   done
   rustfs_port="$(podman port "$rustfs_name" 9000/tcp | sed 's/.*://')"
   wait_for_url "http://127.0.0.1:$rustfs_port/health" "$rustfs_name" ""
-  MD_CONVERTER_TEST_S3_ACCESS_KEY_ID=e2eaccess \
-  MD_CONVERTER_TEST_S3_BUCKET=md-converter-t21 \
-  MD_CONVERTER_TEST_S3_ENDPOINT_URL="http://127.0.0.1:$rustfs_port" \
-  MD_CONVERTER_TEST_S3_REGION=us-east-1 \
-  MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY=e2esecret \
+  MARKWEAVE_TEST_S3_ACCESS_KEY_ID=e2eaccess \
+  MARKWEAVE_TEST_S3_BUCKET=md-converter-t21 \
+  MARKWEAVE_TEST_S3_ENDPOINT_URL="http://127.0.0.1:$rustfs_port" \
+  MARKWEAVE_TEST_S3_REGION=us-east-1 \
+  MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY=e2esecret \
     uv run python -m scripts.ci.prepare_s3_test_bucket
   E2E_SETTINGS+=(
-    --env MD_CONVERTER_STORAGE_PROFILE=distributed
-    --env MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://postgres:e2e-postgres-password@postgres:5432/md_converter_e2e
-    --env MD_CONVERTER_S3_BUCKET=md-converter-t21
-    --env MD_CONVERTER_S3_ENDPOINT_URL=http://rustfs:9000
-    --env MD_CONVERTER_S3_REGION=us-east-1
-    --env MD_CONVERTER_S3_ACCESS_KEY_ID=e2eaccess
-    --env MD_CONVERTER_S3_SECRET_ACCESS_KEY=e2esecret
+    --env MARKWEAVE_STORAGE_PROFILE=distributed
+    --env MARKWEAVE_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://postgres:e2e-postgres-password@postgres:5432/md_converter_e2e
+    --env MARKWEAVE_S3_BUCKET=md-converter-t21
+    --env MARKWEAVE_S3_ENDPOINT_URL=http://rustfs:9000
+    --env MARKWEAVE_S3_REGION=us-east-1
+    --env MARKWEAVE_S3_ACCESS_KEY_ID=e2eaccess
+    --env MARKWEAVE_S3_SECRET_ACCESS_KEY=e2esecret
   )
 fi
 
@@ -263,7 +263,7 @@ if [[ "$profile" == standalone ]]; then
 fi
 application_settings=(
   "${E2E_SETTINGS[@]}"
-  --env MD_CONVERTER_USER_PROVISIONING_FILE=/run/secrets/users.csv
+  --env MARKWEAVE_USER_PROVISIONING_FILE=/run/secrets/users.csv
 )
 created=("$application_name" "${created[@]}")
 podman run --detach --name "$application_name" --network "$network_name" \
@@ -350,16 +350,16 @@ uv run python -m tests.e2e.service_workflow exercise \
 uv run python -m tests.e2e.cli_workflow --container "$application_name"
 
 podman exec \
-  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MD_CONVERTER_E2E_PROFILE="$profile" \
-  --env MD_CONVERTER_E2E_TEMPLATE_FIXTURE=/evidence/browser-template.docx \
-  --env MD_CONVERTER_E2E_SOURCE_FIXTURE=/evidence/source.md \
-  --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MD_CONVERTER_E2E_ADMIN_USERNAME=e2e-admin \
-  --env MD_CONVERTER_E2E_ADMIN_PASSWORD=e2e-admin-password \
-  --env MD_CONVERTER_E2E_PROVISIONED_USERNAME="$provisioned_username" \
-  --env MD_CONVERTER_E2E_PROVISIONED_PASSWORD="$provisioned_initial_password" \
-  --env MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD="$provisioned_renewed_password" \
+  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_TEMPLATE_FIXTURE=/evidence/browser-template.docx \
+  --env MARKWEAVE_E2E_SOURCE_FIXTURE=/evidence/source.md \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
+  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
+  --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
+  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_initial_password" \
+  --env MARKWEAVE_E2E_PROVISIONED_RENEWED_PASSWORD="$provisioned_renewed_password" \
   "$application_name" node --test /e2e/browser-final-image.test.mjs
 
 chmod 0644 "$provisioning_file"
@@ -370,11 +370,11 @@ chmod 0444 "$provisioning_file"
 podman restart --time 15 "$application_name" >/dev/null
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 podman exec \
-  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MD_CONVERTER_E2E_PROFILE="$profile" \
-  --env MD_CONVERTER_E2E_PROVISIONED_USERNAME="$provisioned_username" \
-  --env MD_CONVERTER_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
-  --env MD_CONVERTER_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
+  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
+  --env MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
+  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
   "$application_name" node --test /e2e/browser-provisioning-restart.test.mjs
 
 uv run python -m tests.e2e.service_workflow submit-recovery \
@@ -383,12 +383,12 @@ uv run python -m tests.e2e.service_workflow submit-recovery \
   --state-file "$recovery_state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 podman exec \
-  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MD_CONVERTER_E2E_PROFILE="$profile" \
-  --env MD_CONVERTER_E2E_RECOVERY_STATE=/browser-session/admin.json \
-  --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MD_CONVERTER_E2E_ADMIN_USERNAME=e2e-admin \
-  --env MD_CONVERTER_E2E_ADMIN_PASSWORD=e2e-admin-password \
+  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
+  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
   "$application_name" node --test /e2e/browser-recovery-checkpoint.test.mjs
 if [[ "$profile" == standalone ]]; then
   podman kill --signal KILL "$application_name" >/dev/null
@@ -409,10 +409,10 @@ uv run python -m tests.e2e.service_workflow verify-recovery \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
 podman exec \
-  --env MD_CONVERTER_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MD_CONVERTER_E2E_PROFILE="$profile" \
-  --env MD_CONVERTER_E2E_RECOVERY_STATE=/browser-session/admin.json \
-  --env MD_CONVERTER_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   "$application_name" node --test /e2e/browser-recovery.test.mjs
 
 require_http_status "$base_url/health/live" 200
@@ -498,7 +498,7 @@ podman rm --force "$application_name" "$clamav_name" >/dev/null
 created=("$insecure_application_name" "${created[@]}")
 podman run --detach --name "$insecure_application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
-  --env MD_CONVERTER_INSECURE_EVALUATION_MODE=true \
+  --env MARKWEAVE_INSECURE_EVALUATION_MODE=true \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null
 insecure_application_port="$(podman port "$insecure_application_name" 8080/tcp | sed 's/.*://')"

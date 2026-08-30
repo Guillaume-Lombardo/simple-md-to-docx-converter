@@ -43,8 +43,8 @@ on each worker node before applying a manifest. OpenShift validation remains def
 manifests do not claim OpenShift compatibility.
 
 Local ClamAV is the default upload-scanning boundary. Its external `clamd` service is selected
-through `MD_CONVERTER_CLAMAV_HOST`, port, and timeout, and its unavailability remains fail-closed.
-Set `MD_CONVERTER_MALWARE_SCANNING_MODE=trusted-upstream` only when an upstream proxy scans every
+through `MARKWEAVE_CLAMAV_HOST`, port, and timeout, and its unavailability remains fail-closed.
+Set `MARKWEAVE_MALWARE_SCANNING_MODE=trusted-upstream` only when an upstream proxy scans every
 conversion and template upload before forwarding and default-deny network policy makes direct or
 alternate application access impossible. This mode makes no ClamAV connection and logs a startup
 warning; it is not a general-purpose antivirus-disable switch.
@@ -71,7 +71,7 @@ The complete environment inventory and cross-field constraints are in
 
 Terminate TLS before authenticated browser traffic reaches the application. The runtime starts
 Uvicorn with proxy-header trust disabled, so `Forwarded` and `X-Forwarded-*` headers do not define
-the security origin. For an HTTPS-terminating proxy, set `MD_CONVERTER_PUBLIC_ORIGIN` to the exact
+the security origin. For an HTTPS-terminating proxy, set `MARKWEAVE_PUBLIC_ORIGIN` to the exact
 browser-visible origin, for example `https://converter.example.invalid`; an explicit non-default
 port is permitted, but paths, queries, fragments, and user information are rejected. Origin checks
 then compare against that configured value. When the setting is absent, they use the direct ASGI

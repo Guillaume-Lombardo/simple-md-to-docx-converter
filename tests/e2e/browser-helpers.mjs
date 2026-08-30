@@ -3,37 +3,37 @@ import { access, chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const REQUIRED_ENVIRONMENT = [
-  "MD_CONVERTER_E2E_BASE_URL",
-  "MD_CONVERTER_E2E_PROFILE",
-  "MD_CONVERTER_E2E_ARTIFACT_DIR",
-  "MD_CONVERTER_E2E_SOURCE_FIXTURE",
-  "MD_CONVERTER_E2E_TEMPLATE_FIXTURE",
-  "MD_CONVERTER_E2E_ADMIN_USERNAME",
-  "MD_CONVERTER_E2E_ADMIN_PASSWORD",
-  "MD_CONVERTER_E2E_PROVISIONED_USERNAME",
-  "MD_CONVERTER_E2E_PROVISIONED_PASSWORD",
-  "MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD",
+  "MARKWEAVE_E2E_BASE_URL",
+  "MARKWEAVE_E2E_PROFILE",
+  "MARKWEAVE_E2E_ARTIFACT_DIR",
+  "MARKWEAVE_E2E_SOURCE_FIXTURE",
+  "MARKWEAVE_E2E_TEMPLATE_FIXTURE",
+  "MARKWEAVE_E2E_ADMIN_USERNAME",
+  "MARKWEAVE_E2E_ADMIN_PASSWORD",
+  "MARKWEAVE_E2E_PROVISIONED_USERNAME",
+  "MARKWEAVE_E2E_PROVISIONED_PASSWORD",
+  "MARKWEAVE_E2E_PROVISIONED_RENEWED_PASSWORD",
 ];
 
 export async function configuration(environment = process.env) {
   for (const name of REQUIRED_ENVIRONMENT) assert.ok(environment[name], `${name} is required`);
-  const parsed = new URL(environment.MD_CONVERTER_E2E_BASE_URL);
+  const parsed = new URL(environment.MARKWEAVE_E2E_BASE_URL);
   assert.ok(["http:", "https:"].includes(parsed.protocol), "base URL must use HTTP(S)");
   assert.equal(parsed.username, "", "base URL must not contain credentials");
   assert.equal(parsed.password, "", "base URL must not contain credentials");
   assert.equal(parsed.pathname, "/", "base URL must not contain a path");
   assert.equal(parsed.search, "", "base URL must not contain a query");
   assert.equal(parsed.hash, "", "base URL must not contain a fragment");
-  const profile = environment.MD_CONVERTER_E2E_PROFILE;
+  const profile = environment.MARKWEAVE_E2E_PROFILE;
   assert.ok(["standalone", "distributed"].includes(profile), "profile is invalid");
-  const timeoutSeconds = Number(environment.MD_CONVERTER_E2E_TIMEOUT_SECONDS || "360");
+  const timeoutSeconds = Number(environment.MARKWEAVE_E2E_TIMEOUT_SECONDS || "360");
   assert.ok(Number.isFinite(timeoutSeconds) && timeoutSeconds > 0, "timeout is invalid");
-  const sourceFixture = path.resolve(environment.MD_CONVERTER_E2E_SOURCE_FIXTURE);
-  const templateFixture = path.resolve(environment.MD_CONVERTER_E2E_TEMPLATE_FIXTURE);
+  const sourceFixture = path.resolve(environment.MARKWEAVE_E2E_SOURCE_FIXTURE);
+  const templateFixture = path.resolve(environment.MARKWEAVE_E2E_TEMPLATE_FIXTURE);
   assert.match(sourceFixture, /\.(md|zip)$/i, "source fixture must be Markdown or ZIP");
   assert.match(templateFixture, /\.docx$/i, "template fixture must be DOCX");
   await Promise.all([access(sourceFixture), access(templateFixture)]);
-  const artifactRoot = path.resolve(environment.MD_CONVERTER_E2E_ARTIFACT_DIR);
+  const artifactRoot = path.resolve(environment.MARKWEAVE_E2E_ARTIFACT_DIR);
   assert.notEqual(artifactRoot, path.parse(artifactRoot).root, "artifact directory is too broad");
   return {
     baseUrl: parsed.href.replace(/\/$/, ""),
@@ -41,13 +41,13 @@ export async function configuration(environment = process.env) {
     artifactRoot,
     sourceFixture,
     templateFixture,
-    adminUsername: environment.MD_CONVERTER_E2E_ADMIN_USERNAME,
-    adminPassword: environment.MD_CONVERTER_E2E_ADMIN_PASSWORD,
-    provisionedUsername: environment.MD_CONVERTER_E2E_PROVISIONED_USERNAME,
-    provisionedPassword: environment.MD_CONVERTER_E2E_PROVISIONED_PASSWORD,
+    adminUsername: environment.MARKWEAVE_E2E_ADMIN_USERNAME,
+    adminPassword: environment.MARKWEAVE_E2E_ADMIN_PASSWORD,
+    provisionedUsername: environment.MARKWEAVE_E2E_PROVISIONED_USERNAME,
+    provisionedPassword: environment.MARKWEAVE_E2E_PROVISIONED_PASSWORD,
     provisionedRenewedPassword:
-      environment.MD_CONVERTER_E2E_PROVISIONED_RENEWED_PASSWORD,
-    chromiumExecutable: environment.MD_CONVERTER_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
+      environment.MARKWEAVE_E2E_PROVISIONED_RENEWED_PASSWORD,
+    chromiumExecutable: environment.MARKWEAVE_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
     timeoutMilliseconds: timeoutSeconds * 1_000,
   };
 }

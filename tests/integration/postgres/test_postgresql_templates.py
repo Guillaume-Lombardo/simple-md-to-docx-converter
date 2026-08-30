@@ -63,7 +63,7 @@ def clear_template_test_data(engine: Engine) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_template_contract_constraints_and_immutability() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     clear_template_test_data(engine)
     users = SqlUserRepository(engine)
@@ -144,7 +144,7 @@ def test_postgresql_template_contract_constraints_and_immutability() -> None:
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 def test_distributed_template_versions_and_concurrent_replacement() -> None:  # noqa: PLR0915
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     clear_template_test_data(engine)
     owner = User(uuid4(), "Owner", f"owner-{uuid4()}", "hash", Role.USER)
@@ -152,12 +152,12 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:  # 
     objects = S3ObjectStore(
         boto3.client(
             "s3",
-            endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-            region_name=os.environ.get("MD_CONVERTER_TEST_S3_REGION", "us-east-1"),
-            aws_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-            aws_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+            endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+            region_name=os.environ.get("MARKWEAVE_TEST_S3_REGION", "us-east-1"),
+            aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
         ),
-        os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
+        os.environ["MARKWEAVE_TEST_S3_BUCKET"],
     )
     service = TemplateService(
         catalog=SqlTemplateCatalogRepository(engine),
@@ -222,7 +222,7 @@ def test_distributed_template_versions_and_concurrent_replacement() -> None:  # 
         )
         assert current in {b"second-a", b"second-b"}
         listed = objects._client.list_objects_v2(
-            Bucket=os.environ["MD_CONVERTER_TEST_S3_BUCKET"],
+            Bucket=os.environ["MARKWEAVE_TEST_S3_BUCKET"],
             Prefix=f"template-versions/{owner.id}/",
         )
         assert listed.get("KeyCount") == 2

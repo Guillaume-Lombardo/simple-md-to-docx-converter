@@ -46,7 +46,7 @@ from tests.template_records import publish_template_pair
 def test_postgresql_queue_observation_matches_standalone_contract(
     tmp_path: Path,
 ) -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     try:
         upgrade_database(engine)
         now = datetime(2026, 8, 24, 20, tzinfo=UTC)
@@ -117,7 +117,7 @@ def test_postgresql_queue_observation_matches_standalone_contract(
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_queue_observation_statement_timeout_is_bounded() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     try:
         upgrade_database(engine)
         with engine.connect() as blocker:
@@ -138,7 +138,7 @@ def test_postgresql_queue_observation_statement_timeout_is_bounded() -> None:
 @pytest.mark.requires_postgres
 def test_postgresql_observation_engine_preserves_isolated_search_path() -> None:
     engine = create_database_engine(
-        os.environ["MD_CONVERTER_TEST_POSTGRES_URL"], timeout_seconds=0.5
+        os.environ["MARKWEAVE_TEST_POSTGRES_URL"], timeout_seconds=0.5
     )
     try:
         upgrade_database(engine)
@@ -172,12 +172,12 @@ def test_missing_bucket_then_healthy_distributed_contract_is_isolated() -> None:
             argon2_memory_cost=8,
             argon2_time_cost=1,
             storage_profile="distributed",
-            distributed_database_url=os.environ["MD_CONVERTER_TEST_POSTGRES_URL"],
+            distributed_database_url=os.environ["MARKWEAVE_TEST_POSTGRES_URL"],
             s3_bucket=bucket,
-            s3_endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-            s3_region=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-            s3_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-            s3_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+            s3_endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+            s3_region=os.environ["MARKWEAVE_TEST_S3_REGION"],
+            s3_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+            s3_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
             conversion_upload_max_bytes=128,
             conversion_request_max_bytes=1_024,
             conversion_retry_after_seconds=1,
@@ -190,7 +190,7 @@ def test_missing_bucket_then_healthy_distributed_contract_is_isolated() -> None:
         assert failed.status_code == 503
         assert failed.json()["error"]["code"] == "NOT_READY"
 
-    ready_app = create_app(settings(os.environ["MD_CONVERTER_TEST_S3_BUCKET"]))
+    ready_app = create_app(settings(os.environ["MARKWEAVE_TEST_S3_BUCKET"]))
     with TestClient(ready_app, base_url="https://testserver") as client:
         assert client.get("/health/ready").json() == {"status": "ready"}
         assert (
@@ -208,7 +208,7 @@ def test_missing_bucket_then_healthy_distributed_contract_is_isolated() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_combined_audit_contract_and_concurrent_cleanup() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     now = datetime(2026, 8, 24, 20, tzinfo=UTC)
     actor = uuid4()
@@ -310,7 +310,7 @@ def test_postgresql_combined_audit_contract_and_concurrent_cleanup() -> None:
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 def test_postgresql_revision_11_downgrade_removes_authentication_audit() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     assert "authentication_audit_records" in inspect(engine).get_table_names()
     assert "audit_cleanup_guards" in inspect(engine).get_table_names()

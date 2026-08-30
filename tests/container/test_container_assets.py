@@ -129,6 +129,21 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
     assert "uv sync --locked --no-dev --no-editable" in containerfile
 
 
+def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    smoke = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+
+    assert "MARKWEAVE_HOST=" not in containerfile
+    assert "MARKWEAVE_PORT=" not in containerfile
+    assert 'legacy_settings+=("${setting/MARKWEAVE_/MD_CONVERTER_}")' in smoke
+    assert "--env MD_CONVERTER_HOST=127.0.0.1" in smoke
+    assert "--env MD_CONVERTER_PORT=18080" in smoke
+    assert 'urllib.request.urlopen("http://127.0.0.1:18080/health/live"' in smoke
+    assert (
+        '(Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)' in smoke
+    )
+
+
 def test_final_image_version_comes_from_project_metadata() -> None:
     containerfile = Path("Containerfile").read_text(encoding="utf-8")
     build = Path("scripts/container/build.sh").read_text(encoding="utf-8")

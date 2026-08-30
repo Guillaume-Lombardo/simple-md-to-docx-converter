@@ -12,10 +12,10 @@ import {
   waitForText,
 } from "./browser-helpers.mjs";
 
-const baseUrl = process.env.MD_CONVERTER_E2E_BASE_URL;
-const recoveryState = process.env.MD_CONVERTER_E2E_RECOVERY_STATE;
-const profile = process.env.MD_CONVERTER_E2E_PROFILE;
-const artifactRoot = process.env.MD_CONVERTER_E2E_ARTIFACT_DIR;
+const baseUrl = process.env.MARKWEAVE_E2E_BASE_URL;
+const recoveryState = process.env.MARKWEAVE_E2E_RECOVERY_STATE;
+const profile = process.env.MARKWEAVE_E2E_PROFILE;
+const artifactRoot = process.env.MARKWEAVE_E2E_ARTIFACT_DIR;
 
 test("authenticated browser state remains valid after forced restart", {
   skip: baseUrl && recoveryState && profile && artifactRoot
@@ -31,7 +31,7 @@ test("authenticated browser state remains valid after forced restart", {
   let step = "launch Chromium after forced restart";
   try {
     browser = await chromium.launch({
-      executablePath: process.env.MD_CONVERTER_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
+      executablePath: process.env.MARKWEAVE_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
       headless: true,
     });
     context = await browser.newContext({

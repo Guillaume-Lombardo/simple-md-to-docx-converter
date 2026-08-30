@@ -37,10 +37,10 @@ Status also returns the durable correlation identifier accepted at submission. A
 external worker restores the same identifier when it claims the job; the content-free logging and
 metric contract is documented in [`observability.md`](observability.md).
 
-The required `MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES`,
-`MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES`,
-`MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS`, and
-`MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS` settings deliberately have no production defaults.
+The required `MARKWEAVE_CONVERSION_UPLOAD_MAX_BYTES`,
+`MARKWEAVE_CONVERSION_REQUEST_MAX_BYTES`,
+`MARKWEAVE_CONVERSION_RETRY_AFTER_SECONDS`, and
+`MARKWEAVE_JOB_RESULT_RETENTION_SECONDS` settings deliberately have no production defaults.
 Their validated configurable contracts include the associated quotas and schedules; operators must
 provide environment-specific values.
 The complete typed admission, budget, retention, and cleanup contract is documented in

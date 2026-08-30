@@ -129,20 +129,39 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     }
     assert application["shm_size"] == "128m"
     assert application["mem_limit"] == "1g"
-    assert environment["MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES"] == "805306368"
-    assert environment["MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES"] == (
+    assert environment["MARKWEAVE_WORKER_MEMORY_BUDGET_BYTES"] == "805306368"
+    assert environment["MARKWEAVE_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES"] == (
         "268435456"
     )
-    assert environment["MD_CONVERTER_INITIAL_ADMIN_PASSWORD"].startswith(
+    assert environment["MARKWEAVE_INITIAL_ADMIN_PASSWORD"].startswith(
         "${MARKWEAVE_INITIAL_ADMIN_PASSWORD:?"
     )
-    assert environment["MD_CONVERTER_PUBLIC_ORIGIN"] == (
+    assert environment["MARKWEAVE_PUBLIC_ORIGIN"] == (
         "${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:8080}"
     )
-    assert environment["MD_CONVERTER_CLAMAV_HOST"] == "clamav"
-    assert environment["MD_CONVERTER_STORAGE_PROFILE"] == "standalone"
-    assert environment["MD_CONVERTER_STANDALONE_DATA_DIRECTORY"] == "/data"
-    assert environment["MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS"] == "600"
+    assert environment["MARKWEAVE_CLAMAV_HOST"] == "clamav"
+    assert environment["MARKWEAVE_STORAGE_PROFILE"] == "standalone"
+    assert environment["MARKWEAVE_STANDALONE_DATA_DIRECTORY"] == "/data"
+    assert environment["MARKWEAVE_JOB_RESULT_RETENTION_SECONDS"] == "600"
+
+
+def test_published_compose_bridge_keeps_legacy_aliases_equal_to_canonical_values() -> (
+    None
+):
+    environment = _compose()["services"]["markweave"]["environment"]
+    canonical = {
+        key.removeprefix("MARKWEAVE_"): value
+        for key, value in environment.items()
+        if key.startswith("MARKWEAVE_")
+    }
+    legacy = {
+        key.removeprefix("MD_CONVERTER_"): value
+        for key, value in environment.items()
+        if key.startswith("MD_CONVERTER_")
+    }
+
+    assert canonical == legacy
+    assert len(canonical) == len(legacy) == 73
 
 
 def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> None:
@@ -217,6 +236,7 @@ def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
     overlay = TRUSTED_UPSTREAM_OVERLAY.read_text(encoding="utf-8")
 
     assert "depends_on: !reset {}" in overlay
+    assert "MARKWEAVE_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
     assert "MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
     assert "profiles:" in overlay
     assert "local-antivirus" in overlay
@@ -378,9 +398,9 @@ def test_quickstarts_pass_the_exact_public_origin_to_compose(
 def test_simple_quickstart_probes_the_browser_origin_before_readiness() -> None:
     script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
 
-    assert 'os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN")' in script
+    assert 'os.environ.get("MARKWEAVE_PUBLIC_ORIGIN")' in script
     assert 'headers={"Origin": origin}' in script
-    assert 'os.environ.get("MD_CONVERTER_INSECURE_EVALUATION_MODE")' in script
+    assert 'os.environ.get("MARKWEAVE_INSECURE_EVALUATION_MODE")' in script
     assert '("null", "https://attacker.invalid")' in script
     assert "does not match the requested login-origin policy" in script
 
@@ -639,7 +659,7 @@ def test_compose_ci_runs_secure_and_simple_real_e2e_paths() -> None:
 def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     runner = FINAL_IMAGE_RUNNER.read_text(encoding="utf-8")
 
-    assert "MD_CONVERTER_PUBLIC_ORIGIN=http://127.0.0.1:8080" in runner
+    assert "MARKWEAVE_PUBLIC_ORIGIN=http://127.0.0.1:8080" in runner
     assert 'login("http://127.0.0.1:8080")' in runner
     assert 'login("https://attacker.example")' in runner
     assert '"Forwarded": "host=attacker.example;proto=https"' in runner
@@ -648,7 +668,7 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert "assert accepted_status == 200" in runner
     assert "assert hostile_status == 403" in runner
     assert '"LOGIN_ORIGIN_INVALID"' in runner
-    assert "MD_CONVERTER_INSECURE_EVALUATION_MODE=true" in runner
+    assert "MARKWEAVE_INSECURE_EVALUATION_MODE=true" in runner
     assert "verify-disabled-login-origin" in runner
     assert '"event":"insecure_evaluation_mode_enabled"' in runner
     assert "--publish 127.0.0.1::8080" in runner

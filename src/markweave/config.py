@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Any, Self, get_args
 
 from pydantic import (
     AnyHttpUrl,
@@ -39,11 +40,13 @@ class Settings(BaseSettings):
     """Security-sensitive application settings."""
 
     model_config = SettingsConfigDict(
-        env_prefix="MD_CONVERTER_",
+        env_prefix="MARKWEAVE_",
         case_sensitive=False,
         extra="ignore",
     )
 
+    host: str = Field(default="0.0.0.0", min_length=1)  # noqa: S104 - container bind
+    port: int = Field(default=8080, ge=1, le=65_535)
     initial_admin_username: str = Field(min_length=1)
     initial_admin_password: SecretStr
     user_provisioning_file: Path | None = None
@@ -145,6 +148,41 @@ class Settings(BaseSettings):
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
 
+    @classmethod
+    def _environment_values(cls) -> tuple[dict[str, str], dict[str, str], set[str]]:
+        """Read canonical and legacy values without giving either alias precedence."""
+        environment: dict[str, list[tuple[str, str]]] = {}
+        for name, value in os.environ.items():
+            environment.setdefault(name.casefold(), []).append((name, value))
+
+        def find(name: str) -> str | None:
+            entries = environment.get(name.casefold(), [])
+            if len({value for _, value in entries}) > 1:
+                raise ConfigurationError("Invalid application configuration")
+            return entries[0][1] if entries else None
+
+        canonical: dict[str, str] = {}
+        legacy: dict[str, str] = {}
+        dual_definitions: set[str] = set()
+        for field_name in cls.model_fields:
+            suffix = field_name.upper()
+            canonical_value = find(f"MARKWEAVE_{suffix}")
+            legacy_value = find(f"MD_CONVERTER_{suffix}")
+            if canonical_value is not None:
+                canonical[field_name] = canonical_value
+            if legacy_value is not None:
+                legacy[field_name] = legacy_value
+            if canonical_value is not None and legacy_value is not None:
+                dual_definitions.add(field_name)
+        return canonical, legacy, dual_definitions
+
+    @staticmethod
+    def _is_secret(annotation: Any) -> bool:
+        """Identify values whose aliases must compare byte-for-byte as supplied."""
+        if annotation is SecretStr:
+            return True
+        return any(Settings._is_secret(argument) for argument in get_args(annotation))
+
     @field_validator("public_origin")
     @classmethod
     def validate_public_origin(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
@@ -236,6 +274,19 @@ class Settings(BaseSettings):
     def load(cls) -> Settings:
         """Load environment settings without exposing invalid values in the exception."""
         try:
-            return cls()
-        except ValidationError:
+            canonical_values, legacy_values, dual_definitions = (
+                cls._environment_values()
+            )
+            canonical_settings = cls.model_validate(legacy_values | canonical_values)
+            legacy_settings = cls.model_validate(canonical_values | legacy_values)
+            for field_name in dual_definitions:
+                if cls._is_secret(cls.model_fields[field_name].annotation):
+                    if canonical_values[field_name] != legacy_values[field_name]:
+                        raise ConfigurationError("Invalid application configuration")
+                elif getattr(canonical_settings, field_name) != getattr(
+                    legacy_settings, field_name
+                ):
+                    raise ConfigurationError("Invalid application configuration")
+            return canonical_settings
+        except ConfigurationError, ValidationError:
             raise ConfigurationError("Invalid application configuration") from None
