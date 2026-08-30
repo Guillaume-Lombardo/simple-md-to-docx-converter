@@ -1020,19 +1020,19 @@ def test_mutation_policy_rejects_arbitrary_concurrency_expression() -> None:
         ),
         (
             "      - name: Synchronize locked dependencies\n"
-            "        run: uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
             "      - name: Synchronize locked dependencies\n"
             "        if: ${{ false }}\n"
-            "        run: uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
         ),
         (
-            "        run: uv sync --locked --all-groups",
-            "        run: uv sync --locked --all-groups\n"
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups\n"
             "        continue-on-error: true",
         ),
         (
-            "        run: uv sync --locked --all-groups",
-            "        run: uv sync --locked --all-groups\n        shell: bash",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups\n        shell: bash",
         ),
     ],
 )
@@ -1086,14 +1086,14 @@ def test_read_only_policy_rejects_neutralizing_fields(
         ),
         (
             "mutation.yml",
-            "        run: uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
             "        run: git checkout refs/heads/unreviewed",
         ),
         (
             "mutation.yml",
-            "        run: uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
             "        env:\n          BASH_ENV: /tmp/attacker\n"
-            "        run: uv sync --locked --all-groups",
+            "        run: cd .mutation-policy && uv sync --locked --all-groups",
         ),
         (
             "mutation.yml",
@@ -1130,7 +1130,7 @@ def test_scalar_security_scans_decoded_yaml_values() -> None:
     """YAML escapes cannot hide privileged execution from scalar validation."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
     weakened = workflow.replace(
-        "run: uv sync --locked --all-groups",
+        "run: cd .mutation-policy && uv sync --locked --all-groups",
         r'run: "docker run \x2d\x2dprivileged image"',
     )
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
@@ -1153,9 +1153,9 @@ def test_scalar_security_rejects_github_object_and_dynamic_access(
     """Only explicitly allowlisted GitHub context properties may be evaluated."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
     weakened = workflow.replace(
-        "        run: uv sync --locked --all-groups",
+        "        run: cd .mutation-policy && uv sync --locked --all-groups",
         f"        env:\n          CONTEXT: {expression}\n"
-        "        run: uv sync --locked --all-groups",
+        "        run: cd .mutation-policy && uv sync --locked --all-groups",
     )
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
     assert any("GitHub" in error for error in errors)
@@ -1166,10 +1166,10 @@ def test_scalar_security_is_not_truncated_by_expression_like_literal() -> None:
     """A literal closing delimiter cannot hide a later full-context access."""
     workflow = Path(".github/workflows/mutation.yml").read_text(encoding="utf-8")
     weakened = workflow.replace(
-        "        run: uv sync --locked --all-groups",
+        "        run: cd .mutation-policy && uv sync --locked --all-groups",
         "        env:\n"
         "          CONTEXT: ${{ format('}}', toJSON(github)) }}\n"
-        "        run: uv sync --locked --all-groups",
+        "        run: cd .mutation-policy && uv sync --locked --all-groups",
     )
     errors = validate_workflow_text(weakened, workflow_name="mutation.yml")
     assert (
@@ -1198,9 +1198,10 @@ def test_action_pin_validation_uses_parsed_yaml(flow_style: bool) -> None:
     pinned = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     if flow_style:
         weakened = workflow.replace(
-            "      - name: Check out reviewed source\n"
+            "      - name: Check out pull-request mutation target\n"
             f"        uses: {pinned} # v7.0.1\n"
             "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha || github.sha }}\n"
             "          fetch-depth: 0\n"
             "          persist-credentials: false",
             "      - {uses: actions/checkout@v7, with: {persist-credentials: false}}",

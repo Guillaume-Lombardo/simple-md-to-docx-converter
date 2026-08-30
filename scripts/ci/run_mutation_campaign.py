@@ -154,14 +154,16 @@ def select_domains(
     )
 
 
-def changed_paths(base_sha: str, head_sha: str) -> tuple[str, ...]:
+def changed_paths(
+    base_sha: str, head_sha: str, *, target_root: Path = ROOT
+) -> tuple[str, ...]:
     """Return repository-relative changed paths for an immutable commit range."""
 
     if not base_sha or not head_sha:
         raise ValueError("changed mode requires non-empty base and head SHAs")
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=ACMRT", base_sha, head_sha],
-        cwd=ROOT,
+        cwd=target_root,
         check=True,
         capture_output=True,
         text=True,
@@ -232,18 +234,22 @@ def _write_artifact(
     )
 
 
-def _run_mutmut(domains: tuple[MutationDomain, ...]) -> dict[str, Any]:
+def _run_mutmut(
+    domains: tuple[MutationDomain, ...], *, target_root: Path = ROOT
+) -> dict[str, Any]:
     executable = shutil.which("mutmut")
     if executable is None:
         raise RuntimeError("mutmut executable is unavailable")
-    generated = ROOT / "mutants"
-    if generated.exists():
-        if generated.resolve() != (ROOT / "mutants").resolve():
-            raise RuntimeError("refusing to remove an unexpected mutants path")
+    generated = target_root / "mutants"
+    if generated.is_symlink() or (generated.exists() and not generated.is_dir()):
+        raise RuntimeError("refusing to remove an unexpected mutants path")
+    if generated.is_dir():
         shutil.rmtree(generated)
     mutants = [mutant for domain in domains for mutant in domain.mutants]
-    run = subprocess.run([executable, "run", *mutants], cwd=ROOT, check=False)
-    exported = subprocess.run([executable, "export-cicd-stats"], cwd=ROOT, check=False)
+    run = subprocess.run([executable, "run", *mutants], cwd=target_root, check=False)
+    exported = subprocess.run(
+        [executable, "export-cicd-stats"], cwd=target_root, check=False
+    )
     stats_path = generated / "mutmut-cicd-stats.json"
     if exported.returncode != 0 or not stats_path.is_file():
         raise RuntimeError("mutmut did not export CI statistics")
@@ -264,16 +270,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--head-sha", default="")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--artifact", type=Path, default=DEFAULT_ARTIFACT)
+    parser.add_argument("--target-root", type=Path, default=ROOT)
     parser.add_argument("--plan-only", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    domains: tuple[MutationDomain, ...] = ()
+    changed: tuple[str, ...] = ()
     try:
+        target_root = args.target_root.resolve()
+        if not target_root.is_dir():
+            raise ValueError("mutation target root must be an existing directory")
         manifest = load_manifest(args.manifest)
         changed = (
-            changed_paths(args.base_sha, args.head_sha)
+            changed_paths(args.base_sha, args.head_sha, target_root=target_root)
             if args.mode == "changed"
             else ()
         )
@@ -301,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"across {len(domains)} domains."
             )
             return 0
-        stats = _run_mutmut(domains)
+        stats = _run_mutmut(domains, target_root=target_root)
         selected = sum(len(domain.mutants) for domain in domains)
         counts = verify_stats(stats, selected=selected)
         _write_artifact(
@@ -315,8 +327,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Mutation campaign killed all {selected} selected mutants.")
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        domains = locals().get("domains", ())
-        changed = locals().get("changed", ())
         _write_artifact(
             args.artifact,
             mode=args.mode,

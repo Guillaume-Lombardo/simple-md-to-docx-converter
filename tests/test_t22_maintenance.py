@@ -89,6 +89,26 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     assert "--base-sha" in text
     assert "--head-sha" in text
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in text
+    steps = {step["name"]: step for step in workflow["jobs"]["mutation"]["steps"]}
+    assert steps["Check out pull-request mutation target"]["with"] == {
+        "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "fetch-depth": 0,
+        "persist-credentials": False,
+    }
+    assert steps["Check out trusted mutation policy"]["with"] == {
+        "ref": (
+            "${{ github.event.pull_request.base.sha || "
+            "github.event.repository.default_branch }}"
+        ),
+        "path": ".mutation-policy",
+        "persist-credentials": False,
+    }
+    assert steps["Synchronize locked dependencies"]["run"] == (
+        "cd .mutation-policy && uv sync --locked --all-groups"
+    )
+    assert "uv run --directory .mutation-policy python" in text
+    assert '--target-root "$GITHUB_WORKSPACE"' in text
+    assert '--artifact "$GITHUB_WORKSPACE/mutation-results/report.json"' in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.7.0"' in pyproject

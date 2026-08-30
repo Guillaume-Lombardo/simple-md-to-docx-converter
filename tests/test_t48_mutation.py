@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci import run_mutation_campaign as campaign
 from scripts.ci.run_mutation_campaign import (
     FAILURE_STATUSES,
     load_manifest,
@@ -17,6 +18,12 @@ from scripts.ci.run_mutation_campaign import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "mutation/domains.json"
+
+
+def _write_manifest(tmp_path: Path, raw: object) -> Path:
+    path = tmp_path / "domains.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
 
 
 @pytest.mark.unit
@@ -55,6 +62,48 @@ def test_observability_domain_preserves_the_preexisting_bounded_target() -> None
         "markweave.observability.x__normalize_method__mutmut_*"
         in (observability.review_notes[0])
     )
+
+
+@pytest.mark.unit
+def test_load_manifest_rejects_unknown_top_level_fields(tmp_path: Path) -> None:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw["unreviewed"] = True
+    with pytest.raises(ValueError, match="unexpected top-level fields"):
+        load_manifest(_write_manifest(tmp_path, raw))
+
+
+@pytest.mark.unit
+def test_load_manifest_rejects_an_unsupported_schema(tmp_path: Path) -> None:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw["schema_version"] = 2
+    with pytest.raises(ValueError, match="unsupported mutation manifest schema"):
+        load_manifest(_write_manifest(tmp_path, raw))
+
+
+@pytest.mark.unit
+def test_load_manifest_rejects_duplicate_mutants_across_domains(tmp_path: Path) -> None:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw["domains"][1]["mutants"][0] = raw["domains"][0]["mutants"][0]
+    with pytest.raises(ValueError, match="mutants must be unique"):
+        load_manifest(_write_manifest(tmp_path, raw))
+
+
+@pytest.mark.unit
+def test_load_manifest_rejects_domains_out_of_reviewed_order(tmp_path: Path) -> None:
+    raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw["domains"][0]["priority"] = 2
+    with pytest.raises(ValueError, match="domains must be ordered"):
+        load_manifest(_write_manifest(tmp_path, raw))
+
+
+@pytest.mark.unit
+def test_mutmut_refuses_a_symlinked_generated_directory(tmp_path: Path, mocker) -> None:
+    (tmp_path / "mutants").symlink_to(tmp_path / "outside")
+    mocker.patch.object(campaign.shutil, "which", return_value="/bin/mutmut")
+    with pytest.raises(
+        RuntimeError, match="refusing to remove an unexpected mutants path"
+    ):
+        campaign._run_mutmut((), target_root=tmp_path)
 
 
 @pytest.mark.unit

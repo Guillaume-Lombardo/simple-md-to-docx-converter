@@ -60,6 +60,7 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.draft",
         "github.event.pull_request.head.sha",
         "github.event.pull_request.number",
+        "github.event.repository.default_branch",
         "github.event_name",
         "github.ref",
         "github.repository",
@@ -321,7 +322,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         step_conditions={
             ("mutation", "Retain critical mutation evidence"): "${{ always() }}"
         },
-        canonical_digest="e23653e98f0c58dbd68bc6752857aa8191fb6d4ae7751b31d4dbe96d0fad9ed0",
+        canonical_digest="f2ca3c40ff74a81cf2d6c7911630b94801f5b51abfc7dc00ba977ed6a3eadb21",
     ),
 }
 
