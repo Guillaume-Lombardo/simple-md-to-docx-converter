@@ -173,14 +173,22 @@ def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> 
         raise CliError(
             "login_failed", "The service returned an invalid login response."
         )
-    store.save(
-        ConnectionProfile(
-            name=profile_name,
-            service_url=service_url,
-            session_state=response.session,
-            csrf_state=csrf,
-        )
+    saved_profile = ConnectionProfile(
+        name=profile_name,
+        service_url=service_url,
+        session_state=response.session,
+        csrf_state=csrf,
     )
+    try:
+        store.save(saved_profile)
+    except CliError:
+        HttpTransport(
+            service_url,
+            verify_tls=True,
+            timeout=context.timeout_seconds,
+            session_cookie_name=session_cookie_name,
+        ).logout(saved_profile)
+        raise
     username_value = user.get("username")
     safe_username = username_value if isinstance(username_value, str) else "user"
     writer.success(
@@ -285,6 +293,7 @@ def _change_password(
         renewal_profile, new_password, confirmation
     )
     if response.status != _NO_CONTENT:
+        _transport(renewal_profile, context).logout(renewal_profile)
         raise api_error(response, fallback="password_change_failed")
     store.delete(profile_name)
     writer.success(

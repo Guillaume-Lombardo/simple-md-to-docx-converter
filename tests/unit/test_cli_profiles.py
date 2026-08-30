@@ -99,6 +99,7 @@ def test_hostile_profile_data_and_relative_xdg_home_fail_closed(
     ("url", "code"),
     (
         ("http://converter.example", "tls_required"),
+        ("http://localhost", "tls_required"),
         ("http://localhost.evil.example", "tls_required"),
         ("file:///etc/passwd", "invalid_service_url"),
         ("https://user:password@converter.example", "invalid_service_url"),
@@ -112,11 +113,9 @@ def test_service_url_validation_fails_closed(url: str, code: str) -> None:
     assert raised.value.code == code
 
 
-@pytest.mark.parametrize(
-    "url", ("http://localhost", "http://127.0.0.1", "http://[::1]")
-)
+@pytest.mark.parametrize("url", ("http://127.0.0.1", "http://[::1]"))
 def test_loopback_http_is_the_only_tls_evaluation_exception(url: str) -> None:
-    """HTTP is constrained to literal loopback services used by rootless evaluation."""
+    """HTTP is constrained to literal loopback IPs used by rootless evaluation."""
     assert validate_service_url(url, verify_tls=True) == url
 
 

@@ -78,8 +78,6 @@ def validate_service_url(value: str, *, verify_tls: bool) -> str:
 
 
 def _is_loopback_host(hostname: str | None) -> bool:
-    if hostname == "localhost":
-        return True
     try:
         return hostname is not None and ip_address(hostname).is_loopback
     except ValueError:

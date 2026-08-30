@@ -43,6 +43,7 @@ def main() -> int:
     prefix = [
         "podman",
         "exec",
+        "--interactive",
         "--tty",
         "--env",
         "XDG_STATE_HOME=/tmp/markweave-cli-state",

@@ -8,7 +8,13 @@ from dataclasses import dataclass, field, replace
 from http.cookies import SimpleCookie
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 from markweave.cli.errors import CliError
 from markweave.cli.profiles import validate_service_url
@@ -119,9 +125,13 @@ class HttpTransport:
         )
         try:
             context = ssl.create_default_context()
-            opener = build_opener(
-                HTTPSHandler(context=context), _FailClosedRedirectHandler()
-            )
+            handlers: list[Any] = [
+                HTTPSHandler(context=context),
+                _FailClosedRedirectHandler(),
+            ]
+            if self._service_url.startswith("http://"):
+                handlers.append(ProxyHandler({}))
+            opener = build_opener(*handlers)
             response = opener.open(request, timeout=self._timeout)
             try:
                 return _response(
