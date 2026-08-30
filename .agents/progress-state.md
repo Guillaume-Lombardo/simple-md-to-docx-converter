@@ -1,77 +1,26 @@
 # Orchestration State
 
-Last verified: 2026-08-24
-
-## Goal
-
-Deliver the secure asynchronous Markdown-to-DOCX/PDF service defined in
-`docs/product-specification.md` through tickets T00-T23.
+Last verified: 2026-08-30
 
 ## Current State
 
-- `main` at `45fc9e8` contains T00-T16. T16 implementation PR #48 was squash-merged after green CI
-  and independent review; its exact implementation branch was removed locally and remotely.
-- T16/G1L-327 is verified `Done` locally and in Linear. Its T13, T14, and T15 dependencies are also
-  verified `Done` locally and in Linear.
-- PR #48 CI run 32752143779 passed every selected stage. The document-engine job passed the real
-  authenticated browser workflow and 143 engine tests after the existing `/proc` disappearance
-  assertion was hardened for both Linux missing-process outcomes.
-- T16 provides the authenticated server-rendered conversion page, restricted external native
-  JavaScript/CSS, preferred/fallback template selection and search, idempotent submission,
-  progressive polling, recent-job status, cancellation, expiration, accessible safe errors, and
-  guarded downloads without crossing the T17 administration or T18 production-policy boundaries.
-- T15 provides immutable template versions, optimistic concurrency, owner-scoped download and
-  audit behavior, fenced pending-publication recovery, integrity checks, and frozen template
-  resolution in production worker assembly across SQLite/filesystem and PostgreSQL/S3 profiles.
-- The pending-publication lease duration is required configuration and rejects non-positive or
-  non-finite values at both configuration and policy boundaries.
-- K3s remains inactive. The existing `t12-postgres-v2` and `t12-rustfs-v2` containers are running
-  and were used without modification.
+- `main` is verified at `6902f757efba9b7ee183d073f4b61a86bb843130`; exact-main CI run
+  `33317110884` passed.
+- T47/G1L-419 is verified `Done` after PR #109 (`cfbbac7`).
+- T36/G1L-409 is verified `Done` after PR #110 (`93688f7`).
+- T37/G1L-412 is verified `Done` after PR #113 (`8260f1b`) and corrective PR #117
+  (`81f5171`).
+- T40/G1L-418 is verified `Done` after PR #115 (`becfee1`).
+- T43/G1L-415 is verified `Done` after PR #116 (`6902f75`).
+- T41 remains active on `refactor/T41-decompose-fastapi`; do not start overlapping FastAPI
+  composition work.
 
-## T15 Validation
+## Hold
 
-- `uv sync --all-groups`, Ruff formatting and linting, and `ty` pass.
-- The exact CI unit selection passes 699 tests. Application branch coverage is 90.05%
-  (1,041/1,156), and changed application line coverage against `74dcba5` is 91.95% (811/882).
-- The applicable live host selection passes 860 tests with PostgreSQL and RustFS; its focused
-  PostgreSQL/S3 boundary selection passes 13 tests.
-- The exact three T15 activation/publication tests pass in the rootless toolchain image under an
-  arbitrary UID, read-only root and worktree, disabled network, dropped capabilities, and
-  `no-new-privileges`.
-- The unfiltered host suite passes 867 tests and has 37 expected marked engine failures because
-  Pandoc, Mermaid/Chromium, LibreOffice, and locked fonts are intentionally absent from the host.
-  Engine-bound behavior is validated in the toolchain image instead.
-- Historical T13 validation counts are intentionally omitted; all counts above describe the
-  current T15 tree.
-
-## T16 Validation
-
-- `uv sync --all-groups`, Ruff formatting and linting, `ty`, the locked npm install, and committed
-  CI validation pass.
-- The pinned Node 22.23.1 native-module gate passes 10 tests with 100.00% line, 91.43% branch, and
-  97.30% function coverage; the existing light CI job runs the same blocking thresholds.
-- The exact Python unit selection passes 707 tests with 90.07% application branch coverage; all 56
-  changed executable Python lines are covered.
-- The applicable host suite passes 870 tests with the existing live PostgreSQL and RustFS
-  containers and reaches 94.64% application coverage. The focused distributed UI boundary passes
-  against both services and restores/removes its shared test state.
-- The prior unfiltered host run passed 873 tests with 37 expected marked engine failures before the
-  four final non-engine tests were added; the host still lacks Pandoc, Mermaid/Chromium,
-  LibreOffice, and locked fonts.
-- The real-browser workflow passes with pinned Puppeteer/Chrome 151 under arbitrary UID, read-only
-  mounts, disabled network, dropped capabilities, `no-new-privileges`, and the validated sandbox.
-- The built wheel contains `web.py` and both static conversion assets.
-
-## Remaining Scope and Risks
-
-- T20/T21 still own final application-image Playwright E2E coverage. All independent reviewers
-  explicitly approved this sequencing exception; it does not waive the mandatory final
-  two-profile gate.
-- No PM-only implementation blocker is known. Production policy values remain explicit
-  configuration for T18.
+- Keep Relectio PR #106 and branch `fix/t51-finite-template-ratio` unchanged. Do not publish,
+  merge, close, or delete them during T41.
 
 ## Next Action
 
-Stop this orchestration run after the T16 completion record is merged and cleaned, as requested by
-the user. Do not start T17 here. The next conversation should re-read the repository state, verify
-T16 remains delivered, and then select T17.
+Continue T41 from its active worktree. Re-read `main`, the T41 worktree head, Linear, and this state
+before assigning any dependent or overlapping work.

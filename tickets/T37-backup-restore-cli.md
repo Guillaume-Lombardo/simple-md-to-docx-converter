@@ -2,7 +2,7 @@
 ticket: T37
 linear_id: G1L-412
 linear_url: https://linear.app/g1lom/issue/G1L-412/t37-add-backup-and-restore-cli-commands
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -52,10 +52,11 @@ Expose the approved standalone and distributed backup/restore workflows through 
 * 2026-08-30: Integrated verified `main` at `93688f7` after T36 through a normal HTTPS merge. The shared final-image runner preserves both the runtime-operations and recovery gates before supply-chain verification; 338 focused tests, CI policy validation, Ruff, ty, and both real rootless final-image smokes passed on the integrated image.
 * 2026-08-30: Code review follow-up replaced the smoke workspace's world-writable mode with rootless Podman ownership mapping, normalized S3 restore provider failures after rollback, scoped lock error translation to acquisition, removed reliance on optional S3 `KeyCount`, and made the final-image rollback proof require the exact post-object-copy database isolation failure followed by an explicit empty-bucket assertion. Python 3.14.6, Ruff, and ty confirmed that PEP 758's unparenthesized multi-exception syntax is valid. Unit, standalone integration, real PostgreSQL/RustFS integration, and rebuilt rootless-image smokes passed.
 * 2026-08-30: Main CI hotfix for run `33313678573`, job `99263118021`, made recovery-smoke target database creation tolerate PostgreSQL's initialization restart without accepting permanent failures. The bounded helper retries unavailable states, treats an existing target as idempotent success, and returns the original `createdb` error after two consecutive failures while the server reports ready. Deterministic restart/idempotence/permanent-error regressions, a real immediate-start and idempotence proof against PostgreSQL 18, ShellCheck, CI policy validation, 285 targeted tests, Ruff, ty, and the real rootless final-image recovery smoke passed from verified `main` at `becfee1b`.
+* 2026-08-30: Verified complete on `main` at `6902f75`. PR #113 passed CI and CodeRabbit at exact head `d75f25a` and squash-merged as `8260f1b`; corrective PR #117 passed the same gates at exact head `75b0e8b` and squash-merged as `81f5171`. Both exact merge SHAs passed main CI runs `33311193236` and `33316428618`.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
