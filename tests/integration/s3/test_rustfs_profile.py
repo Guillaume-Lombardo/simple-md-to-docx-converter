@@ -35,25 +35,31 @@ def rustfs_client(
 def test_rustfs_object_store_contract() -> None:
     bucket = os.environ["MARKWEAVE_TEST_S3_BUCKET"]
     store = S3ObjectStore(rustfs_client(), bucket)
-    assert store.is_ready()
-    exercise_object_store_contract(store)
+    try:
+        assert store.is_ready()
+        exercise_object_store_contract(store)
+    finally:
+        store.close()
 
 
 @pytest.mark.integration
 @pytest.mark.requires_s3
 def test_rustfs_missing_bucket_is_a_sanitized_readiness_failure() -> None:
     store = S3ObjectStore(rustfs_client(), "t12-bucket-that-does-not-exist")
-    assert not store.is_ready()
-    key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
-    marker = b"must-not-leak"
-    for operation in (
-        lambda: store.put(key, marker),
-        lambda: store.get(key),
-        lambda: store.delete(key),
-    ):
-        assert_operation_fails(operation, marker)
-    # RustFS reports the same generic HEAD 404 for a missing key and bucket.
-    assert not store.exists(key)
+    try:
+        assert not store.is_ready()
+        key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
+        marker = b"must-not-leak"
+        for operation in (
+            lambda: store.put(key, marker),
+            lambda: store.get(key),
+            lambda: store.delete(key),
+        ):
+            assert_operation_fails(operation, marker)
+        # RustFS reports the same generic HEAD 404 for a missing key and bucket.
+        assert not store.exists(key)
+    finally:
+        store.close()
 
 
 @pytest.mark.integration
@@ -66,8 +72,11 @@ def test_rustfs_wrong_credentials_deny_every_object_operation() -> None:
         ),
         os.environ["MARKWEAVE_TEST_S3_BUCKET"],
     )
-    assert not store.is_ready()
-    assert_store_operations_fail(store)
+    try:
+        assert not store.is_ready()
+        assert_store_operations_fail(store)
+    finally:
+        store.close()
 
 
 def assert_store_operations_fail(store: S3ObjectStore) -> None:

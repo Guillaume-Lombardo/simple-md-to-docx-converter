@@ -747,21 +747,24 @@ class AppComponents:
     worker_metrics_accept_queue_size: int = 8
     worker_metrics_request_timeout_seconds: float = 2.0
     owned_engines: tuple[Engine, ...] = field(default=(), repr=False, compare=False)
+    owned_resources: tuple[Any, ...] = field(default=(), repr=False, compare=False)
     _close_lock: Lock = field(
         default_factory=Lock, init=False, repr=False, compare=False
     )
     _closed: Event = field(default_factory=Event, init=False, repr=False, compare=False)
 
     def close(self) -> None:
-        """Cancel observations and dispose only application-owned SQL engines."""
+        """Cancel observations and close every application-owned resource."""
 
-        if not self.owned_engines:
+        if not self.owned_engines and not self.owned_resources:
             return
         with self._close_lock:
             if self._closed.is_set():
                 return
             self._closed.set()
         with ExitStack() as cleanup:
+            for resource in self.owned_resources:
+                cleanup.callback(resource.close)
             for engine in self.owned_engines:
                 cleanup.callback(engine.dispose)
             if self.queue_observer is not None:
@@ -907,9 +910,12 @@ def build_upload_scanner(settings: Settings) -> UploadScanner:
     )
 
 
-def build_components(settings: Settings) -> AppComponents:
+def build_components(  # noqa: PLR0915 - explicit resource ownership composition
+    settings: Settings,
+) -> AppComponents:
     """Assemble the selected coherent persistent storage profile."""
     job_policies = build_job_policies(settings)
+    owned_resources: tuple[Any, ...] = ()
     if settings.storage_profile is StorageProfile.STANDALONE:
         data_directory = settings.standalone_data_directory
         if (
@@ -948,11 +954,18 @@ def build_components(settings: Settings) -> AppComponents:
                 retries={"max_attempts": 0},
             ),
         }
-        object_readiness = S3ObjectStore(
-            boto3.client("s3", **readiness_client_options), bucket
-        )
+        try:
+            object_readiness = S3ObjectStore(
+                boto3.client("s3", **readiness_client_options), bucket
+            )
+        except BaseException:
+            object_store.close()
+            raise
+        owned_resources = (object_store, object_readiness)
 
     with ExitStack() as pending_engines:
+        for resource in owned_resources:
+            pending_engines.callback(resource.close)
         engine = create_database_engine(database_url)
         pending_engines.callback(engine.dispose)
         upgrade_database(engine)
@@ -1040,6 +1053,7 @@ def build_components(settings: Settings) -> AppComponents:
                 settings.worker_metrics_request_timeout_seconds
             ),
             owned_engines=(engine, readiness_engine, observation_engine),
+            owned_resources=owned_resources,
         )
         pending_engines.pop_all()
         return components

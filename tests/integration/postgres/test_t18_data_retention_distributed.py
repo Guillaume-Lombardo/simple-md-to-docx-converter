@@ -27,8 +27,11 @@ from markweave.storage import ObjectKey, ObjectScope, S3ObjectStore
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_retention_matches_standalone_contract() -> None:
+def test_distributed_retention_matches_standalone_contract(
+    request: pytest.FixtureRequest,
+) -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
     upgrade_database(engine)
     client = boto3.client(
         "s3",
@@ -38,6 +41,7 @@ def test_distributed_retention_matches_standalone_contract() -> None:
         aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
     objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
+    request.addfinalizer(objects.close)
     owner_id, template_id = uuid4(), uuid4()
     versions = [uuid4() for _ in range(12)]
     now = datetime.now(UTC)
@@ -159,4 +163,3 @@ def test_distributed_retention_matches_standalone_contract() -> None:
                 delete(TemplateRow).where(TemplateRow.id == str(template_id))
             )
             database.execute(delete(UserRow).where(UserRow.id == str(owner_id)))
-        engine.dispose()

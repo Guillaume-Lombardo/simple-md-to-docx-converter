@@ -158,9 +158,11 @@ class S3ObjectStore:
             raise ObjectStoreError("Object storage operation failed") from error
 
     def get(self, key: ObjectKey) -> bytes:
+        body: Any | None = None
         try:
             response = self._client.get_object(Bucket=self._bucket, Key=key.as_posix())
-            return response["Body"].read()
+            body = response["Body"]
+            return body.read()
         except ClientError as error:
             if error.response.get("Error", {}).get("Code") in {
                 "404",
@@ -171,6 +173,9 @@ class S3ObjectStore:
             raise ObjectStoreError("Object storage operation failed") from error
         except BotoCoreError as error:
             raise ObjectStoreError("Object storage operation failed") from error
+        finally:
+            if body is not None:
+                body.close()
 
     def delete(self, key: ObjectKey) -> None:
         try:
@@ -199,3 +204,8 @@ class S3ObjectStore:
         except BotoCoreError, ClientError:
             return False
         return True
+
+    def close(self) -> None:
+        """Release the provider client's HTTP connection pools."""
+
+        self._client.close()

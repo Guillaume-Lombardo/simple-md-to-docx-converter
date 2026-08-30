@@ -109,15 +109,19 @@ def test_s3_success_uses_only_the_stable_identifier_key(
     mocker: MockerFixture,
 ) -> None:
     client = mocker.Mock()
-    client.get_object.return_value = {"Body": BytesIO(b"content")}
+    body = mocker.Mock(spec=BytesIO)
+    body.read.return_value = b"content"
+    client.get_object.return_value = {"Body": body}
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.TEMPLATE_VERSION, uuid4(), uuid4())
-
-    store.put(key, b"content")
-    assert store.get(key) == b"content"
-    assert store.exists(key)
-    store.delete(key)
-    assert store.is_ready()
+    try:
+        store.put(key, b"content")
+        assert store.get(key) == b"content"
+        assert store.exists(key)
+        store.delete(key)
+        assert store.is_ready()
+    finally:
+        store.close()
     expected = key.as_posix()
     client.put_object.assert_called_once_with(
         Bucket="bucket", Key=expected, Body=b"content"
@@ -125,6 +129,8 @@ def test_s3_success_uses_only_the_stable_identifier_key(
     client.get_object.assert_called_once_with(Bucket="bucket", Key=expected)
     client.head_object.assert_called_once_with(Bucket="bucket", Key=expected)
     client.delete_object.assert_called_once_with(Bucket="bucket", Key=expected)
+    body.close.assert_called_once_with()
+    client.close.assert_called_once_with()
 
 
 @pytest.mark.unit
@@ -135,9 +141,12 @@ def test_s3_missing_object_mapping(mocker: MockerFixture, code: str) -> None:
     client.head_object.side_effect = client_error(code)
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.RESULT, uuid4(), uuid4())
-    with pytest.raises(ObjectNotFoundError, match="Object does not exist"):
-        store.get(key)
-    assert not store.exists(key)
+    try:
+        with pytest.raises(ObjectNotFoundError, match="Object does not exist"):
+            store.get(key)
+        assert not store.exists(key)
+    finally:
+        store.close()
 
 
 @pytest.mark.unit
@@ -155,10 +164,13 @@ def test_s3_adapter_sanitizes_provider_failures(
     getattr(client, method_name).side_effect = client_error("AccessDenied")
     store = S3ObjectStore(client, "bucket")
     key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
-    with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
-        getattr(store, operation)(key, b"content") if operation == "put" else getattr(
-            store, operation
-        )(key)
+    try:
+        with pytest.raises(ObjectStoreError, match="Object storage operation failed"):
+            getattr(store, operation)(
+                key, b"content"
+            ) if operation == "put" else getattr(store, operation)(key)
+    finally:
+        store.close()
 
 
 @pytest.mark.unit
@@ -167,11 +179,32 @@ def test_s3_transport_failure_and_database_failure_make_readiness_false(
 ) -> None:
     client = mocker.Mock()
     client.head_bucket.side_effect = EndpointConnectionError(endpoint_url="test")
-    assert not S3ObjectStore(client, "bucket").is_ready()
+    store = S3ObjectStore(client, "bucket")
+    try:
+        assert not store.is_ready()
+    finally:
+        store.close()
 
     engine = mocker.MagicMock()
     engine.connect.side_effect = RuntimeError("unavailable")
     assert not DatabaseReadinessProbe(engine).is_ready()
+
+
+@pytest.mark.unit
+def test_s3_response_body_closes_when_reading_fails(mocker: MockerFixture) -> None:
+    client = mocker.Mock()
+    body = mocker.Mock()
+    body.read.side_effect = RuntimeError("stream failed")
+    client.get_object.return_value = {"Body": body}
+    store = S3ObjectStore(client, "bucket")
+
+    try:
+        with pytest.raises(RuntimeError, match="stream failed"):
+            store.get(ObjectKey(ObjectScope.RESULT, uuid4(), uuid4()))
+
+        body.close.assert_called_once_with()
+    finally:
+        store.close()
 
 
 @pytest.mark.unit
@@ -202,6 +235,21 @@ def _standalone_component_settings(**overrides: object) -> Settings:
     )
     values.update(overrides)
     return Settings.model_validate(values)
+
+
+def _distributed_component_settings() -> Settings:
+    return Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-" + "password",
+        storage_profile="distributed",
+        distributed_database_url="postgresql+psycopg://database/app",
+        s3_bucket="objects",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
 
 
 @pytest.mark.unit
@@ -294,8 +342,48 @@ def test_component_assembly_attempts_every_engine_disposal_when_one_fails(
 
 
 @pytest.mark.unit
+def test_distributed_component_partial_startup_closes_created_s3_clients(
+    mocker: MockerFixture,
+) -> None:
+    normal_client = mocker.Mock()
+    client = mocker.patch(
+        "markweave.app.boto3.client",
+        side_effect=(normal_client, RuntimeError("readiness client failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="readiness client failed"):
+        build_components(_distributed_component_settings())
+
+    assert client.call_count == 2
+    normal_client.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_distributed_component_database_failure_closes_both_s3_clients(
+    mocker: MockerFixture,
+) -> None:
+    normal_client = mocker.Mock()
+    readiness_client = mocker.Mock()
+    mocker.patch(
+        "markweave.app.boto3.client",
+        side_effect=(normal_client, readiness_client),
+    )
+    mocker.patch(
+        "markweave.app.create_database_engine",
+        side_effect=RuntimeError("database failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="database failed"):
+        build_components(_distributed_component_settings())
+
+    normal_client.close.assert_called_once_with()
+    readiness_client.close.assert_called_once_with()
+
+
+@pytest.mark.unit
 def test_distributed_wiring_allows_aws_credential_provider_defaults(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
     database_url = "postgresql+psycopg://database/app"
@@ -328,6 +416,7 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
         "markweave.app.boto3.client", side_effect=(normal_s3, readiness_s3)
     )
     components = build_components(settings)
+    request.addfinalizer(components.close)
     assert create_engine.call_args_list == [
         mocker.call(database_url),
         mocker.call(database_url, timeout_seconds=2.0, pool_pre_ping=False),
@@ -355,11 +444,15 @@ def test_distributed_wiring_allows_aws_credential_provider_defaults(
     assert components.object_store is not None
     assert components.job_repository is not None
     assert components.retention is not None
+    components.close()
+    normal_s3.close.assert_called_once_with()
+    readiness_s3.close.assert_called_once_with()
 
 
 @pytest.mark.unit
 def test_profile_wiring_covers_standalone_and_explicit_s3_options(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     reclaim = mocker.patch("markweave.app.TemplateService.reclaim_pending")
     engine = mocker.Mock()
@@ -384,6 +477,7 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         job_result_retention_seconds=3_600,
     )
     standalone_components = build_components(standalone)
+    request.addfinalizer(standalone_components.close)
     assert standalone_components.object_store is normal_files
     standalone_readiness = cast(ProfileReadinessProbe, standalone_components.readiness)
     assert standalone_readiness._objects is readiness_files
@@ -406,7 +500,8 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
-    build_components(distributed)
+    distributed_components = build_components(distributed)
+    request.addfinalizer(distributed_components.close)
     assert reclaim.call_count == 2
     common = {
         "endpoint_url": "http://s3.test",
@@ -418,6 +513,8 @@ def test_profile_wiring_covers_standalone_and_explicit_s3_options(
         mocker.call("s3", **common),
         mocker.call("s3", **common, config=mocker.ANY),
     ]
+    standalone_components.close()
+    distributed_components.close()
 
 
 @pytest.mark.unit

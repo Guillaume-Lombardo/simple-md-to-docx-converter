@@ -14,7 +14,7 @@ from markweave.config import Settings
 from markweave.jobs.models import JobState
 from markweave.malware import TrustingUploadScanner
 from markweave.persistence.jobs import SqlJobRepository
-from markweave.persistence.sql import create_database_engine, standalone_database_url
+from markweave.persistence.sql import managed_database_engine, standalone_database_url
 from markweave.persistence.templates import SqlTemplateCatalogRepository
 from markweave.storage import ObjectKey, ObjectScope
 from markweave.templates.models import (
@@ -82,15 +82,16 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         job_result_retention_seconds=3_600,
     )
     app = create_app(settings, scanner=TrustingUploadScanner())
-    with TestClient(app, base_url="https://testserver") as client:
+    with (
+        managed_database_engine(standalone_database_url(tmp_path)) as auxiliary_engine,
+        TestClient(app, base_url="https://testserver") as client,
+    ):
         admin = login(client, "admin", admin_password)
         csrf = str(admin["csrf_token"])
         template_id, template_version_id = uuid4(), uuid4()
         owner_id = UUID(admin["user"]["id"])
         now = datetime.now(UTC)
-        catalog = SqlTemplateCatalogRepository(
-            create_database_engine(standalone_database_url(tmp_path))
-        )
+        catalog = SqlTemplateCatalogRepository(auxiliary_engine)
         template = TemplateIdentity(
             template_id,
             owner_id,
@@ -159,9 +160,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         assert first.json()["component_versions"]
         assert first.json()["expires_at"] is None
         first_id = UUID(first.json()["id"])
-        persisted = SqlJobRepository(
-            create_database_engine(standalone_database_url(tmp_path))
-        ).get(first_id)
+        persisted = SqlJobRepository(auxiliary_engine).get(first_id)
         assert persisted is not None
         assert persisted.correlation_id == correlation_id
         metrics = client.get("/metrics")
@@ -265,9 +264,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         assert successful.status_code == 202
         successful_id = UUID(successful.json()["id"])
         owner_id = UUID(successful.json()["owner_id"])
-        repository = SqlJobRepository(
-            create_database_engine(standalone_database_url(tmp_path))
-        )
+        repository = SqlJobRepository(auxiliary_engine)
         now = datetime.now(UTC)
         claimed = repository.claim(
             "functional-worker", now, now + timedelta(seconds=30)
