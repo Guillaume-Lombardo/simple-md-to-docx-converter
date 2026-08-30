@@ -416,6 +416,16 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
         datetime.now(UTC),
         owner_id,
     )
+    audit = TemplateAuditRecord(
+        uuid4(),
+        owner_id,
+        owner_id,
+        template.id,
+        "publish",
+        version.id,
+        False,
+        datetime.now(UTC),
+    )
     for module in (
         "identity",
         "publication",
@@ -435,7 +445,24 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
             TemplateSearch(), viewer_id=owner_id, viewer_is_admin=False
         ),
         lambda: catalog.reserve_create(template, version),
+        lambda: catalog.reserve_version(
+            template.id, expected_revision=1, version=version
+        ),
+        lambda: catalog.finalize_version(
+            template.id,
+            expected_revision=1,
+            version_id=version.id,
+            publication_token=uuid4(),
+            audit=audit,
+        ),
+        lambda: catalog.release_pending_claim(
+            template.id,
+            version.id,
+            uuid4(),
+            retry_at=datetime.now(UTC),
+        ),
         catalog.pending_deletions,
+        lambda: catalog.get_version(template.id, version.id),
         lambda: catalog.list_versions(template.id),
         lambda: selections.set_preferred(owner_id, template.id),
         lambda: selections.clear_preferred(owner_id),

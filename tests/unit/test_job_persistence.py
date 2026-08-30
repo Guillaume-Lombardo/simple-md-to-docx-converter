@@ -86,6 +86,8 @@ def test_job_repository_sanitizes_each_bounded_store_failure(
 
     operations = (
         lambda: repository.create(submission(owner_id)),
+        lambda: repository.activate_source(uuid4(), now),
+        lambda: repository._get_idempotent(owner_id, "a" * 64),
         lambda: repository.get(uuid4()),
         lambda: repository.claim("worker", now, now + timedelta(seconds=30)),
         lambda: repository.request_cancel(
