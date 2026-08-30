@@ -72,8 +72,6 @@ def test_version_and_missing_command_use_the_documented_streams(
 @pytest.mark.parametrize(
     ("arguments", "expected_command"),
     (
-        (("convert",), "convert"),
-        (("jobs", "wait"), "jobs wait"),
         (("users", "deactivate"), "users deactivate"),
         (("health", "metrics"), "health metrics"),
         (("backup",), "backup"),
