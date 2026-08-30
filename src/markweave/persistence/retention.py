@@ -19,7 +19,7 @@ from markweave.persistence.schema import (
     TemplateVersionRow,
 )
 from markweave.persistence.sql import serialize_sqlite_write
-from markweave.persistence.templates import _version
+from markweave.persistence.templates.common import _version
 from markweave.retention import (
     MINIMUM_PROTECTED_TEMPLATE_VERSIONS,
     RetentionClaim,
