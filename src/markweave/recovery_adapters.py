@@ -523,12 +523,14 @@ class S3RecoveryAdapter:
             if keys != frozenset(placed):
                 raise RecoveryError("S3 restored object set is incomplete")
             return hashlib.sha256(canonical_json(inventory)).hexdigest(), keys
-        except BaseException:
+        except BaseException as error:
             for key in reversed(placed):
                 with suppress(BotoCoreError, ClientError):
                     self._client.delete_object(
                         Bucket=self._configuration.bucket, Key=key
                     )
+            if isinstance(error, (BotoCoreError, ClientError, OSError)):
+                raise RecoveryError("S3 restore failed") from None
             raise
 
     def remove(self, keys: frozenset[str]) -> None:
@@ -577,23 +579,24 @@ class S3RecoveryAdapter:
 def filesystem_lock(path: Path) -> Iterator[None]:
     """Acquire a non-blocking symlink-safe local recovery lock."""
 
-    descriptor: int | None = None
     try:
         descriptor = os.open(
             path,
             os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
+    except OSError:
+        raise RecoveryError("Recovery lock could not be acquired") from None
+    try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RecoveryError("Another recovery operation is active") from None
+        except OSError:
+            raise RecoveryError("Recovery lock could not be acquired") from None
         yield
-    except OSError:
-        raise RecoveryError("Recovery lock could not be acquired") from None
     finally:
-        if descriptor is not None:
-            os.close(descriptor)
+        os.close(descriptor)
 
 
 def _safe_absolute_directory(path: Path, label: str) -> Path:

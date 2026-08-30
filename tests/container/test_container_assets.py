@@ -20,6 +20,7 @@ from scripts.container import (
     summarize_supply_chain,
     verify_supply_chain,
 )
+from tests.e2e.recovery_cli_setup import _listed_object_count
 
 pytestmark = pytest.mark.unit
 LEGACY_TEMPLATE_ID = "00000000-0000-4000-8000-000000000029"
@@ -157,6 +158,23 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     assert release_run.index(
         'bash scripts/container/build.sh "$image"'
     ) < release_run.index(command)
+
+
+def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
+    smoke = Path("scripts/container/recovery-cli-smoke.sh").read_text(encoding="utf-8")
+
+    assert 'chmod 0777 "$workspace"' not in smoke
+    assert smoke.count('"$workspace:/e2e:U,Z"') == 2
+    assert '.error.message == "Distributed restore target is not isolated"' in smoke
+    assert 'run_setup "${common_s3[@]}" -- distributed-cleanup-verify' in smoke
+
+
+def test_recovery_smoke_does_not_require_optional_s3_key_count() -> None:
+    assert _listed_object_count({}) == 0
+    assert _listed_object_count({"Contents": []}) == 0
+    assert _listed_object_count({"Contents": [{"Key": "one"}]}) == 1
+    with pytest.raises(RuntimeError, match="listing is invalid"):
+        _listed_object_count({"Contents": "not-a-list"})
 
 
 def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:

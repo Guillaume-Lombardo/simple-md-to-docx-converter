@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import boto3
@@ -23,6 +24,15 @@ def _s3():
         aws_access_key_id=os.environ["RECOVERY_S3_ACCESS"],
         aws_secret_access_key=os.environ["RECOVERY_S3_SECRET"],
     )
+
+
+def _listed_object_count(response: dict[str, Any]) -> int:
+    contents = response.get("Contents")
+    if contents is None:
+        return 0
+    if not isinstance(contents, list):
+        raise RuntimeError("S3 object listing is invalid")
+    return len(contents)
 
 
 def _upgrade_and_seed(database_url) -> None:
@@ -96,9 +106,15 @@ def distributed_verify() -> None:
         engine.dispose()
     client = _s3()
     target = client.list_objects_v2(Bucket=os.environ["RECOVERY_TARGET_BUCKET"])
+    if _listed_object_count(target) != 1:
+        raise RuntimeError("distributed restore target is invalid")
+
+
+def distributed_cleanup_verify() -> None:
+    client = _s3()
     failed = client.list_objects_v2(Bucket=os.environ["RECOVERY_FAILED_BUCKET"])
-    if target.get("KeyCount") != 1 or failed.get("KeyCount") != 0:
-        raise RuntimeError("distributed restore cleanup is invalid")
+    if _listed_object_count(failed) != 0:
+        raise RuntimeError("distributed restore rollback cleanup is invalid")
 
 
 def tamper(path: Path) -> None:
@@ -113,6 +129,7 @@ def main() -> None:
         choices=(
             "standalone-initialize",
             "standalone-verify",
+            "distributed-cleanup-verify",
             "distributed-initialize",
             "distributed-verify",
             "tamper",
@@ -126,6 +143,8 @@ def main() -> None:
         standalone_verify(arguments.path)
     elif arguments.operation == "distributed-initialize":
         distributed_initialize()
+    elif arguments.operation == "distributed-cleanup-verify":
+        distributed_cleanup_verify()
     elif arguments.operation == "distributed-verify":
         distributed_verify()
     else:

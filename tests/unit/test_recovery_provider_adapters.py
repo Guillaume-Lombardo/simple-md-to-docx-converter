@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from botocore.exceptions import ClientError
 from sqlalchemy import func, insert, select
 from sqlalchemy import inspect as sqlalchemy_inspect
 
@@ -30,6 +31,7 @@ from markweave.recovery_adapters import (
     _safe_absolute_directory,
     _safe_new_destination,
     _validate_object_key,
+    filesystem_lock,
 )
 from markweave.recovery_manifest import RecoveryError, RecoveryMember
 
@@ -375,6 +377,39 @@ def test_s3_inventory_pagination_and_restore_failures_cleanup(
     assert fake.buckets["target"] == {}
 
 
+def test_s3_restore_translates_provider_failure_after_rollback(
+    tmp_path: Path, mocker
+) -> None:
+    fake = _S3()
+    key = f"uploads/{uuid4()}/{uuid4()}"
+    source = tmp_path / "objects" / key
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"expected")
+    member = RecoveryMember(
+        f"objects/{key}",
+        len(b"expected"),
+        "0" * 64,
+    )
+    mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
+    mocker.patch.object(
+        fake,
+        "head_object",
+        side_effect=ClientError(
+            {"Error": {"Code": "InternalError", "Message": "provider failed"}},
+            "HeadObject",
+        ),
+    )
+    target = S3RecoveryAdapter(
+        S3Configuration("target", None, None), RecoveryDeadline.after(30)
+    )
+
+    with pytest.raises(RecoveryError, match="S3 restore failed"):
+        target.ensure_empty_and_restore(
+            tmp_path, (member,), source_identity="different"
+        )
+    assert fake.buckets["target"] == {}
+
+
 def test_s3_inventory_rejects_incomplete_pagination(mocker) -> None:
     fake = _S3()
     mocker.patch("markweave.recovery_adapters.boto3.client", return_value=fake)
@@ -415,6 +450,18 @@ def test_standalone_adapter_rejects_missing_sources_and_stale_stage(
     stale_stage.mkdir()
     with pytest.raises(RecoveryError, match="staging path"):
         adapter.restore(tmp_path, target, (), RecoveryDeadline.after(1))
+
+
+def test_filesystem_lock_does_not_translate_body_oserror(tmp_path: Path) -> None:
+    lock = tmp_path / "recovery.lock"
+    with (
+        pytest.raises(OSError, match="operation body failed"),
+        filesystem_lock(lock),
+    ):
+        raise OSError("operation body failed")
+
+    with filesystem_lock(lock):
+        pass
 
 
 def test_standalone_adapter_skips_foreign_members_and_rejects_symlinked_directory(

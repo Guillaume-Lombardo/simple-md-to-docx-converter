@@ -192,6 +192,6 @@ def test_distributed_restore_cleans_target_bucket_when_database_is_not_isolated(
                     s3=_configuration(target_bucket),
                 )
             )
-        assert client.list_objects_v2(Bucket=target_bucket).get("KeyCount") == 0
+        assert not client.list_objects_v2(Bucket=target_bucket).get("Contents", [])
     finally:
         _delete_bucket(client, target_bucket)

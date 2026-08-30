@@ -45,7 +45,6 @@ done
 [[ "$ready" == true ]]
 podman exec "$postgres" createdb -U postgres target
 
-chmod 0777 "$workspace"
 run_setup() {
   local -a container_arguments=()
   while [[ "$1" != -- ]]; do
@@ -54,7 +53,7 @@ run_setup() {
   done
   shift
   podman run --rm --network "$network" --entrypoint python \
-    --volume "$workspace:/e2e:Z" \
+    --volume "$workspace:/e2e:U,Z" \
     --volume "$setup_script:/tmp/recovery-cli-setup.py:ro,Z" \
     "${container_arguments[@]}" "$image" /tmp/recovery-cli-setup.py "$@"
 }
@@ -66,7 +65,7 @@ run_cli() {
   done
   shift
   podman run --rm --network "$network" --entrypoint markweave \
-    --volume "$workspace:/e2e:Z" "${container_arguments[@]}" "$image" "$@"
+    --volume "$workspace:/e2e:U,Z" "${container_arguments[@]}" "$image" "$@"
 }
 
 run_setup -- standalone-initialize --path /e2e/standalone-source
@@ -118,17 +117,24 @@ run_cli "${common_s3[@]}" --env RECOVERY_DATABASE="$target_url" -- \
   --s3-region us-east-1 --s3-access-key-environment RECOVERY_S3_ACCESS \
   --s3-secret-key-environment RECOVERY_S3_SECRET \
   --offline-proof final-image-isolated --yes >/dev/null
-if run_cli "${common_s3[@]}" --env RECOVERY_DATABASE="$source_url" -- \
-  --non-interactive --timeout 60 restore --profile distributed \
+failed_restore_json=""
+if failed_restore_json="$(run_cli "${common_s3[@]}" \
+  --env RECOVERY_DATABASE="$source_url" -- \
+  --json --non-interactive --timeout 60 restore --profile distributed \
   --source "/e2e/distributed-sets/$distributed_id" \
   --database-url-environment RECOVERY_DATABASE \
   --s3-bucket failed-bucket --s3-endpoint-url http://rustfs:9000 \
   --s3-region us-east-1 --s3-access-key-environment RECOVERY_S3_ACCESS \
   --s3-secret-key-environment RECOVERY_S3_SECRET \
-  --offline-proof final-image-isolated --yes >/dev/null 2>&1; then
+  --offline-proof final-image-isolated --yes 2>&1)"; then
   echo "non-isolated distributed database target was accepted" >&2
   exit 1
 fi
+jq -e '
+  .error.code == "recovery_failed"
+  and .error.message == "Distributed restore target is not isolated"
+' <<<"$failed_restore_json" >/dev/null
+run_setup "${common_s3[@]}" -- distributed-cleanup-verify
 run_setup "${common_s3[@]}" --env RECOVERY_DATABASE="$target_url" -- \
   distributed-verify
 
