@@ -138,6 +138,53 @@ def test_transport_preserves_session_cookie_and_csrf_over_real_http(
     ]
 
 
+def test_loopback_transport_bypasses_configured_proxies(
+    auth_server: str, monkeypatch
+) -> None:
+    """Loopback evaluation login never sends credentials through ambient proxies."""
+    proxy_requests: list[bytes] = []
+
+    class ProxySink(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            proxy_requests.append(self.rfile.read(length))
+            self.send_response(502)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxySink)
+    proxy_thread = Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+    try:
+        proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+        monkeypatch.setenv("http_proxy", proxy_url)
+        monkeypatch.setenv("HTTP_PROXY", proxy_url)
+        monkeypatch.setenv("no_proxy", "")
+        monkeypatch.setenv("NO_PROXY", "")
+
+        response = HttpTransport(
+            auth_server, verify_tls=False, timeout=2, session_cookie_name="session"
+        ).login("alice", "not-persisted")
+
+        assert response.status == 200
+        assert response.session == "session=opaque"
+        assert _AuthenticationHandler.received == [
+            (
+                "/api/v1/login",
+                None,
+                None,
+                {"username": "alice", "password": "not-persisted"},
+            )
+        ]
+        assert proxy_requests == []
+    finally:
+        proxy.shutdown()
+        proxy_thread.join()
+        proxy.server_close()
+
+
 def test_redirect_never_forwards_session_or_csrf_to_another_server() -> None:
     """A hostile redirect cannot exfiltrate authenticated headers across origins."""
     sink_requests: list[tuple[str | None, str | None]] = []

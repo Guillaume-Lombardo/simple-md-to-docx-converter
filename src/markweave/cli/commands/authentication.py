@@ -155,12 +155,12 @@ def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> 
     profile_name = validate_profile_name(_value(command, "profile"))
     service_url = validate_service_url(_value(command, "url"), verify_tls=True)
     session_cookie_name = _value(command, "session_cookie_name")
+    store = ProfileStore()
+    previous_profile = _existing_profile(store, profile_name, service_url)
     username = command.values.get("username") or _prompt(
         context, "Username: ", secret=False
     )
     password = _prompt(context, "Password: ", secret=True)
-    store = ProfileStore()
-    previous_profile = _existing_profile(store, profile_name, service_url)
     response = HttpTransport(
         service_url,
         verify_tls=True,
@@ -360,14 +360,19 @@ def _require_interactive(context: CommandContext) -> None:
 def _existing_profile(
     store: ProfileStore, profile_name: str, service_url: str
 ) -> ConnectionProfile | None:
-    """Reuse only a same-service cookie so the server can revoke it at re-login."""
+    """Return a same-service profile or reject an unacknowledged service replacement."""
     try:
         profile = store.load(profile_name)
     except CliError as error:
         if error.code == "profile_not_found":
             return None
         raise
-    return profile if profile.service_url == service_url else None
+    if profile.service_url != service_url:
+        raise CliError(
+            "profile_service_mismatch",
+            "The selected profile belongs to a different service.",
+        )
+    return profile
 
 
 def _profile_cookie_name(profile: ConnectionProfile) -> str:

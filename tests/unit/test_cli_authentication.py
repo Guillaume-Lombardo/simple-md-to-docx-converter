@@ -42,7 +42,11 @@ def _login_response(*, renewal: bool = False) -> ApiResponse:
 
 def test_login_prompts_without_echo_and_persists_only_session(mocker, capsys) -> None:
     """Login has no password argument and only saves returned opaque state."""
-    store = mocker.Mock()
+    store = mocker.Mock(
+        load=mocker.Mock(
+            side_effect=authentication.CliError("profile_not_found", "missing")
+        )
+    )
     transport = mocker.Mock(login=mocker.Mock(return_value=_login_response()))
     mocker.patch.object(authentication, "ProfileStore", return_value=store)
     mocker.patch.object(authentication, "HttpTransport", return_value=transport)
@@ -138,16 +142,16 @@ def test_relogin_reuses_only_the_same_service_profile(mocker) -> None:
     assert transport.login.call_args.kwargs == {"previous_profile": _profile()}
 
 
-def test_relogin_to_a_different_service_never_sends_or_overwrites_old_state(
-    mocker,
+def test_relogin_to_a_different_service_preserves_the_existing_profile(
+    mocker, capsys
 ) -> None:
-    """A same-named profile is only reusable when its canonical service matches."""
+    """A named profile cannot silently orphan a session at another service."""
     old_profile = _profile()
     store = mocker.Mock(load=mocker.Mock(return_value=old_profile))
     transport = mocker.Mock(login=mocker.Mock(return_value=_login_response()))
     mocker.patch.object(authentication, "ProfileStore", return_value=store)
     mocker.patch.object(authentication, "HttpTransport", return_value=transport)
-    mocker.patch.object(authentication.getpass, "getpass", return_value="password")
+    prompt = mocker.patch.object(authentication.getpass, "getpass")
 
     assert (
         main(
@@ -159,10 +163,15 @@ def test_relogin_to_a_different_service_never_sends_or_overwrites_old_state(
                 "alice",
             )
         )
-        == 0
+        == 1
     )
-    assert transport.login.call_args.kwargs == {"previous_profile": None}
-    assert store.save.call_args.args[0].service_url == "https://other.example"
+    assert capsys.readouterr().err == (
+        "error: The selected profile belongs to a different service.\n"
+    )
+    prompt.assert_not_called()
+    transport.login.assert_not_called()
+    store.save.assert_not_called()
+    assert store.load("default") == old_profile
 
 
 def test_login_save_failure_revokes_the_unpersisted_remote_session(
