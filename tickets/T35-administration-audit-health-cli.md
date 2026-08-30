@@ -2,7 +2,7 @@
 ticket: T35
 linear_id: G1L-411
 linear_url: https://linear.app/g1lom/issue/G1L-411/t35-add-administration-audit-and-health-cli-commands
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -43,10 +43,11 @@ Expose user administration, audit inspection, service health, readiness, and met
 * 2026-08-30: Integrated T33 from `main` at `fd816c87fe0977e4a6d667b88fece722e21f2cf2` with a normal merge. Wired the administration pilot exactly once after the shared and T33 CLI pilots, removed only the obsolete T35 root-placeholder assertions, and retained every existing T33, T34, and T45 workflow. Ruff, `ty`, 44 focused tests, the 95% administration-module branch coverage check, shell syntax validation, and complete standalone and distributed final-image workflows pass on image `3236b904e22b254acd9a1f3d295692f7516f2f42e8ca42cbe2332d380b31ace3`. After validation, merged the ticket-only T53 and T33-completion advances through current `main` at `daabb2314cff3f536cdedcfa004d02983c02e3f9`; they do not invalidate the executable evidence. The ticket remains In Progress until the change is reviewed, merged, and verified on `main`.
 * 2026-08-30: Closed the readiness-review gap by running the CLI `expect-readiness-failure` mode inside the real shared 503 window: after standalone storage access is removed or distributed RustFS is stopped, and before either dependency is restored. The existing HTTP readiness/liveness probes, distributed PostgreSQL failure proof, and recovery sequence remain intact. Wiring-policy tests enforce both healthy and failed-mode placement. Ruff, `ty`, 44 focused tests, shell syntax validation, and both complete final-image profiles pass again on the exact image `3236b904e22b254acd9a1f3d295692f7516f2f42e8ca42cbe2332d380b31ace3`.
 * 2026-08-30: Reconciled CI run `33337219082`: its light job ran 1,859 tests successfully but reported 89.58% application branch coverage, while the standalone E2E job stopped before product code on a TLS connection reset from `raw.githubusercontent.com`; distributed E2E, functional, both storage profiles, and document engines were green. Added behavioral coverage of the administration HTTP boundary and malformed responses, escaped every remote user/audit string rendered in human output (`id`, `username`, `role`, `created_at`, `operation`, `target_type`, and `target_id`) while preserving JSON, and now distinguish insecure `getpass.GetPassWarning` terminals from exhausted `EOFError` input. The exact light command `uv run pytest -m unit` passes 1,865 tests with 90.13% application branch coverage (2,300/2,552); focused Ruff and `ty` checks pass. Final-image workflows were not rerun because no runtime or runner changed.
+* 2026-08-30: Delivered by squash merge in PR #134 as `5fe369f4f4c37d83954750260c05a373b73c8c5f`. The exact merge commit passed the complete CI matrix, including light checks, document engines, functional tests, standalone and distributed storage, standalone and distributed final-image E2E, and the required gate in run `33338839622`.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
