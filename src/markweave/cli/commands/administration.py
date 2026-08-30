@@ -550,8 +550,10 @@ def _audit_record(value: Any) -> dict[str, Any]:
 def _human_user(user: Mapping[str, Any]) -> str:
     active = "active" if user["active"] else "inactive"
     renewal = "renewal-required" if user["password_change_required"] else "current"
+    identifier = _human_text(user["id"])
     username = _human_text(user["username"])
-    return f"{user['id']}\t{username}\t{user['role']}\t{active}\t{renewal}"
+    role = _human_text(user["role"])
+    return f"{identifier}\t{username}\t{role}\t{active}\t{renewal}"
 
 
 def _human_text(value: Any) -> str:
@@ -564,8 +566,10 @@ def _human_text(value: Any) -> str:
 def _human_audit(record: Mapping[str, Any]) -> str:
     intervention = "admin" if record["administrator_intervention"] else "owner"
     return (
-        f"{record['created_at']}\t{record['operation']}\t{record['target_type']}\t"
-        f"{record['target_id']}\t{intervention}"
+        f"{_human_text(record['created_at'])}\t"
+        f"{_human_text(record['operation'])}\t"
+        f"{_human_text(record['target_type'])}\t"
+        f"{_human_text(record['target_id'])}\t{intervention}"
     )
 
 
@@ -605,7 +609,11 @@ def _prompt(context: CommandContext, prompt: str, *, secret: bool) -> str:
                 sys.stderr.write(prompt)
                 sys.stderr.flush()
                 value = sys.stdin.readline().rstrip("\r\n")
-    except (EOFError, getpass.GetPassWarning) as error:
+    except getpass.GetPassWarning as error:
+        raise CliError(
+            "interactive_tty_required", "A secure interactive terminal is required."
+        ) from error
+    except EOFError as error:
         raise CliError("input_required", "A non-empty value is required.") from error
     if not value:
         raise CliError("input_required", "A non-empty value is required.")

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from email.message import Message
 from io import BytesIO, StringIO
 from typing import Any, cast
+from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 import pytest
@@ -108,6 +110,30 @@ def test_remote_usernames_are_escaped_in_every_human_output_but_not_json(
         rendered = capsys.readouterr().out
         assert escaped in rendered and expected in rendered
         assert "\x1b" not in rendered
+
+
+def test_all_remote_user_fields_are_escaped_in_human_output_but_not_json(
+    remote, capsys
+) -> None:
+    _store, _constructor, client = remote
+    hostile_id = "id\tforged"
+    hostile_role = "admin\n\x1b[31mforged"
+    payload = _user(identifier=hostile_id)
+    payload["role"] = hostile_role
+
+    client.request.return_value = _response(200, [payload])
+    assert main(("users", "list")) == 0
+    rendered = capsys.readouterr().out
+    assert rendered == (
+        "id\\tforged\talice\tadmin\\n\\u001b[31mforged\tactive\tcurrent\n"
+    )
+    assert "\x1b" not in rendered
+
+    client.request.return_value = _response(200, [payload])
+    assert main(("--json", "users", "list")) == 0
+    rendered_json = json.loads(capsys.readouterr().out)["users"][0]
+    assert rendered_json["id"] == hostile_id
+    assert rendered_json["role"] == hostile_role
 
 
 def test_created_remote_username_is_escaped_in_human_output(
@@ -306,6 +332,41 @@ def test_audit_pagination_and_json_output_are_exact(remote, capsys) -> None:
     )
 
 
+def test_all_remote_audit_fields_are_escaped_in_human_output_but_not_json(
+    remote, capsys
+) -> None:
+    _store, _constructor, client = remote
+    record = {
+        "id": "audit-id",
+        "actor_id": ADMIN_ID,
+        "owner_id": ALICE_ID,
+        "operation": "user\tdeactivated",
+        "target_id": "target\nforged",
+        "target_type": "user\r\x1b[31m",
+        "target_version": None,
+        "version_id": None,
+        "administrator_intervention": False,
+        "created_at": "2026-08-30T12:00:00Z\nforged",
+    }
+    client.request.return_value = _response(200, [record])
+
+    assert main(("audit",)) == 0
+    rendered = capsys.readouterr().out
+    assert rendered == (
+        "2026-08-30T12:00:00Z\\nforged\tuser\\tdeactivated\t"
+        "user\\r\\u001b[31m\ttarget\\nforged\towner\n"
+    )
+    assert "\x1b" not in rendered
+
+    client.request.return_value = _response(200, [record])
+    assert main(("--json", "audit")) == 0
+    rendered_json = json.loads(capsys.readouterr().out)["items"][0]
+    assert rendered_json["created_at"] == record["created_at"]
+    assert rendered_json["operation"] == record["operation"]
+    assert rendered_json["target_type"] == record["target_type"]
+    assert rendered_json["target_id"] == record["target_id"]
+
+
 def test_health_url_is_public_and_metrics_support_human_and_json(
     remote, capsys
 ) -> None:
@@ -435,8 +496,16 @@ def test_prompt_and_confirmation_boundaries_are_explicit(mocker, monkeypatch) ->
     assert administration._prompt(context, "Secret: ", secret=True) == "secret"
     getpass.assert_called_once_with("Secret: ")
     getpass.side_effect = administration.getpass.GetPassWarning("unsafe")
-    with pytest.raises(administration.CliError, match="non-empty value"):
+    with pytest.raises(administration.CliError) as insecure:
         administration._prompt(context, "Secret: ", secret=True)
+    assert insecure.value.code == "interactive_tty_required"
+    assert insecure.value.message == "A secure interactive terminal is required."
+
+    getpass.side_effect = EOFError
+    with pytest.raises(administration.CliError) as exhausted:
+        administration._prompt(context, "Secret: ", secret=True)
+    assert exhausted.value.code == "input_required"
+    assert exhausted.value.message == "A non-empty value is required."
 
     mocker.patch.object(administration, "_prompt", return_value="no")
     with pytest.raises(administration.CliError, match="cancelled"):
@@ -457,6 +526,41 @@ def test_response_and_argument_validation_failure_branches_are_safe() -> None:
         )
     with pytest.raises(administration.CliError, match="invalid response"):
         administration._decode_response(200, cast(Any, BytesIO(b"\xff")))
+    assert administration._decode_response(204, cast(Any, BytesIO(b""))) == _response(
+        204, None, ""
+    )
+    assert administration._decode_response(
+        502, cast(Any, BytesIO(b"not-json"))
+    ) == _response(502, None, "not-json")
+
+    invalid_audit_records = (
+        "not-an-object",
+        {"id": "missing-fields"},
+        {
+            "id": "audit-id",
+            "actor_id": ADMIN_ID,
+            "owner_id": ALICE_ID,
+            "operation": "created",
+            "target_id": ALICE_ID,
+            "target_type": "user",
+            "created_at": "2026-08-30T12:00:00Z",
+            "administrator_intervention": "yes",
+        },
+        {
+            "id": "audit-id",
+            "actor_id": ADMIN_ID,
+            "owner_id": ALICE_ID,
+            "operation": "created",
+            "target_id": ALICE_ID,
+            "target_type": "user",
+            "created_at": "2026-08-30T12:00:00Z",
+            "administrator_intervention": True,
+            "target_version": 1,
+        },
+    )
+    for record in invalid_audit_records:
+        with pytest.raises(administration.CliError, match="invalid response"):
+            administration._audit_record(record)
 
     with pytest.raises(administration.CliError, match="invalid"):
         administration._string(administration._Command("test"), "missing")
@@ -468,3 +572,108 @@ def test_response_and_argument_validation_failure_branches_are_safe() -> None:
         administration._nonnegative("-1")
     with pytest.raises(argparse.ArgumentTypeError, match="between 1 and 100"):
         administration._audit_limit("101")
+
+
+def test_administration_client_sends_profile_csrf_and_json_body(mocker) -> None:
+    response = mocker.Mock(status=200)
+    response.read.return_value = b'{"status":"ok"}'
+    opener = mocker.Mock()
+    opener.open.return_value = response
+    build_opener = mocker.patch.object(
+        administration, "build_opener", return_value=opener
+    )
+    context = mocker.patch.object(
+        administration.ssl, "create_default_context", return_value=mocker.sentinel.tls
+    )
+    client = administration._AdministrationClient(
+        "https://converter.example", timeout=2.5
+    )
+
+    result = client.request(
+        "PATCH",
+        "/api/v1/admin/users/id",
+        profile=_profile(),
+        csrf=True,
+        body={"active": False},
+    )
+
+    assert result == _response(200, {"status": "ok"}, '{"status":"ok"}')
+    request = opener.open.call_args.args[0]
+    assert request.full_url == "https://converter.example/api/v1/admin/users/id"
+    assert request.method == "PATCH"
+    assert request.data == b'{"active":false}'
+    assert dict(request.header_items()) == {
+        "Accept": "application/json",
+        "Content-type": "application/json",
+        "Cookie": "md_converter_session=opaque",
+        "X-csrf-token": "csrf-opaque",
+    }
+    opener.open.assert_called_once_with(request, timeout=2.5)
+    context.assert_called_once_with()
+    assert len(build_opener.call_args.args) == 2
+    response.close.assert_called_once_with()
+
+
+def test_administration_client_omits_csrf_without_mutation(mocker) -> None:
+    response = mocker.Mock(status=204)
+    response.read.return_value = b""
+    opener = mocker.Mock()
+    opener.open.return_value = response
+    mocker.patch.object(administration, "build_opener", return_value=opener)
+    mocker.patch.object(administration.ssl, "create_default_context")
+    client = administration._AdministrationClient(
+        "https://converter.example", timeout=None
+    )
+
+    assert client.request("GET", "/api/v1/audit", profile=_profile()) == _response(
+        204, None, ""
+    )
+    request = opener.open.call_args.args[0]
+    assert request.get_header("Cookie") == "md_converter_session=opaque"
+    assert request.get_header("X-csrf-token") is None
+    assert request.data is None
+
+
+def test_administration_client_disables_http_proxy_and_returns_http_error(
+    mocker,
+) -> None:
+    error = HTTPError(
+        "http://127.0.0.1:8000/health/ready",
+        503,
+        "Unavailable",
+        Message(),
+        BytesIO(b'{"error":{"code":"NOT_READY","message":"not ready"}}'),
+    )
+    opener = mocker.Mock()
+    opener.open.side_effect = error
+    build_opener = mocker.patch.object(
+        administration, "build_opener", return_value=opener
+    )
+    mocker.patch.object(administration.ssl, "create_default_context")
+    client = administration._AdministrationClient("http://127.0.0.1:8000", timeout=None)
+
+    result = client.request("GET", "/health/ready")
+
+    assert result.status == 503
+    assert result.payload["error"]["code"] == "NOT_READY"
+    assert any(
+        isinstance(handler, administration.ProxyHandler)
+        for handler in build_opener.call_args.args
+    )
+    assert error.fp.closed
+
+
+def test_administration_client_maps_url_errors_to_sanitized_cli_error(mocker) -> None:
+    opener = mocker.Mock()
+    opener.open.side_effect = URLError("private transport detail")
+    mocker.patch.object(administration, "build_opener", return_value=opener)
+    mocker.patch.object(administration.ssl, "create_default_context")
+    client = administration._AdministrationClient(
+        "https://converter.example", timeout=None
+    )
+
+    with pytest.raises(administration.CliError) as raised:
+        client.request("GET", "/health/live")
+
+    assert raised.value.code == "network_error"
+    assert raised.value.message == "The service could not be reached."
