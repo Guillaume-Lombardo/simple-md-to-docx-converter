@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from markweave.cli.commands.recovery import (
     _distributed_configuration,
     _environment_name,
     _secret_environment,
+    load_and_verify_manifest,
 )
 from markweave.cli.main import main
 from markweave.cli.types import ExitCode
@@ -29,6 +31,105 @@ from markweave.recovery_manifest import (
 from markweave.recovery_service import RestoreResult
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--json", "--non-interactive", "backup"),
+        (
+            "--json",
+            "--non-interactive",
+            "restore",
+            "--profile",
+            "standalone",
+            "--source",
+            "/recovery-set",
+            "--offline-proof",
+            "test-window",
+            "--yes",
+        ),
+    ),
+)
+def test_base_recovery_commands_report_required_server_extra(
+    arguments: tuple[str, ...], mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mocker.patch("markweave.cli.commands.recovery.find_spec", return_value=None)
+
+    assert main(arguments) is ExitCode.FAILURE
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"optional_dependency_missing",'
+        '"message":"Recovery commands require server dependencies; '
+        "install 'markweave[server]'." + '"}}\n',
+    )
+
+
+def test_unexpected_recovery_import_failure_is_not_reclassified(
+    mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mocker.patch(
+        "markweave.cli.commands.recovery._backup",
+        side_effect=ModuleNotFoundError("unexpected internal import"),
+    )
+    imported = mocker.patch("builtins.__import__", wraps=__import__)
+
+    assert main(("--json", "--non-interactive", "backup")) is ExitCode.FAILURE
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"internal_error","message":"An internal error occurred."}}\n',
+    )
+    assert all(
+        call.args[0] != "markweave.recovery_manifest"
+        for call in imported.call_args_list
+    )
+
+
+@pytest.mark.parametrize("missing_module", ("boto3", "botocore", "psycopg"))
+def test_distributed_recovery_reports_required_profile_extra(
+    missing_module: str,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def available(module: str):
+        return None if module == missing_module else ModuleSpec(module, loader=None)
+
+    mocker.patch("markweave.cli.commands.recovery.find_spec", side_effect=available)
+
+    assert (
+        main(
+            (
+                "--json",
+                "--non-interactive",
+                "backup",
+                "--profile",
+                "distributed",
+                "--destination",
+                str(tmp_path.resolve()),
+            )
+        )
+        is ExitCode.FAILURE
+    )
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"optional_dependency_missing",'
+        '"message":"Distributed recovery requires distributed dependencies; '
+        "install 'markweave[distributed]'." + '"}}\n',
+    )
+
+
+def test_manifest_verification_dependency_loads_only_for_restore(
+    tmp_path: Path, mocker
+) -> None:
+    verify = mocker.patch(
+        "markweave.recovery_manifest.load_and_verify_manifest",
+        return_value=mocker.sentinel.manifest,
+    )
+    source = tmp_path / "recovery-set"
+
+    assert load_and_verify_manifest(source) is mocker.sentinel.manifest
+    verify.assert_called_once_with(source)
 
 
 def test_backup_requires_explicit_coherent_profile_configuration(

@@ -9,24 +9,22 @@ import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
+from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from markweave.cli.errors import CliError, unavailable
 from markweave.cli.output import OutputWriter
 from markweave.cli.types import CommandContext
-from markweave.config import StorageProfile
-from markweave.recovery import (
-    RECOVERY_TARGETS,
-    FilesystemRestoreReportStore,
-    RestoreExerciseRunner,
-)
-from markweave.recovery_manifest import RecoveryError, load_and_verify_manifest
 
 if TYPE_CHECKING:
+    from markweave.config import StorageProfile
     from markweave.recovery_adapters import S3Configuration
 
 _ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
+_STORAGE_PROFILES = ("standalone", "distributed")
+_RECOVERY_SERVER_MODULES = ("pydantic", "pydantic_settings")
+_RECOVERY_DISTRIBUTED_MODULES = ("boto3", "botocore", "psycopg")
 CONTROL_CHARACTER_LIMIT = 32
 
 
@@ -56,13 +54,38 @@ class _Invocation:
     def __call__(
         self, context: CommandContext, writer: OutputWriter, _command: str
     ) -> None:
+        _require_recovery_backend(self.values["profile"])
         try:
             if self.operation == "backup":
                 _backup(context, writer, self.values)
             else:
                 _restore(context, writer, self.values)
-        except RecoveryError as error:
+        except ModuleNotFoundError:
+            raise
+        except Exception as error:
+            from markweave.recovery_manifest import RecoveryError  # noqa: PLC0415
+
+            if not isinstance(error, RecoveryError):
+                raise
             raise CliError("recovery_failed", str(error)) from None
+
+
+def _require_recovery_backend(profile: str | None) -> None:
+    """Fail precisely before importing recovery modules from a base-only install."""
+    if any(find_spec(module) is None for module in _RECOVERY_SERVER_MODULES):
+        raise CliError(
+            "optional_dependency_missing",
+            "Recovery commands require server dependencies; "
+            "install 'markweave[server]'.",
+        )
+    if profile == "distributed" and any(
+        find_spec(module) is None for module in _RECOVERY_DISTRIBUTED_MODULES
+    ):
+        raise CliError(
+            "optional_dependency_missing",
+            "Distributed recovery requires distributed dependencies; "
+            "install 'markweave[distributed]'.",
+        )
 
 
 class _BoundStore(argparse.Action):
@@ -155,8 +178,7 @@ def _profile_arguments(
     parser.add_argument(
         "--profile",
         required=required,
-        choices=tuple(StorageProfile),
-        type=StorageProfile,
+        choices=_STORAGE_PROFILES,
         action=_BoundStore,
         invocation=invocation,
     )
@@ -201,6 +223,7 @@ def _profile_arguments(
 def _backup(
     context: CommandContext, writer: OutputWriter, values: dict[str, Any]
 ) -> None:
+    from markweave.recovery import RECOVERY_TARGETS  # noqa: PLC0415
     from markweave.recovery_service import (  # noqa: PLC0415 - optional CLI backend
         BackupRequest,
         RecoveryService,
@@ -209,8 +232,8 @@ def _backup(
     if values["profile"] is None and values["destination"] is None:
         raise unavailable("backup")
     if values["profile"] is None or values["destination"] is None:
-        raise RecoveryError("Backup profile and destination are required")
-    profile: StorageProfile = values["profile"]
+        raise _recovery_error("Backup profile and destination are required")
+    profile = _storage_profile(values["profile"])
     timeout = context.timeout_seconds or RECOVERY_TARGETS[profile].rto_seconds
     database_url, s3 = _distributed_configuration(profile, values)
     manifest = RecoveryService().backup(
@@ -240,27 +263,32 @@ def _backup(
 def _restore(
     context: CommandContext, writer: OutputWriter, values: dict[str, Any]
 ) -> None:
+    from markweave.recovery import (  # noqa: PLC0415
+        RECOVERY_TARGETS,
+        FilesystemRestoreReportStore,
+        RestoreExerciseRunner,
+    )
     from markweave.recovery_service import (  # noqa: PLC0415 - optional CLI backend
         RecoveryService,
         RestoreRequest,
     )
 
-    profile: StorageProfile = values["profile"]
+    profile = _storage_profile(values["profile"])
     source = _absolute(values["source"], "Recovery source")
     manifest = load_and_verify_manifest(source)
     if not values["confirmed"]:
         if context.non_interactive:
-            raise RecoveryError("Non-interactive restore requires --yes")
+            raise _recovery_error("Non-interactive restore requires --yes")
         sys.stderr.write(f"Type backup identity {manifest.backup_id} to continue: ")
         sys.stderr.flush()
         if sys.stdin.readline().strip() != manifest.backup_id:
-            raise RecoveryError(
+            raise _recovery_error(
                 "Restore confirmation did not match the backup identity"
             )
     report_directory = values["report_directory"]
     evidence_id = values["evidence_id"]
     if (report_directory is None) != (evidence_id is None):
-        raise RecoveryError(
+        raise _recovery_error(
             "Exercise report directory and evidence identity are required together"
         )
     timeout = context.timeout_seconds or RECOVERY_TARGETS[profile].rto_seconds
@@ -300,11 +328,11 @@ def _restore(
             restore=perform,
         )
         if not captured:
-            raise RecoveryError("Restore exercise did not produce readiness evidence")
+            raise _recovery_error("Restore exercise did not produce readiness evidence")
         result = captured[0]
         targets_met = report.targets_met
         if not report.targets_met:
-            raise RecoveryError("Restore exercise did not meet its recovery targets")
+            raise _recovery_error("Restore exercise did not meet its recovery targets")
     writer.success(
         f"Backup {result.backup_id} restored and verified.",
         {
@@ -320,6 +348,7 @@ def _restore(
 def _distributed_configuration(
     profile: StorageProfile, values: dict[str, Any]
 ) -> tuple[str | None, S3Configuration | None]:
+    from markweave.config import StorageProfile  # noqa: PLC0415
     from markweave.recovery_adapters import (  # noqa: PLC0415 - optional CLI backend
         S3Configuration,
     )
@@ -334,19 +363,21 @@ def _distributed_configuration(
     )
     if profile is StorageProfile.STANDALONE:
         if any(value is not None for value in distributed_values):
-            raise RecoveryError("Standalone recovery cannot use distributed settings")
+            raise _recovery_error("Standalone recovery cannot use distributed settings")
         return None, None
     database_environment = values["database_url_environment"]
     bucket = values["s3_bucket"]
     if database_environment is None or bucket is None:
-        raise RecoveryError("Distributed recovery settings are incomplete")
+        raise _recovery_error("Distributed recovery settings are incomplete")
     database_url = _secret_environment(database_environment)
     if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
-        raise RecoveryError("Distributed recovery requires PostgreSQL")
+        raise _recovery_error("Distributed recovery requires PostgreSQL")
     access_environment = values["s3_access_key_environment"]
     secret_environment = values["s3_secret_key_environment"]
     if (access_environment is None) != (secret_environment is None):
-        raise RecoveryError("S3 credential environment names must be supplied together")
+        raise _recovery_error(
+            "S3 credential environment names must be supplied together"
+        )
     access_key = _secret_environment(access_environment) if access_environment else None
     secret_key = _secret_environment(secret_environment) if secret_environment else None
     return database_url, S3Configuration(
@@ -365,7 +396,7 @@ def _secret_environment(name: str) -> str:
         or not value
         or any(ord(character) < CONTROL_CHARACTER_LIMIT for character in value)
     ):
-        raise RecoveryError("A required recovery environment value is unavailable")
+        raise _recovery_error("A required recovery environment value is unavailable")
     return value
 
 
@@ -377,7 +408,7 @@ def _environment_name(value: str) -> str:
 
 def _absolute(path: Path, label: str) -> Path:
     if not path.is_absolute():
-        raise RecoveryError(f"{label} must be absolute")
+        raise _recovery_error(f"{label} must be absolute")
     return path
 
 
@@ -389,3 +420,26 @@ def manifest_created_at(value: str):
     """Parse the already authenticated manifest timestamp."""
 
     return datetime.fromisoformat(value)
+
+
+def load_and_verify_manifest(source: Path) -> Any:
+    """Verify a recovery set only after the restore command is selected."""
+    from markweave.recovery_manifest import (  # noqa: PLC0415
+        load_and_verify_manifest as verify,
+    )
+
+    return verify(source)
+
+
+def _storage_profile(value: object) -> StorageProfile:
+    """Resolve the server-side profile only after a recovery command is selected."""
+    from markweave.config import StorageProfile  # noqa: PLC0415
+
+    return StorageProfile(value)
+
+
+def _recovery_error(message: str) -> Exception:
+    """Construct the recovery-domain error without importing it for remote commands."""
+    from markweave.recovery_manifest import RecoveryError  # noqa: PLC0415
+
+    return RecoveryError(message)

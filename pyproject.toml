@@ -6,21 +6,38 @@ build-backend = "hatchling.build"
 name = "markweave"
 # A version change merged to main is the sole automatic publication trigger.
 version = "0.4.0"
-description = "A service for converting Markdown documents to DOCX and PDF"
+description = "Secure Markdown-to-DOCX and PDF conversion service and HTTP CLI"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
-dependencies = [
+authors = [{ name = "Guillaume Lombardo", email = "lombardo.guillaume@gmail.com" }]
+maintainers = [
+    { name = "Guillaume Lombardo", email = "lombardo.guillaume@gmail.com" },
+]
+keywords = ["cli", "conversion", "docx", "markdown", "pdf"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Text Processing :: Markup",
+]
+dependencies = []
+
+[project.optional-dependencies]
+server = [
     "alembic>=1.16,<2",
     "argon2-cffi>=25.1,<26",
-    "boto3>=1.40,<2",
     "cairosvg>=2.8,<3",
     "fastapi>=0.116,<1",
     "markdown-it-py>=4,<5",
     "mdit-py-plugins>=0.5,<0.7",
     "pillow>=12,<13",
-    "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.10,<3",
     "pypdf>=6.16.2,<7",
     "python-multipart>=0.0.20,<1",
@@ -29,19 +46,29 @@ dependencies = [
     "tinycss2>=1.5,<2",
     "uvicorn>=0.35,<1",
 ]
+standalone = ["markweave[server]"]
+distributed = [
+    "markweave[server]",
+    "boto3>=1.40,<2",
+    "psycopg[binary]>=3.2,<4",
+]
+all = ["markweave[standalone,distributed]"]
 
 [project.scripts]
 markweave = "markweave.cli.main:main"
 
 [project.urls]
-Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter#readme"
+Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/python-distribution.md"
 Issues = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues"
 Repository = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"
+Source = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter"
+Support = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/discussions"
 
 [dependency-groups]
 build = ["hatchling==1.32.0"]
 dev = [
     "httpx>=0.28,<1",
+    "markweave[all]",
     "mutmut==3.7.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",

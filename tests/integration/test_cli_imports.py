@@ -22,9 +22,39 @@ for arguments in (("--version",), ("--help",)):
     except SystemExit as error:
         if error.code != 0:
             raise
-for forbidden in ("markweave.app", "boto3", "sqlalchemy", "fastapi"):
+for forbidden in (
+    "markweave.app",
+    "markweave.config",
+    "markweave.recovery",
+    "markweave.recovery_manifest",
+    "boto3",
+    "botocore",
+    "pydantic",
+    "psycopg",
+    "sqlalchemy",
+    "fastapi",
+):
     if forbidden in sys.modules:
         raise SystemExit(f"unexpected eager import: {forbidden}")
+"""
+    result = subprocess.run(
+        (sys.executable, "-I", "-c", script),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_standalone_recovery_imports_do_not_load_s3_dependencies() -> None:
+    """The shared SQLite recovery path remains importable without the S3 SDK."""
+    script = """
+import sys
+import markweave.recovery_adapters
+import markweave.recovery_service
+for forbidden in ("boto3", "botocore"):
+    if forbidden in sys.modules:
+        raise SystemExit(f"unexpected eager S3 import: {forbidden}")
 """
     result = subprocess.run(
         (sys.executable, "-I", "-c", script),

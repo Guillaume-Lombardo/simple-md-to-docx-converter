@@ -5,14 +5,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from threading import Event, Lock
 from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-import boto3
-from botocore.config import Config
 from fastapi import (
     Depends,
     FastAPI,
@@ -50,7 +49,12 @@ from markweave.auth.service import (
     SecurityRuntime,
     SessionPolicy,
 )
-from markweave.config import MalwareScanningMode, Settings, StorageProfile
+from markweave.config import (
+    ConfigurationError,
+    MalwareScanningMode,
+    Settings,
+    StorageProfile,
+)
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -926,6 +930,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         object_store: ObjectStore = FilesystemObjectStore(data_directory)
         object_readiness: ReadinessProbe = FilesystemObjectStore(data_directory)
     else:
+        boto3, config_class = _load_distributed_dependencies()
         database_secret = settings.distributed_database_url
         bucket = settings.s3_bucket
         if database_secret is None or bucket is None:
@@ -948,7 +953,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         object_store = S3ObjectStore(boto3.client("s3", **client_options), bucket)
         readiness_client_options = {
             **client_options,
-            "config": Config(
+            "config": config_class(
                 connect_timeout=settings.readiness_timeout_seconds,
                 read_timeout=settings.readiness_timeout_seconds,
                 retries={"max_attempts": 0},
@@ -1057,6 +1062,27 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         )
         pending_engines.pop_all()
         return components
+
+
+def _load_distributed_dependencies() -> tuple[Any, type[Any]]:
+    """Load distributed-only clients after the selected profile is known."""
+
+    try:
+        import_module("psycopg")
+    except ModuleNotFoundError:
+        raise ConfigurationError(
+            "PostgreSQL storage requires the 'distributed' extra; "
+            "install 'markweave[distributed]'."
+        ) from None
+    try:
+        boto3 = import_module("boto3")
+        config_class = import_module("botocore.config").Config
+    except ModuleNotFoundError:
+        raise ConfigurationError(
+            "S3 object storage requires the 'distributed' extra; "
+            "install 'markweave[distributed]'."
+        ) from None
+    return boto3, config_class
 
 
 def create_app(  # noqa: PLR0913, PLR0915 - explicit lifecycle and route composition
