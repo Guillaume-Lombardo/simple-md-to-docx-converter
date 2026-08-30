@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -21,14 +22,24 @@ def _driver_module():
     return module
 
 
-def test_template_cli_e2e_uses_profile_specific_admin_state() -> None:
+@pytest.mark.parametrize("profile", ("standalone", "distributed"))
+def test_template_cli_e2e_uses_profile_specific_admin_state(
+    profile: str, mocker, capsys
+) -> None:
     driver = _driver_module()
+    container = f"markweave-{profile}"
+    pty = driver._exec_prefix(container, tty=True)
+    plain = driver._exec_prefix(container, tty=False)
+    run_pty = mocker.patch.object(driver, "_run_pty", return_value=(1, ""))
 
-    for profile in ("standalone", "distributed"):
-        plain = driver._exec_prefix(f"markweave-{profile}", tty=False)
-        assert plain[-1] == "/opt/md-converter/venv/bin/markweave"
-        assert "--tty" not in plain
-        assert f"template-admin-{profile}" != "default"
+    assert driver._template_workflow(container, profile, pty, plain) == 1
+    login_arguments = run_pty.call_args.args[0]
+    profile_option = login_arguments.index("--profile")
+    assert login_arguments[profile_option + 1] == f"template-admin-{profile}"
+    assert "XDG_STATE_HOME=/tmp/markweave-cli-state" in login_arguments
+    assert plain[-1] == "/opt/md-converter/venv/bin/markweave"
+    assert "--tty" not in plain
+    assert "template admin login" in capsys.readouterr().err
 
 
 def test_template_cli_e2e_declares_the_complete_activation_font_set() -> None:
@@ -46,22 +57,77 @@ def test_template_cli_e2e_declares_the_complete_activation_font_set() -> None:
     )
 
 
-def test_template_cli_e2e_never_places_the_admin_password_in_commands() -> None:
-    source = Path("tests/e2e/template_cli_workflow.py").read_text(encoding="utf-8")
-
-    assert '"--password"' not in source
-    assert '"Password: "' not in source
-    assert "_run_pty" in source
-
-
-def test_template_cli_e2e_sends_regular_user_credentials_only_over_stdin() -> None:
+def test_template_cli_e2e_sends_login_secret_only_through_pty(mocker) -> None:
     driver = _driver_module()
-    command = driver._user_setup_command("markweave-standalone")
+    sentinel = "sentinel-login-secret"
+    run_pty = mocker.patch.object(driver, "_run_pty", return_value=(0, ""))
 
-    assert "T34Owner-standalone-Fixture9!" not in "\0".join(command)
-    assert "T34Other-standalone-Fixture9!" not in "\0".join(command)
+    assert (
+        driver._login(
+            "markweave-standalone",
+            ["podman", "exec", "markweave-standalone", "markweave"],
+            username="fixture-owner",
+            password=sentinel,
+            profile="fixture-profile",
+            inspect_process=False,
+            stage="fixture login",
+        )
+        is None
+    )
+    arguments, prompted_secret = run_pty.call_args.args[:2]
+    assert sentinel not in "\0".join(arguments)
+    assert "env" not in run_pty.call_args.kwargs
+    assert prompted_secret == sentinel
+
+
+def test_template_cli_e2e_sends_regular_user_credentials_only_over_stdin(
+    mocker,
+) -> None:
+    driver = _driver_module()
+    owner_secret = "sentinel-owner-secret"  # noqa: S105 - non-secret test sentinel
+    other_secret = "sentinel-other-secret"  # noqa: S105 - non-secret test sentinel
+    run = mocker.patch.object(
+        driver.subprocess,
+        "run",
+        return_value=driver.subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    assert (
+        driver._setup_users(
+            "markweave-standalone",
+            "template-admin-standalone",
+            (("fixture-owner", owner_secret), ("fixture-other", other_secret)),
+        )
+        is None
+    )
+    command = run.call_args.args[0]
+    invocation = "\0".join(command)
+    payload = run.call_args.kwargs["input"]
+    assert owner_secret not in invocation
+    assert other_secret not in invocation
+    assert "env" not in run.call_args.kwargs
+    assert json.loads(payload)["users"] == [
+        {"username": "fixture-owner", "password": owner_secret},
+        {"username": "fixture-other", "password": other_secret},
+    ]
     assert "--interactive" in command
     assert "-c" in command
+
+
+@pytest.mark.parametrize("wrapper", ("_plain_command", "_json_command"))
+def test_template_cli_e2e_turns_command_timeout_into_staged_failure(
+    wrapper: str, mocker, capsys
+) -> None:
+    driver = _driver_module()
+    mocker.patch.object(
+        driver.subprocess,
+        "run",
+        side_effect=driver.subprocess.TimeoutExpired(["markweave"], 45),
+    )
+
+    command = getattr(driver, wrapper)
+    assert command(["markweave"], ["templates", "list"], "list") == 1
+    assert "CLI E2E failed at list: exit=124" in capsys.readouterr().err
 
 
 def test_template_cli_e2e_runs_after_browser_workflow_and_before_restart() -> None:

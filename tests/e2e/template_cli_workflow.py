@@ -566,13 +566,19 @@ def _user_setup_command(container: str) -> list[str]:
 def _run_captured(
     prefix: list[str], arguments: list[str]
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*prefix, "--json", *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=45,
-    )
+    command = [*prefix, "--json", *arguments]
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, "", "")
+    except OSError:
+        return subprocess.CompletedProcess(command, 126, "", "")
 
 
 def _plain_command(prefix: list[str], arguments: list[str], stage: str) -> int | None:
