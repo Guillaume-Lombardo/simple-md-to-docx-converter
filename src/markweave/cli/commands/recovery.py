@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 _ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _STORAGE_PROFILES = ("standalone", "distributed")
 _RECOVERY_SERVER_MODULES = ("pydantic", "pydantic_settings")
+_RECOVERY_DISTRIBUTED_MODULES = ("boto3", "botocore", "psycopg")
 CONTROL_CHARACTER_LIMIT = 32
 
 
@@ -53,7 +54,7 @@ class _Invocation:
     def __call__(
         self, context: CommandContext, writer: OutputWriter, _command: str
     ) -> None:
-        _require_recovery_backend()
+        _require_recovery_backend(self.values["profile"])
         try:
             if self.operation == "backup":
                 _backup(context, writer, self.values)
@@ -69,13 +70,21 @@ class _Invocation:
             raise CliError("recovery_failed", str(error)) from None
 
 
-def _require_recovery_backend() -> None:
+def _require_recovery_backend(profile: str | None) -> None:
     """Fail precisely before importing recovery modules from a base-only install."""
     if any(find_spec(module) is None for module in _RECOVERY_SERVER_MODULES):
         raise CliError(
             "optional_dependency_missing",
             "Recovery commands require server dependencies; "
             "install 'markweave[server]'.",
+        )
+    if profile == "distributed" and any(
+        find_spec(module) is None for module in _RECOVERY_DISTRIBUTED_MODULES
+    ):
+        raise CliError(
+            "optional_dependency_missing",
+            "Distributed recovery requires distributed dependencies; "
+            "install 'markweave[distributed]'.",
         )
 
 

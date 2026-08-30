@@ -98,6 +98,95 @@ for command in commands:
         )
 """
 
+STANDALONE_RECOVERY_CHECK = """\
+from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import find_spec
+from io import StringIO
+import json
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+for module in ("boto3", "botocore", "psycopg"):
+    if find_spec(module) is not None:
+        raise SystemExit(f"standalone install contains distributed dependency: {module}")
+
+from markweave.cli.main import main
+from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.sql import create_database_engine, standalone_database_url
+import markweave.recovery_adapters
+import markweave.recovery_service
+
+for module in ("boto3", "botocore"):
+    if module in sys.modules:
+        raise SystemExit(f"standalone recovery imported S3 dependency: {module}")
+
+root = Path.cwd() / "standalone-recovery-contract"
+data = root / "data"
+object_path = data / "objects" / "uploads" / str(uuid4()) / str(uuid4())
+object_path.parent.mkdir(parents=True)
+object_path.write_bytes(b"standalone-recovery-object")
+engine = create_database_engine(standalone_database_url(data))
+try:
+    upgrade_database(engine)
+finally:
+    engine.dispose()
+
+def invoke(command):
+    stdout, stderr = StringIO(), StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = main(command)
+    if result != 0 or stderr.getvalue():
+        raise SystemExit(
+            f"unexpected standalone recovery failure: {command!r} "
+            f"code={result!r} stdout={stdout.getvalue()!r} stderr={stderr.getvalue()!r}"
+        )
+    return json.loads(stdout.getvalue())
+
+backups = root / "backups"
+backup = invoke((
+    "--json", "--non-interactive", "backup",
+    "--profile", "standalone", "--destination", str(backups),
+    "--data-directory", str(data),
+))
+if backup.get("profile") != "standalone" or backup.get("status") != "created":
+    raise SystemExit(f"unexpected standalone backup output: {backup!r}")
+recovery_set = backups / backup["backup_id"]
+restored = root / "restored"
+restore = invoke((
+    "--json", "--non-interactive", "restore",
+    "--profile", "standalone", "--source", str(recovery_set),
+    "--data-directory", str(restored), "--offline-proof", "install-check", "--yes",
+))
+if restore.get("profile") != "standalone" or restore.get("status") != "verified":
+    raise SystemExit(f"unexpected standalone restore output: {restore!r}")
+if not (restored / "metadata.sqlite3").is_file():
+    raise SystemExit("standalone restore did not create the SQLite database")
+restored_objects = [path.read_bytes() for path in (restored / "objects").rglob("*") if path.is_file()]
+if restored_objects != [b"standalone-recovery-object"]:
+    raise SystemExit(f"standalone restore object mismatch: {restored_objects!r}")
+"""
+
+DISTRIBUTED_RECOVERY_CHECK = """\
+from markweave.recovery_adapters import (
+    RecoveryDeadline,
+    S3Configuration,
+    S3RecoveryAdapter,
+)
+
+adapter = S3RecoveryAdapter(
+    S3Configuration(
+        bucket="install-check",
+        endpoint_url="http://127.0.0.1:1",
+        region="us-east-1",
+        access_key_id="install-check",
+        secret_access_key="install-check",
+    ),
+    RecoveryDeadline.after(5),
+)
+adapter.close()
+"""
+
 BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg")
 
 
@@ -305,6 +394,20 @@ def verify_clean_install(
                     label=f"isolated {profile.name} optional dependency check",
                     timeout=IMPORT_TIMEOUT_SECONDS,
                 )
+                if profile.name == "standalone":
+                    run_command(
+                        (str(python), "-I", "-c", STANDALONE_RECOVERY_CHECK),
+                        cwd=root,
+                        label="standalone recovery success and S3 isolation check",
+                        timeout=CONSOLE_TIMEOUT_SECONDS,
+                    )
+                elif profile.name in {"distributed", "all"}:
+                    run_command(
+                        (str(python), "-I", "-c", DISTRIBUTED_RECOVERY_CHECK),
+                        cwd=root,
+                        label=f"{profile.name} recovery S3 dependency check",
+                        timeout=CONSOLE_TIMEOUT_SECONDS,
+                    )
             console = environment / "bin" / "markweave"
             for arguments, label in (
                 (

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from uuid import uuid4
 
@@ -81,6 +82,40 @@ def test_unexpected_recovery_import_failure_is_not_reclassified(
     assert all(
         call.args[0] != "markweave.recovery_manifest"
         for call in imported.call_args_list
+    )
+
+
+@pytest.mark.parametrize("missing_module", ("boto3", "botocore", "psycopg"))
+def test_distributed_recovery_reports_required_profile_extra(
+    missing_module: str,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def available(module: str):
+        return None if module == missing_module else ModuleSpec(module, loader=None)
+
+    mocker.patch("markweave.cli.commands.recovery.find_spec", side_effect=available)
+
+    assert (
+        main(
+            (
+                "--json",
+                "--non-interactive",
+                "backup",
+                "--profile",
+                "distributed",
+                "--destination",
+                str(tmp_path.resolve()),
+            )
+        )
+        is ExitCode.FAILURE
+    )
+    assert capsys.readouterr() == (
+        "",
+        '{"error":{"code":"optional_dependency_missing",'
+        '"message":"Distributed recovery requires distributed dependencies; '
+        "install 'markweave[distributed]'." + '"}}\n',
     )
 
 
