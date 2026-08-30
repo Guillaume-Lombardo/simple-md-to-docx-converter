@@ -2,7 +2,7 @@
 ticket: T39
 linear_id: G1L-417
 linear_url: https://linear.app/g1lom/issue/G1L-417/t39-migrate-configuration-to-markweave-names
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,7 @@ Adopt the Markweave brand for application configuration while preserving determi
 
 ## Progress
 
+* 2026-08-30: Completed in pull request #103 and squash-merged to `main` as `66a0cff8a85f9232e1af70362905713d4aa97544`. Ready CI run `33301806234` and exact-main CI run `33302570018` passed every implemented domain and final gate. Independent review and CodeRabbit approved the final compatibility bridge with no unresolved conversations.
 * 2026-08-30: Implemented the canonical `MARKWEAVE_*` environment surface with deprecated 0.x
   `MD_CONVERTER_*` aliases. Startup independently validates both aliases, compares typed canonical
   values (or exact raw secrets), and fails closed without values on conflicts. Updated Compose,
@@ -62,7 +63,7 @@ Adopt the Markweave brand for application configuration while preserving determi
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
