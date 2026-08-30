@@ -2,7 +2,7 @@
 ticket: T42
 linear_id: G1L-416
 linear_url: https://linear.app/g1lom/issue/G1L-416/t42-decompose-the-conversion-worker-orchestration
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,10 +36,12 @@ Split worker claim, heartbeat, processing, publication, cancellation, recovery, 
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized T42 after T43 and prohibited concurrent edits to persistence ports.
+* 2026-08-30: Implementation started on `refactor/T42-decompose-worker` from exact `main` SHA `c1cae3b6`. The work owns worker orchestration decomposition and focused tests while preserving finalized persistence ports, public contracts, and both embedded and external worker behavior.
+* 2026-08-30: Decomposed claim, heartbeat, execution, failure resolution, fenced publication, recovery, and cleanup into independently tested services while retaining `ConversionWorker` as the shared embedded/external composition root. Historical and focused worker tests pass, real SQLite/PostgreSQL/S3 integrations pass, both final-image recovery profiles pass, and changed worker modules retain 99–100% coverage. The full host suite reached 1,983 passes and 95.99% total coverage; 37 document-engine checks require the pinned final-image engines and one Argon2 timing median was load-sensitive. A baseline zero-byte E2E restart artifact was isolated outside T42 and synchronized separately as T52 / G1L-459.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
