@@ -53,7 +53,7 @@ def _has_release_heading(changelog: str, *, version: str) -> bool:
     """Return whether a real level-two Markdown heading names the release."""
     tokens = MARKDOWN.parse(changelog)
     for index, token in enumerate(tokens[:-1]):
-        if token.type != "heading_open" or token.tag != "h2":
+        if token.type != "heading_open" or token.tag != "h2" or token.level != 0:
             continue
         inline = tokens[index + 1]
         if inline.type != "inline":

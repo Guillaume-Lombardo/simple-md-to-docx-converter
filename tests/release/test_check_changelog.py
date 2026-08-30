@@ -53,6 +53,8 @@ def test_ignores_non_material_pyproject_changes() -> None:
             "lacks a dated entry",
         ),
         ("<!-- ## [0.5.0] - 2026-08-30 -->\n", "lacks a dated entry"),
+        ("> ## [0.5.0] - 2026-08-30\n", "lacks a dated entry"),
+        ("- ## [0.5.0] - 2026-08-30\n", "lacks a dated entry"),
     ],
 )
 def test_rejects_ambiguous_or_malformed_entries(changelog: str, message: str) -> None:
@@ -160,3 +162,8 @@ def test_upgrade_guide_exposes_explicit_stable_anchors() -> None:
 
     assert '<a id="upgrading"></a>' in guide
     assert '<a id="configuration-compatibility"></a>' in guide
+    assert "[Upgrade guide top](#upgrading)" in guide
+    assert (
+        "[Configuration compatibility during 0.x](#configuration-compatibility)"
+        in guide
+    )

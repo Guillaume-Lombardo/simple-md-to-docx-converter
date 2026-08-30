@@ -42,6 +42,7 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 * 2026-08-30: Added release-focused changelog history, deterministic upgrade and rollback guidance, canonical configuration migration guidance, and a tested fail-closed checker for dated material-version entries. Targeted documentation and checker tests, Ruff, and ty passed; repository-wide suites still require unavailable external engines and services.
 * 2026-08-30: Independent review clarified that automatic enforcement is inherent in the checker acceptance criterion. T47 therefore owns the minimal release detect-job hook and its policy tests; publication and mutation logic remain out of scope.
 * 2026-08-30: Review corrections added the automatic hook before remote release checks, real-Git boundary coverage, Markdown/date fail-closed parsing, explicit upgrade anchors, accurate T39 equal-alias guidance, and updated changelog history. Targeted checker, Git integration, workflow-policy, and documentation tests passed.
+* 2026-08-30: Final review corrections reject nested blockquote and list headings and make the stable-link list use the explicit upgrade and configuration anchors.
 
 ## Coordination
 

@@ -1,6 +1,6 @@
 <a id="upgrading"></a>
 
-# Upgrading Markweave
+# Upgrading
 
 This guide defines the supported operator path between released Markweave
 versions. It covers a package installation and the matching container image;
@@ -64,7 +64,9 @@ point a restored database at a newer or unrelated object-store version. A
 rollback is complete only after readiness and representative stable-object
 checks succeed on the restored previous version.
 
-## Configuration compatibility during 0.x
+## Configuration compatibility
+
+### During 0.x
 
 <a id="configuration-compatibility"></a>
 
@@ -82,8 +84,8 @@ required or select values for unresolved production limits.
 
 ## Stable links
 
-- [Upgrade guide top](#upgrading-markweave)
+- [Upgrade guide top](#upgrading)
 - [Supported transition](#supported-transition)
 - [Upgrade procedure](#upgrade-procedure)
 - [Schema changes and rollback](#schema-changes-and-rollback)
-- [Configuration compatibility during 0.x](#configuration-compatibility-during-0x)
+- [Configuration compatibility during 0.x](#configuration-compatibility)
