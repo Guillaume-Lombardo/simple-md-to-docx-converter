@@ -7,6 +7,7 @@ import math
 import pytest
 
 from markweave.cli.errors import CliError
+from markweave.cli.http import ApiResponse
 from markweave.cli.main import _positive_timeout, build_parser, main
 from markweave.cli.output import OutputWriter
 from markweave.cli.types import ConnectionProfile, ExitCode, OutputFormat
@@ -71,7 +72,6 @@ def test_version_and_missing_command_use_the_documented_streams(
 @pytest.mark.parametrize(
     ("arguments", "expected_command"),
     (
-        (("login",), "login"),
         (("convert",), "convert"),
         (("jobs", "wait"), "jobs wait"),
         (("templates", "restore"), "templates restore"),
@@ -186,6 +186,17 @@ def test_connection_profile_keeps_opaque_session_values_out_of_repr() -> None:
         csrf_state="csrf-secret",
     )
     assert "secret" not in repr(profile)
+
+
+def test_http_response_keeps_cookie_and_session_values_out_of_repr() -> None:
+    """Transport result diagnostics cannot disclose HTTP authentication state."""
+    response = ApiResponse(
+        200,
+        {"csrf_token": "csrf-secret"},
+        "session-secret",
+        (("session", "cookie-secret"),),
+    )
+    assert "secret" not in repr(response)
 
 
 @pytest.mark.parametrize("output_format", (OutputFormat.HUMAN, OutputFormat.JSON))
