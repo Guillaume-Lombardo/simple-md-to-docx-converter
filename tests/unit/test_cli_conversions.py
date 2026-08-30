@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import io
 import os
+from email.message import Message
 from pathlib import Path
 from typing import BinaryIO, cast
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 import pytest
@@ -147,6 +148,44 @@ def test_convert_retries_only_ambiguous_network_failures_with_explicit_key(
     assert client.submit.call_count == 2
 
 
+@pytest.mark.parametrize(
+    "failures, expected_calls",
+    (
+        ((CliError("quota_exceeded", "Quota exceeded."),), 1),
+        (
+            (
+                CliError("network_error", "The service could not be reached."),
+                CliError("network_error", "The service could not be reached."),
+            ),
+            2,
+        ),
+    ),
+)
+def test_convert_does_not_retry_definitive_or_exhausted_failures(
+    failures: tuple[CliError, ...], expected_calls: int, tmp_path: Path, mocker
+) -> None:
+    source = tmp_path / "source.md"
+    source.write_text("source", encoding="utf-8")
+    client = mocker.Mock()
+    client.submit.side_effect = failures
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert (
+        main(
+            (
+                "convert",
+                str(source),
+                "--idempotency-key",
+                "retry-key",
+                "--retries",
+                "1",
+            )
+        )
+        == 1
+    )
+    assert client.submit.call_count == expected_calls
+
+
 def test_conversion_source_read_stays_on_open_descriptor_during_symlink_swap(
     tmp_path: Path, mocker
 ) -> None:
@@ -178,10 +217,19 @@ def test_conversion_source_read_stays_on_open_descriptor_during_symlink_swap(
         ("convert", "missing.md"),
         ("convert", "source.txt"),
         ("convert", "source.md", "--template-id", TEMPLATE_ID),
+        (
+            "convert",
+            "source.md",
+            "--template-id",
+            "invalid",
+            "--template-version-id",
+            VERSION_ID,
+        ),
         ("convert", "source.md", "--idempotency-key", "bad key"),
         ("convert", "source.md", "--retries", "6", "--idempotency-key", "key"),
         ("jobs", "show", "invalid"),
         ("jobs", "list", "--limit", "101"),
+        ("jobs", "list", "--limit", "many"),
     ),
 )
 def test_invalid_local_inputs_fail_before_http(
@@ -210,6 +258,14 @@ def test_source_rejects_empty_files_and_symlinks(tmp_path: Path, mocker) -> None
     assert main(("convert", str(empty))) == 1
     assert main(("convert", str(symlink))) == 1
     client.assert_not_called()
+
+
+def test_source_rejects_a_non_regular_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.md"
+    os.mkfifo(source)
+
+    with pytest.raises(CliError, match="unsafe"):
+        conversions._read_source(source)
 
 
 def test_list_show_cancel_and_wait_use_only_family_http_client(
@@ -309,6 +365,23 @@ def test_multipart_uses_only_canonical_source_name() -> None:
     assert b'filename="source.md"' in body
     assert b"private content" in body
     assert TEMPLATE_ID.encode() in body and VERSION_ID.encode() in body
+
+
+def test_multipart_replaces_a_boundary_that_occurs_in_the_source(mocker) -> None:
+    first = mocker.Mock(hex="collision")
+    second = mocker.Mock(hex="safe")
+    mocker.patch.object(conversion_http, "uuid4", side_effect=(first, second))
+
+    body, content_type = _multipart_body(
+        b"private markweave-collision content",
+        source_kind="zip",
+        output="docx",
+        template_id=None,
+        template_version_id=None,
+    )
+
+    assert content_type.endswith("boundary=markweave-safe")
+    assert b'filename="source.zip"' in body
 
 
 def test_atomic_stream_refuses_clobber_and_supports_explicit_regular_overwrite(
@@ -430,6 +503,38 @@ def test_cleanup_helpers_preserve_first_error_and_attempt_all_closes(mocker) -> 
     assert close.call_args_list == [mocker.call(42), mocker.call(43)]
 
 
+def test_cleanup_helpers_cover_absent_resources_and_late_failures(mocker) -> None:
+    directory_close_error = OSError("directory close failure")
+    close = mocker.patch.object(
+        conversion_http.os, "close", side_effect=directory_close_error
+    )
+
+    with pytest.raises(OSError, match="directory close failure") as raised:
+        conversion_http._close_download_resources(None, 41, primary_error=None)
+
+    assert raised.value is directory_close_error
+    close.assert_called_once_with(41)
+
+    close.reset_mock(side_effect=True)
+    unlink = mocker.patch.object(
+        conversion_http.os, "unlink", side_effect=FileNotFoundError
+    )
+    fsync_error = OSError("directory sync failure")
+    fsync = mocker.patch.object(conversion_http.os, "fsync", side_effect=fsync_error)
+
+    conversion_http._cleanup_atomic_resources(
+        descriptor=-1,
+        temporary="missing",
+        directory_descriptor=42,
+        close_directory=False,
+        primary_error=RuntimeError("primary stream failure"),
+    )
+
+    close.assert_not_called()
+    unlink.assert_called_once_with("missing", dir_fd=42)
+    fsync.assert_called_once_with(42)
+
+
 def test_atomic_stream_keeps_publication_and_cleanup_on_open_parent_descriptor(
     tmp_path: Path, mocker
 ) -> None:
@@ -535,6 +640,26 @@ def _http_client() -> ConversionHttpClient:
     )
 
 
+@pytest.mark.parametrize("idempotency_key", (None, "stable-key"))
+def test_conversion_http_submit_forwards_only_an_explicit_idempotency_key(
+    idempotency_key: str | None, mocker
+) -> None:
+    client = _http_client()
+    request = mocker.patch.object(client, "request", return_value=_response(202))
+
+    client.submit(
+        b"source",
+        source_kind="md",
+        output="docx",
+        template_id=None,
+        template_version_id=None,
+        idempotency_key=idempotency_key,
+    )
+
+    headers = request.call_args.kwargs["headers"]
+    assert headers.get("Idempotency-Key") == idempotency_key
+
+
 def test_conversion_http_request_binds_api_cookie_csrf_and_bounded_json(mocker) -> None:
     response = _FakeHttpResponse(
         b'{"id":"value"}', headers={"X-Correlation-ID": CORRELATION_ID}
@@ -553,6 +678,39 @@ def test_conversion_http_request_binds_api_cookie_csrf_and_bounded_json(mocker) 
     assert request.get_header("Cookie") == "session=opaque"
     assert request.get_header("X-csrf-token") == "csrf-opaque"
     assert opener.open.call_args.kwargs == {"timeout": 2}
+
+
+def test_conversion_https_client_returns_bounded_http_error_payload(mocker) -> None:
+    headers = Message()
+    headers["X-Correlation-ID"] = CORRELATION_ID
+    response = HTTPError(
+        "https://service.example/api/v1/conversions",
+        429,
+        "Too Many Requests",
+        headers,
+        io.BytesIO(b'{"error":{"code":"QUEUE_FULL","message":"Queue full."}}'),
+    )
+    opener = mocker.Mock()
+    opener.open.side_effect = response
+    build_opener = mocker.patch.object(
+        conversion_http, "build_opener", return_value=opener
+    )
+    client = ConversionHttpClient(
+        ConnectionProfile(
+            "default",
+            "https://service.example",
+            "session=opaque",
+            "csrf-opaque",
+        ),
+        timeout=2,
+    )
+
+    result = client.request("POST", "/api/v1/conversions")
+
+    assert result.status == 429
+    assert result.payload == {"error": {"code": "QUEUE_FULL", "message": "Queue full."}}
+    assert result.correlation_id == CORRELATION_ID
+    assert len(build_opener.call_args.args) == 2
 
 
 def test_conversion_http_rejects_non_api_paths_network_and_oversized_json(
