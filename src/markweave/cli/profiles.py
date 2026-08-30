@@ -21,6 +21,8 @@ _MAX_SECRET_LENGTH = 4_096
 _MAX_FILE_LENGTH = 16_384
 _SCHEMA_VERSION = 1
 _PROFILE_FILE_MODE = 0o600
+_ASCII_CONTROL_MAX = 32
+_ASCII_DELETE = 127
 
 
 def validate_profile_name(name: str) -> str:
@@ -35,9 +37,20 @@ def validate_profile_name(name: str) -> str:
 
 def validate_service_url(value: str, *, verify_tls: bool) -> str:
     """Validate a remote base URL before it reaches an HTTP client."""
-    if not value or len(value) > _MAX_URL_LENGTH:
+    if (
+        not value
+        or len(value) > _MAX_URL_LENGTH
+        or any(
+            ord(character) <= _ASCII_CONTROL_MAX or ord(character) == _ASCII_DELETE
+            for character in value
+        )
+    ):
         raise CliError("invalid_service_url", "The service URL is invalid.")
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as error:
+        raise CliError("invalid_service_url", "The service URL is invalid.") from error
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
         raise CliError(
             "invalid_service_url", "The service URL must be an absolute HTTP URL."
@@ -85,7 +98,12 @@ class ProfileStore:
             _check_profile_metadata(metadata)
             with os.fdopen(descriptor, encoding="utf-8") as profile_file:
                 descriptor = -1
-                content = profile_file.read(_MAX_FILE_LENGTH + 1)
+                try:
+                    content = profile_file.read(_MAX_FILE_LENGTH + 1)
+                except UnicodeError as error:
+                    raise CliError(
+                        "profile_invalid", "The selected connection profile is invalid."
+                    ) from error
         finally:
             if descriptor >= 0:
                 os.close(descriptor)

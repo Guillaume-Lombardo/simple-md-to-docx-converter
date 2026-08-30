@@ -14,6 +14,12 @@ from markweave.cli.types import ConnectionProfile
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def secure_tty(mocker) -> None:
+    """Exercise prompt behavior through the secure terminal branch."""
+    mocker.patch.object(authentication, "_secure_tty_available", return_value=True)
+
+
 def _profile() -> ConnectionProfile:
     return ConnectionProfile(
         name="default",
@@ -59,6 +65,7 @@ def test_login_prompts_without_echo_and_persists_only_session(mocker, capsys) ->
     )
     assert prompt.call_args.args == ("Password: ",)
     assert transport.login.call_args.args == ("alice", "password")
+    assert transport.login.call_args.kwargs == {"previous_profile": None}
     saved = store.save.call_args.args[0]
     assert saved.session_state == "md_converter_session=new-session"
     assert saved.csrf_state == "new-csrf"
@@ -81,6 +88,39 @@ def test_non_interactive_login_and_password_change_fail_before_prompt(
     assert main(("--non-interactive", "password", "change")) == 1
     assert prompt.call_count == 0
     assert "interactive input" in capsys.readouterr().err
+
+
+def test_piped_prompt_is_rejected_without_calling_getpass(mocker, capsys) -> None:
+    """The stdlib fallback cannot read or echo a password from a pipe."""
+    mocker.patch.object(authentication, "_secure_tty_available", return_value=False)
+    prompt = mocker.patch.object(authentication.getpass, "getpass")
+    assert main(("login", "--url", "https://converter.example")) == 1
+    assert prompt.call_count == 0
+    assert (
+        capsys.readouterr().err == "error: A secure interactive terminal is required.\n"
+    )
+
+
+def test_relogin_reuses_only_the_same_service_profile(mocker) -> None:
+    """A same-service re-login carries the prior cookie for server-side rotation."""
+    store = mocker.Mock(load=mocker.Mock(return_value=_profile()))
+    transport = mocker.Mock(login=mocker.Mock(return_value=_login_response()))
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+    mocker.patch.object(authentication.getpass, "getpass", return_value="password")
+    assert (
+        main(
+            (
+                "login",
+                "--url",
+                "https://converter.example",
+                "--username",
+                "alice",
+            )
+        )
+        == 0
+    )
+    assert transport.login.call_args.kwargs == {"previous_profile": _profile()}
 
 
 def test_whoami_reports_only_safe_session_fields(mocker, capsys) -> None:

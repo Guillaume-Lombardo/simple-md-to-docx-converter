@@ -102,7 +102,9 @@ def test_transport_preserves_session_cookie_and_csrf_over_real_http(
     auth_server: str,
 ) -> None:
     """The standard-library boundary serializes the documented HTTP contract exactly."""
-    transport = HttpTransport(auth_server, verify_tls=False, timeout=2)
+    transport = HttpTransport(
+        auth_server, verify_tls=False, timeout=2, session_cookie_name="session"
+    )
     login = transport.login("alice", "not-persisted")
     assert login.status == 200
     assert login.session == "session=opaque"
@@ -134,3 +136,58 @@ def test_transport_preserves_session_cookie_and_csrf_over_real_http(
             {"password": "new-password", "confirmation": "new-password"},
         ),
     ]
+
+
+def test_redirect_never_forwards_session_or_csrf_to_another_server() -> None:
+    """A hostile redirect cannot exfiltrate authenticated headers across origins."""
+    sink_requests: list[tuple[str | None, str | None]] = []
+
+    class Sink(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            sink_requests.append(
+                (self.headers.get("Cookie"), self.headers.get("X-CSRF-Token"))
+            )
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    sink = ThreadingHTTPServer(("127.0.0.1", 0), Sink)
+    sink_thread = Thread(target=sink.serve_forever, daemon=True)
+    sink_thread.start()
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink.server_port}/steal")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    source = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    source_thread = Thread(target=source.serve_forever, daemon=True)
+    source_thread.start()
+    try:
+        profile = ConnectionProfile(
+            name="default",
+            service_url=f"http://127.0.0.1:{source.server_port}",
+            session_state="session=opaque",
+            csrf_state="csrf-opaque",
+        )
+        response = HttpTransport(
+            profile.service_url,
+            verify_tls=False,
+            timeout=2,
+            session_cookie_name="session",
+        ).logout(profile)
+        assert response.status == 302
+        assert sink_requests == []
+    finally:
+        source.shutdown()
+        source_thread.join()
+        source.server_close()
+        sink.shutdown()
+        sink_thread.join()
+        sink.server_close()

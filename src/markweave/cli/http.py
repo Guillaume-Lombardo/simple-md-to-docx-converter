@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from http.cookies import SimpleCookie
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from markweave.cli.errors import CliError
 from markweave.cli.profiles import validate_service_url
 from markweave.cli.types import ConnectionProfile
+
+_MAX_RESPONSE_BYTES = 1_048_576
+_DEFAULT_SESSION_COOKIE_NAME = "md_converter_session"
+_ASCII_CONTROL_MAX = 32
+_ASCII_DELETE = 127
 
 
 @dataclass(frozen=True)
@@ -22,22 +27,54 @@ class ApiResponse:
     status: int
     payload: dict[str, Any] | None
     session: str | None = None
+    cookies: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+
+
+class _FailClosedRedirectHandler(HTTPRedirectHandler):
+    """Prevent credentials from crossing an origin or protocol boundary on redirect."""
+
+    def redirect_request(  # noqa: PLR0913, PLR0917 - stdlib override has a fixed signature
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> Request | None:
+        del req, fp, code, msg, headers, newurl
 
 
 class HttpTransport:
     """HTTP-only client with explicit cookie and CSRF handling."""
 
     def __init__(
-        self, service_url: str, *, verify_tls: bool, timeout: float | None
+        self,
+        service_url: str,
+        *,
+        verify_tls: bool,
+        timeout: float | None,
+        session_cookie_name: str = _DEFAULT_SESSION_COOKIE_NAME,
     ) -> None:
         self._service_url = validate_service_url(service_url, verify_tls=verify_tls)
         self._verify_tls = verify_tls
         self._timeout = timeout
+        self._session_cookie_name = _validate_cookie_name(session_cookie_name)
 
-    def login(self, username: str, password: str) -> ApiResponse:
-        return self._request(
-            "POST", "/api/v1/login", body={"username": username, "password": password}
+    def login(
+        self,
+        username: str,
+        password: str,
+        *,
+        previous_profile: ConnectionProfile | None = None,
+    ) -> ApiResponse:
+        response = self._request(
+            "POST",
+            "/api/v1/login",
+            profile=previous_profile,
+            body={"username": username, "password": password},
         )
+        return _with_session_cookie(response, self._session_cookie_name)
 
     def session(self, profile: ConnectionProfile) -> ApiResponse:
         return self._request("GET", "/api/v1/session", profile=profile)
@@ -82,15 +119,19 @@ class HttpTransport:
         )
         try:
             context = ssl.create_default_context()
-            opener = build_opener(HTTPSHandler(context=context))
+            opener = build_opener(
+                HTTPSHandler(context=context), _FailClosedRedirectHandler()
+            )
             response = opener.open(request, timeout=self._timeout)
             try:
-                return _response(response.status, response.headers, response.read())
+                return _response(
+                    response.status, response.headers, _read_body(response)
+                )
             finally:
                 response.close()
         except HTTPError as error:
             try:
-                return _response(error.code, error.headers, error.read())
+                return _response(error.code, error.headers, _read_body(error))
             finally:
                 error.close()
         except (TimeoutError, URLError, OSError) as error:
@@ -103,27 +144,53 @@ def _response(status: int, headers: Any, body: bytes) -> ApiResponse:
     payload: dict[str, Any] | None = None
     if body:
         try:
-            decoded = json.loads(body)
-        except TypeError, ValueError:
+            decoded = json.loads(body.decode("utf-8"))
+        except TypeError, UnicodeError, ValueError:
             decoded = None
         if isinstance(decoded, dict):
             payload = decoded
     cookies = SimpleCookie()
     for value in headers.get_all("Set-Cookie", []):
         cookies.load(value)
-    session_cookie = next(
-        (cookie for name, cookie in cookies.items() if not name.startswith("__Host-")),
-        None,
-    )
     return ApiResponse(
         status=status,
         payload=payload,
-        session=(
-            f"{session_cookie.key}={session_cookie.value}"
-            if session_cookie is not None
-            else None
-        ),
+        cookies=tuple((cookie.key, cookie.value) for cookie in cookies.values()),
     )
+
+
+def _with_session_cookie(
+    response: ApiResponse, session_cookie_name: str
+) -> ApiResponse:
+    """Extract only the explicitly configured session cookie, including __Host names."""
+    session = next(
+        (
+            f"{name}={value}"
+            for name, value in response.cookies
+            if name == session_cookie_name and value
+        ),
+        None,
+    )
+    return replace(response, session=session)
+
+
+def _read_body(response: Any) -> bytes:
+    """Bound every successful and error response before decoding JSON."""
+    body = response.read(_MAX_RESPONSE_BYTES + 1)
+    if len(body) > _MAX_RESPONSE_BYTES:
+        raise CliError("response_too_large", "The service response is too large.")
+    return body
+
+
+def _validate_cookie_name(value: str) -> str:
+    if not value or any(
+        ord(character) <= _ASCII_CONTROL_MAX or ord(character) == _ASCII_DELETE
+        for character in value
+    ):
+        raise CliError(
+            "invalid_session_cookie_name", "The session cookie name is invalid."
+        )
+    return value
 
 
 def api_error(response: ApiResponse, *, fallback: str) -> CliError:

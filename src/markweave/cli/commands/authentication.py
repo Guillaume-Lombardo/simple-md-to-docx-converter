@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import sys
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,6 +24,7 @@ _DEFAULT_PROFILE = "default"
 _OK = 200
 _NO_CONTENT = 204
 _UNAUTHORIZED = 401
+_DEFAULT_SESSION_COOKIE_NAME = "md_converter_session"
 
 
 @dataclass
@@ -75,10 +78,22 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     login.add_argument(
         "--username", action=_RequestOption, help="Local account username."
     )
+    login.add_argument(
+        "--session-cookie-name",
+        action=_RequestOption,
+        default=_DEFAULT_SESSION_COOKIE_NAME,
+        help="Configured remote session-cookie name.",
+    )
     _profile_argument(login)
     _reject_password_arguments(login)
     login.set_defaults(
-        command_name=_Request("login", {"profile": _DEFAULT_PROFILE}),
+        command_name=_Request(
+            "login",
+            {
+                "profile": _DEFAULT_PROFILE,
+                "session_cookie_name": _DEFAULT_SESSION_COOKIE_NAME,
+            },
+        ),
         command_handler=_login,
     )
 
@@ -137,13 +152,19 @@ def _reject_password_arguments(parser: argparse.ArgumentParser) -> None:
 def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> None:
     profile_name = validate_profile_name(_value(command, "profile"))
     service_url = validate_service_url(_value(command, "url"), verify_tls=True)
+    session_cookie_name = _value(command, "session_cookie_name")
     username = command.values.get("username") or _prompt(
         context, "Username: ", secret=False
     )
     password = _prompt(context, "Password: ", secret=True)
+    store = ProfileStore()
+    previous_profile = _existing_profile(store, profile_name, service_url)
     response = HttpTransport(
-        service_url, verify_tls=True, timeout=context.timeout_seconds
-    ).login(username, password)
+        service_url,
+        verify_tls=True,
+        timeout=context.timeout_seconds,
+        session_cookie_name=session_cookie_name,
+    ).login(username, password, previous_profile=previous_profile)
     if response.status != _OK or response.payload is None or response.session is None:
         raise api_error(response, fallback="login_failed")
     csrf = response.payload.get("csrf_token")
@@ -152,7 +173,7 @@ def _login(context: CommandContext, writer: OutputWriter, command: _Request) -> 
         raise CliError(
             "login_failed", "The service returned an invalid login response."
         )
-    ProfileStore().save(
+    store.save(
         ConnectionProfile(
             name=profile_name,
             service_url=service_url,
@@ -213,6 +234,7 @@ def _whoami(context: CommandContext, writer: OutputWriter, command: _Request) ->
 def _change_password(
     context: CommandContext, writer: OutputWriter, command: _Request
 ) -> None:
+    _require_interactive(context)
     profile_name = validate_profile_name(_value(command, "profile"))
     store = ProfileStore()
     profile = store.load(profile_name)
@@ -273,16 +295,31 @@ def _change_password(
 
 def _transport(profile: ConnectionProfile, context: CommandContext) -> HttpTransport:
     return HttpTransport(
-        profile.service_url, verify_tls=True, timeout=context.timeout_seconds
+        profile.service_url,
+        verify_tls=True,
+        timeout=context.timeout_seconds,
+        session_cookie_name=_profile_cookie_name(profile),
     )
 
 
 def _prompt(context: CommandContext, prompt: str, *, secret: bool) -> str:
-    if context.non_interactive:
+    _require_interactive(context)
+    if not _secure_tty_available():
         raise CliError(
-            "interactive_required", "This command requires interactive input."
+            "interactive_tty_required",
+            "A secure interactive terminal is required.",
         )
-    value = getpass.getpass(prompt) if secret else input(prompt)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            value = getpass.getpass(prompt) if secret else input(prompt)
+    except getpass.GetPassWarning as error:
+        raise CliError(
+            "interactive_tty_required",
+            "A secure interactive terminal is required.",
+        ) from error
+    except EOFError as error:
+        raise CliError("input_required", "A non-empty value is required.") from error
     if not value:
         raise CliError("input_required", "A non-empty value is required.")
     return value
@@ -293,3 +330,35 @@ def _value(command: _Request, key: str) -> str:
     if not isinstance(value, str):
         raise CliError("invalid_request", "The command arguments are invalid.")
     return value
+
+
+def _secure_tty_available() -> bool:
+    """Require terminals for both prompt input and safe diagnostic output."""
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def _require_interactive(context: CommandContext) -> None:
+    if context.non_interactive:
+        raise CliError(
+            "interactive_required", "This command requires interactive input."
+        )
+
+
+def _existing_profile(
+    store: ProfileStore, profile_name: str, service_url: str
+) -> ConnectionProfile | None:
+    """Reuse only a same-service cookie so the server can revoke it at re-login."""
+    try:
+        profile = store.load(profile_name)
+    except CliError as error:
+        if error.code == "profile_not_found":
+            return None
+        raise
+    return profile if profile.service_url == service_url else None
+
+
+def _profile_cookie_name(profile: ConnectionProfile) -> str:
+    name, separator, value = (profile.session_state or "").partition("=")
+    if not separator or not value:
+        raise CliError("profile_invalid", "The selected connection profile is invalid.")
+    return name
