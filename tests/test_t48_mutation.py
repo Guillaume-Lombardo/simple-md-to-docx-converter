@@ -10,6 +10,7 @@ import pytest
 from scripts.ci import run_mutation_campaign as campaign
 from scripts.ci.run_mutation_campaign import (
     FAILURE_STATUSES,
+    changed_paths,
     load_manifest,
     main,
     select_domains,
@@ -131,6 +132,51 @@ def test_changed_paths_select_only_affected_domains_and_global_files_select_all(
         select_domains(manifest, mode="changed", changed_paths=("pyproject.toml",))
         == manifest.domains
     )
+
+
+@pytest.mark.unit
+def test_changed_paths_includes_deletions_and_both_rename_endpoints(
+    tmp_path: Path, mocker
+) -> None:
+    mocker.patch.object(
+        campaign.subprocess,
+        "run",
+        return_value=mocker.Mock(
+            stdout=(
+                "D\0src/markweave/auth/service.py\0"
+                "R100\0src/markweave/jobs/worker.py\0docs/worker.md\0"
+                "C100\0src/markweave/storage.py\0docs/storage-copy.md\0"
+            )
+        ),
+    )
+    paths = changed_paths("base", "head", target_root=tmp_path)
+    assert paths == (
+        "docs/storage-copy.md",
+        "docs/worker.md",
+        "src/markweave/auth/service.py",
+        "src/markweave/jobs/worker.py",
+        "src/markweave/storage.py",
+    )
+    manifest = load_manifest(MANIFEST)
+    assert [
+        domain.name
+        for domain in select_domains(manifest, mode="changed", changed_paths=paths)
+    ] == [
+        "auth-session",
+        "job-integrity",
+        "retention-storage",
+    ]
+
+
+@pytest.mark.unit
+def test_changed_paths_rejects_malformed_or_unsafe_name_status(
+    tmp_path: Path, mocker
+) -> None:
+    mocker.patch.object(
+        campaign.subprocess, "run", return_value=mocker.Mock(stdout="D\0../secret\0")
+    )
+    with pytest.raises(RuntimeError, match="unsafe repository path"):
+        changed_paths("base", "head", target_root=tmp_path)
 
 
 @pytest.mark.unit

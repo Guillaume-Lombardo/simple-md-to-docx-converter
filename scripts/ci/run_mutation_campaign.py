@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -162,13 +162,39 @@ def changed_paths(
     if not base_sha or not head_sha:
         raise ValueError("changed mode requires non-empty base and head SHAs")
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRT", base_sha, head_sha],
+        [
+            "git",
+            "diff",
+            "--name-status",
+            "-z",
+            "--diff-filter=ACDMRT",
+            base_sha,
+            head_sha,
+        ],
         cwd=target_root,
         check=True,
         capture_output=True,
         text=True,
     )
-    return tuple(line for line in result.stdout.splitlines() if line)
+    fields = result.stdout.split("\0")
+    if fields[-1] != "":
+        raise RuntimeError("git diff name-status output is not NUL-terminated")
+    fields.pop()
+    paths: set[str] = set()
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        index += 1
+        path_count = 2 if status[:1] in {"R", "C"} else 1
+        if not status or index + path_count > len(fields):
+            raise RuntimeError("git diff name-status output is malformed")
+        for raw_path in fields[index : index + path_count]:
+            path = PurePosixPath(raw_path)
+            if not raw_path or path.is_absolute() or ".." in path.parts:
+                raise RuntimeError("git diff returned an unsafe repository path")
+            paths.add(path.as_posix())
+        index += path_count
+    return tuple(sorted(paths))
 
 
 def verify_stats(stats: dict[str, Any], *, selected: int) -> dict[str, int]:
