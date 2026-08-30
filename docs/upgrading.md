@@ -39,12 +39,15 @@ matches the selected storage profile before production use.
    and matching object-store versions from one coordinated window.
 4. Stop or drain every API and worker process that can write the selected
    profile. Never run a mixed-version fleet during a schema transition.
-5. Deploy the target package or exact container image. Run its migration path
-   once for the selected profile, then start components at the target version.
-   Alembic upgrades older metadata when application components are assembled.
-6. Require `/health/ready` before admitting traffic. Verify representative
-   stable object identifiers and one authorized workflow before ending the
-   maintenance window.
+5. Deploy the target package or exact container image, then start one controlled
+   Markweave application component for the selected profile. Alembic upgrades
+   older metadata when that component is assembled; wait for its migration and
+   readiness result before starting any other component at the target version.
+   This guide does not depend on a separate migration command.
+6. Require `/health/ready` from the controlled component before admitting
+   traffic. Start the remaining same-version components only after readiness,
+   then verify representative stable object identifiers and one authorized
+   workflow before ending the maintenance window.
 
 ## Schema changes and rollback
 
@@ -71,10 +74,11 @@ setting to its corresponding canonical name before 1.0, verify the effective
 configuration, and remove the legacy definition once the canonical definition
 is confirmed.
 
-Do not set both names for one setting: conflicting dual definitions fail
-closed. The aliases are removed in 1.0, so an upgrade to 1.0 requires a
-configuration with no `MD_CONVERTER_*` entries. This policy does not alter
-which values are required or select values for unresolved production limits.
+You may temporarily set both names for one setting during 0.x only when they
+validate to the same effective value. Conflicting dual definitions fail closed.
+The aliases are removed in 1.0, so an upgrade to 1.0 requires a configuration
+with no `MD_CONVERTER_*` entries. This policy does not alter which values are
+required or select values for unresolved production limits.
 
 ## Stable links
 

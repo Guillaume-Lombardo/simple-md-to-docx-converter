@@ -6,9 +6,11 @@ import argparse
 import re
 import subprocess
 import tomllib
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from markdown_it import MarkdownIt
 from packaging.version import InvalidVersion, Version
 
 if TYPE_CHECKING:
@@ -17,6 +19,8 @@ if TYPE_CHECKING:
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 ZERO_SHA = "0" * 40
+ENTRY = re.compile(r"^\[(?P<version>[^]]+)\] - (?P<date>\d{4}-\d{2}-\d{2})$")
+MARKDOWN = MarkdownIt()
 
 
 class ChangelogError(ValueError):
@@ -45,11 +49,24 @@ def _version(document: bytes, *, label: str) -> str:
     return raw
 
 
-def _entry_pattern(version: str) -> re.Pattern[str]:
-    return re.compile(
-        rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$",
-        re.MULTILINE,
-    )
+def _has_release_heading(changelog: str, *, version: str) -> bool:
+    """Return whether a real level-two Markdown heading names the release."""
+    tokens = MARKDOWN.parse(changelog)
+    for index, token in enumerate(tokens[:-1]):
+        if token.type != "heading_open" or token.tag != "h2":
+            continue
+        inline = tokens[index + 1]
+        if inline.type != "inline":
+            continue
+        matched = ENTRY.fullmatch(inline.content)
+        if matched is None or matched["version"] != version:
+            continue
+        try:
+            date.fromisoformat(matched["date"])
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def check_changelog(previous: bytes, current: bytes, changelog: str) -> None:
@@ -60,7 +77,7 @@ def check_changelog(previous: bytes, current: bytes, changelog: str) -> None:
         raise ChangelogError("current project.version must not be lower than previous")
     if current_version == previous_version:
         return
-    if _entry_pattern(current_version).search(changelog) is None:
+    if not _has_release_heading(changelog, version=current_version):
         raise ChangelogError(
             f"CHANGELOG.md lacks a dated entry for version {current_version}"
         )

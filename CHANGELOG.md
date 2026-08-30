@@ -10,7 +10,17 @@ target. Internal ticket choreography is intentionally excluded.
 
 ### Changed
 
-- No released changes yet.
+- The installed `markweave` command now provides the stable root command
+  registry, machine-readable output, safe errors, and clean-package entry point
+  for the supported CLI families.
+- `MARKWEAVE_*` is now the canonical configuration namespace. During 0.x,
+  matching validated `MD_CONVERTER_*` aliases remain compatible; conflicting
+  dual definitions fail closed.
+
+### Deprecated
+
+- `MD_CONVERTER_*` configuration aliases are deprecated and will be removed in
+  1.0. Migrate to the equivalent `MARKWEAVE_*` settings before that release.
 
 <a id="release-0-4-0"></a>
 
@@ -84,8 +94,23 @@ target. Internal ticket choreography is intentionally excluded.
 
 ### Added
 
-- The first approved public Markweave release established protected automatic
-  package and container publication from an exact `main` version transition.
+- The first approved public Markweave release delivered the browser and HTTP API
+  workflow for authenticated Markdown conversion, immutable Word templates,
+  asynchronous job status, cancellation, and result download.
+- Standalone SQLite/PVC and distributed PostgreSQL/S3-compatible storage
+  profiles share the same durable queue and recovery contract.
+
+### Security
+
+- Uploads are scanned by ClamAV before durable processing, unsafe archives and
+  remote document resources are rejected, and the final image runs rootlessly
+  with a read-only root filesystem and no added capabilities.
+
+### Operations
+
+- Protected automatic package and container publication is bound to an exact
+  `main` version transition, verified artifacts, provenance, and release
+  evidence.
 
 ## Link targets
 

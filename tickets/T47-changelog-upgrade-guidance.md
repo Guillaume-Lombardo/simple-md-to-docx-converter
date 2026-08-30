@@ -29,8 +29,9 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 
 ## Implementation boundary
 
-* Exclusively own `CHANGELOG.md`, `docs/upgrading.md`, `scripts/release/check_changelog.py`, and `tests/release/test_check_changelog.py`.
+* Exclusively own `CHANGELOG.md`, `docs/upgrading.md`, `scripts/release/check_changelog.py`, its focused unit and integration tests, and the minimal `.github/workflows/release.yml` detect-job hook plus its CI-policy validator and tests.
 * Do not edit README, `docs/index.md`, deployment/configuration/recovery/release guides, T40's release-install verifier, or security/support policy files; T50 owns cross-guide navigation.
+* The release-workflow change may invoke the checker after exact transition detection and before remote release checks, but must not alter publication or mutation logic.
 * Do not select a release version or implement configuration aliases.
 
 ## Progress
@@ -39,6 +40,8 @@ Provide concise release history and a deterministic operator upgrade/rollback co
 * 2026-08-29: Final audit follow-up assigned shared documentation navigation exclusively to T50 and restricted T47 to dedicated files.
 * 2026-08-30: Implementation started on `feat/T47-upgrade-guidance` from verified main `d3c7a2f`. This workstream owns only the changelog, upgrade guide, changelog checker, its tests, and this ticket mirror.
 * 2026-08-30: Added release-focused changelog history, deterministic upgrade and rollback guidance, canonical configuration migration guidance, and a tested fail-closed checker for dated material-version entries. Targeted documentation and checker tests, Ruff, and ty passed; repository-wide suites still require unavailable external engines and services.
+* 2026-08-30: Independent review clarified that automatic enforcement is inherent in the checker acceptance criterion. T47 therefore owns the minimal release detect-job hook and its policy tests; publication and mutation logic remain out of scope.
+* 2026-08-30: Review corrections added the automatic hook before remote release checks, real-Git boundary coverage, Markdown/date fail-closed parsing, explicit upgrade anchors, accurate T39 equal-alias guidance, and updated changelog history. Targeted checker, Git integration, workflow-policy, and documentation tests passed.
 
 ## Coordination
 

@@ -47,6 +47,12 @@ def test_ignores_non_material_pyproject_changes() -> None:
         ("## [0.5.0]\n", "lacks a dated entry"),
         ("## [0.5.0] - 2026-8-30\n", "lacks a dated entry"),
         ("## [0.5.0] - 2026-08-30 extra\n", "lacks a dated entry"),
+        ("## [0.5.0] - 2026-02-30\n", "lacks a dated entry"),
+        (
+            "```markdown\n## [0.5.0] - 2026-08-30\n```\n",
+            "lacks a dated entry",
+        ),
+        ("<!-- ## [0.5.0] - 2026-08-30 -->\n", "lacks a dated entry"),
     ],
 )
 def test_rejects_ambiguous_or_malformed_entries(changelog: str, message: str) -> None:
@@ -147,3 +153,10 @@ def test_command_line_returns_zero_for_a_valid_check(
     )
 
     mocked.assert_called_once_with(repository=tmp_path, before=BEFORE, head=HEAD)
+
+
+def test_upgrade_guide_exposes_explicit_stable_anchors() -> None:
+    guide = Path("docs/upgrading.md").read_text(encoding="utf-8")
+
+    assert '<a id="upgrading"></a>' in guide
+    assert '<a id="configuration-compatibility"></a>' in guide
