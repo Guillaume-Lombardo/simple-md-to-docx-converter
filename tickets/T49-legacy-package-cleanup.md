@@ -37,6 +37,7 @@ Remove residual `md_converter` build/runtime artifacts and prevent the retired n
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized cleanup after T40 and assigned dedicated namespace checks without shared distribution files.
 * 2026-08-30: Started implementation. Added the dedicated namespace checker and clean source, sdist, wheel, and editable-install contamination coverage. Used its dry-run then constrained cleanup to remove only the ignored `src/md_converter` bytecode tree and obsolete `dist/md_converter-0.1.0` artifacts from the maintained checkout; legacy environment compatibility aliases and historical evidence remain untouched.
+* 2026-08-30: Reconciled the implementation with main `7850ab695ec278012b3db6e00a854b1c9dcf2360` by a normal merge. Post-merge Ruff, type, and focused namespace checks passed. The full default non-engine Pytest command completed with 1,943 passed, 3 failed, and 32 errors because local PostgreSQL and RustFS services were unavailable; the T49 namespace tests passed in that run.
 
 ## Coordination
 
