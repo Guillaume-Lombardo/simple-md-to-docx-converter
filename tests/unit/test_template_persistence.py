@@ -372,16 +372,37 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
     template = TemplateIdentity(
         uuid4(), owner_id, "Private", "secret marker", TemplateStatus.ACTIVE
     )
-    mocker.patch(
-        "markweave.persistence.templates.DatabaseSession",
-        side_effect=SQLAlchemyError("private SQL and values"),
+    version = TemplateVersion(
+        uuid4(),
+        template.id,
+        1,
+        owner_id,
+        "a" * 64,
+        1,
+        datetime.now(UTC),
+        owner_id,
     )
+    for module in (
+        "identity",
+        "publication",
+        "publication_recovery",
+        "search",
+        "selection",
+        "versions",
+    ):
+        mocker.patch(
+            f"markweave.persistence.templates.{module}.DatabaseSession",
+            side_effect=SQLAlchemyError("private SQL and values"),
+        )
     operations = (
         lambda: catalog.add(template),
         lambda: catalog.get(template.id),
         lambda: catalog.search(
             TemplateSearch(), viewer_id=owner_id, viewer_is_admin=False
         ),
+        lambda: catalog.reserve_create(template, version),
+        catalog.pending_deletions,
+        lambda: catalog.list_versions(template.id),
         lambda: selections.set_preferred(owner_id, template.id),
         lambda: selections.clear_preferred(owner_id),
         lambda: selections.preferred_id(owner_id),

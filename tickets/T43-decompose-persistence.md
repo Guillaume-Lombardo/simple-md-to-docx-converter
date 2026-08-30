@@ -2,7 +2,7 @@
 ticket: T43
 linear_id: G1L-415
 linear_url: https://linear.app/g1lom/issue/G1L-415/t43-decompose-persistence-adapters-by-responsibility
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,12 +34,13 @@ Split oversized job and template persistence adapters into cohesive repositories
 
 ## Progress
 
+* 2026-08-30: Started implementation on `refactor/T43-decompose-persistence` from verified `main` at `163bb697`. T12, T15, and T44 are `Done`; scope is limited to job/template persistence decomposition, finalized provider-neutral ports, and the corresponding contract, migration, concurrency, and profile-parity tests.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up assigned final ownership of job and template persistence ports to T43 before T42 begins.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
