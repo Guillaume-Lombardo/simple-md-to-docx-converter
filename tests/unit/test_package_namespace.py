@@ -102,7 +102,18 @@ def test_legacy_cleanup_recognizes_only_valid_legacy_distribution_names(
     valid_sdist = dist / "md-converter-1.2.3.tar.gz"
     invalid_wheel = dist / "md_converter-backup-py3-none-any.whl"
     backup = dist / "md_converter-customer-backup.gz"
-    for path in (valid_wheel, valid_sdist, invalid_wheel, backup):
+    invalid_version_wheel = dist / "md_converter-1customer-py3-none-any.whl"
+    invalid_version_sdist = dist / "md_converter-1customer.tar.gz"
+    invalid_build_wheel = dist / "md_converter-1-customer-py3-none-any.whl"
+    for path in (
+        valid_wheel,
+        valid_sdist,
+        invalid_wheel,
+        backup,
+        invalid_version_wheel,
+        invalid_version_sdist,
+        invalid_build_wheel,
+    ):
         path.write_bytes(b"artifact")
 
     assert legacy_cleanup_paths(tmp_path) == (valid_sdist, valid_wheel)
@@ -112,6 +123,9 @@ def test_legacy_cleanup_recognizes_only_valid_legacy_distribution_names(
     assert not valid_sdist.exists()
     assert invalid_wheel.exists()
     assert backup.exists()
+    assert invalid_version_wheel.exists()
+    assert invalid_version_sdist.exists()
+    assert invalid_build_wheel.exists()
 
 
 def test_legacy_cleanup_refuses_untracked_source_code(tmp_path: Path) -> None:

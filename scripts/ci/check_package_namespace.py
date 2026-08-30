@@ -10,23 +10,23 @@ legacy source tree that contains files other than bytecode caches.
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 import subprocess
 import tomllib
 from pathlib import Path, PurePosixPath
 
+from packaging.utils import (
+    canonicalize_name,
+    parse_sdist_filename,
+    parse_wheel_filename,
+)
+
 from scripts.release.artifacts import ArtifactError, verify_release
 
 PUBLIC_NAMESPACE = "markweave"
 RETIRED_NAMESPACE = "md_converter"
+RETIRED_DISTRIBUTION = canonicalize_name(RETIRED_NAMESPACE)
 BUILD_OUTPUT_DIRECTORIES = frozenset({"artifacts", "build", "dist"})
-VERSION = r"[0-9][A-Za-z0-9.!+_-]*"
-WHEEL = re.compile(
-    rf"md_converter-{VERSION}-(?:[0-9][A-Za-z0-9_.]*-)?"
-    r"[A-Za-z0-9_.]+-[A-Za-z0-9_.]+-[A-Za-z0-9_.]+\.whl\Z"
-)
-SDIST = re.compile(rf"(?:md_converter|md-converter)-{VERSION}\.tar\.gz\Z")
 
 
 class NamespaceError(ValueError):
@@ -131,7 +131,16 @@ def _check_artifact_directory(
 
 def _is_legacy_distribution_artifact(path: Path) -> bool:
     """Return whether a basename is a syntactically valid retired artifact."""
-    return bool(WHEEL.fullmatch(path.name) or SDIST.fullmatch(path.name))
+    try:
+        if path.name.endswith(".whl"):
+            distribution, _version, _build, _tags = parse_wheel_filename(path.name)
+        elif path.name.endswith(".tar.gz"):
+            distribution, _version = parse_sdist_filename(path.name)
+        else:
+            return False
+    except ValueError:
+        return False
+    return distribution == RETIRED_DISTRIBUTION
 
 
 def check_namespace(root: Path, artifact_directories: tuple[Path, ...] = ()) -> None:
