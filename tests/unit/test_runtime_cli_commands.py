@@ -13,6 +13,8 @@ from markweave.persistence.migrations import MigrationResult
 from markweave.runtime_diagnostics import DiagnosticCheck, DiagnosticReport
 from markweave.runtime_migrations import ProfileMigrationResult
 
+pytestmark = pytest.mark.unit
+
 
 def test_serve_and_worker_delegate_to_existing_runtime(mocker, capsys) -> None:
     serve = mocker.patch(
