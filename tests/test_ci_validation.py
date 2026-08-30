@@ -773,6 +773,7 @@ def test_automatic_release_policy_requires_dynamic_versions_and_no_secrets() -> 
     "contract",
     [
         "github.event.before",
+        "scripts.release.check_changelog",
         "needs.detect.outputs.changed == 'true'",
         "/git/ref/tags/$RELEASE_TAG",
         "/releases/tags/$RELEASE_TAG",
@@ -788,6 +789,21 @@ def test_automatic_release_policy_requires_transition_and_collision_gates(
     errors = validate_production_release_workflow_text(weakened)
     assert "automatic release workflow differs from the reviewed policy" in errors
     assert f"automatic release is missing contract: {contract}" in errors
+
+
+@pytest.mark.unit
+def test_automatic_release_policy_requires_changelog_before_remote_checks() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        "      - name: Require a changelog entry for a material version transition\n",
+        "      - name: Removed changelog gate\n",
+        1,
+    )
+
+    errors = validate_production_release_workflow_text(weakened)
+
+    assert "automatic release workflow differs from the reviewed policy" in errors
+    assert "automatic release must gate remote checks on changelog validation" in errors
 
 
 @pytest.mark.unit
