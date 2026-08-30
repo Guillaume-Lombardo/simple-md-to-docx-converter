@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
+from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
@@ -92,6 +93,8 @@ def _route_manifest(app: FastAPI) -> list[dict[str, Any]]:
     manifest = []
     for route in app.routes:
         response_class = getattr(route, "response_class", None)
+        if isinstance(response_class, DefaultPlaceholder):
+            response_class = response_class.value
         response_class_name = getattr(response_class, "__name__", None)
         if response_class is not None and response_class_name is None:
             response_class_name = type(response_class).__name__
@@ -862,6 +865,31 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "format": "binary",
         }
         assert {"401", "404", "422", "503"} <= responses.keys()
+
+
+@pytest.mark.unit
+def test_route_manifest_records_effective_default_response_class(
+    mocker: MockerFixture,
+) -> None:
+    app = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    routes_by_name = {route["name"]: route for route in _route_manifest(app)}
+    assert routes_by_name["live"]["response_class"] == "JSONResponse"
+    assert routes_by_name["browser_root"] == {
+        "path": "/",
+        "methods": ["GET"],
+        "name": "browser_root",
+        "include_in_schema": False,
+        "status_code": None,
+        "response_class": "JSONResponse",
+    }
+    assert all(
+        route["response_class"] != "DefaultPlaceholder"
+        for route in routes_by_name.values()
+    )
 
 
 @pytest.mark.unit
