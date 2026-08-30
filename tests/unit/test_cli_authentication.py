@@ -318,7 +318,7 @@ def test_failed_renewal_revokes_the_transient_reauthentication_session(mocker) -
     assert main(("password", "change")) == 1
     renewal_profile = transport.change_password.call_args.args[0]
     transport.logout.assert_called_once_with(renewal_profile)
-    store.delete.assert_not_called()
+    store.delete.assert_called_once_with("default")
 
 
 def test_server_error_envelopes_are_safe(mocker, capsys) -> None:
@@ -339,3 +339,55 @@ def test_server_error_envelopes_are_safe(mocker, capsys) -> None:
         '{"error":{"code":"session_invalid","message":"Sign in again."}}\n'
     )
     store.delete.assert_called_once_with("default")
+
+
+def test_login_and_whoami_reject_incomplete_server_payloads(mocker, capsys) -> None:
+    """Remote authentication responses must contain every required safe field."""
+    missing = authentication.CliError("profile_not_found", "missing")
+    login_store = mocker.Mock(load=mocker.Mock(side_effect=missing))
+    login_transport = mocker.Mock(
+        login=mocker.Mock(return_value=ApiResponse(200, {"csrf_token": "csrf"}))
+    )
+    mocker.patch.object(authentication, "ProfileStore", return_value=login_store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=login_transport)
+    mocker.patch.object(authentication.getpass, "getpass", return_value="password")
+
+    assert (
+        main(("login", "--url", "https://converter.example", "--username", "alice"))
+        == 1
+    )
+    assert "service rejected" in capsys.readouterr().err
+    login_store.save.assert_not_called()
+
+    store = mocker.Mock(load=mocker.Mock(return_value=_profile()))
+    transport = mocker.Mock(
+        session=mocker.Mock(
+            return_value=ApiResponse(
+                200,
+                {
+                    "username": "alice",
+                    "role": "user",
+                    "password_change_required": "yes",
+                },
+            )
+        )
+    )
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+
+    assert main(("whoami",)) == 1
+    assert "invalid session response" in capsys.readouterr().err
+
+
+def test_password_change_discards_expired_restricted_profile(mocker, capsys) -> None:
+    """An expired renewal session is deleted before any password prompt occurs."""
+    store = mocker.Mock(load=mocker.Mock(return_value=_profile()))
+    transport = mocker.Mock(session=mocker.Mock(return_value=ApiResponse(401, None)))
+    prompt = mocker.patch.object(authentication.getpass, "getpass")
+    mocker.patch.object(authentication, "ProfileStore", return_value=store)
+    mocker.patch.object(authentication, "HttpTransport", return_value=transport)
+
+    assert main(("password", "change")) == 1
+    store.delete.assert_called_once_with("default")
+    prompt.assert_not_called()
+    assert "service rejected" in capsys.readouterr().err

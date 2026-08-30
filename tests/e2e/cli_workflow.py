@@ -8,6 +8,7 @@ import os
 import pty
 import select
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 
@@ -99,53 +100,53 @@ def _blocked_process_snapshot(container: str) -> str:
     return result.stdout
 
 
-def main() -> int:
+def main() -> int:  # noqa: PLR0911 - stage-specific safe failure diagnostics
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True)
+    parser.add_argument(
+        "--profile", choices=("standalone", "distributed"), required=True
+    )
     namespace = parser.parse_args()
-    prefix = [
-        "podman",
-        "exec",
-        "--interactive",
-        "--tty",
-        "--env",
-        "XDG_STATE_HOME=/tmp/markweave-cli-state",
-        namespace.container,
-        "/usr/bin/env",
-        "-i",
-        "XDG_STATE_HOME=/tmp/markweave-cli-state",
-        "/opt/md-converter/venv/bin/markweave",
-    ]
-    password = "e2e-admin-password"  # noqa: S105 - final-image fixture credential
+    pty_prefix = _exec_prefix(namespace.container, tty=True)
+    plain_prefix = _exec_prefix(namespace.container, tty=False)
+    username, password = _provisioned_login(namespace.profile)
     try:
         login, output = _run_pty(
             [
-                *prefix,
+                *pty_prefix,
                 "login",
                 "--url",
                 "http://127.0.0.1:8080",
                 "--username",
-                "e2e-admin",
+                username,
             ],
             password,
             on_prompt=lambda: _assert_secret_free(
                 _blocked_process_snapshot(namespace.container), password
             ),
         )
-    except OSError, RuntimeError, subprocess.TimeoutExpired:
-        return 1
+    except RuntimeError as error:
+        return _failure("login execution", str(error))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return _failure("login execution", type(error).__name__)
     if login != 0 or not _is_secret_free(output, password):
-        return 1
+        return _failure(
+            "login result",
+            f"exit={login}; secret_free={_is_secret_free(output, password)}",
+        )
     for command in (("whoami",), ("logout",)):
         result = subprocess.run(
-            [*prefix, *command], check=False, capture_output=True, text=True
+            [*plain_prefix, *command], check=False, capture_output=True, text=True
         )
         if result.returncode != 0 or not _is_secret_free(
             result.stdout + result.stderr, password
         ):
-            return 1
+            return _failure(
+                f"{' '.join(command)} result",
+                f"exit={result.returncode}; secret_free={_is_secret_free(result.stdout + result.stderr, password)}",
+            )
     non_interactive = subprocess.run(
-        [*prefix, "--non-interactive", "password", "change"],
+        [*plain_prefix, "--non-interactive", "password", "change"],
         check=False,
         capture_output=True,
         text=True,
@@ -157,18 +158,51 @@ def main() -> int:
             non_interactive.stdout + non_interactive.stderr, password
         )
     ):
-        return 1
+        return _failure(
+            "non-interactive renewal",
+            f"exit={non_interactive.returncode}; expected_message={'interactive input' in non_interactive.stderr}; secret_free={_is_secret_free(non_interactive.stdout + non_interactive.stderr, password)}",
+        )
     logs = subprocess.run(
         ["podman", "logs", "--tail", "200", namespace.container],
         check=False,
         capture_output=True,
         text=True,
     )
-    return (
-        0
-        if logs.returncode == 0 and _is_secret_free(logs.stdout + logs.stderr, password)
-        else 1
-    )
+    if logs.returncode != 0 or not _is_secret_free(logs.stdout + logs.stderr, password):
+        return _failure(
+            "container logs",
+            f"exit={logs.returncode}; secret_free={_is_secret_free(logs.stdout + logs.stderr, password)}",
+        )
+    return 0
+
+
+def _exec_prefix(container: str, *, tty: bool) -> list[str]:
+    """Return a PTY-only or capture-safe `podman exec` command prefix."""
+    prefix = [
+        "podman",
+        "exec",
+        "--env",
+        "XDG_STATE_HOME=/tmp/markweave-cli-state",
+        container,
+        "/usr/bin/env",
+        "-i",
+        "XDG_STATE_HOME=/tmp/markweave-cli-state",
+        "/opt/md-converter/venv/bin/markweave",
+    ]
+    if tty:
+        prefix[2:2] = ["--interactive", "--tty"]
+    return prefix
+
+
+def _provisioned_login(profile: str) -> tuple[str, str]:
+    """Return the profile-specific fixture that is mounted instead of exported."""
+    return f"e2e-provisioned-{profile}", f"Provisioned-{profile}-initial"
+
+
+def _failure(stage: str, detail: str) -> int:
+    """Print bounded diagnostics without reproducing captured command output."""
+    print(f"CLI E2E failed at {stage}: {detail}", file=sys.stderr)
+    return 1
 
 
 def _assert_secret_free(value: str, secret: str) -> None:

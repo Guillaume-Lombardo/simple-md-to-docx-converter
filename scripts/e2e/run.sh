@@ -347,7 +347,7 @@ uv run python -m tests.e2e.service_workflow exercise \
   --artifact-dir "$temporary_directory/browser-artifacts" \
   --api-metrics-url "$base_url/metrics" "${worker_metrics[@]}"
 
-uv run python -m tests.e2e.cli_workflow --container "$application_name"
+uv run python -m tests.e2e.cli_workflow --container "$application_name" --profile "$profile"
 
 podman exec \
   --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \

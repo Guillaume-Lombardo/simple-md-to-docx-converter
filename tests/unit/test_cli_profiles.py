@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -200,3 +201,62 @@ def test_failed_replacement_preserves_a_different_service_profile(
 
     assert raised.value.code == "profile_write_failed"
     assert store.load("default") == original
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "",
+        "https://converter.example/\x7f",
+        "https://converter.example:" + "9" * 2_050,
+        "https://converter.example:not-a-port",
+    ),
+)
+def test_service_url_rejects_bounded_and_malformed_transport_values(url: str) -> None:
+    """Malformed URL input never reaches parsing or a remote transport."""
+    with pytest.raises(CliError) as raised:
+        validate_service_url(url, verify_tls=True)
+
+    assert raised.value.code == "invalid_service_url"
+
+
+def test_profile_load_rejects_oversized_document_and_delete_failure(
+    tmp_path, mocker
+) -> None:
+    """Bounded profile reads and failed removals leave no ambiguous local state."""
+    store = ProfileStore(tmp_path)
+    directory = tmp_path / "markweave" / "profiles"
+    directory.mkdir(parents=True, mode=0o700)
+    path = directory / "default.json"
+    path.write_text("x" * 16_385, encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(CliError) as oversized:
+        store.load("default")
+    assert oversized.value.code == "profile_invalid"
+
+    store.save(_profile())
+    mocker.patch.object(Path, "unlink", side_effect=OSError("read-only"))
+    with pytest.raises(CliError) as failed_delete:
+        store.delete("default")
+    assert failed_delete.value.code == "profile_delete_failed"
+
+
+def test_profile_directory_rejects_non_directory_state_and_unfixable_permissions(
+    tmp_path, mocker
+) -> None:
+    """State directories fail closed when ownership-safe permissions cannot be ensured."""
+    state_file = tmp_path / "state-file"
+    state_file.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(CliError) as unsafe_state:
+        ProfileStore(state_file).save(_profile())
+    assert unsafe_state.value.code == "profile_directory_unsafe"
+
+    state_home = tmp_path / "state"
+    profiles = state_home / "markweave" / "profiles"
+    profiles.mkdir(parents=True, mode=0o755)
+    profiles.chmod(0o755)
+    mocker.patch.object(Path, "chmod", side_effect=OSError("permissions denied"))
+    with pytest.raises(CliError) as permissions:
+        ProfileStore(state_home).save(_profile())
+    assert permissions.value.code == "profile_directory_unsafe"

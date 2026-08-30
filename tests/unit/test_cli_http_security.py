@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from email.message import Message
+from io import BytesIO
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -92,7 +94,7 @@ def test_transport_request_branches(mocker) -> None:
     assert transport.change_password(profile, "n", "n").status == 200
     assert any(type(item).__name__ == "ProxyHandler" for item in build.call_args.args)
 
-    error = HTTPError("http://x", 403, "no", _Headers([]), _Response(b"{}"))
+    error = HTTPError("http://x", 403, "no", Message(), BytesIO(b"{}"))
     opener.open.side_effect = error
     assert transport.session(profile).status == 403
     opener.open.side_effect = URLError("down")

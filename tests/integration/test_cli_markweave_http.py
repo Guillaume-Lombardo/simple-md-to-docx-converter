@@ -48,12 +48,12 @@ def running_markweave(tmp_path: Path):
     )
     thread = Thread(target=server.run, daemon=True)
     thread.start()
-    for _ in range(100):
-        if server.started:
-            break
-        sleep(0.01)
-    assert server.started
     try:
+        for _ in range(500):
+            if server.started:
+                break
+            sleep(0.01)
+        assert server.started
         yield f"http://127.0.0.1:{port}", application
     finally:
         server.should_exit = True

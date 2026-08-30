@@ -298,6 +298,7 @@ def _change_password(
     if response.status != _NO_CONTENT:
         with suppress(CliError):
             _transport(renewal_profile, context).logout(renewal_profile)
+        store.delete(profile_name)
         raise api_error(response, fallback="password_change_failed")
     store.delete(profile_name)
     writer.success(
