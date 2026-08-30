@@ -84,13 +84,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
     selected = tuple(sys.argv[1:] if arguments is None else arguments)
     if selected == ("embedded-worker",):
+        settings = Settings.load()
         uvicorn.run(
-            build_embedded_app(),
-            host=os.environ.get(
-                "MD_CONVERTER_HOST",
-                "0.0.0.0",  # noqa: S104 - container bind
-            ),
-            port=int(os.environ.get("MD_CONVERTER_PORT", "8080")),
+            build_embedded_app(settings),
+            host=settings.host,
+            port=settings.port,
             proxy_headers=False,
             server_header=False,
         )

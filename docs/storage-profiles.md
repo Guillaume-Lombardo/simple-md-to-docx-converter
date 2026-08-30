@@ -1,6 +1,6 @@
 # Storage profiles and recovery
 
-The application requires one explicit `MD_CONVERTER_STORAGE_PROFILE`. Configuration validation
+The application requires one explicit `MARKWEAVE_STORAGE_PROFILE`. Configuration validation
 rejects mixed or incomplete profile settings before adapters are constructed. Alembic upgrades run
 when the application components are assembled; the standalone profile has one replica, while the
 distributed migration runner uses the same schema history for PostgreSQL.
@@ -8,39 +8,39 @@ distributed migration runner uses the same schema history for PostgreSQL.
 Both profiles require explicit template activation policy; there are no production defaults:
 
 ```text
-MD_CONVERTER_TEMPLATE_MAX_ARCHIVE_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_REQUEST_MAX_BYTES=<approved value greater than archive limit>
-MD_CONVERTER_TEMPLATE_METADATA_REQUEST_MAX_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_NAME_CHARACTERS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_DESCRIPTION_CHARACTERS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_ENTRIES=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_MEMBER_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_TOTAL_BYTES=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_COMPRESSION_RATIO=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_XML_ELEMENTS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_XML_DEPTH=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_XML_ATTRIBUTES=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_DECLARED_FONTS=<approved value>
-MD_CONVERTER_TEMPLATE_MAX_FONT_NAME_CHARACTERS=<approved value>
-MD_CONVERTER_TEMPLATE_PANDOC_EXECUTABLE=<approved executable path>
-MD_CONVERTER_TEMPLATE_LIBREOFFICE_EXECUTABLE=<approved executable path>
-MD_CONVERTER_TEMPLATE_ENGINE_TIMEOUT_SECONDS=<approved value>
-MD_CONVERTER_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=<approved value>
-MD_CONVERTER_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=<approved value>
-MD_CONVERTER_TEMPLATE_VERSION_RETENTION_SECONDS=31536000
-MD_CONVERTER_TEMPLATE_MIN_RETAINED_VERSIONS=10
-MD_CONVERTER_AUDIT_RETENTION_SECONDS=31536000
-MD_CONVERTER_CLAMAV_HOST=<clamd service name>
-MD_CONVERTER_CLAMAV_PORT=3310
-MD_CONVERTER_CLAMAV_TIMEOUT_SECONDS=5
-MD_CONVERTER_READINESS_TIMEOUT_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_METRICS_BIND_HOST=<external-worker metrics bind host>
-MD_CONVERTER_WORKER_METRICS_PORT=<external-worker metrics bind port>
-MD_CONVERTER_WORKER_METRICS_MAX_CONNECTIONS=<bounded positive value>
-MD_CONVERTER_WORKER_METRICS_OBSERVATION_LIMIT=<positive value not exceeding max connections>
-MD_CONVERTER_WORKER_METRICS_ACCEPT_QUEUE_SIZE=<bounded positive value>
-MD_CONVERTER_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS=<approved positive finite value>
-MD_CONVERTER_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
+MARKWEAVE_TEMPLATE_MAX_ARCHIVE_BYTES=<approved value>
+MARKWEAVE_TEMPLATE_REQUEST_MAX_BYTES=<approved value greater than archive limit>
+MARKWEAVE_TEMPLATE_METADATA_REQUEST_MAX_BYTES=<approved value>
+MARKWEAVE_TEMPLATE_MAX_NAME_CHARACTERS=<approved value>
+MARKWEAVE_TEMPLATE_MAX_DESCRIPTION_CHARACTERS=<approved value>
+MARKWEAVE_TEMPLATE_MAX_ENTRIES=<approved value>
+MARKWEAVE_TEMPLATE_MAX_MEMBER_BYTES=<approved value>
+MARKWEAVE_TEMPLATE_MAX_TOTAL_BYTES=<approved value>
+MARKWEAVE_TEMPLATE_MAX_COMPRESSION_RATIO=<approved value>
+MARKWEAVE_TEMPLATE_MAX_XML_ELEMENTS=<approved value>
+MARKWEAVE_TEMPLATE_MAX_XML_DEPTH=<approved value>
+MARKWEAVE_TEMPLATE_MAX_XML_ATTRIBUTES=<approved value>
+MARKWEAVE_TEMPLATE_MAX_DECLARED_FONTS=<approved value>
+MARKWEAVE_TEMPLATE_MAX_FONT_NAME_CHARACTERS=<approved value>
+MARKWEAVE_TEMPLATE_PANDOC_EXECUTABLE=<approved executable path>
+MARKWEAVE_TEMPLATE_LIBREOFFICE_EXECUTABLE=<approved executable path>
+MARKWEAVE_TEMPLATE_ENGINE_TIMEOUT_SECONDS=<approved value>
+MARKWEAVE_TEMPLATE_ENGINE_TERMINATION_GRACE_SECONDS=<approved value>
+MARKWEAVE_TEMPLATE_PENDING_PUBLICATION_STALE_SECONDS=<approved value>
+MARKWEAVE_TEMPLATE_VERSION_RETENTION_SECONDS=31536000
+MARKWEAVE_TEMPLATE_MIN_RETAINED_VERSIONS=10
+MARKWEAVE_AUDIT_RETENTION_SECONDS=31536000
+MARKWEAVE_CLAMAV_HOST=<clamd service name>
+MARKWEAVE_CLAMAV_PORT=3310
+MARKWEAVE_CLAMAV_TIMEOUT_SECONDS=5
+MARKWEAVE_READINESS_TIMEOUT_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_METRICS_BIND_HOST=<external-worker metrics bind host>
+MARKWEAVE_WORKER_METRICS_PORT=<external-worker metrics bind port>
+MARKWEAVE_WORKER_METRICS_MAX_CONNECTIONS=<bounded positive value>
+MARKWEAVE_WORKER_METRICS_OBSERVATION_LIMIT=<positive value not exceeding max connections>
+MARKWEAVE_WORKER_METRICS_ACCEPT_QUEUE_SIZE=<bounded positive value>
+MARKWEAVE_WORKER_METRICS_REQUEST_TIMEOUT_SECONDS=<approved positive finite value>
+MARKWEAVE_TEMPLATE_ENGINE_WORKSPACE_ROOT=<optional bounded workspace parent>
 ```
 
 Template activation invokes both configured document engines synchronously inside a bounded worker
@@ -51,26 +51,26 @@ Both profiles also require the complete resource policy below. Placeholders inte
 not establish production values:
 
 ```text
-MD_CONVERTER_CONVERSION_UPLOAD_MAX_BYTES=<approved positive value>
-MD_CONVERTER_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
-MD_CONVERTER_CONVERSION_MAX_DECOMPRESSED_BYTES=<approved positive value>
-MD_CONVERTER_CONVERSION_MAX_FILES=<approved positive value>
-MD_CONVERTER_CONVERSION_MAX_IMAGES=<approved positive value>
-MD_CONVERTER_CONVERSION_MAX_DIAGRAMS=<approved positive value>
-MD_CONVERTER_CONVERSION_RETRY_AFTER_SECONDS=<approved positive value>
-MD_CONVERTER_JOB_RESULT_RETENTION_SECONDS=<approved positive value>
-MD_CONVERTER_JOB_ACTIVE_LIMIT_PER_USER=<approved positive value>
-MD_CONVERTER_JOB_GLOBAL_QUEUE_CAPACITY=<approved positive value>
-MD_CONVERTER_JOB_MAX_DURATION_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_MEMORY_BUDGET_BYTES=<approved positive value>
-MD_CONVERTER_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES=<approved positive value>
-MD_CONVERTER_WORKER_LEASE_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_HEARTBEAT_SECONDS=<approved finite value shorter than lease>
-MD_CONVERTER_WORKER_INCOMPLETE_SUBMISSION_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_IDLE_POLL_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_ERROR_BACKOFF_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
-MD_CONVERTER_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
+MARKWEAVE_CONVERSION_UPLOAD_MAX_BYTES=<approved positive value>
+MARKWEAVE_CONVERSION_REQUEST_MAX_BYTES=<approved value greater than upload limit>
+MARKWEAVE_CONVERSION_MAX_DECOMPRESSED_BYTES=<approved positive value>
+MARKWEAVE_CONVERSION_MAX_FILES=<approved positive value>
+MARKWEAVE_CONVERSION_MAX_IMAGES=<approved positive value>
+MARKWEAVE_CONVERSION_MAX_DIAGRAMS=<approved positive value>
+MARKWEAVE_CONVERSION_RETRY_AFTER_SECONDS=<approved positive value>
+MARKWEAVE_JOB_RESULT_RETENTION_SECONDS=<approved positive value>
+MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=<approved positive value>
+MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY=<approved positive value>
+MARKWEAVE_JOB_MAX_DURATION_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_MEMORY_BUDGET_BYTES=<approved positive value>
+MARKWEAVE_WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES=<approved positive value>
+MARKWEAVE_WORKER_LEASE_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_HEARTBEAT_SECONDS=<approved finite value shorter than lease>
+MARKWEAVE_WORKER_INCOMPLETE_SUBMISSION_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_IDLE_POLL_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_ERROR_BACKOFF_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
+MARKWEAVE_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
 ```
 
 Upload and decompressed-content limits are independent. A standalone Markdown upload can make the
@@ -83,8 +83,8 @@ ordering.
 Set:
 
 ```text
-MD_CONVERTER_STORAGE_PROFILE=standalone
-MD_CONVERTER_STANDALONE_DATA_DIRECTORY=/data
+MARKWEAVE_STORAGE_PROFILE=standalone
+MARKWEAVE_STANDALONE_DATA_DIRECTORY=/data
 # plus every shared resource-policy variable listed above
 ```
 
@@ -113,15 +113,15 @@ upgrade older metadata, and require `/health/ready` to succeed before admitting 
 Set:
 
 ```text
-MD_CONVERTER_STORAGE_PROFILE=distributed
-MD_CONVERTER_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
-MD_CONVERTER_S3_BUCKET=...
+MARKWEAVE_STORAGE_PROFILE=distributed
+MARKWEAVE_DISTRIBUTED_DATABASE_URL=postgresql+psycopg://...
+MARKWEAVE_S3_BUCKET=...
 # plus every shared resource-policy variable listed above
 ```
 
-`MD_CONVERTER_S3_ENDPOINT_URL` and `MD_CONVERTER_S3_REGION` select an AWS S3-compatible endpoint.
+`MARKWEAVE_S3_ENDPOINT_URL` and `MARKWEAVE_S3_REGION` select an AWS S3-compatible endpoint.
 Static credentials are optional for workloads using an AWS-compatible credential provider; when
-used, `MD_CONVERTER_S3_ACCESS_KEY_ID` and `MD_CONVERTER_S3_SECRET_ACCESS_KEY` must be supplied
+used, `MARKWEAVE_S3_ACCESS_KEY_ID` and `MARKWEAVE_S3_SECRET_ACCESS_KEY` must be supplied
 together through secrets. RustFS is the CI and k3s implementation, but application code uses only
 AWS S3-compatible operations and contains no RustFS-specific API.
 

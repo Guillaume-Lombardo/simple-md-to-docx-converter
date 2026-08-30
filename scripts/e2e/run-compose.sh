@@ -185,8 +185,8 @@ assert written <= 268_435_456, written
 }
 
 write_checkpoint() {
-  MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
-  MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
+  MARKWEAVE_E2E_ADMIN_USERNAME=admin \
+  MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow checkpoint \
       --base-url "http://127.0.0.1:$port" \
       --profile standalone \
@@ -197,8 +197,8 @@ write_checkpoint() {
 }
 
 verify_checkpoint() {
-  MD_CONVERTER_E2E_ADMIN_USERNAME=admin \
-  MD_CONVERTER_E2E_ADMIN_PASSWORD="$password" \
+  MARKWEAVE_E2E_ADMIN_USERNAME=admin \
+  MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow verify-checkpoint \
       --base-url "http://127.0.0.1:$port" \
       --profile standalone \

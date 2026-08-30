@@ -13,6 +13,7 @@ from pytest_mock import MockerFixture
 import markweave
 from scripts.release.artifacts import ArtifactError, ArtifactSet
 from scripts.release.verify_install import (
+    CONSOLE_TIMEOUT_SECONDS,
     ENVIRONMENT_TIMEOUT_SECONDS,
     IMPORT_TIMEOUT_SECONDS,
     INSTALL_TIMEOUT_SECONDS,
@@ -67,7 +68,7 @@ def artifacts(tmp_path: Path) -> ArtifactSet:
 def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture
 ) -> None:
-    """Only a private copy matching the manifest reaches uv and isolated Python."""
+    """Only a private copy matching the manifest reaches isolated Python paths."""
     events: list[str] = []
 
     def verified(*args: object, **kwargs: object) -> ArtifactSet:
@@ -79,7 +80,7 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
     def executed(
         command: tuple[str, ...], *, cwd: Path, label: str, timeout: int
     ) -> None:
-        events.append(command[1] if command[0] == "/usr/bin/uv" else "import")
+        events.append(label)
         calls.append((command, cwd, timeout))
         if len(calls) == 2:
             private_wheel = Path(command[-1])
@@ -107,7 +108,14 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         expected_version="0.1.0",
         manifest_name="release-integrity.json",
     )
-    assert events == ["verified", "venv", "pip", "import"]
+    assert events == [
+        "verified",
+        "clean environment creation",
+        "exact wheel installation",
+        "isolated public import check",
+        "isolated console version check",
+        "isolated console help check",
+    ]
     venv_command, root, timeout = calls[0]
     environment = root / "venv"
     python = environment / "bin" / "python"
@@ -145,6 +153,17 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         ),
         root,
         IMPORT_TIMEOUT_SECONDS,
+    )
+    console = environment / "bin" / "markweave"
+    assert calls[3] == (
+        (str(python), "-I", str(console), "--version"),
+        root,
+        CONSOLE_TIMEOUT_SECONDS,
+    )
+    assert calls[4] == (
+        (str(python), "-I", str(console), "--help"),
+        root,
+        CONSOLE_TIMEOUT_SECONDS,
     )
     assert all(cwd == root for _, cwd, _ in calls)
     assert root != Path.cwd()
@@ -205,7 +224,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     run.assert_not_called()
 
 
-@pytest.mark.parametrize("failing_call", [1, 2, 3])
+@pytest.mark.parametrize("failing_call", [1, 2, 3, 4, 5])
 def test_subprocess_failure_stops_later_steps_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture, failing_call: int
 ) -> None:

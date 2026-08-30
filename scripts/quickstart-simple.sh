@@ -347,9 +347,9 @@ import urllib.request
 
 expected = sys.argv[1]
 insecure = sys.argv[2]
-if os.environ.get("MD_CONVERTER_PUBLIC_ORIGIN") != expected:
+if os.environ.get("MARKWEAVE_PUBLIC_ORIGIN") != expected:
     raise SystemExit(2)
-if os.environ.get("MD_CONVERTER_INSECURE_EVALUATION_MODE") != insecure:
+if os.environ.get("MARKWEAVE_INSECURE_EVALUATION_MODE") != insecure:
     raise SystemExit(3)
 origins = ("null", "https://attacker.invalid") if insecure == "true" else (expected,)
 for origin in origins:

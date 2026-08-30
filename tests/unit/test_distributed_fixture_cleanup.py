@@ -12,11 +12,11 @@ pytestmark = pytest.mark.unit
 
 
 def _environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MD_CONVERTER_TEST_POSTGRES_URL", "postgresql://test/db")
-    monkeypatch.setenv("MD_CONVERTER_TEST_S3_ENDPOINT_URL", "http://s3.invalid")
-    monkeypatch.setenv("MD_CONVERTER_TEST_S3_REGION", "test-region")
-    monkeypatch.setenv("MD_CONVERTER_TEST_S3_ACCESS_KEY_ID", "test-access")
-    monkeypatch.setenv("MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY", "test-secret")
+    monkeypatch.setenv("MARKWEAVE_TEST_POSTGRES_URL", "postgresql://test/db")
+    monkeypatch.setenv("MARKWEAVE_TEST_S3_ENDPOINT_URL", "http://s3.invalid")
+    monkeypatch.setenv("MARKWEAVE_TEST_S3_REGION", "test-region")
+    monkeypatch.setenv("MARKWEAVE_TEST_S3_ACCESS_KEY_ID", "test-access")
+    monkeypatch.setenv("MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY", "test-secret")
 
 
 def _requires_s3_request(mocker: MockerFixture) -> object:
