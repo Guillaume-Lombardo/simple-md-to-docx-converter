@@ -6,7 +6,7 @@ import json
 import os
 import ssl
 import stat
-from contextlib import suppress
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -179,9 +179,11 @@ class ConversionHttpClient:
                 response.status, headers=headers, bytes_written=written
             )
         finally:
-            if response is not None:
-                response.close()
-            os.close(directory_descriptor)
+            _close_download_resources(
+                response,
+                directory_descriptor,
+                primary_error=sys.exception(),
+            )
 
     def _open(
         self,
@@ -395,11 +397,68 @@ def _atomic_stream(
         os.fsync(directory_descriptor)
         return written
     finally:
+        _cleanup_atomic_resources(
+            descriptor=descriptor,
+            temporary=temporary,
+            directory_descriptor=directory_descriptor,
+            close_directory=owned_directory_descriptor,
+            primary_error=sys.exception(),
+        )
+
+
+def _close_download_resources(
+    response: Any,
+    directory_descriptor: int,
+    *,
+    primary_error: BaseException | None,
+) -> None:
+    close_error: BaseException | None = None
+    try:
+        if response is not None:
+            response.close()
+    except BaseException as error:
+        close_error = error
+    try:
+        os.close(directory_descriptor)
+    except OSError as error:
+        if close_error is None:
+            close_error = error
+    if primary_error is None and close_error is not None:
+        raise close_error
+
+
+def _cleanup_atomic_resources(
+    *,
+    descriptor: int,
+    temporary: str,
+    directory_descriptor: int,
+    close_directory: bool,
+    primary_error: BaseException | None,
+) -> None:
+    cleanup_error: OSError | None = None
+    try:
         if descriptor >= 0:
             os.close(descriptor)
-        if temporary:
-            with suppress(FileNotFoundError):
-                os.unlink(temporary, dir_fd=directory_descriptor)
+    except OSError as error:
+        cleanup_error = error
+    if temporary:
+        try:
+            os.unlink(temporary, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            if cleanup_error is None:
+                cleanup_error = error
+        try:
             os.fsync(directory_descriptor)
-        if owned_directory_descriptor:
+        except OSError as error:
+            if cleanup_error is None:
+                cleanup_error = error
+    if close_directory:
+        try:
             os.close(directory_descriptor)
+        except OSError as error:
+            if cleanup_error is None:
+                cleanup_error = error
+    if primary_error is None and cleanup_error is not None:
+        raise cleanup_error

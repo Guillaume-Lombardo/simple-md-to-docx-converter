@@ -343,6 +343,93 @@ def test_atomic_stream_cleans_partial_file_after_interruption(tmp_path: Path) ->
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("cleanup_failure", ("unlink", "fsync"))
+def test_atomic_stream_closes_owned_parent_after_cleanup_failure(
+    cleanup_failure: str, tmp_path: Path, mocker
+) -> None:
+    class Interrupted:
+        def read(self, _size: int) -> bytes:
+            raise RuntimeError("primary stream failure")
+
+    opened_descriptors: list[int] = []
+    real_open_destination = conversion_http._open_destination
+    real_unlink = os.unlink
+    real_fsync = os.fsync
+
+    def record_open(destination: Path, *, overwrite: bool) -> int:
+        descriptor = real_open_destination(destination, overwrite=overwrite)
+        opened_descriptors.append(descriptor)
+        return descriptor
+
+    def fail_unlink(path, *, dir_fd=None) -> None:
+        raise PermissionError("cleanup unlink failure")
+
+    def fail_directory_fsync(descriptor: int) -> None:
+        if descriptor in opened_descriptors:
+            raise OSError("cleanup fsync failure")
+        real_fsync(descriptor)
+
+    mocker.patch.object(conversion_http, "_open_destination", record_open)
+    if cleanup_failure == "unlink":
+        mocker.patch.object(conversion_http.os, "unlink", fail_unlink)
+    else:
+        mocker.patch.object(conversion_http.os, "fsync", fail_directory_fsync)
+
+    destination = tmp_path / "result.bin"
+    with pytest.raises(RuntimeError, match="primary stream failure"):
+        _atomic_stream(cast(BinaryIO, Interrupted()), destination, overwrite=False)
+
+    assert len(opened_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened_descriptors[0])
+    temporary_files = list(tmp_path.glob(".markweave-download-*"))
+    if cleanup_failure == "unlink":
+        assert len(temporary_files) == 1
+        real_unlink(temporary_files[0])
+    else:
+        assert temporary_files == []
+
+
+def test_cleanup_helpers_preserve_first_error_and_attempt_all_closes(mocker) -> None:
+    response = mocker.Mock()
+    response_error = RuntimeError("response close failure")
+    response.close.side_effect = response_error
+    close = mocker.patch.object(
+        conversion_http.os,
+        "close",
+        side_effect=(OSError("directory close failure"),),
+    )
+
+    with pytest.raises(RuntimeError, match="response close failure") as raised:
+        conversion_http._close_download_resources(response, 41, primary_error=None)
+
+    assert raised.value is response_error
+    close.assert_called_once_with(41)
+
+    close.reset_mock(side_effect=True)
+    conversion_http._close_download_resources(
+        response,
+        41,
+        primary_error=RuntimeError("primary request failure"),
+    )
+    close.assert_called_once_with(41)
+
+    first_close_error = OSError("file close failure")
+    close.reset_mock(side_effect=True)
+    close.side_effect = (first_close_error, OSError("directory close failure"))
+    with pytest.raises(OSError, match="file close failure") as raised:
+        conversion_http._cleanup_atomic_resources(
+            descriptor=42,
+            temporary="",
+            directory_descriptor=43,
+            close_directory=True,
+            primary_error=None,
+        )
+
+    assert raised.value is first_close_error
+    assert close.call_args_list == [mocker.call(42), mocker.call(43)]
+
+
 def test_atomic_stream_keeps_publication_and_cleanup_on_open_parent_descriptor(
     tmp_path: Path, mocker
 ) -> None:
@@ -416,11 +503,13 @@ class _FakeHttpResponse:
         status: int = 200,
         headers: dict[str, str] | None = None,
         failure: Exception | None = None,
+        close_failure: Exception | None = None,
     ) -> None:
         self.status = status
         self.headers = headers or {}
         self._content = content
         self._failure = failure
+        self._close_failure = close_failure
         self.closed = False
 
     def read(self, size: int = -1) -> bytes:
@@ -430,6 +519,8 @@ class _FakeHttpResponse:
 
     def close(self) -> None:
         self.closed = True
+        if self._close_failure is not None:
+            raise self._close_failure
 
 
 def _http_client() -> ConversionHttpClient:
@@ -513,6 +604,29 @@ def test_conversion_http_error_download_is_bounded_and_does_not_create_file(
     assert result.payload == {"error": {"code": "JOB_EXPIRED", "message": "Expired."}}
     assert not destination.exists()
     assert response.closed is True
+
+
+def test_download_closes_parent_fd_when_response_close_repeatedly_fails(
+    tmp_path: Path, mocker
+) -> None:
+    descriptor_directory = Path("/proc/self/fd")
+    assert descriptor_directory.is_dir()
+    opener = mocker.Mock()
+    opener.open.side_effect = lambda *_args, **_kwargs: _FakeHttpResponse(
+        b'{"error":{"code":"JOB_EXPIRED","message":"Expired."}}',
+        status=409,
+        close_failure=RuntimeError("response close failure"),
+    )
+    mocker.patch.object(conversion_http, "build_opener", return_value=opener)
+    destination = tmp_path / "result.bin"
+    descriptors_before = len(tuple(descriptor_directory.iterdir()))
+
+    for _ in range(32):
+        with pytest.raises(RuntimeError, match="response close failure"):
+            _http_client().download_result(JOB_ID, destination, overwrite=False)
+
+    assert len(tuple(descriptor_directory.iterdir())) == descriptors_before
+    assert not destination.exists()
 
 
 def test_conversion_http_interrupted_download_is_sanitized_and_cleans_temp(
