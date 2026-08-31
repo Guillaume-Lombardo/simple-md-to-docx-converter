@@ -309,7 +309,10 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         f"child=subprocess.Popen([sys.executable,'-c',{child_program!r}])\n"
         f"ready=pathlib.Path({str(ready_file)!r})\n"
         "while not ready.exists(): time.sleep(0.005)\n"
-        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        f"pid_file=pathlib.Path({str(pid_file)!r})\n"
+        "temporary_pid_file=pid_file.with_suffix('.tmp')\n"
+        "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
+        "temporary_pid_file.replace(pid_file)\n"
         "time.sleep(30)",
     )
 
@@ -318,9 +321,15 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
             raise RuntimeError("sensitive")
         return False
 
+    def cancellation_probe() -> bool:
+        if not pid_file.exists():
+            return False
+        assert pid_file.read_text(encoding="ascii").isdigit()
+        return True
+
     probes: dict[str, Callable[[], bool] | None] = {
         "timeout": None,
-        "cancel": pid_file.exists,
+        "cancel": cancellation_probe,
         "probe-failure": probe_failure,
     }
     expected_codes = {
