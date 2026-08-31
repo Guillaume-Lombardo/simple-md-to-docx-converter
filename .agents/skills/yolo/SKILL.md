@@ -12,7 +12,7 @@ Run each phase in order from the repository root. The implicit pull request is t
 An explicit `$yolo` invocation grants, in the same request, the approvals required to:
 
 - push the exact current work branch;
-- create, update, and mark ready the pull request for that branch and the captured target branch;
+- create and update the ready-for-review pull request for that branch and the captured target branch;
 - squash-merge that pull request at the exact captured head SHA after all required checks, reviews,
   conversations, and protections pass; and
 - delete the exact captured source branch locally and remotely after the merge is verified.
@@ -27,9 +27,9 @@ resolution of a new blocker without the user's direction.
 ## 1. Publish
 
 1. Read all repository instructions and the product specification referenced by `AGENTS.md`.
-2. Load and follow `$yeet-github` in full to inspect, validate, commit, push, and open a draft pull
-   request. The explicit `$yolo` invocation satisfies `$yeet-github`'s approval requirement for the
-   captured push and pull-request publication; do not ask for it again.
+2. Load and follow `$yeet-github` in full to inspect, validate, commit, push, and open a
+   ready-for-review pull request. The explicit `$yolo` invocation satisfies `$yeet-github`'s
+   approval requirement for the captured push and pull-request publication; do not ask for it again.
 3. Retain the exact source and target branches, pushed SHA, pull-request number, and URL.
 4. Stop after any failure or ambiguous external result. Never merge or clean up after a partial failure.
 
@@ -39,7 +39,8 @@ resolution of a new blocker without the user's direction.
    captured head SHA. It never authorizes bypassing protections or merging another pull request.
 2. Verify with `gh pr view` that the pull request exactly matches the captured source branch and SHA. Reject ambiguity or a changed head.
 3. Inspect required checks, reviews, conversations, and protections with `gh pr checks` and `gh pr view --json mergeStateStatus,reviewDecision,statusCheckRollup`.
-4. Mark a ready draft with `gh pr ready <number>`.
+4. Require the pull request to be ready for review from creation. Never use a draft-to-ready
+   transition because it cancels and duplicates CI runs and delays automated review.
 5. Watch pending checks with `gh pr checks <number> --watch --interval 10`; stop and report any failing check.
 6. Present the final state as a progress update, reconfirm that the invocation's authorization is
    still valid, and proceed without requesting a second approval.
