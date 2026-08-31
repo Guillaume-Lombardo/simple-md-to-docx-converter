@@ -14,17 +14,31 @@ RUNNER = Path("scripts/e2e/run.sh").resolve()
 
 @pytest.mark.unit
 def test_relative_runtime_marker_is_contained_by_owned_directory() -> None:
-    with tempfile.TemporaryDirectory(prefix="tmp.") as directory:
+    with tempfile.TemporaryDirectory(prefix="markweave-e2e.") as directory:
         harness_directory = Path(directory)
+        identity = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; e2e_harness_directory_identity "$2"',
+                "bash",
+                str(HARNESS),
+                str(harness_directory),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         result = subprocess.run(
             [
                 "bash",
                 "-c",
-                'source "$1"; e2e_run_in_harness_directory "$2" '
+                'source "$1"; e2e_run_in_harness_directory "$2" "$3" '
                 "bash -c 'printf runtime-marker > oom'",
                 "bash",
                 str(HARNESS),
                 str(harness_directory),
+                identity,
             ],
             check=False,
             capture_output=True,
@@ -35,7 +49,42 @@ def test_relative_runtime_marker_is_contained_by_owned_directory() -> None:
         assert (harness_directory / "oom").read_text(encoding="utf-8") == (
             "runtime-marker"
         )
-        assert not Path("oom").exists()
+    assert not Path("oom").exists()
+
+
+@pytest.mark.unit
+def test_alternate_tmpdir_launches_and_removes_only_owned_tree(
+    tmp_path: Path,
+) -> None:
+    alternate_tmpdir = tmp_path / "alternate temporary root"
+    alternate_tmpdir.mkdir()
+    sibling = alternate_tmpdir / "preserve-me"
+    sibling.mkdir()
+    environment = {"TMPDIR": str(alternate_tmpdir)}
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; directory="$(e2e_create_harness_directory)"; '
+            'identity="$(e2e_harness_directory_identity "$directory")"; '
+            'e2e_run_in_harness_directory "$directory" "$identity" '
+            "bash -c 'printf runtime-marker > oom'; "
+            'e2e_remove_harness_directory "$directory" "$identity"; '
+            'printf "%s\\n" "$directory"',
+            "bash",
+            str(HARNESS),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    owned_directory = Path(result.stdout.strip())
+    assert result.returncode == 0, result.stderr
+    assert owned_directory.parent == alternate_tmpdir
+    assert not owned_directory.exists()
+    assert sibling.is_dir()
 
 
 @pytest.mark.unit
@@ -95,7 +144,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
 
     assert len(podman_runs) == 8
     assert all(
-        'e2e_run_in_harness_directory "$temporary_directory"' in lines[index - 1]
+        '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs
     )
     assert 'rm -f -- "$repository/oom"' not in runner
