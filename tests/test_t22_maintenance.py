@@ -50,7 +50,7 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
 def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
     triggers = workflow["on"]
-    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    assert set(triggers) == {"pull_request", "schedule", "workflow_dispatch"}
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     job = workflow["jobs"]["mutation"]
@@ -72,25 +72,15 @@ def test_mutation_workflow_is_isolated_bounded_and_read_only() -> None:
 @pytest.mark.unit
 def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
     workflow = load_strings(MUTATION_WORKFLOW)
-    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["target"]
-    target = "markweave.observability.x__normalize_method__mutmut_*"
+    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]["domain"]
     assert dispatch["type"] == "choice"
-    assert dispatch["default"] == target
-    assert dispatch["options"] == [target]
+    assert dispatch["default"] == "all"
+    assert "observability" in dispatch["options"]
     text = MUTATION_WORKFLOW.read_text(encoding="utf-8")
-    assert "rm -rf -- mutants" in text
-    assert 'uv run mutmut run "$MUTATION_TARGET"' in text
-    assert "uv run mutmut export-cicd-stats" in text
-    assert 'stats.get("killed", 0) <= 0' in text
-    for failure in (
-        "survived",
-        "no_tests",
-        "suspicious",
-        "timeout",
-        "check_was_interrupted_by_user",
-        "segfault",
-    ):
-        assert f'"{failure}"' in text
+    assert "scripts/ci/run_mutation_campaign.py" in text
+    assert ".mutation-policy" in text
+    assert '--target-root "$GITHUB_WORKSPACE"' in text
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     assert '"mutmut==3.7.0"' in pyproject
