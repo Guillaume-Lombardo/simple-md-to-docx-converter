@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     template_max_entries: int = Field(gt=0)
     template_max_member_bytes: int = Field(gt=0)
     template_max_total_bytes: int = Field(gt=0)
-    template_max_compression_ratio: float = Field(ge=1.0)
+    template_max_compression_ratio: float = Field(ge=1.0, allow_inf_nan=False)
     template_max_xml_elements: int = Field(gt=0)
     template_max_xml_depth: int = Field(gt=0)
     template_max_xml_attributes: int = Field(gt=0)
