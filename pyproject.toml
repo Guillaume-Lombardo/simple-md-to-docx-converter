@@ -49,8 +49,8 @@ server = [
 standalone = ["markweave[server]"]
 distributed = [
     "markweave[server]",
-    "boto3>=1.40,<2",
-    "psycopg[binary]>=3.2,<4",
+    "boto3>=1.43.82,<2",
+    "psycopg[binary]>=3.3.4,<4",
 ]
 all = ["markweave[standalone,distributed]"]
 
@@ -74,8 +74,8 @@ dev = [
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",
     "pytest-mock>=3.15,<4",
-    "ruff>=0.13,<1",
-    "ty>=0.0.1a20,<1",
+    "ruff>=0.16.5,<1",
+    "ty>=0.0.75,<1",
 ]
 
 [tool.markweave.release]

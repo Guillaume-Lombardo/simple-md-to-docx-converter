@@ -47,12 +47,12 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
     assert extras["standalone"] == ["markweave[server]"]
     assert extras["distributed"] == [
         "markweave[server]",
-        "boto3>=1.40,<2",
-        "psycopg[binary]>=3.2,<4",
+        "boto3>=1.43.82,<2",
+        "psycopg[binary]>=3.3.4,<4",
     ]
     assert extras["all"] == ["markweave[standalone,distributed]"]
-    assert "boto3>=1.40,<2" not in extras["server"]
-    assert "psycopg[binary]>=3.2,<4" not in extras["server"]
+    assert "boto3>=1.43.82,<2" not in extras["server"]
+    assert "psycopg[binary]>=3.3.4,<4" not in extras["server"]
     assert "markweave[all]" in metadata["dependency-groups"]["dev"]
 
 
