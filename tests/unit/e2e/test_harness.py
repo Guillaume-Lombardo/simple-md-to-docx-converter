@@ -198,6 +198,55 @@ def test_worktree_guard_reports_and_preserves_unexpected_change(tmp_path: Path) 
 
 
 @pytest.mark.unit
+def test_repository_local_tmpdir_is_removed_before_worktree_check(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(
+        ["git", "init", "--quiet", "--initial-branch=main", str(repository)],
+        check=True,
+    )
+    local_tmpdir = repository / "unignored-temporary-root"
+    local_tmpdir.mkdir()
+    sibling = local_tmpdir / "preserve-me"
+    sibling.write_text("sibling", encoding="utf-8")
+    unexpected = repository / "unexpected"
+    environment = os.environ | {"TMPDIR": str(local_tmpdir)}
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -e; source "$1"; '
+            'baseline="$(e2e_get_worktree_state "$2")"; '
+            'directory=""; identity=""; '
+            "e2e_initialize_harness_directory directory identity; "
+            'printf runtime-marker > "$directory/oom"; '
+            'printf unexpected > "$2/unexpected"; '
+            'printf "%s\\n" "$directory"; '
+            'e2e_remove_harness_directory "$directory" "$identity"; '
+            'e2e_require_worktree_state_unchanged "$2" "$baseline"',
+            "bash",
+            str(HARNESS),
+            str(repository),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    owned_directory = Path(result.stdout.strip())
+    assert result.returncode == 1
+    assert not owned_directory.exists()
+    assert sibling.read_text(encoding="utf-8") == "sibling"
+    assert unexpected.read_text(encoding="utf-8") == "unexpected"
+    assert "?? unexpected" in result.stderr
+    assert "markweave-e2e" not in result.stderr
+    assert "oom" not in result.stderr
+
+
+@pytest.mark.unit
 def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
     lines = runner.splitlines()
@@ -213,6 +262,6 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         for index in podman_runs
     )
     assert 'rm -f -- "$repository/oom"' not in runner
-    assert 'e2e_require_worktree_unchanged "$repository" "$worktree_baseline"' in (
-        runner
-    )
+    removal_index = runner.index("if ! e2e_remove_harness_directory")
+    worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
+    assert removal_index < worktree_index

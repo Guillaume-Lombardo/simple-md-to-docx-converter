@@ -110,8 +110,13 @@ e2e_capture_worktree_state() {
   local worktree_repository="$1"
   local destination="$2"
 
-  git -C "$worktree_repository" status --porcelain=v1 --untracked-files=all \
-    >"$destination"
+  e2e_get_worktree_state "$worktree_repository" >"$destination"
+}
+
+e2e_get_worktree_state() {
+  local worktree_repository="$1"
+
+  git -C "$worktree_repository" status --porcelain=v1 --untracked-files=all
 }
 
 e2e_require_worktree_unchanged() {
@@ -126,5 +131,22 @@ e2e_require_worktree_unchanged() {
 
   echo "Final-image E2E changed the repository worktree:" >&2
   diff --unified=0 -- "$baseline" "$current" >&2 || true
+  return 1
+}
+
+e2e_require_worktree_state_unchanged() {
+  local worktree_repository="$1"
+  local baseline_state="$2"
+  local current_state
+
+  current_state="$(e2e_get_worktree_state "$worktree_repository")" || return 1
+  if [[ "$baseline_state" == "$current_state" ]]; then
+    return 0
+  fi
+
+  echo "Final-image E2E changed the repository worktree:" >&2
+  diff --unified=0 --label=before --label=after \
+    <(printf '%s\n' "$baseline_state") \
+    <(printf '%s\n' "$current_state") >&2 || true
   return 1
 }

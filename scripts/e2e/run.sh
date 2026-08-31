@@ -26,13 +26,14 @@ readonly seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 
 # shellcheck source=scripts/e2e/harness.sh
 source "$repository/scripts/e2e/harness.sh"
+worktree_baseline="$(e2e_get_worktree_state "$repository")"
+readonly worktree_baseline
 temporary_directory=""
 temporary_directory_identity=""
 e2e_initialize_harness_directory \
   temporary_directory temporary_directory_identity
 readonly temporary_directory
 readonly temporary_directory_identity
-worktree_baseline="$temporary_directory/worktree-before"
 data_directory="$temporary_directory/data"
 evidence_directory="$temporary_directory/evidence"
 state_file="$temporary_directory/state.json"
@@ -51,7 +52,6 @@ succeeded=false
 
 # shellcheck source=scripts/e2e/runtime-settings.sh
 source "$repository/scripts/e2e/runtime-settings.sh"
-e2e_capture_worktree_state "$repository" "$worktree_baseline"
 
 remove_artifacts() {
   if [[ "$artifact_directory" != "$repository/artifacts/e2e/$profile" ]]; then
@@ -104,11 +104,12 @@ cleanup() {
       exit_code=1
     fi
   fi
-  if ! e2e_require_worktree_unchanged "$repository" "$worktree_baseline"; then
-    exit_code=1
-  fi
   if ! e2e_remove_harness_directory \
     "$temporary_directory" "$temporary_directory_identity"; then
+    exit_code=1
+  fi
+  if ! e2e_require_worktree_state_unchanged \
+    "$repository" "$worktree_baseline"; then
     exit_code=1
   fi
   exit "$exit_code"
