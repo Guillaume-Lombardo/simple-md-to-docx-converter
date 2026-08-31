@@ -29,6 +29,11 @@ PANDOC_READER = (
 )
 _REMOTE_RESOURCE = re.compile(r"(?i)^(?:[a-z][a-z0-9+.-]*(?::|%3a)|//|%2f%2f)")
 _RAW_ATTRIBUTE = re.compile(r"^\{\s*=([^\s{}]+)\s*\}")
+_ALLOWED_EXTERNAL_LINK_SCHEMES = frozenset({"http", "https"})
+_MAX_URL_DECODE_PASSES = 2
+_ASCII_CONTROL_END = 32
+_ASCII_DELETE = 127
+_MAX_URL_PORT = 65_535
 
 
 class _ResourceParser(MarkdownIt):
@@ -153,6 +158,49 @@ def _resolve_local_image(
         raise validation_error("Markdown image is missing or unapproved.")
 
 
+def _decoded_destination_variants(resource: str) -> tuple[str, ...]:
+    variants = [resource]
+    for _ in range(_MAX_URL_DECODE_PASSES):
+        decoded = unquote(variants[-1], encoding="utf-8", errors="replace")
+        if decoded == variants[-1]:
+            break
+        variants.append(decoded)
+    return tuple(variants)
+
+
+def _is_remote_destination(resource: str) -> bool:
+    return any(
+        _REMOTE_RESOURCE.search(value)
+        for value in _decoded_destination_variants(resource)
+    )
+
+
+def _is_safe_external_link(resource: str) -> bool:
+    variants = _decoded_destination_variants(resource)
+    if not _REMOTE_RESOURCE.search(resource) or any(
+        ord(character) < _ASCII_CONTROL_END or ord(character) == _ASCII_DELETE
+        for value in variants
+        for character in value
+    ):
+        return False
+    try:
+        parsed = urlsplit(resource)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.casefold() in _ALLOWED_EXTERNAL_LINK_SCHEMES
+        and bool(parsed.netloc)
+        and bool(hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and (port is None or 0 <= port <= _MAX_URL_PORT)
+        and "%" not in hostname
+        and "\\" not in resource
+    )
+
+
 def _is_safe_package_path(path: PurePosixPath) -> bool:
     return (
         isinstance(path, PurePosixPath)
@@ -209,12 +257,18 @@ def _validate_tokens(
         if token.type in {"code_block", "code_inline", "fence"}:
             continue
         resource = token.attrGet("src") or token.attrGet("href")
-        if isinstance(resource, str) and _REMOTE_RESOURCE.search(resource):
-            raise validation_error("Markdown input contains a remote resource.")
         if token.type == "image":
+            if isinstance(resource, str) and _is_remote_destination(resource):
+                raise validation_error("Markdown input contains a remote resource.")
             if not isinstance(resource, str) or not approved_paths:
                 raise validation_error("Markdown input contains an unapproved image.")
             _resolve_local_image(resource, entrypoint, approved_paths)
+        elif (
+            isinstance(resource, str)
+            and _is_remote_destination(resource)
+            and not _is_safe_external_link(resource)
+        ):
+            raise validation_error("Markdown input contains a remote resource.")
 
 
 def validate_markdown(markdown: str) -> ApprovedMarkdown:

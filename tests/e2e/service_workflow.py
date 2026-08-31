@@ -826,16 +826,48 @@ def require_failed_conversion(
     source: bytes,
     *,
     label: str,
+    filename: str | None = None,
 ) -> None:
     """Require an invalid archive/image upload to fail without publishing a result."""
 
     _job, location = submit_conversion(
-        client, template, "docx", source, filename=f"{label}.zip"
+        client, template, "docx", source, filename=filename or f"{label}.zip"
     )
     terminal = wait_for_job(client, location)
     if terminal.get("state") != "failed" or terminal.get("error_code") != "validation":
         raise WorkflowFailure(f"{label}: deterministic validation failure missing")
     expect(client.request("GET", f"{location}/result"), 409, f"{label} result denial")
+
+
+def validate_external_hyperlinks(content: bytes) -> None:
+    """Require the anonymized fixture's external links in generated OpenXML."""
+
+    relationship_namespace = (
+        "http://schemas.openxmlformats.org/package/2006/relationships"
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as document:
+            relationships = ElementTree.fromstring(  # noqa: S314 - generated OpenXML
+                document.read("word/_rels/document.xml.rels")
+            )
+    except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as error:
+        raise WorkflowFailure(
+            "external hyperlinks: invalid OpenXML relationships"
+        ) from error
+    targets = {
+        relationship.attrib.get("Target")
+        for relationship in relationships.iter(
+            f"{{{relationship_namespace}}}Relationship"
+        )
+        if relationship.attrib.get("Type", "").endswith("/hyperlink")
+        and relationship.attrib.get("TargetMode") == "External"
+    }
+    expected = {
+        "http://packages.example.invalid/document-tool",
+        "https://documentation.example.invalid/document-tool",
+    }
+    if targets != expected:
+        raise WorkflowFailure("external hyperlinks: relationship targets differ")
 
 
 def exercise_security_boundaries(arguments: argparse.Namespace) -> None:
@@ -892,6 +924,31 @@ def exercise_security_boundaries(arguments: argparse.Namespace) -> None:
         ]
     if len(media) != 1 or not media[0].startswith(b"\x89PNG\r\n\x1a\n"):
         raise WorkflowFailure("archive/image result: normalized PNG evidence missing")
+
+    hyperlink_source = (
+        REPOSITORY_ROOT / "tests/e2e/fixtures/external-hyperlinks.md"
+    ).read_bytes()
+    _job, location = submit_conversion(
+        client,
+        template,
+        "docx",
+        hyperlink_source,
+        filename="external-hyperlinks.md",
+    )
+    terminal = wait_for_job(client, location)
+    if terminal.get("state") != "succeeded":
+        raise WorkflowFailure("external hyperlinks: conversion did not succeed")
+    result = client.request("GET", f"{location}/result")
+    expect(result, 200, "external hyperlinks result")
+    validate_external_hyperlinks(result.body)
+
+    require_failed_conversion(
+        client,
+        template,
+        b"# Remote image\n\n![blocked](https://images.example.invalid/pixel.png)\n",
+        label="remote-image",
+        filename="remote-image.md",
+    )
 
     stored = _zip_fixture(
         [("document.md", b"sensitive archive marker")],
