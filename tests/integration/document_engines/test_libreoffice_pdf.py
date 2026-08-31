@@ -296,11 +296,30 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
     workspace = _workspace(tmp_path)
     pid_file = workspace / f"descendant-{mode}.pid"
     ready_file = workspace / f"descendant-{mode}.ready"
+    staged_file = workspace / f"descendant-{mode}.staged"
+    release_file = workspace / f"descendant-{mode}.release"
+    temporary_pid_file = pid_file.with_suffix(".tmp")
     child_program = (
         "import signal,time,pathlib; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
         f"pathlib.Path({str(ready_file)!r}).write_text('ready'); "
         "time.sleep(30)"
+    )
+    publication_program = (
+        (
+            "temporary_pid_file.write_text('', encoding='ascii')\n"
+            f"staged_file=pathlib.Path({str(staged_file)!r})\n"
+            f"release_file=pathlib.Path({str(release_file)!r})\n"
+            "staged_file.write_text('staged', encoding='ascii')\n"
+            "while not release_file.exists(): time.sleep(0.005)\n"
+            "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
+            "temporary_pid_file.replace(pid_file)\n"
+        )
+        if mode == "cancel"
+        else (
+            "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
+            "temporary_pid_file.replace(pid_file)\n"
+        )
     )
     executable = _executable(
         workspace,
@@ -311,8 +330,7 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         "while not ready.exists(): time.sleep(0.005)\n"
         f"pid_file=pathlib.Path({str(pid_file)!r})\n"
         "temporary_pid_file=pid_file.with_suffix('.tmp')\n"
-        "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
-        "temporary_pid_file.replace(pid_file)\n"
+        f"{publication_program}"
         "time.sleep(30)",
     )
 
@@ -322,6 +340,11 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         return False
 
     def cancellation_probe() -> bool:
+        if staged_file.exists() and not release_file.exists():
+            assert temporary_pid_file.read_text(encoding="ascii") == ""
+            assert not pid_file.exists()
+            release_file.write_text("release", encoding="ascii")
+            return False
         if not pid_file.exists():
             return False
         assert pid_file.read_text(encoding="ascii").isdigit()
@@ -343,6 +366,7 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         )
     assert captured.value.code is expected_codes[mode]
     assert "sensitive" not in str(captured.value)
+    assert not temporary_pid_file.exists()
     descendant_pid = int(pid_file.read_text(encoding="utf-8"))
 
     def descendant_is_running() -> bool:

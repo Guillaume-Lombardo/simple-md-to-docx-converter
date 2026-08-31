@@ -18,6 +18,8 @@ cancellation integration test.
 
 - The cancellation probe never treats an empty PID file as a published descendant PID.
 - The test harness writes the PID payload before the PID file becomes visible at its final path.
+- Regression coverage pauses after an incomplete temporary PID write and proves the final path is
+  absent until publication is explicitly released.
 - Existing timeout, cancellation, and descendant process-group integration coverage remains intact.
 - No production converter behavior changes.
 
@@ -35,6 +37,10 @@ cancellation integration test.
   cancellation, so the former empty-file observation fails deterministically. Focused process-group
   coverage passes. Ruff format/check, ty, and the canonical suite excluding unavailable document
   engines pass at 95% coverage.
+- 2026-08-31: Independent review required coordinated staging so the atomic-publication assertion
+  cannot pass by scheduling luck. The cancellation fixture now pauses with an empty temporary file;
+  the probe asserts that the final path is absent, releases publication, and then validates the
+  complete final PID. Reverting to a direct final-path write fails at that assertion.
 
 ## Synchronization
 
