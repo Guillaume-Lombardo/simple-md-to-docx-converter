@@ -299,7 +299,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="434d6b758c63d6b11b3c5053a5d5572442ad209907cca569887ab60a992f263a",
+        canonical_digest="1b2deda90145ada44090c0baf9e58f4307006ac263156c99917bfa01f0a5e03e",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
