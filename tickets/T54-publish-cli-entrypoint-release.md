@@ -2,7 +2,7 @@
 ticket: T54
 linear_id: G1L-461
 linear_url: https://linear.app/g1lom/issue/G1L-461/t54-publish-the-post-t38-cli-entrypoint-release-and-atomically-pin
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,8 @@ Publish the first post-T38 release whose final image exposes the Markweave CLI e
 
 ## Progress
 
+* 2026-08-31: Phase 2 PR [#148](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/148) was squash-merged as `0384d605890ffb2c9d3120c98b3558004a0af8e1`. Exact-main CI run `33429139713` passed the light, container, Compose, standalone E2E, distributed E2E, and gate jobs. Public Compose and every quickstart now use the supported 0.5.0 CLI roles and immutable GHCR digest, so all T54 acceptance criteria are verified on `main`.
+
 * 2026-08-31: Phase 1 was squash-merged by PR #147 as `34d2460d1e43c3c5ffcdd80b67d8188b98cb80cb`. Automatic release run `33414896392` completed successfully: PyPI published `markweave 0.5.0`, the lightweight `v0.5.0` tag and GitHub Release resolve to that exact source SHA, and GHCR publication, SBOM/vulnerability evidence, provenance attestation, and retained release evidence all passed. The retained receipt records registry digest `sha256:a00767265c6c35b3fb19c4464e04d9f507940415a8c277e28f5bdc0f7dc420a4`; a separate anonymous manifest fetch returned the same digest and verified it against the manifest bytes. Phase 2 adopts that exact digest, uses the supported `serve` Compose role, removes the obsolete public legacy-environment bridge, and validates the public quickstarts plus both final-image profiles. Two consecutive cold Docker quickstart runs exposed a deterministic 15-second LibreOffice template-validation timeout, so the bounded local-evaluation timeout is raised to 30 seconds before repeating the complete workflow. The complete Docker quickstart then passed, including conversion, restart, recovery, and fault scenarios. The final-image E2E runner also accepts a strictly validated immutable published-image override without changing its default source-build CI path. Both standalone and distributed final-image workflows passed against exact image `0.5.0@sha256:a00767265c6c35b3fb19c4464e04d9f507940415a8c277e28f5bdc0f7dc420a4`, including security boundaries, service and CLI conversion, browser provisioning, restart recovery, checkpoint verification, remote-client entrypoints, and login-origin enforcement.
 
 * 2026-08-31: The complete pull-request container build detected a mutable UBI repository inventory change. A local rebuild and an exact comparison against the published `0.4.0` final image confirmed the same 549 packages with one maintenance update only: `tar` moved from `1.34-11.el9` to `1.34-13.el9_8` with the same GPLv3+ license. The reviewed final-image inventory hash is now `3c4d1883b398ebf8b2bdaa3e5fb9ff956214e395b6517e00f1e58f0903a49576`, and the full local image build passed with that hash.
@@ -49,7 +51,7 @@ Publish the first post-T38 release whose final image exposes the Markweave CLI e
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * T38's source-built implementation dependency is verified on `main`, and the selected release version is `0.5.0`.
 * T54 is the explicit owner of version/release-attempt metadata and immutable public image pinning for this release only.
 * After phase 1 merges, suspend unrelated integrations, monitor automatic publication to a terminal result, and immediately start phase 2 from the exact retained publication receipt when it succeeds.
