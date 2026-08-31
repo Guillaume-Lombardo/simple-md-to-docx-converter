@@ -8,6 +8,16 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-5-1"></a>
+
+## [0.5.1] - 2026-08-31
+
+### Security
+
+- Markdown conversions now accept strictly validated absolute HTTP(S) hyperlink destinations
+  without permitting Pandoc or the document to load remote resources. Remote images and unsafe,
+  malformed, credential-bearing, or non-HTTP(S) destinations remain rejected.
+
 <a id="release-0-5-0"></a>
 
 ## [0.5.0] - 2026-08-31
@@ -128,6 +138,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.5.1](#release-0-5-1)
 - [0.5.0](#release-0-5-0)
 - [0.4.0](#release-0-4-0)
 - [0.3.5](#release-0-3-5)
