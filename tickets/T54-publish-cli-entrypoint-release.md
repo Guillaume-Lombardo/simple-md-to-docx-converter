@@ -18,7 +18,7 @@ Publish the first post-T38 release whose final image exposes the Markweave CLI e
 * Obtain an explicit product decision for the release version before changing version metadata; do not infer or choose the version.
 * For this release only, own the coordinated `pyproject.toml` version and `tool.markweave.release.attempt` update needed by the release workflow.
 * Publish the post-T38 image through the existing T22 release workflow and verify its immutable digest, provenance, signature, and installed `markweave` entrypoint.
-* In the same reviewed change that adopts the published digest, migrate public Compose roles and quickstart workflows to `markweave serve` and `markweave worker`; never point public instructions at an unpublished or mutable image.
+* In the same reviewed change that adopts the published digest, migrate every public Compose role and public quickstart workflow to `markweave serve` and `markweave worker`; never point public instructions at an unpublished or mutable image.
 * Run standalone and distributed quickstart/final-image validation against the exact published digest, including representative operational and remote-client commands.
 * Record the exact version and digest in Linear and the repository ticket mirror.
 
@@ -30,13 +30,13 @@ Publish the first post-T38 release whose final image exposes the Markweave CLI e
 
 ## Implementation boundary
 
-* Own only the selected release's version/release-attempt metadata, publication evidence, immutable Compose pin, quickstart command migration, and their focused tests.
+* Exclusively own the selected release's version/release-attempt metadata, publication evidence, immutable public Compose pin, public quickstart command migration, and their focused tests.
 * Do not choose the version, modify unrelated CLI internals, or absorb changelog/upgrade/shared-navigation work owned by T47 and T50.
-* Keep T38 In Progress until this ticket proves that the public Compose and quickstart acceptance criteria are satisfied.
+* Do not extend T38's completion boundary: this ticket starts only after T38's source-built entrypoint migration is verified on `main`.
 
 ## Progress
 
-* 2026-08-31: Created after the product manager selected the two-stage release-and-pin sequence. Version selection remains an explicit pending product decision.
+* 2026-08-31: Created after the product manager selected the two-stage release-and-pin sequence. T54 exclusively owns the published public Compose and quickstart migration; T38 is independently completable after its source-built entrypoint change is verified on `main`. Version selection remains an explicit pending product decision.
 
 ## Coordination
 
