@@ -24,6 +24,8 @@ target. Internal ticket choreography is intentionally excluded.
 
 - Final source-built containers and their deployment, recovery, smoke, and E2E
   workflows now enter through the supported `markweave` commands.
+- The reviewed final-image RPM inventory now includes the UBI `tar` maintenance
+  update from `1.34-11.el9` to `1.34-13.el9_8`.
 - `MARKWEAVE_*` is now the canonical configuration namespace. During 0.x,
   matching validated `MD_CONVERTER_*` aliases remain compatible; conflicting
   dual definitions fail closed.
