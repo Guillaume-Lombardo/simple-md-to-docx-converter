@@ -40,7 +40,8 @@ cancellation integration test.
 - 2026-08-31: Independent review required coordinated staging so the atomic-publication assertion
   cannot pass by scheduling luck. The cancellation fixture now pauses with an empty temporary file;
   the probe asserts that the final path is absent, releases publication, and then validates the
-  complete final PID. Reverting to a direct final-path write fails at that assertion.
+  complete final PID. Reverting to a direct final-path write fails at that assertion. Commit
+  `542511b` passed Ruff format/check, ty, and all three focused process-group cases.
 
 ## Synchronization
 
