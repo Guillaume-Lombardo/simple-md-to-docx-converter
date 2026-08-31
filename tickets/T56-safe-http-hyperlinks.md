@@ -72,6 +72,22 @@ access.
   version `0.5.1`. Compose intentionally remains pinned to the verified `0.5.0` digest until the
   protected release publishes `0.5.1`; the immediate follow-up will adopt the exact retained GHCR
   receipt, validate the public quickstarts, and only then mark T56 Done.
+- 2026-08-31: Release PR #151 was squash-merged as
+  `eac6637eeb6fcdb6b32cc1a5d10b0d7747bf27e8`. Automatic release run 33441588004 published
+  `markweave 0.5.1` to PyPI, created `v0.5.1` and its GitHub Release at that exact source SHA, and
+  completed the GHCR build, SBOM/vulnerability evidence, provenance attestation, and retained
+  release-evidence jobs. The retained receipt records registry digest
+  `sha256:c37ed02dfbf6a74e140280efcf4152e4499dcba929d2f23cab22da8414c22fec`; a separate anonymous
+  manifest fetch returned the same digest and verified it against the public manifest bytes. This
+  phase adopts that exact published image in Compose and validates the public quickstarts before
+  completing T56.
+- 2026-08-31: The exact-main CI run 33441587678 for release commit
+  `eac6637eeb6fcdb6b32cc1a5d10b0d7747bf27e8` passed. The public simple quickstart then pulled the
+  retained `0.5.1` digest and reached readiness with both Docker and rootless Podman. Each runtime
+  completed a real template-free conversion of the anonymized external-hyperlink fixture in
+  `pandoc-default` mode; the downloaded DOCX passed OpenXML validation and contained exactly the
+  expected sanitized HTTP and HTTPS hyperlink relationships. The isolated containers, volumes,
+  and temporary quickstart state were removed after validation.
 
 ## Synchronization
 
