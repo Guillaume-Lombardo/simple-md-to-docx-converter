@@ -428,7 +428,8 @@ T46 and T49 follow T40 and run in parallel on dedicated policy files and namespa
 checks without editing distribution metadata or release-install verification. T47 follows T39 and
 owns only its dedicated changelog, upgrade guide, and changelog-check files. T48 waits for the
 refactored mutation targets. T38 integrates the finished CLI into container assets and executable
-deployment/recovery tests without editing shared documentation navigation. T50 performs final
+deployment/recovery tests without editing shared documentation navigation. T54 follows T38, T40,
+and T22 to publish and pin the public Compose and quickstart migration, before T50 performs final
 cross-surface acceptance and exclusively owns README, `docs/index.md`, and cross-guide navigation
 updates. Each ticket lists its exclusive files or components; a worker must stop and resynchronize
 the ticket before touching any path owned by another active ticket.
