@@ -18,10 +18,9 @@ database URLs, S3 credentials, and other secret or opaque values must match exac
 Any incompatible pair, including an invalid alias spelling, prevents startup without displaying
 either value. This fail-closed behavior avoids silently selecting a configuration source.
 
-The pinned 0.4.0 Compose image predates this migration. Until the Compose default is advanced to a
-T39-capable image, its evaluated environment carries an equal-value deprecated alias bridge so
-that both the current image and an upgraded image start safely. Operators continue to set only
-`MARKWEAVE_*` variables; do not set `MD_CONVERTER_*` separately.
+The public Compose quickstart uses a T39-capable image and supplies only `MARKWEAVE_*` variables.
+The deprecated aliases remain available only for operators migrating an older external deployment;
+do not define both prefixes in new deployments.
 
 The default cookie names remain `md_converter_session` and `__Host-md_converter_csrf` throughout
 0.x. Do not rename them during this environment-prefix migration; a deliberate session/cookie

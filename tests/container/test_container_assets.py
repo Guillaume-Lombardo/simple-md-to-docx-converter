@@ -235,6 +235,18 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
     assert script.index(pull) < script.index(verification) < script.index(build)
 
 
+def test_final_image_e2e_accepts_only_an_immutable_published_image_override() -> None:
+    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    assert 'readonly published_image="${MARKWEAVE_E2E_IMAGE:-}"' in script
+    assert "ghcr\\.io/guillaume-lombardo/md-converter:" in script
+    assert "@sha256:[0-9a-f]{64}" in script
+    assert 'podman pull --quiet "$image"' in script
+    assert (
+        'test "$(podman image inspect "$image" --format \'{{.Digest}}\')" '
+        '= "${image##*@}"'
+    ) in script
+
+
 def test_entrypoint_delegates_every_supported_command_to_markweave() -> None:
     entrypoint = Path("container/entrypoint.sh").read_text(encoding="utf-8")
     assert "md-converter-preflight" in entrypoint

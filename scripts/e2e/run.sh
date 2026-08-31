@@ -8,7 +8,13 @@ fi
 
 readonly profile="$1"
 readonly repository="$(pwd)"
-readonly image="localhost/md-converter:t21-$profile"
+readonly published_image="${MARKWEAVE_E2E_IMAGE:-}"
+if [[ -n "$published_image" ]] &&
+  [[ ! "$published_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
+  echo "MARKWEAVE_E2E_IMAGE must be an immutable version-and-digest Markweave image." >&2
+  exit 2
+fi
+readonly image="${published_image:-localhost/md-converter:t21-$profile}"
 readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
 readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly prefix="md-converter-t21-$profile"
@@ -197,9 +203,14 @@ chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-podman pull --quiet "$base_image"
-test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
-bash scripts/container/build.sh "$image"
+if [[ -n "$published_image" ]]; then
+  podman pull --quiet "$image"
+  test "$(podman image inspect "$image" --format '{{.Digest}}')" = "${image##*@}"
+else
+  podman pull --quiet "$base_image"
+  test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
+  bash scripts/container/build.sh "$image"
+fi
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
