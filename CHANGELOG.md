@@ -8,11 +8,24 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-5-0"></a>
+
+## [0.5.0] - 2026-08-31
+
+### Added
+
+- The installed `markweave` CLI now covers authentication and session profiles,
+  conversion and job lifecycles, template administration, user administration,
+  audit and health operations, and the local runtime and recovery commands.
+- Python installations can select the supported server, standalone, distributed,
+  or complete dependency extras without changing the public import surface.
+
 ### Changed
 
-- The installed `markweave` command now provides the stable root command
-  registry, machine-readable output, safe errors, and clean-package entry point
-  for the supported CLI families.
+- Final source-built containers and their deployment, recovery, smoke, and E2E
+  workflows now enter through the supported `markweave` commands.
+- The reviewed final-image RPM inventory now includes the UBI `tar` maintenance
+  update from `1.34-11.el9` to `1.34-13.el9_8`.
 - `MARKWEAVE_*` is now the canonical configuration namespace. During 0.x,
   matching validated `MD_CONVERTER_*` aliases remain compatible; conflicting
   dual definitions fail closed.
@@ -115,6 +128,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.5.0](#release-0-5-0)
 - [0.4.0](#release-0-4-0)
 - [0.3.5](#release-0-3-5)
 - [0.3.4](#release-0-3-4)

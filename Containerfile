@@ -104,7 +104,7 @@ COPY --chmod=0444 spikes/toolchain/fonts/manifest.json /opt/md-converter/font-ma
 COPY --chmod=0444 spikes/toolchain/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
 COPY --chmod=0444 spikes/toolchain/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
-ARG RPM_INVENTORY_SHA256=7d6f97daffef4581775cefd422aa7ba355d7fb8c705ae499c7846a81c4ffc1ee
+ARG RPM_INVENTORY_SHA256=3c4d1883b398ebf8b2bdaa3e5fb9ff956214e395b6517e00f1e58f0903a49576
 RUN mkdir -p /data /work /tmp/md-converter \
     && chgrp -R 0 /data /work /tmp/md-converter \
     && chmod -R g=u /data /work /tmp/md-converter \
