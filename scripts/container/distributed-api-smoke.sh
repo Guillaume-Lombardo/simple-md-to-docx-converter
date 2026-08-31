@@ -173,7 +173,7 @@ podman run --detach --name "$application_name" --network "$network_name" \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m --publish 127.0.0.1::8080 \
-  "${settings[@]}" "$image" api >/dev/null
+  "${settings[@]}" "$image" serve >/dev/null
 created=("$application_name" "${created[@]}")
 podman run --detach --name "$worker_name" --network "$network_name" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
@@ -182,7 +182,7 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m \
-  "${settings[@]}" "$image" external-worker >/dev/null
+  "${settings[@]}" "$image" worker >/dev/null
 created=("$worker_name" "${created[@]}")
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 for _ in $(seq 1 80); do
@@ -227,7 +227,7 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   --env MARKWEAVE_CONVERSION_MERMAID_EXECUTABLE=/blocking-mmdc.sh \
   --volume "$(pwd)/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
   --volume "$blocking_evidence_directory:/evidence:rw,Z" \
-  "$image" external-worker >/dev/null
+  "$image" worker >/dev/null
 test "$(podman inspect "$worker_name" --format '{{.State.Running}}')" = true
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$application_port" \
@@ -263,7 +263,7 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m \
-  "${settings[@]}" "$image" external-worker >/dev/null
+  "${settings[@]}" "$image" worker >/dev/null
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$application_port" \
   --recover-job "$blocking_job_file"

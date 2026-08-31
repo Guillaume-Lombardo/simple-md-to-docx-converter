@@ -24,7 +24,7 @@ spec:
         - name: application
           image: ${MARKWEAVE_IMAGE}
           imagePullPolicy: IfNotPresent
-          args: [embedded-worker]
+          args: [serve]
           envFrom:
             - configMapRef:
                 name: md-converter

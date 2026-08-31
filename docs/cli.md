@@ -18,8 +18,9 @@ serve | worker | doctor | migrate
 backup | restore
 ```
 
-`python -m markweave.runtime` remains the package-internal compatibility path for
-the existing container worker modes until T36 and T38 migrate them to this CLI.
+Final containers use this same registry directly: `serve` is the default image command and
+distributed worker containers select `worker`. Operational and remote-client command overrides are
+passed to `markweave` unchanged after the container runtime preflight.
 
 ## Process contract
 

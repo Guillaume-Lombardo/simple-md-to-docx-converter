@@ -146,7 +146,7 @@ podman run --detach \
   "${legacy_settings[@]}" \
   --env MD_CONVERTER_HOST=127.0.0.1 \
   --env MD_CONVERTER_PORT=18080 \
-  "$image" embedded-worker >/dev/null
+  "$image" serve >/dev/null
 legacy_created=true
 
 for _ in $(seq 1 60); do
@@ -187,7 +187,7 @@ podman run --detach \
   --shm-size=128m \
   --publish 127.0.0.1::8080 \
   "${settings[@]}" \
-  "$image" embedded-worker >/dev/null
+  "$image" serve >/dev/null
 created=true
 
 port="$(podman port "$container_name" 8080/tcp | sed 's/.*://')"

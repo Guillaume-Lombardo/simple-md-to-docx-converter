@@ -14,10 +14,13 @@ passed to Podman as a read-only named build context, so it is not copied into an
 uses the same contract for separate checksum-keyed RPM and DEB caches; untrusted runs restore only,
 and only a trusted push to `main` may populate them.
 
-The entrypoint accepts exactly `api`, `embedded-worker`, or `external-worker`. `api` serves HTTP
-without a worker. `embedded-worker` is the one-replica standalone process. `external-worker` is a
-distributed worker without HTTP. Both worker modes use the package-native `markweave.runtime`
-assembly and the same production conversion processor.
+The entrypoint performs the hardened runtime preflight and then executes the installed `markweave`
+program without translating or restricting its arguments. The default command is `markweave serve`:
+it serves HTTP with the embedded worker for the one-replica standalone profile and without an
+embedded worker for the distributed profile. Distributed worker containers use `markweave worker`.
+Command overrides can invoke `doctor`, `migrate`, `backup`, `restore`, or any supported HTTP client
+command through the same entrypoint. Container-only `api`, `embedded-worker`, and `external-worker`
+commands are not part of this image contract.
 
 Every mode refuses UID 0, non-empty effective or bounding capabilities, absent
 `no-new-privileges`, a writable root, or missing dedicated `/tmp`, `/work`, and `/dev/shm` mounts.
@@ -28,10 +31,15 @@ deployment examples. `/data` is mounted only for standalone persistence.
 
 ## Profiles and resource policy
 
-`deploy/standalone.yaml.example` runs one `embedded-worker` replica with a ReadWriteOnce `/data`
-claim. `deploy/distributed.yaml.example` separates API and external-worker deployments and expects
+`deploy/standalone.yaml.example` runs one `serve` replica with a ReadWriteOnce `/data`
+claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` deployments and expects
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
+
+The repository's public Compose quickstart remains pinned to a pre-T38 release and its legacy
+command until a compatible post-T38 image has been published and its immutable digest can be
+reviewed. Do not combine that published-image pin with the source-built image commands described
+above.
 
 The examples are workload fragments, not complete production stacks. They deliberately contain
 `${...}` placeholders. Render them only after supplying every

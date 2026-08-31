@@ -165,6 +165,17 @@ def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
 
     assert 'chmod 0777 "$workspace"' not in smoke
     assert smoke.count('"$workspace:/e2e:U,Z"') == 2
+    assert "--entrypoint markweave" not in smoke
+    assert '"$image" "$@"' in smoke
+    for boundary in (
+        '--user "$runtime_uid:0"',
+        "--read-only",
+        "--cap-drop=all",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--tmpfs /work:",
+    ):
+        assert boundary in smoke
     assert '.error.message == "Distributed restore target is not isolated"' in smoke
     assert 'run_setup "${common_s3[@]}" -- distributed-cleanup-verify' in smoke
 
@@ -224,14 +235,36 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
     assert script.index(pull) < script.index(verification) < script.index(build)
 
 
-def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
+def test_entrypoint_delegates_every_supported_command_to_markweave() -> None:
     entrypoint = Path("container/entrypoint.sh").read_text(encoding="utf-8")
-    assert "api|embedded-worker|external-worker" in entrypoint
-    assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
-    assert "exec uvicorn markweave.app:create_app" in entrypoint
-    assert "uvicorn markweave:create_app" not in entrypoint
-    assert "--factory" in entrypoint
+    assert 'exec /opt/md-converter/venv/bin/markweave "$@"' in entrypoint
+    assert "api|embedded-worker|external-worker" not in entrypoint
+    assert "markweave.runtime" not in entrypoint
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    assert 'ENTRYPOINT ["md-converter-entrypoint"]' in containerfile
+    assert 'CMD ["serve"]' in containerfile
+
+
+def test_final_image_e2e_uses_cli_roles_and_default_remote_client_entrypoint() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    assert "application_mode=serve" in runner
+    assert '"$image" worker' in runner
+    assert 'arguments[-1] == b"serve"' in runner
+    assert 'arguments[-1] == b"worker"' in runner
+    assert runner.count('"$image" --json health') == 2
+    for legacy_mode in ("application_mode=api", "application_mode=embedded-worker"):
+        assert legacy_mode not in runner
+
+
+def test_distributed_api_deployment_uses_cli_serve_role() -> None:
+    documents = tuple(
+        yaml.safe_load_all(
+            Path("deploy/distributed.yaml.example").read_text(encoding="utf-8")
+        )
+    )
+    application = documents[0]["spec"]["template"]["spec"]["containers"][0]
+    assert application["args"] == ["serve"]
 
 
 def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:
@@ -252,8 +285,8 @@ def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:
 @pytest.mark.parametrize(
     ("manifest", "mode"),
     [
-        ("deploy/standalone.yaml.example", "embedded-worker"),
-        ("deploy/distributed.yaml.example", "external-worker"),
+        ("deploy/standalone.yaml.example", "serve"),
+        ("deploy/distributed.yaml.example", "worker"),
     ],
 )
 def test_deployment_examples_apply_worker_security_and_t18_limits(

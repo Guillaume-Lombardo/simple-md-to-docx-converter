@@ -35,7 +35,7 @@ start the standalone API and embedded worker with:
 ```bash
 export MARKWEAVE_HOST=127.0.0.1
 export MARKWEAVE_PORT=8000
-uv run python -m markweave.runtime embedded-worker
+uv run markweave serve
 ```
 
 The package runtime binds `MARKWEAVE_HOST` and `MARKWEAVE_PORT`, documented with the other
