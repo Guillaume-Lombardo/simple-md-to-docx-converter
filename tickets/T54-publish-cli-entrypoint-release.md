@@ -37,10 +37,12 @@ Publish the first post-T38 release whose final image exposes the Markweave CLI e
 ## Progress
 
 * 2026-08-31: Created after the product manager selected the two-stage release-and-pin sequence. T54 exclusively owns the published public Compose and quickstart migration; T38 is independently completable after its source-built entrypoint change is verified on `main`. Version selection remains an explicit pending product decision.
+* 2026-08-31: T38 implementation PR [#140](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/140) was squash-merged as `47e34da52d2c1782c2dc6006e83060d796f5127e`, and exact-main CI run `33379357180` passed the light, container, Compose, both-profile E2E, and gate jobs. The source-built entrypoint prerequisite is satisfied; T54 remains in Backlog pending the explicit product decision on the release version.
 
 ## Coordination
 
 * Status: Backlog.
+* T38's source-built implementation dependency is verified on `main`. After this completion record is merged and T38 is closed in Linear, T54 remains gated by the explicit release-version decision.
 * T54 is the explicit owner of version/release-attempt metadata and immutable public image pinning for this release only.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
