@@ -272,6 +272,8 @@ def test_public_origin_rejects_non_origin_urls(public_origin: str) -> None:
         {"job_result_retention_seconds": 0},
         {"template_version_retention_seconds": 0},
         {"template_min_retained_versions": 9},
+        {"template_max_compression_ratio": float("inf")},
+        {"template_max_compression_ratio": float("nan")},
         {"audit_retention_seconds": 0},
         {"readiness_timeout_seconds": float("inf")},
         {"worker_metrics_bind_host": "bad host/private"},
