@@ -113,6 +113,16 @@ browser-module tests with independent coverage gates, unit tests with blocking o
 coverage, an explicit branch-only JSON check, changed application line coverage, lock validation,
 and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
 
+T48 phase 1 defines the reviewed, risk-ranked mutation manifest, runner, evidence format, and
+mutation-driven tests before activating the expanded gate. Its five bounded domains cover
+observability, authentication/session, archive/SVG, job integrity, and retention/storage. The
+observability domain preserves the original
+`markweave.observability.x__normalize_method__mutmut_*` target and
+`tests/unit/test_observability.py`. Its JSON evidence records the exact selected and killed counts;
+the phase-2 gate rejects every surviving, untested, suspicious, timed-out, interrupted, or
+crashing mutant. Phase 2 activates it only from a trusted `main` base revision and immediately
+restores `Mutation / critical gate` as a required check.
+
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least
 90% of changed executable lines under `src/markweave` must be covered. The checker uses a

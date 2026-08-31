@@ -10,7 +10,8 @@ from threading import Event, Lock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, inspect, select, update
+from sqlalchemy.orm import Session as DatabaseSession
 
 from markweave.auth.models import Role, User
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
@@ -27,6 +28,7 @@ from markweave.jobs.service import JobService, JobServicePolicy
 from markweave.jobs.worker import ConversionWorker, WorkerPolicy, WorkerRuntime
 from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import downgrade_database, upgrade_database
+from markweave.persistence.schema import ConversionJobRow
 from markweave.persistence.sql import (
     SqlUserRepository,
     create_database_engine,
@@ -114,6 +116,38 @@ def test_repository_persists_pandoc_default_job(tmp_path: Path) -> None:
     assert not replayed
     assert created.template_id is None
     assert created.template_version_id is None
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_recovery_never_requeues_terminal_rows_with_stale_lease_data(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "recovery-owner", "hash:owner", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    repository = SqlJobRepository(engine)
+    now = datetime.now(UTC)
+    created, _ = repository.create(
+        replace(submission(owner.id), template_id=None, template_version_id=None)
+    )
+    with DatabaseSession(engine) as database, database.begin():
+        database.execute(
+            update(ConversionJobRow)
+            .where(ConversionJobRow.id == str(created.id))
+            .values(
+                state=JobState.FAILED.value,
+                lease_expires_at=now - timedelta(seconds=1),
+            )
+        )
+
+    assert repository.recover_expired_leases(now, now, now) == 0
+    with DatabaseSession(engine) as database:
+        state = database.scalar(
+            select(ConversionJobRow.state).where(ConversionJobRow.id == str(created.id))
+        )
+    assert state == JobState.FAILED.value
     engine.dispose()
 
 
