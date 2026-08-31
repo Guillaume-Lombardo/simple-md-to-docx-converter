@@ -53,8 +53,9 @@ cancellation integration test.
   was independently approved after CodeRabbit's two threads were resolved. Its exact reviewed head
   `58e7e7b477a4934d863b2f6626f38fda786a232f` passed CI run `33369784787` and was squash-merged
   to `main` as `59b68657b1cde580c386a1f9a3220b923cf8392b`; exact-main CI run `33370113535` passed.
-  Local validation remains limited by unavailable real LibreOffice and final-image boundaries,
-  which the passing GitHub runs covered.
+  The GitHub runs covered the real LibreOffice document-engine boundary. Container and final-image
+  E2E jobs were not selected and are not applicable because T55 changes only the integration-test
+  harness, with no production or container behavior change.
 
 ## Coordination
 
