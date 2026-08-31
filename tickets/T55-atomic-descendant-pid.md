@@ -2,7 +2,7 @@
 ticket: T55
 linear_id: G1L-462
 linear_url: https://linear.app/g1lom/issue/G1L-462/t55-publish-descendant-pid-probes-atomically
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -49,6 +49,18 @@ cancellation integration test.
   allocates a unique private child directory; the probe-failure staging path proves that only its
   known temporary PID file is removed after process-group termination. Ruff format/check, ty, and
   the three focused process-group cases pass.
+- 2026-08-31: Ready PR [#142](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/142)
+  was independently approved after CodeRabbit's two threads were resolved. Its exact reviewed head
+  `58e7e7b477a4934d863b2f6626f38fda786a232f` passed CI run `33369784787` and was squash-merged
+  to `main` as `59b68657b1cde580c386a1f9a3220b923cf8392b`; exact-main CI run `33370113535` passed.
+  The GitHub runs covered the real LibreOffice document-engine boundary. Container and final-image
+  E2E jobs were not selected and are not applicable because T55 changes only the integration-test
+  harness, with no production or container behavior change.
+
+## Coordination
+
+- Status: Done; implementation is verified on `main`.
+- Linear remains In Progress until this completion record is published and synchronized.
 
 ## Synchronization
 
