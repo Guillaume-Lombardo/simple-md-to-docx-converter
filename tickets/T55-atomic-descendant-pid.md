@@ -20,6 +20,8 @@ cancellation integration test.
 - The test harness writes the PID payload before the PID file becomes visible at its final path.
 - Regression coverage pauses after an incomplete temporary PID write and proves the final path is
   absent until publication is explicitly released.
+- `ENGINE_FIXTURE_ROOT` receives a new private child directory for every invocation, and an
+  interrupted staged fixture removes only its own temporary PID file.
 - Existing timeout, cancellation, and descendant process-group integration coverage remains intact.
 - No production converter behavior changes.
 
@@ -42,6 +44,11 @@ cancellation integration test.
   the probe asserts that the final path is absent, releases publication, and then validates the
   complete final PID. Reverting to a direct final-path write fails at that assertion. Commit
   `542511b` passed Ruff format/check, ty, and all three focused process-group cases.
+- 2026-08-31: Independent review also identified stale fixture state under `ENGINE_FIXTURE_ROOT`
+  and a temporary-file leak if the fixture is terminated before replacement. Every fixture now
+  allocates a unique private child directory; the probe-failure staging path proves that only its
+  known temporary PID file is removed after process-group termination. Ruff format/check, ty, and
+  the three focused process-group cases pass.
 
 ## Synchronization
 

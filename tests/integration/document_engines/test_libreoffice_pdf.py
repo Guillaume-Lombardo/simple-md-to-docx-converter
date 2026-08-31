@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import time
 import zipfile
 from collections.abc import Callable
@@ -52,9 +53,8 @@ GOLDEN_RASTER_LIMITS = RasterLimits(20, 5_000_000, 20_000_000)
 
 def _workspace(tmp_path: Path) -> Path:
     root = Path(os.environ.get("ENGINE_FIXTURE_ROOT", str(tmp_path.parent)))
-    workspace = root / tmp_path.name
-    workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return workspace
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"{tmp_path.name}-", dir=root))
 
 
 def _trace(reference: bytes) -> PdfTraceabilityContext:
@@ -289,6 +289,25 @@ def _minimal_docx() -> bytes:
     return output.getvalue()
 
 
+def _wait_for_descendant_exit(descendant_pid: int) -> None:
+    def descendant_is_running() -> bool:
+        try:
+            state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
+        except FileNotFoundError, ProcessLookupError:
+            return False
+        return state != "Z"
+
+    deadline = time.monotonic() + 2.0
+    try:
+        while descendant_is_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not descendant_is_running()
+    finally:
+        if descendant_is_running():
+            with suppress(ProcessLookupError):
+                os.kill(descendant_pid, signal.SIGKILL)
+
+
 @pytest.mark.parametrize("mode", ("timeout", "cancel", "probe-failure"))
 def test_timeout_and_cancellation_kill_process_group_descendants(
     tmp_path: Path, mode: str
@@ -299,9 +318,11 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
     staged_file = workspace / f"descendant-{mode}.staged"
     release_file = workspace / f"descendant-{mode}.release"
     temporary_pid_file = pid_file.with_suffix(".tmp")
+    child_pid_file = workspace / f"descendant-{mode}.child.pid"
     child_program = (
-        "import signal,time,pathlib; "
+        "import os,signal,time,pathlib; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(child_pid_file)!r}).write_text(str(os.getpid()), encoding='ascii'); "
         f"pathlib.Path({str(ready_file)!r}).write_text('ready'); "
         "time.sleep(30)"
     )
@@ -315,7 +336,7 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
             "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
             "temporary_pid_file.replace(pid_file)\n"
         )
-        if mode == "cancel"
+        if mode in {"cancel", "probe-failure"}
         else (
             "temporary_pid_file.write_text(str(child.pid), encoding='ascii')\n"
             "temporary_pid_file.replace(pid_file)\n"
@@ -335,9 +356,11 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
     )
 
     def probe_failure() -> bool:
-        if pid_file.exists():
-            raise RuntimeError("sensitive")
-        return False
+        if not staged_file.exists():
+            return False
+        assert temporary_pid_file.read_text(encoding="ascii") == ""
+        assert not pid_file.exists()
+        raise RuntimeError("sensitive")
 
     def cancellation_probe() -> bool:
         if staged_file.exists() and not release_file.exists():
@@ -360,28 +383,25 @@ def test_timeout_and_cancellation_kill_process_group_descendants(
         "cancel": ConversionErrorCode.PDF_CANCELLED,
         "probe-failure": ConversionErrorCode.PDF_FAILURE,
     }
-    with pytest.raises(ConversionError) as captured:
-        _converter(workspace, executable=str(executable), timeout=0.3).convert(
-            _minimal_docx(), _trace(_minimal_docx()), probes[mode]
-        )
-    assert captured.value.code is expected_codes[mode]
-    assert "sensitive" not in str(captured.value)
-    assert not temporary_pid_file.exists()
-    descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+    descendant_pid: int | None = None
 
-    def descendant_is_running() -> bool:
-        try:
-            state = Path(f"/proc/{descendant_pid}/stat").read_text().split()[2]
-        except FileNotFoundError, ProcessLookupError:
-            return False
-        return state != "Z"
-
-    deadline = time.monotonic() + 2.0
     try:
-        while descendant_is_running() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert not descendant_is_running()
+        with pytest.raises(ConversionError) as captured:
+            _converter(workspace, executable=str(executable), timeout=0.3).convert(
+                _minimal_docx(), _trace(_minimal_docx()), probes[mode]
+            )
+        assert captured.value.code is expected_codes[mode]
+        assert "sensitive" not in str(captured.value)
+        if mode == "probe-failure":
+            assert temporary_pid_file.exists()
+            descendant_pid = int(child_pid_file.read_text(encoding="ascii"))
+        else:
+            assert not temporary_pid_file.exists()
+            descendant_pid = int(pid_file.read_text(encoding="utf-8"))
     finally:
-        if descendant_is_running():
-            with suppress(ProcessLookupError):
-                os.kill(descendant_pid, signal.SIGKILL)
+        try:
+            if descendant_pid is not None:
+                _wait_for_descendant_exit(descendant_pid)
+        finally:
+            temporary_pid_file.unlink(missing_ok=True)
+    assert not temporary_pid_file.exists()
