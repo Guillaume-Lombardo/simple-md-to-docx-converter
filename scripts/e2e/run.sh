@@ -24,7 +24,16 @@ readonly runtime_uid="${T21_RUNTIME_UID:-51000}"
 readonly artifact_directory="$repository/artifacts/e2e/$profile"
 readonly seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 
-temporary_directory="$(mktemp -d)"
+# shellcheck source=scripts/e2e/harness.sh
+source "$repository/scripts/e2e/harness.sh"
+worktree_baseline="$(e2e_get_worktree_state "$repository")"
+readonly worktree_baseline
+temporary_directory=""
+temporary_directory_identity=""
+e2e_initialize_harness_directory \
+  temporary_directory temporary_directory_identity
+readonly temporary_directory
+readonly temporary_directory_identity
 data_directory="$temporary_directory/data"
 evidence_directory="$temporary_directory/evidence"
 state_file="$temporary_directory/state.json"
@@ -90,14 +99,18 @@ cleanup() {
       podman rm --force "$resource" >/dev/null 2>&1 || true
     fi
   done
-  if [[ "$temporary_directory" == /tmp/tmp.* ]]; then
-    podman unshare rm -rf -- "$temporary_directory" >/dev/null 2>&1 || \
-      rm -rf -- "$temporary_directory"
-  else
-    echo "Refusing to remove unexpected temporary directory $temporary_directory." >&2
-  fi
   if [[ "$succeeded" == true ]]; then
-    remove_artifacts
+    if ! remove_artifacts; then
+      exit_code=1
+    fi
+  fi
+  if ! e2e_remove_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity"; then
+    exit_code=1
+  fi
+  if ! e2e_require_worktree_state_unchanged \
+    "$repository" "$worktree_baseline"; then
+    exit_code=1
   fi
   exit "$exit_code"
 }
@@ -192,7 +205,9 @@ podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
 
 created=("$clamav_name" "${created[@]}")
-podman run --detach --name "$clamav_name" --network "$network_name" \
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$clamav_name" --network "$network_name" \
   --network-alias e2e-clamav --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
@@ -209,13 +224,17 @@ if [[ "$profile" == standalone ]]; then
   )
 else
   created=("$postgres_name" "${created[@]}")
-  podman run --detach --name "$postgres_name" --network "$network_name" \
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    podman run --detach --name "$postgres_name" --network "$network_name" \
     --network-alias postgres --env POSTGRES_DB=md_converter_e2e \
     --env POSTGRES_PASSWORD=e2e-postgres-password \
     docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8 \
     >/dev/null
   created=("$rustfs_name" "${created[@]}")
-  podman run --detach --name "$rustfs_name" --network "$network_name" \
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    podman run --detach --name "$rustfs_name" --network "$network_name" \
     --network-alias rustfs --publish 127.0.0.1::9000 \
     --env RUSTFS_ACCESS_KEY=e2eaccess --env RUSTFS_SECRET_KEY=e2esecret \
     --env RUSTFS_ADDRESS=0.0.0.0:9000 --env RUSTFS_CONSOLE_ENABLE=false \
@@ -263,7 +282,9 @@ application_settings=(
   --env MARKWEAVE_USER_PROVISIONING_FILE=/run/secrets/users.csv
 )
 created=("$application_name" "${created[@]}")
-podman run --detach --name "$application_name" --network "$network_name" \
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null
@@ -271,7 +292,9 @@ podman run --detach --name "$application_name" --network "$network_name" \
 if [[ "$profile" == distributed ]]; then
   for worker in "$worker_one_name" "$worker_two_name"; do
     created=("$worker" "${created[@]}")
-    podman run --detach --name "$worker" --network "$network_name" \
+    e2e_run_in_harness_directory \
+      "$temporary_directory" "$temporary_directory_identity" \
+      podman run --detach --name "$worker" --network "$network_name" \
       --publish 127.0.0.1::9464 "${hardened_runtime[@]}" "${E2E_SETTINGS[@]}" \
       "$image" worker >/dev/null
   done
@@ -298,11 +321,15 @@ assert arguments[-1] == b"worker", arguments
 '
   done
 fi
-podman run --rm --network "container:$application_name" \
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --rm --network "container:$application_name" \
   "${hardened_runtime[@]}" \
   "$image" --json health live --url http://127.0.0.1:8080 \
   | grep -Fq '"status":"ok"'
-podman run --rm --network "container:$application_name" \
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --rm --network "container:$application_name" \
   "${hardened_runtime[@]}" \
   "$image" --json health ready --url http://127.0.0.1:8080 \
   | grep -Fq '"status":"ready"'
@@ -531,7 +558,9 @@ uv run python -m tests.e2e.service_workflow verify-checkpoint \
 # published port remains loopback-only even though login origins are ignored.
 podman rm --force "$application_name" "$clamav_name" >/dev/null
 created=("$insecure_application_name" "${created[@]}")
-podman run --detach --name "$insecure_application_name" --network "$network_name" \
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$insecure_application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
   --env MARKWEAVE_INSECURE_EVALUATION_MODE=true \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
