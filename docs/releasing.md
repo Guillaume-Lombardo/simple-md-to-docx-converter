@@ -49,8 +49,7 @@ repositories.
 1. Change only the intended release version in `project.version` and the matching application
    version source. Use canonical final public PEP 440 syntax. Pre-releases, development releases,
    local versions, epochs, invalid spellings, version downgrades, and mismatched application
-   versions fail closed. A more explicit canonical spelling such as `0.3` to `0.3.0` remains a
-   valid transition even though the two parsed PEP 440 versions have equal precedence. Reset
+   versions and transitions with equal PEP 440 precedence fail closed. Reset
    `tool.markweave.release.attempt` to `1`. For the `0.5.0` transition, Compose also catches up
    from `0.3.5` to the already-published immutable `0.4.0` image while retaining its existing
    `embedded-worker` command. This bounded correction restores the required base/PyPI/Compose
