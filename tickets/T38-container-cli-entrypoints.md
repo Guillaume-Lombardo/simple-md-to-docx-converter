@@ -53,7 +53,7 @@ Make the final container expose the same supported `markweave` commands used by 
 ## Coordination
 
 * Status: Done; implementation and exact-main CI are verified at `47e34da52d2c1782c2dc6006e83060d796f5127e`.
-* T38's source-built entrypoint dependency for T54 is satisfied. T54 owns the subsequent version decision, release evidence, and public published-image migration.
+* T38's source-built entrypoint dependency for T54 is satisfied. T54 owns the subsequent version decision, release evidence, and migration of public Compose and quickstart workflows to the published image.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
