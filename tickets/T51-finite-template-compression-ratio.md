@@ -42,6 +42,14 @@ accepting them and failing later while assembling the template validator.
   tests are green. Both canonical Python suites were executed and retain more than 95% coverage,
   but this macOS environment lacks the required PostgreSQL/RustFS variables and approved Linux
   document-engine/container boundaries; those unrelated integration gates remain for GitHub CI.
+* 2026-08-31: The PM released the Relectio hold. Ready PR
+  [#106](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/106) was merged
+  with current `main` at `e5a3f4212d7f5ba6f0885098efd22a4b9090fd8b`, producing exact head
+  `00ba986c31592411f0e4e0f3b310fd155e2d46b0`. The isolated-worktree merge had no conflicts.
+  `uv sync --all-groups`, Ruff format/check, and `ty check` passed; the focused configuration
+  suite passed 117 tests but, when run alone, correctly fails the repository-wide coverage gate.
+  The default canonical Python suite completed with 95% coverage. Full local Python validation is
+  limited by unavailable real document engines; fresh GitHub CI and CodeRabbit review are pending.
 
 ## Coordination
 
