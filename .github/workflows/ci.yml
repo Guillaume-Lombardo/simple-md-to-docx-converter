@@ -100,6 +100,14 @@ jobs:
           save-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
       - name: Synchronize locked dependencies
         run: uv sync --locked --all-groups
+      - name: Verify public release alignment
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: >-
+          uv run python -m scripts.release.public_alignment
+          --event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: Check formatting
         run: uv run ruff format --check .
       - name: Lint

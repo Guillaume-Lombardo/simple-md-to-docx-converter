@@ -91,6 +91,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
         ("light", "Validate the canonical OpenAPI contract"),
+        ("light", "Verify public release alignment"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
         ("heavy", "Prepare verified LibreOffice DEB archive"),
         ("heavy", "Prepare verified LibreOffice RPM archive"),
@@ -299,7 +300,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="1b2deda90145ada44090c0baf9e58f4307006ac263156c99917bfa01f0a5e03e",
+        canonical_digest="f384a0ffe79876809d796fec7b9b0e923a741e80f3b6dbbcd8e09998d5b0a656",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -698,6 +699,10 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "  uv run python -m scripts.openapi_contract compare "
             '--baseline-git-ref "$BASE_SHA"\n'
             "fi\n"
+        ),
+        ("light", "Verify public release alignment"): (
+            "uv run python -m scripts.release.public_alignment "
+            '--event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"'
         ),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
             "npm run test:web-browser"

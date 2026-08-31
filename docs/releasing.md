@@ -16,6 +16,16 @@ numbers, and stale attempts on a new version fail closed. Pull requests, forks, 
 Release events cannot start publication. Manual dispatch cannot publish Python artifacts; it is
 reserved for the container-only recovery described below.
 
+The read-only CI workflow also verifies the public release identity through fixed HTTPS endpoints.
+In the normal state, `project.version`, the latest PyPI version, the Compose image tag, the
+published GitHub tag and Release receipt, and the anonymous GHCR manifest digest must all agree;
+the Compose reference must include that immutable digest. The only exception is an exact version
+transition on a pull request, merge-group candidate, or trusted `main` push: the base project,
+PyPI, and Compose versions must still agree, the new project version must be higher, and all public
+evidence for the base version must remain valid. Scheduled, Release, and manual runs never receive
+this exception. A later revision at the unchanged new version also fails until the published image
+has been adopted.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
@@ -40,7 +50,12 @@ repositories.
    version source. Use canonical final public PEP 440 syntax. Pre-releases, development releases,
    local versions, epochs, invalid spellings, version downgrades, and mismatched application
    versions fail closed. A more explicit canonical spelling such as `0.3` to `0.3.0` remains a
-   valid transition even though the two parsed PEP 440 versions have equal precedence.
+   valid transition even though the two parsed PEP 440 versions have equal precedence. Reset
+   `tool.markweave.release.attempt` to `1`. For the `0.5.0` transition, Compose also catches up
+   from `0.3.5` to the already-published immutable `0.4.0` image while retaining its existing
+   `embedded-worker` command. This bounded correction restores the required base/PyPI/Compose
+   alignment; it does not pre-pin the unpublished `0.5.0` image or perform the CLI command
+   migration owned by post-publication adoption.
 2. Open a pull request and require the complete `CI / gate`, independent review, and protected
    merge to `main`. Release versions are derived dynamically and are not hardcoded in the
    workflows.
@@ -64,6 +79,15 @@ repositories.
    SBOM, publication receipt, and evidence to the verified Release identity. Because job
    credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
    before pushing provenance; it does not reuse or persist the publication job's credentials.
+
+After the version pull request is merged, suspend unrelated integrations and monitor the automatic
+release workflow on `main` to a terminal result. If publication succeeds, immediately open the
+follow-up pull request from the resulting evidence: copy the exact `registry_manifest_digest` from
+`registry-publication.json` into the Compose `version@sha256:...` reference, verify it anonymously
+against GHCR, perform any release-owned public command migration, and run the documented
+standalone and distributed quickstarts against that exact digest. The follow-up must restore full
+alignment before unrelated work is integrated. If publication fails, investigate or use the
+bounded recovery path below; never infer a digest or point Compose at an unpublished tag.
 
 If GitHub loses a run before creating any job, first prove that every external release surface is
 absent and attempt the normal, forced, and platform-advised cancellation or rerun paths. Record the

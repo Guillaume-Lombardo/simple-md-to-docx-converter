@@ -77,7 +77,7 @@ x-markweave-settings: &markweave-settings
   MARKWEAVE_STORAGE_PROFILE: standalone
   MARKWEAVE_STANDALONE_DATA_DIRECTORY: /data
 
-# The published 0.3.5 image accepts only the legacy names. Keep this equal-value
+# The published 0.4.0 image accepts only the legacy names. Keep this equal-value
 # bridge until the Compose default advances to an image with T39 support.
 x-markweave-legacy-settings: &markweave-legacy-settings
   MD_CONVERTER_INITIAL_ADMIN_USERNAME: admin
@@ -156,7 +156,7 @@ x-markweave-legacy-settings: &markweave-legacy-settings
 
 services:
   markweave:
-    image: ghcr.io/guillaume-lombardo/md-converter:0.3.5@sha256:2697d86ffddf51040d633614b66258e65308b94305cbef708d2631be9b9156d4
+    image: ghcr.io/guillaume-lombardo/md-converter:0.4.0@sha256:f1dacb99881d9890efc34ba8327afc23b0c9b1ed7f713876e35e04b36bbb6ab3
     platform: linux/amd64
     command: embedded-worker
     depends_on:
