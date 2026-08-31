@@ -2,7 +2,7 @@
 ticket: T52
 linear_id: G1L-459
 linear_url: https://linear.app/g1lom/issue/G1L-459/t52-prevent-final-image-e2e-restart-oom-artifact
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -48,10 +48,11 @@ Prevent the final-image E2E restart workflow from leaving a zero-byte `oom` arti
 * 2026-08-31: A second PR #145 review follow-up removes Bash status masking from `readonly name="$(command)"`. Harness creation and identity acquisition now complete before the outputs become readonly. If identity acquisition fails in the pre-trap boundary, the initializer validates the newly created absolute, prefixed, non-symlink directory and removes it with empty-directory-only `rmdir` before returning failure; normal launch and recursive cleanup retain the current-user ownership and exact-identity checks. Seven deterministic harness tests pass, including actual-runner rejection of relative and symlink `TMPDIR` values before worktree setup and an injected failure during identity acquisition that neither continues nor leaks its new tree. A proportional standalone run under the alternate `TMPDIR` passed build, security-boundary, service, and CLI phases, then stopped before restart on a known T53 browser timeout while waiting for the template-created alert; failure cleanup removed the exact harness tree and left the repository marker-free. This hardening does not claim to eliminate a theoretical ancestor-symlink TOCTOU.
 * 2026-08-31: A third PR #145 review follow-up handles an unignored repository-local `TMPDIR` without treating the runner-owned tree as an unexpected worktree change. The runner captures the baseline before creating the harness, removes the exact harness only after validating its path, ownership, and device/inode identity, and then compares Git porcelain in memory. Eight deterministic harness tests pass. The repository-local regression proves that the owned tree and its `oom` marker are removed, an unrelated unexpected repository file still fails the guard and remains present, and a sibling beside the owned tree is preserved. No cleanup scope or ownership guard was broadened; no additional full engine profile was run because this ordering-only host boundary is covered directly and the unchanged application profiles retain the previously recorded E2E evidence and T53 browser limitations.
 * 2026-08-31: Canonical dependency sync, Ruff formatting/linting, and `ty` checks passed. The default Pytest profile completed with 2,114 passed, 44 deselected, 4 failed, and 32 setup errors; the full profile completed with 2,121 passed, 41 failed, and 32 setup errors. T52 coverage passed in both. The failures are unrelated environment/baseline gaps: missing PostgreSQL and S3 test environment variables, unavailable document engines and font evidence in the full profile, and an existing release test that expects the old boto3 lower bound while the exact base already declares the newer bound.
+* 2026-08-31: PR #145 merged to `main` as `a78a93edd5504c6a67ffce0c9e8b24481527dc27`. Exact-main CI run 33396700639 attempt 1 passed light and distributed E2E, but standalone failed in the fresh browser session-expiry phase with `page.waitForTimeout: Page crashed`, so the gate failed. The bounded failed-job attempt 2 on the same SHA passed standalone E2E and the gate, and the overall run completed successfully. The attempt-1 failure occurred during the 61-second browser expiry wait before restart assertions, matches the browser resource-phase symptoms owned by T53, and produced no T52 worktree, harness-validation, or marker-cleanup diagnostic. With both profiles verified through their complete restart and recovery workflows on the merged implementation and the exact-main retry green, all T52 acceptance criteria are complete.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done; synchronize Linear to Done only after this completion record is verified on `main`.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

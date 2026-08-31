@@ -37,6 +37,7 @@ Harden the final-image browser E2E resource phases so Chromium failures retain e
 
 * 2026-08-30: Created from T34 PR #127 CI diagnosis. Exact-head run 33325930671 failed standalone browser three times after the new template CLI workload: two `waitForURL` timeouts despite successful `/convert` navigation and DOM/network-idle, and one Chromium target crash. Same-base T42 and T45 standalone jobs passed. T34 owns the immediate phase-order fix; T53 owns systemic resource evidence and cleanup.
 * 2026-08-30: Review clarified the failure-artifact boundary. Existing screenshots and Playwright traces remain failure-only, private, synthetic-fixture artifacts with masked screenshot inputs and 30-day CI retention; the new resource-diagnostic payload is separately allowlisted and must contain no command arguments, credentials, document content, or host paths.
+* 2026-08-31: T52 merged through PR #145 as `a78a93edd5504c6a67ffce0c9e8b24481527dc27`, completing serialization on the shared final-image harness. Exact-main CI run 33396700639 attempt 1 added another fresh session-expiry symptom: standalone passed its security, service, and CLI phases, then Chromium reported `page.waitForTimeout: Page crashed` at the 61-second expiry wait before restart assertions. Distributed E2E passed in attempt 1, and the bounded failed-job attempt 2 passed standalone and the gate on the unchanged SHA. This intermittent result remains T53 browser resource-phase evidence; T53 stays Backlog until its own implementation begins.
 
 ## Coordination
 
