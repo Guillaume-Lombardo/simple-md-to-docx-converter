@@ -90,6 +90,7 @@ READ_ONLY_ENV_STEPS = frozenset(
     {
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
+        ("light", "Validate the canonical OpenAPI contract"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
         ("heavy", "Prepare verified LibreOffice DEB archive"),
         ("heavy", "Prepare verified LibreOffice RPM archive"),
@@ -145,10 +146,10 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "5c67726f99574a9a28b8ec773294651e3cac5ed7677eee8f05e08dd031f5a9b4"
+    "2645ebf0f05beb703e8e86912041475895ba9087e3c3a42736a137981a448f91"
 )
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "6b2450bfe139fced0ae234d3dba83a0aeb71c290d7a74e28ed30a4a93622542c"
+    "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
 )
 
 
@@ -298,7 +299,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="331aa7470702735627e6ed1342ec7e18cda4e4327dfc2bbb0d7a2fca2c12366d",
+        canonical_digest="434d6b758c63d6b11b3c5053a5d5572442ad209907cca569887ab60a992f263a",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -688,6 +689,15 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "uv run python -m scripts.ci.check_changed_coverage "
             '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
             "--source-root src/markweave --fail-under 90"
+        ),
+        ("light", "Validate the canonical OpenAPI contract"): (
+            "set -euo pipefail\n"
+            "uv run python -m scripts.openapi_contract check\n"
+            'if [[ -n "$BASE_SHA" && "$BASE_SHA" != '
+            '"0000000000000000000000000000000000000000" ]]; then\n'
+            "  uv run python -m scripts.openapi_contract compare "
+            '--baseline-git-ref "$BASE_SHA"\n'
+            "fi\n"
         ),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
             "npm run test:web-browser"
@@ -1531,6 +1541,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
         '"localhost/md-converter:$RELEASE_VERSION"',
+        'bash scripts/container/recovery-cli-smoke.sh "$image"',
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
         "skopeo --version",
@@ -1596,6 +1607,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
         'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
+        'bash scripts/container/recovery-cli-smoke.sh "$image"',
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"automatic container build is missing: {required}")
@@ -1713,7 +1725,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     return errors
 
 
-def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: PLR0912
+def validate_production_release_workflow_text(  # noqa: PLR0912, PLR0915
+    text: str,
+) -> list[str]:
     """Validate the exact trusted-main automatic publication orchestrator."""
     workflow, errors = _load_workflow(text)
     if workflow is None:
@@ -1791,6 +1805,7 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
         errors.append("automatic release workflow must not access stored secrets")
     required_contracts = (
         "scripts.release.detect_version",
+        "scripts.release.check_changelog",
         "github.event.before",
         "needs.detect.outputs.changed == 'true'",
         "/git/ref/tags/$RELEASE_TAG",
@@ -1807,6 +1822,24 @@ def validate_production_release_workflow_text(text: str) -> list[str]:  # noqa: 
     for required in required_contracts:
         if required not in text:
             errors.append(f"automatic release is missing contract: {required}")
+    detect_steps = _job_steps(workflow, "detect")
+    step_names = [step.get("name") for step in detect_steps]
+    required_order = (
+        "Detect an exact final-version transition",
+        "Require a changelog entry for a material version transition",
+        "Reject an existing tag, release, or PyPI version",
+    )
+    try:
+        indices = [step_names.index(name) for name in required_order]
+    except ValueError:
+        errors.append(
+            "automatic release must gate remote checks on changelog validation"
+        )
+    else:
+        if indices != sorted(indices):
+            errors.append(
+                "automatic release must gate remote checks on changelog validation"
+            )
     create_steps = [
         step
         for step in _job_steps(workflow, "create-release")

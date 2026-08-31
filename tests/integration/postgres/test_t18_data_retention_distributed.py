@@ -27,17 +27,21 @@ from markweave.storage import ObjectKey, ObjectScope, S3ObjectStore
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_retention_matches_standalone_contract() -> None:
-    engine = create_database_engine(os.environ["MD_CONVERTER_TEST_POSTGRES_URL"])
+def test_distributed_retention_matches_standalone_contract(
+    request: pytest.FixtureRequest,
+) -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    request.addfinalizer(engine.dispose)
     upgrade_database(engine)
     client = boto3.client(
         "s3",
-        endpoint_url=os.environ["MD_CONVERTER_TEST_S3_ENDPOINT_URL"],
-        region_name=os.environ["MD_CONVERTER_TEST_S3_REGION"],
-        aws_access_key_id=os.environ["MD_CONVERTER_TEST_S3_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["MD_CONVERTER_TEST_S3_SECRET_ACCESS_KEY"],
+        endpoint_url=os.environ["MARKWEAVE_TEST_S3_ENDPOINT_URL"],
+        region_name=os.environ["MARKWEAVE_TEST_S3_REGION"],
+        aws_access_key_id=os.environ["MARKWEAVE_TEST_S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY"],
     )
-    objects = S3ObjectStore(client, os.environ["MD_CONVERTER_TEST_S3_BUCKET"])
+    objects = S3ObjectStore(client, os.environ["MARKWEAVE_TEST_S3_BUCKET"])
+    request.addfinalizer(objects.close)
     owner_id, template_id = uuid4(), uuid4()
     versions = [uuid4() for _ in range(12)]
     now = datetime.now(UTC)
@@ -159,4 +163,3 @@ def test_distributed_retention_matches_standalone_contract() -> None:
                 delete(TemplateRow).where(TemplateRow.id == str(template_id))
             )
             database.execute(delete(UserRow).where(UserRow.id == str(owner_id)))
-        engine.dispose()

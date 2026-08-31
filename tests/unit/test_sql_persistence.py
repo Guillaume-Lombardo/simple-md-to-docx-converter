@@ -1,6 +1,7 @@
 """Fast in-process tests for SQL repository control flow."""
 
 import importlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from markweave.persistence.sql import (
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
+    managed_database_engine,
     standalone_database_url,
 )
 
@@ -320,6 +322,7 @@ def test_sql_password_renewal_is_compare_and_set_and_self_audited() -> None:
 @pytest.mark.unit
 def test_database_engine_applies_profile_bounded_timeouts(
     mocker: MockerFixture,
+    request: pytest.FixtureRequest,
 ) -> None:
     created = mocker.patch("markweave.persistence.sql.create_engine")
     listen = mocker.patch("markweave.persistence.sql.event.listen")
@@ -327,6 +330,7 @@ def test_database_engine_applies_profile_bounded_timeouts(
     sqlite_engine = create_database_engine(
         "sqlite+pysqlite:///:memory:", timeout_seconds=0.5
     )
+    request.addfinalizer(sqlite_engine.dispose)
     assert sqlite_engine is created.return_value
     assert created.call_args.kwargs["connect_args"] == {
         "check_same_thread": False,
@@ -334,10 +338,11 @@ def test_database_engine_applies_profile_bounded_timeouts(
     }
     listen.assert_called_once()
 
-    create_database_engine(
+    postgres_engine = create_database_engine(
         "postgresql+psycopg://database/app?options=-csearch_path%3Disolated",
         timeout_seconds=0.5,
     )
+    request.addfinalizer(postgres_engine.dispose)
     assert created.call_args.args[0].query["options"] == "-csearch_path=isolated"
     assert created.call_args.kwargs["connect_args"] == {"connect_timeout": 1}
     assert created.call_args.kwargs["pool_timeout"] == 0.5
@@ -353,6 +358,42 @@ def test_database_engine_applies_profile_bounded_timeouts(
     assert postgres_connection.autocommit is False
     with pytest.raises(ValueError, match="timeout"):
         create_database_engine("sqlite+pysqlite:///:memory:", timeout_seconds=0)
+
+
+@pytest.mark.unit
+def test_managed_database_engine_disposes_after_success_and_failure(
+    mocker: MockerFixture,
+) -> None:
+    engine = mocker.patch(
+        "markweave.persistence.sql.create_database_engine"
+    ).return_value
+
+    with managed_database_engine("sqlite+pysqlite://") as yielded:
+        assert yielded is engine
+    with (
+        pytest.raises(RuntimeError, match="operation failed"),
+        managed_database_engine("sqlite+pysqlite://"),
+    ):
+        raise RuntimeError("operation failed")
+
+    assert engine.dispose.call_count == 2
+
+
+@pytest.mark.unit
+def test_managed_sqlite_engines_close_across_repeated_parallel_use(
+    tmp_path: Path,
+) -> None:
+    def exercise(index: int) -> int:
+        directory = tmp_path / str(index)
+        directory.mkdir()
+        with managed_database_engine(standalone_database_url(directory)) as engine:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE TABLE lifecycle (value INTEGER)"))
+            with engine.connect() as connection:
+                return int(connection.scalar(text("SELECT 1")))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert list(executor.map(exercise, range(12))) == [1] * 12
 
 
 @pytest.mark.unit
@@ -579,8 +620,12 @@ def test_alembic_environment_rejects_an_unmanaged_connection(
     with pytest.raises(RuntimeError, match="application-managed"):
         run_migration_environment(context)
 
-    with pytest.raises(ValueError, match="must not be blank"):
-        downgrade_database(create_database_engine("sqlite+pysqlite://"), " ")
+    engine = create_database_engine("sqlite+pysqlite://")
+    try:
+        with pytest.raises(ValueError, match="must not be blank"):
+            downgrade_database(engine, " ")
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.unit

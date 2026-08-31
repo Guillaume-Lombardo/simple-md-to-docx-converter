@@ -33,14 +33,14 @@ and reports invalid assembly without echoing field values. After supplying the f
 start the standalone API and embedded worker with:
 
 ```bash
-export MD_CONVERTER_HOST=127.0.0.1
-export MD_CONVERTER_PORT=8000
+export MARKWEAVE_HOST=127.0.0.1
+export MARKWEAVE_PORT=8000
 uv run python -m markweave.runtime embedded-worker
 ```
 
-The package runtime binds `MD_CONVERTER_HOST` and `MD_CONVERTER_PORT`, documented with the other
+The package runtime binds `MARKWEAVE_HOST` and `MARKWEAVE_PORT`, documented with the other
 runtime variables. For authenticated browser use, terminate TLS locally and set
-`MD_CONVERTER_PUBLIC_ORIGIN` to the exact browser-visible HTTPS origin, including a non-default port.
+`MARKWEAVE_PUBLIC_ORIGIN` to the exact browser-visible HTTPS origin, including a non-default port.
 That configured value, rather than proxy forwarding headers, is authoritative for login Origin
 validation. Keep the application listener private to the terminator and do not enable broad proxy
 header trust. Direct or end-to-end TLS may omit the setting only when the ASGI-visible scheme, host,
@@ -50,7 +50,7 @@ Do not commit bootstrap credentials or place production secrets in shell history
 limit must exceed the source limit, and the worker heartbeat must remain shorter than its lease;
 all other cross-field rules are listed in the configuration reference.
 
-For disposable local development, point `MD_CONVERTER_STANDALONE_DATA_DIRECTORY` at a writable
+For disposable local development, point `MARKWEAVE_STANDALONE_DATA_DIRECTORY` at a writable
 directory rather than production `/data`. Distributed development requires a real PostgreSQL
 database and an AWS S3-compatible bucket. See [storage-profiles.md](storage-profiles.md) for the
 complete configuration and recovery contract.
@@ -88,7 +88,7 @@ uv run pytest
 
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
 integration, and end-to-end tests remain included in the default command. Configure
-`MD_CONVERTER_TEST_POSTGRES_URL` and the `MD_CONVERTER_TEST_S3_*` variables before the canonical
+`MARKWEAVE_TEST_POSTGRES_URL` and the `MARKWEAVE_TEST_S3_*` variables before the canonical
 run. The distributed CI domain provisions PostgreSQL and RustFS and never substitutes MinIO.
 
 Pytest always measures the installed `markweave` application package and enforces two separate
@@ -112,6 +112,16 @@ provisional weekly schedule. Pull requests always run formatting, linting, type 
 browser-module tests with independent coverage gates, unit tests with blocking overall application
 coverage, an explicit branch-only JSON check, changed application line coverage, lock validation,
 and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
+
+T48 phase 1 defines the reviewed, risk-ranked mutation manifest, runner, evidence format, and
+mutation-driven tests before activating the expanded gate. Its five bounded domains cover
+observability, authentication/session, archive/SVG, job integrity, and retention/storage. The
+observability domain preserves the original
+`markweave.observability.x__normalize_method__mutmut_*` target and
+`tests/unit/test_observability.py`. Its JSON evidence records the exact selected and killed counts;
+the phase-2 gate rejects every surviving, untested, suspicious, timed-out, interrupted, or
+crashing mutant. Phase 2 activates it only from a trusted `main` base revision and immediately
+restores `Mutation / critical gate` as a required check.
 
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least

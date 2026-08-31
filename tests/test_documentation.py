@@ -17,7 +17,6 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN = MarkdownIt()
-RUNTIME_ONLY_SETTINGS = {"MD_CONVERTER_HOST", "MD_CONVERTER_PORT"}
 
 
 def _documentation_files() -> tuple[Path, ...]:
@@ -141,10 +140,9 @@ def test_local_link_validation_covers_references_images_and_fragments(
 
 def test_configuration_reference_covers_every_runtime_setting() -> None:
     reference = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
-    documented = set(re.findall(r"`(MD_CONVERTER_[A-Z0-9_]+)`", reference))
+    documented = set(re.findall(r"`(MARKWEAVE_[A-Z0-9_]+)`", reference))
     expected = {
-        *(f"MD_CONVERTER_{name.upper()}" for name in Settings.model_fields),
-        *RUNTIME_ONLY_SETTINGS,
+        *(f"MARKWEAVE_{name.upper()}" for name in Settings.model_fields),
     }
 
     assert documented == expected

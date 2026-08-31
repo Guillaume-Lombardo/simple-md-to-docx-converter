@@ -78,8 +78,8 @@ the pinned Chrome version installed by CI. Its committed CI-equivalent invocatio
 
 ```bash
 npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
-MD_CONVERTER_TEST_PUPPETEER="$PWD/spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js" \
-MD_CONVERTER_TEST_CHROMIUM=/usr/bin/google-chrome-stable \
+MARKWEAVE_TEST_PUPPETEER="$PWD/spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js" \
+MARKWEAVE_TEST_CHROMIUM=/usr/bin/google-chrome-stable \
 npm run test:web-browser
 ```
 

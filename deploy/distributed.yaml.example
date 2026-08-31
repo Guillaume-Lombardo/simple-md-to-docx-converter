@@ -17,14 +17,14 @@ spec:
           type: RuntimeDefault
       containers:
         - name: application
-          image: ${MD_CONVERTER_IMAGE}
+          image: ${MARKWEAVE_IMAGE}
           args: [api]
           envFrom:
             - configMapRef: {name: md-converter}
             - secretRef: {name: md-converter}
           env:
-            - {name: MD_CONVERTER_STORAGE_PROFILE, value: distributed}
-            - {name: MD_CONVERTER_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
+            - {name: MARKWEAVE_STORAGE_PROFILE, value: distributed}
+            - {name: MARKWEAVE_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
           ports:
             - {name: http, containerPort: 8080}
           livenessProbe:
@@ -68,14 +68,14 @@ spec:
           localhostProfile: profiles/md-converter-chrome.json
       containers:
         - name: worker
-          image: ${MD_CONVERTER_IMAGE}
+          image: ${MARKWEAVE_IMAGE}
           args: [external-worker]
           envFrom:
             - configMapRef: {name: md-converter}
             - secretRef: {name: md-converter}
           env:
-            - {name: MD_CONVERTER_STORAGE_PROFILE, value: distributed}
-            - {name: MD_CONVERTER_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
+            - {name: MARKWEAVE_STORAGE_PROFILE, value: distributed}
+            - {name: MARKWEAVE_CLAMAV_HOST, value: "${CLAMAV_SERVICE}"}
           resources:
             requests:
               memory: "${WORKER_MEMORY_BUDGET_BYTES}"

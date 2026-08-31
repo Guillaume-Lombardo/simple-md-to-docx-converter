@@ -319,7 +319,7 @@ verify_application_public_origin() {
   container="$(application_container)"
   [[ -n "$container" ]] || fail "The running Markweave container could not be resolved."
   actual="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
-    "$container" | sed -n 's/^MD_CONVERTER_PUBLIC_ORIGIN=//p')"
+    "$container" | sed -n 's/^MARKWEAVE_PUBLIC_ORIGIN=//p')"
   [[ "$actual" == "$public_origin" ]] || \
     fail "The running application did not receive the configured public origin."
 }

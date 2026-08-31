@@ -2,7 +2,7 @@
 ticket: T32
 linear_id: G1L-407
 linear_url: https://linear.app/g1lom/issue/G1L-407/t32-add-secure-http-login-and-cli-profiles
-status: Backlog
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -35,12 +35,18 @@ Authenticate remote CLI commands through the existing session and CSRF contract 
 
 ## Progress
 
+* 2026-08-30: Squash-merged PR #107 verified the secure CLI authentication and profile workflow on `main` at `e453a28e1efc6a617f93c417ab52b5628114132b`. Complete CI run `33305588346` passed; T32 is complete.
+* 2026-08-30: Review follow-up makes named profiles fail closed before prompting or sending a login when the stored service URL differs, preserving the existing reachable session. Added a real loopback proxy-bypass regression with both proxy variables set and both bypass variables empty; the target receives login directly while the proxy receives no request or password body.
+* 2026-08-30: Completed review hardening on `feat/T32-secure-cli-profiles`: real Uvicorn command-path coverage now exercises password-change prompts, success, mismatch, reauthentication failure, fresh-login requirement, and profile cleanup. Profiles reject malformed cookie/CSRF state with stable errors; secret-bearing transport fields are non-representable; failed profile writes and failed renewal cleanup are covered. The final-image PTY workflow now inspects blocked process arguments/environment, drains safely, handles PTY hangup, reaps timeouts, and checks output and logs for the fixture secret. Pending independent review, full validation, and publication.
+* 2026-08-30: Added the rootless final-image CLI workflow to the existing Podman E2E harness. It drives the installed executable through a PTY, sends the fixture password only after the non-echoing prompt, verifies login/whoami/logout, and asserts non-interactive renewal fails safely.
+* 2026-08-30: Implemented the authentication command family on this branch: HTTPS-only standard-library transport, atomic owner-only XDG profiles, non-echoing prompts, login/logout/session inspection, and restricted-session password renewal with a mandatory fresh login. Added unit, shell, and real loopback-HTTP coverage for safe profile handling, path/symlink attacks, hostile state, CSRF, redaction, mismatch, expiration cleanup, and transport serialization. Pending independent review and full repository validation before publication.
+* 2026-08-30: Started implementation on `feat/T32-secure-cli-profiles` from verified `main` at `ca3fe44`; this workstream owns the pre-registered authentication command family, HTTP transport, and secure XDG profile storage, and must not modify T39-owned configuration files.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up made self-service password renewal an explicit restricted-session CLI workflow.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: Done; merged and verified on `main` by PR #107, squash commit `e453a28e1efc6a617f93c417ab52b5628114132b`, and complete CI run `33305588346`.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

@@ -15,6 +15,7 @@ from PIL import Image
 from markweave.conversion.errors import ConversionError, ConversionErrorCode
 from markweave.conversion.images import (
     ImageLimits,
+    _has_external_css_reference,
     normalize_image,
     render_svg_with_cairo,
     validate_normalized_png,
@@ -220,6 +221,11 @@ def test_svg_external_css_references_and_foreign_content_are_removed() -> None:
     assert b"example.invalid" not in sanitized
     assert b"file:///" not in sanitized
     assert b"foreignobject" not in sanitized
+
+
+def test_svg_css_reference_classification_is_fail_closed() -> None:
+    assert _has_external_css_reference("fill: url(https://example.invalid/image)")
+    assert not _has_external_css_reference("fill: url(#local-gradient)")
 
 
 def test_svg_escaped_css_url_spelling_is_removed_before_renderer() -> None:

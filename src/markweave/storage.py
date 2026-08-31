@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import StrEnum
+from importlib import import_module
 from pathlib import Path
 from tempfile import mkstemp
 from typing import Any, Protocol
 from uuid import UUID
-
-from botocore.exceptions import BotoCoreError, ClientError
 
 
 class ObjectScope(StrEnum):
@@ -144,8 +143,18 @@ class S3ObjectStore:
     """AWS S3-compatible adapter used with AWS or RustFS without provider APIs."""
 
     def __init__(self, client: Any, bucket: str) -> None:
+        try:
+            exceptions = import_module("botocore.exceptions")
+        except ModuleNotFoundError:
+            raise ObjectStoreError(
+                "S3 object storage requires the 'distributed' extra; "
+                "install 'markweave[distributed]'."
+            ) from None
         self._client = client
         self._bucket = bucket
+        self._client_error = exceptions.ClientError
+        self._boto_core_error = exceptions.BotoCoreError
+        self._boto_errors = (self._boto_core_error, self._client_error)
 
     def put(self, key: ObjectKey, content: bytes) -> None:
         try:
@@ -154,14 +163,16 @@ class S3ObjectStore:
                 Key=key.as_posix(),
                 Body=content,
             )
-        except (BotoCoreError, ClientError) as error:
+        except self._boto_errors as error:
             raise ObjectStoreError("Object storage operation failed") from error
 
     def get(self, key: ObjectKey) -> bytes:
+        body: Any | None = None
         try:
             response = self._client.get_object(Bucket=self._bucket, Key=key.as_posix())
-            return response["Body"].read()
-        except ClientError as error:
+            body = response["Body"]
+            return body.read()
+        except self._client_error as error:
             if error.response.get("Error", {}).get("Code") in {
                 "404",
                 "NoSuchKey",
@@ -169,19 +180,22 @@ class S3ObjectStore:
             }:
                 raise ObjectNotFoundError("Object does not exist") from None
             raise ObjectStoreError("Object storage operation failed") from error
-        except BotoCoreError as error:
+        except self._boto_core_error as error:
             raise ObjectStoreError("Object storage operation failed") from error
+        finally:
+            if body is not None:
+                body.close()
 
     def delete(self, key: ObjectKey) -> None:
         try:
             self._client.delete_object(Bucket=self._bucket, Key=key.as_posix())
-        except (BotoCoreError, ClientError) as error:
+        except self._boto_errors as error:
             raise ObjectStoreError("Object storage operation failed") from error
 
     def exists(self, key: ObjectKey) -> bool:
         try:
             self._client.head_object(Bucket=self._bucket, Key=key.as_posix())
-        except ClientError as error:
+        except self._client_error as error:
             if error.response.get("Error", {}).get("Code") in {
                 "404",
                 "NoSuchKey",
@@ -189,13 +203,18 @@ class S3ObjectStore:
             }:
                 return False
             raise ObjectStoreError("Object storage operation failed") from error
-        except BotoCoreError as error:
+        except self._boto_core_error as error:
             raise ObjectStoreError("Object storage operation failed") from error
         return True
 
     def is_ready(self) -> bool:
         try:
             self._client.head_bucket(Bucket=self._bucket)
-        except BotoCoreError, ClientError:
+        except self._boto_errors:
             return False
         return True
+
+    def close(self) -> None:
+        """Release the provider client's HTTP connection pools."""
+
+        self._client.close()

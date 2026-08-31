@@ -20,6 +20,7 @@ from scripts.container import (
     summarize_supply_chain,
     verify_supply_chain,
 )
+from tests.e2e.recovery_cli_setup import _listed_object_count
 
 pytestmark = pytest.mark.unit
 LEGACY_TEMPLATE_ID = "00000000-0000-4000-8000-000000000029"
@@ -110,6 +111,7 @@ def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
         "scripts/container/distributed-api-smoke.sh",
+        "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
@@ -126,7 +128,68 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
         assert f"ARG {artifact}_SHA256=" in containerfile
     assert "rpm --checksig /tmp/google-chrome.rpm" in containerfile
     assert "RPM_INVENTORY_SHA256" in containerfile
-    assert "uv sync --locked --no-dev --no-editable" in containerfile
+    assert "uv sync --locked --no-dev --no-editable --extra all" in containerfile
+
+
+def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
+    """Both reviewed final-image paths execute the complete recovery contract."""
+
+    command = 'bash scripts/container/recovery-cli-smoke.sh "$image"'
+    run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+    ci_command = command.replace('"$image"', '"$final_image"')
+    release = yaml.safe_load(
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+    )
+    release_run = next(
+        step["run"]
+        for step in release["jobs"]["build-and-publish"]["steps"]
+        if step["name"] == "Build and validate the final rootless image"
+    )
+
+    assert run_ci.count(ci_command) == 1
+    assert (
+        run_ci.index('bash scripts/container/build.sh "$final_image"')
+        < run_ci.index(ci_command)
+        < run_ci.index(
+            'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
+        )
+    )
+    assert release_run.count(command) == 1
+    assert release_run.index(
+        'bash scripts/container/build.sh "$image"'
+    ) < release_run.index(command)
+
+
+def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
+    smoke = Path("scripts/container/recovery-cli-smoke.sh").read_text(encoding="utf-8")
+
+    assert 'chmod 0777 "$workspace"' not in smoke
+    assert smoke.count('"$workspace:/e2e:U,Z"') == 2
+    assert '.error.message == "Distributed restore target is not isolated"' in smoke
+    assert 'run_setup "${common_s3[@]}" -- distributed-cleanup-verify' in smoke
+
+
+def test_recovery_smoke_does_not_require_optional_s3_key_count() -> None:
+    assert _listed_object_count({}) == 0
+    assert _listed_object_count({"Contents": []}) == 0
+    assert _listed_object_count({"Contents": [{"Key": "one"}]}) == 1
+    with pytest.raises(RuntimeError, match="listing is invalid"):
+        _listed_object_count({"Contents": "not-a-list"})
+
+
+def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    smoke = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+
+    assert "MARKWEAVE_HOST=" not in containerfile
+    assert "MARKWEAVE_PORT=" not in containerfile
+    assert 'legacy_settings+=("${setting/MARKWEAVE_/MD_CONVERTER_}")' in smoke
+    assert "--env MD_CONVERTER_HOST=127.0.0.1" in smoke
+    assert "--env MD_CONVERTER_PORT=18080" in smoke
+    assert 'urllib.request.urlopen("http://127.0.0.1:18080/health/live"' in smoke
+    assert (
+        '(Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)' in smoke
+    )
 
 
 def test_final_image_version_comes_from_project_metadata() -> None:
@@ -166,6 +229,9 @@ def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
     assert "api|embedded-worker|external-worker" in entrypoint
     assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
+    assert "exec uvicorn markweave.app:create_app" in entrypoint
+    assert "uvicorn markweave:create_app" not in entrypoint
+    assert "--factory" in entrypoint
 
 
 def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:

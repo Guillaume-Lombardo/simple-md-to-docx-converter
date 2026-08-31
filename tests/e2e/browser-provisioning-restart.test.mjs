@@ -6,21 +6,21 @@ import { chromium } from "playwright-core";
 import { sessionRequest } from "./browser-helpers.mjs";
 
 const REQUIRED_ENVIRONMENT = [
-  "MD_CONVERTER_E2E_BASE_URL",
-  "MD_CONVERTER_E2E_PROFILE",
-  "MD_CONVERTER_E2E_PROVISIONED_USERNAME",
-  "MD_CONVERTER_E2E_PROVISIONED_OLD_PASSWORD",
-  "MD_CONVERTER_E2E_PROVISIONED_PASSWORD",
+  "MARKWEAVE_E2E_BASE_URL",
+  "MARKWEAVE_E2E_PROFILE",
+  "MARKWEAVE_E2E_PROVISIONED_USERNAME",
+  "MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD",
+  "MARKWEAVE_E2E_PROVISIONED_PASSWORD",
 ];
 
 test("startup CSV replaces an existing final-image account after restart", async () => {
   for (const name of REQUIRED_ENVIRONMENT) {
     assert.ok(process.env[name], `${name} is required`);
   }
-  const baseUrl = process.env.MD_CONVERTER_E2E_BASE_URL;
-  const username = process.env.MD_CONVERTER_E2E_PROVISIONED_USERNAME;
+  const baseUrl = process.env.MARKWEAVE_E2E_BASE_URL;
+  const username = process.env.MARKWEAVE_E2E_PROVISIONED_USERNAME;
   const browser = await chromium.launch({
-    executablePath: process.env.MD_CONVERTER_E2E_CHROMIUM
+    executablePath: process.env.MARKWEAVE_E2E_CHROMIUM
       || "/usr/bin/google-chrome-stable",
     headless: true,
   });
@@ -30,7 +30,7 @@ test("startup CSV replaces an existing final-image account after restart", async
     await page.goto("/login", { waitUntil: "networkidle" });
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(
-      process.env.MD_CONVERTER_E2E_PROVISIONED_OLD_PASSWORD,
+      process.env.MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD,
     );
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.locator(".alert").filter({
@@ -39,7 +39,7 @@ test("startup CSV replaces an existing final-image account after restart", async
 
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(
-      process.env.MD_CONVERTER_E2E_PROVISIONED_PASSWORD,
+      process.env.MARKWEAVE_E2E_PROVISIONED_PASSWORD,
     );
     await Promise.all([
       page.waitForURL("**/change-password"),

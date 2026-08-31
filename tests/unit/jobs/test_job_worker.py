@@ -31,6 +31,7 @@ from markweave.jobs.worker import (
     WorkerPolicy,
     WorkerRuntime,
 )
+from markweave.jobs.worker_publication import _is_sha256
 from markweave.observability import (
     OperationalMetrics,
     QueueSnapshot,
@@ -53,6 +54,13 @@ def versioned_result(content: bytes, manifest: bytes | None = None) -> JobProces
         template_version=TRACEABILITY_TEMPLATE_VERSION,
         template_sha256=TRACEABILITY_TEMPLATE_SHA256,
     )
+
+
+def test_publication_digest_validation_requires_lowercase_sha256() -> None:
+    assert _is_sha256("a" * 64)
+    assert not _is_sha256("A" * 64)
+    assert not _is_sha256("a" * 63)
+    assert not _is_sha256(None)
 
 
 def worker(mocker: MockerFixture) -> tuple[ConversionWorker, Any, Any, Any]:

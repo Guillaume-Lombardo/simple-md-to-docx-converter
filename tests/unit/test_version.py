@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from markweave import __version__
-from markweave.app import COMPONENT_VERSIONS
+from markweave.http.routers.conversions import COMPONENT_VERSIONS
 from markweave.version import VERSION
 
 pytestmark = pytest.mark.unit

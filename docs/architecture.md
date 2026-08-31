@@ -62,7 +62,7 @@ prevent verification/reset races.
 ## Security model
 
 All browser and API use is authenticated and intended for HTTPS. State changes require a CSRF token
-and a matching effective origin. With `MD_CONVERTER_PUBLIC_ORIGIN` set, that exact external
+and a matching effective origin. With `MARKWEAVE_PUBLIC_ORIGIN` set, that exact external
 scheme/host/optional-port is authoritative for Origin checks; the value must contain no path, query,
 fragment, or user information. When it is unset, the direct ASGI request base URL is authoritative.
 Proxy forwarding headers remain deliberately untrusted.

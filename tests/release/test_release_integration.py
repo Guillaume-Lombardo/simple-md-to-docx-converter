@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import tarfile
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,13 @@ def test_real_build_validation_clean_install_and_tamper_failure(
     with zipfile.ZipFile(verified.wheel) as wheel:
         names = set(wheel.namelist())
         assert "markweave/__init__.py" in names
+        package_init = wheel.read("markweave/__init__.py").decode()
+        assert "create_app" not in package_init
+        assert '__all__ = ["__version__"]' in package_init
+        entry_points = wheel.read("markweave-0.4.0.dist-info/entry_points.txt").decode()
+        assert (
+            entry_points == "[console_scripts]\nmarkweave = markweave.cli.main:main\n"
+        )
         assert not any(name.startswith("md_converter/") for name in names)
         assert "md_converter.py" not in names
         assert not any(
@@ -50,6 +58,28 @@ def test_real_build_validation_clean_install_and_tamper_failure(
             for name in names
         )
         assert "markweave-0.4.0.dist-info/licenses/LICENSE" in names
+        metadata_name = next(
+            name for name in names if name.endswith(".dist-info/METADATA")
+        )
+        metadata = BytesParser().parsebytes(wheel.read(metadata_name))
+        assert metadata["License-Expression"] == "Apache-2.0"
+        assert metadata.get_all("Provides-Extra") == [
+            "all",
+            "distributed",
+            "server",
+            "standalone",
+        ]
+        requirements = metadata.get_all("Requires-Dist", [])
+        assert "boto3<2,>=1.40; extra == 'distributed'" in requirements
+        assert "psycopg[binary]<4,>=3.2; extra == 'distributed'" in requirements
+        assert not any(
+            "boto3" in requirement and "extra == 'server'" in requirement
+            for requirement in requirements
+        )
+        assert not any(
+            "psycopg" in requirement and "extra == 'server'" in requirement
+            for requirement in requirements
+        )
     with tarfile.open(verified.sdist, mode="r:gz") as sdist:
         names = set(sdist.getnames())
         assert "markweave-0.4.0/LICENSE" in names
