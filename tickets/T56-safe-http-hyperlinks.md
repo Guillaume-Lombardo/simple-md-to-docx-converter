@@ -7,6 +7,15 @@ priority: High
 project: Markdown to DOCX and PDF Converter
 ---
 
+---
+ticket: T56
+linear_id: G1L-480
+linear_url: https://linear.app/g1lom/issue/G1L-480/t56-allow-safe-https-hyperlinks-without-remote-resource-loading
+status: Done
+priority: High
+project: Markdown to DOCX and PDF Converter
+---
+
 # T56 - Allow safe HTTP(S) hyperlinks without remote resource loading
 
 ## Objective
@@ -88,6 +97,11 @@ access.
   `pandoc-default` mode; the downloaded DOCX passed OpenXML validation and contained exactly the
   expected sanitized HTTP and HTTPS hyperlink relationships. The isolated containers, volumes,
   and temporary quickstart state were removed after validation.
+- 2026-09-01: Phase 2 PR #152 was squash-merged as
+  `0e896684bfe6d2391a096e73f22e1f57ab81ad75`. Exact-main CI run 33445301676 passed its light,
+  Compose, affected-domain, and final gate jobs. The public quickstart now pins the published
+  `0.5.1` image by its verified immutable receipt digest, so every T56 acceptance criterion is
+  verified on `main` and the ticket is Done.
 
 ## Synchronization
 
