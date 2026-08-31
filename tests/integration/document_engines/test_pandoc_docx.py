@@ -112,6 +112,33 @@ def test_real_pandoc_converts_complete_corpus_and_applies_reference(
         assert expected in text
 
 
+@pytest.mark.requires_pandoc
+def test_real_pandoc_preserves_safe_external_hyperlinks_without_loading_them(
+    tmp_path: Path,
+) -> None:
+    markdown = Path("tests/e2e/fixtures/external-hyperlinks.md").read_text(
+        encoding="utf-8"
+    )
+    service = DocxConversionService(
+        PandocDocxConverter(PandocConfig("pandoc", 30.0, 2.0, tmp_path), os.environ)
+    )
+
+    snapshot = inspect_docx(
+        service.convert(markdown, default_reference_docx()), DOCX_LIMITS
+    )
+
+    hyperlinks = {
+        relationship.target
+        for relationship in snapshot.relationships
+        if relationship.relationship_type.endswith("/hyperlink")
+        and relationship.target_mode == "External"
+    }
+    assert hyperlinks == {
+        "http://packages.example.invalid/document-tool",
+        "https://documentation.example.invalid/document-tool",
+    }
+
+
 @pytest.mark.parametrize(
     ("program", "expected_code"),
     [

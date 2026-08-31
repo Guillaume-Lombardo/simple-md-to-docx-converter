@@ -34,9 +34,12 @@ output remains downloadable until the configured result-retention deadline. Fail
 jobs do not expose a result.
 
 Uploads are rejected when they violate the configured request, source, archive, image, diagram, or
-PDF limits. Archives may contain one Markdown source plus local resources; remote URLs and paths
-escaping the archive are forbidden. See [archives and images](archive-images.md) and
-[local Mermaid rendering](mermaid.md).
+PDF limits. Ordinary absolute HTTP(S) links are preserved as clickable document hyperlinks when
+they have a valid host and contain no embedded credentials or control characters. They are not
+downloaded during conversion. Remote images and other remotely loaded resources remain forbidden;
+archives may contain one Markdown source plus approved local resources, and paths escaping the
+archive are rejected. See [archives and images](archive-images.md) and [local Mermaid
+rendering](mermaid.md).
 
 ## Templates
 

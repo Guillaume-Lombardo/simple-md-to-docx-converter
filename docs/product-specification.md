@@ -41,7 +41,7 @@ The product includes a conversion page, template administration, local authentic
 | Standalone storage | SQLite and files on a PVC, one replica |
 | Distributed storage | PostgreSQL and S3-compatible object storage |
 | Initial authentication | Local username/password behind an OIDC-ready abstraction |
-| Document resources | Remote resources are forbidden |
+| Document resources | Remote-loaded resources are forbidden; validated HTTP(S) hyperlinks are allowed |
 | Markdown reader | `commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html`, with raw HTML rejected before Pandoc |
 | Browser sandbox | Keep Chromium's sandbox enabled; validate a minimal seccomp/user-namespace profile on rootless Podman, then k3s; never use `--no-sandbox`; defer OpenShift proof |
 | Document fonts | Liberation plus Carlito/Caladea, DejaVu as fallback, and Noto only for explicitly required scripts |
@@ -124,7 +124,11 @@ and end-to-end integration snapshots.
 
 ## 4. Input contract
 
-A standalone Markdown file is accepted only when it has no local-resource dependency. The service never downloads document images, stylesheets, or other remote resources.
+A standalone Markdown file is accepted only when it has no local-resource dependency. The service
+never downloads document images, stylesheets, or other remote resources. Ordinary hyperlink
+destinations are not loaded: accept only well-formed absolute HTTP(S) hyperlinks with a host, no
+embedded credentials, and no control characters. Reject other URI schemes, protocol-relative
+destinations, and encoded-scheme equivalents.
 
 Recommended archive layout:
 
@@ -137,7 +141,11 @@ document.zip
     └── screenshot.jpg
 ```
 
-Select root `document.md` first, otherwise the sole `.md` file, and reject ambiguity. Reject absolute and escaping paths, symlinks, encrypted archives, ZIP bombs, abnormal compression ratios, configured-limit violations, disallowed types, and every remote URL including internal-network destinations.
+Select root `document.md` first, otherwise the sole `.md` file, and reject ambiguity. Reject
+absolute and escaping paths, symlinks, encrypted archives, ZIP bombs, abnormal compression ratios,
+configured-limit violations, disallowed types, and every remotely loaded resource URL including
+internal-network destinations. This resource prohibition includes images even when their URL would
+be a valid HTTP(S) hyperlink destination.
 
 Supported image candidates are PNG, JPEG, sanitized SVG, static GIF, and WebP. Reject animated GIF. Treat SVG as untrusted XML: disable external entities, remove scripts and external references, then rasterize locally without network access. Include XXE, script, and remote `xlink:href` fixtures in the security corpus.
 
@@ -352,7 +360,8 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 - Both storage profiles pass the same functional contract.
 - Queue recovery, leases, idempotency, cancellation, expiration, quotas, and cleanup are deterministic.
 - Ownership and administrator permissions hold across API and UI.
-- Remote resources, unsafe archives, hostile SVG, unsafe subprocess input, and sensitive logs are prevented.
+- Remote resource loading, unsafe link schemes, unsafe archives, hostile SVG, unsafe subprocess
+  input, and sensitive logs are prevented while validated HTTP(S) hyperlinks remain usable.
 - Required checks, 90% coverage thresholds, independent review, and English-only repository artifacts are enforced.
 - Every applicable real-boundary feature has integration coverage for its primary successful path and every relevant failure behavior, and every delivered user-visible or operational workflow has E2E coverage against the final rootless image for its primary path and every relevant critical failure, authorization, cancellation, recovery, or concurrency behavior.
 
@@ -413,6 +422,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T48, T49 |
 | T54 | Publish the post-T38 CLI-entrypoint release and atomically pin public Compose and quickstarts to its immutable image | T22, T38, T40 |
 | T55 | Publish LibreOffice descendant PID probes atomically in the real-process cancellation test harness | T21 |
+| T56 | Allow safe HTTP(S) hyperlinks without remote resource loading and verify the workflow against the final image | T07, T08, T21 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30).
 

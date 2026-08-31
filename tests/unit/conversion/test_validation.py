@@ -139,6 +139,12 @@ def test_extension_context_cannot_hide_raw_html(mocker, raw_html: str) -> None:
         "[link](https:example.test/path)",
         "[link](file%3A///etc/passwd)",
         "[link](%2F%2Fexample.test/path)",
+        "[link](https%3A//example.test/path)",
+        "[link](https%253A//example.test/path)",
+        "[link](https://user@example.test/path)",
+        "[link](https://user:secret@example.test/path)",
+        "[link](https://example.test/%0Aheader)",
+        "[link](https://example.test:invalid/path)",
     ],
 )
 def test_remote_resources_are_rejected_before_converter_call(
@@ -155,9 +161,29 @@ def test_remote_resources_are_rejected_before_converter_call(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "link",
+    [
+        "[secure](https://example.test/path?query=value#section)",
+        "[encoded path](https://example.test/a%20path)",
+        "[plain](http://example.test/path)",
+        "<https://example.test/autolink>",
+        "[Unicode host](https://例え.テスト/path)",
+        "[relative](guide/page.html)",
+        "[fragment](#section)",
+    ],
+)
+def test_safe_http_links_and_local_links_are_accepted(mocker, link: str) -> None:
+    converter = mocker.Mock()
+    converter.convert.return_value = b"docx"
+
+    assert DocxConversionService(converter).convert(link, b"reference") == b"docx"
+    converter.convert.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "remote",
     [
-        "---\ntitle: |\n  [private](https://example.test/private)\n---\n# Safe",
         "---\nsource: '[local](file:///etc/passwd)'\n---\n# Safe",
         "---\nsource: '![data](data:text/plain,secret)'\n---\n# Safe",
         '---\nsource: "[local](file\\u003a///etc/passwd)"\n---\n# Safe',
@@ -174,6 +200,18 @@ def test_extension_context_cannot_hide_resource_destination(
     assert captured.value.code is ConversionErrorCode.VALIDATION
     assert str(captured.value) == "Markdown input contains a remote resource."
     converter.convert.assert_not_called()
+
+
+@pytest.mark.unit
+def test_safe_external_link_is_accepted_in_metadata_and_footnotes() -> None:
+    markdown = """---
+source: '[documentation](https://example.test/metadata)'
+---
+Safe.[^1]
+
+[^1]: [reference](http://example.test/footnote)
+"""
+    assert validate_markdown(markdown).text == markdown
 
 
 @pytest.mark.unit
@@ -390,14 +428,8 @@ literal
     "literal",
     [r"\<span>escaped\</span>", "<https://example.test/resource>"],
 )
-def test_escaped_html_is_text_but_remote_autolink_is_still_forbidden(
-    literal: str,
-) -> None:
-    if literal.startswith("\\"):
-        assert validate_markdown(literal).text == literal
-    else:
-        with pytest.raises(ConversionError, match="remote resource"):
-            validate_markdown(literal)
+def test_escaped_html_and_safe_http_autolinks_are_accepted(literal: str) -> None:
+    assert validate_markdown(literal).text == literal
 
 
 @pytest.mark.unit
