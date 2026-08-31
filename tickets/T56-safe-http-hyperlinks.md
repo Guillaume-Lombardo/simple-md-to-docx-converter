@@ -66,6 +66,12 @@ access.
   coverage, with only the expected 32 PostgreSQL setup errors and three RustFS failures because the
   host service variables were absent. Host Pandoc is also unavailable; the real Pandoc boundary was
   instead exercised successfully by both final-image workflows.
+- 2026-08-31: PR #150 was squash-merged as
+  `db88c2b8aa07657e0514cfb8f153b221dc3e127e`; CodeRabbit reported no actionable comments and the
+  complete exact-main CI run 33437138553 passed. The requested patch-release closure now prepares
+  version `0.5.1`. Compose intentionally remains pinned to the verified `0.5.0` digest until the
+  protected release publishes `0.5.1`; the immediate follow-up will adopt the exact retained GHCR
+  receipt, validate the public quickstarts, and only then mark T56 Done.
 
 ## Synchronization
 

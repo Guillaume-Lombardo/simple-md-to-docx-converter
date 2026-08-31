@@ -28,14 +28,14 @@ def test_real_build_validation_clean_install_and_tamper_failure(
     built = build_release(
         output,
         expected_name="markweave",
-        expected_version="0.5.0",
+        expected_version="0.5.1",
         constraint=project_root / "build-constraints.txt",
     )
     verified = verify_release(
-        output, expected_name="markweave", expected_version="0.5.0"
+        output, expected_name="markweave", expected_version="0.5.1"
     )
     installed = verify_clean_install(
-        output, expected_name="markweave", expected_version="0.5.0"
+        output, expected_name="markweave", expected_version="0.5.1"
     )
 
     assert built.integrity == verified.integrity
@@ -47,7 +47,7 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         package_init = wheel.read("markweave/__init__.py").decode()
         assert "create_app" not in package_init
         assert '__all__ = ["__version__"]' in package_init
-        entry_points = wheel.read("markweave-0.5.0.dist-info/entry_points.txt").decode()
+        entry_points = wheel.read("markweave-0.5.1.dist-info/entry_points.txt").decode()
         assert (
             entry_points == "[console_scripts]\nmarkweave = markweave.cli.main:main\n"
         )
@@ -57,7 +57,7 @@ def test_real_build_validation_clean_install_and_tamper_failure(
             "/purelib/md_converter" in name or "/platlib/md_converter" in name
             for name in names
         )
-        assert "markweave-0.5.0.dist-info/licenses/LICENSE" in names
+        assert "markweave-0.5.1.dist-info/licenses/LICENSE" in names
         metadata_name = next(
             name for name in names if name.endswith(".dist-info/METADATA")
         )
@@ -82,8 +82,8 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         )
     with tarfile.open(verified.sdist, mode="r:gz") as sdist:
         names = set(sdist.getnames())
-        assert "markweave-0.5.0/LICENSE" in names
-        assert "markweave-0.5.0/src/markweave/__init__.py" in names
+        assert "markweave-0.5.1/LICENSE" in names
+        assert "markweave-0.5.1/src/markweave/__init__.py" in names
         assert not any("/src/md_converter/" in name for name in names)
         assert not any(name.endswith("/src/md_converter.py") for name in names)
 
@@ -93,5 +93,5 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         stream.write(b"controlled tamper")
     with pytest.raises(ArtifactError, match="integrity check failed"):
         verify_clean_install(
-            tampered, expected_name="markweave", expected_version="0.5.0"
+            tampered, expected_name="markweave", expected_version="0.5.1"
         )
