@@ -2,7 +2,7 @@
 ticket: T51
 linear_id: G1L-434
 linear_url: https://linear.app/g1lom/issue/G1L-434/t51-reject-non-finite-template-compression-ratios
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -50,10 +50,15 @@ accepting them and failing later while assembling the template validator.
   suite passed 117 tests but, when run alone, correctly fails the repository-wide coverage gate.
   The default canonical Python suite completed with 95% coverage. Full local Python validation is
   limited by unavailable real document engines; fresh GitHub CI and CodeRabbit review are pending.
+* 2026-08-31: PR [#106](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/106)
+  was squash-merged as `b84fc5c1ee9f64ff354c2ee303a643684aa0be76`. Exact-head CI run
+  `33365130741` and exact-main CI run `33366340502` passed; CodeRabbit completed with zero
+  unresolved threads. Local validation remained limited to unavailable real document engines;
+  those engine and container boundaries were verified by the passing GitHub runs.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done; implementation is verified on `main`.
 * One worker owns this ticket's implementation files at a time.
 * All repository artifacts and user-facing text are English.
 
