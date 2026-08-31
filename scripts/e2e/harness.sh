@@ -18,6 +18,43 @@ e2e_harness_directory_identity() {
   stat --dereference --format='%d:%i' -- "$harness_directory"
 }
 
+e2e_remove_unidentified_harness_directory() {
+  local harness_directory="$1"
+
+  if [[ "$harness_directory" != /* || "$harness_directory" == / || \
+    "$harness_directory" == "${TMPDIR:-/tmp}" || \
+    "${harness_directory##*/}" != markweave-e2e.* || \
+    ! -d "$harness_directory" || -L "$harness_directory" ]]; then
+    echo "Refusing to remove an unidentified harness directory." >&2
+    return 1
+  fi
+
+  rmdir -- "$harness_directory"
+}
+
+e2e_initialize_harness_directory() {
+  local directory_variable="$1"
+  local identity_variable="$2"
+  local created_directory
+  local created_identity
+
+  if [[ ! "$directory_variable" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ || \
+    ! "$identity_variable" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    echo "Refusing invalid harness output variable names." >&2
+    return 1
+  fi
+  created_directory="$(e2e_create_harness_directory)" || return 1
+  if ! created_identity="$(
+    e2e_harness_directory_identity "$created_directory"
+  )"; then
+    e2e_remove_unidentified_harness_directory "$created_directory"
+    return 1
+  fi
+
+  printf -v "$directory_variable" '%s' "$created_directory"
+  printf -v "$identity_variable" '%s' "$created_identity"
+}
+
 e2e_require_owned_harness_directory() {
   local harness_directory="$1"
   local expected_identity="$2"

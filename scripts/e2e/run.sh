@@ -26,10 +26,12 @@ readonly seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 
 # shellcheck source=scripts/e2e/harness.sh
 source "$repository/scripts/e2e/harness.sh"
-readonly temporary_directory="$(e2e_create_harness_directory)"
-readonly temporary_directory_identity="$(
-  e2e_harness_directory_identity "$temporary_directory"
-)"
+temporary_directory=""
+temporary_directory_identity=""
+e2e_initialize_harness_directory \
+  temporary_directory temporary_directory_identity
+readonly temporary_directory
+readonly temporary_directory_identity
 worktree_baseline="$temporary_directory/worktree-before"
 data_directory="$temporary_directory/data"
 evidence_directory="$temporary_directory/evidence"

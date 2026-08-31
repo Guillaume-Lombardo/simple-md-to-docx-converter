@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -65,8 +66,8 @@ def test_alternate_tmpdir_launches_and_removes_only_owned_tree(
         [
             "bash",
             "-c",
-            'source "$1"; directory="$(e2e_create_harness_directory)"; '
-            'identity="$(e2e_harness_directory_identity "$directory")"; '
+            'source "$1"; directory=""; identity=""; '
+            "e2e_initialize_harness_directory directory identity; "
             'e2e_run_in_harness_directory "$directory" "$identity" '
             "bash -c 'printf runtime-marker > oom'; "
             'e2e_remove_harness_directory "$directory" "$identity"; '
@@ -84,6 +85,70 @@ def test_alternate_tmpdir_launches_and_removes_only_owned_tree(
     assert result.returncode == 0, result.stderr
     assert owned_directory.parent == alternate_tmpdir
     assert not owned_directory.exists()
+    assert sibling.is_dir()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("temporary_root_kind", ["relative", "symlink"])
+def test_runner_rejects_unsafe_tmpdir_before_worktree_setup(
+    tmp_path: Path,
+    temporary_root_kind: str,
+) -> None:
+    if temporary_root_kind == "relative":
+        temporary_root = "relative-temporary-root"
+    else:
+        real_temporary_root = tmp_path / "real-temporary-root"
+        real_temporary_root.mkdir()
+        symlink = tmp_path / "temporary-root-link"
+        symlink.symlink_to(real_temporary_root, target_is_directory=True)
+        temporary_root = str(symlink)
+    environment = os.environ | {"TMPDIR": temporary_root}
+    result = subprocess.run(
+        ["bash", str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe temporary root" in result.stderr
+    assert "worktree-before" not in result.stderr
+    if temporary_root_kind == "symlink":
+        assert list(real_temporary_root.iterdir()) == []
+
+
+@pytest.mark.unit
+def test_identity_failure_removes_new_tree_before_continuation(
+    tmp_path: Path,
+) -> None:
+    alternate_tmpdir = tmp_path / "alternate temporary root"
+    alternate_tmpdir.mkdir()
+    sibling = alternate_tmpdir / "preserve-me"
+    sibling.mkdir()
+    continuation = alternate_tmpdir / "continued-to-worktree-setup"
+    environment = os.environ | {"TMPDIR": str(alternate_tmpdir)}
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -e; source "$1"; '
+            "e2e_harness_directory_identity() { return 42; }; "
+            'directory=""; identity=""; '
+            "e2e_initialize_harness_directory directory identity; "
+            'printf continued > "$TMPDIR/continued-to-worktree-setup"',
+            "bash",
+            str(HARNESS),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode != 0
+    assert not continuation.exists()
+    assert list(alternate_tmpdir.glob("markweave-e2e.*")) == []
     assert sibling.is_dir()
 
 
