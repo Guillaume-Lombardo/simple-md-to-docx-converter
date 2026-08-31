@@ -69,20 +69,13 @@ def test_trusted_upstream_podman_renders_custom_public_origin(
     assert application["environment"]["MARKWEAVE_PUBLIC_ORIGIN"] == (
         "https://converter.example"
     )
-    assert application["environment"]["MD_CONVERTER_PUBLIC_ORIGIN"] == (
-        "https://converter.example"
-    )
     assert application["environment"]["MARKWEAVE_INSECURE_EVALUATION_MODE"] == "false"
-    assert (
-        application["environment"]["MD_CONVERTER_INSECURE_EVALUATION_MODE"] == "false"
-    )
     assert (
         application["environment"]["MARKWEAVE_MALWARE_SCANNING_MODE"]
         == "trusted-upstream"
     )
-    assert (
-        application["environment"]["MD_CONVERTER_MALWARE_SCANNING_MODE"]
-        == "trusted-upstream"
+    assert not any(
+        name.startswith("MD_CONVERTER_") for name in application["environment"]
     )
     assert (
         _load_rendered_settings(
@@ -137,10 +130,8 @@ def test_clamav_free_compose_can_enable_insecure_evaluation_mode() -> None:
         ]
         == "true"
     )
-    assert (
-        document["services"]["markweave"]["environment"][
-            "MD_CONVERTER_INSECURE_EVALUATION_MODE"
-        ]
-        == "true"
+    assert not any(
+        name.startswith("MD_CONVERTER_")
+        for name in document["services"]["markweave"]["environment"]
     )
     assert "clamav" not in document["services"]["markweave"].get("depends_on", {})

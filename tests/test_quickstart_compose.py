@@ -45,8 +45,8 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.4.0@"
-    "sha256:f1dacb99881d9890efc34ba8327afc23b0c9b1ed7f713876e35e04b36bbb6ab3"
+    "ghcr.io/guillaume-lombardo/md-converter:0.5.0@"
+    "sha256:a00767265c6c35b3fb19c4464e04d9f507940415a8c277e28f5bdc0f7dc420a4"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
@@ -67,7 +67,7 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
 
     assert application["image"] == MARKWEAVE_DIGEST
     assert application["platform"] == "linux/amd64"
-    assert application["command"] == "embedded-worker"
+    assert application["command"] == "serve"
     assert "restart" not in application
     assert application["depends_on"]["clamav"]["condition"] == "service_healthy"
     assert application["ports"] == ["127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"]
@@ -143,25 +143,14 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     assert environment["MARKWEAVE_STORAGE_PROFILE"] == "standalone"
     assert environment["MARKWEAVE_STANDALONE_DATA_DIRECTORY"] == "/data"
     assert environment["MARKWEAVE_JOB_RESULT_RETENTION_SECONDS"] == "600"
+    assert environment["MARKWEAVE_TEMPLATE_ENGINE_TIMEOUT_SECONDS"] == "30"
 
 
-def test_published_compose_bridge_keeps_legacy_aliases_equal_to_canonical_values() -> (
-    None
-):
+def test_published_compose_uses_only_canonical_environment_names() -> None:
     environment = _compose()["services"]["markweave"]["environment"]
-    canonical = {
-        key.removeprefix("MARKWEAVE_"): value
-        for key, value in environment.items()
-        if key.startswith("MARKWEAVE_")
-    }
-    legacy = {
-        key.removeprefix("MD_CONVERTER_"): value
-        for key, value in environment.items()
-        if key.startswith("MD_CONVERTER_")
-    }
 
-    assert canonical == legacy
-    assert len(canonical) == len(legacy) == 73
+    assert len(environment) == 73
+    assert all(key.startswith("MARKWEAVE_") for key in environment)
 
 
 def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> None:
@@ -237,7 +226,7 @@ def test_trusted_upstream_overlay_removes_local_scanner_dependency() -> None:
 
     assert "depends_on: !reset {}" in overlay
     assert "MARKWEAVE_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
-    assert "MD_CONVERTER_MALWARE_SCANNING_MODE: trusted-upstream" in overlay
+    assert "MD_CONVERTER_" not in overlay
     assert "profiles:" in overlay
     assert "local-antivirus" in overlay
 

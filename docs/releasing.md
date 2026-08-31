@@ -53,8 +53,8 @@ repositories.
    `tool.markweave.release.attempt` to `1`. For the `0.5.0` transition, Compose also catches up
    from `0.3.5` to the already-published immutable `0.4.0` image while retaining its existing
    `embedded-worker` command. This bounded correction restores the required base/PyPI/Compose
-   alignment; it does not pre-pin the unpublished `0.5.0` image or perform the CLI command
-   migration owned by post-publication adoption.
+   alignment before publication. The completed post-publication phase pins `0.5.0` from its
+   retained receipt and advances the public role to `markweave serve`.
 2. Open a pull request and require the complete `CI / gate`, independent review, and protected
    merge to `main`. Release versions are derived dynamically and are not hardcoded in the
    workflows.
