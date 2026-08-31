@@ -3,6 +3,7 @@
 import logging
 from io import BytesIO
 from pathlib import Path
+from tempfile import mkstemp
 from typing import Any, cast
 from uuid import uuid4
 
@@ -63,6 +64,24 @@ def test_filesystem_reads_deletes_and_readiness_delegate_without_raw_names(
     sync_directory.assert_called_once_with(target.parent)
     ensure_directory.assert_called_once_with(Path("/data/objects"))
     access.assert_called_once()
+
+
+@pytest.mark.unit
+def test_filesystem_put_uses_hidden_atomic_stage_and_missing_error_is_stable(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    staged = mocker.patch("markweave.storage.mkstemp", wraps=mkstemp)
+    store = FilesystemObjectStore(tmp_path)
+    key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
+
+    store.put(key, b"content")
+
+    assert store.get(key) == b"content"
+    assert staged.call_args.kwargs["prefix"] == ".pending-"
+    missing = ObjectKey(ObjectScope.UPLOAD, key.owner_id, uuid4())
+    with pytest.raises(ObjectNotFoundError) as captured:
+        store.get(missing)
+    assert str(captured.value) == "Object does not exist"
 
 
 @pytest.mark.unit
