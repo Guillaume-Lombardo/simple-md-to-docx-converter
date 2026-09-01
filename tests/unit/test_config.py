@@ -143,6 +143,20 @@ def test_legacy_environment_aliases_remain_supported_through_0_x(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("prefix", ("MARKWEAVE_", "MD_CONVERTER_"))
+def test_deprecated_idle_environment_input_is_never_silently_ignored(
+    monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    _set_environment_configuration(monkeypatch, "MARKWEAVE_")
+    monkeypatch.setenv(f"{prefix}SESSION_IDLE_SECONDS", "1200")
+    if prefix == "MD_CONVERTER_":
+        monkeypatch.delenv("MARKWEAVE_SESSION_IDLE_SECONDS", raising=False)
+
+    with pytest.warns(FutureWarning, match="does not control"):
+        assert Settings.load().session_idle_seconds == 1200
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("field_name", "canonical", "legacy"),
     [

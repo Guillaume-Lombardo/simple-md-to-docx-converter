@@ -365,7 +365,7 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Allow an administrator to persist one system-wide role-specific idle-session policy. Standard-user
   durations are whole minutes from 5 through 300, inclusive; administrator durations are whole
   minutes from 5 through 60, inclusive. The operator-configured absolute lifetime remains a hard
-  ceiling. FastAPI enforces the policy for the session user's current effective role on every
+  ceiling: reject an update if either proposed duration exceeds it. FastAPI enforces the policy for the session user's current effective role on every
   validation, a tightened policy or role change applies to existing unexpired sessions, and a later
   relaxation never revives an expired or revoked session. Policy changes use optimistic concurrency
   and immutable audit records in both storage profiles.

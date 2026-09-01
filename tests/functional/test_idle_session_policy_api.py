@@ -64,6 +64,23 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             assert invalid.status_code == 422
             assert invalid.json()["error"]["code"] == "REQUEST_INVALID"
 
+        for validator in (
+            '"idle-session-policy-+0"',
+            '"idle-session-policy- 0"',
+            '"idle-session-policy-00"',
+        ):
+            malformed = client.put(
+                "/api/v1/admin/session-policy",
+                headers={**csrf(admin_login), "If-Match": validator},
+                json={"user_idle_minutes": 5, "admin_idle_minutes": 5},
+            )
+            assert malformed.status_code == 412
+            assert client.get("/api/v1/admin/session-policy").json() == defaults.json()
+            assert not any(
+                item["operation"] == "idle_session_policy_update"
+                for item in client.get("/api/v1/audit").json()
+            )
+
         missing = client.put(
             "/api/v1/admin/session-policy",
             headers=csrf(admin_login),
@@ -126,3 +143,24 @@ def test_policy_persists_across_application_restart(tmp_path: Path) -> None:
             "admin_idle_minutes": 5,
             "revision": 1,
         }
+
+
+@pytest.mark.functional
+def test_policy_update_cannot_exceed_operator_absolute_lifetime(tmp_path: Path) -> None:
+    with make_client(tmp_path, session_absolute_seconds=10 * 60) as client:
+        admin = login(client)
+        current = client.get("/api/v1/admin/session-policy")
+        rejected = client.put(
+            "/api/v1/admin/session-policy",
+            headers={**csrf(admin), "If-Match": current.headers["etag"]},
+            json={"user_idle_minutes": 11, "admin_idle_minutes": 10},
+        )
+        assert rejected.status_code == 422
+        assert rejected.json()["error"]["code"] == (
+            "IDLE_SESSION_POLICY_EXCEEDS_ABSOLUTE_LIFETIME"
+        )
+        assert client.get("/api/v1/admin/session-policy").json() == current.json()
+        assert not any(
+            item["operation"] == "idle_session_policy_update"
+            for item in client.get("/api/v1/audit").json()
+        )

@@ -125,10 +125,14 @@ def expected_idle_session_policy_revision(if_match: str | None) -> int:
     prefix = '"idle-session-policy-'
     if not if_match.startswith(prefix) or not if_match.endswith('"'):
         raise IdleSessionPolicyConflictError
-    try:
-        revision = int(if_match[len(prefix) : -1])
-    except ValueError:
+    candidate = if_match[len(prefix) : -1]
+    if (
+        not candidate.isascii()
+        or not candidate.isdecimal()
+        or (len(candidate) > 1 and candidate.startswith("0"))
+    ):
         raise IdleSessionPolicyConflictError from None
+    revision = int(candidate)
     if revision < 0:
         raise IdleSessionPolicyConflictError
     return revision

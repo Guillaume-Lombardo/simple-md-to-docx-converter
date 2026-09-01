@@ -7,6 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from markweave.auth.models import (
     IdleSessionPolicy,
@@ -15,6 +17,7 @@ from markweave.auth.models import (
 )
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database
+from markweave.persistence.schema import IdleSessionPolicyAuditRow
 from markweave.persistence.sql import (
     SqlIdleSessionPolicyRepository,
     create_database_engine,
@@ -86,11 +89,13 @@ def test_standalone_backup_restore_preserves_idle_session_policy(
     data = _standalone_data(tmp_path)
     engine = create_database_engine(standalone_database_url(data))
     actor = uuid4()
+    audit_id = uuid4()
+    created_at = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
     policy = SqlIdleSessionPolicyRepository(engine).update(
         IdleSessionPolicy(300, 60),
         expected_revision=0,
         audit=IdleSessionPolicyAudit(
-            uuid4(),
+            audit_id,
             actor,
             IdleSessionPolicyOperation.UPDATE,
             30,
@@ -98,7 +103,7 @@ def test_standalone_backup_restore_preserves_idle_session_policy(
             300,
             60,
             1,
-            datetime.now(UTC),
+            created_at,
         ),
     )
     assert policy == IdleSessionPolicy(300, 60, 1)
@@ -125,6 +130,37 @@ def test_standalone_backup_restore_preserves_idle_session_policy(
     )
     restored_engine = create_database_engine(standalone_database_url(restored))
     assert SqlIdleSessionPolicyRepository(restored_engine).get() == policy
+    with restored_engine.connect() as connection:
+        audit = connection.execute(
+            select(
+                IdleSessionPolicyAuditRow.id,
+                IdleSessionPolicyAuditRow.actor_id,
+                IdleSessionPolicyAuditRow.operation,
+                IdleSessionPolicyAuditRow.old_user_idle_minutes,
+                IdleSessionPolicyAuditRow.old_admin_idle_minutes,
+                IdleSessionPolicyAuditRow.new_user_idle_minutes,
+                IdleSessionPolicyAuditRow.new_admin_idle_minutes,
+                IdleSessionPolicyAuditRow.revision,
+                IdleSessionPolicyAuditRow.created_at,
+            )
+        ).one()
+        assert audit.id == str(audit_id)
+        assert audit.actor_id == str(actor)
+        assert audit.operation == "idle_session_policy_update"
+        assert (
+            audit.old_user_idle_minutes,
+            audit.old_admin_idle_minutes,
+            audit.new_user_idle_minutes,
+            audit.new_admin_idle_minutes,
+            audit.revision,
+        ) == (30, 15, 300, 60, 1)
+        assert audit.created_at.replace(tzinfo=UTC) == created_at
+    with pytest.raises(SQLAlchemyError), restored_engine.begin() as connection:
+        connection.execute(
+            update(IdleSessionPolicyAuditRow)
+            .where(IdleSessionPolicyAuditRow.id == str(audit_id))
+            .values(new_admin_idle_minutes=6)
+        )
     restored_engine.dispose()
 
 

@@ -49,7 +49,7 @@ deployment concerns; binding a socket does not authorize public exposure.
 | `MARKWEAVE_ARGON2_TIME_COST` | `2`, minimum 1 | Both profiles |
 | `MARKWEAVE_ARGON2_PARALLELISM` | `1`, minimum 1 | Both profiles |
 | `MARKWEAVE_SESSION_TOKEN_BYTES` | `32`, minimum 16 | Both profiles |
-| `MARKWEAVE_SESSION_IDLE_SECONDS` | Deprecated 0.x compatibility input | Accepted but ignored; persisted administrator policy is authoritative |
+| `MARKWEAVE_SESSION_IDLE_SECONDS` | Deprecated 0.x compatibility input | Accepted with a startup warning; persisted administrator policy is authoritative |
 | `MARKWEAVE_SESSION_ABSOLUTE_SECONDS` | `28800`, positive | Both profiles; operator hard ceiling for every role policy |
 | `MARKWEAVE_SESSION_COOKIE_NAME` | `md_converter_session`, nonblank | Both profiles |
 | `MARKWEAVE_PUBLIC_ORIGIN` | Optional | Both profiles; exact HTTP(S) scheme, host, optional port only |
@@ -71,7 +71,8 @@ handling requirements.
 Role-specific idle durations are application data, not deployment configuration. With no persisted
 override they are 30 minutes for standard users and 15 minutes for administrators. Administrators
 replace the pair through the versioned FastAPI policy endpoint within its documented bounds. The
-absolute lifetime can be shorter than either idle duration and always wins. Preserve the policy
+absolute lifetime can be shorter than the stored default, but an administrator update is rejected
+if either proposed duration exceeds it. Existing sessions remain capped by the absolute lifetime. Preserve the policy
 row and its immutable audits in database backup, restore, and rollback procedures.
 
 ## Conversion and engine limits

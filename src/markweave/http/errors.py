@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from markweave.auth.errors import AuthenticationError
 from markweave.auth.policy_errors import (
+    IdleSessionPolicyAbsoluteLimitError,
     IdleSessionPolicyConflictError,
     IdleSessionPolicyPreconditionRequiredError,
 )
@@ -124,6 +125,20 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "IDLE_SESSION_POLICY_PRECONDITION_FAILED",
                     "message": "The idle-session policy has changed.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyAbsoluteLimitError)
+    def idle_policy_absolute_limit_handler(
+        _request: Request, _error: IdleSessionPolicyAbsoluteLimitError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_EXCEEDS_ABSOLUTE_LIFETIME",
+                    "message": "Idle-session durations cannot exceed the absolute lifetime.",
                 }
             },
         )

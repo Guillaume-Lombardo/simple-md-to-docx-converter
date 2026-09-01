@@ -47,8 +47,10 @@ def _user(
     }
 
 
-def _response(status: int, payload: object = None, text: str = ""):
-    return administration._Response(status, payload, text)
+def _response(
+    status: int, payload: object = None, text: str = "", etag: str | None = None
+):
+    return administration._Response(status, payload, text, etag)
 
 
 @pytest.fixture
@@ -319,11 +321,17 @@ def test_audit_pagination_and_json_output_are_exact(remote, capsys) -> None:
         "administrator_intervention": True,
         "created_at": "2026-08-30T12:00:00Z",
     }
+    normalized = record | {
+        "old_user_idle_minutes": None,
+        "old_admin_idle_minutes": None,
+        "new_user_idle_minutes": None,
+        "new_admin_idle_minutes": None,
+    }
     client.request.return_value = _response(200, [record])
 
     assert main(("--json", "audit", "--offset", "2", "--limit", "1")) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "items": [record],
+        "items": [normalized],
         "limit": 1,
         "offset": 2,
     }
@@ -365,6 +373,76 @@ def test_all_remote_audit_fields_are_escaped_in_human_output_but_not_json(
     assert rendered_json["operation"] == record["operation"]
     assert rendered_json["target_type"] == record["target_type"]
     assert rendered_json["target_id"] == record["target_id"]
+
+
+def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
+    remote, capsys
+) -> None:
+    _store, _constructor, client = remote
+    initial = {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
+    updated = {"user_idle_minutes": 25, "admin_idle_minutes": 10, "revision": 1}
+    client.request.side_effect = (
+        _response(200, initial, etag='"idle-session-policy-0"'),
+        _response(200, initial, etag='"idle-session-policy-0"'),
+        _response(200, updated, etag='"idle-session-policy-1"'),
+    )
+
+    assert main(("--json", "session-policy", "get")) == 0
+    assert json.loads(capsys.readouterr().out) == {"session_policy": initial}
+    assert (
+        main(
+            (
+                "--non-interactive",
+                "session-policy",
+                "update",
+                "--user-idle-minutes",
+                "25",
+                "--admin-idle-minutes",
+                "10",
+                "--force",
+            )
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == (
+        "Users: 25 minutes; administrators: 10 minutes; revision: 1.\n"
+    )
+    update = client.request.call_args_list[-1]
+    assert update.args == ("PUT", "/api/v1/admin/session-policy")
+    assert update.kwargs == {
+        "profile": _profile(),
+        "csrf": True,
+        "if_match": '"idle-session-policy-0"',
+        "body": {"user_idle_minutes": 25, "admin_idle_minutes": 10},
+    }
+
+    audit = {
+        "id": "audit-id",
+        "actor_id": ADMIN_ID,
+        "owner_id": ADMIN_ID,
+        "operation": "idle_session_policy_update",
+        "target_id": "00000000-0000-0000-0000-000000000001",
+        "target_type": "session_policy",
+        "target_version": "1",
+        "version_id": None,
+        "administrator_intervention": True,
+        "created_at": "2026-09-01T12:00:00Z",
+        "old_user_idle_minutes": 30,
+        "old_admin_idle_minutes": 15,
+        "new_user_idle_minutes": 25,
+        "new_admin_idle_minutes": 10,
+    }
+    assert administration._audit_record(audit) == audit
+
+
+def test_session_policy_help_exposes_http_only_read_and_update(capsys) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(("session-policy", "--help"))
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "get" in output
+    assert "update" in output
+    assert "role-specific idle-session" in output
 
 
 def test_health_url_is_public_and_metrics_support_human_and_json(
@@ -594,6 +672,7 @@ def test_administration_client_sends_profile_csrf_and_json_body(mocker) -> None:
         "/api/v1/admin/users/id",
         profile=_profile(),
         csrf=True,
+        if_match='"idle-session-policy-7"',
         body={"active": False},
     )
 
@@ -606,6 +685,7 @@ def test_administration_client_sends_profile_csrf_and_json_body(mocker) -> None:
         "Accept": "application/json",
         "Content-type": "application/json",
         "Cookie": "md_converter_session=opaque",
+        "If-match": '"idle-session-policy-7"',
         "X-csrf-token": "csrf-opaque",
     }
     opener.open.assert_called_once_with(request, timeout=2.5)

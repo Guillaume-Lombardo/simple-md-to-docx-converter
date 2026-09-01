@@ -29,7 +29,11 @@ from markweave.storage import (
     ObjectStoreError,
 )
 from tests.idle_session_policy_contracts import (
+    exercise_idle_session_policy_audit_retention_contract,
     exercise_idle_session_policy_repository_contract,
+)
+from tests.session_policy_service_contracts import (
+    exercise_assembled_idle_session_policy_contract,
 )
 from tests.settings import template_settings
 from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
@@ -56,7 +60,30 @@ def test_sqlite_idle_session_policy_repository_contract(tmp_path: Path) -> None:
     engine = create_database_engine(standalone_database_url(tmp_path))
     upgrade_database(engine)
     exercise_idle_session_policy_repository_contract(engine)
+    exercise_idle_session_policy_audit_retention_contract(engine)
     engine.dispose()
+
+
+@pytest.mark.integration
+def test_standalone_assembled_idle_session_policy_enforcement(tmp_path: Path) -> None:
+    settings = Settings(
+        **template_settings(),
+        initial_admin_username="admin",
+        initial_admin_password="admin-password",  # noqa: S106
+        argon2_memory_cost=8,
+        argon2_time_cost=1,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path / "assembled-policy",
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3_600,
+    )
+    app = create_app(settings)
+    try:
+        exercise_assembled_idle_session_policy_contract(app)
+    finally:
+        app.state.components.close()
 
 
 @pytest.mark.integration

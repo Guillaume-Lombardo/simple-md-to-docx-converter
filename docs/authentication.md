@@ -72,8 +72,9 @@ idle minutes. An administrator can atomically configure the system-wide pair thr
 `/api/v1/admin/session-policy`: standard users accept whole minutes from 5 through 300 and
 administrators accept whole minutes from 5 through 60. `MARKWEAVE_SESSION_ABSOLUTE_SECONDS`
 defaults to 8 hours and remains an operator-owned hard ceiling regardless of the selected idle
-duration. The deprecated `MARKWEAVE_SESSION_IDLE_SECONDS` input is accepted for 0.x configuration
-compatibility but no longer controls effective policy. Login rotates any present session, logout
+duration. Updates that exceed the configured absolute lifetime are rejected without changing the
+policy or audit. The deprecated `MARKWEAVE_SESSION_IDLE_SECONDS` input remains accepted for 0.x
+configuration compatibility, emits a startup warning, and does not control effective policy. Login rotates any present session, logout
 revokes it, and account deactivation or password reset revokes every session for that account.
 
 FastAPI reads the current policy and the account's current effective role during every session

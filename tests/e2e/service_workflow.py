@@ -254,36 +254,47 @@ def exercise_idle_session_policy(
     ) != (30, 15):
         raise WorkflowFailure("read idle-session policy: defaults mismatch")
 
-    updated_result = json_request(
-        admin,
-        "PUT",
-        "/api/v1/admin/session-policy",
-        {"user_idle_minutes": 300, "admin_idle_minutes": 60},
-        expected=200,
-        operation="update idle-session policy",
-        headers={"If-Match": etag},
-    )
-    updated = decode_object(updated_result, "update idle-session policy")
-    if (
-        updated.get("user_idle_minutes"),
-        updated.get("admin_idle_minutes"),
-        updated.get("revision"),
-    ) != (300, 60, int(current.get("revision", -1)) + 1):
-        raise WorkflowFailure("update idle-session policy: state mismatch")
+    def race(payload: dict[str, int]) -> HttpResult:
+        return admin.request(
+            "PUT",
+            "/api/v1/admin/session-policy",
+            body=json.dumps(payload).encode(),
+            content_type="application/json",
+            mutate=True,
+            headers={"If-Match": etag},
+        )
 
-    json_request(
-        admin,
-        "PUT",
-        "/api/v1/admin/session-policy",
-        {"user_idle_minutes": 5, "admin_idle_minutes": 5},
-        expected=412,
-        operation="reject stale idle-session policy update",
-        headers={"If-Match": etag},
-    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = tuple(
+            pool.map(
+                race,
+                (
+                    {"user_idle_minutes": 300, "admin_idle_minutes": 60},
+                    {"user_idle_minutes": 5, "admin_idle_minutes": 5},
+                ),
+            )
+        )
+    if sorted(outcome.status for outcome in outcomes) != [200, 412]:
+        raise WorkflowFailure("concurrent idle-session policy update was not atomic")
+    updated_result = next(outcome for outcome in outcomes if outcome.status == 200)
+    updated = decode_object(updated_result, "update idle-session policy")
+    if updated.get("revision") != int(current.get("revision", -1)) + 1:
+        raise WorkflowFailure("update idle-session policy: revision mismatch")
     final = admin.request("GET", "/api/v1/admin/session-policy")
     expect(final, 200, "reread idle-session policy")
     if decode_object(final, "reread idle-session policy") != updated:
         raise WorkflowFailure("stale idle-session policy update changed state")
+    audit_result = admin.request("GET", "/api/v1/audit?limit=100")
+    expect(audit_result, 200, "idle-session policy audit")
+    audits = json.loads(audit_result.body)
+    if not isinstance(audits, list) or not any(
+        record.get("operation") == "idle_session_policy_update"
+        and record.get("target_version") == str(updated["revision"])
+        and record.get("old_user_idle_minutes") == current["user_idle_minutes"]
+        and record.get("new_user_idle_minutes") == updated["user_idle_minutes"]
+        for record in audits
+    ):
+        raise WorkflowFailure("idle-session policy audit evidence is missing")
 
 
 def create_template(
@@ -1396,6 +1407,19 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
     if result_digest(client, job) != state["result_sha256"]:
         raise WorkflowFailure("checkpoint recovery: result bytes changed")
     require_template_audit(client, state["template_id"])
+    policy = decode_object(
+        client.request("GET", "/api/v1/admin/session-policy"),
+        "checkpoint idle-session policy",
+    )
+    if not isinstance(policy.get("revision"), int) or policy["revision"] < 1:
+        raise WorkflowFailure("checkpoint idle-session policy was not preserved")
+    audit = client.request("GET", "/api/v1/audit?limit=100")
+    expect(audit, 200, "checkpoint idle-session policy audit")
+    records = json.loads(audit.body)
+    if not isinstance(records, list) or not any(
+        record.get("operation") == "idle_session_policy_update" for record in records
+    ):
+        raise WorkflowFailure("checkpoint idle-session policy audit was not preserved")
 
 
 def recovery_payload(

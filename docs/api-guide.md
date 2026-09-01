@@ -89,7 +89,12 @@ validator in `If-Match` and atomically replaces both values. Standard-user value
 minutes from 5 through 300 inclusive; administrator values must be whole minutes from 5 through 60
 inclusive. Missing preconditions return `428`; malformed or stale validators return `412`, leave
 both values unchanged, and append no audit. A successful update returns the next revision and ETag
-and records actor, old/new pairs, revision, and operation without credentials.
+and records actor, old/new pairs, revision, and operation without credentials. If either duration
+exceeds the operator-configured absolute session lifetime, the update returns `422` and does not
+change policy or audit state.
+The supported CLI mirrors these operations with `markweave session-policy get` and
+`markweave session-policy update --user-idle-minutes N --admin-idle-minutes N`. The update
+command reads the current ETag immediately before sending the CSRF-protected replacement.
 
 The generated OpenAPI document is the exact source for request schemas, response status codes,
 field names, and header names. Pin or regenerate a client against the deployed release rather than

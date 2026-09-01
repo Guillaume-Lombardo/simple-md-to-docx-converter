@@ -30,7 +30,11 @@ from markweave.persistence.sql import (
 from markweave.persistence.templates import SqlTemplateCatalogRepository
 from markweave.templates.models import TemplateSearch
 from tests.idle_session_policy_contracts import (
+    exercise_idle_session_policy_audit_retention_contract,
     exercise_idle_session_policy_repository_contract,
+)
+from tests.session_policy_service_contracts import (
+    exercise_assembled_idle_session_policy_contract,
 )
 from tests.settings import template_settings
 from tests.storage_contracts import exercise_auth_repository_contract
@@ -45,6 +49,16 @@ def test_postgresql_authentication_repository_contract() -> None:
     with engine.begin() as connection:
         connection.execute(delete(SessionRow))
         connection.execute(delete(UserRow))
+        connection.execute(
+            text(
+                "INSERT INTO audit_cleanup_guards (id) VALUES ('policy-contract') ON CONFLICT DO NOTHING"
+            )
+        )
+        connection.execute(text("DELETE FROM idle_session_policy_audit_records"))
+        connection.execute(
+            text("DELETE FROM audit_cleanup_guards WHERE id = 'policy-contract'")
+        )
+        connection.execute(text("DELETE FROM idle_session_policy"))
     exercise_auth_repository_contract(
         SqlUserRepository(engine), SqlSessionRepository(engine)
     )
@@ -58,6 +72,7 @@ def test_postgresql_idle_session_policy_repository_contract() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     exercise_idle_session_policy_repository_contract(engine)
+    exercise_idle_session_policy_audit_retention_contract(engine)
     engine.dispose()
 
 
@@ -306,6 +321,17 @@ def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
     with engine.begin() as connection:
         connection.execute(delete(SessionRow))
         connection.execute(delete(UserRow))
+        connection.execute(
+            text(
+                "INSERT INTO audit_cleanup_guards (id) VALUES "
+                "('assembled-policy') ON CONFLICT DO NOTHING"
+            )
+        )
+        connection.execute(text("DELETE FROM idle_session_policy_audit_records"))
+        connection.execute(
+            text("DELETE FROM audit_cleanup_guards WHERE id = 'assembled-policy'")
+        )
+        connection.execute(text("DELETE FROM idle_session_policy"))
     engine.dispose()
 
     settings = Settings(
@@ -334,3 +360,7 @@ def test_distributed_profile_wires_postgresql_and_s3_readiness() -> None:
         ).user.role.value
         == "admin"
     )
+    try:
+        exercise_assembled_idle_session_policy_contract(app)
+    finally:
+        app.state.components.close()

@@ -98,6 +98,7 @@ class _Response:
     status: int
     payload: Any = field(repr=False)
     text: str = field(repr=False)
+    etag: str | None = None
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -130,12 +131,15 @@ class _AdministrationClient:
         csrf: bool = False,
         body: Mapping[str, Any] | None = None,
         accept: str = "application/json",
+        if_match: str | None = None,
     ) -> _Response:
         headers = {"Accept": accept}
         if profile is not None:
             headers["Cookie"] = profile.session_state or ""
             if csrf:
                 headers["X-CSRF-Token"] = profile.csrf_state or ""
+        if if_match is not None:
+            headers["If-Match"] = if_match
         encoded = None
         if body is not None:
             encoded = json.dumps(body, separators=(",", ":")).encode()
@@ -217,6 +221,8 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     _profile_argument(renewal)
     _bind(renewal, "users require-password-change", _set_password_requirement)
 
+    _register_session_policy(subparsers)
+
     audit = subparsers.add_parser("audit", help="Inspect audit records.")
     audit.add_argument("--offset", type=_nonnegative, action=_StoreValue, default=0)
     audit.add_argument("--limit", type=_audit_limit, action=_StoreValue, default=50)
@@ -241,6 +247,32 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
             help="Named connection profile (default: default).",
         )
         _bind(parser, f"health {name}", handler)
+
+
+def _register_session_policy(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    policy = subparsers.add_parser(
+        "session-policy", help="Inspect or update role-specific idle sessions."
+    )
+    policy_commands = policy.add_subparsers(
+        dest="session_policy_command", metavar="COMMAND"
+    )
+    policy_get = policy_commands.add_parser("get", help="Read the idle-session policy.")
+    _profile_argument(policy_get)
+    _bind(policy_get, "session-policy get", _get_session_policy)
+    policy_update = policy_commands.add_parser(
+        "update", help="Update both role-specific idle-session durations."
+    )
+    policy_update.add_argument(
+        "--user-idle-minutes", required=True, type=int, action=_StoreValue
+    )
+    policy_update.add_argument(
+        "--admin-idle-minutes", required=True, type=int, action=_StoreValue
+    )
+    _mutation_options(policy_update)
+    _profile_argument(policy_update)
+    _bind(policy_update, "session-policy update", _update_session_policy)
 
 
 def _bind(parser: argparse.ArgumentParser, name: str, handler: Any) -> None:
@@ -401,6 +433,47 @@ def _audit(context: CommandContext, writer: OutputWriter, command: _Command) -> 
     writer.success(human, {"items": normalized, "limit": limit, "offset": offset})
 
 
+def _get_session_policy(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    profile, client = _authenticated(context, command)
+    response = client.request("GET", "/api/v1/admin/session-policy", profile=profile)
+    policy = _session_policy(
+        _require_object(response, expected=_OK, fallback="session_policy_read_failed")
+    )
+    writer.success(_human_session_policy(policy), {"session_policy": policy})
+
+
+def _update_session_policy(
+    context: CommandContext, writer: OutputWriter, command: _Command
+) -> None:
+    user_minutes = _integer(command, "user_idle_minutes")
+    admin_minutes = _integer(command, "admin_idle_minutes")
+    _confirm(context, command, "Update the role-specific idle-session policy?")
+    profile, client = _authenticated(context, command)
+    current = client.request("GET", "/api/v1/admin/session-policy", profile=profile)
+    _session_policy(
+        _require_object(current, expected=_OK, fallback="session_policy_read_failed")
+    )
+    if current.etag is None:
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    response = client.request(
+        "PUT",
+        "/api/v1/admin/session-policy",
+        profile=profile,
+        csrf=True,
+        if_match=current.etag,
+        body={
+            "user_idle_minutes": user_minutes,
+            "admin_idle_minutes": admin_minutes,
+        },
+    )
+    policy = _session_policy(
+        _require_object(response, expected=_OK, fallback="session_policy_update_failed")
+    )
+    writer.success(_human_session_policy(policy), {"session_policy": policy})
+
+
 def _live(context: CommandContext, writer: OutputWriter, command: _Command) -> None:
     _health_json(context, writer, command, path="/health/live", label="live")
 
@@ -471,7 +544,9 @@ def _decode_response(status: int, response: HTTPResponse | HTTPError) -> _Respon
             payload = json.loads(text)
         except ValueError:
             payload = None
-    return _Response(status, payload, text)
+    headers = getattr(response, "headers", None)
+    etag = headers.get("ETag") if headers is not None else None
+    return _Response(status, payload, text, etag if isinstance(etag, str) else None)
 
 
 def _api_error(response: _Response, fallback: str) -> CliError:
@@ -538,13 +613,46 @@ def _audit_record(value: Any) -> dict[str, Any]:
             raise CliError(
                 "response_invalid", "The service returned an invalid response."
             )
+    policy_fields = (
+        "old_user_idle_minutes",
+        "old_admin_idle_minutes",
+        "new_user_idle_minutes",
+        "new_admin_idle_minutes",
+    )
+    for key in policy_fields:
+        if value.get(key) is not None and (
+            not isinstance(value.get(key), int) or isinstance(value.get(key), bool)
+        ):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
     keys = (
         *string_fields,
         "target_version",
         "version_id",
         "administrator_intervention",
+        *policy_fields,
     )
     return {key: value.get(key) for key in keys}
+
+
+def _session_policy(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    keys = ("user_idle_minutes", "admin_idle_minutes", "revision")
+    if any(
+        not isinstance(value.get(key), int) or isinstance(value.get(key), bool)
+        for key in keys
+    ):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    return {key: value[key] for key in keys}
+
+
+def _human_session_policy(policy: Mapping[str, int]) -> str:
+    return (
+        f"Users: {policy['user_idle_minutes']} minutes; administrators: "
+        f"{policy['admin_idle_minutes']} minutes; revision: {policy['revision']}."
+    )
 
 
 def _human_user(user: Mapping[str, Any]) -> str:

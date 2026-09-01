@@ -34,6 +34,7 @@ from markweave.auth.models import (
     User,
     normalize_username,
 )
+from markweave.auth.policy_errors import IdleSessionPolicyAbsoluteLimitError
 from markweave.auth.ports import (
     Clock,
     IdleSessionPolicyRepository,
@@ -333,6 +334,11 @@ class AuthenticationService:
     ) -> IdleSessionPolicy | None:
         """Atomically replace both role durations and append audit evidence."""
         AuthorizationService.require_admin(actor)
+        if (
+            user_idle_minutes * 60 > self.absolute_lifetime.total_seconds()
+            or admin_idle_minutes * 60 > self.absolute_lifetime.total_seconds()
+        ):
+            raise IdleSessionPolicyAbsoluteLimitError
         current = self.idle_policies.get()
         proposed = IdleSessionPolicy(
             user_idle_minutes=user_idle_minutes,

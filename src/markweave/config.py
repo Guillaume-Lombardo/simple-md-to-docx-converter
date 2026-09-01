@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self, get_args
@@ -285,6 +286,15 @@ class Settings(BaseSettings):
                     legacy_settings, field_name
                 ):
                     raise ConfigurationError("Invalid application configuration")
+            if (
+                "session_idle_seconds" in canonical_values
+                or "session_idle_seconds" in legacy_values
+            ):
+                warnings.warn(
+                    "SESSION_IDLE_SECONDS is deprecated and does not control the persisted role policy.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
             return canonical_settings
         except ConfigurationError, ValidationError:
             raise ConfigurationError("Invalid application configuration") from None

@@ -7,3 +7,7 @@ class IdleSessionPolicyPreconditionRequiredError(RuntimeError):
 
 class IdleSessionPolicyConflictError(RuntimeError):
     """The supplied revision no longer identifies current policy state."""
+
+
+class IdleSessionPolicyAbsoluteLimitError(RuntimeError):
+    """A proposed idle duration exceeds the operator absolute lifetime."""
