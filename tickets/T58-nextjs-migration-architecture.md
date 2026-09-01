@@ -2,7 +2,7 @@
 ticket: T58
 linear_id: G1L-522
 linear_url: https://linear.app/g1lom/issue/G1L-522/t58-define-the-nextjs-frontend-migration-architecture
-status: Done
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -47,6 +47,7 @@ Define and approve the target architecture and migration contract for replacing 
 
 * 2026-09-01: Created after product approval of the Next.js, TypeScript, and Tailwind CSS migration target with FastAPI retained as the backend and `web/` reserved for the frontend.
 * 2026-09-01: Completed and verified on `main`: PR #155 was squash-merged as `b2efcd37f4e9a9fbd60d6fd664f1901b27bb4dea`, and exact-main CI run `33505309785` passed. Linear G1L-522 is Done with the same evidence; this mirror is synchronized.
+* 2026-09-01: Reopened after review found that PR #155 recorded only high-level migration backlog scaffolding and did not satisfy the production topology, security boundary, runtime, release, rollback, or complete legacy-behavior inventory criteria. Linear G1L-522 and this repository mirror are `In Progress` while the missing architecture contract is completed.
 
 ## Synchronization
 
