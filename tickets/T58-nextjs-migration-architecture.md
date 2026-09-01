@@ -2,7 +2,7 @@
 ticket: T58
 linear_id: G1L-522
 linear_url: https://linear.app/g1lom/issue/G1L-522/t58-define-the-nextjs-frontend-migration-architecture
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -54,6 +54,7 @@ Define and approve the target architecture and migration contract for replacing 
 * 2026-09-01: PR review follow-up closes three remaining routing and CSP gaps. The router now strips the complete `Cookie` header from every frontend-bound request and every frontend `Set-Cookie` response field while preserving both unchanged on exact `/api/v1`, `/api/v1/**`, and operational FastAPI routes. The production CSP uses the same fresh nonce in `script-src` and `style-src`, requires every bootstrap script and inline style element to carry it, and forbids style attributes or unnonced inline styles. Normative routing consistently names both the exact API base and its descendants. T60 fixture and T64 final-image tests are blocking. Scoped links, OpenAPI freshness, Ruff, `ty`, 23 JavaScript tests with all coverage gates, and 14 focused Python tests passed.
 * 2026-09-01: A final terminology review aligned the CSP interception hook with the official Next.js 16 convention: T60 must use `web/proxy.ts` with the named `export function proxy`, and structural/build checks reject deprecated `middleware.ts` or a `middleware` export. Local links, OpenAPI freshness, Ruff format/lint, `ty`, and seven focused documentation/version tests passed.
 * 2026-09-01: Review-thread closure extends the router credential boundary to every frontend-owned route and HTTP method, including unknown catch-all paths and non-GET requests, with blocking T60/T64 fixtures. Nonce freshness now applies only to dynamically rendered HTML documents; content-hashed `/_next/static/**` assets and non-HTML/content-free responses such as empty `431` and `503` failures receive no generated nonce CSP, while HTML retains the shared script/style/bootstrap/style-element nonce checks. Scoped links, OpenAPI freshness, Ruff, `ty`, 34 JavaScript tests with all coverage gates, and 14 focused Python tests passed.
+* 2026-09-01: Ready PR #158 was squash-merged as `9f1647ae368a232d33e7cc6b6c74f049602decaa` after exact-head CI run 33518668425, CodeRabbit, independent review, all six resolved conversations, and the final gate passed. Exact-main CI run 33519331110 repeated the complete applicable light suite and final gate successfully. The architecture and every acceptance criterion are verified on `main`.
 
 ## Synchronization
 
