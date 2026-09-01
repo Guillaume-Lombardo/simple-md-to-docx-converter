@@ -78,9 +78,9 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   CI run 33508555488 had already passed the container gate and both standalone and distributed
   rootless-Podman final-image profiles for the exact release source.
 - 2026-09-01: Pin PR #157 passed independent review, CodeRabbit with no actionable comments, and
-  exact-head CI run 33510964451 before squash merge as
-  `bb4ca3227ac834e824163e6ba69b4d6c8b816653`. Exact-main CI run 33512104805 then passed after a
-  transient anonymous GitHub Release API failure was rerun successfully, including the public
+  exact-head CI run 33510964451 at `4180db3844b3b82ad028f80b069a52e6d4738f75` before squash merge
+  as `bb4ca3227ac834e824163e6ba69b4d6c8b816653`. Exact-main CI run 33512104805 then passed at that
+  merge SHA after a transient anonymous GitHub Release API failure was rerun, including the public
   release-alignment, light, rootless Compose, and final gate jobs. The published package, release,
   image receipt, immutable quickstart pin, real filename-preserving conversion, and repository
   mirror are therefore verified on `main`; T57 is complete.
