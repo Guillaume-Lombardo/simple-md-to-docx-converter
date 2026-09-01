@@ -61,7 +61,7 @@ def test_source_change_selects_all_application_domains_except_container() -> Non
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
     selected = select_domains(["src/markweave/service.py"])
     assert selected == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
     )
 
 
@@ -185,6 +185,23 @@ def test_t06_functional_domain_is_active_and_runnable() -> None:
         "functional or integration",
         "--no-cov",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path", ["web/package.json", "web/server.mjs", "openapi/v1.json"]
+)
+def test_frontend_inputs_select_rootless_frontend_smoke(path: str) -> None:
+    registry = load_registry(Path(".github/ci/domains.json"))
+    selected = select_domains([path])
+    planned, runnable = classify_domains(selected, registry)
+    assert planned == []
+    assert "frontend" in runnable
+    assert registry["frontend"] == {
+        "activation_ticket": "T60",
+        "command": ["bash", "web/scripts/run-rootless-smoke.sh"],
+        "status": "active",
+    }
 
 
 @pytest.mark.unit
@@ -398,6 +415,6 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         line.split("=", maxsplit=1) for line in output.read_text().splitlines()
     )
     assert json.loads(values["selected-domains"]) == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
     )
     assert json.loads(values["runnable-domains"]) == []

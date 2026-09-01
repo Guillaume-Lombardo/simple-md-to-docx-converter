@@ -299,7 +299,7 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert (
         "matrix.domain == 'compose' || matrix.domain == 'container' || "
-        "startsWith(matrix.domain, 'e2e-')" in workflow
+        "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
     )
     assert (
         "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
@@ -309,6 +309,32 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
     assert (
         "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
         "&& 'standalone' || 'distributed' }}" in workflow
+    )
+
+
+@pytest.mark.unit
+def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "- name: Set up pinned Node for frontend smoke" in workflow
+    assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
+    assert "node-version: 24.19.0" in workflow
+    assert "cache-dependency-path: web/package-lock.json" in workflow
+    weakened = workflow.replace(
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24.19.0",
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24",
+    )
+    assert "frontend smoke must use the reviewed pinned Node setup" in (
+        validate_workflow_text(weakened)
     )
 
 

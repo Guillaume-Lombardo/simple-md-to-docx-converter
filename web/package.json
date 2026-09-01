@@ -1,0 +1,54 @@
+{
+  "name": "@markweave/web",
+  "version": "0.0.0-private",
+  "private": true,
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": "24.19.0",
+    "npm": "11.17.0"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1"
+  },
+  "scripts": {
+    "build": "next build",
+    "check": "npm run format:check && npm run lint && npm run typegen && npm run typecheck && npm run bindings:check && npm run test:structure && npm run test:coverage",
+    "bindings:check": "node scripts/generate-openapi.mjs --check",
+    "bindings:generate": "node scripts/generate-openapi.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "start": "NODE_ENV=production node server.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:production": "node --test tests/production.test.mjs",
+    "test:structure": "node --test tests/structure.test.mjs",
+    "typegen": "next typegen",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "valibot": "1.4.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@hey-api/openapi-ts": "0.97.3",
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.3.4",
+    "jsdom": "28.1.0",
+    "prettier": "3.8.2",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

@@ -85,11 +85,15 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: false
-      - name: Set up pinned Node for browser-module tests
+      - name: Set up pinned Node for browser and frontend tests
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.23.1
+          node-version: 24.19.0
           check-latest: false
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -127,6 +131,15 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run test:web
+      - name: Verify the isolated frontend
+        run: |
+          cd web
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          npm ci --ignore-scripts
+          npm run check
+          npm run build
+          npm run test:production
       - name: Run unit tests with branch coverage
         run: >-
           uv run pytest -m unit
@@ -227,6 +240,14 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: false
+      - name: Set up pinned Node for frontend smoke
+        if: ${{ matrix.domain == 'frontend' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -272,7 +293,7 @@ jobs:
           path: ${{ runner.temp }}/markweave-toolchain/LibreOffice_26.2.5_Linux_x86-64_rpm.tar.gz
           key: ubuntu-24.04-amd64-libreoffice-rpm-26.2.5-f62611c441ff1faa5cadb499abdbab119f5a9013eb6c0e32fc9aa65f6ff8b53d
       - name: Install rootless Podman for container validation
-        if: ${{ matrix.domain == 'compose' || matrix.domain == 'container' || startsWith(matrix.domain, 'e2e-') }}
+        if: ${{ matrix.domain == 'compose' || matrix.domain == 'container' || matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
         run: |
           set -euo pipefail
           sudo apt-get update
