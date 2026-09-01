@@ -74,8 +74,9 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   `quickstart-source.md`. The download was a valid 10,459-byte OpenXML DOCX named
   `quickstart-source.docx`, confirming the T57 behavior through the published image. The equivalent
   rootless Podman pull was attempted but the local VM had only 964 MiB free and exhausted
-  `/var/tmp` while storing an image layer; no application container was created. Hosted CI had
-  already passed both Docker and rootless-Podman final-image profiles for the exact release source.
+  `/var/tmp` while storing an image layer; no application container was created. Hosted exact-main
+  CI run 33508555488 had already passed the container gate and both standalone and distributed
+  rootless-Podman final-image profiles for the exact release source.
 
 ## Synchronization
 
