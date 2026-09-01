@@ -143,6 +143,20 @@ def test_legacy_environment_aliases_remain_supported_through_0_x(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("prefix", ("MARKWEAVE_", "MD_CONVERTER_"))
+def test_deprecated_idle_environment_input_is_never_silently_ignored(
+    monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    _set_environment_configuration(monkeypatch, "MARKWEAVE_")
+    monkeypatch.setenv(f"{prefix}SESSION_IDLE_SECONDS", "1200")
+    if prefix == "MD_CONVERTER_":
+        monkeypatch.delenv("MARKWEAVE_SESSION_IDLE_SECONDS", raising=False)
+
+    with pytest.warns(FutureWarning, match="does not control"):
+        assert Settings.load().session_idle_seconds == 1200
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("field_name", "canonical", "legacy"),
     [
@@ -263,7 +277,6 @@ def test_public_origin_rejects_non_origin_urls(public_origin: str) -> None:
         {"initial_admin_username": " "},
         {"initial_admin_password": ""},
         {"session_token_bytes": 15},
-        {"session_idle_seconds": 20, "session_absolute_seconds": 10},
         {"conversion_upload_max_bytes": 0},
         {"conversion_request_max_bytes": 1_000_000},
         {"conversion_retry_after_seconds": 0},

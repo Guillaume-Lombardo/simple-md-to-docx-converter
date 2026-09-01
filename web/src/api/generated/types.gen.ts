@@ -39,6 +39,22 @@ export type AuditRecordResponse = {
      */
     id: string;
     /**
+     * New Admin Idle Minutes
+     */
+    new_admin_idle_minutes?: number | null;
+    /**
+     * New User Idle Minutes
+     */
+    new_user_idle_minutes?: number | null;
+    /**
+     * Old Admin Idle Minutes
+     */
+    old_admin_idle_minutes?: number | null;
+    /**
+     * Old User Idle Minutes
+     */
+    old_user_idle_minutes?: number | null;
+    /**
      * Operation
      */
     operation: string;
@@ -243,6 +259,42 @@ export type ErrorDetail = {
  */
 export type ErrorResponse = {
     error: ErrorDetail;
+};
+
+/**
+ * IdleSessionPolicyResponse
+ *
+ * Effective singleton policy and optimistic-concurrency revision.
+ */
+export type IdleSessionPolicyResponse = {
+    /**
+     * Admin Idle Minutes
+     */
+    admin_idle_minutes: number;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * User Idle Minutes
+     */
+    user_idle_minutes: number;
+};
+
+/**
+ * IdleSessionPolicyUpdateRequest
+ *
+ * Atomic administrator update for both role-specific durations.
+ */
+export type IdleSessionPolicyUpdateRequest = {
+    /**
+     * Admin Idle Minutes
+     */
+    admin_idle_minutes: number;
+    /**
+     * User Idle Minutes
+     */
+    user_idle_minutes: number;
 };
 
 /**
@@ -518,6 +570,94 @@ export type UserResponse = {
      */
     username: string;
 };
+
+export type GetSessionPolicyApiV1AdminSessionPolicyGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/session-policy';
+};
+
+export type GetSessionPolicyApiV1AdminSessionPolicyGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetSessionPolicyApiV1AdminSessionPolicyGetError = GetSessionPolicyApiV1AdminSessionPolicyGetErrors[keyof GetSessionPolicyApiV1AdminSessionPolicyGetErrors];
+
+export type GetSessionPolicyApiV1AdminSessionPolicyGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: IdleSessionPolicyResponse;
+};
+
+export type GetSessionPolicyApiV1AdminSessionPolicyGetResponse = GetSessionPolicyApiV1AdminSessionPolicyGetResponses[keyof GetSessionPolicyApiV1AdminSessionPolicyGetResponses];
+
+export type UpdateSessionPolicyApiV1AdminSessionPolicyPutData = {
+    body: IdleSessionPolicyUpdateRequest;
+    headers?: {
+        /**
+         * If-Match
+         */
+        'If-Match'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/session-policy';
+};
+
+export type UpdateSessionPolicyApiV1AdminSessionPolicyPutErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * A request precondition failed
+     */
+    412: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The request requires a precondition
+     */
+    428: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type UpdateSessionPolicyApiV1AdminSessionPolicyPutError = UpdateSessionPolicyApiV1AdminSessionPolicyPutErrors[keyof UpdateSessionPolicyApiV1AdminSessionPolicyPutErrors];
+
+export type UpdateSessionPolicyApiV1AdminSessionPolicyPutResponses = {
+    /**
+     * Successful Response
+     */
+    200: IdleSessionPolicyResponse;
+};
+
+export type UpdateSessionPolicyApiV1AdminSessionPolicyPutResponse = UpdateSessionPolicyApiV1AdminSessionPolicyPutResponses[keyof UpdateSessionPolicyApiV1AdminSessionPolicyPutResponses];
 
 export type ListUsersApiV1AdminUsersGetData = {
     body?: never;

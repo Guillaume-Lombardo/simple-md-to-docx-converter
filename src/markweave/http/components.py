@@ -49,6 +49,7 @@ from markweave.persistence.observability import SqlAuditReader, SqlOperationalOb
 from markweave.persistence.retention import SqlRetentionRepository
 from markweave.persistence.sql import (
     DatabaseReadinessProbe,
+    SqlIdleSessionPolicyRepository,
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
@@ -345,9 +346,9 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
                 clock=SystemClock(),
             ),
             policy=SessionPolicy(
-                idle_seconds=settings.session_idle_seconds,
                 absolute_seconds=settings.session_absolute_seconds,
             ),
+            idle_policies=SqlIdleSessionPolicyRepository(engine),
         )
         job_repository = SqlJobRepository(engine, job_policies.admission)
         jobs = JobService(job_repository, object_store, job_policies.service)

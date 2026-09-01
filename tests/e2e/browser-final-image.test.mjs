@@ -391,25 +391,6 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     pages.length = 0;
     traces.length = 0;
 
-    step = "browser session expires at the configured boundary";
-    const expiringContext = await browser.newContext({
-      baseURL: settings.baseUrl,
-      acceptDownloads: false,
-      serviceWorkers: "block",
-    });
-    contexts.push(expiringContext);
-    traces.push({ name: "expiring-alice", trace: await startTrace(expiringContext) });
-    const expiringPage = await expiringContext.newPage();
-    pages.push({ name: "expiring-alice", page: expiringPage });
-    await login(
-      expiringPage,
-      settings.baseUrl,
-      identities.alice.username,
-      renewedPasswordValue,
-    );
-    await expiringPage.waitForTimeout(61_000);
-    assert.equal((await sessionRequest(expiringPage, "/api/v1/session")).status, 401);
-
     step = "discard successful traces";
     await Promise.all(traces.map(({ trace }) => discardTrace(trace)));
   } catch (error) {

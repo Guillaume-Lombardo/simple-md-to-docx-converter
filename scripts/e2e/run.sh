@@ -20,6 +20,7 @@ readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly prefix="md-converter-t21-$profile"
 readonly network_name="$prefix"
 readonly application_name="$prefix-api"
+readonly expiry_application_name="$prefix-expiry-api"
 readonly insecure_application_name="$prefix-insecure-api"
 readonly clamav_name="$prefix-clamav"
 readonly postgres_name="$prefix-postgres"
@@ -171,7 +172,8 @@ trap cleanup EXIT
 refuse_existing_resources() {
   local name
   for name in "$application_name" "$clamav_name" "$postgres_name" "$rustfs_name" \
-    "$insecure_application_name" "$worker_one_name" "$worker_two_name"; do
+    "$expiry_application_name" "$insecure_application_name" "$worker_one_name" \
+    "$worker_two_name"; do
     if podman container exists "$name"; then
       echo "Refusing to replace pre-existing container $name." >&2
       exit 1
@@ -562,6 +564,7 @@ wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 uv run python -m tests.e2e.service_workflow checkpoint \
   --base-url "$base_url" --profile "$profile" \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
+  --policy-evidence \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
 podman restart --time 15 "$application_name" >/dev/null
@@ -611,9 +614,29 @@ uv run python -m tests.e2e.service_workflow verify-checkpoint \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
+# Prove absolute session expiry against the real final image without waiting for
+# the administrator policy's approved five-minute minimum. This isolated runtime
+# uses the operator-owned two-second absolute ceiling and performs no policy update.
+podman rm --force "$application_name" >/dev/null
+created=("$expiry_application_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$expiry_application_name" --network "$network_name" \
+  --network-alias application --publish 127.0.0.1::8080 \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+  --env MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2 \
+  "$image" "$application_mode" >/dev/null
+expiry_application_port="$(podman port "$expiry_application_name" 8080/tcp | sed 's/.*://')"
+expiry_base_url="http://127.0.0.1:$expiry_application_port"
+wait_for_url "$expiry_base_url/health/ready" "$expiry_application_name" \
+  '"status":"ready"'
+uv run python -m tests.e2e.service_workflow verify-session-expiration \
+  --base-url "$expiry_base_url" --profile "$profile" \
+  --artifact-dir "$temporary_directory/browser-artifacts"
+
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.
-podman rm --force "$application_name" "$clamav_name" >/dev/null
+podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null
 created=("$insecure_application_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \

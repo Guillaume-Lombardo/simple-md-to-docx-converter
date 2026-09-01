@@ -66,11 +66,24 @@ check of the account security version. Successful current verification and succe
 verification plus rehash each perform one current-profile unit.
 
 Sessions use opaque CSPRNG tokens; `MARKWEAVE_SESSION_TOKEN_BYTES` defaults to 32 bytes and
-cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. Idle and absolute
-lifetimes default to 30 minutes and 8 hours and are configured with
-`MARKWEAVE_SESSION_IDLE_SECONDS` and `MARKWEAVE_SESSION_ABSOLUTE_SECONDS`. Login rotates any
-present session, logout revokes it, and account deactivation or password reset revokes every
-session for that account.
+cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. With no persisted
+administrator override, standard users expire after 30 idle minutes and administrators after 15
+idle minutes. An administrator can atomically configure the system-wide pair through
+`/api/v1/admin/session-policy`: standard users accept whole minutes from 5 through 300 and
+administrators accept whole minutes from 5 through 60. `MARKWEAVE_SESSION_ABSOLUTE_SECONDS`
+defaults to 8 hours and remains an operator-owned hard ceiling regardless of the selected idle
+duration. Updates that exceed the configured absolute lifetime are rejected without changing the
+policy or audit. The deprecated `MARKWEAVE_SESSION_IDLE_SECONDS` input remains accepted for 0.x
+configuration compatibility, emits a startup warning, and does not control effective policy. Login rotates any present session, logout
+revokes it, and account deactivation or password reset revokes every session for that account.
+
+FastAPI reads the current policy and the account's current effective role during every session
+validation. It compares the resulting deadline with the session's last activity, its previously
+stored idle deadline, and its absolute deadline. Tightening a duration or changing a role therefore
+applies to already issued cookies immediately. Relaxing a duration can extend only a session that
+is still valid; expiry, logout, account security changes, password renewal, and absolute expiry are
+never reversed. Successful validation advances activity and stores a new deadline bounded by the
+absolute lifetime.
 
 Each account carries a monotonically increasing authentication version. Password reset,
 deactivation, and reactivation increment it atomically. Login verifies a snapshot and then uses a
@@ -110,11 +123,14 @@ browser into the attacker's account.
 - `PATCH /api/v1/admin/users/{id}/active`: activation and deactivation
 - `POST /api/v1/admin/users/{id}/password`: administrative password reset
 - `PATCH /api/v1/admin/users/{id}/password-change-required`: renewal requirement
+- `GET`, `PUT /api/v1/admin/session-policy`: read or atomically replace both role idle durations
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
 
-Every successful administrator account creation, deactivation, reactivation, and password reset is
-committed atomically with a content-free immutable audit record. `GET /api/v1/audit` merges those
-records deterministically with template audits; failed or unauthorized requests create no audit.
+Every successful administrator account creation, deactivation, reactivation, password reset, and
+idle-session policy update is committed atomically with a content-free immutable audit record.
+Policy evidence contains the actor, old pair, new pair, resulting revision, operation, and time;
+it contains no cookie, token, password, or credential. `GET /api/v1/audit` merges those records
+deterministically with template audits; failed, stale, or unauthorized requests create no audit.
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
 - `GET /convert`: authenticated server-rendered conversion interface
 - `GET /templates`: authenticated template interface and administrator-only account tab
@@ -183,3 +199,6 @@ Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E c
   and forced relogin with the new password;
 - startup failure for absent or invalid bootstrap secrets without secret or hash leakage;
 - liveness and readiness behavior in both standalone and distributed profiles.
+- role-specific policy defaults, inclusive bounds, strict whole-minute HTTP validation, stale
+  writes, restart and backup/restore persistence, immediate tightening and role changes, and
+  non-revival after expiry or revocation.

@@ -3,6 +3,10 @@
 from fastapi import Response
 from fastapi.responses import HTMLResponse
 
+from markweave.auth.policy_errors import (
+    IdleSessionPolicyConflictError,
+    IdleSessionPolicyPreconditionRequiredError,
+)
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.jobs.models import ConversionJob
@@ -16,6 +20,7 @@ from markweave.web import WEB_SECURITY_HEADERS
 from .schemas import ConversionResponse, TemplateResponse
 
 CSRF_COOKIE_NAME = "__Host-md_converter_csrf"
+_MAX_POLICY_REVISION_DIGITS = 19
 
 
 def set_session_cookie(response: Response, settings: Settings, token: str) -> None:
@@ -108,4 +113,31 @@ def expected_revision(template_id, if_match: str | None) -> int:
         raise TemplateConflictError from None
     if revision <= 0:
         raise TemplateConflictError
+    return revision
+
+
+def idle_session_policy_etag(revision: int) -> str:
+    return f'"idle-session-policy-{revision}"'
+
+
+def expected_idle_session_policy_revision(if_match: str | None) -> int:
+    if if_match is None:
+        raise IdleSessionPolicyPreconditionRequiredError
+    prefix = '"idle-session-policy-'
+    if not if_match.startswith(prefix) or not if_match.endswith('"'):
+        raise IdleSessionPolicyConflictError
+    candidate = if_match[len(prefix) : -1]
+    if (
+        len(candidate) > _MAX_POLICY_REVISION_DIGITS
+        or not candidate.isascii()
+        or not candidate.isdecimal()
+        or (len(candidate) > 1 and candidate.startswith("0"))
+    ):
+        raise IdleSessionPolicyConflictError from None
+    try:
+        revision = int(candidate)
+    except ValueError:
+        raise IdleSessionPolicyConflictError from None
+    if revision < 0:
+        raise IdleSessionPolicyConflictError
     return revision

@@ -256,7 +256,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 8
+    assert len(podman_runs) == 9
     assert all(
         '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs

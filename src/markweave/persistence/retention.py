@@ -13,6 +13,7 @@ from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     AuthenticationAuditRow,
     ConversionJobRow,
+    IdleSessionPolicyAuditRow,
     RetentionCleanupRunRow,
     TemplateAuditRow,
     TemplateRow,
@@ -161,6 +162,11 @@ class SqlRetentionRepository:
                         AuthenticationAuditRow.created_at.label("created_at"),
                         literal("authentication").label("record_type"),
                     ).where(AuthenticationAuditRow.created_at < cutoff_at),
+                    select(
+                        IdleSessionPolicyAuditRow.id.label("id"),
+                        IdleSessionPolicyAuditRow.created_at.label("created_at"),
+                        literal("idle_session_policy").label("record_type"),
+                    ).where(IdleSessionPolicyAuditRow.created_at < cutoff_at),
                 ).subquery()
                 candidates = tuple(
                     database.execute(
@@ -190,9 +196,15 @@ class SqlRetentionRepository:
                         for candidate in candidates
                         if candidate.record_type == "authentication"
                     ]
+                    policy_ids = [
+                        candidate.id
+                        for candidate in candidates
+                        if candidate.record_type == "idle_session_policy"
+                    ]
                     for row_type, identifiers in (
                         (TemplateAuditRow, template_ids),
                         (AuthenticationAuditRow, authentication_ids),
+                        (IdleSessionPolicyAuditRow, policy_ids),
                     ):
                         if identifiers:
                             result = database.execute(

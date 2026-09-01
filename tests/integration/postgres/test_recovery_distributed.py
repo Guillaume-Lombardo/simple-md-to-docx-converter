@@ -5,18 +5,28 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, closing
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import boto3
 import pytest
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select, text, update
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 
+from markweave.auth.models import (
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
+)
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.schema import UserRow
-from markweave.persistence.sql import create_database_engine
+from markweave.persistence.schema import IdleSessionPolicyAuditRow, UserRow
+from markweave.persistence.sql import (
+    SqlIdleSessionPolicyRepository,
+    create_database_engine,
+)
 from markweave.recovery_adapters import S3Configuration
 from markweave.recovery_manifest import RecoveryError
 from markweave.recovery_service import BackupRequest, RecoveryService, RestoreRequest
@@ -85,7 +95,7 @@ def _target_database(stack: ExitStack) -> str:
     ).render_as_string(hide_password=False)
 
 
-def _prepare_source(client, bucket: str) -> tuple[str, bytes]:
+def _prepare_source(client, bucket: str) -> tuple[str, bytes, str, str, datetime]:
     database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     try:
@@ -104,12 +114,40 @@ def _prepare_source(client, bucket: str) -> tuple[str, bytes]:
                     "password_change_required": False,
                 },
             )
+            connection.execute(
+                text(
+                    "INSERT INTO audit_cleanup_guards (id) VALUES ('recovery-policy') ON CONFLICT DO NOTHING"
+                )
+            )
+            connection.execute(text("DELETE FROM idle_session_policy_audit_records"))
+            connection.execute(
+                text("DELETE FROM audit_cleanup_guards WHERE id = 'recovery-policy'")
+            )
+            connection.execute(text("DELETE FROM idle_session_policy"))
+        actor = uuid4()
+        audit_id = uuid4()
+        created_at = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+        assert SqlIdleSessionPolicyRepository(engine).update(
+            IdleSessionPolicy(300, 5),
+            expected_revision=0,
+            audit=IdleSessionPolicyAudit(
+                audit_id,
+                actor,
+                IdleSessionPolicyOperation.UPDATE,
+                30,
+                15,
+                300,
+                5,
+                1,
+                created_at,
+            ),
+        ) == IdleSessionPolicy(300, 5, 1)
     finally:
         engine.dispose()
     key = f"uploads/{uuid4()}/{uuid4()}"
     content = b"distributed-stable-object"
     client.put_object(Bucket=bucket, Key=key, Body=content)
-    return key, content
+    return key, content, str(actor), str(audit_id), created_at
 
 
 def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
@@ -118,7 +156,9 @@ def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
 ) -> None:
     client = s3_client
     source_bucket = os.environ["MARKWEAVE_TEST_S3_BUCKET"]
-    key, content = _prepare_source(client, source_bucket)
+    key, content, actor_id, audit_id, created_at = _prepare_source(
+        client, source_bucket
+    )
     service = RecoveryService()
     manifest = service.backup(
         BackupRequest(
@@ -156,6 +196,38 @@ def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
         try:
             with engine.connect() as connection:
                 assert connection.scalar(select(UserRow.username)) == "Recovery User"
+                assert SqlIdleSessionPolicyRepository(engine).get() == (
+                    IdleSessionPolicy(300, 5, 1)
+                )
+                audit = connection.execute(
+                    select(
+                        IdleSessionPolicyAuditRow.id,
+                        IdleSessionPolicyAuditRow.actor_id,
+                        IdleSessionPolicyAuditRow.operation,
+                        IdleSessionPolicyAuditRow.old_user_idle_minutes,
+                        IdleSessionPolicyAuditRow.old_admin_idle_minutes,
+                        IdleSessionPolicyAuditRow.new_user_idle_minutes,
+                        IdleSessionPolicyAuditRow.new_admin_idle_minutes,
+                        IdleSessionPolicyAuditRow.revision,
+                        IdleSessionPolicyAuditRow.created_at,
+                    )
+                ).one()
+                assert audit.id == audit_id and audit.actor_id == actor_id
+                assert audit.operation == "idle_session_policy_update"
+                assert (
+                    audit.old_user_idle_minutes,
+                    audit.old_admin_idle_minutes,
+                    audit.new_user_idle_minutes,
+                    audit.new_admin_idle_minutes,
+                    audit.revision,
+                ) == (30, 15, 300, 5, 1)
+                assert audit.created_at == created_at
+            with pytest.raises(SQLAlchemyError), engine.begin() as connection:
+                connection.execute(
+                    update(IdleSessionPolicyAuditRow)
+                    .where(IdleSessionPolicyAuditRow.id == audit_id)
+                    .values(new_admin_idle_minutes=6)
+                )
         finally:
             engine.dispose()
 

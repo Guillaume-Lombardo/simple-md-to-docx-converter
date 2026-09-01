@@ -16,6 +16,9 @@ from markweave.auth.models import (
     SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
     ProvisionedUser,
     Role,
     Session,
@@ -31,6 +34,7 @@ from markweave.persistence.migrations import (
 from markweave.persistence.schema import AuthenticationAuditRow
 from markweave.persistence.sql import (
     DatabaseReadinessProbe,
+    SqlIdleSessionPolicyRepository,
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
@@ -68,6 +72,43 @@ OPTIONAL_TEMPLATE_REVISION: Any = importlib.import_module(
 PASSWORD_CHANGE_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260829_14_password_change_required"
 )
+IDLE_POLICY_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260901_15_idle_session_policy"
+)
+
+
+@pytest.mark.unit
+def test_inprocess_idle_policy_repository_covers_default_and_replacement() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    repository = SqlIdleSessionPolicyRepository(engine)
+    assert repository.get() == IdleSessionPolicy()
+    actor = uuid4()
+
+    def update_policy(policy: IdleSessionPolicy, expected_revision: int) -> None:
+        assert (
+            repository.update(
+                policy,
+                expected_revision=expected_revision,
+                audit=IdleSessionPolicyAudit(
+                    uuid4(),
+                    actor,
+                    IdleSessionPolicyOperation.UPDATE,
+                    30,
+                    15,
+                    policy.user_idle_minutes,
+                    policy.admin_idle_minutes,
+                    expected_revision + 1,
+                    datetime.now(UTC),
+                ),
+            )
+            is not None
+        )
+
+    update_policy(IdleSessionPolicy(25, 10), 0)
+    update_policy(IdleSessionPolicy(20, 8), 1)
+    assert repository.get() == IdleSessionPolicy(20, 8, 2)
+    engine.dispose()
 
 
 @pytest.mark.unit
@@ -80,6 +121,8 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "audit_cleanup_guards",
         "authentication_audit_records",
         "conversion_jobs",
+        "idle_session_policy",
+        "idle_session_policy_audit_records",
         "retention_cleanup_runs",
         "sessions",
         "system_template_selection",
@@ -692,6 +735,25 @@ def test_retention_migrations_cover_schema_and_both_immutability_dialects(
     )
     CORRELATION_REVISION.downgrade()
     correlation.drop_column.assert_called_once_with("conversion_jobs", "correlation_id")
+
+
+@pytest.mark.unit
+def test_idle_policy_migration_covers_both_immutability_dialects(
+    mocker: MockerFixture,
+) -> None:
+    idle_policy = mocker.patch.object(IDLE_POLICY_REVISION, "op")
+    idle_policy.get_bind.return_value.dialect.name = "sqlite"
+    IDLE_POLICY_REVISION.upgrade()
+    IDLE_POLICY_REVISION.downgrade()
+    assert idle_policy.create_table.call_count == 2
+    assert idle_policy.create_index.call_count == 1
+    assert idle_policy.execute.call_count == 4
+
+    idle_policy.reset_mock()
+    idle_policy.get_bind.return_value.dialect.name = "postgresql"
+    IDLE_POLICY_REVISION.upgrade()
+    IDLE_POLICY_REVISION.downgrade()
+    assert idle_policy.execute.call_count == 4
 
 
 @pytest.mark.unit

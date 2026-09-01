@@ -20,9 +20,13 @@ from markweave.auth.errors import (
     USERNAME_INVALID,
     USERNAME_TAKEN,
 )
+from markweave.auth.memory import MemoryIdleSessionPolicyRepository
 from markweave.auth.models import (
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
     LoginResult,
     ProvisionedUser,
     Role,
@@ -30,8 +34,10 @@ from markweave.auth.models import (
     User,
     normalize_username,
 )
+from markweave.auth.policy_errors import IdleSessionPolicyAbsoluteLimitError
 from markweave.auth.ports import (
     Clock,
+    IdleSessionPolicyRepository,
     PasswordHasher,
     SessionRepository,
     TokenGenerator,
@@ -54,8 +60,8 @@ class SecurityRuntime:
 class SessionPolicy:
     """Configurable idle and absolute server-side session lifetimes."""
 
-    idle_seconds: int
     absolute_seconds: int
+    idle_seconds: int | None = None
 
 
 class AuthorizationService:
@@ -82,13 +88,21 @@ class AuthenticationService:
         sessions: SessionRepository,
         security: SecurityRuntime,
         policy: SessionPolicy,
+        idle_policies: IdleSessionPolicyRepository | None = None,
     ) -> None:
         self.users = users
         self.sessions = sessions
         self.hasher = security.hasher
         self.tokens = security.tokens
         self.clock = security.clock
-        self.idle_lifetime = timedelta(seconds=policy.idle_seconds)
+        self._legacy_idle_lifetime = (
+            timedelta(seconds=policy.idle_seconds)
+            if idle_policies is None and policy.idle_seconds is not None
+            else None
+        )
+        if idle_policies is None:
+            idle_policies = MemoryIdleSessionPolicyRepository()
+        self.idle_policies = idle_policies
         self.absolute_lifetime = timedelta(seconds=policy.absolute_seconds)
 
     def bootstrap_admin(self, username: str, password: str) -> User:
@@ -143,6 +157,7 @@ class AuthenticationService:
         csrf_token = self.tokens.generate()
         now = self.clock.now()
         absolute_expires = now + self.absolute_lifetime
+        idle_lifetime = self._idle_lifetime(committed_user.role)
         session = Session(
             token_digest=digest_token(session_token),
             csrf_digest=digest_token(csrf_token),
@@ -150,7 +165,7 @@ class AuthenticationService:
             auth_version=committed_user.auth_version,
             created_at=now,
             last_seen_at=now,
-            idle_expires_at=min(now + self.idle_lifetime, absolute_expires),
+            idle_expires_at=min(now + idle_lifetime, absolute_expires),
             absolute_expires_at=absolute_expires,
         )
         self.sessions.create(session)
@@ -163,23 +178,30 @@ class AuthenticationService:
     def authenticate(
         self, session_token: str | None, *, allow_password_change: bool = False
     ) -> User:
-        session = self._active_session(session_token)
+        session = self._stored_session(session_token)
         user = self.users.get_by_id(session.user_id)
         if user is None or not user.active or user.auth_version != session.auth_version:
             self.sessions.revoke(session.token_digest)
             raise AUTHENTICATION_REQUIRED.new()
+        now = self.clock.now()
+        current_idle_expiry = min(
+            session.last_seen_at + self._idle_lifetime(user.role),
+            session.absolute_expires_at,
+        )
+        if now >= session.idle_expires_at or now >= current_idle_expiry:
+            self.sessions.revoke(session.token_digest)
+            raise AUTHENTICATION_REQUIRED.new()
         if user.password_change_required and not allow_password_change:
             raise PASSWORD_CHANGE_REQUIRED.new()
-        now = self.clock.now()
         session.last_seen_at = now
         session.idle_expires_at = min(
-            now + self.idle_lifetime, session.absolute_expires_at
+            now + self._idle_lifetime(user.role), session.absolute_expires_at
         )
         self.sessions.save(session)
         return user
 
     def validate_csrf(self, session_token: str | None, csrf_token: str | None) -> None:
-        session = self._active_session(session_token)
+        session = self._stored_session(session_token)
         candidate = digest_token(csrf_token) if csrf_token else ""
         if not secrets.compare_digest(session.csrf_digest, candidate):
             raise CSRF_REQUIRED.new()
@@ -297,6 +319,49 @@ class AuthenticationService:
             raise AUTHENTICATION_REQUIRED.new()
         self.sessions.revoke_user(user.id)
 
+    def get_idle_session_policy(self, actor: User) -> IdleSessionPolicy:
+        """Return the effective persisted/default policy to an administrator."""
+        AuthorizationService.require_admin(actor)
+        return self.idle_policies.get()
+
+    def update_idle_session_policy(
+        self,
+        actor: User,
+        *,
+        user_idle_minutes: int,
+        admin_idle_minutes: int,
+        expected_revision: int,
+    ) -> IdleSessionPolicy | None:
+        """Atomically replace both role durations and append audit evidence."""
+        AuthorizationService.require_admin(actor)
+        if (
+            user_idle_minutes * 60 > self.absolute_lifetime.total_seconds()
+            or admin_idle_minutes * 60 > self.absolute_lifetime.total_seconds()
+        ):
+            raise IdleSessionPolicyAbsoluteLimitError
+        current = self.idle_policies.get()
+        proposed = IdleSessionPolicy(
+            user_idle_minutes=user_idle_minutes,
+            admin_idle_minutes=admin_idle_minutes,
+            revision=expected_revision,
+        )
+        audit = IdleSessionPolicyAudit(
+            id=uuid4(),
+            actor_id=actor.id,
+            operation=IdleSessionPolicyOperation.UPDATE,
+            old_user_idle_minutes=current.user_idle_minutes,
+            old_admin_idle_minutes=current.admin_idle_minutes,
+            new_user_idle_minutes=proposed.user_idle_minutes,
+            new_admin_idle_minutes=proposed.admin_idle_minutes,
+            revision=expected_revision + 1,
+            created_at=self.clock.now(),
+        )
+        return self.idle_policies.update(
+            proposed,
+            expected_revision=expected_revision,
+            audit=audit,
+        )
+
     def _audit(
         self, actor: User, operation: AuthenticationAuditOperation
     ) -> AuthenticationAuditContext:
@@ -304,7 +369,7 @@ class AuthenticationService:
             uuid4(), actor.id, operation, self.clock.now()
         )
 
-    def _active_session(self, session_token: str | None) -> Session:
+    def _stored_session(self, session_token: str | None) -> Session:
         if not session_token:
             raise AUTHENTICATION_REQUIRED.new()
         digest = digest_token(session_token)
@@ -316,3 +381,8 @@ class AuthenticationService:
             self.sessions.revoke(digest)
             raise AUTHENTICATION_REQUIRED.new()
         return session
+
+    def _idle_lifetime(self, role: Role) -> timedelta:
+        if self._legacy_idle_lifetime is not None:
+            return self._legacy_idle_lifetime
+        return timedelta(minutes=self.idle_policies.get().minutes_for(role))

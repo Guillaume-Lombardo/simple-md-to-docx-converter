@@ -14,7 +14,9 @@ from markweave.config import ConfigurationError, Settings
 from tests.settings import template_settings
 
 
-def make_client(data_directory: Path) -> TestClient:
+def make_client(
+    data_directory: Path, *, session_absolute_seconds: int = 8 * 60 * 60
+) -> TestClient:
     """Build an HTTPS ASGI client with intentionally cheap test-only Argon2 settings."""
     password = "admin-" + "password"
     settings = Settings(
@@ -25,7 +27,7 @@ def make_client(data_directory: Path) -> TestClient:
         argon2_time_cost=1,
         argon2_parallelism=1,
         session_idle_seconds=60,
-        session_absolute_seconds=300,
+        session_absolute_seconds=session_absolute_seconds,
         storage_profile="standalone",
         standalone_data_directory=data_directory,
         conversion_upload_max_bytes=1_000_000,
@@ -72,7 +74,7 @@ def provisioning_settings(data_directory: Path, source: Path | None) -> Settings
         argon2_time_cost=1,
         argon2_parallelism=1,
         session_idle_seconds=60,
-        session_absolute_seconds=300,
+        session_absolute_seconds=8 * 60 * 60,
         storage_profile="standalone",
         standalone_data_directory=data_directory,
         conversion_upload_max_bytes=1_000_000,
@@ -144,7 +146,7 @@ def test_json_login_sets_hardened_cookie_without_exposing_session_token(
         assert "HttpOnly" in cookie
         assert "Secure" in cookie
         assert "SameSite=lax" in cookie
-        assert "Max-Age=300" in cookie
+        assert "Max-Age=28800" in cookie
         body = response.json()
         assert set(body) == {"user", "csrf_token"}
         assert "admin-password" not in response.text.casefold()

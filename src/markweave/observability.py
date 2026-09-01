@@ -324,6 +324,10 @@ class AuditRecord:
     version_id: UUID | None
     administrator_intervention: bool
     created_at: datetime
+    old_user_idle_minutes: int | None = None
+    old_admin_idle_minutes: int | None = None
+    new_user_idle_minutes: int | None = None
+    new_admin_idle_minutes: int | None = None
 
 
 class AuditReader(Protocol):

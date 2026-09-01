@@ -4,16 +4,30 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from markweave.auth.errors import AuthenticationError
-from markweave.auth.memory import MemorySessionRepository, MemoryUserRepository
-from markweave.auth.models import Role, User, normalize_username
+from markweave.auth.memory import (
+    MemoryIdleSessionPolicyRepository,
+    MemorySessionRepository,
+    MemoryUserRepository,
+)
+from markweave.auth.models import (
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
+    Role,
+    User,
+    normalize_username,
+)
+from markweave.auth.policy_errors import IdleSessionPolicyAbsoluteLimitError
 from markweave.auth.security import digest_token
 from markweave.auth.service import (
     AuthenticationService,
@@ -87,6 +101,24 @@ def build_service() -> tuple[AuthenticationService, FakeHasher, FakeClock]:
         policy=SessionPolicy(idle_seconds=30, absolute_seconds=100),
     )
     return service, hasher, clock
+
+
+def build_role_policy_service() -> tuple[
+    AuthenticationService,
+    MemoryIdleSessionPolicyRepository,
+    FakeClock,
+]:
+    hasher = FakeHasher()
+    clock = FakeClock()
+    policies = MemoryIdleSessionPolicyRepository()
+    service = AuthenticationService(
+        users=MemoryUserRepository(),
+        sessions=MemorySessionRepository(),
+        security=SecurityRuntime(hasher=hasher, tokens=SequenceTokens(), clock=clock),
+        policy=SessionPolicy(absolute_seconds=8 * 60 * 60),
+        idle_policies=policies,
+    )
+    return service, policies, clock
 
 
 def assert_error(code: str, operation: Callable[[], object]) -> None:
@@ -457,3 +489,170 @@ def test_security_change_after_login_cas_makes_late_session_unusable() -> None:
     assert_error(
         "AUTHENTICATION_REQUIRED", lambda: service.authenticate(result.session_token)
     )
+
+
+@pytest.mark.unit
+def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> None:
+    service, _, clock = build_role_policy_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    user = service.create_user(admin, "alice", "correct")
+
+    admin_login = service.login("admin", "correct")
+    user_login = service.login("alice", "correct")
+    admin_session = service.sessions.get(digest_token(admin_login.session_token))
+    user_session = service.sessions.get(digest_token(user_login.session_token))
+    assert admin_session is not None and user_session is not None
+    assert admin_session.idle_expires_at - admin_session.created_at == timedelta(
+        minutes=15
+    )
+    assert user_session.idle_expires_at - user_session.created_at == timedelta(
+        minutes=30
+    )
+
+    assert service.update_idle_session_policy(
+        admin,
+        user_idle_minutes=5,
+        admin_idle_minutes=10,
+        expected_revision=0,
+    ) == IdleSessionPolicy(5, 10, 1)
+    clock.advance(minutes=6)
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(user_login.session_token),
+    )
+    assert service.update_idle_session_policy(
+        admin,
+        user_idle_minutes=300,
+        admin_idle_minutes=60,
+        expected_revision=1,
+    ) == IdleSessionPolicy(300, 60, 2)
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(user_login.session_token),
+    )
+
+    fresh_user = service.login("alice", "correct")
+    users = service.users
+    assert isinstance(users, MemoryUserRepository)
+    stored = users._users[user.id]
+    users._users[user.id] = replace(stored, role=Role.ADMIN)
+    clock.advance(minutes=61)
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.authenticate(fresh_user.session_token),
+    )
+
+
+@pytest.mark.unit
+def test_policy_update_is_atomic_versioned_audited_and_absolute_is_hard_ceiling() -> (
+    None
+):
+    service, policies, clock = build_role_policy_service()
+    admin = service.bootstrap_admin("admin", "correct")
+    assert service.get_idle_session_policy(admin) == IdleSessionPolicy()
+    updated = service.update_idle_session_policy(
+        admin,
+        user_idle_minutes=300,
+        admin_idle_minutes=60,
+        expected_revision=0,
+    )
+    assert updated == IdleSessionPolicy(300, 60, 1)
+    assert (
+        service.update_idle_session_policy(
+            admin,
+            user_idle_minutes=5,
+            admin_idle_minutes=5,
+            expected_revision=0,
+        )
+        is None
+    )
+    assert policies.get() == updated
+    audit = policies.audits[0]
+    assert audit.actor_id == admin.id
+    assert (audit.old_user_idle_minutes, audit.old_admin_idle_minutes) == (30, 15)
+    assert (audit.new_user_idle_minutes, audit.new_admin_idle_minutes) == (300, 60)
+    assert audit.revision == 1
+
+    login = service.login("admin", "correct")
+    clock.advance(hours=8)
+    assert_error(
+        "AUTHENTICATION_REQUIRED", lambda: service.authenticate(login.session_token)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("user_idle_minutes", True),
+        ("user_idle_minutes", 5.5),
+        ("user_idle_minutes", "5"),
+        ("user_idle_minutes", 4),
+        ("user_idle_minutes", 301),
+        ("admin_idle_minutes", False),
+        ("admin_idle_minutes", 5.5),
+        ("admin_idle_minutes", "5"),
+        ("admin_idle_minutes", 4),
+        ("admin_idle_minutes", 61),
+        ("revision", True),
+        ("revision", 1.5),
+        ("revision", "1"),
+        ("revision", -1),
+    ),
+)
+def test_idle_session_policy_requires_actual_integers(
+    field: str, value: object
+) -> None:
+    values: dict[str, Any] = {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+    }
+    values[field] = value
+    with pytest.raises(ValueError):
+        IdleSessionPolicy(**values)
+
+
+@pytest.mark.unit
+def test_memory_policy_audit_derives_new_values_from_persisted_policy() -> None:
+    repository = MemoryIdleSessionPolicyRepository()
+    actor = uuid4()
+    updated = repository.update(
+        IdleSessionPolicy(300, 60),
+        expected_revision=0,
+        audit=IdleSessionPolicyAudit(
+            uuid4(),
+            actor,
+            IdleSessionPolicyOperation.UPDATE,
+            30,
+            15,
+            5,
+            5,
+            1,
+            datetime.now(UTC),
+        ),
+    )
+
+    assert updated == IdleSessionPolicy(300, 60, 1)
+    assert (
+        repository.audits[0].new_user_idle_minutes,
+        repository.audits[0].new_admin_idle_minutes,
+    ) == (300, 60)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("user_minutes", "admin_minutes"), ((11, 5), (5, 11)))
+def test_policy_rejects_each_role_above_the_absolute_lifetime(
+    user_minutes: int, admin_minutes: int
+) -> None:
+    service, _policies, _clock = build_role_policy_service()
+    service.absolute_lifetime = timedelta(minutes=10)
+    admin = service.bootstrap_admin("admin", "correct")
+
+    with pytest.raises(IdleSessionPolicyAbsoluteLimitError):
+        service.update_idle_session_policy(
+            admin,
+            user_idle_minutes=user_minutes,
+            admin_idle_minutes=admin_minutes,
+            expected_revision=0,
+        )

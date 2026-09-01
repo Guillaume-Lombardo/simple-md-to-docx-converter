@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Engine,
+    Integer,
     String,
     case,
     cast,
@@ -31,6 +32,7 @@ from markweave.persistence.errors import PersistenceError
 from markweave.persistence.schema import (
     AuthenticationAuditRow,
     ConversionJobRow,
+    IdleSessionPolicyAuditRow,
     TemplateAuditRow,
 )
 
@@ -188,6 +190,10 @@ class SqlAuditReader:
                             "administrator_intervention"
                         ),
                         TemplateAuditRow.created_at.label("created_at"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
                     ),
                     select(
                         AuthenticationAuditRow.id.label("id"),
@@ -204,6 +210,38 @@ class SqlAuditReader:
                             "administrator_intervention"
                         ),
                         AuthenticationAuditRow.created_at.label("created_at"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
+                    ),
+                    select(
+                        IdleSessionPolicyAuditRow.id.label("id"),
+                        IdleSessionPolicyAuditRow.actor_id.label("actor_id"),
+                        IdleSessionPolicyAuditRow.actor_id.label("owner_id"),
+                        IdleSessionPolicyAuditRow.operation.label("operation"),
+                        literal("00000000-0000-0000-0000-000000000001").label(
+                            "target_id"
+                        ),
+                        literal("session_policy").label("target_type"),
+                        cast(IdleSessionPolicyAuditRow.revision, String).label(
+                            "target_version"
+                        ),
+                        literal(None, type_=String).label("version_id"),
+                        literal(True).label("administrator_intervention"),
+                        IdleSessionPolicyAuditRow.created_at.label("created_at"),
+                        IdleSessionPolicyAuditRow.old_user_idle_minutes.label(
+                            "old_user_idle_minutes"
+                        ),
+                        IdleSessionPolicyAuditRow.old_admin_idle_minutes.label(
+                            "old_admin_idle_minutes"
+                        ),
+                        IdleSessionPolicyAuditRow.new_user_idle_minutes.label(
+                            "new_user_idle_minutes"
+                        ),
+                        IdleSessionPolicyAuditRow.new_admin_idle_minutes.label(
+                            "new_admin_idle_minutes"
+                        ),
                     ),
                 ).subquery()
                 rows = database.execute(
@@ -228,6 +266,18 @@ class SqlAuditReader:
                         version_id=UUID(row.version_id) if row.version_id else None,
                         administrator_intervention=row.administrator_intervention,
                         created_at=_required_utc(row.created_at),
+                        old_user_idle_minutes=getattr(
+                            row, "old_user_idle_minutes", None
+                        ),
+                        old_admin_idle_minutes=getattr(
+                            row, "old_admin_idle_minutes", None
+                        ),
+                        new_user_idle_minutes=getattr(
+                            row, "new_user_idle_minutes", None
+                        ),
+                        new_admin_idle_minutes=getattr(
+                            row, "new_admin_idle_minutes", None
+                        ),
                     )
                     for row in rows
                 )

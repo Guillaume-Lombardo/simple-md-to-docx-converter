@@ -99,7 +99,7 @@ production implementation until T64 completes parity, rootless E2E verification,
 - **Templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
 
 Administrators also receive controls to create, search, activate, deactivate, and reset local
-accounts and to configure the effective system-wide idle session duration. Every permission and
+accounts and to configure the effective system-wide, role-specific idle session durations. Every permission and
 session-expiry decision is enforced by FastAPI. Application TypeScript and JavaScript receive their
 own tests and blocking coverage checks.
 
@@ -359,13 +359,16 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
 - Use Argon2id with configurable parameters defaulting to `m=19456 KiB`, `t=2`, and `p=1`.
 - Use opaque CSPRNG session tokens containing at least 128 bits. Store only a one-way token digest
   server-side.
-- Default the configurable idle session lifetime to 30 minutes and the absolute lifetime to 8
-  hours. Revoke sessions server-side on logout, account deactivation, and password reset.
-- Allow an administrator to persist a system-wide idle-session override within explicitly approved
-  bounds. The operator-configured absolute lifetime remains a hard ceiling. FastAPI enforces the
-  current effective idle policy on every validation, a tightened policy applies to existing
-  unexpired sessions, and a later relaxation never revives an expired or revoked session. Policy
-  changes use optimistic concurrency and immutable audit records in both storage profiles.
+- Default the configurable idle session lifetime to 30 minutes for standard users and 15 minutes
+  for administrators, and default the absolute lifetime to 8 hours. Revoke sessions server-side on
+  logout, account deactivation, and password reset.
+- Allow an administrator to persist one system-wide role-specific idle-session policy. Standard-user
+  durations are whole minutes from 5 through 300, inclusive; administrator durations are whole
+  minutes from 5 through 60, inclusive. The operator-configured absolute lifetime remains a hard
+  ceiling: reject an update if either proposed duration exceeds it. FastAPI enforces the policy for the session user's current effective role on every
+  validation, a tightened policy or role change applies to existing unexpired sessions, and a later
+  relaxation never revives an expired or revoked session. Policy changes use optimistic concurrency
+  and immutable audit records in both storage profiles.
 - Send the session token only in a cookie with `HttpOnly`, `Secure`, and `SameSite=Lax`.
 - Reject login POST requests carrying a cross-origin `Origin` before evaluating credentials. Allow
   the exact request origin and documented non-browser clients that omit `Origin`.
@@ -581,10 +584,6 @@ updates. Each ticket lists its exclusive files or components; a worker must stop
 the ticket before touching any path owned by another active ticket.
 
 ## 14. Deferred decisions and initial-scope exclusions
-
-- T59 owns the explicit minimum and maximum administrator-selectable idle-session durations. Keep
-  the existing 30-minute default and the operator-controlled absolute lifetime until those bounds
-  receive product approval; do not infer security-policy values from framework defaults.
 
 - Exact UBI 9 Python 3.14 image digest and availability of Chromium, LibreOffice, and Pandoc from approved build sources.
 - Validate the approved Chromium sandbox strategy on k3s after the rootless Podman proof. OpenShift

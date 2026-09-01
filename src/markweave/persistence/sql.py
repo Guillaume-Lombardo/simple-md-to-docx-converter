@@ -22,6 +22,8 @@ from markweave.auth.models import (
     SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
     ProvisionedUser,
     Role,
     Session,
@@ -29,7 +31,13 @@ from markweave.auth.models import (
 )
 from markweave.config import ConfigurationError
 from markweave.persistence.errors import PersistenceError
-from markweave.persistence.schema import AuthenticationAuditRow, SessionRow, UserRow
+from markweave.persistence.schema import (
+    AuthenticationAuditRow,
+    IdleSessionPolicyAuditRow,
+    IdleSessionPolicyRow,
+    SessionRow,
+    UserRow,
+)
 
 
 def create_database_engine(
@@ -520,6 +528,87 @@ class SqlSessionRepository:
             idle_expires_at=session.idle_expires_at,
             absolute_expires_at=session.absolute_expires_at,
         )
+
+
+class SqlIdleSessionPolicyRepository:
+    """Atomic singleton policy and immutable audit persistence adapter."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def get(self) -> IdleSessionPolicy:
+        try:
+            with DatabaseSession(self._engine) as database:
+                row = database.get(IdleSessionPolicyRow, 1)
+                if row is None:
+                    return IdleSessionPolicy()
+                return IdleSessionPolicy(
+                    row.user_idle_minutes,
+                    row.admin_idle_minutes,
+                    row.revision,
+                )
+        except SQLAlchemyError, ValueError:
+            raise PersistenceError from None
+
+    def update(
+        self,
+        policy: IdleSessionPolicy,
+        *,
+        expected_revision: int,
+        audit: IdleSessionPolicyAudit,
+    ) -> IdleSessionPolicy | None:
+        try:
+            with DatabaseSession(self._engine) as database, database.begin():
+                serialize_sqlite_write(database, self._engine)
+                if self._engine.dialect.name == "postgresql":
+                    database.execute(text("SELECT pg_advisory_xact_lock(1296914259)"))
+                row = database.get(IdleSessionPolicyRow, 1)
+                current_revision = row.revision if row is not None else 0
+                if current_revision != expected_revision:
+                    return None
+                previous = (
+                    IdleSessionPolicy()
+                    if row is None
+                    else IdleSessionPolicy(
+                        row.user_idle_minutes,
+                        row.admin_idle_minutes,
+                        row.revision,
+                    )
+                )
+                revision = current_revision + 1
+                if row is None:
+                    row = IdleSessionPolicyRow(
+                        id=1,
+                        user_idle_minutes=policy.user_idle_minutes,
+                        admin_idle_minutes=policy.admin_idle_minutes,
+                        revision=revision,
+                    )
+                    database.add(row)
+                else:
+                    row.user_idle_minutes = policy.user_idle_minutes
+                    row.admin_idle_minutes = policy.admin_idle_minutes
+                    row.revision = revision
+                database.add(
+                    IdleSessionPolicyAuditRow(
+                        id=str(audit.id),
+                        actor_id=str(audit.actor_id),
+                        operation=audit.operation.value,
+                        old_user_idle_minutes=previous.user_idle_minutes,
+                        old_admin_idle_minutes=previous.admin_idle_minutes,
+                        new_user_idle_minutes=policy.user_idle_minutes,
+                        new_admin_idle_minutes=policy.admin_idle_minutes,
+                        revision=revision,
+                        created_at=audit.created_at,
+                    )
+                )
+                database.flush()
+                return IdleSessionPolicy(
+                    row.user_idle_minutes,
+                    row.admin_idle_minutes,
+                    row.revision,
+                )
+        except SQLAlchemyError, ValueError:
+            raise PersistenceError from None
 
 
 class DatabaseReadinessProbe:

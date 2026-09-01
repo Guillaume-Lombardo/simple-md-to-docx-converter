@@ -37,6 +37,7 @@ def test_root_help_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
         "    jobs             Inspect and manage conversion jobs.\n"
         "    templates        Discover and manage document templates.\n"
         "    users            Administer local users.\n"
+        "    session-policy   Inspect or update role-specific idle sessions.\n"
         "    audit            Inspect audit records.\n"
         "    health           Inspect service health.\n"
         "    serve            Run the local HTTP service.\n"

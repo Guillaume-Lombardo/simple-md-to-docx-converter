@@ -103,6 +103,34 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
     _save_login(url, "alice", "alice", "alice-password")
     _save_login(url, "restricted", "restricted", "restricted-password")
 
+    assert main(("--json", "session-policy", "get", "--profile", "admin")) == 0
+    assert json.loads(capsys.readouterr().out)["session_policy"] == {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+    }
+    assert main(("session-policy", "get", "--profile", "alice")) == 1
+    assert "not authorized" in capsys.readouterr().err
+    assert (
+        main(
+            (
+                "--json",
+                "--non-interactive",
+                "session-policy",
+                "update",
+                "--user-idle-minutes",
+                "25",
+                "--admin-idle-minutes",
+                "10",
+                "--force",
+                "--profile",
+                "admin",
+            )
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["session_policy"]["revision"] == 1
+
     prompt = mocker.patch.object(
         administration,
         "_prompt",
@@ -230,6 +258,10 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
             "version_id",
             "administrator_intervention",
             "created_at",
+            "old_user_idle_minutes",
+            "old_admin_idle_minutes",
+            "new_user_idle_minutes",
+            "new_admin_idle_minutes",
         }
         for item in page["items"]
     )

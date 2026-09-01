@@ -21,6 +21,10 @@ export const vAuditRecordResponse = v.object({
     administrator_intervention: v.boolean(),
     created_at: v.pipe(v.string(), v.isoTimestamp()),
     id: v.pipe(v.string(), v.uuid()),
+    new_admin_idle_minutes: v.nullish(v.pipe(v.number(), v.integer())),
+    new_user_idle_minutes: v.nullish(v.pipe(v.number(), v.integer())),
+    old_admin_idle_minutes: v.nullish(v.pipe(v.number(), v.integer())),
+    old_user_idle_minutes: v.nullish(v.pipe(v.number(), v.integer())),
     operation: v.string(),
     owner_id: v.pipe(v.string(), v.uuid()),
     target_id: v.pipe(v.string(), v.uuid()),
@@ -64,6 +68,27 @@ export const vErrorDetail = v.object({
  */
 export const vErrorResponse = v.object({
     error: vErrorDetail
+});
+
+/**
+ * IdleSessionPolicyResponse
+ *
+ * Effective singleton policy and optimistic-concurrency revision.
+ */
+export const vIdleSessionPolicyResponse = v.object({
+    admin_idle_minutes: v.pipe(v.number(), v.integer()),
+    revision: v.pipe(v.number(), v.integer()),
+    user_idle_minutes: v.pipe(v.number(), v.integer())
+});
+
+/**
+ * IdleSessionPolicyUpdateRequest
+ *
+ * Atomic administrator update for both role-specific durations.
+ */
+export const vIdleSessionPolicyUpdateRequest = v.object({
+    admin_idle_minutes: v.pipe(v.number(), v.integer(), v.minValue(5), v.maxValue(60)),
+    user_idle_minutes: v.pipe(v.number(), v.integer(), v.minValue(5), v.maxValue(300))
 });
 
 /**
@@ -269,6 +294,23 @@ export const vLoginResponse = v.object({
     csrf_token: v.string(),
     user: vUserResponse
 });
+
+/**
+ * Successful Response
+ */
+export const vGetSessionPolicyApiV1AdminSessionPolicyGetResponse = vIdleSessionPolicyResponse;
+
+export const vUpdateSessionPolicyApiV1AdminSessionPolicyPutBody = vIdleSessionPolicyUpdateRequest;
+
+export const vUpdateSessionPolicyApiV1AdminSessionPolicyPutHeaders = v.object({
+    'If-Match': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vUpdateSessionPolicyApiV1AdminSessionPolicyPutResponse = vIdleSessionPolicyResponse;
 
 /**
  * Response List Users Api V1 Admin Users Get

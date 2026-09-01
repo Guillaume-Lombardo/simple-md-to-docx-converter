@@ -94,8 +94,9 @@ destination directory, synchronize its content, replace the destination, and syn
 directory. One application replica must have exclusive ownership of this PVC; never mount the
 SQLite database from multiple pods.
 
-Template identities, immutable owners, search fields, preferences, the system fallback, immutable
-version metadata, and audit records are in the same database. Template bytes use the
+Template identities, immutable owners, search fields, preferences, the system fallback, the
+versioned role-specific idle-session policy, immutable version metadata, and audit records are in
+the same database. Template bytes use the
 `template-versions/<owner UUID>/<version UUID>` object namespace; visible names and uploaded
 filenames never influence a key.
 Conversion inputs and results use the `uploads` and `results` namespaces. Durable queue state,
@@ -130,8 +131,9 @@ stable S3-compatible inventory and requires a named quiescence/provider-consiste
 requires an isolated empty database/schema and bucket, verifies all stable references, applies the
 application migration, and emits readiness evidence without switching traffic.
 Do not rewrite object keys from usernames, filenames, or template names during backup or restore.
-Template identities, versions, audit, preferences, and fallback selection are part of the
-PostgreSQL recovery set. Immutable template bytes use the same stable key layout in S3 as on the
+Template identities, versions, audit, preferences, fallback selection, and the versioned
+role-specific idle-session policy are part of the PostgreSQL recovery set. Immutable template
+bytes use the same stable key layout in S3 as on the
 standalone filesystem.
 Conversion queue rows and their referenced upload/result objects are also one recovery unit.
 External workers must be stopped or drained during a coordinated backup unless the database and

@@ -661,4 +661,10 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert "verify-disabled-login-origin" in runner
     assert '"event":"insecure_evaluation_mode_enabled"' in runner
     assert "--publish 127.0.0.1::8080" in runner
-    assert 'podman rm --force "$application_name" "$clamav_name"' in runner
+    assert 'podman rm --force "$application_name"' in runner
+    assert "MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2" in runner
+    assert "verify-session-expiration" in runner
+    assert 'podman rm --force "$expiry_application_name" "$clamav_name"' in runner
+    assert "--policy-evidence" in runner
+    assert "--policy-evidence" not in RUNNER.read_text(encoding="utf-8")
+    assert "--policy-evidence" not in SIMPLE_RUNNER.read_text(encoding="utf-8")
