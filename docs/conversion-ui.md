@@ -26,7 +26,8 @@ Recent conversions on the page can be reopened. Queued and running jobs may be c
 states are displayed as succeeded, failed, cancelled, or expired; failure text comes only from the
 API's safe error contract. An expired conversion no longer offers a download. Successful downloads
 use an owner-authorized API route and preserve the uploaded filename stem while replacing its
-extension with `.docx`, `.pdf`, or `.zip`. Their responses also enforce `nosniff` and a private
+extension with `.docx`, `.pdf`, or `.zip`. Jobs without persisted source metadata instead use
+`conversion-<job-id>` as the filename stem. Their responses also enforce `nosniff` and a private
 no-store cache policy. Page text and errors are announced through accessible live regions.
 
 If the session expires, sign in again. Browser mutations send the session-bound CSRF value from the

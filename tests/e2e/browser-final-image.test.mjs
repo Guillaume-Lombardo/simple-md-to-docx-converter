@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -175,12 +176,18 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     bob: { username: `e2e-bob-${suffix}`, password: `Bob-${suffix}-password` },
   };
   const templateName = `E2E ${suffix} report`;
+  const encodedSourceFixture = path.join(
+    settings.artifactRoot,
+    `résumé final${path.extname(settings.sourceFixture).toLowerCase()}`,
+  );
   let browser = null;
   const contexts = [];
   const pages = [];
   const traces = [];
   let step = "launch Chromium";
   try {
+    await mkdir(settings.artifactRoot, { recursive: true });
+    await copyFile(settings.sourceFixture, encodedSourceFixture);
     browser = await chromium.launch({
       executablePath: settings.chromiumExecutable,
       headless: true,
@@ -288,7 +295,7 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     for (const output of ["docx", "pdf", "both"]) {
       jobs.push(await convertAndDownload(
         alicePage,
-        settings.sourceFixture,
+        output === "docx" ? encodedSourceFixture : settings.sourceFixture,
         output,
         settings.timeoutMilliseconds,
       ));

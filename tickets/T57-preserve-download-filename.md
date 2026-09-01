@@ -50,6 +50,10 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   admitted source integrity metadata into its in-memory job, so the download correctly used the
   legacy fallback while the new browser assertion expected `source.docx`. The harness now preserves
   the request filename, kind, digest, and size like production persistence before CI is rerun.
+- 2026-09-01: Addressed all four CodeRabbit review threads: documented the legacy filename fallback
+  and fixed result media type, taught the final-image assertion to decode RFC 5987 filenames, added a
+  non-ASCII filename journey, and rejected empty sources at the job request boundary. Ruff, `ty`, 23
+  JavaScript tests, and the 1,929-test unit gate pass with 94.33% total application coverage.
 
 ## Synchronization
 
