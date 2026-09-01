@@ -156,6 +156,33 @@ test("real router preserves backend credentials and isolates frontend credential
     ),
   ).toBe(true);
 
+  for (const [path, canonical] of [
+    ["/missing%20path", "/missing%20path"],
+    ["/caf%C3%A9", "/caf%C3%A9"],
+    ["/caf%c3%a9", "/caf%C3%A9"],
+    ["/missing%2520path", "/missing%20path"],
+    ["/%E2%98%83", "/%E2%98%83"],
+  ] as const) {
+    expect(await call(routerOrigin, "GET", path)).toEqual({
+      body: "frontend",
+      cookies: [],
+      status: 200,
+    });
+    expect(frontendCaptures.at(-1)?.path).toBe(canonical);
+  }
+
+  for (const [path, canonical] of [
+    ["/api/v1/items/hello%20world", "/api/v1/items/hello%20world"],
+    ["/docs/caf%C3%A9", "/docs/caf%C3%A9"],
+  ] as const) {
+    expect(await call(routerOrigin, "GET", path)).toEqual({
+      body: "backend",
+      cookies: ["session=one; HttpOnly", "csrf=two"],
+      status: 200,
+    });
+    expect(backendCaptures.at(-1)?.path).toBe(canonical);
+  }
+
   for (const path of ["/api/v1/../convert", "/docs/%2e%2e/convert"]) {
     expect(await call(routerOrigin, "GET", path)).toEqual({
       body: "frontend",
@@ -223,4 +250,24 @@ test("real router preserves backend credentials and isolates frontend credential
       (server) => new Promise((resolve) => server.close(resolve)),
     ),
   );
+});
+
+test("synchronous upstream creation failures are contained without exiting", async () => {
+  const router = createRoutingFixture({
+    backend: "http://[invalid",
+    frontend: "http://[invalid",
+    publicHosts: ["converter.example"],
+  });
+  const origin = await listen(router);
+  expect(await call(origin, "GET", "/missing%20path")).toEqual({
+    body: "",
+    cookies: [],
+    status: 502,
+  });
+  expect(await call(origin, "GET", "/caf%C3%A9")).toEqual({
+    body: "",
+    cookies: [],
+    status: 502,
+  });
+  await new Promise((resolve) => router.close(resolve));
 });

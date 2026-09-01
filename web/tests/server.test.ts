@@ -272,16 +272,16 @@ test("page server retains CSP only for emitted HTML documents", async () => {
   expect((await get(port, "/html")).csp).toBe("generated");
   expect((await get(port, "/json")).csp).toBeUndefined();
   expect((await get(port, "/empty")).csp).toBeUndefined();
-  expect(
-    (await get(port, "/html", { Purpose: "prefetch" })).csp,
-  ).toBeUndefined();
-  expect((await get(port, "/html", { RSC: "1" })).csp).toBeUndefined();
-  expect(
-    (await get(port, "/html", { "Next-Router-Prefetch": "1" })).csp,
-  ).toBeUndefined();
+  expect((await get(port, "/html", { Purpose: "prefetch" })).csp).toBe(
+    "generated",
+  );
+  expect((await get(port, "/html", { RSC: "1" })).csp).toBe("generated");
+  expect((await get(port, "/html", { "Next-Router-Prefetch": "1" })).csp).toBe(
+    "generated",
+  );
   expect(
     (await get(port, "/html", { "Next-Router-Segment-Prefetch": "1" })).csp,
-  ).toBeUndefined();
+  ).toBe("generated");
   expect((await get(port, "/not-modified")).csp).toBeUndefined();
   expect((await get(port, "/zero")).csp).toBeUndefined();
   expect((await get(port, "/raw")).csp).toBeUndefined();

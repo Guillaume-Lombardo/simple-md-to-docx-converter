@@ -97,20 +97,25 @@ test("all dynamic and generated error HTML receives fresh nonce policies", async
   const absentNonce = absentCsp.match(/script-src 'nonce-([^']+)'/)?.[1];
   for (const tag of absentAccept.body.matchAll(/<(script|style)\b([^>]*)>/g))
     assert.equal(tag[2].match(/\bnonce=["']([^"']+)["']/)?.[1], absentNonce);
+
+  await assertNonceHtml("/convert", 200, {
+    Accept: "text/html",
+    Purpose: "prefetch",
+  });
+  for (const headers of [
+    { Accept: "text/html", RSC: "1" },
+    { Accept: "text/html", "Next-Router-Prefetch": "1" },
+    { Accept: "text/html", "Next-Router-Segment-Prefetch": "1" },
+  ])
+    await assertNonceHtml("/foundation-response?kind=html", 200, headers);
 });
 
-test("component, prefetch, non-HTML, and content-free responses receive no CSP", async () => {
+test("component, non-HTML, and content-free responses receive no CSP", async () => {
   const component = await fetch(`http://127.0.0.1:${pagePort}/convert`, {
     headers: { Accept: "text/x-component", RSC: "1" },
   });
   assert.match(component.headers.get("content-type"), /^text\/x-component/);
   assert.equal(component.headers.get("content-security-policy"), null);
-
-  const prefetch = await fetch(`http://127.0.0.1:${pagePort}/convert`, {
-    headers: { Accept: "text/html", Purpose: "prefetch" },
-  });
-  assert.match(prefetch.headers.get("content-type"), /^text\/html/);
-  assert.equal(prefetch.headers.get("content-security-policy"), null);
 
   const json = await fetch(
     `http://127.0.0.1:${pagePort}/foundation-response?kind=json`,

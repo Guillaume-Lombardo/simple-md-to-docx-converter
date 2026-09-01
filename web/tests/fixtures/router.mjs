@@ -23,10 +23,9 @@ function normalize(requestTarget) {
     if (part === "..") parts.pop();
     else parts.push(part);
   }
-  return {
-    path: `/${parts.join("/")}`,
-    requestTarget: `/${parts.join("/")}${query}`,
-  };
+  const path = `/${parts.join("/")}`;
+  const encodedPath = `/${parts.map((part) => encodeURIComponent(part)).join("/")}`;
+  return { path, requestTarget: `${encodedPath}${query}` };
 }
 
 function target(path) {
@@ -71,7 +70,6 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
       clientResponse.end();
       return;
     }
-    const destination = new URL(selected === "backend" ? backend : frontend);
     const headers = { ...clientRequest.headers };
     for (const name of Object.keys(headers))
       if (name === "forwarded" || name.startsWith("x-forwarded-"))
@@ -79,34 +77,42 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
     if (selected === "frontend") {
       delete headers.cookie;
     }
-    const upstream = send(
-      {
-        headers,
-        hostname: destination.hostname,
-        method: clientRequest.method,
-        path: normalized.requestTarget,
-        port: destination.port,
-      },
-      (upstreamResponse) => {
-        for (
-          let index = 0;
-          index < upstreamResponse.rawHeaders.length;
-          index += 2
-        ) {
-          const name = upstreamResponse.rawHeaders[index];
-          const value = upstreamResponse.rawHeaders[index + 1];
-          if (selected === "frontend" && name.toLowerCase() === "set-cookie")
-            continue;
-          clientResponse.appendHeader(name, value);
-        }
-        clientResponse.writeHead(upstreamResponse.statusCode);
-        upstreamResponse.pipe(clientResponse);
-      },
-    );
+    let upstream;
+    try {
+      const destination = new URL(selected === "backend" ? backend : frontend);
+      upstream = send(
+        {
+          headers,
+          hostname: destination.hostname,
+          method: clientRequest.method,
+          path: normalized.requestTarget,
+          port: destination.port,
+        },
+        (upstreamResponse) => {
+          for (
+            let index = 0;
+            index < upstreamResponse.rawHeaders.length;
+            index += 2
+          ) {
+            const name = upstreamResponse.rawHeaders[index];
+            const value = upstreamResponse.rawHeaders[index + 1];
+            if (selected === "frontend" && name.toLowerCase() === "set-cookie")
+              continue;
+            clientResponse.appendHeader(name, value);
+          }
+          clientResponse.writeHead(upstreamResponse.statusCode);
+          upstreamResponse.pipe(clientResponse);
+        },
+      );
+      clientRequest.pipe(upstream);
+    } catch {
+      clientResponse.writeHead(502, { "Content-Length": "0" });
+      clientResponse.end();
+      return;
+    }
     upstream.on("error", () => {
       clientResponse.writeHead(502, { "Content-Length": "0" });
       clientResponse.end();
     });
-    clientRequest.pipe(upstream);
   });
 }

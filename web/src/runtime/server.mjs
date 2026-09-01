@@ -105,17 +105,12 @@ function filterGeneratedCsp(request, response) {
       suppliedHeaders,
       "content-length",
     );
-    const prefetch =
-      request.headers.rsc === "1" ||
-      request.headers["next-router-prefetch"] !== undefined ||
-      request.headers["next-router-segment-prefetch"] !== undefined ||
-      request.headers.purpose?.toLowerCase() === "prefetch";
     const bodyless =
       request.method === "HEAD" ||
       statusCode === 204 ||
       statusCode === 304 ||
       contentLength === "0";
-    if (contentType !== "text/html" || prefetch || bodyless) {
+    if (contentType !== "text/html" || bodyless) {
       response.removeHeader("content-security-policy");
       removeHeader(suppliedHeaders, "content-security-policy");
     }
