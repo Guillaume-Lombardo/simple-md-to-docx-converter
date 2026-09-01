@@ -22,9 +22,11 @@ The product includes a conversion page, template administration, local authentic
 |---|---|
 | Backend language | Python 3.14 |
 | Backend image | Official `ubi9/python-314`, pinned by digest in CI |
-| API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under `/api/v1` and the documented operational routes |
+| API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under exact `/api/v1`, `/api/v1/**`, and the documented operational routes |
 | Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
-| Browser boundary | Browser pages and `/api/v1` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
+| Browser boundary | Browser pages and both exact `/api/v1` and `/api/v1/**` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
+| Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
+| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0` and npm `11.17.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3`, all exact and lockfile-integrity pinned as reviewed on 2026-09-01 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
@@ -100,6 +102,118 @@ Administrators also receive controls to create, search, activate, deactivate, an
 accounts and to configure the effective system-wide idle session duration. Every permission and
 session-expiry decision is enforced by FastAPI. Application TypeScript and JavaScript receive their
 own tests and blocking coverage checks.
+
+#### 3.3.1 Next.js production and migration contract
+
+The reviewed routing boundary sends both exact `/api/v1` and `/api/v1/**`, plus `/health/live`,
+`/health/ready`, `/metrics`, `/docs`, `/docs/**`, `/redoc`, and `/openapi.json`, directly to FastAPI.
+At T64 cutover it sends `/`, `/login`, `/change-password`, `/convert`, `/templates`, and `/_next/**`
+to Next.js. Unknown paths return the
+frontend's accessible `404`; they never fall through to FastAPI or an external destination. The
+router preserves `Host` and `Origin`, rejects unknown hosts, does not trust forwarded headers, and
+never selects an upstream from user-controlled headers. No CORS or second browser origin is
+supported. Before the frontend catch-all, the public router returns a content-free `404` for
+`/_frontend/health`, every descendant, and decoded or case-varied equivalents. Only platform probes
+may call the exact internal `/_frontend/health/live` and `/_frontend/health/ready` paths through the
+frontend Service's separate probe port; the public router reaches only the page port.
+
+The router removes the complete `Cookie` request header before every request whose selected upstream
+is the frontend, regardless of method or route class, including named pages, `/_next/**`, and the
+unknown-path catch-all. It removes every `Set-Cookie` response-header field from every frontend
+response regardless of method, status, or content type. Exact `/api/v1`, `/api/v1/**`, and the public
+operational routes go directly to FastAPI without either transformation, preserving its incoming
+`Cookie` and all outgoing `Set-Cookie` fields. T60 blocks on routing-fixture tests for both
+directions, named pages, assets, unknown paths, and non-GET requests; T64 repeats them through the
+production router against the exact final images.
+
+Next.js is a presentation-only process. Browser code calls same-origin FastAPI routes directly.
+Except for two non-public process-local frontend probes, route handlers, Server Actions,
+Proxy, rewrites, server components, and server-side fetches
+must not proxy API requests, read or forward session credentials, or reproduce authentication,
+authorization, validation, quotas, persistence, conversion, template, account, audit, health,
+readiness, metrics, or OpenAPI behavior. The frontend receives no database, object-store, scanner,
+worker, or document-engine credentials and mounts neither `/data` nor `/work`.
+
+FastAPI exclusively owns the public health/readiness contract. The frontend exposes only internal
+`/_frontend/health/live` and `/_frontend/health/ready` platform probes; readiness verifies its
+immutable built route/assets and never calls FastAPI or storage. Browser-route availability and
+FastAPI readiness are monitored separately. Frontend or backend failure must not cascade into
+state corruption: API/CLI use can continue during a frontend outage, while backend loss produces
+bounded safe browser errors without client-side mutation replay.
+
+The frontend runs with an arbitrary non-zero UID, group 0, read-only root, no capabilities,
+`no-new-privileges`, RuntimeDefault seccomp, no service-account token, and only a `32Mi`
+memory-backed `/tmp`. Each replica requests `100m` CPU, `128Mi` memory, and `32Mi` ephemeral
+storage and is limited to `500m` CPU, `256Mi` memory, `64Mi` ephemeral storage, a `160Mi` Node.js
+old-space heap, 64 processes, 128 in-flight requests, 16 KiB request headers, and 30 seconds for
+graceful shutdown. Raising a hard ceiling requires reviewed load evidence.
+
+T60 owns `web/server.mjs`, a supported Next.js custom production server. It uses Node's HTTP server
+with `maxHeaderSize: 16384` and a zero-length header-overflow `431`, admits at most 128 requests per
+replica, returns a zero-length `503` before Next.js when saturated or draining, accounts each
+response exactly once on finish or close, and completes admitted work for at most 30 seconds after
+SIGTERM. It performs no API proxying or business work. Because Next.js does not support custom
+servers with `output: "standalone"`, the
+frontend packages the `.next` build and exact pruned production dependency graph instead. T60 and
+T64 must block on the exact 128/129 admission boundary, header rejection, empty failure responses,
+finish/close accounting, drain races, and bounded shutdown.
+
+Every dynamically rendered HTML document response is `no-store` and uses a fresh per-response
+cryptographic nonce with a CSP allowing only self-hosted connections, stylesheets, fonts, and images
+plus nonce-bearing framework scripts and inline style elements; it forbids
+objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
+API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
+use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
+third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
+must prove a fresh nonce for each HTML document with no cache reuse, the same nonce in `script-src`
+and `style-src`, a nonce on every framework bootstrap script and inline style element, no inline
+style attribute or unnonced inline style, and no eval requirement. Content-hashed
+`/_next/static/**` assets and non-HTML or content-free responses, including custom-server header
+error, saturation, and draining responses, are outside nonce generation and freshness assertions.
+T60 implements the interception hook as `web/proxy.ts` with the named `export function proxy`;
+structural and production-build tests reject the deprecated `middleware.ts` filename or
+`middleware` export.
+
+The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
+`Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS
+response. T64 verifies the values on frontend, FastAPI, error, and download responses. HSTS
+`includeSubDomains` and `preload` are excluded because Markweave does not control every sibling
+subdomain or the parent domain's browser preload commitment.
+
+FastAPI keeps the opaque `HttpOnly`, `Secure`, `SameSite=Lax`, path-root session cookie and the
+separate JavaScript-readable `__Host-md_converter_csrf` cookie. Browser mutations copy the latter
+into `X-CSRF-Token`; login goes directly to `/api/v1/login` and preserves exact-Origin validation.
+Although the browser sends same-origin cookies on matching frontend paths, the router strips the
+complete request header before Next.js and strips every frontend-originated `Set-Cookie` response
+field. It preserves both header directions unchanged on direct FastAPI routes.
+Uploads and downloads pass router-to-FastAPI without traversing Next.js, and retain FastAPI's
+scanner, authorization, filename, digest, content-type, `nosniff`, and private no-store contracts.
+
+The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. npm is the
+only package manager; `packageManager` and every direct dependency are exact, `web/package-lock.json`
+pins the complete integrity-checked graph, and deterministic installation uses `npm ci
+--ignore-scripts`. Updates occur only through reviewed pull requests with support, license,
+vulnerability, build, browser, rootless, and rollback evidence. No production build or startup
+resolves a tag, range, Git URL, CDN, or dynamically downloaded asset.
+
+Final releases bind one source SHA and version to the PyPI package plus distinct backend and
+frontend GHCR manifest digests. Each image is built and serialized once and receives CycloneDX and
+SPDX SBOMs, vulnerability evidence, a publication receipt, and provenance for its public digest.
+Deployment manifests pin both exact digests and prohibit mixed frontend/backend releases. Partial
+publication is recovered from retained exact bytes without rebuilding or is treated as a failed
+release.
+
+T60–T63 must leave the legacy FastAPI pages on the production route while building and verifying
+the frontend foundation, authentication, conversion, and administration parity. In T64, complete
+parity and rollback rehearsal while the candidate branch still contains the legacy renderer, then
+remove the legacy code and assets, build and serialize the final matched images exactly once, and
+run the complete two-profile rootless acceptance matrix against those staged bytes. Publish and
+deploy only those verified bytes; no post-verification removal or rebuild is permitted. Cutover
+then switches the route to their exact published digests. Rollback restores the previous matched
+backend release with its legacy UI and route manifest; if persistent schema or data changed, it
+also restores the matching pre-cutover database and object backup according to the upgrade
+contract. Mixed releases and mutable rollback tags are forbidden. The complete inventory and
+failure matrix are in [the reviewed migration architecture](nextjs-migration-architecture.md).
 
 ### 3.4 Command-line interface
 
@@ -468,10 +582,6 @@ the ticket before touching any path owned by another active ticket.
 
 ## 14. Deferred decisions and initial-scope exclusions
 
-- T58 owns the production Next.js topology, frontend base image, supported Node.js/Next.js/
-  TypeScript/Tailwind versions, package manager, health/readiness split, resource budgets,
-  publication model, and rollback mechanics. Do not implement or publish a topology before that
-  architecture decision is reviewed.
 - T59 owns the explicit minimum and maximum administrator-selectable idle-session durations. Keep
   the existing 30-minute default and the operator-controlled absolute lifetime until those bounds
   receive product approval; do not infer security-policy values from framework defaults.

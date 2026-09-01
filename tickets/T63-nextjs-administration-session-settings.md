@@ -17,6 +17,7 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 
 * Support template search/filtering, owner display, creation, download, metadata update, replacement, version history, copy-forward restore, archive/delete guards, preferred selection, and system fallback behavior.
 * Preserve owner/administrator authorization, immutable ownership, ETag/If-Match concurrency, safe DOCX validation failures, upload bounds, audit behavior, and response-generation fencing.
+* Preserve replacement editing and explicit clearing of comma-separated expected fonts: trimmed non-empty values remain ordered, while blank input sends the explicit empty field rather than omitting it; cover both paths in component, browser, and final-image tests.
 * Support administrator user search, creation, activation, deactivation, password reset, and required-password-renewal controls with duplicate-submit and revoked-session handling.
 * Add an administrator-only control for the effective system-wide inactivity duration delivered by T59, showing the default/effective value, approved bounds, absolute ceiling, current revision, validation errors, stale-write conflicts, and a clear warning that tightening can require current users to sign in again.
 * Never let frontend validation, cached data, or hidden controls replace FastAPI authorization and policy enforcement.

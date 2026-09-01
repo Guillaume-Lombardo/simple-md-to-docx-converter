@@ -147,6 +147,26 @@ same-origin form origin without disclosing referrers cross-origin. The explicit 
 SSH-tunnel tests. It is not an authentication deployment option and must never be exposed to a
 network or used in production.
 
+## Next.js migration boundary
+
+The approved frontend migration does not change this authentication contract. After T64, browser
+pages come from the same-origin Next.js process, but login, session inspection, logout, password
+renewal, expiry, revocation, authorization, cookies, CSRF validation, and Origin validation remain
+direct FastAPI operations. Next.js application code may neither read nor forward the HttpOnly
+session cookie. The public router enforces this boundary by removing the complete `Cookie` header
+from every request selected for the frontend, for every method and including named pages, assets,
+and unknown catch-all paths. It removes every `Set-Cookie` field from every frontend response
+regardless of method, status, or content type. It applies neither transformation to exact
+`/api/v1`, `/api/v1/**`, or public operational routes, so FastAPI continues to receive browser
+cookies and issue or clear all session and CSRF cookies directly. Browser JavaScript continues to
+read only the `__Host-md_converter_csrf` cookie and copy it to `X-CSRF-Token` for mutations.
+
+The frontend renders no authoritative authenticated state on the server. It loads the principal
+from `/api/v1/session`, treats `401` and restricted-session responses as authoritative, and never
+extends a session with a client timer. HTML and authenticated data remain `no-store`. The complete
+login, renewal, expiry, navigation, race, accessibility, and safe-error parity inventory is in
+[the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
+
 ## Verification inventory
 
 Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E cover:

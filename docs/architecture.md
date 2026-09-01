@@ -1,8 +1,12 @@
 # Architecture
 
-Markweave is a server-rendered FastAPI application with durable asynchronous conversion workers.
-It accepts Markdown, local resources, and validated DOCX reference templates; Pandoc creates DOCX,
-local Mermaid CLI and sandboxed Chromium render diagrams, and headless LibreOffice creates PDF.
+Markweave currently uses a server-rendered FastAPI browser interface with durable asynchronous
+conversion workers. The approved T58 target replaces only that browser presentation with a
+separate Next.js process; FastAPI and the worker/storage architecture remain authoritative. See
+[the reviewed Next.js migration architecture](nextjs-migration-architecture.md) for the staged
+topology and parity contract. Markweave accepts Markdown, local resources, and validated DOCX
+reference templates; Pandoc creates DOCX, local Mermaid CLI and sandboxed Chromium render diagrams,
+and headless LibreOffice creates PDF.
 
 ## Component boundaries
 
@@ -19,6 +23,16 @@ local Mermaid CLI and sandboxed Chromium render diagrams, and headless LibreOffi
 - Workers claim durable leases, heartbeat, load the frozen owner-scoped source, resolve the exact
   template version when selected or use Pandoc's default reference document, publish output
   atomically, and recover interrupted work deterministically.
+
+After T64, the Web presentation is a stateless rootless Next.js process behind the same public TLS
+router as FastAPI. Literal path routing sends browser pages and `/_next/**` to that process and
+both exact `/api/v1` and `/api/v1/**`, plus every public operational route, directly to FastAPI.
+Browser JavaScript uses only relative same-origin API URLs. Regardless of method, the router strips
+`Cookie` from every request selected for the frontend, including named pages, assets, and unknown
+catch-all paths, and strips every `Set-Cookie` field from every frontend response. It preserves both
+directions unchanged for direct FastAPI routes. Next.js has no persistence or
+infrastructure credentials, receives no upload/download body, and cannot implement or proxy
+FastAPI business behavior.
 
 The conversion path is:
 
@@ -46,6 +60,11 @@ Both profiles share the same domain and storage contracts. Profile selection is 
 and rejects mixed SQLite/S3 or PostgreSQL/filesystem configuration. See
 [storage-profiles.md](storage-profiles.md).
 
+The target standalone deployment adds one frontend replica to the existing single backend/embedded
+worker replica. The target distributed deployment scales stateless frontend replicas independently
+from API replicas and external workers. Frontend failure therefore cannot corrupt backend state,
+and API/CLI availability is independent of browser-page availability.
+
 ## Templates and authorization
 
 A template identity has an immutable owner and immutable content versions. Replacement and restore
@@ -66,6 +85,14 @@ and a matching effective origin. With `MARKWEAVE_PUBLIC_ORIGIN` set, that exact 
 scheme/host/optional-port is authoritative for Origin checks; the value must contain no path, query,
 fragment, or user information. When it is unset, the direct ASGI request base URL is authoritative.
 Proxy forwarding headers remain deliberately untrusted.
+
+The server-side Next.js process cannot read or forward any browser cookie because the router
+removes the complete `Cookie` header before forwarding any frontend route or method. The router
+also removes all frontend `Set-Cookie` response fields. Next.js renders a public shell and lets
+browser JavaScript obtain session state directly from FastAPI and read only the CSRF cookie required
+for mutations. A nonce-based CSP, no-store HTML/API responses, immutable content-hashed assets, and
+direct FastAPI upload/download routing keep the new presentation boundary from becoming a
+credential, file, or cache boundary.
 
 Document-controlled network access is forbidden. Remote Markdown, image, CSS, font, and Mermaid
 references are rejected; the only runtime egress is to explicitly configured infrastructure such as
