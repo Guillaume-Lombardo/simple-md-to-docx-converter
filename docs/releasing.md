@@ -160,3 +160,25 @@ For released version `<version>`:
 
 Preserve workflow URLs and immutable digests in the release record. Do not publish, replace, or
 delete external release state outside this protected automation without explicit approval.
+
+## Frontend publication after T64
+
+The current release workflow publishes only the existing backend image. T64 must extend, not
+replace, its trust model for the approved Next.js cutover. The frontend package identity is
+`ghcr.io/guillaume-lombardo/md-converter-web`; it shares the Markweave version, source SHA,
+`v<version>` tag, GitHub Release, and protected human gate with the backend but has its own registry
+manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance.
+
+One release is deployable only when the PyPI artifact and both image receipts agree on version and
+source SHA, both public digests are anonymously readable, and the release evidence manifest binds
+the pair plus the frontend lockfile digest. Build and serialize each image once. If publication is
+partial, recover the missing image/evidence from the retained exact staged bytes without rebuilding,
+or fail the release. Never pair an older frontend with a newer backend, infer a digest, or use a
+mutable tag as rollback identity.
+
+The post-publication adoption pull request pins both exact public manifest digests in Compose,
+quickstarts, and deployment evidence before unrelated integration resumes. The existing GHCR
+preflight, exact-copy verification, narrow external-writer race disclosure, permissions,
+concurrency, provenance, attachment, and anonymous verification rules apply separately to each
+package. See [the reviewed migration architecture](nextjs-migration-architecture.md) for the image
+baseline, staged cutover, and release-level rollback contract.

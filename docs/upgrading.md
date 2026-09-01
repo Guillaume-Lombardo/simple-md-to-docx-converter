@@ -64,6 +64,27 @@ point a restored database at a newer or unrelated object-store version. A
 rollback is complete only after readiness and representative stable-object
 checks succeed on the restored previous version.
 
+### Next.js cutover releases
+
+A release containing the T64 cutover adds a separately published frontend
+image but remains one Markweave release. Before rollout, verify the exact
+matched backend and frontend registry digests, the pair-binding release
+receipt, the previous backend digest containing the legacy interface, and the
+reviewed previous and target routing manifests. Mixed frontend/backend versions
+are unsupported even when their HTTP schemas appear compatible.
+
+Cut over only after the previous profile-consistent backup and the complete
+two-profile final-image evidence are available. If routing or the frontend
+fails before any persistent transition, stop admission and restore the previous
+routing manifest and previous backend release with its legacy pages. If a
+database migration or persistent data change has started, restore the matching
+pre-cutover database and object backup into isolated targets before switching
+traffic back. In either case, require frontend-route or legacy-page availability,
+FastAPI readiness, login, one authorized workflow, and representative stable
+object/download checks before declaring rollback complete. The detailed route
+and rehearsal contract is in
+[the Next.js migration architecture](nextjs-migration-architecture.md).
+
 ## Configuration compatibility
 
 ### During 0.x

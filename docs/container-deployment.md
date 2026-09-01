@@ -159,3 +159,29 @@ conditional update, and select the result in the same transaction; PostgreSQL ke
 Build-only npm tooling and unused curl, OpenSSL, and Apache HTTPD command-line executables are
 absent from the runtime filesystem. Required shared libraries and the complete RPM inventory remain
 recorded. This reduces unused attack surface without altering the vulnerability threshold.
+
+## Approved Next.js cutover topology
+
+The currently published image and examples continue to serve the legacy FastAPI browser pages.
+T60–T63 must not change production routing. T64 implements the separate frontend image and the
+literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
+[the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
+
+The approved target uses a UBI 9 Node.js 24 builder and UBI 9 Node.js 24 minimal runtime pinned by
+the reviewed Linux/AMD64 digests. The process is stateless, arbitrary-UID, read-only-root, and
+capability-free, with only bounded memory-backed `/tmp`; it mounts neither `/data` nor `/work` and
+receives no backend service credentials. The standalone profile adds one frontend replica, while
+the distributed profile may scale frontend replicas independently. Both keep browser pages and
+FastAPI behind one TLS origin.
+
+The public `/health/live` and `/health/ready` paths continue to reach FastAPI. Platform probes reach
+the frontend's non-public `/_frontend/health/live` and `/_frontend/health/ready` paths directly on
+its service. Never expose those paths through the public router or treat frontend readiness as
+backend/storage readiness. Deployment manifests must apply the exact initial frontend budgets from
+the migration architecture and keep backend, worker, scanner, storage, and document budgets
+independent.
+
+At release, deploy only a matched backend/frontend version pair pinned by both verified registry
+manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes
+fail is not deployable. Preserve the prior backend digest containing the legacy UI and its route
+manifest until the cutover rollback window and rehearsal are complete.
