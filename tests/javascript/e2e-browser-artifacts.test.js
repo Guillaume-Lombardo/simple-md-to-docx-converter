@@ -99,6 +99,22 @@ test("completed browser phases close every context after a trace discard failure
   assert.deepEqual(closed, ["first", "second"]);
 });
 
+test("completed browser phases reject after attempting every context close", async () => {
+  const closed = [];
+  await assert.rejects(
+    closeCompletedBrowserPhases(
+      [
+        { close: async () => closed.push("first") },
+        { close: async () => { closed.push("failed"); throw new Error("close failed"); } },
+        { close: async () => closed.push("last") },
+      ],
+      [],
+    ),
+    /close failed/,
+  );
+  assert.deepEqual(closed, ["first", "failed", "last"]);
+});
+
 test("resource diagnostics expose only the bounded allowlisted schema", async () => {
   const reads = [];
   const fixtures = new Map([
@@ -383,6 +399,7 @@ test("fresh expiry tracing and resource collection keep failure-only ordering", 
   assert.ok(fallbackIndex > runnerSource.indexOf("container_oom_killed"));
   assert.ok(runnerSource.indexOf("--host-fallback") > fallbackIndex);
   assert.ok(failureCopyIndex > runnerSource.indexOf("podman unshare chown -R 0:0"));
+  assert.ok(runnerSource.includes("if ! collect_failure_artifacts; then\n      exit_code=1"));
   assert.ok(collectorIndex > runnerSource.indexOf("collect_failure_artifacts()"));
   assert.ok(
     browserSource.indexOf("retainResourceDiagnostics(settings.artifactRoot)")

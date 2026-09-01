@@ -138,7 +138,9 @@ cleanup() {
   local exit_code=$?
   local resource
   if [[ "$succeeded" != true ]]; then
-    collect_failure_artifacts
+    if ! collect_failure_artifacts; then
+      exit_code=1
+    fi
   fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* ]]; then
