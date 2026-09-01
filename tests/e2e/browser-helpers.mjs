@@ -150,13 +150,13 @@ export async function retainFailureArtifacts({
   await chmod(diagnostic, 0o600);
 }
 
-export function assertDownloadedResult(output, headers, content) {
+export function assertDownloadedResult(output, sourceStem, headers, content) {
   assert.ok(content.length > 0, `${output} download is empty`);
   const disposition = headers["content-disposition"] || "";
   const expectedExtension = output === "both" ? "zip" : output;
-  assert.match(
+  assert.equal(
     disposition,
-    new RegExp(`^attachment; filename="conversion-[0-9a-f-]+\\.${expectedExtension}"$`),
+    `attachment; filename="${sourceStem}.${expectedExtension}"`,
     `${output} download disposition is invalid`,
   );
   assert.equal(headers["cache-control"], "private, no-store");

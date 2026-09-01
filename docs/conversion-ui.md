@@ -25,8 +25,9 @@ different file or template starts a new request identity.
 Recent conversions on the page can be reopened. Queued and running jobs may be cancelled. Terminal
 states are displayed as succeeded, failed, cancelled, or expired; failure text comes only from the
 API's safe error contract. An expired conversion no longer offers a download. Successful downloads
-use an owner-authorized API route, a server-generated filename, `nosniff`, and private no-store cache
-policy. Page text and errors are announced through accessible live regions.
+use an owner-authorized API route and preserve the uploaded filename stem while replacing its
+extension with `.docx`, `.pdf`, or `.zip`. Their responses also enforce `nosniff` and a private
+no-store cache policy. Page text and errors are announced through accessible live regions.
 
 If the session expires, sign in again. Browser mutations send the session-bound CSRF value from the
 Secure, SameSite=Lax `__Host-md_converter_csrf` cookie as `X-CSRF-Token`. The opaque session cookie

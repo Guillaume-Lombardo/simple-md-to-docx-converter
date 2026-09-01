@@ -65,6 +65,8 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 - Render every Mermaid block locally.
 - Use either Pandoc's native default reference document or an active immutable template version.
 - Produce DOCX, PDF, or a ZIP containing both.
+- Name each result from the uploaded source filename stem, replacing only the final source extension
+  with `.docx`, `.pdf`, or `.zip`, and encode the attachment header safely.
 - Return a job identifier immediately and expose state, current step, progress, safe errors, cancellation, result download, and expiration.
 - Use states `queued`, `running`, `succeeded`, `failed`, `cancelled`, and `expired`.
 - Return the component versions and explicit template mode needed to reproduce a conversion; a
@@ -423,6 +425,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T54 | Publish the post-T38 CLI-entrypoint release and atomically pin public Compose and quickstarts to its immutable image | T22, T38, T40 |
 | T55 | Publish LibreOffice descendant PID probes atomically in the real-process cancellation test harness | T21 |
 | T56 | Allow safe HTTP(S) hyperlinks without remote resource loading and verify the workflow against the final image | T07, T08, T21 |
+| T57 | Preserve the uploaded filename stem for DOCX, PDF, and combined conversion downloads | T16, T21 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30).
 

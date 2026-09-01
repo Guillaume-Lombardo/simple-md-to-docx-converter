@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
@@ -91,7 +92,12 @@ async function convertAndDownload(page, sourceFixture, output, timeout) {
     };
   }, href);
   assert.equal(result.status, 200, `${output} result download failed`);
-  assertDownloadedResult(output, result.headers, Buffer.from(result.body));
+  assertDownloadedResult(
+    output,
+    path.parse(sourceFixture).name,
+    result.headers,
+    Buffer.from(result.body),
+  );
   if (output !== "docx") {
     const manifestResponse = await sessionRequest(
       page,
