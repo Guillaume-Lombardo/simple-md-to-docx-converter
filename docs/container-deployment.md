@@ -36,7 +36,7 @@ claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` depl
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
 
-The repository's public Compose quickstart pins the post-T38 `0.5.1` image by its verified registry
+The repository's public Compose quickstart pins the post-T38 `0.5.2` image by its verified registry
 digest and starts its standalone role with `markweave serve`. The deployment examples use
 `markweave serve` for API roles and `markweave worker` for distributed workers.
 
