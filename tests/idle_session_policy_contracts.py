@@ -13,6 +13,7 @@ from markweave.auth.models import (
     IdleSessionPolicyAudit,
     IdleSessionPolicyOperation,
 )
+from markweave.persistence.observability import SqlAuditReader
 from markweave.persistence.retention import SqlRetentionRepository
 from markweave.persistence.schema import IdleSessionPolicyAuditRow
 from markweave.persistence.sql import SqlIdleSessionPolicyRepository
@@ -35,8 +36,8 @@ def exercise_idle_session_policy_repository_contract(engine: Engine) -> None:
                 IdleSessionPolicyOperation.UPDATE,
                 30,
                 15,
-                minutes,
-                5,
+                42,
+                13,
                 1,
                 datetime.now(UTC),
             ),
@@ -58,6 +59,8 @@ def exercise_idle_session_policy_repository_contract(engine: Engine) -> None:
                     IdleSessionPolicyAuditRow.actor_id,
                     IdleSessionPolicyAuditRow.old_user_idle_minutes,
                     IdleSessionPolicyAuditRow.old_admin_idle_minutes,
+                    IdleSessionPolicyAuditRow.new_user_idle_minutes,
+                    IdleSessionPolicyAuditRow.new_admin_idle_minutes,
                     IdleSessionPolicyAuditRow.revision,
                 )
             )
@@ -66,7 +69,27 @@ def exercise_idle_session_policy_repository_contract(engine: Engine) -> None:
     audit = audits[0]
     assert audit.actor_id == str(actor)
     assert (audit.old_user_idle_minutes, audit.old_admin_idle_minutes) == (30, 15)
+    assert (audit.new_user_idle_minutes, audit.new_admin_idle_minutes) == (
+        persisted.user_idle_minutes,
+        persisted.admin_idle_minutes,
+    )
     assert audit.revision == 1
+
+    unified_audits = SqlAuditReader(engine).list_recent(offset=0, limit=100)
+    policy_audit = next(
+        record for record in unified_audits if str(record.id) == audit.id
+    )
+    assert (
+        policy_audit.old_user_idle_minutes,
+        policy_audit.old_admin_idle_minutes,
+        policy_audit.new_user_idle_minutes,
+        policy_audit.new_admin_idle_minutes,
+    ) == (
+        30,
+        15,
+        persisted.user_idle_minutes,
+        persisted.admin_idle_minutes,
+    )
 
     with pytest.raises(SQLAlchemyError), engine.begin() as connection:
         connection.execute(

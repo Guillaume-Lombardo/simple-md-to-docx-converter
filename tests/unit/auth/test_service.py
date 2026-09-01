@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -18,7 +19,15 @@ from markweave.auth.memory import (
     MemorySessionRepository,
     MemoryUserRepository,
 )
-from markweave.auth.models import IdleSessionPolicy, Role, User, normalize_username
+from markweave.auth.models import (
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
+    Role,
+    User,
+    normalize_username,
+)
+from markweave.auth.policy_errors import IdleSessionPolicyAbsoluteLimitError
 from markweave.auth.security import digest_token
 from markweave.auth.service import (
     AuthenticationService,
@@ -569,3 +578,81 @@ def test_policy_update_is_atomic_versioned_audited_and_absolute_is_hard_ceiling(
     assert_error(
         "AUTHENTICATION_REQUIRED", lambda: service.authenticate(login.session_token)
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("user_idle_minutes", True),
+        ("user_idle_minutes", 5.5),
+        ("user_idle_minutes", "5"),
+        ("user_idle_minutes", 4),
+        ("user_idle_minutes", 301),
+        ("admin_idle_minutes", False),
+        ("admin_idle_minutes", 5.5),
+        ("admin_idle_minutes", "5"),
+        ("admin_idle_minutes", 4),
+        ("admin_idle_minutes", 61),
+        ("revision", True),
+        ("revision", 1.5),
+        ("revision", "1"),
+        ("revision", -1),
+    ),
+)
+def test_idle_session_policy_requires_actual_integers(
+    field: str, value: object
+) -> None:
+    values: dict[str, Any] = {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+    }
+    values[field] = value
+    with pytest.raises(ValueError):
+        IdleSessionPolicy(**values)
+
+
+@pytest.mark.unit
+def test_memory_policy_audit_derives_new_values_from_persisted_policy() -> None:
+    repository = MemoryIdleSessionPolicyRepository()
+    actor = uuid4()
+    updated = repository.update(
+        IdleSessionPolicy(300, 60),
+        expected_revision=0,
+        audit=IdleSessionPolicyAudit(
+            uuid4(),
+            actor,
+            IdleSessionPolicyOperation.UPDATE,
+            30,
+            15,
+            5,
+            5,
+            1,
+            datetime.now(UTC),
+        ),
+    )
+
+    assert updated == IdleSessionPolicy(300, 60, 1)
+    assert (
+        repository.audits[0].new_user_idle_minutes,
+        repository.audits[0].new_admin_idle_minutes,
+    ) == (300, 60)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("user_minutes", "admin_minutes"), ((11, 5), (5, 11)))
+def test_policy_rejects_each_role_above_the_absolute_lifetime(
+    user_minutes: int, admin_minutes: int
+) -> None:
+    service, _policies, _clock = build_role_policy_service()
+    service.absolute_lifetime = timedelta(minutes=10)
+    admin = service.bootstrap_admin("admin", "correct")
+
+    with pytest.raises(IdleSessionPolicyAbsoluteLimitError):
+        service.update_idle_session_policy(
+            admin,
+            user_idle_minutes=user_minutes,
+            admin_idle_minutes=admin_minutes,
+            expected_revision=0,
+        )

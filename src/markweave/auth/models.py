@@ -118,17 +118,31 @@ class IdleSessionPolicy:
     revision: int = 0
 
     def __post_init__(self) -> None:
-        if isinstance(self.user_idle_minutes, bool) or not (
-            MINIMUM_IDLE_MINUTES <= self.user_idle_minutes <= MAXIMUM_USER_IDLE_MINUTES
+        if (
+            not isinstance(self.user_idle_minutes, int)
+            or isinstance(self.user_idle_minutes, bool)
+            or not (
+                MINIMUM_IDLE_MINUTES
+                <= self.user_idle_minutes
+                <= MAXIMUM_USER_IDLE_MINUTES
+            )
         ):
             raise ValueError("Standard-user idle duration is invalid")
-        if isinstance(self.admin_idle_minutes, bool) or not (
-            MINIMUM_IDLE_MINUTES
-            <= self.admin_idle_minutes
-            <= MAXIMUM_ADMIN_IDLE_MINUTES
+        if (
+            not isinstance(self.admin_idle_minutes, int)
+            or isinstance(self.admin_idle_minutes, bool)
+            or not (
+                MINIMUM_IDLE_MINUTES
+                <= self.admin_idle_minutes
+                <= MAXIMUM_ADMIN_IDLE_MINUTES
+            )
         ):
             raise ValueError("Administrator idle duration is invalid")
-        if self.revision < 0:
+        if (
+            not isinstance(self.revision, int)
+            or isinstance(self.revision, bool)
+            or self.revision < 0
+        ):
             raise ValueError("Idle-session policy revision is invalid")
 
     def minutes_for(self, role: Role) -> int:

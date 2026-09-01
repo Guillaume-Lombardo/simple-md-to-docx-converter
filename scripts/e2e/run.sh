@@ -564,6 +564,7 @@ wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 uv run python -m tests.e2e.service_workflow checkpoint \
   --base-url "$base_url" --profile "$profile" \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
+  --policy-evidence \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
 podman restart --time 15 "$application_name" >/dev/null

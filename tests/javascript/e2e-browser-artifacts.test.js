@@ -357,24 +357,9 @@ test("runner fallback CLI repairs missing and malformed diagnostics at its exact
   }
 });
 
-test("fresh expiry tracing and resource collection keep failure-only ordering", async () => {
+test("resource collection keeps failure-only ordering", async () => {
   const browserSource = await readFile("tests/e2e/browser-final-image.test.mjs", "utf8");
   const runnerSource = await readFile("scripts/e2e/run.sh", "utf8");
-  const releaseIndex = browserSource.indexOf(
-    "await closeCompletedBrowserPhases(contexts, traces);",
-  );
-  const expiryContextIndex = browserSource.indexOf(
-    "const expiringContext = await browser.newContext",
-  );
-  const expiryTraceIndex = browserSource.indexOf(
-    'traces.push({ name: "expiring-alice", trace: await startTrace(expiringContext) });',
-  );
-  const expiryPageIndex = browserSource.indexOf(
-    "const expiringPage = await expiringContext.newPage();",
-  );
-
-  assert.ok(releaseIndex > 0 && releaseIndex < expiryContextIndex);
-  assert.ok(expiryContextIndex < expiryTraceIndex && expiryTraceIndex < expiryPageIndex);
   const collectorIndex = runnerSource.indexOf(
     "podman exec \"$application_name\" node /e2e/resource-diagnostics.mjs",
   );

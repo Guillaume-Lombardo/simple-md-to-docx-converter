@@ -16,6 +16,9 @@ from markweave.auth.models import (
     SYSTEM_ACTOR_ID,
     AuthenticationAuditContext,
     AuthenticationAuditOperation,
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
     ProvisionedUser,
     Role,
     Session,
@@ -31,6 +34,7 @@ from markweave.persistence.migrations import (
 from markweave.persistence.schema import AuthenticationAuditRow
 from markweave.persistence.sql import (
     DatabaseReadinessProbe,
+    SqlIdleSessionPolicyRepository,
     SqlSessionRepository,
     SqlUserRepository,
     create_database_engine,
@@ -71,6 +75,40 @@ PASSWORD_CHANGE_REVISION: Any = importlib.import_module(
 IDLE_POLICY_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260901_15_idle_session_policy"
 )
+
+
+@pytest.mark.unit
+def test_inprocess_idle_policy_repository_covers_default_and_replacement() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    repository = SqlIdleSessionPolicyRepository(engine)
+    assert repository.get() == IdleSessionPolicy()
+    actor = uuid4()
+
+    def update_policy(policy: IdleSessionPolicy, expected_revision: int) -> None:
+        assert (
+            repository.update(
+                policy,
+                expected_revision=expected_revision,
+                audit=IdleSessionPolicyAudit(
+                    uuid4(),
+                    actor,
+                    IdleSessionPolicyOperation.UPDATE,
+                    30,
+                    15,
+                    policy.user_idle_minutes,
+                    policy.admin_idle_minutes,
+                    expected_revision + 1,
+                    datetime.now(UTC),
+                ),
+            )
+            is not None
+        )
+
+    update_policy(IdleSessionPolicy(25, 10), 0)
+    update_policy(IdleSessionPolicy(20, 8), 1)
+    assert repository.get() == IdleSessionPolicy(20, 8, 2)
+    engine.dispose()
 
 
 @pytest.mark.unit

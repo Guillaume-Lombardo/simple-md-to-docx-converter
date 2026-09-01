@@ -62,6 +62,13 @@ def checkpoint() -> dict[str, str]:
     }
 
 
+def legacy_checkpoint() -> dict[str, str]:
+    payload = checkpoint()
+    return {
+        key: value for key, value in payload.items() if not key.startswith("policy_")
+    } | {"schema": "t21-service-checkpoint-v1"}
+
+
 @pytest.mark.unit
 def test_service_client_requires_safe_absolute_http_url() -> None:
     client = workflow.ServiceClient("https://example.test/service")
@@ -270,6 +277,10 @@ def test_checkpoint_round_trip_is_content_free_and_owner_only(tmp_path: Path) ->
     rendered = path.read_text(encoding="utf-8")
     assert "password" not in rendered
     assert "source content" not in rendered
+
+    legacy = legacy_checkpoint()
+    workflow.write_state(path, legacy)
+    assert workflow.read_state(path, expected_profile="standalone") == legacy
 
 
 @pytest.mark.unit

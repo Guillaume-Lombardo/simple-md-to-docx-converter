@@ -49,16 +49,6 @@ def test_postgresql_authentication_repository_contract() -> None:
     with engine.begin() as connection:
         connection.execute(delete(SessionRow))
         connection.execute(delete(UserRow))
-        connection.execute(
-            text(
-                "INSERT INTO audit_cleanup_guards (id) VALUES ('policy-contract') ON CONFLICT DO NOTHING"
-            )
-        )
-        connection.execute(text("DELETE FROM idle_session_policy_audit_records"))
-        connection.execute(
-            text("DELETE FROM audit_cleanup_guards WHERE id = 'policy-contract'")
-        )
-        connection.execute(text("DELETE FROM idle_session_policy"))
     exercise_auth_repository_contract(
         SqlUserRepository(engine), SqlSessionRepository(engine)
     )
@@ -71,6 +61,17 @@ def test_postgresql_authentication_repository_contract() -> None:
 def test_postgresql_idle_session_policy_repository_contract() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO audit_cleanup_guards (id) VALUES ('policy-contract') ON CONFLICT DO NOTHING"
+            )
+        )
+        connection.execute(text("DELETE FROM idle_session_policy_audit_records"))
+        connection.execute(
+            text("DELETE FROM audit_cleanup_guards WHERE id = 'policy-contract'")
+        )
+        connection.execute(text("DELETE FROM idle_session_policy"))
     exercise_idle_session_policy_repository_contract(engine)
     exercise_idle_session_policy_audit_retention_contract(engine)
     engine.dispose()

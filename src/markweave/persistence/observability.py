@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Engine,
+    Integer,
     String,
     case,
     cast,
@@ -189,10 +190,10 @@ class SqlAuditReader:
                             "administrator_intervention"
                         ),
                         TemplateAuditRow.created_at.label("created_at"),
-                        literal(None).label("old_user_idle_minutes"),
-                        literal(None).label("old_admin_idle_minutes"),
-                        literal(None).label("new_user_idle_minutes"),
-                        literal(None).label("new_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
                     ),
                     select(
                         AuthenticationAuditRow.id.label("id"),
@@ -209,10 +210,10 @@ class SqlAuditReader:
                             "administrator_intervention"
                         ),
                         AuthenticationAuditRow.created_at.label("created_at"),
-                        literal(None).label("old_user_idle_minutes"),
-                        literal(None).label("old_admin_idle_minutes"),
-                        literal(None).label("new_user_idle_minutes"),
-                        literal(None).label("new_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("old_user_idle_minutes"),
+                        literal(None, type_=Integer).label("old_admin_idle_minutes"),
+                        literal(None, type_=Integer).label("new_user_idle_minutes"),
+                        literal(None, type_=Integer).label("new_admin_idle_minutes"),
                     ),
                     select(
                         IdleSessionPolicyAuditRow.id.label("id"),

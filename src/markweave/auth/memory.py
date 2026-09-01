@@ -257,6 +257,8 @@ class MemoryIdleSessionPolicyRepository:
                     audit,
                     old_user_idle_minutes=previous.user_idle_minutes,
                     old_admin_idle_minutes=previous.admin_idle_minutes,
+                    new_user_idle_minutes=updated.user_idle_minutes,
+                    new_admin_idle_minutes=updated.admin_idle_minutes,
                     revision=updated.revision,
                 )
             )

@@ -595,8 +595,8 @@ class SqlIdleSessionPolicyRepository:
                         operation=audit.operation.value,
                         old_user_idle_minutes=previous.user_idle_minutes,
                         old_admin_idle_minutes=previous.admin_idle_minutes,
-                        new_user_idle_minutes=audit.new_user_idle_minutes,
-                        new_admin_idle_minutes=audit.new_admin_idle_minutes,
+                        new_user_idle_minutes=policy.user_idle_minutes,
+                        new_admin_idle_minutes=policy.admin_idle_minutes,
                         revision=revision,
                         created_at=audit.created_at,
                     )

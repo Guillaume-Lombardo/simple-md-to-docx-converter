@@ -270,7 +270,7 @@ def exercise_idle_session_policy(
                 race,
                 (
                     {"user_idle_minutes": 300, "admin_idle_minutes": 60},
-                    {"user_idle_minutes": 5, "admin_idle_minutes": 5},
+                    {"user_idle_minutes": 299, "admin_idle_minutes": 59},
                 ),
             )
         )
@@ -756,12 +756,37 @@ def write_state(path: Path, state: dict[str, str]) -> None:
     temporary.replace(path)
 
 
+def validate_policy_state(state: dict[str, str]) -> None:
+    """Validate the additional evidence owned by the source-built T59 image."""
+    try:
+        uuid.UUID(state["policy_audit_id"])
+        uuid.UUID(state["policy_audit_actor_id"])
+    except ValueError as error:
+        raise WorkflowFailure("checkpoint: invalid identifier") from error
+    numeric_fields = (
+        "policy_user_idle_minutes",
+        "policy_admin_idle_minutes",
+        "policy_revision",
+        "policy_audit_old_user_idle_minutes",
+        "policy_audit_old_admin_idle_minutes",
+        "policy_audit_new_user_idle_minutes",
+        "policy_audit_new_admin_idle_minutes",
+        "policy_audit_revision",
+    )
+    if any(
+        not state[key].isascii() or not state[key].isdecimal() for key in numeric_fields
+    ):
+        raise WorkflowFailure("checkpoint: invalid policy evidence")
+    if state["policy_audit_operation"] != "idle_session_policy_update":
+        raise WorkflowFailure("checkpoint: invalid policy operation")
+
+
 def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
         raise WorkflowFailure("checkpoint: unreadable state") from error
-    keys = {
+    base_keys = {
         "schema",
         "profile",
         "owner",
@@ -772,6 +797,8 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         "template_id",
         "template_version_id",
         "result_sha256",
+    }
+    policy_keys = {
         "policy_user_idle_minutes",
         "policy_admin_idle_minutes",
         "policy_revision",
@@ -785,12 +812,18 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         "policy_audit_new_admin_idle_minutes",
         "policy_audit_revision",
     }
-    if not isinstance(raw, dict) or set(raw) != keys:
+    if not isinstance(raw, dict):
+        raise WorkflowFailure("checkpoint: invalid schema")
+    schema = raw.get("schema")
+    keys = (
+        base_keys | policy_keys if schema == "t59-service-checkpoint-v2" else base_keys
+    )
+    if set(raw) != keys:
         raise WorkflowFailure("checkpoint: invalid schema")
     if not all(isinstance(raw[key], str) and raw[key] for key in keys):
         raise WorkflowFailure("checkpoint: invalid values")
     if (
-        raw["schema"] != "t59-service-checkpoint-v2"
+        schema not in {"t21-service-checkpoint-v1", "t59-service-checkpoint-v2"}
         or raw["profile"] != expected_profile
     ):
         raise WorkflowFailure("checkpoint: profile or version mismatch")
@@ -803,29 +836,12 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         uuid.UUID(raw["correlation_id"])
         uuid.UUID(raw["template_id"])
         uuid.UUID(raw["template_version_id"])
-        uuid.UUID(raw["policy_audit_id"])
-        uuid.UUID(raw["policy_audit_actor_id"])
     except ValueError as error:
         raise WorkflowFailure("checkpoint: invalid identifier") from error
     if len(raw["result_sha256"]) != 64:
         raise WorkflowFailure("checkpoint: invalid result digest")
-    numeric_policy_fields = (
-        "policy_user_idle_minutes",
-        "policy_admin_idle_minutes",
-        "policy_revision",
-        "policy_audit_old_user_idle_minutes",
-        "policy_audit_old_admin_idle_minutes",
-        "policy_audit_new_user_idle_minutes",
-        "policy_audit_new_admin_idle_minutes",
-        "policy_audit_revision",
-    )
-    if any(
-        not raw[key].isascii() or not raw[key].isdecimal()
-        for key in numeric_policy_fields
-    ):
-        raise WorkflowFailure("checkpoint: invalid policy evidence")
-    if raw["policy_audit_operation"] != "idle_session_policy_update":
-        raise WorkflowFailure("checkpoint: invalid policy operation")
+    if schema == "t59-service-checkpoint-v2":
+        validate_policy_state(raw)
     return {key: raw[key] for key in keys}
 
 
@@ -1455,7 +1471,6 @@ def checkpoint(arguments: argparse.Namespace) -> None:
         raise WorkflowFailure("checkpoint: conversion did not succeed")
     validate_result(client, terminal, arguments.output, arguments.artifact_dir)
     require_template_audit(client, str(template["id"]))
-    policy_evidence = checkpoint_policy_evidence(client)
     state = state_payload(
         profile=arguments.profile,
         owner=arguments.admin_username,
@@ -1465,8 +1480,9 @@ def checkpoint(arguments: argparse.Namespace) -> None:
         template=template,
         result_sha256=result_digest(client, terminal),
     )
-    state["schema"] = "t59-service-checkpoint-v2"
-    state.update(policy_evidence)
+    if arguments.policy_evidence:
+        state["schema"] = "t59-service-checkpoint-v2"
+        state.update(checkpoint_policy_evidence(client))
     write_state(
         arguments.state_file,
         state,
@@ -1506,6 +1522,8 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
     if result_digest(client, job) != state["result_sha256"]:
         raise WorkflowFailure("checkpoint recovery: result bytes changed")
     require_template_audit(client, state["template_id"])
+    if state["schema"] != "t59-service-checkpoint-v2":
+        return
     policy_result = client.request("GET", "/api/v1/admin/session-policy")
     expect(policy_result, 200, "checkpoint idle-session policy")
     policy = decode_object(policy_result, "checkpoint idle-session policy")
@@ -1716,6 +1734,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-file", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--output", choices=("docx", "pdf", "both"), default="docx")
+    parser.add_argument(
+        "--policy-evidence",
+        action="store_true",
+        help="Persist T59 policy evidence in a source-built final-image checkpoint.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument(
         "--admin-username",

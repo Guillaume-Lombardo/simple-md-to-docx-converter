@@ -445,6 +445,108 @@ def test_session_policy_help_exposes_http_only_read_and_update(capsys) -> None:
     assert "role-specific idle-session" in output
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        None,
+        {},
+        {"user_idle_minutes": True, "admin_idle_minutes": 15, "revision": 0},
+        {"user_idle_minutes": 30, "admin_idle_minutes": "15", "revision": 0},
+        {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": False},
+    ),
+)
+def test_session_policy_rejects_malformed_service_responses(
+    remote, capsys, payload: Any
+) -> None:
+    _store, _constructor, client = remote
+    client.request.return_value = _response(
+        200, payload, etag='"idle-session-policy-0"'
+    )
+
+    assert main(("session-policy", "get")) == 1
+    assert "invalid response" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("operation", None),
+        ("administrator_intervention", "yes"),
+        ("target_version", 1),
+        ("new_user_idle_minutes", True),
+        ("new_admin_idle_minutes", "10"),
+    ),
+)
+def test_policy_audit_rejects_malformed_service_fields(field: str, value: Any) -> None:
+    record = {
+        "id": "audit-id",
+        "actor_id": ADMIN_ID,
+        "owner_id": ADMIN_ID,
+        "operation": "idle_session_policy_update",
+        "target_id": "00000000-0000-0000-0000-000000000001",
+        "target_type": "session_policy",
+        "target_version": "1",
+        "version_id": None,
+        "administrator_intervention": True,
+        "created_at": "2026-09-01T12:00:00Z",
+        "old_user_idle_minutes": 30,
+        "old_admin_idle_minutes": 15,
+        "new_user_idle_minutes": 25,
+        "new_admin_idle_minutes": 10,
+    }
+    record[field] = value
+
+    with pytest.raises(administration.CliError, match="invalid response"):
+        administration._audit_record(record)
+
+
+def test_policy_audit_requires_an_object() -> None:
+    with pytest.raises(administration.CliError, match="invalid response"):
+        administration._audit_record([])
+
+
+def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -> None:
+    _store, _constructor, client = remote
+    client.request.return_value = _response(
+        200, {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
+    )
+
+    assert (
+        main(
+            (
+                "--non-interactive",
+                "session-policy",
+                "update",
+                "--user-idle-minutes",
+                "25",
+                "--admin-idle-minutes",
+                "10",
+                "--force",
+            )
+        )
+        == 1
+    )
+    assert "invalid response" in capsys.readouterr().err
+    client.request.assert_called_once()
+
+
+def test_policy_response_requires_an_object() -> None:
+    with pytest.raises(administration.CliError, match="invalid response"):
+        administration._session_policy([])
+
+
+def test_policy_error_falls_back_for_a_malformed_error_envelope() -> None:
+    error = administration._api_error(
+        administration._Response(400, {"error": []}, "", None), "policy_failed"
+    )
+    assert error.code == "policy_failed"
+
+
+def test_human_policy_audit_rejects_non_text_remote_fields() -> None:
+    with pytest.raises(administration.CliError, match="invalid response"):
+        administration._human_text(1)
+
+
 def test_health_url_is_public_and_metrics_support_human_and_json(
     remote, capsys
 ) -> None:

@@ -665,3 +665,6 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert "MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2" in runner
     assert "verify-session-expiration" in runner
     assert 'podman rm --force "$expiry_application_name" "$clamav_name"' in runner
+    assert "--policy-evidence" in runner
+    assert "--policy-evidence" not in RUNNER.read_text(encoding="utf-8")
+    assert "--policy-evidence" not in SIMPLE_RUNNER.read_text(encoding="utf-8")
