@@ -68,8 +68,52 @@ remove_artifacts() {
 }
 
 collect_failure_artifacts() {
-  local resource
+  local resource container_state container_exit_code container_oom_killed
   mkdir -p -- "$artifact_directory"
+  container_state=""
+  container_exit_code=""
+  container_oom_killed=""
+  if ! mkdir -p -- "$temporary_directory/browser-artifacts"; then
+    echo "Could not create browser artifact directory." >&2
+  elif podman container exists "$application_name"; then
+    if ! read -r container_state container_exit_code container_oom_killed < <(
+      podman inspect "$application_name" \
+        --format '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}' 2>/dev/null || true
+    ); then
+      container_state=""
+      container_exit_code=""
+      container_oom_killed=""
+    fi
+    [[ "$container_state" =~ ^[a-z-]+$ ]] || container_state=""
+    [[ "$container_exit_code" =~ ^[0-9]+$ ]] || container_exit_code=""
+    [[ "$container_oom_killed" == true || "$container_oom_killed" == false ]] \
+      || container_oom_killed=""
+    if [[ "$container_state" == running ]] && ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      >/dev/null 2>&1; then
+      podman exec "$application_name" node /e2e/resource-diagnostics.mjs \
+        >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ -d "$temporary_directory/browser-artifacts" ]] && ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+    --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+    >/dev/null 2>&1; then
+    if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --output "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      --host-fallback \
+      --container-state "$container_state" \
+      --container-exit-code "$container_exit_code" \
+      --container-oom-killed "$container_oom_killed"; then
+      echo "Could not write fallback resource diagnostics." >&2
+      return 1
+    fi
+    if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      >/dev/null 2>&1; then
+      echo "Fallback resource diagnostics failed schema validation." >&2
+      return 1
+    fi
+  fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* || "$resource" == volume:* ]]; then
       continue
@@ -94,7 +138,9 @@ cleanup() {
   local exit_code=$?
   local resource
   if [[ "$succeeded" != true ]]; then
-    collect_failure_artifacts
+    if ! collect_failure_artifacts; then
+      exit_code=1
+    fi
   fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* ]]; then

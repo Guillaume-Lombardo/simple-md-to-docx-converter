@@ -5,9 +5,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
+import { retainResourceDiagnostics } from "./resource-diagnostics.mjs";
 
 import {
   assertDownloadedResult,
+  closeCompletedBrowserPhases,
   configuration,
   discardTrace,
   login,
@@ -382,6 +384,13 @@ test("final rootless image supports provisioning and the browser workflow", asyn
       renewedPasswordValue,
     );
 
+    assert.equal(template.owner_id, jobs[0].owner_id);
+    step = "close completed browser phases";
+    await closeCompletedBrowserPhases(contexts, traces);
+    contexts.length = 0;
+    pages.length = 0;
+    traces.length = 0;
+
     step = "browser session expires at the configured boundary";
     const expiringContext = await browser.newContext({
       baseURL: settings.baseUrl,
@@ -389,6 +398,7 @@ test("final rootless image supports provisioning and the browser workflow", asyn
       serviceWorkers: "block",
     });
     contexts.push(expiringContext);
+    traces.push({ name: "expiring-alice", trace: await startTrace(expiringContext) });
     const expiringPage = await expiringContext.newPage();
     pages.push({ name: "expiring-alice", page: expiringPage });
     await login(
@@ -400,10 +410,10 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     await expiringPage.waitForTimeout(61_000);
     assert.equal((await sessionRequest(expiringPage, "/api/v1/session")).status, 401);
 
-    assert.equal(template.owner_id, jobs[0].owner_id);
     step = "discard successful traces";
     await Promise.all(traces.map(({ trace }) => discardTrace(trace)));
   } catch (error) {
+    await Promise.allSettled([retainResourceDiagnostics(settings.artifactRoot)]);
     await retainFailureArtifacts({
       artifactRoot: settings.artifactRoot,
       profile: settings.profile,
