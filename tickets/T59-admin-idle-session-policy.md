@@ -2,7 +2,7 @@
 ticket: T59
 linear_id: G1L-523
 linear_url: https://linear.app/g1lom/issue/G1L-523/t59-add-an-administrator-controlled-idle-session-policy
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -56,6 +56,7 @@ Allow administrators to configure the system-wide, role-specific idle session du
 * 2026-09-01: Implemented the versioned role-specific policy, administrator-only ETag API, immutable audit trail, SQLite and PostgreSQL persistence, current-role session enforcement, OpenAPI contract, recovery coverage, documentation, and final-image workflow assertions. The locally runnable suite passes with 2,167 tests and 95.40% coverage; PostgreSQL, S3, and real final-image checks remain unavailable in the current environment because their required service configuration is absent.
 * 2026-09-01: Addressed independent review by adding the supported CLI read/update surface and policy audit fields, strict canonical ETags, deterministic absolute-lifetime update rejection, visible legacy idle-setting deprecation, assembled-service enforcement contracts, policy-specific audit retention, complete backup/restore audit evidence, and expanded two-profile final-image concurrency/restart/audit assertions. The locally runnable suite now passes with 2,173 tests and 95.41% coverage.
 * 2026-09-01: Completed final review corrections with bounded canonical ETag parsing, exact policy/audit checkpoint evidence verified after both restart and restore, and a separate real-image two-second absolute-lifetime scenario that tests session expiry without violating the five-minute administrator-policy floor. The locally runnable suite passes with 2,174 tests and 95.40% coverage.
+* 2026-09-02: Completed on `main` as `fda25796d7b6f23d6000e1f0e364cdeeeb63e6c5` through ready PR #165. Exact-head run `33563655189` and exact-main run `33565274830` passed every selected gate, including 1,975 unit tests, 90.29% application branch coverage, 92.73% changed application coverage, Compose compatibility with the pinned 0.5.2 image, PostgreSQL/S3 storage contracts, and standalone/distributed final-image E2E. CodeRabbit findings were addressed or documented as a Python 3.14 PEP 758 false positive, all review conversations were resolved, and independent exact-revision reviews approved the delivered implementation.
 
 ## Synchronization
 
