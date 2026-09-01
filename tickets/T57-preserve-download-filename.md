@@ -54,6 +54,11 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   and fixed result media type, taught the final-image assertion to decode RFC 5987 filenames, added a
   non-ASCII filename journey, and rejected empty sources at the job request boundary. Ruff, `ty`, 23
   JavaScript tests, and the 1,929-test unit gate pass with 94.33% total application coverage.
+- 2026-09-01: PR #154 was squash-merged as
+  `b141b9e114b31433a3dc4bbcf5ccd25670effcd7`; CodeRabbit resolved every review thread and exact-main
+  CI run 33483876501 passed the complete light, document-engine, both-profile E2E, functional, and
+  storage matrix. The requested patch-release closure now prepares version `0.5.2`. Compose remains
+  pinned to the verified `0.5.1` digest until publication produces the exact retained GHCR receipt.
 
 ## Synchronization
 
