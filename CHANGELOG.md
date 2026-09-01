@@ -8,6 +8,16 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-5-2"></a>
+
+## [0.5.2] - 2026-09-01
+
+### Changed
+
+- Completed DOCX, PDF, and combined ZIP downloads now preserve the uploaded source filename stem,
+  including safe RFC 5987 encoding for non-ASCII names. Retained legacy jobs without source
+  metadata continue to use the `conversion-<job-id>` fallback.
+
 <a id="release-0-5-1"></a>
 
 ## [0.5.1] - 2026-08-31
@@ -138,6 +148,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.5.2](#release-0-5-2)
 - [0.5.1](#release-0-5-1)
 - [0.5.0](#release-0-5-0)
 - [0.4.0](#release-0-4-0)
