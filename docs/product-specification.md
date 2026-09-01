@@ -126,7 +126,7 @@ through the production router against the exact final images.
 
 Next.js is a presentation-only process. Browser code calls same-origin FastAPI routes directly.
 Except for two non-public process-local frontend probes, route handlers, Server Actions,
-middleware, rewrites, server components, and server-side fetches
+Proxy, rewrites, server components, and server-side fetches
 must not proxy API requests, read or forward session credentials, or reproduce authentication,
 authorization, validation, quotas, persistence, conversion, template, account, audit, health,
 readiness, metrics, or OpenAPI behavior. The frontend receives no database, object-store, scanner,
@@ -165,7 +165,9 @@ use one-year immutable caching. No service worker, CDN data cache, analytics, re
 third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
 must prove a fresh nonce per response with no cache reuse, the same nonce in `script-src` and
 `style-src`, a nonce on every framework bootstrap script and inline style element, no inline style
-attribute or unnonced inline style, and no eval requirement.
+attribute or unnonced inline style, and no eval requirement. T60 implements the interception hook as
+`web/proxy.ts` with the named `export function proxy`; structural and production-build tests reject
+the deprecated `middleware.ts` filename or `middleware` export.
 
 The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS

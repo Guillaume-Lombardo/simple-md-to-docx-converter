@@ -14,6 +14,10 @@ The decision was reviewed against upstream support information on 2026-09-01:
   an Active or Maintenance LTS line. Node.js 24 is LTS.
 - [Next.js support policy](https://nextjs.org/support-policy) identifies Next.js 16 as Active LTS
   and rejects canary releases for production.
+- The [Next.js 16 upgrade guide](https://nextjs.org/docs/app/guides/upgrading/version-16)
+  deprecates `middleware.ts` and the `middleware` export in favor of `proxy.ts` and a function named
+  `proxy`; the [official CSP guide](https://nextjs.org/docs/app/guides/content-security-policy) uses
+  that convention for per-request nonces.
 - [TypeScript 7.0's release announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
   says 7.0 has no programmatic API and recommends the TypeScript 6 compatibility package for tools
   that still need one. The migration therefore stays on the latest reviewed 6.0 patch until the
@@ -62,11 +66,12 @@ The frontend is a presentation process. It owns page composition, browser assets
 state, and rendering only. Browser JavaScript calls FastAPI directly through same-origin relative
 `/api/v1` URLs. The frontend has no database, object-store, scanner, worker, or document-engine
 credentials; it does not mount `/data` or `/work`; and it has no network route to those services.
-Next.js route handlers, Server Actions, middleware, rewrites, and server components must not proxy
-API calls or implement authentication, authorization, validation, quotas, persistence, conversion,
+Next.js route handlers, Server Actions, Proxy, rewrites, and server components must not proxy API
+calls or implement authentication, authorization, validation, quotas, persistence, conversion,
 template, account, audit, public service health/readiness, metrics, or OpenAPI behavior. The only
 route-handler exception is the two non-public, process-local frontend probes defined below.
-Middleware may generate page CSP nonces and perform presentation-only routing.
+`web/proxy.ts` with the named `export function proxy` may generate page CSP nonces and perform
+presentation-only routing. The deprecated `middleware.ts` file and `middleware` export are absent.
 
 FastAPI remains the only authority for all business and security decisions. The standalone profile
 has one backend `serve` replica with its embedded worker plus one frontend replica. The distributed
@@ -252,6 +257,10 @@ font-src 'self';
 manifest-src 'self';
 worker-src 'none'
 ```
+
+The CSP interception hook is `web/proxy.ts` with the named `export function proxy`, as required by
+the reviewed Next.js 16 convention. T60's structural and production-build tests reject deprecated
+`middleware.ts` or an exported function named `middleware`.
 
 The same response nonce is passed to framework bootstrap scripts and every emitted inline style
 element. T60 must prove on exact Next.js `16.3.4` production dynamic rendering that every response
