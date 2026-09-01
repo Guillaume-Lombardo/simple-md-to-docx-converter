@@ -17,7 +17,7 @@ Create the production-ready Next.js, TypeScript, and Tailwind CSS application fo
 
 * Create an isolated `web/` application using the architecture, runtime, package-manager, and version policies approved by T58.
 * Enable strict TypeScript, linting, formatting, deterministic lockfile installation, reproducible production builds, and Tailwind CSS with a small accessible design-token foundation.
-* Derive frontend API types or fixtures from the canonical OpenAPI contract and fail CI when generated contract artifacts are stale; do not hand-maintain a divergent API model.
+* Generate typed frontend bindings for the production runtime and test fixtures from the canonical OpenAPI contract; fail CI when generated contract artifacts are stale, and do not hand-maintain a divergent API model.
 * Provide one typed API transport for JSON, multipart uploads, downloads, error envelopes, ETags, CSRF headers, idempotency keys, cancellation, and request aborts.
 * Establish accessible application-shell, form, alert, loading, progress, dialog, table/list, and navigation primitives without introducing a separate business backend.
 * Enforce production CSP compatibility without `unsafe-inline` or `unsafe-eval`, except for a separately reviewed and documented framework requirement.
@@ -47,6 +47,7 @@ Create the production-ready Next.js, TypeScript, and Tailwind CSS application fo
 ## Progress
 
 * 2026-09-01: Created as the frontend foundation after T58; it deliberately leaves the existing production pages active.
+* 2026-09-01: Review clarified that production runtime code must use generated typed bindings; fixtures are generated from the same OpenAPI contract for tests only.
 
 ## Synchronization
 
