@@ -9,25 +9,28 @@ const exactOperations = new Set([
   "/openapi.json",
 ]);
 
-function normalize(path) {
-  let decoded = path;
-  try {
-    for (let count = 0; count < 2; count += 1)
-      decoded = decodeURIComponent(decoded);
-  } catch {
-    return path.toLowerCase();
-  }
+function normalize(requestTarget) {
+  const separator = requestTarget.indexOf("?");
+  const rawPath =
+    separator < 0 ? requestTarget : requestTarget.slice(0, separator);
+  const query = separator < 0 ? "" : requestTarget.slice(separator);
+  let decoded = rawPath;
+  for (let count = 0; count < 2; count += 1)
+    decoded = decodeURIComponent(decoded).replaceAll("\\", "/");
   const parts = [];
   for (const part of decoded.split("/")) {
     if (!part || part === ".") continue;
     if (part === "..") parts.pop();
     else parts.push(part);
   }
-  return `/${parts.join("/")}`.toLowerCase();
+  return {
+    path: `/${parts.join("/")}`,
+    requestTarget: `/${parts.join("/")}${query}`,
+  };
 }
 
 function target(path) {
-  const decoded = normalize(path);
+  const decoded = path.toLowerCase();
   if (
     decoded === "/_frontend/health" ||
     decoded.startsWith("/_frontend/health/")
@@ -54,7 +57,15 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
       clientResponse.end();
       return;
     }
-    const selected = target(clientRequest.url.split(/[?#]/, 1)[0]);
+    let normalized;
+    try {
+      normalized = normalize(clientRequest.url);
+    } catch {
+      clientResponse.writeHead(400, { "Content-Length": "0" });
+      clientResponse.end();
+      return;
+    }
+    const selected = target(normalized.path);
     if (selected === "deny") {
       clientResponse.writeHead(404, { "Content-Length": "0" });
       clientResponse.end();
@@ -73,7 +84,7 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
         headers,
         hostname: destination.hostname,
         method: clientRequest.method,
-        path: clientRequest.url,
+        path: normalized.requestTarget,
         port: destination.port,
       },
       (upstreamResponse) => {

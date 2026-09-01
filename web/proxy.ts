@@ -19,17 +19,6 @@ function policy(nonce: string): string {
 }
 
 export function proxy(request: NextRequest) {
-  const acceptsHtml = (request.headers.get("accept") ?? "")
-    .split(",")
-    .some((item) => item.split(";", 1)[0]?.trim() === "text/html");
-  const isComponent =
-    request.headers.get("rsc") === "1" ||
-    request.headers.has("next-router-prefetch") ||
-    request.headers.has("next-router-segment-prefetch") ||
-    request.headers.get("purpose") === "prefetch";
-  if (request.method === "HEAD" || !acceptsHtml || isComponent)
-    return NextResponse.next();
-
   const nonce = randomBytes(18).toString("base64");
   const csp = policy(nonce);
   const requestHeaders = new Headers(request.headers);

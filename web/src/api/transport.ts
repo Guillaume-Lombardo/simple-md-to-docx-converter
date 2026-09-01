@@ -57,6 +57,29 @@ function isJsonMediaType(value: string | null): boolean {
   return value?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
 
+function normalizeApiPath(path: string): ApiPath {
+  const base = new URL("https://markweave.invalid");
+  const rawPath = path.split(/[?#]/, 1)[0]!.replaceAll("\\", "/");
+  let decoded = rawPath;
+  try {
+    for (let count = 0; count < 2; count += 1)
+      decoded = decodeURIComponent(decoded).replaceAll("\\", "/");
+  } catch {
+    throw new ApiError(0, "INVALID_API_PATH", "The API path is invalid.");
+  }
+  if (decoded.split("/").some((segment) => segment === "." || segment === ".."))
+    throw new ApiError(0, "INVALID_API_PATH", "The API path is invalid.");
+  const normalized = new URL(path, base);
+  if (
+    normalized.origin !== base.origin ||
+    normalized.hash ||
+    (normalized.pathname !== "/api/v1" &&
+      !normalized.pathname.startsWith("/api/v1/"))
+  )
+    throw new ApiError(0, "INVALID_API_PATH", "The API path is invalid.");
+  return `${normalized.pathname}${normalized.search}` as ApiPath;
+}
+
 async function parseJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
@@ -137,8 +160,7 @@ export class ApiTransport {
     options: RequestOptions,
     accept: string,
   ): Promise<Response> {
-    if (path !== "/api/v1" && !path.startsWith("/api/v1/"))
-      throw new ApiError(0, "INVALID_API_PATH", "The API path is invalid.");
+    const normalizedPath = normalizeApiPath(path);
     const headers = new Headers({ Accept: accept });
     if (options.csrf) {
       const csrf = cookieValue(this.readCookie(), CSRF_COOKIE);
@@ -156,7 +178,7 @@ export class ApiTransport {
     if (typeof options.body === "string")
       headers.set("Content-Type", "application/json");
 
-    const response = await this.fetcher(path, {
+    const response = await this.fetcher(normalizedPath, {
       body: options.body,
       cache: "no-store",
       credentials: "same-origin",

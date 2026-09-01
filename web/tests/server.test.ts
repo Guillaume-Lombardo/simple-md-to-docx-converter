@@ -157,10 +157,11 @@ async function get(
   port: number,
   path: string,
   headers?: Record<string, string>,
+  method = "GET",
 ) {
   return new Promise<{ body: string; csp?: string; status: number }>(
     (resolve, reject) => {
-      const call = request({ headers, path, port }, (result) => {
+      const call = request({ headers, method, path, port }, (result) => {
         let body = "";
         result.on("data", (chunk) => {
           body += chunk;
@@ -231,6 +232,64 @@ test("HTTP header overflow returns an empty 431", async () => {
   page.server.close();
 });
 
+test("page server retains CSP only for emitted HTML documents", async () => {
+  const page = createPageServer(
+    (incoming: IncomingMessage, response: ServerResponse) => {
+      response.setHeader("Content-Security-Policy", "generated");
+      if (incoming.url === "/json") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end("{}");
+      } else if (incoming.url === "/empty") {
+        response.writeHead(204, { "Content-Type": "text/html" });
+        response.end();
+      } else if (incoming.url === "/not-modified") {
+        response.writeHead(304, { "Content-Type": "text/html" });
+        response.end();
+      } else if (incoming.url === "/zero") {
+        response.writeHead(200, {
+          "Content-Length": "0",
+          "Content-Type": "text/html",
+        });
+        response.end();
+      } else if (incoming.url === "/raw") {
+        response.writeHead(200, [
+          "Content-Type",
+          "application/json",
+          "Content-Security-Policy",
+          "generated",
+        ]);
+        response.end("{}");
+      } else if (incoming.url === "/status-message") {
+        response.writeHead(200, "Fine", { "Content-Type": "text/html" });
+        response.end("document");
+      } else {
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        response.end("document");
+      }
+    },
+  );
+  const port = await listen(page.server);
+  expect((await get(port, "/html")).csp).toBe("generated");
+  expect((await get(port, "/json")).csp).toBeUndefined();
+  expect((await get(port, "/empty")).csp).toBeUndefined();
+  expect(
+    (await get(port, "/html", { Purpose: "prefetch" })).csp,
+  ).toBeUndefined();
+  expect((await get(port, "/html", { RSC: "1" })).csp).toBeUndefined();
+  expect(
+    (await get(port, "/html", { "Next-Router-Prefetch": "1" })).csp,
+  ).toBeUndefined();
+  expect(
+    (await get(port, "/html", { "Next-Router-Segment-Prefetch": "1" })).csp,
+  ).toBeUndefined();
+  expect((await get(port, "/not-modified")).csp).toBeUndefined();
+  expect((await get(port, "/zero")).csp).toBeUndefined();
+  expect((await get(port, "/raw")).csp).toBeUndefined();
+  expect((await get(port, "/status-message")).csp).toBe("generated");
+  expect((await get(port, "/html", undefined, "HEAD")).csp).toBeUndefined();
+  await new Promise((resolve) => page.server.close(resolve));
+});
+
 test("readiness checks route manifests and immutable asset integrity", async () => {
   const root = await mkdtemp(join(tmpdir(), "markweave-build-"));
   const staticRoot = join(root, ".next/static/chunks");
@@ -249,12 +308,24 @@ test("readiness checks route manifests and immutable asset integrity", async () 
     '{"/convert/page":"app/convert/page.js"}',
   );
   await writeFile(join(serverRoot, "page.js"), "route");
+  const clientChunk = join(staticRoot, "route-client.js");
+  const serverChunk = join(root, ".next/server/chunks/route-ssr.js");
+  await mkdir(join(root, ".next/server/chunks"), { recursive: true });
+  await writeFile(
+    join(serverRoot, "page_client-reference-manifest.js"),
+    'globalThis.__RSC_MANIFEST["/convert/page"] = {"clientModules":{"fixture":{"chunks":["/_next/static/chunks/route-client.js"]}},"ssrModuleMapping":{"fixture":{"chunks":["server/chunks/route-ssr.js"]}}};\n',
+  );
+  await writeFile(clientChunk, "client route");
+  await writeFile(serverChunk, "server route");
   await writeFile(join(staticRoot, "unreferenced.js"), "present");
   await expect(createBuildIntegrity(root)).rejects.toThrow();
   const asset = join(staticRoot, "app-abc.js");
   await writeFile(asset, "original");
   const ready = await createBuildIntegrity(root);
   expect(await ready()).toBe(true);
+  await rm(clientChunk);
+  expect(await ready()).toBe(false);
+  await writeFile(clientChunk, "client route");
   await writeFile(asset, "corrupt");
   expect(await ready()).toBe(false);
   await writeFile(asset, "original");
@@ -264,6 +335,29 @@ test("readiness checks route manifests and immutable asset integrity", async () 
   await rm(join(root, ".next/routes-manifest.json"));
   expect(await ready()).toBe(false);
   await writeFile(join(root, ".next/routes-manifest.json"), routes);
+  await writeFile(join(root, ".next/routes-manifest.json"), "{}");
+  await expect(createBuildIntegrity(root)).rejects.toThrow(
+    "Invalid routes manifest",
+  );
+  await writeFile(
+    join(root, ".next/routes-manifest.json"),
+    '{"staticRoutes":[{"page":"/missing"}]}',
+  );
+  await expect(createBuildIntegrity(root)).rejects.toThrow(
+    "Missing route artifact",
+  );
+  await writeFile(join(root, ".next/routes-manifest.json"), routes);
+  await writeFile(
+    join(serverRoot, "page_client-reference-manifest.js"),
+    "invalid",
+  );
+  await expect(createBuildIntegrity(root)).rejects.toThrow(
+    "Invalid client-reference manifest",
+  );
+  await writeFile(
+    join(serverRoot, "page_client-reference-manifest.js"),
+    'globalThis.__RSC_MANIFEST["/convert/page"] = {};\n',
+  );
   await writeFile(join(root, ".next/BUILD_ID"), "\n");
   await expect(createBuildIntegrity(root)).rejects.toThrow(
     "Empty build identifier",

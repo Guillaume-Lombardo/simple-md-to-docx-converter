@@ -156,6 +156,42 @@ test("real router preserves backend credentials and isolates frontend credential
     ),
   ).toBe(true);
 
+  for (const path of ["/api/v1/../convert", "/docs/%2e%2e/convert"]) {
+    expect(await call(routerOrigin, "GET", path)).toEqual({
+      body: "frontend",
+      cookies: [],
+      status: 200,
+    });
+  }
+  expect(frontendCaptures.slice(-2).map((item) => item.path)).toEqual([
+    "/api/convert",
+    "/convert",
+  ]);
+
+  for (const path of [
+    "/convert/../api/v1/session",
+    "/convert/%2e%2e/api/v1/session",
+    "/convert/%5c..%5c/api/v1/session",
+    "/api/v1/%2e%2e/%2e%2e/docs/oauth2-redirect",
+  ])
+    expect(await call(routerOrigin, "GET", path)).toEqual({
+      body: "backend",
+      cookies: ["session=one; HttpOnly", "csrf=two"],
+      status: 200,
+    });
+  expect(backendCaptures.slice(-4).map((item) => item.path)).toEqual([
+    "/api/v1/session",
+    "/api/v1/session",
+    "/api/v1/session",
+    "/docs/oauth2-redirect",
+  ]);
+
+  expect(await call(routerOrigin, "GET", "/api/v1/%ZZ")).toEqual({
+    body: "",
+    cookies: [],
+    status: 400,
+  });
+
   const capturesBeforeDenial = frontendCaptures.length + backendCaptures.length;
   for (const path of [
     "/_frontend/health",

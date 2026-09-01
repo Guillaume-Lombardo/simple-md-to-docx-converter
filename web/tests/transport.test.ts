@@ -202,6 +202,37 @@ test("runtime API path validation rejects lookalike prefixes before fetch", asyn
 });
 
 test.each([
+  "/api/v1/../admin",
+  "/api/v1/%2e%2e/admin",
+  "/api/v1/%252e%252e/admin",
+  "/api/v1/%5c..%5cadmin",
+  "/api/v1/a/./b",
+  "/api/v1/../../outside",
+  "//attacker.invalid/api/v1/test",
+  "https://attacker.invalid/api/v1/test",
+])(
+  "API paths reject traversal and origin changes before fetch: %s",
+  async (path) => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      new ApiTransport(fetcher).json(path as "/api/v1/test", okSchema),
+    ).rejects.toMatchObject({ code: "INVALID_API_PATH" });
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+
+test("API paths are normalized before fetch without changing their origin", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  await new ApiTransport(fetcher).json("/api/v1/test?name=a%20b", okSchema);
+  expect(fetcher.mock.calls[0]![0]).toBe("/api/v1/test?name=a%20b");
+});
+
+test.each([
   ["not-json", 200],
   ['{"ok":"yes"}', 200],
   ["not-json", 400],

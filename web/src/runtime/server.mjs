@@ -54,7 +54,10 @@ export function createPageServer(handler) {
   const admission = createAdmission(handler);
   const server = createServer(
     { maxHeaderSize: MAX_HEADER_SIZE },
-    admission.handler,
+    (request, response) => {
+      filterGeneratedCsp(request, response);
+      admission.handler(request, response);
+    },
   );
   server.on("clientError", (_error, socket) => {
     if (socket.writable)
@@ -63,6 +66,63 @@ export function createPageServer(handler) {
       );
   });
   return { admission, server };
+}
+
+function headerFrom(response, headers, name) {
+  if (Array.isArray(headers)) {
+    for (let index = 0; index < headers.length; index += 2)
+      if (String(headers[index]).toLowerCase() === name)
+        return String(headers[index + 1]);
+  } else if (headers) {
+    for (const [key, value] of Object.entries(headers))
+      if (key.toLowerCase() === name) return String(value);
+  }
+  const value = response.getHeader(name);
+  return value === undefined ? undefined : String(value);
+}
+
+function removeHeader(headers, name) {
+  if (Array.isArray(headers)) {
+    for (let index = headers.length - 2; index >= 0; index -= 2)
+      if (String(headers[index]).toLowerCase() === name)
+        headers.splice(index, 2);
+  } else if (headers) {
+    for (const key of Object.keys(headers))
+      if (key.toLowerCase() === name) delete headers[key];
+  }
+}
+
+function filterGeneratedCsp(request, response) {
+  const writeHead = response.writeHead;
+  response.writeHead = function filteredWriteHead(statusCode, reason, headers) {
+    const suppliedHeaders = typeof reason === "string" ? headers : reason;
+    const contentType = headerFrom(response, suppliedHeaders, "content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    const contentLength = headerFrom(
+      response,
+      suppliedHeaders,
+      "content-length",
+    );
+    const prefetch =
+      request.headers.rsc === "1" ||
+      request.headers["next-router-prefetch"] !== undefined ||
+      request.headers["next-router-segment-prefetch"] !== undefined ||
+      request.headers.purpose?.toLowerCase() === "prefetch";
+    const bodyless =
+      request.method === "HEAD" ||
+      statusCode === 204 ||
+      statusCode === 304 ||
+      contentLength === "0";
+    if (contentType !== "text/html" || prefetch || bodyless) {
+      response.removeHeader("content-security-policy");
+      removeHeader(suppliedHeaders, "content-security-policy");
+    }
+    return typeof reason === "string"
+      ? writeHead.call(this, statusCode, reason, headers)
+      : writeHead.call(this, statusCode, reason);
+  };
 }
 
 export function createProbeServer(state) {
@@ -105,6 +165,30 @@ function strings(value) {
   if (value && typeof value === "object")
     return Object.values(value).flatMap(strings);
   return [];
+}
+
+async function clientReferences(nextRoot, routeFiles) {
+  const manifests = [];
+  const references = [];
+  for (const routeFile of routeFiles) {
+    const manifest = join(
+      nextRoot,
+      "server",
+      routeFile.replace(/\.js$/, "_client-reference-manifest.js"),
+    );
+    const source = await readFile(manifest, "utf8");
+    const match = source.match(/\]\s*=\s*(\{.*\});\s*$/s);
+    if (!match) throw new Error("Invalid client-reference manifest");
+    const parsed = JSON.parse(match[1]);
+    manifests.push(manifest);
+    for (const path of strings(parsed)) {
+      if (path.startsWith("/_next/static/"))
+        references.push(join(nextRoot, path.slice("/_next/".length)));
+      else if (path.startsWith("static/") || path.startsWith("server/"))
+        references.push(join(nextRoot, path));
+    }
+  }
+  return { manifests, references };
 }
 
 export async function createBuildIntegrity(root) {
@@ -151,6 +235,10 @@ export async function createBuildIntegrity(root) {
       join(nextRoot, "server", path),
     ),
   ];
+  const client = await clientReferences(
+    nextRoot,
+    Object.values(appPathsManifest),
+  );
   const staticRoot = join(nextRoot, "static");
   const staticFiles = await assetFiles(staticRoot);
   if (staticFiles.length === 0) throw new Error("No immutable assets found");
@@ -158,6 +246,8 @@ export async function createBuildIntegrity(root) {
     ...new Set([
       ...required.map((item) => join(nextRoot, item)),
       ...referenced,
+      ...client.manifests,
+      ...client.references,
       ...staticFiles.sort(),
     ]),
   ];
