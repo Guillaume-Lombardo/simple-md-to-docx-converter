@@ -59,6 +59,24 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   CI run 33483876501 passed the complete light, document-engine, both-profile E2E, functional, and
   storage matrix. The requested patch-release closure now prepares version `0.5.2`. Compose remains
   pinned to the verified `0.5.1` digest until publication produces the exact retained GHCR receipt.
+- 2026-09-01: Release PR #156 was squash-merged as
+  `8e9ef63f62e81012cc31346acb7f3a390da6863d`. Automatic release run 33508555975 published
+  `markweave 0.5.2` to PyPI, created `v0.5.2` and its GitHub Release at that exact source SHA,
+  and completed the GHCR build, SBOM and vulnerability evidence, provenance attestation, and
+  retained release-evidence jobs. The retained receipt records registry digest
+  `sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e`;
+  the downloaded receipt and metadata matched their GitHub asset digests, and a separate anonymous
+  manifest fetch returned the same digest in both its response header and the hash of the exact
+  public manifest bytes. This phase adopts that exact published image in Compose before public
+  quickstart validation and ticket completion.
+- 2026-09-01: The Docker simple quickstart pulled the pinned `0.5.2` image by its exact retained
+  digest, reached readiness, and completed a real template-free conversion of
+  `quickstart-source.md`. The download was a valid 10,459-byte OpenXML DOCX named
+  `quickstart-source.docx`, confirming the T57 behavior through the published image. The equivalent
+  rootless Podman pull was attempted but the local VM had only 964 MiB free and exhausted
+  `/var/tmp` while storing an image layer; no application container was created. Hosted exact-main
+  CI run 33508555488 had already passed the container gate and both standalone and distributed
+  rootless-Podman final-image profiles for the exact release source.
 
 ## Synchronization
 
