@@ -11,11 +11,12 @@ from uuid import uuid4
 import boto3
 import pytest
 from sqlalchemy import insert, select, text
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.engine import make_url
 
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.schema import UserRow
+from markweave.persistence.schema import IdleSessionPolicyRow, UserRow
 from markweave.persistence.sql import create_database_engine
 from markweave.recovery_adapters import S3Configuration
 from markweave.recovery_manifest import RecoveryError
@@ -104,6 +105,23 @@ def _prepare_source(client, bucket: str) -> tuple[str, bytes]:
                     "password_change_required": False,
                 },
             )
+            connection.execute(
+                postgres_insert(IdleSessionPolicyRow)
+                .values(
+                    id=1,
+                    user_idle_minutes=300,
+                    admin_idle_minutes=5,
+                    revision=42,
+                )
+                .on_conflict_do_update(
+                    index_elements=[IdleSessionPolicyRow.id],
+                    set_={
+                        "user_idle_minutes": 300,
+                        "admin_idle_minutes": 5,
+                        "revision": 42,
+                    },
+                )
+            )
     finally:
         engine.dispose()
     key = f"uploads/{uuid4()}/{uuid4()}"
@@ -156,6 +174,14 @@ def test_distributed_backup_and_isolated_restore_bind_both_provider_identities(
         try:
             with engine.connect() as connection:
                 assert connection.scalar(select(UserRow.username)) == "Recovery User"
+                policy = connection.execute(
+                    select(
+                        IdleSessionPolicyRow.user_idle_minutes,
+                        IdleSessionPolicyRow.admin_idle_minutes,
+                        IdleSessionPolicyRow.revision,
+                    )
+                ).one()
+                assert policy == (300, 5, 42)
         finally:
             engine.dispose()
 
