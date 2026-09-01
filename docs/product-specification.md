@@ -2,7 +2,7 @@
 
 **Status:** Functional, technical, and autonomous-development specification
 
-**Date:** August 26, 2026
+**Date:** September 1, 2026
 
 **Runtime target:** UBI 9 container, Python 3.14, rootless Podman, and OpenShift
 
@@ -20,9 +20,11 @@ The product includes a conversion page, template administration, local authentic
 
 | Topic | Decision |
 |---|---|
-| Application language | Python 3.14 |
-| Base image | Official `ubi9/python-314`, pinned by digest in CI |
-| API and Web | FastAPI, server-rendered HTML, limited native JavaScript |
+| Backend language | Python 3.14 |
+| Backend image | Official `ubi9/python-314`, pinned by digest in CI |
+| API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under `/api/v1` and the documented operational routes |
+| Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
+| Browser boundary | Browser pages and `/api/v1` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
@@ -85,14 +87,19 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 
 ### 3.3 Web interface
 
-Provide a login page and two main server-rendered pages:
+Provide a login page and two main browser workflows. The target implementation is the Next.js,
+TypeScript, and Tailwind CSS application under `web/`; the current server-rendered pages remain the
+production implementation until T64 completes parity, rootless E2E verification, and cutover:
 
 - **Convert:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
   choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
   display accessible English errors.
 - **Templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
 
-Administrators also receive a users tab to create, search, activate, deactivate, and reset local accounts. Every permission is enforced server-side. Any application JavaScript receives its own tests and coverage checks.
+Administrators also receive controls to create, search, activate, deactivate, and reset local
+accounts and to configure the effective system-wide idle session duration. Every permission and
+session-expiry decision is enforced by FastAPI. Application TypeScript and JavaScript receive their
+own tests and blocking coverage checks.
 
 ### 3.4 Command-line interface
 
@@ -240,6 +247,11 @@ Support `Idempotency-Key` for job creation. Enforce owner/administrator access t
   server-side.
 - Default the configurable idle session lifetime to 30 minutes and the absolute lifetime to 8
   hours. Revoke sessions server-side on logout, account deactivation, and password reset.
+- Allow an administrator to persist a system-wide idle-session override within explicitly approved
+  bounds. The operator-configured absolute lifetime remains a hard ceiling. FastAPI enforces the
+  current effective idle policy on every validation, a tightened policy applies to existing
+  unexpired sessions, and a later relaxation never revives an expired or revoked session. Policy
+  changes use optimistic concurrency and immutable audit records in both storage profiles.
 - Send the session token only in a cookie with `HttpOnly`, `Secure`, and `SameSite=Lax`.
 - Reject login POST requests carrying a cross-origin `Origin` before evaluating credentials. Allow
   the exact request origin and documented non-browser clients that omit `Origin`.
@@ -323,7 +335,7 @@ markers = [
 ]
 ```
 
-Unit tests remain fast and deterministic and use pytest-mock rather than direct `unittest.mock`. Ruff must enforce that restriction. Calculate branch coverage from unit tests with a blocking 90% threshold and enforce 90% changed-line coverage in pull requests.
+Unit tests remain fast and deterministic and use pytest-mock rather than direct `unittest.mock`. Ruff must enforce that restriction. Calculate branch coverage from unit tests with a blocking 90% threshold and enforce 90% changed-line coverage in pull requests. The frontend independently blocks line, branch, and function coverage below 90% and runs strict TypeScript, lint, formatting, deterministic-build, and OpenAPI-binding freshness checks.
 
 Functional tests exercise assembled application behavior with substituted adapters. Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—has at least one integration test covering its primary successful path and every relevant failure behavior. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
 
@@ -426,8 +438,15 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T55 | Publish LibreOffice descendant PID probes atomically in the real-process cancellation test harness | T21 |
 | T56 | Allow safe HTTP(S) hyperlinks without remote resource loading and verify the workflow against the final image | T07, T08, T21 |
 | T57 | Preserve the uploaded filename stem for DOCX, PDF, and combined conversion downloads | T16, T21 |
+| T58 | Define the Next.js frontend migration architecture, same-origin API boundary, staged cutover, runtime topology, and rollback contract | T20, T21, T45 |
+| T59 | Persist and audit an administrator-controlled idle-session policy enforced by FastAPI across both storage profiles | T06, T12, T19, T45, T58 |
+| T60 | Build the `web/` Next.js, TypeScript, and Tailwind CSS foundation, typed API transport, frontend quality gates, and rootless smoke test | T45, T58 |
+| T61 | Migrate login, logout, password renewal, protected navigation, and session-expiry behavior to Next.js | T30, T59, T60 |
+| T62 | Migrate the asynchronous conversion workflow to Next.js with behavioral, accessibility, and failure parity | T16, T57, T61 |
+| T63 | Migrate template, user, and idle-session-policy administration to Next.js | T17, T59, T61 |
+| T64 | Cut over browser routing, remove the legacy frontend, harden and publish the frontend runtime, and complete two-profile rootless E2E acceptance | T20, T21, T22, T62, T63 |
 
-Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30).
+Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, parallel workflow migrations T62 and T63, and the single verified cutover T64.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
@@ -448,6 +467,14 @@ updates. Each ticket lists its exclusive files or components; a worker must stop
 the ticket before touching any path owned by another active ticket.
 
 ## 14. Deferred decisions and initial-scope exclusions
+
+- T58 owns the production Next.js topology, frontend base image, supported Node.js/Next.js/
+  TypeScript/Tailwind versions, package manager, health/readiness split, resource budgets,
+  publication model, and rollback mechanics. Do not implement or publish a topology before that
+  architecture decision is reviewed.
+- T59 owns the explicit minimum and maximum administrator-selectable idle-session durations. Keep
+  the existing 30-minute default and the operator-controlled absolute lifetime until those bounds
+  receive product approval; do not infer security-policy values from framework defaults.
 
 - Exact UBI 9 Python 3.14 image digest and availability of Chromium, LibreOffice, and Pandoc from approved build sources.
 - Validate the approved Chromium sandbox strategy on k3s after the rootless Podman proof. OpenShift
