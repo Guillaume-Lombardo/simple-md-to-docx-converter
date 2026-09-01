@@ -557,6 +557,12 @@ export type UserResponse = {
      */
     active: boolean;
     /**
+     * Effective Idle Minutes
+     *
+     * Current server-enforced inactivity duration. Present on login and session inspection responses.
+     */
+    effective_idle_minutes?: number | null;
+    /**
      * Id
      */
     id: string;

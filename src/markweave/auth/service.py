@@ -324,6 +324,10 @@ class AuthenticationService:
         AuthorizationService.require_admin(actor)
         return self.idle_policies.get()
 
+    def effective_idle_minutes(self, role: Role) -> int:
+        """Return the server-enforced inactivity duration for one effective role."""
+        return int(self._idle_lifetime(role).total_seconds() // 60)
+
     def update_idle_session_policy(
         self,
         actor: User,

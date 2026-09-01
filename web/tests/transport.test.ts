@@ -8,6 +8,21 @@ function response(body: BodyInit | null, init: ResponseInit = {}) {
   return new Response(body, init);
 }
 
+test("browser fetch is invoked without an ApiTransport receiver", async () => {
+  const fetcher = function (this: unknown) {
+    expect(this).toBeUndefined();
+    return Promise.resolve(
+      response('{"ok":true}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  } as typeof fetch;
+  await expect(
+    new ApiTransport(fetcher).json("/api/v1/test", okSchema),
+  ).resolves.toEqual({ ok: true });
+});
+
 test("JSON transport sends contract headers and parses a typed response", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
     response('{"ok":true}', {

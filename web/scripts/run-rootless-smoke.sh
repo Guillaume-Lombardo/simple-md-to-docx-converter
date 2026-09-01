@@ -46,6 +46,8 @@ for _ in $(seq 1 30); do
   sleep 0.1
 done
 curl --fail --silent --output /dev/null "http://127.0.0.1:${router_port}/convert"
+curl --fail --silent --output /dev/null "http://127.0.0.1:${router_port}/login"
+curl --fail --silent --output /dev/null "http://127.0.0.1:${router_port}/change-password"
 test -z "$(curl --silent --head "http://127.0.0.1:${router_port}/convert" | \
   grep --ignore-case '^x-powered-by:' || true)"
 for path in \

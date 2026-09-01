@@ -2,19 +2,27 @@
 
 import Link from "next/link";
 import {
+  forwardRef,
   type ComponentPropsWithoutRef,
   type ReactNode,
   useEffect,
   useId,
   useRef,
 } from "react";
+import type { EffectiveUser } from "../src/auth/controller";
 
 export function AppShell({
   children,
   current,
+  onLogout,
+  pending = false,
+  user,
 }: {
   children: ReactNode;
-  current: "Convert";
+  current: "Convert" | "Password" | "Templates";
+  onLogout?: () => void;
+  pending?: boolean;
+  user?: EffectiveUser;
 }) {
   return (
     <>
@@ -34,19 +42,51 @@ export function AppShell({
           >
             Convert
           </Link>
+          <Link
+            aria-current={current === "Templates" ? "page" : undefined}
+            className="text-accent underline-offset-4 hover:underline"
+            href="/templates"
+          >
+            Templates
+          </Link>
+          {user?.role === "admin" && (
+            <Link
+              className="text-accent underline-offset-4 hover:underline"
+              href="/templates#users"
+            >
+              Users
+            </Link>
+          )}
+          {user && (
+            <div className="ml-auto flex flex-wrap items-center gap-3">
+              <span>
+                {user.username} (
+                {user.role === "admin" ? "Administrator" : "User"})
+              </span>
+              <button disabled={pending} onClick={onLogout} type="button">
+                Sign out
+              </button>
+            </div>
+          )}
         </nav>
       </header>
       <main className="mx-auto max-w-5xl space-y-6 p-6" id="main">
+        {user && (
+          <p className="text-sm text-muted">
+            You will be asked to sign in again after{" "}
+            {user.effective_idle_minutes} minutes of inactivity.
+          </p>
+        )}
         {children}
       </main>
     </>
   );
 }
 
-export function TextField({
-  label,
-  ...props
-}: { label: string } & ComponentPropsWithoutRef<"input">) {
+export const TextField = forwardRef<
+  HTMLInputElement,
+  { label: string } & ComponentPropsWithoutRef<"input">
+>(function TextField({ label, ...props }, ref) {
   const id = props.id ?? props.name;
   return (
     <label className="grid gap-2 font-medium" htmlFor={id}>
@@ -55,10 +95,11 @@ export function TextField({
         {...props}
         className="rounded-control border border-muted bg-surface px-3 py-2 font-normal"
         id={id}
+        ref={ref}
       />
     </label>
   );
-}
+});
 
 export function Alert({
   children,

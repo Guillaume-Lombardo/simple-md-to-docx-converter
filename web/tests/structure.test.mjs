@@ -77,3 +77,21 @@ test("no application route duplicates the FastAPI API", async () => {
   const nextConfig = await readFile("next.config.ts", "utf8");
   assert.doesNotMatch(nextConfig, /rewrites|redirects|headers\s*\(/);
 });
+
+test("authentication keeps authority and secrets outside browser persistence", async () => {
+  const controller = await readFile("src/auth/controller.ts", "utf8");
+  const context = await readFile("src/auth/context.tsx", "utf8");
+  for (const source of [controller, context]) {
+    assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/);
+    assert.doesNotMatch(source, /setInterval|setTimeout/);
+  }
+  assert.doesNotMatch(controller, /session_token|sessionToken/);
+  assert.doesNotMatch(context, /session_token|sessionToken/);
+  await assert.rejects(stat("app/api"), { code: "ENOENT" });
+  assert.deepEqual(
+    (await readdir("app", { recursive: true })).filter((path) =>
+      /(?:route\.(?:js|ts)|actions?\.(?:js|ts))$/.test(path),
+    ),
+    ["foundation-response/route.ts"],
+  );
+});

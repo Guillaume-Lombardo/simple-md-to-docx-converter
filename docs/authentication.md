@@ -183,6 +183,13 @@ extends a session with a client timer. HTML and authenticated data remain `no-st
 login, renewal, expiry, navigation, race, accessibility, and safe-error parity inventory is in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
+Session inspection and the user nested in a successful login response include
+`effective_idle_minutes`. FastAPI computes this value from the current effective role and the
+persisted policy. The Next.js shell displays it as informational policy text; it does not derive a
+deadline, poll session inspection, or decide whether a cookie is valid. A protected request that
+receives `401` moves the browser to one fixed sign-in-again state. Login credential failures remain
+form errors, and failed mutations are never replayed after reauthentication.
+
 ## Verification inventory
 
 Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E cover:

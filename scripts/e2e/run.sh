@@ -22,6 +22,8 @@ readonly network_name="$prefix"
 readonly application_name="$prefix-api"
 readonly expiry_application_name="$prefix-expiry-api"
 readonly insecure_application_name="$prefix-insecure-api"
+readonly frontend_name="$prefix-frontend"
+readonly frontend_image="localhost/markweave-web:t61-$profile"
 readonly clamav_name="$prefix-clamav"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
@@ -173,7 +175,7 @@ refuse_existing_resources() {
   local name
   for name in "$application_name" "$clamav_name" "$postgres_name" "$rustfs_name" \
     "$expiry_application_name" "$insecure_application_name" "$worker_one_name" \
-    "$worker_two_name"; do
+    "$worker_two_name" "$frontend_name"; do
     if podman container exists "$name"; then
       echo "Refusing to replace pre-existing container $name." >&2
       exit 1
@@ -245,6 +247,8 @@ printf '%s\n%s,%s,user,true,true\n' \
 chmod 0444 "$provisioning_file"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
+cp "$repository/web/tests/fixtures/router.mjs" \
+  "$browser_runtime_directory/routing-fixture.mjs"
 PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
@@ -259,6 +263,7 @@ else
   test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
   bash scripts/container/build.sh "$image"
 fi
+podman build --format docker --tag "$frontend_image" --file web/Containerfile web
 
 podman network create "$network_name" >/dev/null
 created+=("network:$network_name")
@@ -613,6 +618,41 @@ uv run python -m tests.e2e.service_workflow verify-checkpoint \
   --base-url "$base_url" --profile "$profile" \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
+
+# Exercise the unpublished T61 frontend through a test-only same-origin router.
+# Production traffic remains on the legacy FastAPI pages until T64.
+podman rm --force "$application_name" >/dev/null
+created=("$frontend_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$frontend_name" --network "$network_name" \
+  --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m "$frontend_image" >/dev/null
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$application_name" --network "$network_name" \
+  --network-alias application --publish 127.0.0.1::8080 \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+  --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
+  "$image" "$application_mode" >/dev/null
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+podman exec --detach "$application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
+    'import urllib.request; urllib.request.urlopen("http://localhost:3100/login", timeout=2).read()' \
+    >/dev/null 2>&1 && podman exec "$application_name" node -e \
+    'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  "$application_name" node --test /e2e/browser-next-auth.test.mjs
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime

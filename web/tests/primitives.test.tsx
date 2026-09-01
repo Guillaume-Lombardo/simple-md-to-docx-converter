@@ -22,8 +22,39 @@ test("application shell exposes navigation and skip target", () => {
     "aria-current",
     "page",
   );
-  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Templates" })).toBeVisible();
   expect(screen.getByRole("main")).toHaveAttribute("id", "main");
+});
+
+test("administrator shell shows identity, inactivity policy, users, and pending sign-out", () => {
+  render(
+    <AppShell
+      current="Templates"
+      onLogout={vi.fn()}
+      pending
+      user={{
+        active: true,
+        effective_idle_minutes: 15,
+        id: "00000000-0000-4000-8000-000000000001",
+        password_change_required: false,
+        role: "admin",
+        username: "Admin",
+      }}
+    >
+      Work
+    </AppShell>,
+  );
+  expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
+    "href",
+    "/templates#users",
+  );
+  expect(screen.getByText("Admin (Administrator)")).toBeVisible();
+  expect(screen.getByText(/15 minutes of inactivity/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();
 });
 
 test("form and status primitives retain accessible names", () => {
