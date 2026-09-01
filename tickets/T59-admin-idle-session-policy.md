@@ -2,7 +2,7 @@
 ticket: T59
 linear_id: G1L-523
 linear_url: https://linear.app/g1lom/issue/G1L-523/t59-add-an-administrator-controlled-idle-session-policy
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -11,20 +11,21 @@ project: Markdown to DOCX and PDF Converter
 
 ## Objective
 
-Allow administrators to configure the system-wide idle session duration enforced by FastAPI: the inactivity period after which a user must authenticate again.
+Allow administrators to configure the system-wide, role-specific idle session durations enforced by FastAPI: the inactivity periods after which standard users and administrators must authenticate again.
 
 ## Acceptance criteria
 
-* Keep the existing 30-minute idle duration as the default when no persisted administrator override exists.
-* Obtain and record explicit product approval for the minimum and maximum administrator-selectable idle durations before implementation; do not infer security bounds.
+* When no persisted administrator override exists, default standard-user sessions to 30 minutes of inactivity and administrator sessions to 15 minutes of inactivity.
+* Accept whole-minute standard-user idle durations from 5 through 300 minutes, inclusive.
+* Accept whole-minute administrator idle durations from 5 through 60 minutes, inclusive.
 * Keep the operator-configured absolute session lifetime as a hard ceiling that an administrator cannot exceed.
-* Persist one versioned system-wide idle-session policy in both SQLite and PostgreSQL profiles and expose authenticated administrator-only read/update endpoints under `/api/v1`.
-* Make FastAPI enforce the current effective policy on every session validation so a previously issued cookie cannot bypass a tightened timeout; an already expired or revoked session is never revived by a later relaxation.
+* Persist one versioned system-wide idle-session policy containing both role-specific durations in SQLite and PostgreSQL profiles and expose authenticated administrator-only read/update endpoints under `/api/v1`.
+* Make FastAPI enforce the duration for the session user's current effective role on every session validation so a previously issued cookie cannot bypass a tightened timeout or role change; an already expired or revoked session is never revived by a later relaxation.
 * Define deterministic concurrency semantics with an ETag/revision precondition and reject stale updates without partial state.
 * Audit actor, old value, new value, revision, and operation without recording tokens or credentials.
 * Preserve session revocation on logout, deactivation, password reset, password renewal, idle expiry, and absolute expiry.
 * Regenerate and validate the canonical OpenAPI artifact and update authentication, administration, configuration, backup, and recovery documentation.
-* Test default/bootstrap behavior, authorized and forbidden access, bounds, stale writes, immediate tightening, non-revival after relaxation, restart persistence, backup/restore, and both storage profiles with two users and one administrator.
+* Test both role defaults, whole-minute granularity, inclusive bounds, authorized and forbidden access, stale writes, immediate tightening, role changes, non-revival after relaxation, restart persistence, backup/restore, and both storage profiles with two users and one administrator.
 
 ## Dependencies
 
@@ -51,6 +52,7 @@ Allow administrators to configure the system-wide idle session duration enforced
 ## Progress
 
 * 2026-09-01: Created with the administrator setting scoped to idle reauthentication time. The existing 30-minute default remains fixed; minimum and maximum selectable values require a separate explicit product decision before implementation.
+* 2026-09-01: Product approved role-specific whole-minute policies: standard users default to 30 minutes with an inclusive 5–300 minute range; administrators default to 15 minutes with an inclusive 5–60 minute range. Implementation started from verified `main` at `049146de248e684acfb170aa526030f2ca0c84cb` on `feat/T59-role-idle-session-policy`.
 
 ## Synchronization
 
