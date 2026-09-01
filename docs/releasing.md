@@ -171,10 +171,13 @@ manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance
 
 One release is deployable only when the PyPI artifact and both image receipts agree on version and
 source SHA, both public digests are anonymously readable, and the release evidence manifest binds
-the pair plus the frontend lockfile digest. Build and serialize each image once. If publication is
-partial, recover the missing image/evidence from the retained exact staged bytes without rebuilding,
-or fail the release. Never pair an older frontend with a newer backend, infer a digest, or use a
-mutable tag as rollback identity.
+the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
+removing the legacy renderer from candidate source. Only after that removal does the release
+workflow build and serialize each final image once, run the complete rootless acceptance matrix
+against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
+another after legacy removal. If publication is partial, recover the missing image/evidence from
+the retained exact staged bytes without rebuilding, or fail the release. Never pair an older
+frontend with a newer backend, infer a digest, or use a mutable tag as rollback identity.
 
 The post-publication adoption pull request pins both exact public manifest digests in Compose,
 quickstarts, and deployment evidence before unrelated integration resumes. The existing GHCR

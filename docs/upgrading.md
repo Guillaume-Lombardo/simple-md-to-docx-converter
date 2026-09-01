@@ -74,7 +74,10 @@ reviewed previous and target routing manifests. Mixed frontend/backend versions
 are unsupported even when their HTTP schemas appear compatible.
 
 Cut over only after the previous profile-consistent backup and the complete
-two-profile final-image evidence are available. If routing or the frontend
+two-profile evidence against the exact published final bytes is available. The
+final backend bytes are built only after parity and rollback rehearsal complete
+and the candidate source has removed the legacy renderer; they are not rebuilt
+after acceptance. If routing or the frontend
 fails before any persistent transition, stop admission and restore the previous
 routing manifest and previous backend release with its legacy pages. If a
 database migration or persistent data change has started, restore the matching

@@ -175,11 +175,29 @@ the distributed profile may scale frontend replicas independently. Both keep bro
 FastAPI behind one TLS origin.
 
 The public `/health/live` and `/health/ready` paths continue to reach FastAPI. Platform probes reach
-the frontend's non-public `/_frontend/health/live` and `/_frontend/health/ready` paths directly on
-its service. Never expose those paths through the public router or treat frontend readiness as
-backend/storage readiness. Deployment manifests must apply the exact initial frontend budgets from
-the migration architecture and keep backend, worker, scanner, storage, and document budgets
-independent.
+the frontend's non-public `/_frontend/health/live` and `/_frontend/health/ready` paths on the
+Service-only probe port 3001; the public router reaches page port 3000 only. The public router must
+normalize the request target and order a content-free `404` denial for `/_frontend/health`, every
+descendant, and decoded or case-varied equivalents before its frontend catch-all. Network policy
+permits frontend ingress only from the public router and platform probe source. Never expose the
+probe port publicly or treat frontend readiness as backend/storage readiness. T64 verifies internal
+live/ready success and failure plus public denial of exact, descendant, encoded, and case-varied
+paths. Deployment manifests must apply the exact initial frontend budgets from the migration
+architecture and keep backend, worker, scanner, storage, and document budgets independent.
+
+The frontend uses the T60-owned `web/server.mjs` supported custom-server entry point, not Next.js
+standalone output. Node rejects headers beyond 16 KiB; the server admits at most 128 simultaneous
+requests, emits a zero-length `431` for header overflow and zero-length `503` responses for
+saturation and drain races, and bounds SIGTERM draining to 30 seconds. The runtime therefore
+contains the `.next` production build and exact
+pruned production dependency graph. T60 proves the server contract in isolation and T64 repeats it
+against the final rootless image.
+
+The TLS router owns the response-wide minimum headers
+`Strict-Transport-Security: max-age=31536000` and
+`Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`. Do not add HSTS
+`includeSubDomains` or `preload` without a separate domain-ownership decision. T64 verifies exact,
+non-duplicated values across frontend, FastAPI, error, and download responses.
 
 At release, deploy only a matched backend/frontend version pair pinned by both verified registry
 manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes

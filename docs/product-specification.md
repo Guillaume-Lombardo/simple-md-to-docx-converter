@@ -111,7 +111,10 @@ The reviewed routing boundary sends `/api/v1/**`, `/health/live`, `/health/ready
 frontend's accessible `404`; they never fall through to FastAPI or an external destination. The
 router preserves `Host` and `Origin`, rejects unknown hosts, does not trust forwarded headers, and
 never selects an upstream from user-controlled headers. No CORS or second browser origin is
-supported.
+supported. Before the frontend catch-all, the public router returns a content-free `404` for
+`/_frontend/health`, every descendant, and decoded or case-varied equivalents. Only platform probes
+may call the exact internal `/_frontend/health/live` and `/_frontend/health/ready` paths through the
+frontend Service's separate probe port; the public router reaches only the page port.
 
 Next.js is a presentation-only process. Browser code calls same-origin FastAPI routes directly.
 Except for two non-public process-local frontend probes, route handlers, Server Actions,
@@ -135,12 +138,30 @@ storage and is limited to `500m` CPU, `256Mi` memory, `64Mi` ephemeral storage, 
 old-space heap, 64 processes, 128 in-flight requests, 16 KiB request headers, and 30 seconds for
 graceful shutdown. Raising a hard ceiling requires reviewed load evidence.
 
+T60 owns `web/server.mjs`, a supported Next.js custom production server. It uses Node's HTTP server
+with `maxHeaderSize: 16384` and a zero-length header-overflow `431`, admits at most 128 requests per
+replica, returns a zero-length `503` before Next.js when saturated or draining, accounts each
+response exactly once on finish or close, and completes admitted work for at most 30 seconds after
+SIGTERM. It performs no API proxying or business work. Because Next.js does not support custom
+servers with `output: "standalone"`, the
+frontend packages the `.next` build and exact pruned production dependency graph instead. T60 and
+T64 must block on the exact 128/129 admission boundary, header rejection, empty failure responses,
+finish/close accounting, drain races, and bounded shutdown.
+
 Every HTML response is `no-store` and uses a per-response cryptographic nonce with a CSP allowing
 only self-hosted connections, styles, fonts, images and nonce-bearing framework scripts; it forbids
 objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
 API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
 use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
-third-party script is allowed.
+third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
+must prove a fresh nonce per response with no cache reuse, a nonce on every framework bootstrap
+script, and no eval requirement.
+
+The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
+`Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS
+response. T64 verifies the values on frontend, FastAPI, error, and download responses. HSTS
+`includeSubDomains` and `preload` are excluded because Markweave does not control every sibling
+subdomain or the parent domain's browser preload commitment.
 
 FastAPI keeps the opaque `HttpOnly`, `Secure`, `SameSite=Lax`, path-root session cookie and the
 separate JavaScript-readable `__Host-md_converter_csrf` cookie. Browser mutations copy the latter
@@ -163,13 +184,16 @@ publication is recovered from retained exact bytes without rebuilding or is trea
 release.
 
 T60–T63 must leave the legacy FastAPI pages on the production route while building and verifying
-the frontend foundation, authentication, conversion, and administration parity. T64 alone may
-switch the route and remove the legacy implementation, after the complete inventory and failure
-matrix in [the reviewed migration architecture](nextjs-migration-architecture.md) passes against
-both final rootless storage profiles and rollback is rehearsed. Rollback restores the previous
-matched backend release with its legacy UI and route manifest; if persistent schema or data changed,
-it also restores the matching pre-cutover database and object backup according to the upgrade
-contract. Mixed releases and mutable rollback tags are forbidden.
+the frontend foundation, authentication, conversion, and administration parity. In T64, complete
+parity and rollback rehearsal while the candidate branch still contains the legacy renderer, then
+remove the legacy code and assets, build and serialize the final matched images exactly once, and
+run the complete two-profile rootless acceptance matrix against those staged bytes. Publish and
+deploy only those verified bytes; no post-verification removal or rebuild is permitted. Cutover
+then switches the route to their exact published digests. Rollback restores the previous matched
+backend release with its legacy UI and route manifest; if persistent schema or data changed, it
+also restores the matching pre-cutover database and object backup according to the upgrade
+contract. Mixed releases and mutable rollback tags are forbidden. The complete inventory and
+failure matrix are in [the reviewed migration architecture](nextjs-migration-architecture.md).
 
 ### 3.4 Command-line interface
 

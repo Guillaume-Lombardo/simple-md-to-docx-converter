@@ -16,12 +16,16 @@ Complete the production cutover from FastAPI-rendered pages to the Next.js front
 ## Acceptance criteria
 
 * Route browser pages and assets to the reviewed Next.js runtime while preserving same-origin `/api/v1`, downloads, OpenAPI, health, readiness, and metrics according to T58.
-* Remove the legacy Python HTML renderers and native browser assets only after login, password renewal, conversion, template, user, and session-policy parity is proven; retain a documented rollback path for the release.
+* Prove login, password renewal, conversion, template, user, and session-policy parity and rehearse rollback while the candidate branch still contains the legacy renderer; then remove the legacy Python renderers/assets, build and serialize the matched final images exactly once, run acceptance against those exact bytes, publish the same bytes, and cut over to their verified digests without a post-test rebuild.
 * Build reproducible rootless frontend and backend artifacts with arbitrary-UID support, read-only roots, no added capabilities, bounded writable areas, pinned inputs, SBOMs, provenance, vulnerability gates, and verified immutable publication identities.
 * Update standalone/distributed deployment examples, Compose and both quickstarts, routing, readiness, startup/rollback cleanup, resource budgets, backup/recovery scope, monitoring, and operational documentation.
 * Ensure frontend unavailability cannot corrupt backend state, backend unavailability produces bounded safe UI failures, and readiness distinguishes frontend routing from backend/service readiness.
+* Order a normalized public content-free `404` denial for `/_frontend/health/**` and decoded/case-varied equivalents before the frontend catch-all; prove only direct internal Service probes on the separate probe port can reach the exact live/ready endpoints, and cover their success/failure plus public exact, descendant, encoded, and case-variant denial.
+* Verify the custom-server 16 KiB header ceiling with an empty overflow `431`, exact 128/129 admission boundary, empty saturation/draining `503`s, response accounting, and 30-second SIGTERM bound in the final image.
+* Verify exact Next.js `16.3.4` dynamic nonce CSP behavior with a fresh non-reused nonce, every bootstrap script nonced, no eval, and no `unsafe-inline`/`unsafe-eval`; verify exact router-owned HSTS and Permissions-Policy headers on frontend, API, error, and download responses.
 * Run the complete frontend quality gates, OpenAPI compatibility gate, Python canonical checks, container smoke tests, and final-image Playwright E2E workflows for both storage profiles with two users and one administrator.
 * Cover login/renewal/logout, session-policy tightening and expiry, conversion success/failure/cancellation/expiration/download/recovery/concurrency, template lifecycle, account administration, authorization failures, CSRF/CSP/Origin enforcement, restart recovery, and failure-only sanitized artifacts.
+* Cover replacement expected-font editing and explicit clearing through the comma-separated field without omitting the API field.
 * Update the normative specification, architecture, authentication, administration, UI, deployment, configuration, operations, recovery, development, and release documentation.
 * Do not declare completion until the cutover is verified on `main` and the published runtime identities are consistently pinned.
 

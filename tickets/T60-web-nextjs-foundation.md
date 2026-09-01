@@ -20,10 +20,11 @@ Create the production-ready Next.js, TypeScript, and Tailwind CSS application fo
 * Generate typed frontend bindings for the production runtime and test fixtures from the canonical OpenAPI contract; fail CI when generated contract artifacts are stale, and do not hand-maintain a divergent API model.
 * Provide one typed API transport for JSON, multipart uploads, downloads, error envelopes, ETags, CSRF headers, idempotency keys, cancellation, and request aborts.
 * Establish accessible application-shell, form, alert, loading, progress, dialog, table/list, and navigation primitives without introducing a separate business backend.
-* Enforce production CSP compatibility without `unsafe-inline` or `unsafe-eval`, except for a separately reviewed and documented framework requirement.
+* On exact Next.js `16.3.4` production dynamic rendering, enforce the reviewed nonce CSP without `unsafe-inline` or `unsafe-eval`; prove every response receives a fresh nonce, cached output never reuses one, every framework bootstrap script carries it, and no generated page or asset requires eval. This gate blocks T60 and is repeated against the final image in T64; there is no framework exception.
+* Implement the supported `web/server.mjs` custom production server without Next.js `output: "standalone"`; enforce 16 KiB request headers with a zero-length overflow `431`, the exact 128/129 per-replica admission boundary, zero-length saturation/draining `503` responses, exact finish/close accounting, and bounded 30-second SIGTERM draining with no API proxying.
 * Add frontend unit/component coverage thresholds at least as strict as the existing JavaScript 90% line, branch, and function gates.
 * Integrate deterministic frontend dependency, build, type, lint, test, cache, and affected-path selection into CI.
-* Add a minimal rootless production smoke test for the frontend runtime and its health endpoint.
+* Add a minimal rootless production smoke test for the frontend runtime and its two internal health endpoints on the Service-only probe port, including normalized public-router denial of the complete `/_frontend/health/**` prefix and decoded/case-varied equivalents before the catch-all.
 * Leave the current FastAPI-rendered pages as the production UI until the cutover ticket.
 
 ## Dependencies

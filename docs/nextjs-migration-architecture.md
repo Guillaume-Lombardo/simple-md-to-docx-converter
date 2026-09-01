@@ -39,7 +39,10 @@ The initial implementation baseline is:
 Every direct dependency, including React and React DOM, uses an exact version. `npm ci
 --ignore-scripts` consumes `web/package-lock.json` in CI and container builds; lockfile drift,
 install-script requirements, or an unexpected resolved graph fails the build. Production contains
-only the standalone Next.js output and its pruned runtime graph. A dependency update is one reviewed
+the `.next` production build, public assets, the reviewed custom server, and the exact pruned
+production dependency graph. It does not use Next.js `output: "standalone"`, because the
+[official custom-server guide](https://nextjs.org/docs/app/guides/custom-server) says that output
+mode and a custom server cannot be combined. A dependency update is one reviewed
 pull request that refreshes the lockfile, generated bindings when affected, licenses, SBOMs,
 vulnerability results, deterministic build evidence, browser tests, rootless smoke tests, and
 rollback evidence. Security fixes may be expedited but never floated at startup or build time.
@@ -87,6 +90,7 @@ At T64 cutover the router applies this ordered, non-overlapping table:
 | `/api/v1` and `/api/v1/**` | FastAPI | No Next.js rewrite, proxy, cache, or body inspection. This includes uploads and downloads. |
 | `/health/live`, `/health/ready`, `/metrics`, `/docs`, `/docs/**`, `/redoc`, `/openapi.json` | FastAPI | Preserve the existing public operational contract and FastAPI response semantics. |
 | `/login`, `/change-password`, `/convert`, `/templates`, `/` | Next.js | `/` preserves the redirect to `/convert`; page behavior follows the parity inventory below. |
+| `/_frontend/health` and `/_frontend/health/**` | Public router denial | Return a content-free `404` before any Next.js catch-all; reject decoded or case-varied equivalents rather than forwarding them. Platform probes reach only the two exact internal paths on the frontend Service's separate probe port. |
 | `/_next/**` | Next.js | Only content-hashed framework assets are public and immutable. Source maps are not published. |
 | `/static/**` | FastAPI before cutover; absent after legacy removal | Never alias this prefix to new assets. It allows pre-cutover and rollback routes to remain unambiguous. |
 | any other path | Next.js | Return the reviewed accessible `404`; never fall through to FastAPI or an external URL. |
@@ -114,12 +118,14 @@ and [minimal runtime](https://catalog.redhat.com/en/software/containers/ubi9/nod
 
 These are the reviewed AMD64 image digests observed on 2026-09-01 and both resolve to Node.js
 `24.19.0` and npm `11.17.0`. A refresh must update the digest and expected tool versions together
-and repeat supply-chain and runtime verification. The runtime copies only the traced standalone
-output, static assets, required notices, and the minimal launch wrapper. It contains no compiler,
-package cache, source tree, development dependency, shell-based package install, or dynamically
-downloaded asset.
+and repeat supply-chain and runtime verification. The runtime copies only the production `.next`
+build output, exact pruned production `node_modules`, public assets, required notices, and
+`web/server.mjs`. The reviewed custom server uses the supported Next.js production server API; it
+must not be packaged with `output: "standalone"`. The image contains no compiler, package cache,
+source tree, development dependency, shell-based package install, or dynamically downloaded asset.
 
-The process listens on unprivileged port 3000 and runs as an arbitrary non-zero UID in group 0. It
+The process listens for page traffic on unprivileged port 3000 and for Service-internal probes on
+unprivileged port 3001, and runs as an arbitrary non-zero UID in group 0. It
 requires a read-only root filesystem, `no-new-privileges`, an empty capability set, RuntimeDefault
 seccomp, no privilege escalation, and no service-account token. The only writable mount is a
 memory-backed `/tmp`; `HOME`, npm cache, and Next.js runtime caches are disabled or point into that
@@ -144,9 +150,20 @@ The initial per-replica production budget is explicit and is a required T64 depl
 The frontend accepts no API upload body, so these values do not change T18's document or worker
 budgets. Operators may lower request reservations after measurement. Raising a limit or changing a
 hard ceiling requires load evidence and a reviewed deployment change; it is never inferred from a
-framework default. Saturation rejects new page requests with a content-free `503` and does not queue
-unbounded work. The router and FastAPI retain their independent upload, queue, worker, and storage
-limits.
+framework default.
+
+`web/server.mjs`, owned by T60, is the enforcement point for the per-replica HTTP ceilings. It uses
+Node's HTTP server with `maxHeaderSize: 16384`, returns a zero-length `431` from its `clientError`
+handler for header overflow, counts admitted requests across page and asset handlers, admits no
+more than 128 simultaneously, and returns a zero-length `503` before invoking Next.js when saturated
+or draining. It decrements the count exactly once when the response finishes or closes. On SIGTERM
+it marks the process draining before closing the listener, rejects races with the same empty `503`,
+allows admitted requests to finish for at most 30 seconds, then terminates.
+This custom server performs no API proxying or business work. T60 blocks on unit/integration tests
+for empty header rejection, the exact 128/129 boundary, finish/close accounting, empty saturation and
+draining responses, and bounded shutdown. T64 repeats those cases against the final rootless image.
+The public router and FastAPI retain their independent connection, upload, queue, worker, and
+storage limits.
 
 ## Health, readiness, and failure semantics
 
@@ -161,6 +178,13 @@ the frontend. The frontend exposes service-internal, non-public `/_frontend/heal
 - neither probe calls FastAPI, storage, a network service, or a browser workflow;
 - any missing/corrupt build artifact, incomplete startup, draining process, or event-loop failure
   fails frontend readiness with a content-free `503`.
+
+The frontend Service exposes port 3001 only to the platform probe source; the public router reaches
+page port 3000 only. Network policy allows frontend ingress only from that router and the probe
+source. The router's ordered denial normalizes the request target and returns content-free `404`
+for the reserved prefix, including decoded and case-varied equivalents, before its frontend
+catch-all. T64 must prove both internal liveness/readiness success and failure and public denial of
+the exact paths, descendants, encoded variants, and case variants.
 
 The router sends browser-page traffic only to frontend-ready replicas and API traffic only to
 FastAPI-ready replicas. Monitoring treats browser-route availability and FastAPI service readiness
@@ -212,13 +236,21 @@ manifest-src 'self';
 worker-src 'none'
 ```
 
-The nonce is passed only to framework bootstrap scripts in the response being rendered. No
+The nonce is passed only to framework bootstrap scripts in the response being rendered. T60 must
+prove on exact Next.js `16.3.4` production dynamic rendering that every response has a fresh nonce,
+cached responses never reuse one, all framework bootstrap scripts carry it, and no generated page
+or asset requires eval. T64 repeats that proof against the exact final image bytes. No
 `unsafe-inline`, `unsafe-eval`, remote script, remote stylesheet, runtime font fetch, analytics,
 third-party widget, service worker, or user-controlled CSP source is allowed. If a supported Next.js
 patch cannot satisfy this policy, implementation stops for explicit security review instead of
-weakening it. Pages also send `Cache-Control: no-store`, `Referrer-Policy: same-origin`,
-`X-Content-Type-Options: nosniff`, and the platform's reviewed HTTPS/HSTS and permissions-policy
-headers.
+weakening it. Pages also send `Cache-Control: no-store`, `Referrer-Policy: same-origin`, and
+`X-Content-Type-Options: nosniff`. The public TLS router owns
+and adds to every HTTPS response the exact minimum
+`Strict-Transport-Security: max-age=31536000` and
+`Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` headers. HSTS
+`includeSubDomains` and `preload` are deliberately absent because Markweave does not control every
+sibling subdomain or commit the parent domain to browser preload policy. T64 tests the exact values
+on frontend, FastAPI, error, and download responses and rejects duplicate or weaker values.
 
 ### Uploads, downloads, and caching
 
@@ -278,16 +310,21 @@ verification, and post-publication receipt adoption apply independently to both 
    while legacy browser routes remain the production default.
 4. **T62/T63 workflow parity:** verify conversion and administration behavior independently and
    together. Legacy routes remain deployable and receive all production browser traffic.
-5. **T64 release candidate:** build both final rootless images; run strict frontend gates, CSP and
-   routing contract tests, FastAPI checks, real-browser tests, container smoke, and full final-image
-   E2E against standalone and distributed profiles with two users and one administrator. Exercise
-   frontend loss, backend loss, restart, cancellation, concurrency, expiry, authorization, and
-   rollback rehearsal. Resolve every parity difference before cutover.
-6. **Atomic cutover:** drain new submissions as required, take the profile-consistent backup,
-   deploy the exact matched image digests, switch the reviewed route table, and require frontend
-   readiness, FastAPI readiness, login, one authorized workflow, and operational-route checks
-   before admitting general traffic. Only then may T64 remove legacy renderer code from the new
-   backend image.
+5. **T64 parity and rollback gate:** while the candidate branch still contains the legacy renderer,
+   run the complete parity/failure matrix and rehearse rollback to the previous released backend
+   and route manifest. Resolve every difference before deleting the legacy implementation.
+6. **Final source and bytes:** remove the legacy renderer and assets from the candidate source, then
+   build and serialize the matched backend and frontend images exactly once. Run strict frontend
+   gates, nonce-CSP and ordered-routing tests, FastAPI checks, container smoke, and full final-image
+   E2E against those exact staged bytes for standalone and distributed profiles with two users and
+   one administrator. Exercise frontend loss, backend loss, internal/public probe separation,
+   saturation, draining, restart, cancellation, concurrency, expiry, and authorization. Publish
+   only those verified bytes and attach their receipts, SBOMs, and provenance.
+7. **Atomic cutover:** drain new submissions as required, take the profile-consistent backup,
+   deploy the exact matched published digests, switch the reviewed route table, and require
+   frontend readiness, FastAPI readiness, login, one authorized workflow, and operational-route
+   checks before admitting general traffic. No post-verification legacy-code removal or image
+   rebuild is permitted.
 
 Rollback is release-level, not a mutable feature flag. Preserve the previous matched backend image,
 its legacy browser assets, configuration, route manifest, database revision, and both profile backup
@@ -365,6 +402,9 @@ unit/component coverage where applicable and preserve it in real-browser/final-i
 - Create accepts labelled name, description, comma-separated expected fonts, and exactly one
   non-empty bounded `.docx`; immediate client checks remain advisory and OpenXML, engine, font,
   scanner, storage, ownership, and activation validation remain server-side.
+- Replacement preserves the editable comma-separated expected-font field: non-empty input sends
+  the trimmed ordered font values, while blank input sends the explicit empty field and clears the
+  declaration. T63 tests edit and clear behavior rather than omitting the field.
 - Owners and administrators can edit metadata, replace content, load ordered immutable versions,
   download current/history content, and copy-forward restore a non-current version. Every mutation
   uses the current revision ETag in `If-Match`, handles `428`/stale conflicts without overwrite,
@@ -406,5 +446,6 @@ unit/component coverage where applicable and preserve it in real-browser/final-i
   adding high-cardinality frontend telemetry. No analytics, remote font, third-party script, or
   browser persistence is introduced.
 
-T64 may remove the legacy FastAPI pages only after the complete inventory passes against both final
-rootless storage-profile deployments and the rollback rehearsal succeeds.
+T64 may remove the legacy FastAPI pages only after the pre-removal parity matrix and rollback
+rehearsal succeed. After removal, the complete inventory must pass against the exact final rootless
+bytes in both storage-profile deployments before publication and cutover.
