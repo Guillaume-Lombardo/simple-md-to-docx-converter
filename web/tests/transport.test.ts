@@ -1,4 +1,7 @@
 import { ApiError, ApiTransport, CSRF_COOKIE } from "../src/api/transport";
+import { boolean, object } from "valibot";
+
+const okSchema = object({ ok: boolean() });
 
 function response(body: BodyInit | null, init: ResponseInit = {}) {
   return new Response(body, init);
@@ -13,7 +16,7 @@ test("JSON transport sends contract headers and parses a typed response", async 
   );
   const api = new ApiTransport(fetcher, () => `${CSRF_COOKIE}=safe%20token`);
   await expect(
-    api.json<{ ok: boolean }>("/api/v1/test", {
+    api.json("/api/v1/test", okSchema, {
       body: "{}",
       csrf: true,
       etag: '"v1"',
@@ -41,13 +44,13 @@ test("JSON metadata preserves the server ETag", async () => {
     }),
   );
   await expect(
-    new ApiTransport(fetcher).jsonWithMetadata<{ ok: boolean }>("/api/v1/test"),
+    new ApiTransport(fetcher).jsonWithMetadata("/api/v1/test", okSchema),
   ).resolves.toEqual({ data: { ok: true }, etag: '"v2"' });
 });
 
 test("multipart leaves content type to the browser", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-    response("{}", {
+    response('{"ok":true}', {
       status: 200,
       headers: { "content-type": "application/json" },
     }),
@@ -55,6 +58,7 @@ test("multipart leaves content type to the browser", async () => {
   await new ApiTransport(fetcher).multipart(
     "/api/v1/conversions",
     new FormData(),
+    okSchema,
   );
   expect(
     new Headers(fetcher.mock.calls[0]![1]?.headers).has("Content-Type"),
@@ -78,7 +82,7 @@ test("download preserves response metadata and accepts abort signals", async () 
 
 test("cancellation is a CSRF-protected abortable DELETE", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-    response("{}", {
+    response('{"ok":true}', {
       status: 200,
       headers: { "content-type": "application/json" },
     }),
@@ -86,6 +90,7 @@ test("cancellation is a CSRF-protected abortable DELETE", async () => {
   const signal = new AbortController().signal;
   await new ApiTransport(fetcher, () => `${CSRF_COOKIE}=token`).cancel(
     "/api/v1/conversions/job",
+    okSchema,
     signal,
   );
   expect(fetcher.mock.calls[0]![1]).toMatchObject({ method: "DELETE", signal });
@@ -99,7 +104,7 @@ test("stable error envelopes become typed errors", async () => {
     }),
   );
   await expect(
-    new ApiTransport(fetcher).json("/api/v1/test"),
+    new ApiTransport(fetcher).json("/api/v1/test", okSchema),
   ).rejects.toMatchObject({
     status: 403,
     code: "DENIED",
@@ -115,7 +120,7 @@ test("malformed JSON envelopes are never reflected", async () => {
     }),
   );
   await expect(
-    new ApiTransport(fetcher).json("/api/v1/test"),
+    new ApiTransport(fetcher).json("/api/v1/test", okSchema),
   ).rejects.toMatchObject({
     code: "UNEXPECTED_RESPONSE",
     message: "The service returned an unexpected response.",
@@ -139,7 +144,7 @@ test.each([
   ],
 ])("unexpected responses fail with a fixed message", async (result, status) => {
   const api = new ApiTransport(vi.fn<typeof fetch>().mockResolvedValue(result));
-  await expect(api.json("/api/v1/test")).rejects.toEqual(
+  await expect(api.json("/api/v1/test", okSchema)).rejects.toEqual(
     new ApiError(
       status,
       "UNEXPECTED_RESPONSE",
@@ -153,11 +158,36 @@ test.each(["", "flag", `${CSRF_COOKIE}=%GG`])(
   async (cookie) => {
     const fetcher = vi.fn<typeof fetch>();
     await expect(
-      new ApiTransport(fetcher, () => cookie).json("/api/v1/test", {
+      new ApiTransport(fetcher, () => cookie).json("/api/v1/test", okSchema, {
         csrf: true,
         method: "DELETE",
       }),
     ).rejects.toMatchObject({ code: "CSRF_MISSING" });
     expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ["not-json", 200],
+  ['{"ok":"yes"}', 200],
+  ["not-json", 400],
+])(
+  "malformed JSON or schema output is fixed and non-reflective",
+  async (body, status) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      response(body, {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      new ApiTransport(fetcher).json("/api/v1/test", okSchema),
+    ).rejects.toEqual(
+      new ApiError(
+        status,
+        "UNEXPECTED_RESPONSE",
+        "The service returned an unexpected response.",
+      ),
+    );
   },
 );

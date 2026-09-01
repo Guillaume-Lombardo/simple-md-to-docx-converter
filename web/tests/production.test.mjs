@@ -25,6 +25,7 @@ test.before(async () => {
     env: {
       ...process.env,
       HOSTNAME: "127.0.0.1",
+      MARKWEAVE_FRONTEND_ERROR_TEST: "1",
       PORT: String(pagePort),
       PROBE_PORT: String(probePort),
     },
@@ -37,9 +38,11 @@ test.after(async () => {
   await new Promise((resolve) => processUnderTest.once("exit", resolve));
 });
 
-test("dynamic HTML receives fresh strict nonce policies", async () => {
-  const first = await fetch(`http://127.0.0.1:${pagePort}/convert`);
-  const second = await fetch(`http://127.0.0.1:${pagePort}/convert`);
+async function assertNonceHtml(path, status) {
+  const first = await fetch(`http://127.0.0.1:${pagePort}${path}`);
+  const second = await fetch(`http://127.0.0.1:${pagePort}${path}`);
+  assert.equal(first.status, status);
+  assert.match(first.headers.get("content-type"), /^text\/html/);
   const firstCsp = first.headers.get("content-security-policy");
   const secondCsp = second.headers.get("content-security-policy");
   assert.match(firstCsp, /script-src 'nonce-([^']+)' 'strict-dynamic'/);
@@ -53,9 +56,18 @@ test("dynamic HTML receives fresh strict nonce policies", async () => {
   for (const tag of html.matchAll(/<(script|style)\b([^>]*)>/g))
     assert.equal(tag[2].match(/\bnonce=["']([^"']+)["']/)?.[1], nonce);
   assert.doesNotMatch(html, /\sstyle=/i);
-  assert.equal(first.headers.get("cache-control"), "no-store");
+  assert.match(first.headers.get("cache-control"), /(?:^|,\s*)no-store(?:,|$)/);
   assert.equal(first.headers.get("referrer-policy"), "same-origin");
   assert.equal(first.headers.get("x-content-type-options"), "nosniff");
+  return html;
+}
+
+test("all dynamic and generated error HTML receives fresh nonce policies", async () => {
+  await assertNonceHtml("/convert", 200);
+  await assertNonceHtml("/missing", 404);
+  await assertNonceHtml("/missing.js", 404);
+  const error = await assertNonceHtml("/foundation-error", 500);
+  assert.doesNotMatch(error, /foundation error canary/i);
 });
 
 test("internal probes are isolated on the probe listener", async () => {

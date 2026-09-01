@@ -1,4 +1,10 @@
-import type { ErrorResponse } from "./generated";
+import {
+  safeParse,
+  type BaseIssue,
+  type BaseSchema,
+  type InferOutput,
+} from "valibot";
+import { vErrorResponse } from "./generated/valibot.gen";
 
 export const CSRF_COOKIE = "__Host-md_converter_csrf";
 
@@ -40,18 +46,18 @@ function cookieValue(cookie: string, name: string): string | undefined {
   return undefined;
 }
 
-function isErrorEnvelope(value: unknown): value is ErrorResponse {
-  if (typeof value !== "object" || value === null || !("error" in value))
-    return false;
-  const error = value.error;
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string" &&
-    "message" in error &&
-    typeof error.message === "string"
-  );
+const unexpectedMessage = "The service returned an unexpected response.";
+
+function unexpected(status: number): ApiError {
+  return new ApiError(status, "UNEXPECTED_RESPONSE", unexpectedMessage);
+}
+
+async function parseJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw unexpected(response.status);
+  }
 }
 
 export class ApiTransport {
@@ -60,36 +66,41 @@ export class ApiTransport {
     private readonly readCookie: () => string = () => document.cookie,
   ) {}
 
-  async json<T>(
+  async json<TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>>(
     path: `/api/v1${string}`,
+    schema: TSchema,
     options: RequestOptions = {},
-  ): Promise<T> {
-    return (await this.jsonWithMetadata<T>(path, options)).data;
+  ): Promise<InferOutput<TSchema>> {
+    return (await this.jsonWithMetadata(path, schema, options)).data;
   }
 
-  async jsonWithMetadata<T>(
+  async jsonWithMetadata<
+    TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
+  >(
     path: `/api/v1${string}`,
+    schema: TSchema,
     options: RequestOptions = {},
-  ): Promise<JsonResult<T>> {
+  ): Promise<JsonResult<InferOutput<TSchema>>> {
     const response = await this.request(path, options, "application/json");
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.toLowerCase().startsWith("application/json")) {
-      throw new ApiError(
-        response.status,
-        "UNEXPECTED_RESPONSE",
-        "The service returned an unexpected response.",
-      );
+      throw unexpected(response.status);
     }
+    const parsed = safeParse(schema, await parseJson(response));
+    if (!parsed.success) throw unexpected(response.status);
     const etag = response.headers.get("etag") ?? undefined;
-    return { data: (await response.json()) as T, ...(etag ? { etag } : {}) };
+    return { data: parsed.output, ...(etag ? { etag } : {}) };
   }
 
-  async multipart<T>(
+  async multipart<
+    TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
+  >(
     path: `/api/v1${string}`,
     form: FormData,
+    schema: TSchema,
     options: Omit<RequestOptions, "body"> = {},
-  ): Promise<T> {
-    return this.json<T>(path, {
+  ): Promise<InferOutput<TSchema>> {
+    return this.json(path, schema, {
       ...options,
       body: form,
       method: options.method ?? "POST",
@@ -103,8 +114,14 @@ export class ApiTransport {
     return this.request(path, options, "application/octet-stream");
   }
 
-  async cancel<T>(path: `/api/v1${string}`, signal?: AbortSignal): Promise<T> {
-    return this.json<T>(path, { csrf: true, method: "DELETE", signal });
+  async cancel<
+    TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
+  >(
+    path: `/api/v1${string}`,
+    schema: TSchema,
+    signal?: AbortSignal,
+  ): Promise<InferOutput<TSchema>> {
+    return this.json(path, schema, { csrf: true, method: "DELETE", signal });
   }
 
   private async request(
@@ -142,19 +159,15 @@ export class ApiTransport {
 
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.toLowerCase().startsWith("application/json")) {
-      const envelope: unknown = await response.json();
-      if (isErrorEnvelope(envelope)) {
+      const parsed = safeParse(vErrorResponse, await parseJson(response));
+      if (parsed.success) {
         throw new ApiError(
           response.status,
-          envelope.error.code,
-          envelope.error.message,
+          parsed.output.error.code,
+          parsed.output.error.message,
         );
       }
     }
-    throw new ApiError(
-      response.status,
-      "UNEXPECTED_RESPONSE",
-      "The service returned an unexpected response.",
-    );
+    throw unexpected(response.status);
   }
 }

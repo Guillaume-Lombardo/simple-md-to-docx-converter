@@ -25,6 +25,7 @@ function generate(output) {
       output,
       "-p",
       "@hey-api/typescript",
+      "valibot",
       "--no-log-file",
       "--silent",
     ],
@@ -43,7 +44,7 @@ try {
     const candidate = join(temporary, "generated");
     generate(candidate);
     for (const output of outputs) {
-      for (const file of ["index.ts", "types.gen.ts"]) {
+      for (const file of ["index.ts", "types.gen.ts", "valibot.gen.ts"]) {
         if (
           readFileSync(join(output, file), "utf8") !==
           readFileSync(join(candidate, file), "utf8")

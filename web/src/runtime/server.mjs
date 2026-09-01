@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { join, relative } from "node:path";
 
 export const MAX_IN_FLIGHT = 128;
 export const MAX_HEADER_SIZE = 16_384;
@@ -26,10 +29,12 @@ export function createAdmission(handler, maximum = MAX_IN_FLIGHT) {
     };
     response.once("finish", release);
     response.once("close", release);
-    Promise.resolve(handler(request, response)).catch(() => {
-      if (!response.headersSent) empty(response, 500);
-      else response.destroy();
-    });
+    Promise.resolve()
+      .then(() => handler(request, response))
+      .catch(() => {
+        if (!response.headersSent) empty(response, 500);
+        else response.destroy();
+      });
   };
   return {
     handler: admit,
@@ -61,13 +66,76 @@ export function createPageServer(handler) {
 }
 
 export function createProbeServer(state) {
-  return createServer((request, response) => {
+  return createServer(async (request, response) => {
     if (request.method !== "GET") return empty(response, 404);
     if (request.url === "/_frontend/health/live") return empty(response, 200);
-    if (request.url === "/_frontend/health/ready")
-      return empty(response, state.ready && !state.draining ? 200 : 503);
+    if (request.url === "/_frontend/health/ready") {
+      let ready = false;
+      try {
+        ready =
+          typeof state.ready === "function"
+            ? await state.ready()
+            : Boolean(state.ready);
+      } catch {}
+      return empty(response, ready && !state.draining ? 200 : 503);
+    }
     return empty(response, 404);
   });
+}
+
+async function assetFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await assetFiles(path)));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
+}
+
+async function digest(path) {
+  return createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
+}
+
+export async function createBuildIntegrity(root) {
+  const nextRoot = join(root, ".next");
+  const required = ["BUILD_ID", "routes-manifest.json", "build-manifest.json"];
+  const staticRoot = join(nextRoot, "static");
+  const staticFiles = await assetFiles(staticRoot);
+  if (staticFiles.length === 0) throw new Error("No immutable assets found");
+  const paths = [
+    ...required.map((item) => join(nextRoot, item)),
+    ...staticFiles.sort(),
+  ];
+  const expected = new Map(
+    await Promise.all(
+      paths.map(async (path) => [relative(nextRoot, path), await digest(path)]),
+    ),
+  );
+  for (const manifest of required.filter((item) => item.endsWith(".json")))
+    JSON.parse(await readFile(join(nextRoot, manifest), "utf8"));
+  if (!(await readFile(join(nextRoot, "BUILD_ID"), "utf8")).trim())
+    throw new Error("Empty build identifier");
+
+  return async () => {
+    try {
+      for (const [path, expectedDigest] of expected) {
+        if ((await digest(join(nextRoot, path))) !== expectedDigest)
+          return false;
+      }
+      const currentAssets = (await assetFiles(staticRoot))
+        .map((path) => relative(nextRoot, path))
+        .sort();
+      const expectedAssets = [...expected.keys()]
+        .filter((path) => path.startsWith("static/"))
+        .sort();
+      return JSON.stringify(currentAssets) === JSON.stringify(expectedAssets);
+    } catch {
+      return false;
+    }
+  };
 }
 
 export async function closeWithin(servers, timeoutMs = SHUTDOWN_TIMEOUT_MS) {

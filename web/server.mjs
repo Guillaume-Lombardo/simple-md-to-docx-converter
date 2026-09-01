@@ -1,8 +1,7 @@
-import { access } from "node:fs/promises";
-import { join } from "node:path";
 import next from "next";
 import {
   closeWithin,
+  createBuildIntegrity,
   createPageServer,
   createProbeServer,
 } from "./src/runtime/server.mjs";
@@ -10,7 +9,7 @@ import {
 const host = process.env.HOSTNAME || "0.0.0.0";
 const pagePort = Number.parseInt(process.env.PORT || "3000", 10);
 const probePort = Number.parseInt(process.env.PROBE_PORT || "3001", 10);
-const state = { draining: false, ready: false };
+const state = { draining: false, ready: async () => false };
 const app = next({
   dev: false,
   dir: import.meta.dirname,
@@ -18,11 +17,7 @@ const app = next({
   port: pagePort,
 });
 await app.prepare();
-await Promise.all([
-  access(join(import.meta.dirname, ".next/BUILD_ID")),
-  access(join(import.meta.dirname, ".next/routes-manifest.json")),
-]);
-state.ready = true;
+state.ready = await createBuildIntegrity(import.meta.dirname);
 
 const page = createPageServer(app.getRequestHandler());
 const probe = createProbeServer(state);

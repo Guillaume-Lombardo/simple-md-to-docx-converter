@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 
 export function AppShell({
   children,
@@ -105,20 +111,50 @@ export function Progress({ label, value }: { label: string; value: number }) {
 
 export function Dialog({
   children,
+  onClose,
   open,
   title,
 }: {
   children: ReactNode;
+  onClose: () => void;
   open: boolean;
   title: string;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const restoreFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      restoreFocus.current = document.activeElement as HTMLElement | null;
+      dialog.showModal();
+    } else if (!open && dialog.open) {
+      dialog.close();
+      restoreFocus.current?.focus();
+      restoreFocus.current = null;
+    }
+  }, [open]);
+
+  useEffect(
+    () => () => {
+      restoreFocus.current?.focus();
+    },
+    [],
+  );
+
   return (
     <dialog
-      aria-labelledby="dialog-title"
+      aria-labelledby={titleId}
       className="m-auto max-w-lg rounded-control bg-surface p-6 shadow-xl"
-      open={open}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      ref={dialogRef}
     >
-      <h2 className="text-xl font-semibold" id="dialog-title">
+      <h2 className="text-xl font-semibold" id={titleId}>
         {title}
       </h2>
       <div className="mt-4">{children}</div>

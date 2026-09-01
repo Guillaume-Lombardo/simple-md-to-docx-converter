@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  createBuildIntegrity,
   createAdmission,
   closeWithin,
   createPageServer,
@@ -51,7 +55,7 @@ test("draining rejects races without invoking the handler", () => {
 });
 
 test("handler failures close safely", async () => {
-  const admission = createAdmission(async () => {
+  const admission = createAdmission(() => {
     throw new Error("failure");
   });
   const response = fakeResponse();
@@ -59,6 +63,50 @@ test("handler failures close safely", async () => {
   await new Promise(setImmediate);
   expect(response.status).toBe(500);
   expect(admission.inFlight).toBe(0);
+});
+
+async function listen(server: ReturnType<typeof createPageServer>["server"]) {
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  return (server.address() as { port: number }).port;
+}
+
+test("real HTTP admission rejects request 129, drains, and has empty failures", async () => {
+  const held: ServerResponse[] = [];
+  const page = createPageServer(
+    (_request: IncomingMessage, response: ServerResponse) =>
+      void held.push(response),
+  );
+  const port = await listen(page.server);
+  const pending = Array.from({ length: 128 }, () => get(port, "/hold"));
+  await vi.waitFor(() => expect(page.admission.inFlight).toBe(128));
+  expect(await get(port, "/overflow")).toEqual({ body: "", status: 503 });
+  page.admission.drain();
+  expect(await get(port, "/draining")).toEqual({ body: "", status: 503 });
+  held.forEach((response) => response.end("ok"));
+  await Promise.all(pending);
+  await vi.waitFor(() => expect(page.admission.inFlight).toBe(0));
+  await new Promise((resolve) => page.server.close(resolve));
+});
+
+test("synchronous handler throws become an empty HTTP 500", async () => {
+  const page = createPageServer(() => {
+    throw new Error("failure");
+  });
+  const port = await listen(page.server);
+  expect(await get(port, "/")).toEqual({ body: "", status: 500 });
+  expect(page.admission.inFlight).toBe(0);
+  await new Promise((resolve) => page.server.close(resolve));
+});
+
+test("real HTTP shutdown is bounded and terminates held connections", async () => {
+  const page = createPageServer(() => undefined);
+  const port = await listen(page.server);
+  const pending = get(port, "/hold").catch(() => ({ body: "", status: 0 }));
+  await vi.waitFor(() => expect(page.admission.inFlight).toBe(1));
+  await expect(closeWithin([page.server], 5)).resolves.toBe("timeout");
+  await pending;
+  await vi.waitFor(() => expect(page.admission.inFlight).toBe(0));
 });
 
 test("handler failure destroys a response whose headers were sent", async () => {
@@ -153,4 +201,31 @@ test("HTTP header overflow returns an empty 431", async () => {
   const result = await get(port, "/", { "x-large": "a".repeat(17_000) });
   expect(result).toEqual({ body: "", status: 431 });
   page.server.close();
+});
+
+test("readiness checks route manifests and immutable asset integrity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "markweave-build-"));
+  const staticRoot = join(root, ".next/static/chunks");
+  await mkdir(staticRoot, { recursive: true });
+  await writeFile(join(root, ".next/BUILD_ID"), "build-id\n");
+  await writeFile(join(root, ".next/routes-manifest.json"), "{}");
+  await writeFile(join(root, ".next/build-manifest.json"), "{}");
+  const asset = join(staticRoot, "app-abc.js");
+  await writeFile(asset, "original");
+  const ready = await createBuildIntegrity(root);
+  expect(await ready()).toBe(true);
+  await writeFile(asset, "corrupt");
+  expect(await ready()).toBe(false);
+  await writeFile(asset, "original");
+  await writeFile(join(staticRoot, "unexpected.js"), "unexpected");
+  expect(await ready()).toBe(false);
+  await rm(join(staticRoot, "unexpected.js"));
+  await rm(join(root, ".next/routes-manifest.json"));
+  expect(await ready()).toBe(false);
+  await writeFile(join(root, ".next/routes-manifest.json"), "{}");
+  await writeFile(join(root, ".next/BUILD_ID"), "\n");
+  await expect(createBuildIntegrity(root)).rejects.toThrow(
+    "Empty build identifier",
+  );
+  await rm(root, { recursive: true });
 });

@@ -1,66 +1,107 @@
-type Target = "backend" | "deny" | "frontend";
+// @vitest-environment node
+import { createServer, request } from "node:http";
+import { createRoutingFixture } from "./fixtures/router.mjs";
 
-function route(path: string): Target {
-  const normalized = decodeURIComponent(path).toLowerCase();
-  if (
-    normalized === "/_frontend/health" ||
-    normalized.startsWith("/_frontend/health/")
-  )
-    return "deny";
-  if (
-    path === "/api/v1" ||
-    path.startsWith("/api/v1/") ||
-    [
-      "/health/live",
-      "/health/ready",
-      "/metrics",
-      "/docs",
-      "/redoc",
-      "/openapi.json",
-    ].includes(path)
-  )
-    return "backend";
-  return "frontend";
+type Capture = { cookie?: string; method: string; path: string };
+
+async function listen(server: ReturnType<typeof createServer>) {
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 }
 
-test.each(["/convert", "/_next/static/chunk.js", "/missing"])(
-  "frontend fixture strips all credential fields from %s",
-  (path) => {
-    expect(route(path)).toBe("frontend");
-    const request = new Headers({ Cookie: "session=a; csrf=b; unrelated=c" });
-    request.delete("Cookie");
-    const responseCookies = ["session=x", "csrf=y"];
-    responseCookies.splice(0);
-    expect(request.has("Cookie")).toBe(false);
-    expect(responseCookies).toEqual([]);
-  },
-);
+async function call(origin: string, method: string, path: string) {
+  const destination = new URL(origin);
+  return new Promise<{ body: string; cookies: string[]; status: number }>(
+    (resolve, reject) => {
+      const outbound = request(
+        {
+          headers: {
+            cookie: "session=a; csrf=b",
+            "x-forwarded-host": "attacker.invalid",
+          },
+          host: destination.hostname,
+          method,
+          path,
+          port: destination.port,
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () =>
+            resolve({
+              body,
+              cookies: response.headers["set-cookie"] ?? [],
+              status: response.statusCode!,
+            }),
+          );
+        },
+      );
+      outbound.on("error", reject);
+      outbound.end();
+    },
+  );
+}
 
-test.each([
-  ["POST", "/convert"],
-  ["PATCH", "/unknown"],
-])("credential stripping is independent of %s %s", (_method, path) => {
-  expect(route(path)).toBe("frontend");
-});
+test("real router preserves backend credentials and isolates frontend credentials", async () => {
+  const frontendCaptures: Capture[] = [];
+  const backendCaptures: Capture[] = [];
+  const upstream = (captures: Capture[], label: string) =>
+    createServer((incoming, response) => {
+      captures.push({
+        cookie: incoming.headers.cookie,
+        method: incoming.method!,
+        path: incoming.url!,
+      });
+      response.setHeader("Set-Cookie", ["session=one; HttpOnly", "csrf=two"]);
+      response.end(label);
+    });
+  const frontend = upstream(frontendCaptures, "frontend");
+  const backend = upstream(backendCaptures, "backend");
+  const frontendOrigin = await listen(frontend);
+  const backendOrigin = await listen(backend);
+  const router = createRoutingFixture({
+    backend: backendOrigin,
+    frontend: frontendOrigin,
+  });
+  const routerOrigin = await listen(router);
 
-test.each(["/api/v1", "/api/v1/session", "/health/live"])(
-  "backend fixture preserves cookies for %s",
-  (path) => {
-    expect(route(path)).toBe("backend");
-    const cookies = ["session=a", "csrf=b"];
-    expect(cookies).toEqual(["session=a", "csrf=b"]);
-  },
-);
+  for (const [method, path] of [
+    ["GET", "/convert"],
+    ["GET", "/_next/static/chunk.js"],
+    ["GET", "/missing"],
+    ["POST", "/convert"],
+    ["PATCH", "/unknown"],
+  ] as const) {
+    expect(await call(routerOrigin, method, path)).toEqual({
+      body: "frontend",
+      cookies: [],
+      status: 200,
+    });
+  }
+  expect(frontendCaptures).toEqual([
+    { cookie: undefined, method: "GET", path: "/convert" },
+    { cookie: undefined, method: "GET", path: "/_next/static/chunk.js" },
+    { cookie: undefined, method: "GET", path: "/missing" },
+    { cookie: undefined, method: "POST", path: "/convert" },
+    { cookie: undefined, method: "PATCH", path: "/unknown" },
+  ]);
 
-test.each([
-  "/_frontend/health",
-  "/_frontend/health/live",
-  "/_FRONTEND/HEALTH/live",
-  "/%5ffrontend/health/live",
-])("reserved frontend probes are denied publicly: %s", (path) => {
-  expect(route(path)).toBe("deny");
-});
+  for (const path of ["/api/v1", "/api/v1/session", "/health/live"]) {
+    expect(await call(routerOrigin, "GET", path)).toEqual({
+      body: "backend",
+      cookies: ["session=one; HttpOnly", "csrf=two"],
+      status: 200,
+    });
+  }
+  expect(
+    backendCaptures.every((item) => item.cookie === "session=a; csrf=b"),
+  ).toBe(true);
 
-test("fixture never trusts forwarding headers", () => {
-  expect(route("/convert")).toBe("frontend");
+  await Promise.all(
+    [router, frontend, backend].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
 });
