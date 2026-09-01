@@ -772,13 +772,25 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         "template_id",
         "template_version_id",
         "result_sha256",
+        "policy_user_idle_minutes",
+        "policy_admin_idle_minutes",
+        "policy_revision",
+        "policy_audit_id",
+        "policy_audit_actor_id",
+        "policy_audit_operation",
+        "policy_audit_created_at",
+        "policy_audit_old_user_idle_minutes",
+        "policy_audit_old_admin_idle_minutes",
+        "policy_audit_new_user_idle_minutes",
+        "policy_audit_new_admin_idle_minutes",
+        "policy_audit_revision",
     }
     if not isinstance(raw, dict) or set(raw) != keys:
         raise WorkflowFailure("checkpoint: invalid schema")
     if not all(isinstance(raw[key], str) and raw[key] for key in keys):
         raise WorkflowFailure("checkpoint: invalid values")
     if (
-        raw["schema"] != "t21-service-checkpoint-v1"
+        raw["schema"] != "t59-service-checkpoint-v2"
         or raw["profile"] != expected_profile
     ):
         raise WorkflowFailure("checkpoint: profile or version mismatch")
@@ -791,10 +803,29 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         uuid.UUID(raw["correlation_id"])
         uuid.UUID(raw["template_id"])
         uuid.UUID(raw["template_version_id"])
+        uuid.UUID(raw["policy_audit_id"])
+        uuid.UUID(raw["policy_audit_actor_id"])
     except ValueError as error:
         raise WorkflowFailure("checkpoint: invalid identifier") from error
     if len(raw["result_sha256"]) != 64:
         raise WorkflowFailure("checkpoint: invalid result digest")
+    numeric_policy_fields = (
+        "policy_user_idle_minutes",
+        "policy_admin_idle_minutes",
+        "policy_revision",
+        "policy_audit_old_user_idle_minutes",
+        "policy_audit_old_admin_idle_minutes",
+        "policy_audit_new_user_idle_minutes",
+        "policy_audit_new_admin_idle_minutes",
+        "policy_audit_revision",
+    )
+    if any(
+        not raw[key].isascii() or not raw[key].isdecimal()
+        for key in numeric_policy_fields
+    ):
+        raise WorkflowFailure("checkpoint: invalid policy evidence")
+    if raw["policy_audit_operation"] != "idle_session_policy_update":
+        raise WorkflowFailure("checkpoint: invalid policy operation")
     return {key: raw[key] for key in keys}
 
 
@@ -1310,7 +1341,6 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     if wait_for_job(expiring, expiring_location).get("state") != "succeeded":
         raise WorkflowFailure("expiration: prerequisite conversion did not succeed")
     time.sleep(61)
-    expect(expiring.request("GET", "/api/v1/session"), 401, "session expiration")
     observer = ServiceClient(arguments.base_url)
     observer.login(arguments.admin_username, arguments.admin_password)
     expired = observer.request("GET", expiring_location)
@@ -1349,6 +1379,71 @@ def require_template_audit(client: ServiceClient, template_id: str) -> None:
         raise WorkflowFailure("checkpoint audit: template creation record missing")
 
 
+def checkpoint_policy_evidence(client: ServiceClient) -> dict[str, str]:
+    """Persist one exact policy revision and return content-free audit evidence."""
+    current_result = client.request("GET", "/api/v1/admin/session-policy")
+    expect(current_result, 200, "checkpoint policy baseline")
+    current = decode_object(current_result, "checkpoint policy baseline")
+    etag = current_result.headers.get("etag")
+    if etag is None:
+        raise WorkflowFailure("checkpoint policy baseline: ETag is missing")
+    target = (
+        {"user_idle_minutes": 26, "admin_idle_minutes": 11}
+        if (current.get("user_idle_minutes"), current.get("admin_idle_minutes"))
+        == (25, 10)
+        else {"user_idle_minutes": 25, "admin_idle_minutes": 10}
+    )
+    updated_result = json_request(
+        client,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        target,
+        expected=200,
+        operation="checkpoint policy update",
+        headers={"If-Match": etag},
+    )
+    updated = decode_object(updated_result, "checkpoint policy update")
+    audit_result = client.request("GET", "/api/v1/audit?limit=100")
+    expect(audit_result, 200, "checkpoint policy audit")
+    records = json.loads(audit_result.body)
+    matches = (
+        [
+            record
+            for record in records
+            if isinstance(record, dict)
+            and record.get("operation") == "idle_session_policy_update"
+            and record.get("target_version") == str(updated.get("revision"))
+            and record.get("old_user_idle_minutes") == current.get("user_idle_minutes")
+            and record.get("old_admin_idle_minutes")
+            == current.get("admin_idle_minutes")
+            and record.get("new_user_idle_minutes") == target["user_idle_minutes"]
+            and record.get("new_admin_idle_minutes") == target["admin_idle_minutes"]
+        ]
+        if isinstance(records, list)
+        else []
+    )
+    if len(matches) != 1:
+        raise WorkflowFailure("checkpoint policy audit evidence is not unique")
+    audit = matches[0]
+    required = ("id", "actor_id", "operation", "created_at")
+    if not all(isinstance(audit.get(key), str) and audit[key] for key in required):
+        raise WorkflowFailure("checkpoint policy audit evidence is incomplete")
+    return {
+        "policy_user_idle_minutes": str(target["user_idle_minutes"]),
+        "policy_admin_idle_minutes": str(target["admin_idle_minutes"]),
+        "policy_revision": str(updated["revision"]),
+        "policy_audit_id": audit["id"],
+        "policy_audit_actor_id": audit["actor_id"],
+        "policy_audit_operation": audit["operation"],
+        "policy_audit_created_at": audit["created_at"],
+        "policy_audit_old_user_idle_minutes": str(current["user_idle_minutes"]),
+        "policy_audit_old_admin_idle_minutes": str(current["admin_idle_minutes"]),
+        "policy_audit_new_user_idle_minutes": str(target["user_idle_minutes"]),
+        "policy_audit_new_admin_idle_minutes": str(target["admin_idle_minutes"]),
+        "policy_audit_revision": str(updated["revision"]),
+    }
+
+
 def checkpoint(arguments: argparse.Namespace) -> None:
     client = ServiceClient(arguments.base_url)
     client.login(arguments.admin_username, arguments.admin_password)
@@ -1360,17 +1455,21 @@ def checkpoint(arguments: argparse.Namespace) -> None:
         raise WorkflowFailure("checkpoint: conversion did not succeed")
     validate_result(client, terminal, arguments.output, arguments.artifact_dir)
     require_template_audit(client, str(template["id"]))
+    policy_evidence = checkpoint_policy_evidence(client)
+    state = state_payload(
+        profile=arguments.profile,
+        owner=arguments.admin_username,
+        location=location,
+        output=arguments.output,
+        job=terminal,
+        template=template,
+        result_sha256=result_digest(client, terminal),
+    )
+    state["schema"] = "t59-service-checkpoint-v2"
+    state.update(policy_evidence)
     write_state(
         arguments.state_file,
-        state_payload(
-            profile=arguments.profile,
-            owner=arguments.admin_username,
-            location=location,
-            output=arguments.output,
-            job=terminal,
-            template=template,
-            result_sha256=result_digest(client, terminal),
-        ),
+        state,
     )
 
 
@@ -1407,17 +1506,34 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
     if result_digest(client, job) != state["result_sha256"]:
         raise WorkflowFailure("checkpoint recovery: result bytes changed")
     require_template_audit(client, state["template_id"])
-    policy = decode_object(
-        client.request("GET", "/api/v1/admin/session-policy"),
-        "checkpoint idle-session policy",
-    )
-    if not isinstance(policy.get("revision"), int) or policy["revision"] < 1:
+    policy_result = client.request("GET", "/api/v1/admin/session-policy")
+    expect(policy_result, 200, "checkpoint idle-session policy")
+    policy = decode_object(policy_result, "checkpoint idle-session policy")
+    expected_policy = {
+        "user_idle_minutes": int(state["policy_user_idle_minutes"]),
+        "admin_idle_minutes": int(state["policy_admin_idle_minutes"]),
+        "revision": int(state["policy_revision"]),
+    }
+    if policy != expected_policy:
         raise WorkflowFailure("checkpoint idle-session policy was not preserved")
     audit = client.request("GET", "/api/v1/audit?limit=100")
     expect(audit, 200, "checkpoint idle-session policy audit")
     records = json.loads(audit.body)
+    expected_audit = {
+        "id": state["policy_audit_id"],
+        "actor_id": state["policy_audit_actor_id"],
+        "operation": state["policy_audit_operation"],
+        "created_at": state["policy_audit_created_at"],
+        "target_version": state["policy_audit_revision"],
+        "old_user_idle_minutes": int(state["policy_audit_old_user_idle_minutes"]),
+        "old_admin_idle_minutes": int(state["policy_audit_old_admin_idle_minutes"]),
+        "new_user_idle_minutes": int(state["policy_audit_new_user_idle_minutes"]),
+        "new_admin_idle_minutes": int(state["policy_audit_new_admin_idle_minutes"]),
+    }
     if not isinstance(records, list) or not any(
-        record.get("operation") == "idle_session_policy_update" for record in records
+        isinstance(record, dict)
+        and all(record.get(key) == value for key, value in expected_audit.items())
+        for record in records
     ):
         raise WorkflowFailure("checkpoint idle-session policy audit was not preserved")
 
@@ -1560,6 +1676,18 @@ def verify_disabled_login_origin(arguments: argparse.Namespace) -> None:
             raise WorkflowFailure(f"disabled login origin ({origin}): auth not reached")
 
 
+def verify_session_expiration(arguments: argparse.Namespace) -> None:
+    """Prove real final-image absolute expiry in a short-lifetime deployment."""
+    client = ServiceClient(arguments.base_url)
+    client.login(arguments.admin_username, arguments.admin_password)
+    expect(client.request("GET", "/api/v1/session"), 200, "short session baseline")
+    time.sleep(3)
+    expired = client.request("GET", "/api/v1/session")
+    expect(expired, 401, "short absolute session expiration")
+    if error_payload(expired).get("code") != "AUTHENTICATION_REQUIRED":
+        raise WorkflowFailure("short absolute session expiration: stable error missing")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1570,6 +1698,7 @@ def build_parser() -> argparse.ArgumentParser:
             "exercise-mermaid",
             "verify-login-origin",
             "verify-disabled-login-origin",
+            "verify-session-expiration",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1679,6 +1808,8 @@ def main(argv: list[str] | None = None) -> int:
             verify_login_origin(arguments)
         elif arguments.command == "verify-disabled-login-origin":
             verify_disabled_login_origin(arguments)
+        elif arguments.command == "verify-session-expiration":
+            verify_session_expiration(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

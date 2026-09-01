@@ -20,6 +20,7 @@ from markweave.web import WEB_SECURITY_HEADERS
 from .schemas import ConversionResponse, TemplateResponse
 
 CSRF_COOKIE_NAME = "__Host-md_converter_csrf"
+_MAX_POLICY_REVISION_DIGITS = 19
 
 
 def set_session_cookie(response: Response, settings: Settings, token: str) -> None:
@@ -127,12 +128,16 @@ def expected_idle_session_policy_revision(if_match: str | None) -> int:
         raise IdleSessionPolicyConflictError
     candidate = if_match[len(prefix) : -1]
     if (
-        not candidate.isascii()
+        len(candidate) > _MAX_POLICY_REVISION_DIGITS
+        or not candidate.isascii()
         or not candidate.isdecimal()
         or (len(candidate) > 1 and candidate.startswith("0"))
     ):
         raise IdleSessionPolicyConflictError from None
-    revision = int(candidate)
+    try:
+        revision = int(candidate)
+    except ValueError:
+        raise IdleSessionPolicyConflictError from None
     if revision < 0:
         raise IdleSessionPolicyConflictError
     return revision

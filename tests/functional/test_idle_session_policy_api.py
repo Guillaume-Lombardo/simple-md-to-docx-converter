@@ -68,6 +68,7 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             '"idle-session-policy-+0"',
             '"idle-session-policy- 0"',
             '"idle-session-policy-00"',
+            f'"idle-session-policy-{"9" * 5000}"',
         ):
             malformed = client.put(
                 "/api/v1/admin/session-policy",
