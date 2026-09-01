@@ -496,6 +496,8 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
     service, _, clock = build_role_policy_service()
     admin = service.bootstrap_admin("admin", "correct")
     user = service.create_user(admin, "alice", "correct")
+    assert service.effective_idle_minutes(Role.ADMIN) == 15
+    assert service.effective_idle_minutes(Role.USER) == 30
 
     admin_login = service.login("admin", "correct")
     user_login = service.login("alice", "correct")
@@ -515,6 +517,8 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
         admin_idle_minutes=10,
         expected_revision=0,
     ) == IdleSessionPolicy(5, 10, 1)
+    assert service.effective_idle_minutes(Role.ADMIN) == 10
+    assert service.effective_idle_minutes(Role.USER) == 5
     clock.advance(minutes=6)
     assert_error(
         "AUTHENTICATION_REQUIRED",
