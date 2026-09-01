@@ -55,7 +55,7 @@ boundary:
 ```text
 browser -- HTTPS --> same-origin router
                        |-- browser pages and /_next/* --> Next.js frontend
-                       `-- /api/v1/* and operations --> FastAPI backend --> workers/storage
+                       `-- /api/v1, /api/v1/**, operations --> FastAPI --> workers/storage
 ```
 
 The frontend is a presentation process. It owns page composition, browser assets, accessible client
@@ -81,24 +81,39 @@ derive security decisions from `Forwarded` or `X-Forwarded-*`. FastAPI continues
 operator-set `MARKWEAVE_PUBLIC_ORIGIN`. Next.js receives the same public origin as configuration for
 links only; it may not override or infer FastAPI's security origin.
 
+Because same-origin cookies use `Path=/`, the router removes the complete `Cookie` header before
+forwarding every page or asset request to the frontend. It also removes every `Set-Cookie` field,
+including multiple header fields, from frontend responses before returning them to the browser.
+It performs neither transformation on exact `/api/v1`, `/api/v1/**`, or public operational routes:
+FastAPI receives the original `Cookie` header and the browser receives all of FastAPI's
+`Set-Cookie` fields unchanged. Thus Next.js cannot consume, overwrite, clear, or mint either the
+session or CSRF cookie.
+
 ## One-origin routing contract
 
 At T64 cutover the router applies this ordered, non-overlapping table:
 
 | Public path | Owner | Rules |
 | --- | --- | --- |
-| `/api/v1` and `/api/v1/**` | FastAPI | No Next.js rewrite, proxy, cache, or body inspection. This includes uploads and downloads. |
+| exact `/api/v1` and `/api/v1/**` | FastAPI | No Next.js rewrite, proxy, cache, or body inspection. Preserve incoming `Cookie` and every outgoing `Set-Cookie` field unchanged. This includes uploads and downloads. |
 | `/health/live`, `/health/ready`, `/metrics`, `/docs`, `/docs/**`, `/redoc`, `/openapi.json` | FastAPI | Preserve the existing public operational contract and FastAPI response semantics. |
-| `/login`, `/change-password`, `/convert`, `/templates`, `/` | Next.js | `/` preserves the redirect to `/convert`; page behavior follows the parity inventory below. |
+| `/login`, `/change-password`, `/convert`, `/templates`, `/` | Next.js | Strip the complete request `Cookie` header and every response `Set-Cookie` field. `/` preserves the redirect to `/convert`; page behavior follows the parity inventory below. |
 | `/_frontend/health` and `/_frontend/health/**` | Public router denial | Return a content-free `404` before any Next.js catch-all; reject decoded or case-varied equivalents rather than forwarding them. Platform probes reach only the two exact internal paths on the frontend Service's separate probe port. |
-| `/_next/**` | Next.js | Only content-hashed framework assets are public and immutable. Source maps are not published. |
+| `/_next/**` | Next.js | Strip the complete request `Cookie` header and every response `Set-Cookie` field. Only content-hashed framework assets are public and immutable. Source maps are not published. |
 | `/static/**` | FastAPI before cutover; absent after legacy removal | Never alias this prefix to new assets. It allows pre-cutover and rollback routes to remain unambiguous. |
-| any other path | Next.js | Return the reviewed accessible `404`; never fall through to FastAPI or an external URL. |
+| any other path | Next.js | Strip the complete request `Cookie` header and every response `Set-Cookie` field. Return the reviewed accessible `404`; never fall through to FastAPI or an external URL. |
 
 Routing is exact: encoded or case-varied paths do not bypass prefix selection, dot segments are
 rejected or normalized once before routing, and no user-controlled header chooses an upstream.
 There is no CORS mode and no second browser-visible hostname. Production browser tests fail if any
 page, API request, asset, upload, or download crosses origin.
+
+T60 routing-contract tests send sentinel session, CSRF, and unrelated cookies to pages and assets,
+capture the frontend upstream request, and require the `Cookie` header to be absent. They inject
+multiple frontend `Set-Cookie` fields and require all of them to be absent at the client. The same
+fixture requires both headers to survive unchanged in both directions for exact `/api/v1`, an
+`/api/v1/**` descendant, and a representative public operational route. These are blocking gates;
+T64 repeats them through the production router against the exact final image pair.
 
 During T60–T63, production continues to route all browser paths and `/static/**` to FastAPI. The
 unpublished frontend is exercised only through test-only routing that cannot receive production
@@ -212,10 +227,12 @@ are direct CSRF-protected FastAPI calls. A `401`, password-renewal restriction, 
 expiry is authoritative even when client state says otherwise. Client timers may improve the user
 experience but never extend or decide a session.
 
-Next.js code must not read, forward, persist, log, or transform `Cookie`, `Set-Cookie`, credentials,
-CSRF tokens, authorization data, or request bodies. Page rendering is public-shell rendering; the
-browser obtains the current principal from `/api/v1/session`. No Server Action or server-side fetch
-is an authentication bridge.
+Server-side Next.js code must not read, forward, persist, log, or transform `Cookie`, `Set-Cookie`,
+credentials, CSRF tokens, authorization data, or request bodies. The router makes the cookie rule
+structural by removing the complete incoming `Cookie` header and every outgoing frontend
+`Set-Cookie` field. Page rendering is public-shell rendering; browser JavaScript obtains the current
+principal from `/api/v1/session` and reads only the CSRF cookie for direct FastAPI mutations. No
+Server Action or server-side fetch is an authentication bridge.
 
 ### CSP and page headers
 
@@ -228,7 +245,7 @@ object-src 'none';
 frame-ancestors 'none';
 form-action 'self';
 script-src 'nonce-<request-nonce>' 'strict-dynamic';
-style-src 'self';
+style-src 'self' 'nonce-<request-nonce>';
 connect-src 'self';
 img-src 'self' data: blob:;
 font-src 'self';
@@ -236,10 +253,12 @@ manifest-src 'self';
 worker-src 'none'
 ```
 
-The nonce is passed only to framework bootstrap scripts in the response being rendered. T60 must
-prove on exact Next.js `16.3.4` production dynamic rendering that every response has a fresh nonce,
-cached responses never reuse one, all framework bootstrap scripts carry it, and no generated page
-or asset requires eval. T64 repeats that proof against the exact final image bytes. No
+The same response nonce is passed to framework bootstrap scripts and every emitted inline style
+element. T60 must prove on exact Next.js `16.3.4` production dynamic rendering that every response
+has a fresh nonce, cached responses never reuse one, `script-src` and `style-src` carry that same
+nonce, all framework bootstrap scripts and inline style elements carry it, no inline style
+attribute or unnonced inline style is emitted, and no generated page or asset requires eval. T64
+repeats that proof against the exact final image bytes. No
 `unsafe-inline`, `unsafe-eval`, remote script, remote stylesheet, runtime font fetch, analytics,
 third-party widget, service worker, or user-controlled CSP source is allowed. If a supported Next.js
 patch cannot satisfy this policy, implementation stops for explicit security review instead of

@@ -153,8 +153,12 @@ The approved frontend migration does not change this authentication contract. Af
 pages come from the same-origin Next.js process, but login, session inspection, logout, password
 renewal, expiry, revocation, authorization, cookies, CSRF validation, and Origin validation remain
 direct FastAPI operations. Next.js application code may neither read nor forward the HttpOnly
-session cookie. Browser JavaScript continues to read only the `__Host-md_converter_csrf` cookie and
-copy it to `X-CSRF-Token` for mutations.
+session cookie. The public router enforces this boundary by removing the complete `Cookie` header
+from every frontend-bound page and asset request and removing every `Set-Cookie` field from frontend
+responses. It applies neither transformation to exact `/api/v1`, `/api/v1/**`, or public
+operational routes, so FastAPI continues to receive browser cookies and issue or clear all session
+and CSRF cookies directly. Browser JavaScript continues to read only the
+`__Host-md_converter_csrf` cookie and copy it to `X-CSRF-Token` for mutations.
 
 The frontend renders no authoritative authenticated state on the server. It loads the principal
 from `/api/v1/session`, treats `401` and restricted-session responses as authoritative, and never

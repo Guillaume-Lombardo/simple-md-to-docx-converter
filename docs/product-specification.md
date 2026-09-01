@@ -22,10 +22,10 @@ The product includes a conversion page, template administration, local authentic
 |---|---|
 | Backend language | Python 3.14 |
 | Backend image | Official `ubi9/python-314`, pinned by digest in CI |
-| API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under `/api/v1` and the documented operational routes |
+| API boundary | FastAPI remains the sole authority for business behavior, authentication, authorization, persistence, conversions, templates, accounts, audit, health, readiness, metrics, and OpenAPI under exact `/api/v1`, `/api/v1/**`, and the documented operational routes |
 | Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
-| Browser boundary | Browser pages and `/api/v1` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
-| Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin `/api/v1` URLs, and the frontend has no business-service or persistence credentials |
+| Browser boundary | Browser pages and both exact `/api/v1` and `/api/v1/**` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
+| Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
 | Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0` and npm `11.17.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3`, all exact and lockfile-integrity pinned as reviewed on 2026-09-01 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
@@ -105,9 +105,10 @@ own tests and blocking coverage checks.
 
 #### 3.3.1 Next.js production and migration contract
 
-The reviewed routing boundary sends `/api/v1/**`, `/health/live`, `/health/ready`, `/metrics`,
-`/docs`, `/docs/**`, `/redoc`, and `/openapi.json` directly to FastAPI. At T64 cutover it sends `/`, `/login`,
-`/change-password`, `/convert`, `/templates`, and `/_next/**` to Next.js. Unknown paths return the
+The reviewed routing boundary sends both exact `/api/v1` and `/api/v1/**`, plus `/health/live`,
+`/health/ready`, `/metrics`, `/docs`, `/docs/**`, `/redoc`, and `/openapi.json`, directly to FastAPI.
+At T64 cutover it sends `/`, `/login`, `/change-password`, `/convert`, `/templates`, and `/_next/**`
+to Next.js. Unknown paths return the
 frontend's accessible `404`; they never fall through to FastAPI or an external destination. The
 router preserves `Host` and `Origin`, rejects unknown hosts, does not trust forwarded headers, and
 never selects an upstream from user-controlled headers. No CORS or second browser origin is
@@ -115,6 +116,13 @@ supported. Before the frontend catch-all, the public router returns a content-fr
 `/_frontend/health`, every descendant, and decoded or case-varied equivalents. Only platform probes
 may call the exact internal `/_frontend/health/live` and `/_frontend/health/ready` paths through the
 frontend Service's separate probe port; the public router reaches only the page port.
+
+The router removes the complete `Cookie` request header before every frontend-bound page or asset
+request and removes every `Set-Cookie` response-header field before a frontend response reaches the
+browser. Exact `/api/v1`, `/api/v1/**`, and the public operational routes go directly to FastAPI
+without either transformation, preserving its incoming `Cookie` and all outgoing `Set-Cookie`
+fields. T60 blocks on routing-fixture tests for both directions and route classes; T64 repeats them
+through the production router against the exact final images.
 
 Next.js is a presentation-only process. Browser code calls same-origin FastAPI routes directly.
 Except for two non-public process-local frontend probes, route handlers, Server Actions,
@@ -149,13 +157,15 @@ T64 must block on the exact 128/129 admission boundary, header rejection, empty 
 finish/close accounting, drain races, and bounded shutdown.
 
 Every HTML response is `no-store` and uses a per-response cryptographic nonce with a CSP allowing
-only self-hosted connections, styles, fonts, images and nonce-bearing framework scripts; it forbids
+only self-hosted connections, stylesheets, fonts, and images plus nonce-bearing framework scripts
+and inline style elements; it forbids
 objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
 API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
 use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
 third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
-must prove a fresh nonce per response with no cache reuse, a nonce on every framework bootstrap
-script, and no eval requirement.
+must prove a fresh nonce per response with no cache reuse, the same nonce in `script-src` and
+`style-src`, a nonce on every framework bootstrap script and inline style element, no inline style
+attribute or unnonced inline style, and no eval requirement.
 
 The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS
@@ -166,6 +176,9 @@ subdomain or the parent domain's browser preload commitment.
 FastAPI keeps the opaque `HttpOnly`, `Secure`, `SameSite=Lax`, path-root session cookie and the
 separate JavaScript-readable `__Host-md_converter_csrf` cookie. Browser mutations copy the latter
 into `X-CSRF-Token`; login goes directly to `/api/v1/login` and preserves exact-Origin validation.
+Although the browser sends same-origin cookies on matching frontend paths, the router strips the
+complete request header before Next.js and strips every frontend-originated `Set-Cookie` response
+field. It preserves both header directions unchanged on direct FastAPI routes.
 Uploads and downloads pass router-to-FastAPI without traversing Next.js, and retain FastAPI's
 scanner, authorization, filename, digest, content-type, `nosniff`, and private no-store contracts.
 
