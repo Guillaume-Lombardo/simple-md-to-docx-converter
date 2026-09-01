@@ -69,6 +69,13 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   manifest fetch returned the same digest in both its response header and the hash of the exact
   public manifest bytes. This phase adopts that exact published image in Compose before public
   quickstart validation and ticket completion.
+- 2026-09-01: The Docker simple quickstart pulled the pinned `0.5.2` image by its exact retained
+  digest, reached readiness, and completed a real template-free conversion of
+  `quickstart-source.md`. The download was a valid 10,459-byte OpenXML DOCX named
+  `quickstart-source.docx`, confirming the T57 behavior through the published image. The equivalent
+  rootless Podman pull was attempted but the local VM had only 964 MiB free and exhausted
+  `/var/tmp` while storing an image layer; no application container was created. Hosted CI had
+  already passed both Docker and rootless-Podman final-image profiles for the exact release source.
 
 ## Synchronization
 
