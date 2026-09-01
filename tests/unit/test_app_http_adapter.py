@@ -22,9 +22,17 @@ from markweave.auth.errors import (
 )
 from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
+from markweave.auth.policy_errors import (
+    IdleSessionPolicyConflictError,
+    IdleSessionPolicyPreconditionRequiredError,
+)
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.http.errors import error_responses
+from markweave.http.responses import (
+    expected_idle_session_policy_revision,
+    idle_session_policy_etag,
+)
 from markweave.http.routers.conversions import _result_content_disposition
 from markweave.http.schemas import ErrorResponse
 from markweave.jobs.errors import (
@@ -52,6 +60,27 @@ from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 _HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+@pytest.mark.unit
+def test_idle_session_policy_validator_accepts_only_canonical_etags() -> None:
+    assert idle_session_policy_etag(0) == '"idle-session-policy-0"'
+    assert expected_idle_session_policy_revision('"idle-session-policy-0"') == 0
+    assert expected_idle_session_policy_revision('"idle-session-policy-42"') == 42
+
+    with pytest.raises(IdleSessionPolicyPreconditionRequiredError):
+        expected_idle_session_policy_revision(None)
+    for validator in (
+        "idle-session-policy-0",
+        '"other-0"',
+        '"idle-session-policy-+0"',
+        '"idle-session-policy- 0"',
+        '"idle-session-policy-00"',
+        '"idle-session-policy-\N{ARABIC-INDIC DIGIT ZERO}"',
+        f'"idle-session-policy-{"9" * 65}"',
+    ):
+        with pytest.raises(IdleSessionPolicyConflictError):
+            expected_idle_session_policy_revision(validator)
 
 
 def _load_http_contract_fixture(filename: str) -> Any:
