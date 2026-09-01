@@ -2,7 +2,7 @@
 ticket: T60
 linear_id: G1L-524
 linear_url: https://linear.app/g1lom/issue/G1L-524/t60-build-the-web-nextjs-typescript-and-tailwind-foundation
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -50,6 +50,10 @@ Create the production-ready Next.js, TypeScript, and Tailwind CSS application fo
 
 * 2026-09-01: Created as the frontend foundation after T58; it deliberately leaves the existing production pages active.
 * 2026-09-01: Review clarified that production runtime code must use generated typed bindings; fixtures are generated from the same OpenAPI contract for tests only.
+* 2026-09-01: Implementation started from verified T58 completion on exact `main` at `15b5620439488392e550eeda036d76d0be414e69`. The work is bounded to the isolated `web/` foundation, generated bindings, shared primitives, custom frontend server, routing/CSP/runtime tests, CI integration, and rootless smoke proof; existing FastAPI-rendered production pages remain active.
+* 2026-09-01: Implemented the isolated Next.js 16.3.4, TypeScript 6.0.3, and Tailwind CSS 4.3.3 foundation with exact npm locking, generated production and fixture OpenAPI types, one typed same-origin transport, accessible shared primitives, strict per-request nonce CSP, and the bounded two-port custom server. CI now caches and validates the frontend independently and selects the rootless frontend domain for `web/**` or OpenAPI changes. Production routing and the FastAPI-rendered interface are unchanged.
+* 2026-09-01: Local frontend verification passed formatting, lint, strict types, generated-binding freshness, zero-vulnerability `npm audit`, 4 structural tests, 37 unit/component/runtime tests with 98.29% statements, 94.04% branches, 97.43% functions, and 99.04% lines, the optimized production build, 3 production nonce-CSP/asset/probe tests, and the digest-pinned arbitrary-UID read-only-root Podman smoke test. The CI selector and workflow policy passed 239 focused Python tests. ESLint remains exact 9.39.2 because the reviewed Next.js 16.3.4 plugin stack fails under ESLint 10; dependency updates remain separately reviewed and lockfile-pinned.
+* 2026-09-01: Repository-wide `uv sync`, Ruff, `ty`, legacy JavaScript coverage, OpenAPI freshness, and CI-policy validation passed. The canonical default Python run reached 2,160 passes and 95.48% application coverage but could not run 32 PostgreSQL cases or 3 RustFS cases without their configured services. The complete run reached 2,166 passes and 95.50% coverage; its remaining 41 engine/storage failures and 32 PostgreSQL setup errors are the expected local gaps because Pandoc, Mermaid/Chromium, LibreOffice, the approved fonts, PostgreSQL, and RustFS are unavailable. The T60-owned rootless frontend boundary is independently verified and does not depend on those backend services or document engines.
 
 ## Synchronization
 

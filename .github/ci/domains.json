@@ -74,6 +74,14 @@
     ],
     "status": "active"
   },
+  "frontend": {
+    "activation_ticket": "T60",
+    "command": [
+      "bash",
+      "web/scripts/run-rootless-smoke.sh"
+    ],
+    "status": "active"
+  },
   "storage-distributed": {
     "activation_ticket": "T12",
     "command": [

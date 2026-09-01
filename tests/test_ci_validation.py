@@ -299,7 +299,7 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert (
         "matrix.domain == 'compose' || matrix.domain == 'container' || "
-        "startsWith(matrix.domain, 'e2e-')" in workflow
+        "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
     )
     assert (
         "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"

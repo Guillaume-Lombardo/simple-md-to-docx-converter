@@ -258,7 +258,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Install rootless Podman for container validation",
             ): (
                 "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-                "startsWith(matrix.domain, 'e2e-') }}"
+                "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
             ),
             (
                 "heavy",
@@ -300,7 +300,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="f384a0ffe79876809d796fec7b9b0e923a741e80f3b6dbbcd8e09998d5b0a656",
+        canonical_digest="30a173c2307c7d6e0915b6158144571f4a99d540cc80b5687d56d8ce86aebfb6",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -704,6 +704,15 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "uv run python -m scripts.release.public_alignment "
             '--event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"'
         ),
+        ("light", "Verify the isolated frontend"): (
+            "cd web\n"
+            'test "$(node --version)" = "v24.19.0"\n'
+            'test "$(npm --version)" = "11.17.0"\n'
+            "npm ci --ignore-scripts\n"
+            "npm run check\n"
+            "npm run build\n"
+            "npm run test:production\n"
+        ),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
             "npm run test:web-browser"
         ),
@@ -733,7 +742,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Install rootless Podman for container validation"): (
             "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-            "startsWith(matrix.domain, 'e2e-') }}"
+            "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
             "${{ matrix.domain == 'document-engines' || "

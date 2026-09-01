@@ -93,6 +93,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "deploy/**",
     ),
     "functional": ("src/**", "tests/functional/**", "tests/integration/auth/**"),
+    "frontend": ("web/**", "openapi/v1.json"),
     "storage-distributed": (
         "src/**",
         "tests/integration/storage/**",

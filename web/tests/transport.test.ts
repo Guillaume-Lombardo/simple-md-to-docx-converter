@@ -1,0 +1,163 @@
+import { ApiError, ApiTransport, CSRF_COOKIE } from "../src/api/transport";
+
+function response(body: BodyInit | null, init: ResponseInit = {}) {
+  return new Response(body, init);
+}
+
+test("JSON transport sends contract headers and parses a typed response", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  const api = new ApiTransport(fetcher, () => `${CSRF_COOKIE}=safe%20token`);
+  await expect(
+    api.json<{ ok: boolean }>("/api/v1/test", {
+      body: "{}",
+      csrf: true,
+      etag: '"v1"',
+      idempotencyKey: "key",
+      method: "PATCH",
+    }),
+  ).resolves.toEqual({ ok: true });
+  const [, options] = fetcher.mock.calls[0]!;
+  const headers = new Headers(options?.headers);
+  expect(headers.get("X-CSRF-Token")).toBe("safe token");
+  expect(headers.get("If-Match")).toBe('"v1"');
+  expect(headers.get("Idempotency-Key")).toBe("key");
+  expect(options).toMatchObject({
+    cache: "no-store",
+    credentials: "same-origin",
+    redirect: "error",
+  });
+});
+
+test("JSON metadata preserves the server ETag", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 200,
+      headers: { "content-type": "application/json", etag: '"v2"' },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).jsonWithMetadata<{ ok: boolean }>("/api/v1/test"),
+  ).resolves.toEqual({ data: { ok: true }, etag: '"v2"' });
+});
+
+test("multipart leaves content type to the browser", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  await new ApiTransport(fetcher).multipart(
+    "/api/v1/conversions",
+    new FormData(),
+  );
+  expect(
+    new Headers(fetcher.mock.calls[0]![1]?.headers).has("Content-Type"),
+  ).toBe(false);
+});
+
+test("download preserves response metadata and accepts abort signals", async () => {
+  const result = response("file", {
+    status: 200,
+    headers: { etag: '"result"' },
+  });
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(result);
+  const controller = new AbortController();
+  await expect(
+    new ApiTransport(fetcher).download("/api/v1/file", {
+      signal: controller.signal,
+    }),
+  ).resolves.toBe(result);
+  expect(fetcher.mock.calls[0]![1]?.signal).toBe(controller.signal);
+});
+
+test("cancellation is a CSRF-protected abortable DELETE", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  const signal = new AbortController().signal;
+  await new ApiTransport(fetcher, () => `${CSRF_COOKIE}=token`).cancel(
+    "/api/v1/conversions/job",
+    signal,
+  );
+  expect(fetcher.mock.calls[0]![1]).toMatchObject({ method: "DELETE", signal });
+});
+
+test("stable error envelopes become typed errors", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"error":{"code":"DENIED","message":"Not allowed"}}', {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).json("/api/v1/test"),
+  ).rejects.toMatchObject({
+    status: 403,
+    code: "DENIED",
+    message: "Not allowed",
+  });
+});
+
+test("malformed JSON envelopes are never reflected", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"error":{"code":4,"message":"unsafe"}}', {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).json("/api/v1/test"),
+  ).rejects.toMatchObject({
+    code: "UNEXPECTED_RESPONSE",
+    message: "The service returned an unexpected response.",
+  });
+});
+
+test.each([
+  [
+    response("oops", {
+      status: 502,
+      headers: { "content-type": "text/plain" },
+    }),
+    502,
+  ],
+  [
+    response("not-json", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    }),
+    200,
+  ],
+])("unexpected responses fail with a fixed message", async (result, status) => {
+  const api = new ApiTransport(vi.fn<typeof fetch>().mockResolvedValue(result));
+  await expect(api.json("/api/v1/test")).rejects.toEqual(
+    new ApiError(
+      status,
+      "UNEXPECTED_RESPONSE",
+      "The service returned an unexpected response.",
+    ),
+  );
+});
+
+test.each(["", "flag", `${CSRF_COOKIE}=%GG`])(
+  "missing or malformed CSRF cookies fail before fetch",
+  async (cookie) => {
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      new ApiTransport(fetcher, () => cookie).json("/api/v1/test", {
+        csrf: true,
+        method: "DELETE",
+      }),
+    ).rejects.toMatchObject({ code: "CSRF_MISSING" });
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
