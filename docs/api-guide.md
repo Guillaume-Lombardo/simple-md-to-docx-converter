@@ -49,8 +49,10 @@ default mode.
 Use `GET /api/v1/conversions` for the current user's paginated list and
 `GET /api/v1/conversions/{job_id}` for one job. `DELETE` on the job requests cancellation.
 Completed output is available from `/result`; `/result/manifest` returns its traceability manifest.
-The result media type depends on the requested output. Poll no faster than `Retry-After`, handle
-terminal failed/cancelled states, and download before retention expires.
+The result download filename preserves the uploaded source stem and uses `.docx`, `.pdf`, or `.zip`
+for the requested output. Jobs without persisted source metadata use `conversion-<job-id>` as the
+filename stem. Result downloads use the `application/octet-stream` media type. Poll no faster than
+`Retry-After`, handle terminal failed/cancelled states, and download before retention expires.
 
 ## Templates
 

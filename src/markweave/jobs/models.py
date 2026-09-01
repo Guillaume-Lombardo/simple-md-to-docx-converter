@@ -357,6 +357,8 @@ class JobRequest:
         if self.correlation_id:
             require_correlation_id(self.correlation_id)
         _validate_template_pair(self.template_id, self.template_version_id)
+        if not self.source:
+            raise ValueError("Conversion source must not be empty")
         if source_kind_for_filename(self.source_filename) is not self.source_kind:
             raise ValueError("Source filename and kind do not match")
 

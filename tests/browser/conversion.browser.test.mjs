@@ -164,7 +164,7 @@ test("authenticated conversion workflow works in pinned Chromium", { timeout: 45
     };
   }, downloadHref);
   assert.equal(download.status, 200);
-  assert.match(download.disposition, /^attachment; filename="conversion-[\da-f-]+\.docx"$/);
+  assert.equal(download.disposition, 'attachment; filename="source.docx"');
   assert.equal(download.cache, "private, no-store");
   assert.equal(download.contentTypeOptions, "nosniff");
   assert.equal(download.content, "browser acceptance result");

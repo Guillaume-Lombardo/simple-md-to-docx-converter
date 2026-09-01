@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { copyFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
@@ -91,7 +93,12 @@ async function convertAndDownload(page, sourceFixture, output, timeout) {
     };
   }, href);
   assert.equal(result.status, 200, `${output} result download failed`);
-  assertDownloadedResult(output, result.headers, Buffer.from(result.body));
+  assertDownloadedResult(
+    output,
+    path.parse(sourceFixture).name,
+    result.headers,
+    Buffer.from(result.body),
+  );
   if (output !== "docx") {
     const manifestResponse = await sessionRequest(
       page,
@@ -169,12 +176,18 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     bob: { username: `e2e-bob-${suffix}`, password: `Bob-${suffix}-password` },
   };
   const templateName = `E2E ${suffix} report`;
+  const encodedSourceFixture = path.join(
+    settings.artifactRoot,
+    `résumé final${path.extname(settings.sourceFixture).toLowerCase()}`,
+  );
   let browser = null;
   const contexts = [];
   const pages = [];
   const traces = [];
   let step = "launch Chromium";
   try {
+    await mkdir(settings.artifactRoot, { recursive: true });
+    await copyFile(settings.sourceFixture, encodedSourceFixture);
     browser = await chromium.launch({
       executablePath: settings.chromiumExecutable,
       headless: true,
@@ -282,7 +295,7 @@ test("final rootless image supports provisioning and the browser workflow", asyn
     for (const output of ["docx", "pdf", "both"]) {
       jobs.push(await convertAndDownload(
         alicePage,
-        settings.sourceFixture,
+        output === "docx" ? encodedSourceFixture : settings.sourceFixture,
         output,
         settings.timeoutMilliseconds,
       ));

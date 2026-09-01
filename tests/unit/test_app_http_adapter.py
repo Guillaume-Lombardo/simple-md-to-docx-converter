@@ -25,12 +25,13 @@ from markweave.auth.models import LoginResult, Role, User
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.http.errors import error_responses
+from markweave.http.routers.conversions import _result_content_disposition
 from markweave.http.schemas import ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep
+from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep, SourceKind
 from markweave.jobs.runner import EmbeddedWorker
 from markweave.jobs.service import JobService
 from markweave.malware import (
@@ -988,6 +989,10 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         progress=100,
         result_object_id=uuid4(),
         result_manifest_object_id=uuid4(),
+        source_filename="source.md",
+        source_kind=SourceKind.MARKDOWN,
+        source_sha256="1" * 64,
+        source_size=1,
     )
     jobs.submit.return_value = (queued, False)
     jobs.list_owner.return_value = JobPage((queued,), 1, 0, 50)
@@ -1020,7 +1025,9 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         )
         result = client.get(f"/api/v1/conversions/{queued.id}/result")
         assert result.content == b"result"
-        assert f".{succeeded.output.value}" in result.headers["Content-Disposition"]
+        assert result.headers["Content-Disposition"] == (
+            'attachment; filename="source.pdf"'
+        )
         assert result.headers["Cache-Control"] == "private, no-store"
         assert result.headers["X-Content-Type-Options"] == "nosniff"
         manifest = client.get(f"/api/v1/conversions/{queued.id}/result/manifest")
@@ -1091,6 +1098,50 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
             ).status_code
             == 422
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_filename", "output", "fallback_stem", "expected"),
+    [
+        (
+            "fichier1.md",
+            JobOutput.DOCX,
+            "unused",
+            'attachment; filename="fichier1.docx"',
+        ),
+        (
+            "rapport.final.ZIP",
+            JobOutput.PDF,
+            "unused",
+            'attachment; filename="rapport.final.pdf"',
+        ),
+        (
+            'résumé "final".md',
+            JobOutput.BOTH,
+            "unused",
+            "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.zip",
+        ),
+        (
+            None,
+            JobOutput.DOCX,
+            "conversion-legacy-id",
+            'attachment; filename="conversion-legacy-id.docx"',
+        ),
+    ],
+)
+def test_result_content_disposition_preserves_safe_source_stem(
+    source_filename: str | None,
+    output: JobOutput,
+    fallback_stem: str,
+    expected: str,
+) -> None:
+    assert (
+        _result_content_disposition(
+            source_filename, output, fallback_stem=fallback_stem
+        )
+        == expected
+    )
 
 
 @pytest.mark.unit

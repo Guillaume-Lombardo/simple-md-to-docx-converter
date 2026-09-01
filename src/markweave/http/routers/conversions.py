@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import (
@@ -40,6 +41,32 @@ COMPONENT_VERSIONS = (
     ("mermaid-cli", "11.16.0"),
     ("pandoc", "3.10.2"),
 )
+
+_RESULT_EXTENSIONS = {
+    JobOutput.DOCX: "docx",
+    JobOutput.PDF: "pdf",
+    JobOutput.BOTH: "zip",
+}
+
+
+def _result_content_disposition(
+    source_filename: str | None,
+    output: JobOutput,
+    *,
+    fallback_stem: str,
+) -> str:
+    """Build a safe attachment header preserving the uploaded filename stem."""
+
+    stem = (
+        source_filename.rsplit(".", maxsplit=1)[0]
+        if source_filename is not None
+        else fallback_stem
+    )
+    filename = f"{stem}.{_RESULT_EXTENSIONS[output]}"
+    encoded_filename = quote(filename, safe="")
+    if encoded_filename != filename:
+        return f"attachment; filename*=UTF-8''{encoded_filename}"
+    return f'attachment; filename="{filename}"'
 
 
 def build_router(dependencies: HttpDependencies) -> APIRouter:
@@ -188,18 +215,14 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
             actor_id=actor.id,
             actor_is_admin=actor.role is Role.ADMIN,
         )
-        extensions = {
-            JobOutput.DOCX: "docx",
-            JobOutput.PDF: "pdf",
-            JobOutput.BOTH: "zip",
-        }
         return Response(
             content,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": (
-                    f'attachment; filename="conversion-{job.id}.'
-                    f'{extensions[job.output]}"'
+                "Content-Disposition": _result_content_disposition(
+                    job.source_filename,
+                    job.output,
+                    fallback_stem=f"conversion-{job.id}",
                 ),
                 "Cache-Control": "private, no-store",
                 "X-Content-Type-Options": "nosniff",
