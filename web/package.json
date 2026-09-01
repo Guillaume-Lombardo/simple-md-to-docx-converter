@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "next build",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run bindings:check && npm run test:structure && npm run test:coverage",
+    "check": "npm run format:check && npm run lint && npm run typegen && npm run typecheck && npm run bindings:check && npm run test:structure && npm run test:coverage",
     "bindings:check": "node scripts/generate-openapi.mjs --check",
     "bindings:generate": "node scripts/generate-openapi.mjs",
     "format": "prettier --write .",
@@ -23,6 +23,7 @@
     "test:coverage": "vitest run --coverage",
     "test:production": "node --test tests/production.test.mjs",
     "test:structure": "node --test tests/structure.test.mjs",
+    "typegen": "next typegen",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

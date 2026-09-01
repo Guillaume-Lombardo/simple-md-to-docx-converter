@@ -95,7 +95,7 @@ function removeHeader(headers, name) {
 function filterGeneratedCsp(request, response) {
   const writeHead = response.writeHead;
   response.writeHead = function filteredWriteHead(statusCode, reason, headers) {
-    const suppliedHeaders = typeof reason === "string" ? headers : reason;
+    const suppliedHeaders = headers ?? reason;
     const contentType = headerFrom(response, suppliedHeaders, "content-type")
       ?.split(";", 1)[0]
       ?.trim()
@@ -116,7 +116,7 @@ function filterGeneratedCsp(request, response) {
     }
     return typeof reason === "string"
       ? writeHead.call(this, statusCode, reason, headers)
-      : writeHead.call(this, statusCode, reason);
+      : writeHead.call(this, statusCode, reason, headers);
   };
 }
 
@@ -186,7 +186,7 @@ async function clientReferences(nextRoot, routeFiles) {
   return { manifests, references };
 }
 
-export async function createBuildIntegrity(root) {
+export async function createBuildIntegrity(root, options = {}) {
   const nextRoot = join(root, ".next");
   const required = [
     "BUILD_ID",
@@ -254,11 +254,20 @@ export async function createBuildIntegrity(root) {
   if (!(await readFile(join(nextRoot, "BUILD_ID"), "utf8")).trim())
     throw new Error("Empty build identifier");
 
+  const cacheMs = options.cacheMs ?? 250;
+  const now = options.now ?? Date.now;
+  let cachedAt = Number.NEGATIVE_INFINITY;
+  let cachedResult;
   return async () => {
+    const checkedAt = now();
+    if (cachedResult !== undefined && checkedAt - cachedAt < cacheMs)
+      return cachedResult;
     try {
       for (const [path, expectedDigest] of expected) {
-        if ((await digest(join(nextRoot, path))) !== expectedDigest)
-          return false;
+        if ((await digest(join(nextRoot, path))) !== expectedDigest) {
+          cachedAt = checkedAt;
+          return (cachedResult = false);
+        }
       }
       const currentAssets = (await assetFiles(staticRoot))
         .map((path) => relative(nextRoot, path))
@@ -266,14 +275,18 @@ export async function createBuildIntegrity(root) {
       const expectedAssets = [...expected.keys()]
         .filter((path) => path.startsWith("static/"))
         .sort();
-      return JSON.stringify(currentAssets) === JSON.stringify(expectedAssets);
+      cachedResult =
+        JSON.stringify(currentAssets) === JSON.stringify(expectedAssets);
     } catch {
-      return false;
+      cachedResult = false;
     }
+    cachedAt = checkedAt;
+    return cachedResult;
   };
 }
 
 export async function closeWithin(servers, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+  servers.forEach((server) => server.closeIdleConnections?.());
   const close = Promise.all(
     servers.map((server) => new Promise((resolve) => server.close(resolve))),
   );

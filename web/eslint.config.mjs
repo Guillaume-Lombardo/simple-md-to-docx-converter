@@ -7,7 +7,10 @@ export default defineConfig([
   ...nextTypescript,
   globalIgnores([
     ".next/**",
+    "build/**",
     "coverage/**",
+    "next-env.d.ts",
+    "out/**",
     "src/api/generated/**",
     "tests/fixtures/generated/**",
   ]),

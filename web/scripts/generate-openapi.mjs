@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = resolve(root, "../openapi/v1.json");
+const generator =
+  process.env.MARKWEAVE_OPENAPI_TS_BIN ??
+  resolve(root, "node_modules/.bin/openapi-ts");
 const outputs = [
   resolve(root, "src/api/generated"),
   resolve(root, "tests/fixtures/generated"),
@@ -17,7 +20,7 @@ const temporary = check
 
 function generate(output) {
   const result = spawnSync(
-    resolve(root, "node_modules/.bin/openapi-ts"),
+    generator,
     [
       "-i",
       contract,
@@ -31,9 +34,14 @@ function generate(output) {
     ],
     { cwd: root, encoding: "utf8" },
   );
-  if (result.status !== 0) {
-    process.stderr.write(result.stderr || result.stdout);
-    process.exit(result.status ?? 1);
+  if (result.error || result.status !== 0) {
+    const failure = new Error(
+      [result.stderr, result.stdout, result.error?.message]
+        .filter((item) => typeof item === "string" && item.length > 0)
+        .join("\n") || "OpenAPI generation failed",
+    );
+    failure.exitCode = result.status || 1;
+    throw failure;
   }
 }
 
@@ -57,6 +65,11 @@ try {
       }
     }
   }
+} catch (error) {
+  process.stderr.write(
+    `${error instanceof Error ? error.message : String(error)}\n`,
+  );
+  process.exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;
 } finally {
   if (temporary) rmSync(temporary, { force: true, recursive: true });
 }

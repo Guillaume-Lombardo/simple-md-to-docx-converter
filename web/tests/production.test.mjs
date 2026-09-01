@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
+import { dirname, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const pagePort = 31960;
 const probePort = 31961;
+const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let processUnderTest;
+let processExit;
 
-async function waitReady() {
+async function waitReady(cancelled) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (cancelled()) return;
     try {
       if (
         (await fetch(`http://127.0.0.1:${probePort}/_frontend/health/ready`))
@@ -23,6 +28,7 @@ async function waitReady() {
 
 test.before(async () => {
   processUnderTest = spawn(process.execPath, ["server.mjs"], {
+    cwd: webRoot,
     env: {
       ...process.env,
       HOSTNAME: "127.0.0.1",
@@ -30,13 +36,38 @@ test.before(async () => {
       PORT: String(pagePort),
       PROBE_PORT: String(probePort),
     },
-    stdio: "pipe",
+    stdio: ["ignore", "inherit", "inherit"],
   });
-  await waitReady();
+  processExit = new Promise((resolveExit) => {
+    processUnderTest.once("exit", (code, signal) =>
+      resolveExit({ code, signal }),
+    );
+    processUnderTest.once("error", (error) => resolveExit({ error }));
+  });
+  let startupFinished = false;
+  const startup = await Promise.race([
+    waitReady(() => startupFinished).then(() => ({ ready: true })),
+    processExit.then(({ code, error, signal }) => ({
+      code,
+      error,
+      ready: false,
+      signal,
+    })),
+  ]);
+  startupFinished = true;
+  if (!startup.ready)
+    throw new Error(
+      `frontend exited before readiness (code=${startup.code}, signal=${startup.signal}, error=${startup.error?.message ?? "none"})`,
+    );
 });
 test.after(async () => {
-  processUnderTest.kill("SIGTERM");
-  await new Promise((resolve) => processUnderTest.once("exit", resolve));
+  if (
+    processUnderTest &&
+    processUnderTest.exitCode === null &&
+    processUnderTest.signalCode === null
+  )
+    processUnderTest.kill("SIGTERM");
+  if (processExit) await processExit;
 });
 
 async function assertNonceHtml(

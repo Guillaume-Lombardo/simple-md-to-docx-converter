@@ -313,6 +313,32 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
 
 
 @pytest.mark.unit
+def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "- name: Set up pinned Node for frontend smoke" in workflow
+    assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
+    assert "node-version: 24.19.0" in workflow
+    assert "cache-dependency-path: web/package-lock.json" in workflow
+    weakened = workflow.replace(
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24.19.0",
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24",
+    )
+    assert "frontend smoke must use the reviewed pinned Node setup" in (
+        validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
 def test_validator_rejects_successful_e2e_artifact_retention() -> None:
     """Browser and service evidence must not be uploaded from passing scenarios."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")

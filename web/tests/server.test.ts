@@ -26,7 +26,7 @@ function fakeResponse() {
     response.headersSent = true;
   };
   response.end = () => response.emit("finish");
-  response.destroy = () => response.emit("close");
+  response.destroy = vi.fn(() => response.emit("close"));
   return response;
 }
 
@@ -135,21 +135,30 @@ test("handler failure destroys a response whose headers were sent", async () => 
   const response = fakeResponse();
   admission.handler({} as never, response as never);
   await new Promise(setImmediate);
+  expect(response.destroy).toHaveBeenCalledOnce();
+  expect(response.status).toBeUndefined();
   expect(admission.inFlight).toBe(0);
 });
 
 test("bounded close reports clean completion", async () => {
   const server = {
     close: vi.fn((callback: () => void) => callback()),
+    closeIdleConnections: vi.fn(),
     closeAllConnections: vi.fn(),
   };
   await expect(closeWithin([server] as never, 10)).resolves.toBe("closed");
+  expect(server.closeIdleConnections).toHaveBeenCalledOnce();
   expect(server.closeAllConnections).not.toHaveBeenCalled();
 });
 
 test("bounded close terminates connections after its deadline", async () => {
-  const server = { close: vi.fn(), closeAllConnections: vi.fn() };
+  const server = {
+    close: vi.fn(),
+    closeIdleConnections: vi.fn(),
+    closeAllConnections: vi.fn(),
+  };
   await expect(closeWithin([server] as never, 1)).resolves.toBe("timeout");
+  expect(server.closeIdleConnections).toHaveBeenCalledOnce();
   expect(server.closeAllConnections).toHaveBeenCalledOnce();
 });
 
@@ -262,6 +271,12 @@ test("page server retains CSP only for emitted HTML documents", async () => {
       } else if (incoming.url === "/status-message") {
         response.writeHead(200, "Fine", { "Content-Type": "text/html" });
         response.end("document");
+      } else if (incoming.url === "/undefined-reason") {
+        response.writeHead(200, undefined, {
+          "Content-Security-Policy": "generated",
+          "Content-Type": "application/json",
+        });
+        response.end("{}");
       } else {
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end("document");
@@ -286,6 +301,7 @@ test("page server retains CSP only for emitted HTML documents", async () => {
   expect((await get(port, "/zero")).csp).toBeUndefined();
   expect((await get(port, "/raw")).csp).toBeUndefined();
   expect((await get(port, "/status-message")).csp).toBe("generated");
+  expect((await get(port, "/undefined-reason")).csp).toBeUndefined();
   expect((await get(port, "/html", undefined, "HEAD")).csp).toBeUndefined();
   await new Promise((resolve) => page.server.close(resolve));
 });
@@ -321,7 +337,7 @@ test("readiness checks route manifests and immutable asset integrity", async () 
   await expect(createBuildIntegrity(root)).rejects.toThrow();
   const asset = join(staticRoot, "app-abc.js");
   await writeFile(asset, "original");
-  const ready = await createBuildIntegrity(root);
+  const ready = await createBuildIntegrity(root, { cacheMs: 0 });
   expect(await ready()).toBe(true);
   await rm(clientChunk);
   expect(await ready()).toBe(false);
@@ -362,5 +378,42 @@ test("readiness checks route manifests and immutable asset integrity", async () 
   await expect(createBuildIntegrity(root)).rejects.toThrow(
     "Empty build identifier",
   );
+  await rm(root, { recursive: true });
+});
+
+test("readiness memoizes briefly and detects tampering after expiry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "markweave-build-cache-"));
+  const staticRoot = join(root, ".next/static/chunks");
+  const serverRoot = join(root, ".next/server/app/convert");
+  await mkdir(staticRoot, { recursive: true });
+  await mkdir(serverRoot, { recursive: true });
+  await writeFile(join(root, ".next/BUILD_ID"), "build-id\n");
+  await writeFile(
+    join(root, ".next/routes-manifest.json"),
+    '{"staticRoutes":[{"page":"/convert"}]}',
+  );
+  await writeFile(join(root, ".next/build-manifest.json"), "{}");
+  await writeFile(
+    join(root, ".next/server/app-paths-manifest.json"),
+    '{"/convert/page":"app/convert/page.js"}',
+  );
+  await writeFile(join(serverRoot, "page.js"), "route");
+  await writeFile(
+    join(serverRoot, "page_client-reference-manifest.js"),
+    'globalThis.__RSC_MANIFEST["/convert/page"] = {};\n',
+  );
+  const asset = join(staticRoot, "asset.js");
+  await writeFile(asset, "original");
+  let clock = 0;
+  const ready = await createBuildIntegrity(root, {
+    cacheMs: 100,
+    now: () => clock,
+  });
+  expect(await ready()).toBe(true);
+  await writeFile(asset, "tampered");
+  clock = 50;
+  expect(await ready()).toBe(true);
+  clock = 100;
+  expect(await ready()).toBe(false);
   await rm(root, { recursive: true });
 });

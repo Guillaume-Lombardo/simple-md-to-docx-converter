@@ -22,6 +22,7 @@ test("application shell exposes navigation and skip target", () => {
     "aria-current",
     "page",
   );
+  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
   expect(screen.getByRole("main")).toHaveAttribute("id", "main");
 });
 

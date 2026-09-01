@@ -14,7 +14,7 @@ export function AppShell({
   current,
 }: {
   children: ReactNode;
-  current: "Convert" | "Templates";
+  current: "Convert";
 }) {
   return (
     <>
@@ -27,16 +27,13 @@ export function AppShell({
           className="mx-auto flex max-w-5xl items-center gap-6 p-4"
         >
           <span className="font-semibold">Markweave</span>
-          {(["Convert", "Templates"] as const).map((item) => (
-            <Link
-              aria-current={current === item ? "page" : undefined}
-              className="text-accent underline-offset-4 hover:underline"
-              href={`/${item.toLowerCase()}`}
-              key={item}
-            >
-              {item}
-            </Link>
-          ))}
+          <Link
+            aria-current={current === "Convert" ? "page" : undefined}
+            className="text-accent underline-offset-4 hover:underline"
+            href="/convert"
+          >
+            Convert
+          </Link>
         </nav>
       </header>
       <main className="mx-auto max-w-5xl space-y-6 p-6" id="main">

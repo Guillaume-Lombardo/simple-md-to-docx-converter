@@ -14,9 +14,15 @@ function normalize(requestTarget) {
   const rawPath =
     separator < 0 ? requestTarget : requestTarget.slice(0, separator);
   const query = separator < 0 ? "" : requestTarget.slice(separator);
-  let decoded = rawPath;
-  for (let count = 0; count < 2; count += 1)
-    decoded = decodeURIComponent(decoded).replaceAll("\\", "/");
+  let decoded = decodeURIComponent(rawPath);
+  const encodedPathSeparator = /%(?:2f|5c)/i.test(decoded);
+  const encodedDotSegment = decoded.split(/[\\/]/).some((part) => {
+    const dotsDecoded = part.replaceAll(/%2e/gi, ".");
+    return /%2e/i.test(part) && (dotsDecoded === "." || dotsDecoded === "..");
+  });
+  if (encodedPathSeparator || encodedDotSegment)
+    throw new URIError("Nested path control encoding");
+  decoded = decoded.replaceAll("\\", "/");
   const parts = [];
   for (const part of decoded.split("/")) {
     if (!part || part === ".") continue;
@@ -77,6 +83,14 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
     if (selected === "frontend") {
       delete headers.cookie;
     }
+    const failUpstream = () => {
+      if (clientResponse.destroyed || clientResponse.writableEnded) return;
+      if (clientResponse.headersSent) clientResponse.destroy();
+      else {
+        clientResponse.writeHead(502, { "Content-Length": "0" });
+        clientResponse.end();
+      }
+    };
     let upstream;
     try {
       const destination = new URL(selected === "backend" ? backend : frontend);
@@ -89,6 +103,7 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
           port: destination.port,
         },
         (upstreamResponse) => {
+          upstreamResponse.on("error", failUpstream);
           for (
             let index = 0;
             index < upstreamResponse.rawHeaders.length;
@@ -106,13 +121,9 @@ export function createRoutingFixture({ backend, frontend, publicHosts }) {
       );
       clientRequest.pipe(upstream);
     } catch {
-      clientResponse.writeHead(502, { "Content-Length": "0" });
-      clientResponse.end();
+      failUpstream();
       return;
     }
-    upstream.on("error", () => {
-      clientResponse.writeHead(502, { "Content-Length": "0" });
-      clientResponse.end();
-    });
+    upstream.on("error", failUpstream);
   });
 }

@@ -262,6 +262,10 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             (
                 "heavy",
+                "Set up pinned Node for frontend smoke",
+            ): "${{ matrix.domain == 'frontend' }}",
+            (
+                "heavy",
                 "Install verified Pandoc for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
@@ -300,7 +304,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="30a173c2307c7d6e0915b6158144571f4a99d540cc80b5687d56d8ce86aebfb6",
+        canonical_digest="9aab81508685609cf735f5a94b2f48fe07ed77dbc520b064aa27fccc78a2442d",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -744,6 +748,9 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
             "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
         ),
+        ("heavy", "Set up pinned Node for frontend smoke"): (
+            "${{ matrix.domain == 'frontend' }}"
+        ),
         ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
             "${{ matrix.domain == 'document-engines' || "
             "startsWith(matrix.domain, 'e2e-') }}"
@@ -762,6 +769,30 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             errors.append(
                 f"missing required workflow condition: {expected_condition!r}"
             )
+
+    frontend_node_steps = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Set up pinned Node for frontend smoke"
+    ]
+    frontend_node_options = (
+        _mapping(frontend_node_steps[0].get("with"))
+        if len(frontend_node_steps) == 1
+        else None
+    )
+    if (
+        len(frontend_node_steps) != 1
+        or frontend_node_steps[0].get("uses")
+        != "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+        or frontend_node_options
+        != {
+            "node-version": "24.19.0",
+            "check-latest": False,
+            "cache": "npm",
+            "cache-dependency-path": "web/package-lock.json",
+        }
+    ):
+        errors.append("frontend smoke must use the reviewed pinned Node setup")
 
     evidence_steps = [
         step

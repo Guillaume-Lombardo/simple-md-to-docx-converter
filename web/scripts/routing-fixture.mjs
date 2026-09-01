@@ -10,6 +10,12 @@ const server = createRoutingFixture({
   frontend,
   publicHosts: [publicHost],
 });
-server.listen(port, "127.0.0.1");
+server.once("error", (error) => {
+  process.stderr.write(`routing fixture failed: ${error.message}\n`);
+  process.exitCode = 1;
+});
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`routing fixture listening on 127.0.0.1:${port}\n`);
+});
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => server.close(() => process.exit(0)));

@@ -240,6 +240,14 @@ jobs:
         with:
           python-version-file: .python-version
           check-latest: false
+      - name: Set up pinned Node for frontend smoke
+        if: ${{ matrix.domain == 'frontend' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
