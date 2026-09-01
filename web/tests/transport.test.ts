@@ -1,5 +1,6 @@
 import { ApiError, ApiTransport, CSRF_COOKIE } from "../src/api/transport";
 import { boolean, object } from "valibot";
+import { vApiLogoutApiV1LogoutPostResponse } from "../src/api/generated/valibot.gen";
 
 const okSchema = object({ ok: boolean() });
 
@@ -166,6 +167,39 @@ test.each(["", "flag", `${CSRF_COOKIE}=%GG`])(
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
+
+test("generated void endpoints accept an empty 204 response", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(response(null, { status: 204 }));
+  await expect(
+    new ApiTransport(fetcher).json(
+      "/api/v1/logout",
+      vApiLogoutApiV1LogoutPostResponse,
+      { method: "POST" },
+    ),
+  ).resolves.toBeUndefined();
+});
+
+test("JSON media types require an exact parsed essence", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 200,
+      headers: { "content-type": "application/json-malicious" },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).json("/api/v1/test", okSchema),
+  ).rejects.toMatchObject({ code: "UNEXPECTED_RESPONSE" });
+});
+
+test("runtime API path validation rejects lookalike prefixes before fetch", async () => {
+  const fetcher = vi.fn<typeof fetch>();
+  await expect(
+    new ApiTransport(fetcher).json("/api/v12/test" as "/api/v1/test", okSchema),
+  ).rejects.toMatchObject({ code: "INVALID_API_PATH", status: 0 });
+  expect(fetcher).not.toHaveBeenCalled();
+});
 
 test.each([
   ["not-json", 200],

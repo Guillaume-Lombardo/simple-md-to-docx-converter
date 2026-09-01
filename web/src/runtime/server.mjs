@@ -99,23 +99,73 @@ async function digest(path) {
     .digest("hex");
 }
 
+function strings(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(strings);
+  if (value && typeof value === "object")
+    return Object.values(value).flatMap(strings);
+  return [];
+}
+
 export async function createBuildIntegrity(root) {
   const nextRoot = join(root, ".next");
-  const required = ["BUILD_ID", "routes-manifest.json", "build-manifest.json"];
+  const required = [
+    "BUILD_ID",
+    "routes-manifest.json",
+    "build-manifest.json",
+    "server/app-paths-manifest.json",
+  ];
+  const buildManifest = JSON.parse(
+    await readFile(join(nextRoot, "build-manifest.json"), "utf8"),
+  );
+  const routesManifest = JSON.parse(
+    await readFile(join(nextRoot, "routes-manifest.json"), "utf8"),
+  );
+  const appPathsManifest = JSON.parse(
+    await readFile(join(nextRoot, "server/app-paths-manifest.json"), "utf8"),
+  );
+  if (!Array.isArray(routesManifest.staticRoutes))
+    throw new Error("Invalid routes manifest");
+  for (const route of [
+    ...routesManifest.staticRoutes,
+    ...(routesManifest.dynamicRoutes ?? []),
+  ]) {
+    if (
+      typeof route.page !== "string" ||
+      (!Object.hasOwn(
+        appPathsManifest,
+        `${route.page === "/" ? "" : route.page}/page`,
+      ) &&
+        !Object.hasOwn(
+          appPathsManifest,
+          `${route.page === "/" ? "" : route.page}/route`,
+        ))
+    )
+      throw new Error("Missing route artifact");
+  }
+  const referenced = [
+    ...strings(buildManifest)
+      .filter((path) => path.startsWith("static/"))
+      .map((path) => join(nextRoot, path)),
+    ...Object.values(appPathsManifest).map((path) =>
+      join(nextRoot, "server", path),
+    ),
+  ];
   const staticRoot = join(nextRoot, "static");
   const staticFiles = await assetFiles(staticRoot);
   if (staticFiles.length === 0) throw new Error("No immutable assets found");
   const paths = [
-    ...required.map((item) => join(nextRoot, item)),
-    ...staticFiles.sort(),
+    ...new Set([
+      ...required.map((item) => join(nextRoot, item)),
+      ...referenced,
+      ...staticFiles.sort(),
+    ]),
   ];
   const expected = new Map(
     await Promise.all(
       paths.map(async (path) => [relative(nextRoot, path), await digest(path)]),
     ),
   );
-  for (const manifest of required.filter((item) => item.endsWith(".json")))
-    JSON.parse(await readFile(join(nextRoot, manifest), "utf8"));
   if (!(await readFile(join(nextRoot, "BUILD_ID"), "utf8")).trim())
     throw new Error("Empty build identifier");
 

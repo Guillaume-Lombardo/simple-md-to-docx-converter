@@ -39,8 +39,9 @@ test.after(async () => {
 });
 
 async function assertNonceHtml(path, status) {
-  const first = await fetch(`http://127.0.0.1:${pagePort}${path}`);
-  const second = await fetch(`http://127.0.0.1:${pagePort}${path}`);
+  const options = { headers: { Accept: "text/html" } };
+  const first = await fetch(`http://127.0.0.1:${pagePort}${path}`, options);
+  const second = await fetch(`http://127.0.0.1:${pagePort}${path}`, options);
   assert.equal(first.status, status);
   assert.match(first.headers.get("content-type"), /^text\/html/);
   const firstCsp = first.headers.get("content-security-policy");
@@ -66,8 +67,48 @@ test("all dynamic and generated error HTML receives fresh nonce policies", async
   await assertNonceHtml("/convert", 200);
   await assertNonceHtml("/missing", 404);
   await assertNonceHtml("/missing.js", 404);
+  await assertNonceHtml("/favicon.ico", 404);
   const error = await assertNonceHtml("/foundation-error", 500);
   assert.doesNotMatch(error, /foundation error canary/i);
+});
+
+test("component, prefetch, non-HTML, and content-free responses receive no CSP", async () => {
+  const component = await fetch(`http://127.0.0.1:${pagePort}/convert`, {
+    headers: { Accept: "text/x-component", RSC: "1" },
+  });
+  assert.match(component.headers.get("content-type"), /^text\/x-component/);
+  assert.equal(component.headers.get("content-security-policy"), null);
+
+  const prefetch = await fetch(`http://127.0.0.1:${pagePort}/convert`, {
+    headers: {
+      Accept: "text/x-component",
+      "Next-Router-Prefetch": "1",
+      RSC: "1",
+    },
+  });
+  assert.equal(prefetch.headers.get("content-security-policy"), null);
+
+  const json = await fetch(
+    `http://127.0.0.1:${pagePort}/foundation-response?kind=json`,
+    { headers: { Accept: "application/json" } },
+  );
+  assert.equal(json.headers.get("content-type"), "application/json");
+  assert.equal(json.headers.get("content-security-policy"), null);
+
+  const empty = await fetch(
+    `http://127.0.0.1:${pagePort}/foundation-response?kind=empty`,
+    { headers: { Accept: "application/json" } },
+  );
+  assert.equal(empty.status, 204);
+  assert.equal(await empty.text(), "");
+  assert.equal(empty.headers.get("content-security-policy"), null);
+
+  const head = await fetch(`http://127.0.0.1:${pagePort}/convert`, {
+    method: "HEAD",
+    headers: { Accept: "text/html" },
+  });
+  assert.equal(await head.text(), "");
+  assert.equal(head.headers.get("content-security-policy"), null);
 });
 
 test("internal probes are isolated on the probe listener", async () => {

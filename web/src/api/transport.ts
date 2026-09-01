@@ -7,6 +7,7 @@ import {
 import { vErrorResponse } from "./generated/valibot.gen";
 
 export const CSRF_COOKIE = "__Host-md_converter_csrf";
+export type ApiPath = "/api/v1" | `/api/v1/${string}`;
 
 export class ApiError extends Error {
   constructor(
@@ -52,6 +53,10 @@ function unexpected(status: number): ApiError {
   return new ApiError(status, "UNEXPECTED_RESPONSE", unexpectedMessage);
 }
 
+function isJsonMediaType(value: string | null): boolean {
+  return value?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
+
 async function parseJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
@@ -67,7 +72,7 @@ export class ApiTransport {
   ) {}
 
   async json<TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>>(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     schema: TSchema,
     options: RequestOptions = {},
   ): Promise<InferOutput<TSchema>> {
@@ -77,16 +82,19 @@ export class ApiTransport {
   async jsonWithMetadata<
     TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
   >(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     schema: TSchema,
     options: RequestOptions = {},
   ): Promise<JsonResult<InferOutput<TSchema>>> {
     const response = await this.request(path, options, "application/json");
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.toLowerCase().startsWith("application/json")) {
+    if (
+      response.status !== 204 &&
+      !isJsonMediaType(response.headers.get("content-type"))
+    )
       throw unexpected(response.status);
-    }
-    const parsed = safeParse(schema, await parseJson(response));
+    const value =
+      response.status === 204 ? undefined : await parseJson(response);
+    const parsed = safeParse(schema, value);
     if (!parsed.success) throw unexpected(response.status);
     const etag = response.headers.get("etag") ?? undefined;
     return { data: parsed.output, ...(etag ? { etag } : {}) };
@@ -95,7 +103,7 @@ export class ApiTransport {
   async multipart<
     TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
   >(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     form: FormData,
     schema: TSchema,
     options: Omit<RequestOptions, "body"> = {},
@@ -108,7 +116,7 @@ export class ApiTransport {
   }
 
   async download(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     options: RequestOptions = {},
   ): Promise<Response> {
     return this.request(path, options, "application/octet-stream");
@@ -117,7 +125,7 @@ export class ApiTransport {
   async cancel<
     TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
   >(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     schema: TSchema,
     signal?: AbortSignal,
   ): Promise<InferOutput<TSchema>> {
@@ -125,10 +133,12 @@ export class ApiTransport {
   }
 
   private async request(
-    path: `/api/v1${string}`,
+    path: ApiPath,
     options: RequestOptions,
     accept: string,
   ): Promise<Response> {
+    if (path !== "/api/v1" && !path.startsWith("/api/v1/"))
+      throw new ApiError(0, "INVALID_API_PATH", "The API path is invalid.");
     const headers = new Headers({ Accept: accept });
     if (options.csrf) {
       const csrf = cookieValue(this.readCookie(), CSRF_COOKIE);
@@ -157,8 +167,7 @@ export class ApiTransport {
     });
     if (response.ok) return response;
 
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.toLowerCase().startsWith("application/json")) {
+    if (isJsonMediaType(response.headers.get("content-type"))) {
       const parsed = safeParse(vErrorResponse, await parseJson(response));
       if (parsed.success) {
         throw new ApiError(

@@ -80,9 +80,17 @@ test("real HTTP admission rejects request 129, drains, and has empty failures", 
   const port = await listen(page.server);
   const pending = Array.from({ length: 128 }, () => get(port, "/hold"));
   await vi.waitFor(() => expect(page.admission.inFlight).toBe(128));
-  expect(await get(port, "/overflow")).toEqual({ body: "", status: 503 });
+  expect(await get(port, "/overflow")).toEqual({
+    body: "",
+    csp: undefined,
+    status: 503,
+  });
   page.admission.drain();
-  expect(await get(port, "/draining")).toEqual({ body: "", status: 503 });
+  expect(await get(port, "/draining")).toEqual({
+    body: "",
+    csp: undefined,
+    status: 503,
+  });
   held.forEach((response) => response.end("ok"));
   await Promise.all(pending);
   await vi.waitFor(() => expect(page.admission.inFlight).toBe(0));
@@ -94,7 +102,11 @@ test("synchronous handler throws become an empty HTTP 500", async () => {
     throw new Error("failure");
   });
   const port = await listen(page.server);
-  expect(await get(port, "/")).toEqual({ body: "", status: 500 });
+  expect(await get(port, "/")).toEqual({
+    body: "",
+    csp: undefined,
+    status: 500,
+  });
   expect(page.admission.inFlight).toBe(0);
   await new Promise((resolve) => page.server.close(resolve));
 });
@@ -102,7 +114,11 @@ test("synchronous handler throws become an empty HTTP 500", async () => {
 test("real HTTP shutdown is bounded and terminates held connections", async () => {
   const page = createPageServer(() => undefined);
   const port = await listen(page.server);
-  const pending = get(port, "/hold").catch(() => ({ body: "", status: 0 }));
+  const pending = get(port, "/hold").catch(() => ({
+    body: "",
+    csp: undefined,
+    status: 0,
+  }));
   await vi.waitFor(() => expect(page.admission.inFlight).toBe(1));
   await expect(closeWithin([page.server], 5)).resolves.toBe("timeout");
   await pending;
@@ -142,17 +158,27 @@ async function get(
   path: string,
   headers?: Record<string, string>,
 ) {
-  return new Promise<{ body: string; status: number }>((resolve, reject) => {
-    const call = request({ headers, path, port }, (result) => {
-      let body = "";
-      result.on("data", (chunk) => {
-        body += chunk;
+  return new Promise<{ body: string; csp?: string; status: number }>(
+    (resolve, reject) => {
+      const call = request({ headers, path, port }, (result) => {
+        let body = "";
+        result.on("data", (chunk) => {
+          body += chunk;
+        });
+        result.on("end", () =>
+          resolve({
+            body,
+            csp: result.headers["content-security-policy"] as
+              | string
+              | undefined,
+            status: result.statusCode!,
+          }),
+        );
       });
-      result.on("end", () => resolve({ body, status: result.statusCode! }));
-    });
-    call.on("error", reject);
-    call.end();
-  });
+      call.on("error", reject);
+      call.end();
+    },
+  );
 }
 
 test("probe server keeps exact internal paths content-free", async () => {
@@ -163,10 +189,12 @@ test("probe server keeps exact internal paths content-free", async () => {
   const port = (server.address() as { port: number }).port;
   expect(await get(port, "/_frontend/health/live")).toEqual({
     body: "",
+    csp: undefined,
     status: 200,
   });
   expect(await get(port, "/_frontend/health/ready")).toEqual({
     body: "",
+    csp: undefined,
     status: 503,
   });
   state.ready = true;
@@ -199,17 +227,30 @@ test("HTTP header overflow returns an empty 431", async () => {
   await new Promise((resolve) => page.server.once("listening", resolve));
   const port = (page.server.address() as { port: number }).port;
   const result = await get(port, "/", { "x-large": "a".repeat(17_000) });
-  expect(result).toEqual({ body: "", status: 431 });
+  expect(result).toEqual({ body: "", csp: undefined, status: 431 });
   page.server.close();
 });
 
 test("readiness checks route manifests and immutable asset integrity", async () => {
   const root = await mkdtemp(join(tmpdir(), "markweave-build-"));
   const staticRoot = join(root, ".next/static/chunks");
+  const serverRoot = join(root, ".next/server/app/convert");
   await mkdir(staticRoot, { recursive: true });
+  await mkdir(serverRoot, { recursive: true });
   await writeFile(join(root, ".next/BUILD_ID"), "build-id\n");
-  await writeFile(join(root, ".next/routes-manifest.json"), "{}");
-  await writeFile(join(root, ".next/build-manifest.json"), "{}");
+  const routes = '{"staticRoutes":[{"page":"/convert"}]}';
+  await writeFile(join(root, ".next/routes-manifest.json"), routes);
+  await writeFile(
+    join(root, ".next/build-manifest.json"),
+    '{"rootMainFiles":["static/chunks/app-abc.js"]}',
+  );
+  await writeFile(
+    join(root, ".next/server/app-paths-manifest.json"),
+    '{"/convert/page":"app/convert/page.js"}',
+  );
+  await writeFile(join(serverRoot, "page.js"), "route");
+  await writeFile(join(staticRoot, "unreferenced.js"), "present");
+  await expect(createBuildIntegrity(root)).rejects.toThrow();
   const asset = join(staticRoot, "app-abc.js");
   await writeFile(asset, "original");
   const ready = await createBuildIntegrity(root);
@@ -222,7 +263,7 @@ test("readiness checks route manifests and immutable asset integrity", async () 
   await rm(join(staticRoot, "unexpected.js"));
   await rm(join(root, ".next/routes-manifest.json"));
   expect(await ready()).toBe(false);
-  await writeFile(join(root, ".next/routes-manifest.json"), "{}");
+  await writeFile(join(root, ".next/routes-manifest.json"), routes);
   await writeFile(join(root, ".next/BUILD_ID"), "\n");
   await expect(createBuildIntegrity(root)).rejects.toThrow(
     "Empty build identifier",
