@@ -35,7 +35,8 @@ compatible.
 
 Review the generated diff together with the route implementation. In particular, confirm optional
 template selection, restricted authentication sessions, pagination, `ETag`/`If-Match`, stable
-errors, download media types, health endpoints, and administrator-only operations. CLI contract
+errors, download media types, health endpoints, role-specific session policy, and
+administrator-only operations. CLI contract
 tests read this artifact to verify the endpoints they call; they do not maintain a second route
 list.
 

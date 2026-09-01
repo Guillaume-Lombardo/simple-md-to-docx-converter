@@ -53,6 +53,7 @@ Allow administrators to configure the system-wide, role-specific idle session du
 
 * 2026-09-01: Created with the administrator setting scoped to idle reauthentication time. The existing 30-minute default remains fixed; minimum and maximum selectable values require a separate explicit product decision before implementation.
 * 2026-09-01: Product approved role-specific whole-minute policies: standard users default to 30 minutes with an inclusive 5–300 minute range; administrators default to 15 minutes with an inclusive 5–60 minute range. Implementation started from verified `main` at `049146de248e684acfb170aa526030f2ca0c84cb` on `feat/T59-role-idle-session-policy`.
+* 2026-09-01: Implemented the versioned role-specific policy, administrator-only ETag API, immutable audit trail, SQLite and PostgreSQL persistence, current-role session enforcement, OpenAPI contract, recovery coverage, documentation, and final-image workflow assertions. The locally runnable suite passes with 2,167 tests and 95.40% coverage; PostgreSQL, S3, and real final-image checks remain unavailable in the current environment because their required service configuration is absent.
 
 ## Synchronization
 

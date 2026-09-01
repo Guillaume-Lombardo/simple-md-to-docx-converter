@@ -49,6 +49,19 @@ also add or cancel that requirement independently from an account card; changing
 existing sessions. A required user authenticates with the current password, chooses and confirms a
 new password on the dedicated page, and then signs in again with the new password.
 
+## Idle-session policy API
+
+FastAPI exposes the administrator-only `GET` and `PUT /api/v1/admin/session-policy` operations.
+The read returns both role-specific whole-minute durations, a revision, and an `ETag`. The update
+must send that exact validator in `If-Match` and replaces both values in one transaction; a missing
+precondition returns `428`, and a stale or malformed validator returns `412` without partial state
+or audit. Standard-user access is forbidden. The accepted inclusive ranges are 5–300 minutes for
+standard users and 5–60 minutes for administrators.
+
+This backend ticket intentionally adds no control to the legacy page or the Next.js application.
+T63 owns the Next.js administration control. Any future control must treat the FastAPI response,
+authorization decision, revision, and session enforcement as authoritative.
+
 ## Errors and accessibility
 
 The page has an assertive live error region and a polite live result list. Expected API failures use

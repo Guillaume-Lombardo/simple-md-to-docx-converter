@@ -9,6 +9,8 @@ from uuid import UUID, uuid4
 
 from markweave.auth.models import (
     AuthenticationAuditContext,
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
     ProvisionedUser,
     Role,
     Session,
@@ -223,6 +225,47 @@ class MemorySessionRepository:
                 for digest, session in self._sessions.items()
                 if session.user_id != user_id
             }
+
+
+class MemoryIdleSessionPolicyRepository:
+    """Thread-safe singleton policy adapter for domain and HTTP tests."""
+
+    def __init__(self, policy: IdleSessionPolicy | None = None) -> None:
+        self._policy = policy or IdleSessionPolicy()
+        self._audits: list[IdleSessionPolicyAudit] = []
+        self._lock = RLock()
+
+    def get(self) -> IdleSessionPolicy:
+        with self._lock:
+            return self._policy
+
+    def update(
+        self,
+        policy: IdleSessionPolicy,
+        *,
+        expected_revision: int,
+        audit: IdleSessionPolicyAudit,
+    ) -> IdleSessionPolicy | None:
+        with self._lock:
+            if self._policy.revision != expected_revision:
+                return None
+            previous = self._policy
+            updated = replace(policy, revision=expected_revision + 1)
+            self._policy = updated
+            self._audits.append(
+                replace(
+                    audit,
+                    old_user_idle_minutes=previous.user_idle_minutes,
+                    old_admin_idle_minutes=previous.admin_idle_minutes,
+                    revision=updated.revision,
+                )
+            )
+            return updated
+
+    @property
+    def audits(self) -> tuple[IdleSessionPolicyAudit, ...]:
+        with self._lock:
+            return tuple(self._audits)
 
 
 class MemoryReadinessProbe:

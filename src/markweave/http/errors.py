@@ -7,6 +7,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from markweave.auth.errors import AuthenticationError
+from markweave.auth.policy_errors import (
+    IdleSessionPolicyConflictError,
+    IdleSessionPolicyPreconditionRequiredError,
+)
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -92,6 +96,34 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "PERSISTENCE_UNAVAILABLE",
                     "message": "Persistent storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyPreconditionRequiredError)
+    def idle_policy_precondition_handler(
+        _request: Request, _error: IdleSessionPolicyPreconditionRequiredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=428,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_PRECONDITION_REQUIRED",
+                    "message": "If-Match is required.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyConflictError)
+    def idle_policy_conflict_handler(
+        _request: Request, _error: IdleSessionPolicyConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=412,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_PRECONDITION_FAILED",
+                    "message": "The idle-session policy has changed.",
                 }
             },
         )

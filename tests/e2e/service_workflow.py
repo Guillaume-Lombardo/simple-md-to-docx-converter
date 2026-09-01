@@ -235,6 +235,57 @@ def create_user(admin: ServiceClient, username: str, password: str) -> dict[str,
     return decode_object(result, f"create {username}")
 
 
+def exercise_idle_session_policy(
+    admin: ServiceClient, standard_user: ServiceClient
+) -> None:
+    """Verify final-image authorization, concurrency, and atomic role policy state."""
+    forbidden = standard_user.request("GET", "/api/v1/admin/session-policy")
+    expect(forbidden, 403, "standard-user session policy denial")
+
+    current_result = admin.request("GET", "/api/v1/admin/session-policy")
+    expect(current_result, 200, "read idle-session policy")
+    current = decode_object(current_result, "read idle-session policy")
+    etag = current_result.headers.get("etag", "")
+    if not etag:
+        raise WorkflowFailure("read idle-session policy: ETag is missing")
+    if current.get("revision") == 0 and (
+        current.get("user_idle_minutes"),
+        current.get("admin_idle_minutes"),
+    ) != (30, 15):
+        raise WorkflowFailure("read idle-session policy: defaults mismatch")
+
+    updated_result = json_request(
+        admin,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {"user_idle_minutes": 300, "admin_idle_minutes": 60},
+        expected=200,
+        operation="update idle-session policy",
+        headers={"If-Match": etag},
+    )
+    updated = decode_object(updated_result, "update idle-session policy")
+    if (
+        updated.get("user_idle_minutes"),
+        updated.get("admin_idle_minutes"),
+        updated.get("revision"),
+    ) != (300, 60, int(current.get("revision", -1)) + 1):
+        raise WorkflowFailure("update idle-session policy: state mismatch")
+
+    json_request(
+        admin,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {"user_idle_minutes": 5, "admin_idle_minutes": 5},
+        expected=412,
+        operation="reject stale idle-session policy update",
+        headers={"If-Match": etag},
+    )
+    final = admin.request("GET", "/api/v1/admin/session-policy")
+    expect(final, 200, "reread idle-session policy")
+    if decode_object(final, "reread idle-session policy") != updated:
+        raise WorkflowFailure("stale idle-session policy update changed state")
+
+
 def create_template(
     owner: ServiceClient, template_path: Path, *, run_id: str
 ) -> dict[str, Any]:
@@ -1009,6 +1060,7 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     bob = ServiceClient(arguments.base_url)
     alice.login(alice_name, alice_password)
     bob.login(bob_name, bob_password)
+    exercise_idle_session_policy(admin, alice)
 
     json_request(
         admin,

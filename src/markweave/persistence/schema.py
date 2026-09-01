@@ -70,6 +70,54 @@ class SessionRow(Base):
 Index("ix_sessions_user_id", SessionRow.user_id)
 
 
+class IdleSessionPolicyRow(Base):
+    """Optional singleton administrator override for role idle durations."""
+
+    __tablename__ = "idle_session_policy"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_idle_session_policy_singleton"),
+        CheckConstraint(
+            "user_idle_minutes BETWEEN 5 AND 300",
+            name="ck_idle_session_policy_user_minutes",
+        ),
+        CheckConstraint(
+            "admin_idle_minutes BETWEEN 5 AND 60",
+            name="ck_idle_session_policy_admin_minutes",
+        ),
+        CheckConstraint("revision > 0", name="ck_idle_session_policy_revision"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    admin_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class IdleSessionPolicyAuditRow(Base):
+    """Immutable role policy old/new values and resulting revision."""
+
+    __tablename__ = "idle_session_policy_audit_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    old_user_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    old_admin_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_user_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_admin_idle_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+Index(
+    "ix_idle_session_policy_audit_retention",
+    IdleSessionPolicyAuditRow.created_at,
+    IdleSessionPolicyAuditRow.id,
+)
+
+
 class AuthenticationAuditRow(Base):
     """Durable content-free audit trail for sensitive account mutations."""
 

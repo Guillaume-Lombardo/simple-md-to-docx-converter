@@ -296,6 +296,26 @@
   {
     "include_in_schema": true,
     "methods": [
+      "GET"
+    ],
+    "name": "get_session_policy",
+    "path": "/api/v1/admin/session-policy",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "PUT"
+    ],
+    "name": "update_session_policy",
+    "path": "/api/v1/admin/session-policy",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
       "POST"
     ],
     "name": "create_conversion",

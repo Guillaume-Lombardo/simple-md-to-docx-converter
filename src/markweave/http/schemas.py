@@ -1,6 +1,7 @@
 """Stable request and response schemas for the HTTP contract."""
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +50,23 @@ class PasswordChangeRequest(BaseModel):
 
     password: str
     confirmation: str
+
+
+class IdleSessionPolicyUpdateRequest(BaseModel):
+    """Atomic administrator update for both role-specific durations."""
+
+    user_idle_minutes: Annotated[int, Field(strict=True, ge=5, le=300)]
+    admin_idle_minutes: Annotated[int, Field(strict=True, ge=5, le=60)]
+
+
+class IdleSessionPolicyResponse(BaseModel):
+    """Effective singleton policy and optimistic-concurrency revision."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_idle_minutes: int
+    admin_idle_minutes: int
+    revision: int
 
 
 class UserResponse(BaseModel):
@@ -163,6 +181,18 @@ class AuditRecordResponse(BaseModel):
     version_id: UUID | None
     administrator_intervention: bool
     created_at: datetime
+    old_user_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    old_admin_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    new_user_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    new_admin_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class TemplateMetadataRequest(BaseModel):

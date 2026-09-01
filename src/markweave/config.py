@@ -201,9 +201,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:
-        """Require an absolute lifetime at least as long as the idle lifetime."""
-        if self.session_absolute_seconds < self.session_idle_seconds:
-            raise ValueError("absolute session lifetime must not be shorter than idle")
+        """Validate cross-field security and resource invariants."""
         if not self.initial_admin_username.strip():
             raise ValueError("initial administrator username must not be blank")
         if not self.initial_admin_password.get_secret_value():

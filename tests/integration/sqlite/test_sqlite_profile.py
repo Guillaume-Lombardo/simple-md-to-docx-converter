@@ -28,6 +28,9 @@ from markweave.storage import (
     ObjectScope,
     ObjectStoreError,
 )
+from tests.idle_session_policy_contracts import (
+    exercise_idle_session_policy_repository_contract,
+)
 from tests.settings import template_settings
 from tests.sqlite_compatibility import enforce_sqlite_334_update_grammar
 from tests.storage_contracts import (
@@ -45,6 +48,14 @@ def test_sqlite_authentication_repository_contract(tmp_path: Path) -> None:
     exercise_auth_repository_contract(
         SqlUserRepository(engine), SqlSessionRepository(engine)
     )
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_idle_session_policy_repository_contract(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    exercise_idle_session_policy_repository_contract(engine)
     engine.dispose()
 
 

@@ -29,6 +29,9 @@ from markweave.persistence.sql import (
 )
 from markweave.persistence.templates import SqlTemplateCatalogRepository
 from markweave.templates.models import TemplateSearch
+from tests.idle_session_policy_contracts import (
+    exercise_idle_session_policy_repository_contract,
+)
 from tests.settings import template_settings
 from tests.storage_contracts import exercise_auth_repository_contract
 
@@ -46,6 +49,15 @@ def test_postgresql_authentication_repository_contract() -> None:
         SqlUserRepository(engine), SqlSessionRepository(engine)
     )
     assert DatabaseReadinessProbe(engine).is_ready()
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_idle_session_policy_repository_contract() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    exercise_idle_session_policy_repository_contract(engine)
     engine.dispose()
 
 
@@ -113,6 +125,10 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
     database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
     engine = create_database_engine(database_url)
     with engine.begin() as connection:
+        connection.execute(
+            text("DROP TABLE IF EXISTS idle_session_policy_audit_records CASCADE")
+        )
+        connection.execute(text("DROP TABLE IF EXISTS idle_session_policy CASCADE"))
         connection.execute(text("DROP TABLE IF EXISTS retention_cleanup_runs CASCADE"))
         connection.execute(
             text("DROP TABLE IF EXISTS authentication_audit_records CASCADE")
@@ -156,6 +172,8 @@ def test_postgresql_concurrent_first_migrations_and_advisory_lock() -> None:
         "alembic_version",
         "audit_cleanup_guards",
         "authentication_audit_records",
+        "idle_session_policy",
+        "idle_session_policy_audit_records",
         "sessions",
         "system_template_selection",
         "template_audit_records",

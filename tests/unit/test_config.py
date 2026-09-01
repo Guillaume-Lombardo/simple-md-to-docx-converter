@@ -263,7 +263,6 @@ def test_public_origin_rejects_non_origin_urls(public_origin: str) -> None:
         {"initial_admin_username": " "},
         {"initial_admin_password": ""},
         {"session_token_bytes": 15},
-        {"session_idle_seconds": 20, "session_absolute_seconds": 10},
         {"conversion_upload_max_bytes": 0},
         {"conversion_request_max_bytes": 1_000_000},
         {"conversion_retry_after_seconds": 0},

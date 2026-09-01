@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+from markweave.auth.models import (
+    IdleSessionPolicy,
+    IdleSessionPolicyAudit,
+    IdleSessionPolicyOperation,
+)
 from markweave.config import StorageProfile
 from markweave.persistence.migrations import upgrade_database
-from markweave.persistence.sql import create_database_engine, standalone_database_url
+from markweave.persistence.sql import (
+    SqlIdleSessionPolicyRepository,
+    create_database_engine,
+    standalone_database_url,
+)
 from markweave.recovery_adapters import filesystem_lock
 from markweave.recovery_manifest import RecoveryError, load_and_verify_manifest
 from markweave.recovery_service import BackupRequest, RecoveryService, RestoreRequest
@@ -68,6 +78,54 @@ def test_standalone_backup_is_content_addressed_and_restores_atomically(
         for path in (restored / "objects").rglob("*")
         if path.is_file()
     ] == [b"stable-object"]
+
+
+def test_standalone_backup_restore_preserves_idle_session_policy(
+    tmp_path: Path,
+) -> None:
+    data = _standalone_data(tmp_path)
+    engine = create_database_engine(standalone_database_url(data))
+    actor = uuid4()
+    policy = SqlIdleSessionPolicyRepository(engine).update(
+        IdleSessionPolicy(300, 60),
+        expected_revision=0,
+        audit=IdleSessionPolicyAudit(
+            uuid4(),
+            actor,
+            IdleSessionPolicyOperation.UPDATE,
+            30,
+            15,
+            300,
+            60,
+            1,
+            datetime.now(UTC),
+        ),
+    )
+    assert policy == IdleSessionPolicy(300, 60, 1)
+    engine.dispose()
+
+    service = RecoveryService()
+    manifest = service.backup(
+        BackupRequest(
+            StorageProfile.STANDALONE,
+            (tmp_path / "backups").resolve(),
+            30,
+            data_directory=data.resolve(),
+        )
+    )
+    restored = tmp_path / "restored-policy"
+    service.restore(
+        RestoreRequest(
+            StorageProfile.STANDALONE,
+            (tmp_path / "backups" / manifest.backup_id).resolve(),
+            30,
+            "offline-policy-proof",
+            data_directory=restored.resolve(),
+        )
+    )
+    restored_engine = create_database_engine(standalone_database_url(restored))
+    assert SqlIdleSessionPolicyRepository(restored_engine).get() == policy
+    restored_engine.dispose()
 
 
 def test_standalone_restore_rejects_tampering_before_creating_target(

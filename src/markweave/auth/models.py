@@ -10,6 +10,12 @@ from uuid import UUID
 
 USERNAME_MAX_LENGTH = 255
 SYSTEM_ACTOR_ID = UUID(int=0)
+IDLE_SESSION_POLICY_ID = UUID(int=1)
+DEFAULT_USER_IDLE_MINUTES = 30
+DEFAULT_ADMIN_IDLE_MINUTES = 15
+MINIMUM_IDLE_MINUTES = 5
+MAXIMUM_USER_IDLE_MINUTES = 300
+MAXIMUM_ADMIN_IDLE_MINUTES = 60
 
 
 class Role(StrEnum):
@@ -31,6 +37,12 @@ class AuthenticationAuditOperation(StrEnum):
     CHANGE_PASSWORD = "user_password_change"  # noqa: S105
     PROVISION_CREATE = "user_provision_create"
     PROVISION_UPDATE = "user_provision_update"
+
+
+class IdleSessionPolicyOperation(StrEnum):
+    """Stable system policy audit operation vocabulary."""
+
+    UPDATE = "idle_session_policy_update"
 
 
 def normalize_username(username: str) -> str:
@@ -95,3 +107,45 @@ class LoginResult:
     user: User
     session_token: str
     csrf_token: str
+
+
+@dataclass(frozen=True, slots=True)
+class IdleSessionPolicy:
+    """One system-wide pair of role-specific idle durations."""
+
+    user_idle_minutes: int = DEFAULT_USER_IDLE_MINUTES
+    admin_idle_minutes: int = DEFAULT_ADMIN_IDLE_MINUTES
+    revision: int = 0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.user_idle_minutes, bool) or not (
+            MINIMUM_IDLE_MINUTES <= self.user_idle_minutes <= MAXIMUM_USER_IDLE_MINUTES
+        ):
+            raise ValueError("Standard-user idle duration is invalid")
+        if isinstance(self.admin_idle_minutes, bool) or not (
+            MINIMUM_IDLE_MINUTES
+            <= self.admin_idle_minutes
+            <= MAXIMUM_ADMIN_IDLE_MINUTES
+        ):
+            raise ValueError("Administrator idle duration is invalid")
+        if self.revision < 0:
+            raise ValueError("Idle-session policy revision is invalid")
+
+    def minutes_for(self, role: Role) -> int:
+        """Resolve the duration for the user's current effective role."""
+        return self.admin_idle_minutes if role is Role.ADMIN else self.user_idle_minutes
+
+
+@dataclass(frozen=True, slots=True)
+class IdleSessionPolicyAudit:
+    """Immutable old/new policy evidence committed with one update."""
+
+    id: UUID
+    actor_id: UUID
+    operation: IdleSessionPolicyOperation
+    old_user_idle_minutes: int
+    old_admin_idle_minutes: int
+    new_user_idle_minutes: int
+    new_admin_idle_minutes: int
+    revision: int
+    created_at: datetime

@@ -74,3 +74,13 @@ def document_openapi_contract(app: FastAPI, *, session_cookie_name: str) -> None
     for (path, method), status_code in template_successes.items():
         response = schema["paths"][path][method]["responses"][status_code]
         response.setdefault("headers", {})["ETag"] = etag_header
+
+    policy_etag_header = {
+        "description": "Current role-specific idle-session policy revision.",
+        "schema": {"type": "string"},
+    }
+    for method in ("get", "put"):
+        response = schema["paths"]["/api/v1/admin/session-policy"][method]["responses"][
+            "200"
+        ]
+        response.setdefault("headers", {})["ETag"] = policy_etag_header
