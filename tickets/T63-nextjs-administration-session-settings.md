@@ -1,0 +1,52 @@
+---
+ticket: T63
+linear_id: G1L-527
+linear_url: https://linear.app/g1lom/issue/G1L-527/t63-migrate-administration-and-session-settings-to-nextjs
+status: Backlog
+priority: Medium
+project: Markdown to DOCX and PDF Converter
+---
+
+# T63 - Migrate administration and session settings to Next.js
+
+## Objective
+
+Migrate template, user, and session-policy administration to the Next.js frontend with complete owner and administrator parity.
+
+## Acceptance criteria
+
+* Support template search/filtering, owner display, creation, download, metadata update, replacement, version history, copy-forward restore, archive/delete guards, preferred selection, and system fallback behavior.
+* Preserve owner/administrator authorization, immutable ownership, ETag/If-Match concurrency, safe DOCX validation failures, upload bounds, audit behavior, and response-generation fencing.
+* Support administrator user search, creation, activation, deactivation, password reset, and required-password-renewal controls with duplicate-submit and revoked-session handling.
+* Add an administrator-only control for the effective system-wide inactivity duration delivered by T59, showing the default/effective value, approved bounds, absolute ceiling, current revision, validation errors, stale-write conflicts, and a clear warning that tightening can require current users to sign in again.
+* Never let frontend validation, cached data, or hidden controls replace FastAPI authorization and policy enforcement.
+* Meet accessibility requirements for keyboard operation, focus restoration, forms, confirmation dialogs, lists/tables, live errors/notices, responsive layout, and supported browser behavior.
+* Add unit/component, contract, integration, real-browser, and final rootless-image E2E coverage with two regular users and one administrator across both profiles, including stale ETags, forbidden actions, revoked sessions, persisted policy changes, and restart recovery.
+* Keep the legacy administration page available until T64 completes the verified cutover.
+
+## Dependencies
+
+* T59
+* T61
+* T17
+
+## Implementation boundary
+
+* Own Next.js template, user, and session-policy administration pages and their frontend tests.
+* Backend session-policy behavior belongs to T59.
+
+## Quality requirements
+
+* Preserve FastAPI as the sole business, authentication, authorization, persistence, and job-processing backend.
+* Add automated tests for every introduced behavior and keep the applicable frontend and Python coverage gates.
+* Cover every affected real boundary with integration tests and every delivered browser workflow with final rootless-image E2E tests for both storage profiles.
+* Keep repository artifacts and user-facing text in English.
+* Run all applicable canonical formatting, linting, type-checking, contract, browser, Python, container, and E2E checks.
+
+## Progress
+
+* 2026-09-01: Created with the administrator inactivity-duration control explicitly dependent on the FastAPI-owned T59 policy.
+
+## Synchronization
+
+Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, implementation boundaries, or progress changes.
