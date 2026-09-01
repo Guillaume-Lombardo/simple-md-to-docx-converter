@@ -145,6 +145,7 @@ class BrowserJobService:
             if existing_id is not None:
                 return self._jobs[existing_id], True
             now = request.now
+            source_sha256 = hashlib.sha256(request.source).hexdigest()
             job = ConversionJob(
                 id=uuid4(),
                 owner_id=request.owner_id,
@@ -156,7 +157,7 @@ class BrowserJobService:
                 state=JobState.QUEUED,
                 step=JobStep.QUEUED,
                 progress=0,
-                request_digest=hashlib.sha256(request.source).hexdigest(),
+                request_digest=source_sha256,
                 idempotency_digest=(
                     hashlib.sha256(idempotency_key.encode()).hexdigest()
                     if idempotency_key
@@ -164,6 +165,10 @@ class BrowserJobService:
                 ),
                 created_at=now,
                 updated_at=now,
+                source_filename=request.source_filename,
+                source_kind=request.source_kind,
+                source_sha256=source_sha256,
+                source_size=len(request.source),
             )
             self._jobs[job.id] = job
             self._polls[job.id] = 0

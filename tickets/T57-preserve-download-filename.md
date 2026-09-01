@@ -46,6 +46,10 @@ Preserve the uploaded source filename stem when naming a completed conversion do
   passed 2,155 tests; 32 PostgreSQL setup errors and 3 RustFS failures remain because their required
   environment and services are unavailable. Real-browser and final-image execution remain
   unverified locally because Chrome and the final service environment are unavailable.
+- 2026-09-01: Ready PR #154 exposed that the deterministic Chrome test service did not copy the
+  admitted source integrity metadata into its in-memory job, so the download correctly used the
+  legacy fallback while the new browser assertion expected `source.docx`. The harness now preserves
+  the request filename, kind, digest, and size like production persistence before CI is rerun.
 
 ## Synchronization
 
