@@ -211,15 +211,21 @@ async function main(arguments_) {
     return;
   }
   const values = new Map();
-  for (let index = 0; index < arguments_.length; index += 2) {
+  for (let index = 0; index < arguments_.length;) {
     const option = arguments_[index];
     const value = arguments_[index + 1];
+    if (option === "--host-fallback" && !values.has(option)) {
+      values.set(option, true);
+      index += 1;
+      continue;
+    }
     if (!["--output", "--container-state", "--container-exit-code", "--container-oom-killed"].includes(option)
       || value === undefined || values.has(option)) {
       process.exitCode = 2;
       return;
     }
     values.set(option, value);
+    index += 2;
   }
   const dependencies = {
     container: {
@@ -229,7 +235,7 @@ async function main(arguments_) {
         ? { true: true, false: false }[values.get("--container-oom-killed")] ?? null
         : null,
     },
-    collectHostResources: false,
+    collectHostResources: !values.has("--host-fallback"),
   };
   if (values.has("--output")) {
     await retainResourceDiagnosticsAt(values.get("--output"), dependencies);

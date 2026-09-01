@@ -90,6 +90,7 @@ collect_failure_artifacts() {
     >/dev/null 2>&1; then
     if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
       --output "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      --host-fallback \
       --container-state "$container_state" \
       --container-exit-code "$container_exit_code" \
       --container-oom-killed "$container_oom_killed"; then

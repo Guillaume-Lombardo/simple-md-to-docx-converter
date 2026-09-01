@@ -190,17 +190,25 @@ test("resource diagnostics fail closed for unavailable and malformed probes", as
 });
 
 test("stopped-container fallback diagnostics retain only safe state and OOM evidence", async () => {
+  let probes = 0;
   const payload = await collectResourceDiagnostics({
     readText: async () => {
+      probes += 1;
       throw new Error("probe unavailable");
     },
-    listDirectory: async () => [],
+    listDirectory: async () => {
+      probes += 1;
+      return [];
+    },
     statFileSystem: async () => {
+      probes += 1;
       throw new Error("probe unavailable");
     },
     container: { state: "exited", exit_code: 137, oom_killed: true },
+    collectHostResources: false,
   });
 
+  assert.equal(probes, 0);
   assert.deepEqual(payload.container, { state: "exited", exit_code: 137, oom_killed: true });
   assert.equal(isValidResourceDiagnostics(payload), true);
   assert.equal(isValidResourceDiagnostics({ ...payload, unexpected: "/host/path" }), false);
@@ -293,6 +301,7 @@ test("runner fallback CLI repairs missing and malformed diagnostics at its exact
       await execFile(process.execPath, [
         script,
         "--output", output,
+        "--host-fallback",
         "--container-state", "exited",
         "--container-exit-code", "137",
         "--container-oom-killed", "true",
@@ -363,6 +372,7 @@ test("fresh expiry tracing and resource collection keep failure-only ordering", 
   assert.ok(validationIndex > 0 && validationIndex < collectorIndex);
   assert.ok(fallbackIndex > collectorIndex && fallbackIndex < failureCopyIndex);
   assert.ok(fallbackIndex > runnerSource.indexOf("container_oom_killed"));
+  assert.ok(runnerSource.indexOf("--host-fallback") > fallbackIndex);
   assert.ok(failureCopyIndex > runnerSource.indexOf("podman unshare chown -R 0:0"));
   assert.ok(collectorIndex > runnerSource.indexOf("collect_failure_artifacts()"));
   assert.ok(
