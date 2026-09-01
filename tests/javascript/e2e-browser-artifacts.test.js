@@ -10,6 +10,7 @@ import {
 } from "../e2e/browser-helpers.mjs";
 import {
   collectResourceDiagnostics,
+  isValidResourceDiagnostics,
   parseMemoryEvents,
   retainResourceDiagnostics,
   summarizeProcessNames,
@@ -132,6 +133,7 @@ test("resource diagnostics expose only the bounded allowlisted schema", async ()
       { name: "chrome", count: 1 },
       { name: "node", count: 1 },
     ],
+    container: { state: null, exit_code: null, oom_killed: null },
   });
   assert.ok(reads.every((source) => !source.endsWith("/cmdline")));
   assert.doesNotMatch(JSON.stringify(payload), /secret|password|unsafe name/);
@@ -179,7 +181,31 @@ test("resource diagnostics fail closed for unavailable and malformed probes", as
       used_bytes: null,
     },
     process_names: [],
+    container: { state: null, exit_code: null, oom_killed: null },
   });
+});
+
+test("stopped-container fallback diagnostics retain only safe state and OOM evidence", async () => {
+  const payload = await collectResourceDiagnostics({
+    readText: async () => {
+      throw new Error("probe unavailable");
+    },
+    listDirectory: async () => [],
+    statFileSystem: async () => {
+      throw new Error("probe unavailable");
+    },
+    container: { state: "exited", exit_code: 137, oom_killed: true },
+  });
+
+  assert.deepEqual(payload.container, { state: "exited", exit_code: 137, oom_killed: true });
+  assert.equal(isValidResourceDiagnostics(payload), true);
+  assert.equal(isValidResourceDiagnostics({ ...payload, unexpected: "/host/path" }), false);
+  assert.equal(isValidResourceDiagnostics({ ...payload, container: { state: "exited" } }), false);
+  assert.equal(isValidResourceDiagnostics({
+    ...payload,
+    process_names: [{ name: "node", count: 1, arguments: "--password=secret" }],
+  }), false);
+  assert.doesNotMatch(JSON.stringify(payload), /password|secret|host|path/);
 });
 
 test("resource diagnostics bound and sanitize process-name cardinality", () => {
@@ -220,6 +246,34 @@ test("resource diagnostics are retained separately with private permissions", as
   }
 });
 
+test("resource diagnostics publish atomically and clean up interrupted replacements", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "markweave-resource-atomic-"));
+  const output = path.join(root, "resource-diagnostics.json");
+  const oldPayload = "{\"previous\":true}\n";
+  try {
+    await writeFile(output, oldPayload, { mode: 0o600 });
+    await assert.rejects(
+      retainResourceDiagnostics(root, {
+        readText: async () => {
+          throw new Error("probe unavailable");
+        },
+        listDirectory: async () => [],
+        statFileSystem: async () => {
+          throw new Error("probe unavailable");
+        },
+        renameFile: async () => {
+          throw new Error("simulated interruption");
+        },
+      }),
+      /simulated interruption/,
+    );
+    assert.equal(await readFile(output, "utf8"), oldPayload);
+    assert.deepEqual(await readdir(root), ["resource-diagnostics.json"]);
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
 test("fresh expiry tracing and resource collection keep failure-only ordering", async () => {
   const browserSource = await readFile("tests/e2e/browser-final-image.test.mjs", "utf8");
   const runnerSource = await readFile("scripts/e2e/run.sh", "utf8");
@@ -241,10 +295,26 @@ test("fresh expiry tracing and resource collection keep failure-only ordering", 
   const collectorIndex = runnerSource.indexOf(
     "podman exec \"$application_name\" node /e2e/resource-diagnostics.mjs",
   );
+  let validationIndex = runnerSource.indexOf(
+    'node "$browser_runtime_directory/resource-diagnostics.mjs" \\\n+      --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json"',
+  );
+  let fallbackIndex = runnerSource.indexOf(
+    'node "$browser_runtime_directory/resource-diagnostics.mjs" \\\n+      --output "$temporary_directory/browser-artifacts/resource-diagnostics.json"',
+  );
+  validationIndex = runnerSource.indexOf(
+    '--validate "$temporary_directory/browser-artifacts/resource-diagnostics.json"',
+  );
+  fallbackIndex = runnerSource.indexOf(
+    '--output "$temporary_directory/browser-artifacts/resource-diagnostics.json"',
+  );
   const failureCopyIndex = runnerSource.indexOf(
     'cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"',
   );
   assert.ok(collectorIndex > 0 && collectorIndex < failureCopyIndex);
+  assert.ok(validationIndex > 0 && validationIndex < collectorIndex);
+  assert.ok(fallbackIndex > collectorIndex && fallbackIndex < failureCopyIndex);
+  assert.ok(fallbackIndex > runnerSource.indexOf("container_oom_killed"));
+  assert.ok(failureCopyIndex > runnerSource.indexOf("podman unshare chown -R 0:0"));
   assert.ok(collectorIndex > runnerSource.indexOf("collect_failure_artifacts()"));
   assert.ok(
     browserSource.indexOf("retainResourceDiagnostics(settings.artifactRoot)")

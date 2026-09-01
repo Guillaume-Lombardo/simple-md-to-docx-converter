@@ -68,15 +68,32 @@ remove_artifacts() {
 }
 
 collect_failure_artifacts() {
-  local resource
+  local resource container_state container_exit_code container_oom_killed
   mkdir -p -- "$artifact_directory"
-  if podman container exists "$application_name" &&
-    [[ "$(podman inspect "$application_name" --format '{{.State.Running}}' 2>/dev/null)" == true ]]; then
-    if ! podman exec "$application_name" test -f \
-      /browser-artifacts/resource-diagnostics.json >/dev/null 2>&1; then
+  container_state=""
+  container_exit_code=""
+  container_oom_killed=""
+  if podman container exists "$application_name"; then
+    read -r container_state container_exit_code container_oom_killed < <(
+      podman inspect "$application_name" \
+        --format '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}' 2>/dev/null || true
+    )
+    if [[ "$container_state" == running ]] && ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      >/dev/null 2>&1; then
       podman exec "$application_name" node /e2e/resource-diagnostics.mjs \
         >/dev/null 2>&1 || true
     fi
+  fi
+  if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+    --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+    >/dev/null 2>&1; then
+    node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --output "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      --container-state "$container_state" \
+      --container-exit-code "$container_exit_code" \
+      --container-oom-killed "$container_oom_killed" \
+      >/dev/null 2>&1 || true
   fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* || "$resource" == volume:* ]]; then

@@ -1,4 +1,5 @@
-import { chmod, readdir, readFile, statfs, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, readdir, readFile, rename, rm, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,7 @@ const MEMORY_EVENT_FIELDS = ["low", "high", "max", "oom", "oom_kill", "oom_group
 const MAX_PROCESS_NAMES = 64;
 const MAX_PROCESS_IDS = 4_096;
 const SAFE_PROCESS_NAME = /^[A-Za-z0-9_.:+-]{1,63}$/;
+const SAFE_CONTAINER_STATE = /^[a-z-]{1,32}$/;
 
 function boundedInteger(value) {
   if (typeof value !== "string") return null;
@@ -39,6 +41,46 @@ export function summarizeProcessNames(names) {
     .map(([name, count]) => ({ name, count }));
 }
 
+function isNullableInteger(value) {
+  return value === null || (Number.isSafeInteger(value) && value >= 0);
+}
+
+export function isValidResourceDiagnostics(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  if (payload.schema_version !== 1) return false;
+  if (Object.keys(payload).sort().join(",")
+    !== "cgroup,container,process_names,schema_version,shared_memory") return false;
+  if (!payload.cgroup || !payload.shared_memory || !payload.container) return false;
+  if (!isNullableInteger(payload.cgroup.memory_current_bytes)
+    || !isNullableInteger(payload.cgroup.memory_peak_bytes)
+    || !isNullableInteger(payload.cgroup.pid_count)
+    || !isNullableInteger(payload.shared_memory.capacity_bytes)
+    || !isNullableInteger(payload.shared_memory.used_bytes)
+    || !isNullableInteger(payload.container.exit_code)
+    || (payload.container.state !== null
+      && (typeof payload.container.state !== "string"
+        || !SAFE_CONTAINER_STATE.test(payload.container.state)))
+    || (payload.container.oom_killed !== null && typeof payload.container.oom_killed !== "boolean")) {
+    return false;
+  }
+  if (Object.keys(payload.cgroup).sort().join(",")
+    !== "memory_current_bytes,memory_events,memory_peak_bytes,pid_count") return false;
+  if (Object.keys(payload.shared_memory).sort().join(",")
+    !== "capacity_bytes,used_bytes") return false;
+  if (Object.keys(payload.container).sort().join(",")
+    !== "exit_code,oom_killed,state") return false;
+  if (!payload.cgroup.memory_events || typeof payload.cgroup.memory_events !== "object"
+    || Object.keys(payload.cgroup.memory_events).sort().join(",")
+      !== MEMORY_EVENT_FIELDS.toSorted().join(",")
+    || !Object.values(payload.cgroup.memory_events).every(isNullableInteger)) return false;
+  return Array.isArray(payload.process_names)
+    && payload.process_names.length <= MAX_PROCESS_NAMES
+    && payload.process_names.every((entry) => entry && typeof entry === "object"
+      && !Array.isArray(entry) && Object.keys(entry).sort().join(",") === "count,name"
+      && SAFE_PROCESS_NAME.test(entry.name)
+      && Number.isSafeInteger(entry.count) && entry.count > 0);
+}
+
 async function readBounded(readText, source, maximumBytes) {
   try {
     const value = await readText(source, "utf8");
@@ -54,7 +96,9 @@ export async function collectResourceDiagnostics({
   readText = readFile,
   listDirectory = readdir,
   statFileSystem = statfs,
+  container = { state: null, exit_code: null, oom_killed: null },
 } = {}) {
+  const safeContainer = container && typeof container === "object" ? container : {};
   const memoryCurrent = await readBounded(
     readText,
     "/sys/fs/cgroup/memory.current",
@@ -106,20 +150,76 @@ export async function collectResourceDiagnostics({
       used_bytes: sharedMemoryUsed,
     },
     process_names: summarizeProcessNames(processNames.filter((name) => name !== null)),
+    container: {
+      state: typeof safeContainer.state === "string" && SAFE_CONTAINER_STATE.test(safeContainer.state)
+        ? safeContainer.state
+        : null,
+      exit_code: isNullableInteger(safeContainer.exit_code) ? safeContainer.exit_code : null,
+      oom_killed: typeof safeContainer.oom_killed === "boolean" ? safeContainer.oom_killed : null,
+    },
   };
 }
 
 export async function retainResourceDiagnostics(artifactRoot, dependencies = {}) {
   const payload = await collectResourceDiagnostics(dependencies);
+  const {
+    writeText = writeFile,
+    chmodFile = chmod,
+    renameFile = rename,
+    removeFile = rm,
+  } = dependencies;
   const outputPath = path.join(artifactRoot, "resource-diagnostics.json");
-  await writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
+  const temporaryPath = path.join(
+    artifactRoot,
+    `.resource-diagnostics-${process.pid}-${randomUUID()}.tmp`,
+  );
+  try {
+    await writeText(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    await chmodFile(temporaryPath, 0o600);
+    await renameFile(temporaryPath, outputPath);
+  } finally {
+    await removeFile(temporaryPath, { force: true });
+  }
+}
+
+async function main(arguments_) {
+  if (arguments_[0] === "--validate" && arguments_.length === 2) {
+    try {
+      process.exitCode = isValidResourceDiagnostics(JSON.parse(await readFile(arguments_[1], "utf8")))
+        ? 0
+        : 1;
+    } catch {
+      process.exitCode = 1;
+    }
+    return;
+  }
+  const values = new Map();
+  for (let index = 0; index < arguments_.length; index += 2) {
+    const option = arguments_[index];
+    const value = arguments_[index + 1];
+    if (!["--output", "--container-state", "--container-exit-code", "--container-oom-killed"].includes(option)
+      || value === undefined || values.has(option)) {
+      process.exitCode = 2;
+      return;
+    }
+    values.set(option, value);
+  }
+  await retainResourceDiagnostics(values.get("--output") || OUTPUT_ROOT, {
+    container: {
+      state: values.get("--container-state") || null,
+      exit_code: boundedInteger(values.get("--container-exit-code")),
+      oom_killed: values.has("--container-oom-killed")
+        ? { true: true, false: false }[values.get("--container-oom-killed")] ?? null
+        : null,
+    },
   });
-  await chmod(outputPath, 0o600);
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  await retainResourceDiagnostics(OUTPUT_ROOT);
+  await main(process.argv.slice(2));
 }
