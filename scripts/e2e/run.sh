@@ -70,6 +70,14 @@ remove_artifacts() {
 collect_failure_artifacts() {
   local resource
   mkdir -p -- "$artifact_directory"
+  if podman container exists "$application_name" &&
+    [[ "$(podman inspect "$application_name" --format '{{.State.Running}}' 2>/dev/null)" == true ]]; then
+    if ! podman exec "$application_name" test -f \
+      /browser-artifacts/resource-diagnostics.json >/dev/null 2>&1; then
+      podman exec "$application_name" node /e2e/resource-diagnostics.mjs \
+        >/dev/null 2>&1 || true
+    fi
+  fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* || "$resource" == volume:* ]]; then
       continue

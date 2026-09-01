@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { retainFailureArtifacts } from "../e2e/browser-helpers.mjs";
+import {
+  closeCompletedBrowserPhases,
+  retainFailureArtifacts,
+} from "../e2e/browser-helpers.mjs";
+import {
+  collectResourceDiagnostics,
+  parseMemoryEvents,
+  retainResourceDiagnostics,
+  summarizeProcessNames,
+} from "../e2e/resource-diagnostics.mjs";
 
 test("controlled browser failure retains bounded redacted diagnostics", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "md-converter-e2e-artifacts-"));
@@ -48,4 +57,197 @@ test("controlled browser failure retains bounded redacted diagnostics", async ()
   } finally {
     await rm(root, { recursive: true });
   }
+});
+
+test("completed browser phases discard traces before closing contexts", async () => {
+  const traces = ["admin", "alice", "bob"].map((name) => ({
+    name,
+    trace: {
+      started: true,
+      context: {
+        tracing: {
+          stop: async () => {
+            traces.find((entry) => entry.name === name).trace.started = false;
+          },
+        },
+      },
+    },
+  }));
+  const contexts = ["admin", "alice", "bob"].map((name) => ({
+    close: async () => {
+      assert.ok(traces.every(({ trace }) => trace.started === false));
+      return name;
+    },
+  }));
+
+  await closeCompletedBrowserPhases(contexts, traces);
+
+  assert.ok(traces.every(({ trace }) => trace.started === false));
+});
+
+test("resource diagnostics expose only the bounded allowlisted schema", async () => {
+  const reads = [];
+  const fixtures = new Map([
+    ["/sys/fs/cgroup/memory.current", "1048576\n"],
+    ["/sys/fs/cgroup/memory.peak", "2097152\n"],
+    [
+      "/sys/fs/cgroup/memory.events",
+      "low 1\nhigh 2\nmax 3\noom 4\noom_kill 5\noom_group_kill 6\nsecret 99\n",
+    ],
+    ["/sys/fs/cgroup/pids.current", "3\n"],
+    ["/proc/101/comm", "node\n"],
+    ["/proc/102/comm", "chrome\n"],
+    ["/proc/103/comm", "unsafe name --password=secret\n"],
+  ]);
+  const payload = await collectResourceDiagnostics({
+    readText: async (source) => {
+      reads.push(source);
+      if (!fixtures.has(source)) throw new Error("unexpected probe");
+      return fixtures.get(source);
+    },
+    listDirectory: async () => ["self", "103", "101", "102", "not-a-pid"],
+    statFileSystem: async () => ({ blocks: 32n, bfree: 24n, bsize: 4096n }),
+  });
+
+  assert.deepEqual(payload, {
+    schema_version: 1,
+    cgroup: {
+      memory_current_bytes: 1048576,
+      memory_peak_bytes: 2097152,
+      memory_events: {
+        low: 1,
+        high: 2,
+        max: 3,
+        oom: 4,
+        oom_kill: 5,
+        oom_group_kill: 6,
+      },
+      pid_count: 3,
+    },
+    shared_memory: {
+      capacity_bytes: 131072,
+      used_bytes: 32768,
+    },
+    process_names: [
+      { name: "chrome", count: 1 },
+      { name: "node", count: 1 },
+    ],
+  });
+  assert.ok(reads.every((source) => !source.endsWith("/cmdline")));
+  assert.doesNotMatch(JSON.stringify(payload), /secret|password|unsafe name/);
+});
+
+test("resource diagnostics fail closed for unavailable and malformed probes", async () => {
+  assert.deepEqual(parseMemoryEvents("oom\noom_kill invalid\nhigh 7 extra\nmax 8\n"), {
+    low: null,
+    high: null,
+    max: 8,
+    oom: null,
+    oom_kill: null,
+    oom_group_kill: null,
+  });
+
+  const payload = await collectResourceDiagnostics({
+    readText: async () => {
+      throw new Error("probe unavailable");
+    },
+    listDirectory: async () => {
+      throw new Error("proc unavailable");
+    },
+    statFileSystem: async () => {
+      throw new Error("shared memory unavailable");
+    },
+  });
+
+  assert.deepEqual(payload, {
+    schema_version: 1,
+    cgroup: {
+      memory_current_bytes: null,
+      memory_peak_bytes: null,
+      memory_events: {
+        low: null,
+        high: null,
+        max: null,
+        oom: null,
+        oom_kill: null,
+        oom_group_kill: null,
+      },
+      pid_count: null,
+    },
+    shared_memory: {
+      capacity_bytes: null,
+      used_bytes: null,
+    },
+    process_names: [],
+  });
+});
+
+test("resource diagnostics bound and sanitize process-name cardinality", () => {
+  const names = Array.from({ length: 70 }, (_, index) => `worker-${index}`);
+  names.push("worker-0", "unsafe process --password=secret", "/host/path");
+
+  const summary = summarizeProcessNames(names);
+
+  assert.equal(summary.length, 64);
+  assert.deepEqual(summary.find(({ name }) => name === "worker-0"), {
+    name: "worker-0",
+    count: 2,
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /secret|password|host|path/);
+});
+
+test("resource diagnostics are retained separately with private permissions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "markweave-resource-evidence-"));
+  const fixtures = new Map([
+    ["/sys/fs/cgroup/memory.current", "1\n"],
+    ["/sys/fs/cgroup/memory.peak", "2\n"],
+    ["/sys/fs/cgroup/memory.events", "oom 0\noom_kill 0\n"],
+    ["/sys/fs/cgroup/pids.current", "1\n"],
+    ["/proc/1/comm", "node\n"],
+  ]);
+  try {
+    await retainResourceDiagnostics(root, {
+      readText: async (source) => fixtures.get(source),
+      listDirectory: async () => ["1"],
+      statFileSystem: async () => ({ blocks: 2n, bfree: 1n, bsize: 4096n }),
+    });
+    const output = path.join(root, "resource-diagnostics.json");
+    assert.equal((await stat(output)).mode & 0o777, 0o600);
+    assert.equal(JSON.parse(await readFile(output, "utf8")).schema_version, 1);
+    assert.deepEqual(await readdir(root), ["resource-diagnostics.json"]);
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test("fresh expiry tracing and resource collection keep failure-only ordering", async () => {
+  const browserSource = await readFile("tests/e2e/browser-final-image.test.mjs", "utf8");
+  const runnerSource = await readFile("scripts/e2e/run.sh", "utf8");
+  const releaseIndex = browserSource.indexOf(
+    "await closeCompletedBrowserPhases(contexts, traces);",
+  );
+  const expiryContextIndex = browserSource.indexOf(
+    "const expiringContext = await browser.newContext",
+  );
+  const expiryTraceIndex = browserSource.indexOf(
+    'traces.push({ name: "expiring-alice", trace: await startTrace(expiringContext) });',
+  );
+  const expiryPageIndex = browserSource.indexOf(
+    "const expiringPage = await expiringContext.newPage();",
+  );
+
+  assert.ok(releaseIndex > 0 && releaseIndex < expiryContextIndex);
+  assert.ok(expiryContextIndex < expiryTraceIndex && expiryTraceIndex < expiryPageIndex);
+  const collectorIndex = runnerSource.indexOf(
+    "podman exec \"$application_name\" node /e2e/resource-diagnostics.mjs",
+  );
+  const failureCopyIndex = runnerSource.indexOf(
+    'cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/"',
+  );
+  assert.ok(collectorIndex > 0 && collectorIndex < failureCopyIndex);
+  assert.ok(collectorIndex > runnerSource.indexOf("collect_failure_artifacts()"));
+  assert.ok(
+    browserSource.indexOf("retainResourceDiagnostics(settings.artifactRoot)")
+      < browserSource.indexOf("await retainFailureArtifacts({"),
+  );
 });
