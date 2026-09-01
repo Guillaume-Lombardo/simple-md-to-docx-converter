@@ -77,7 +77,7 @@ export function isValidResourceDiagnostics(payload) {
     && payload.process_names.length <= MAX_PROCESS_NAMES
     && payload.process_names.every((entry) => entry && typeof entry === "object"
       && !Array.isArray(entry) && Object.keys(entry).sort().join(",") === "count,name"
-      && SAFE_PROCESS_NAME.test(entry.name)
+      && typeof entry.name === "string" && SAFE_PROCESS_NAME.test(entry.name)
       && Number.isSafeInteger(entry.count) && entry.count > 0);
 }
 
@@ -97,27 +97,32 @@ export async function collectResourceDiagnostics({
   listDirectory = readdir,
   statFileSystem = statfs,
   container = { state: null, exit_code: null, oom_killed: null },
+  collectHostResources = true,
 } = {}) {
   const safeContainer = container && typeof container === "object" ? container : {};
-  const memoryCurrent = await readBounded(
-    readText,
-    "/sys/fs/cgroup/memory.current",
-    128,
-  );
-  const memoryPeak = await readBounded(readText, "/sys/fs/cgroup/memory.peak", 128);
-  const memoryEvents = await readBounded(
-    readText, "/sys/fs/cgroup/memory.events", 4_096,
-  );
-  const pidCount = await readBounded(readText, "/sys/fs/cgroup/pids.current", 128);
+  const memoryCurrent = collectHostResources
+    ? await readBounded(readText, "/sys/fs/cgroup/memory.current", 128)
+    : null;
+  const memoryPeak = collectHostResources
+    ? await readBounded(readText, "/sys/fs/cgroup/memory.peak", 128)
+    : null;
+  const memoryEvents = collectHostResources
+    ? await readBounded(readText, "/sys/fs/cgroup/memory.events", 4_096)
+    : null;
+  const pidCount = collectHostResources
+    ? await readBounded(readText, "/sys/fs/cgroup/pids.current", 128)
+    : null;
 
   let processIds = [];
-  try {
-    processIds = (await listDirectory("/proc"))
-      .filter((entry) => /^[1-9][0-9]*$/.test(entry))
-      .sort((left, right) => Number(left) - Number(right))
-      .slice(0, MAX_PROCESS_IDS);
-  } catch {
-    processIds = [];
+  if (collectHostResources) {
+    try {
+      processIds = (await listDirectory("/proc"))
+        .filter((entry) => /^[1-9][0-9]*$/.test(entry))
+        .sort((left, right) => Number(left) - Number(right))
+        .slice(0, MAX_PROCESS_IDS);
+    } catch {
+      processIds = [];
+    }
   }
   const processNames = await Promise.all(
     processIds.map((pid) => readBounded(readText, `/proc/${pid}/comm`, 128)),
@@ -125,14 +130,16 @@ export async function collectResourceDiagnostics({
 
   let sharedMemoryCapacity = null;
   let sharedMemoryUsed = null;
-  try {
-    const sharedMemory = await statFileSystem("/dev/shm", { bigint: true });
-    const capacity = sharedMemory.blocks * sharedMemory.bsize;
-    const used = (sharedMemory.blocks - sharedMemory.bfree) * sharedMemory.bsize;
-    if (capacity <= BigInt(Number.MAX_SAFE_INTEGER)) sharedMemoryCapacity = Number(capacity);
-    if (used <= BigInt(Number.MAX_SAFE_INTEGER)) sharedMemoryUsed = Number(used);
-  } catch {
-    // The fixed schema retains nulls when the kernel probe is unavailable.
+  if (collectHostResources) {
+    try {
+      const sharedMemory = await statFileSystem("/dev/shm", { bigint: true });
+      const capacity = sharedMemory.blocks * sharedMemory.bsize;
+      const used = (sharedMemory.blocks - sharedMemory.bfree) * sharedMemory.bsize;
+      if (capacity <= BigInt(Number.MAX_SAFE_INTEGER)) sharedMemoryCapacity = Number(capacity);
+      if (used <= BigInt(Number.MAX_SAFE_INTEGER)) sharedMemoryUsed = Number(used);
+    } catch {
+      // The fixed schema retains nulls when the kernel probe is unavailable.
+    }
   }
 
   return {
@@ -160,7 +167,7 @@ export async function collectResourceDiagnostics({
   };
 }
 
-export async function retainResourceDiagnostics(artifactRoot, dependencies = {}) {
+export async function retainResourceDiagnosticsAt(outputPath, dependencies = {}) {
   const payload = await collectResourceDiagnostics(dependencies);
   const {
     writeText = writeFile,
@@ -168,10 +175,9 @@ export async function retainResourceDiagnostics(artifactRoot, dependencies = {})
     renameFile = rename,
     removeFile = rm,
   } = dependencies;
-  const outputPath = path.join(artifactRoot, "resource-diagnostics.json");
   const temporaryPath = path.join(
-    artifactRoot,
-    `.resource-diagnostics-${process.pid}-${randomUUID()}.tmp`,
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}-${process.pid}-${randomUUID()}.tmp`,
   );
   try {
     await writeText(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, {
@@ -184,6 +190,13 @@ export async function retainResourceDiagnostics(artifactRoot, dependencies = {})
   } finally {
     await removeFile(temporaryPath, { force: true });
   }
+}
+
+export async function retainResourceDiagnostics(artifactRoot, dependencies = {}) {
+  await retainResourceDiagnosticsAt(
+    path.join(artifactRoot, "resource-diagnostics.json"),
+    dependencies,
+  );
 }
 
 async function main(arguments_) {
@@ -208,7 +221,7 @@ async function main(arguments_) {
     }
     values.set(option, value);
   }
-  await retainResourceDiagnostics(values.get("--output") || OUTPUT_ROOT, {
+  const dependencies = {
     container: {
       state: values.get("--container-state") || null,
       exit_code: boundedInteger(values.get("--container-exit-code")),
@@ -216,7 +229,13 @@ async function main(arguments_) {
         ? { true: true, false: false }[values.get("--container-oom-killed")] ?? null
         : null,
     },
-  });
+    collectHostResources: false,
+  };
+  if (values.has("--output")) {
+    await retainResourceDiagnosticsAt(values.get("--output"), dependencies);
+  } else {
+    await retainResourceDiagnostics(OUTPUT_ROOT, dependencies);
+  }
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;

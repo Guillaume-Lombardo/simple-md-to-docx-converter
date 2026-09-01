@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFile as executeFile } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -15,6 +17,8 @@ import {
   retainResourceDiagnostics,
   summarizeProcessNames,
 } from "../e2e/resource-diagnostics.mjs";
+
+const execFile = promisify(executeFile);
 
 test("controlled browser failure retains bounded redacted diagnostics", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "md-converter-e2e-artifacts-"));
@@ -205,6 +209,10 @@ test("stopped-container fallback diagnostics retain only safe state and OOM evid
     ...payload,
     process_names: [{ name: "node", count: 1, arguments: "--password=secret" }],
   }), false);
+  assert.equal(isValidResourceDiagnostics({
+    ...payload,
+    process_names: [{ name: 123, count: 1 }],
+  }), false);
   assert.doesNotMatch(JSON.stringify(payload), /password|secret|host|path/);
 });
 
@@ -269,6 +277,47 @@ test("resource diagnostics publish atomically and clean up interrupted replaceme
     );
     assert.equal(await readFile(output, "utf8"), oldPayload);
     assert.deepEqual(await readdir(root), ["resource-diagnostics.json"]);
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test("runner fallback CLI repairs missing and malformed diagnostics at its exact output path", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "markweave-resource-cli-"));
+  const output = path.join(root, "resource-diagnostics.json");
+  const script = path.resolve("tests/e2e/resource-diagnostics.mjs");
+  try {
+    for (const initial of [null, "{malformed\n"]) {
+      await rm(output, { force: true });
+      if (initial !== null) await writeFile(output, initial, { mode: 0o600 });
+      await execFile(process.execPath, [
+        script,
+        "--output", output,
+        "--container-state", "exited",
+        "--container-exit-code", "137",
+        "--container-oom-killed", "true",
+      ]);
+      const payload = JSON.parse(await readFile(output, "utf8"));
+      assert.equal(isValidResourceDiagnostics(payload), true);
+      assert.deepEqual(payload.container, { state: "exited", exit_code: 137, oom_killed: true });
+      assert.deepEqual(payload.cgroup, {
+        memory_current_bytes: null,
+        memory_peak_bytes: null,
+        memory_events: {
+          low: null,
+          high: null,
+          max: null,
+          oom: null,
+          oom_kill: null,
+          oom_group_kill: null,
+        },
+        pid_count: null,
+      });
+      assert.deepEqual(payload.shared_memory, { capacity_bytes: null, used_bytes: null });
+      assert.deepEqual(payload.process_names, []);
+      assert.equal((await stat(output)).mode & 0o777, 0o600);
+      assert.deepEqual(await readdir(root), ["resource-diagnostics.json"]);
+    }
   } finally {
     await rm(root, { recursive: true });
   }

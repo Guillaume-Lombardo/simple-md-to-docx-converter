@@ -88,12 +88,20 @@ collect_failure_artifacts() {
   if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
     --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
     >/dev/null 2>&1; then
-    node "$browser_runtime_directory/resource-diagnostics.mjs" \
+    if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
       --output "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
       --container-state "$container_state" \
       --container-exit-code "$container_exit_code" \
-      --container-oom-killed "$container_oom_killed" \
-      >/dev/null 2>&1 || true
+      --container-oom-killed "$container_oom_killed"; then
+      echo "Could not write fallback resource diagnostics." >&2
+      return 1
+    fi
+    if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+      --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
+      >/dev/null 2>&1; then
+      echo "Fallback resource diagnostics failed schema validation." >&2
+      return 1
+    fi
   fi
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* || "$resource" == volume:* ]]; then
