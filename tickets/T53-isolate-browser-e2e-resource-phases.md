@@ -2,7 +2,7 @@
 ticket: T53
 linear_id: G1L-460
 linear_url: https://linear.app/g1lom/issue/G1L-460/t53-isolate-final-image-browser-e2e-resource-phases
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -46,10 +46,11 @@ Harden the final-image browser E2E resource phases so Chromium failures retain e
 * 2026-09-01: Third review restored normal in-container collection. The no-argument collector retains cgroup, PID, shared-memory, and process-name probes; only the explicit `--host-fallback` runner path suppresses host probes for a stopped application container. Controlled collector tests verify default probe collection and fallback zero-probe behavior, while the actual CLI fallback regression continues to validate the final path, privacy mode, atomic cleanup, and safe stopped-container payload. Focused and full Web suites (32 passed), Bash syntax validation, Ruff format/lint, and `ty` pass.
 * 2026-09-01: PR review hardened failure cleanup. Missing `podman inspect` output is guarded and normalized, and a missing browser-artifact directory no longer interrupts teardown. Completed browser phases now settle every trace discard and context close; a regression covers a failed trace discard. Focused Web suite (33 passed), Bash syntax validation, Ruff format/lint, and `ty` pass.
 * 2026-09-01: Follow-up review ensures a failed diagnostic collector records failure without preventing container, volume, harness, and worktree cleanup. Browser-phase cleanup now attempts every trace and context, then propagates a context-close failure to prevent the next phase from allocating. Regression coverage includes the guarded collector call and a rejected context close after every context is attempted. Full Web suite (34 passed), Bash syntax validation, Ruff format/lint, and `ty` pass.
+* 2026-09-01: Ready PR #160 was squash-merged as `471dc6ad0069b814369fcbdf814ae1ab546ae02f` after exact-head CI run 33516025912 passed the light suite, standalone and distributed rootless final-image E2E profiles, final gate, CodeRabbit, independent review, and every resolved conversation. Exact-main CI run 33516836305 repeated the light suite, both hosted E2E profiles, and final gate successfully. All acceptance criteria are verified on `main`.
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns the final-image harness files at a time.
 * Serialize implementation with related T52; T52 is not a Linear blocker for this ticket.
 * All repository artifacts and user-facing text are English.
