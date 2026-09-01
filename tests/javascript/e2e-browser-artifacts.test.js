@@ -90,6 +90,15 @@ test("completed browser phases discard traces before closing contexts", async ()
   assert.ok(traces.every(({ trace }) => trace.started === false));
 });
 
+test("completed browser phases close every context after a trace discard failure", async () => {
+  const closed = [];
+  await closeCompletedBrowserPhases(
+    [{ close: async () => closed.push("first") }, { close: async () => closed.push("second") }],
+    [{ trace: { started: true, context: { tracing: { stop: async () => { throw new Error("failed"); } } } } }],
+  );
+  assert.deepEqual(closed, ["first", "second"]);
+});
+
 test("resource diagnostics expose only the bounded allowlisted schema", async () => {
   const reads = [];
   const fixtures = new Map([

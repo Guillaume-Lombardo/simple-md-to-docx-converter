@@ -73,11 +73,21 @@ collect_failure_artifacts() {
   container_state=""
   container_exit_code=""
   container_oom_killed=""
-  if podman container exists "$application_name"; then
-    read -r container_state container_exit_code container_oom_killed < <(
+  if ! mkdir -p -- "$temporary_directory/browser-artifacts"; then
+    echo "Could not create browser artifact directory." >&2
+  elif podman container exists "$application_name"; then
+    if ! read -r container_state container_exit_code container_oom_killed < <(
       podman inspect "$application_name" \
         --format '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}' 2>/dev/null || true
-    )
+    ); then
+      container_state=""
+      container_exit_code=""
+      container_oom_killed=""
+    fi
+    [[ "$container_state" =~ ^[a-z-]+$ ]] || container_state=""
+    [[ "$container_exit_code" =~ ^[0-9]+$ ]] || container_exit_code=""
+    [[ "$container_oom_killed" == true || "$container_oom_killed" == false ]] \
+      || container_oom_killed=""
     if [[ "$container_state" == running ]] && ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
       --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
       >/dev/null 2>&1; then
@@ -85,7 +95,7 @@ collect_failure_artifacts() {
         >/dev/null 2>&1 || true
     fi
   fi
-  if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
+  if [[ -d "$temporary_directory/browser-artifacts" ]] && ! node "$browser_runtime_directory/resource-diagnostics.mjs" \
     --validate "$temporary_directory/browser-artifacts/resource-diagnostics.json" \
     >/dev/null 2>&1; then
     if ! node "$browser_runtime_directory/resource-diagnostics.mjs" \

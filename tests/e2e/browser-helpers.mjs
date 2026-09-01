@@ -102,8 +102,8 @@ export async function discardTrace(trace) {
 }
 
 export async function closeCompletedBrowserPhases(contexts, traces) {
-  await Promise.all(traces.map(({ trace }) => discardTrace(trace)));
-  await Promise.all(contexts.map((context) => context.close()));
+  await Promise.allSettled(traces.map(({ trace }) => discardTrace(trace)));
+  await Promise.allSettled(contexts.map((context) => context.close()));
 }
 
 async function safeScreenshot(page, destination) {
