@@ -117,12 +117,14 @@ supported. Before the frontend catch-all, the public router returns a content-fr
 may call the exact internal `/_frontend/health/live` and `/_frontend/health/ready` paths through the
 frontend Service's separate probe port; the public router reaches only the page port.
 
-The router removes the complete `Cookie` request header before every frontend-bound page or asset
-request and removes every `Set-Cookie` response-header field before a frontend response reaches the
-browser. Exact `/api/v1`, `/api/v1/**`, and the public operational routes go directly to FastAPI
-without either transformation, preserving its incoming `Cookie` and all outgoing `Set-Cookie`
-fields. T60 blocks on routing-fixture tests for both directions and route classes; T64 repeats them
-through the production router against the exact final images.
+The router removes the complete `Cookie` request header before every request whose selected upstream
+is the frontend, regardless of method or route class, including named pages, `/_next/**`, and the
+unknown-path catch-all. It removes every `Set-Cookie` response-header field from every frontend
+response regardless of method, status, or content type. Exact `/api/v1`, `/api/v1/**`, and the public
+operational routes go directly to FastAPI without either transformation, preserving its incoming
+`Cookie` and all outgoing `Set-Cookie` fields. T60 blocks on routing-fixture tests for both
+directions, named pages, assets, unknown paths, and non-GET requests; T64 repeats them through the
+production router against the exact final images.
 
 Next.js is a presentation-only process. Browser code calls same-origin FastAPI routes directly.
 Except for two non-public process-local frontend probes, route handlers, Server Actions,
@@ -156,18 +158,21 @@ frontend packages the `.next` build and exact pruned production dependency graph
 T64 must block on the exact 128/129 admission boundary, header rejection, empty failure responses,
 finish/close accounting, drain races, and bounded shutdown.
 
-Every HTML response is `no-store` and uses a per-response cryptographic nonce with a CSP allowing
-only self-hosted connections, stylesheets, fonts, and images plus nonce-bearing framework scripts
-and inline style elements; it forbids
+Every dynamically rendered HTML document response is `no-store` and uses a fresh per-response
+cryptographic nonce with a CSP allowing only self-hosted connections, stylesheets, fonts, and images
+plus nonce-bearing framework scripts and inline style elements; it forbids
 objects, framing, external resources, workers, `unsafe-inline`, and `unsafe-eval`. Authenticated
 API responses and downloads remain uncacheable. Only content-hashed `/_next/static/**` assets may
 use one-year immutable caching. No service worker, CDN data cache, analytics, remote font, or
 third-party script is allowed. On exact Next.js `16.3.4` production dynamic rendering, T60 and T64
-must prove a fresh nonce per response with no cache reuse, the same nonce in `script-src` and
-`style-src`, a nonce on every framework bootstrap script and inline style element, no inline style
-attribute or unnonced inline style, and no eval requirement. T60 implements the interception hook as
-`web/proxy.ts` with the named `export function proxy`; structural and production-build tests reject
-the deprecated `middleware.ts` filename or `middleware` export.
+must prove a fresh nonce for each HTML document with no cache reuse, the same nonce in `script-src`
+and `style-src`, a nonce on every framework bootstrap script and inline style element, no inline
+style attribute or unnonced inline style, and no eval requirement. Content-hashed
+`/_next/static/**` assets and non-HTML or content-free responses, including custom-server header
+error, saturation, and draining responses, are outside nonce generation and freshness assertions.
+T60 implements the interception hook as `web/proxy.ts` with the named `export function proxy`;
+structural and production-build tests reject the deprecated `middleware.ts` filename or
+`middleware` export.
 
 The public TLS router adds exactly `Strict-Transport-Security: max-age=31536000` and
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()` to every HTTPS

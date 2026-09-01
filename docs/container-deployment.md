@@ -185,12 +185,14 @@ live/ready success and failure plus public denial of exact, descendant, encoded,
 paths. Deployment manifests must apply the exact initial frontend budgets from the migration
 architecture and keep backend, worker, scanner, storage, and document budgets independent.
 
-The public router strips the complete `Cookie` header before forwarding any page or `/_next/**`
-asset request to frontend port 3000 and strips every `Set-Cookie` field from frontend responses.
-It preserves both directions unchanged when routing exact `/api/v1`, `/api/v1/**`, and public
-operational routes directly to FastAPI. T60's routing fixture and T64's production-router final-image
-tests must cover page and asset stripping, multiple response fields, exact API-base and descendant
-preservation, and a representative operational route.
+The public router strips the complete `Cookie` header before forwarding any method on any
+frontend-owned route to port 3000, including named pages, `/_next/**` assets, and unknown catch-all
+paths. It strips every `Set-Cookie` field from every frontend response regardless of method, status,
+or content type. It preserves both directions unchanged when routing exact `/api/v1`, `/api/v1/**`,
+and public operational routes directly to FastAPI. T60's routing fixture and T64's
+production-router final-image tests must cover named pages, assets, unknown paths, non-GET requests,
+multiple response fields, exact API-base and descendant preservation, and a representative
+operational route.
 
 The frontend uses the T60-owned `web/server.mjs` supported custom-server entry point, not Next.js
 standalone output. Node rejects headers beyond 16 KiB; the server admits at most 128 simultaneous

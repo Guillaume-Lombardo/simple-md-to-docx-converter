@@ -87,12 +87,13 @@ operator-set `MARKWEAVE_PUBLIC_ORIGIN`. Next.js receives the same public origin 
 links only; it may not override or infer FastAPI's security origin.
 
 Because same-origin cookies use `Path=/`, the router removes the complete `Cookie` header before
-forwarding every page or asset request to the frontend. It also removes every `Set-Cookie` field,
-including multiple header fields, from frontend responses before returning them to the browser.
-It performs neither transformation on exact `/api/v1`, `/api/v1/**`, or public operational routes:
-FastAPI receives the original `Cookie` header and the browser receives all of FastAPI's
-`Set-Cookie` fields unchanged. Thus Next.js cannot consume, overwrite, clear, or mint either the
-session or CSRF cookie.
+forwarding every request whose selected upstream is the frontend, regardless of HTTP method. This
+includes named pages, `/_next/**` assets, and the unknown-path catch-all. It also removes every
+`Set-Cookie` field, including multiple header fields, from every frontend response regardless of
+method, status, or content type before returning it to the browser. It performs neither
+transformation on exact `/api/v1`, `/api/v1/**`, or public operational routes: FastAPI receives the
+original `Cookie` header and the browser receives all of FastAPI's `Set-Cookie` fields unchanged.
+Thus Next.js cannot consume, overwrite, clear, or mint either the session or CSRF cookie.
 
 ## One-origin routing contract
 
@@ -113,12 +114,15 @@ rejected or normalized once before routing, and no user-controlled header choose
 There is no CORS mode and no second browser-visible hostname. Production browser tests fail if any
 page, API request, asset, upload, or download crosses origin.
 
-T60 routing-contract tests send sentinel session, CSRF, and unrelated cookies to pages and assets,
-capture the frontend upstream request, and require the `Cookie` header to be absent. They inject
-multiple frontend `Set-Cookie` fields and require all of them to be absent at the client. The same
-fixture requires both headers to survive unchanged in both directions for exact `/api/v1`, an
-`/api/v1/**` descendant, and a representative public operational route. These are blocking gates;
-T64 repeats them through the production router against the exact final image pair.
+T60 routing-contract tests send sentinel session, CSRF, and unrelated cookies to a named-page GET,
+a framework-asset GET, an unknown-path GET, a POST to a named page, and a PATCH to an unknown
+catch-all path. They capture every frontend upstream request and require the `Cookie` header to be
+absent, then inject
+multiple frontend `Set-Cookie` fields across those route/method classes and require all of them to
+be absent at the client. The same fixture requires both headers to survive unchanged in both
+directions for exact `/api/v1`, an `/api/v1/**` descendant, and a representative public operational
+route. These are blocking gates; T64 repeats them through the production router against the exact
+final image pair.
 
 During T60–T63, production continues to route all browser paths and `/static/**` to FastAPI. The
 unpublished frontend is exercised only through test-only routing that cannot receive production
@@ -241,7 +245,8 @@ Server Action or server-side fetch is an authentication bridge.
 
 ### CSP and page headers
 
-Every HTML response uses a fresh cryptographically random nonce and this minimum production policy:
+Every dynamically rendered HTML document response uses a fresh cryptographically random nonce and
+this minimum production policy:
 
 ```text
 default-src 'none';
@@ -259,15 +264,21 @@ worker-src 'none'
 ```
 
 The CSP interception hook is `web/proxy.ts` with the named `export function proxy`, as required by
-the reviewed Next.js 16 convention. T60's structural and production-build tests reject deprecated
-`middleware.ts` or an exported function named `middleware`.
+the reviewed Next.js 16 convention. Its matcher covers dynamic document routes and excludes
+content-hashed `/_next/static/**` assets and other non-document asset paths. T60's structural and
+production-build tests reject deprecated `middleware.ts` or an exported function named
+`middleware`.
 
 The same response nonce is passed to framework bootstrap scripts and every emitted inline style
-element. T60 must prove on exact Next.js `16.3.4` production dynamic rendering that every response
-has a fresh nonce, cached responses never reuse one, `script-src` and `style-src` carry that same
-nonce, all framework bootstrap scripts and inline style elements carry it, no inline style
-attribute or unnonced inline style is emitted, and no generated page or asset requires eval. T64
-repeats that proof against the exact final image bytes. No
+element. T60 must prove on exact Next.js `16.3.4` production dynamic rendering that every HTML
+document response has a fresh nonce, cached HTML never reuses one, `script-src` and `style-src`
+carry that same nonce, all framework bootstrap scripts and inline style elements carry it, no
+inline style attribute or unnonced inline style is emitted, and no generated page or asset requires
+eval. T64 repeats that proof against the exact final image bytes. Content-hashed
+`/_next/static/**` assets remain byte-stable and immutable-cacheable, with no generated nonce CSP.
+Non-HTML and content-free responses also receive no generated nonce CSP; this includes the custom
+server's empty header-overflow `431` and saturation/draining `503` responses, which terminate before
+Next.js Proxy. Dynamically rendered HTML error documents remain in the nonce checks. No
 `unsafe-inline`, `unsafe-eval`, remote script, remote stylesheet, runtime font fetch, analytics,
 third-party widget, service worker, or user-controlled CSP source is allowed. If a supported Next.js
 patch cannot satisfy this policy, implementation stops for explicit security review instead of

@@ -27,9 +27,10 @@ and headless LibreOffice creates PDF.
 After T64, the Web presentation is a stateless rootless Next.js process behind the same public TLS
 router as FastAPI. Literal path routing sends browser pages and `/_next/**` to that process and
 both exact `/api/v1` and `/api/v1/**`, plus every public operational route, directly to FastAPI.
-Browser JavaScript uses only relative same-origin API URLs. The router strips `Cookie` from every
-frontend-bound page/asset request and every `Set-Cookie` field from frontend responses, while
-preserving both directions unchanged for direct FastAPI routes. Next.js has no persistence or
+Browser JavaScript uses only relative same-origin API URLs. Regardless of method, the router strips
+`Cookie` from every request selected for the frontend, including named pages, assets, and unknown
+catch-all paths, and strips every `Set-Cookie` field from every frontend response. It preserves both
+directions unchanged for direct FastAPI routes. Next.js has no persistence or
 infrastructure credentials, receives no upload/download body, and cannot implement or proxy
 FastAPI business behavior.
 
@@ -86,10 +87,10 @@ fragment, or user information. When it is unset, the direct ASGI request base UR
 Proxy forwarding headers remain deliberately untrusted.
 
 The server-side Next.js process cannot read or forward any browser cookie because the router
-removes the complete `Cookie` header before forwarding page and asset requests. The router also
-removes all frontend `Set-Cookie` response fields. Next.js renders a public shell and lets browser
-JavaScript obtain session state directly from FastAPI and read only the CSRF cookie required for
-mutations. A nonce-based CSP, no-store HTML/API responses, immutable content-hashed assets, and
+removes the complete `Cookie` header before forwarding any frontend route or method. The router
+also removes all frontend `Set-Cookie` response fields. Next.js renders a public shell and lets
+browser JavaScript obtain session state directly from FastAPI and read only the CSRF cookie required
+for mutations. A nonce-based CSP, no-store HTML/API responses, immutable content-hashed assets, and
 direct FastAPI upload/download routing keep the new presentation boundary from becoming a
 credential, file, or cache boundary.
 
