@@ -296,14 +296,13 @@ export class ConversionController {
     } catch (error) {
       if (generation !== this.submissionGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
-      const clientRejection =
-        error instanceof ApiError && error.status >= 400 && error.status < 500;
-      if (clientRejection) this.idempotencyKey = undefined;
+      const definitiveRejection = isDefinitiveSubmissionRejection(error);
+      if (definitiveRejection) this.idempotencyKey = undefined;
       this.publish({
         ...this.state,
         submitting: false,
         notice: undefined,
-        error: clientRejection
+        error: definitiveRejection
           ? errorMessage(error)
           : `${errorMessage(error, "The conversion could not be submitted.")} Retrying will reuse the same request key.`,
       });
@@ -583,6 +582,15 @@ function errorMessage(error: unknown, fallback = SAFE_FAILURE): string {
 
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isDefinitiveSubmissionRejection(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  return (
+    (error.status >= 400 && error.status < 500) ||
+    (error.status === 503 &&
+      error.code === "CONVERSION_QUEUE_CAPACITY_EXCEEDED")
+  );
 }
 
 function validatedDownloadFilename(response: Response): string {

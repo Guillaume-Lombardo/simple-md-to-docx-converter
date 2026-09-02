@@ -278,7 +278,9 @@ test("ambiguous and server-failed submissions reuse one key while client rejecti
   const multipart = vi
     .fn()
     .mockRejectedValueOnce(new TypeError("offline"))
-    .mockRejectedValueOnce(new ApiError(503, "CAPACITY", "Try later."))
+    .mockRejectedValueOnce(
+      new ApiError(503, "CONVERSION_STORAGE_UNAVAILABLE", "Try later."),
+    )
     .mockResolvedValueOnce({ data: job(), status: 200 })
     .mockResolvedValueOnce(
       accepted(job({ state: "succeeded", progress: 100, step: "complete" })),
@@ -330,6 +332,74 @@ test("ambiguous and server-failed submissions reuse one key while client rejecti
   ]);
   expect(multipart.mock.calls[5]![1].get("output")).toBe("pdf");
 });
+
+test.each([
+  [
+    "owner quota 429",
+    new ApiError(
+      429,
+      "CONVERSION_USER_QUOTA_EXCEEDED",
+      "Too many active conversions.",
+    ),
+    false,
+  ],
+  [
+    "global capacity 503",
+    new ApiError(
+      503,
+      "CONVERSION_QUEUE_CAPACITY_EXCEEDED",
+      "The conversion queue is at capacity.",
+    ),
+    false,
+  ],
+  [
+    "source storage 503",
+    new ApiError(
+      503,
+      "CONVERSION_STORAGE_UNAVAILABLE",
+      "Source storage is unavailable.",
+    ),
+    true,
+  ],
+  [
+    "unexpected server 500",
+    new ApiError(500, "INTERNAL_SERVER_ERROR", "The service failed."),
+    true,
+  ],
+] as const)(
+  "%s uses the correct submission request identity",
+  async (_label, rejection, reusesKey) => {
+    const multipart = vi
+      .fn()
+      .mockRejectedValueOnce(rejection)
+      .mockResolvedValueOnce(accepted(job({ state: "succeeded" })));
+    const transport = api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+      multipartWithMetadata: multipart,
+    });
+    let key = 0;
+    const controller = await loadedController(transport, [
+      transport,
+      vi.fn(),
+      () => `key-${++key}`,
+    ]);
+    controller.setSource([new File(["# source"], "source.md")]);
+
+    await controller.submit();
+    expect(controller.snapshot().error).toContain(rejection.message);
+    expect(controller.snapshot().error?.includes("same request key")).toBe(
+      reusesKey,
+    );
+    await controller.submit();
+
+    expect(multipart.mock.calls.map((call) => call[3].idempotencyKey)).toEqual(
+      reusesKey ? ["key-1", "key-1"] : ["key-1", "key-2"],
+    );
+  },
+);
 
 test("accepted Retry-After schedules the initial status poll", async () => {
   const scheduled: Array<number> = [];
