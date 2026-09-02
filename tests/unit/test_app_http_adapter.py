@@ -106,6 +106,18 @@ def test_conversion_options_rejects_a_mismatched_immutable_version() -> None:
 
 
 @pytest.mark.unit
+def test_conversion_options_accepts_a_consistent_default_selection() -> None:
+    response = ConversionOptionsResponse(
+        conversion_upload_max_bytes=1,
+        resolved_template=None,
+        template_version_id=None,
+        selection_source=TemplateSelectionSource.PANDOC_DEFAULT,
+    )
+
+    assert response.selection_source is TemplateSelectionSource.PANDOC_DEFAULT
+
+
+@pytest.mark.unit
 def test_idle_session_policy_validator_accepts_only_canonical_etags() -> None:
     assert idle_session_policy_etag(0) == '"idle-session-policy-0"'
     assert expected_idle_session_policy_revision('"idle-session-policy-0"') == 0

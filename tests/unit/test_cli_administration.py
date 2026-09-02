@@ -525,7 +525,13 @@ def test_policy_audit_requires_an_object() -> None:
 def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -> None:
     _store, _constructor, client = remote
     client.request.return_value = _response(
-        200, {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
+        200,
+        {
+            "user_idle_minutes": 30,
+            "admin_idle_minutes": 15,
+            "revision": 0,
+            "absolute_lifetime_seconds": 28_800,
+        },
     )
 
     assert (
@@ -544,7 +550,9 @@ def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -
         == 1
     )
     assert "invalid response" in capsys.readouterr().err
-    client.request.assert_called_once()
+    client.request.assert_called_once_with(
+        "GET", "/api/v1/admin/session-policy", profile=_profile()
+    )
 
 
 def test_policy_response_requires_an_object() -> None:

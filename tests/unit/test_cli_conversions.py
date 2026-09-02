@@ -178,6 +178,41 @@ def test_conversion_options_rejects_incomplete_or_invalid_template_identity(
         )
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        None,
+        {
+            "conversion_upload_max_bytes": False,
+            "resolved_template": None,
+            "template_version_id": None,
+            "selection_source": "pandoc_default",
+        },
+        {
+            "conversion_upload_max_bytes": 1,
+            "resolved_template": _template_identity(),
+            "template_version_id": VERSION_ID,
+            "selection_source": "pandoc_default",
+        },
+        {
+            "conversion_upload_max_bytes": 1,
+            "resolved_template": None,
+            "template_version_id": VERSION_ID,
+            "selection_source": "preferred",
+        },
+        {
+            "conversion_upload_max_bytes": 1,
+            "resolved_template": _template_identity(),
+            "template_version_id": TEMPLATE_ID,
+            "selection_source": "preferred",
+        },
+    ),
+)
+def test_conversion_options_rejects_inconsistent_envelope(payload: object) -> None:
+    with pytest.raises(CliError, match="invalid response"):
+        conversions._validated_conversion_options(payload)
+
+
 def test_convert_submits_canonical_source_and_reports_polling_without_filename(
     tmp_path: Path, mocker, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -747,6 +782,14 @@ def _http_client() -> ConversionHttpClient:
         ),
         timeout=2,
     )
+
+
+def test_conversion_http_options_uses_the_authenticated_read_route(mocker) -> None:
+    client = _http_client()
+    request = mocker.patch.object(client, "request", return_value=_response())
+
+    assert client.options() == request.return_value
+    request.assert_called_once_with("GET", "/api/v1/conversion-options")
 
 
 @pytest.mark.parametrize("idempotency_key", (None, "stable-key"))
