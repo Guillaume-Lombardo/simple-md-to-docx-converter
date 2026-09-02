@@ -323,19 +323,22 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     conversion_failure_index = runner.index(
         "/e2e/browser-next-conversion-failure.test.mjs", auth_index
     )
-    admin_index = runner.index(
-        "/e2e/browser-next-admin.test.mjs", conversion_failure_index
+    admin_cookie_index = runner.index(
+        "/e2e/browser-next-admin-cookie.test.mjs", conversion_failure_index
     )
+    admin_index = runner.index("/e2e/browser-next-admin.test.mjs", admin_cookie_index)
     admission_index = runner.index(
         "/e2e/browser-next-conversion-admission.test.mjs", admin_index
     )
 
+    assert runner.count("/e2e/browser-next-admin-cookie.test.mjs") == 1
     assert runner.count("/e2e/browser-next-admin.test.mjs") == 1
     assert (
         checkpoint_verify_index
         < policy_values_index
         < auth_index
         < conversion_failure_index
+        < admin_cookie_index
         < admin_index
         < admission_index
     )
@@ -344,6 +347,11 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     assert (
         "value.isascii() and value.isdecimal()"
         in runner[policy_values_index:auth_index]
+    )
+    cookie_invocation = runner[conversion_failure_index:admin_index]
+    assert (
+        'podman exec \\\n  "$application_name" node --test '
+        "/e2e/browser-next-admin-cookie.test.mjs" in cookie_invocation
     )
     invocation = runner[conversion_failure_index:admission_index]
     assert (

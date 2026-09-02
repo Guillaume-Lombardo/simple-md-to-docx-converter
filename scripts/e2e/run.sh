@@ -735,6 +735,8 @@ podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
 podman exec \
+  "$application_name" node --test /e2e/browser-next-admin-cookie.test.mjs
+podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="$checkpoint_user_idle_minutes" \
