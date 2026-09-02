@@ -451,6 +451,46 @@ test("a new submission schedules polling after reopening an earlier success", as
   );
 });
 
+test("polling calls a browser-like timer cancellation without a receiver", async () => {
+  let scheduled!: () => void;
+  const timer = 17 as unknown as ReturnType<typeof setTimeout>;
+  const cancelSchedule = vi.fn(function browserCancel(
+    this: unknown,
+    received: ReturnType<typeof setTimeout>,
+  ) {
+    expect(this).toBeUndefined();
+    expect(received).toBe(timer);
+  });
+  const transport = api({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(options())
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+      .mockResolvedValueOnce(job({ state: "succeeded" })),
+    multipartWithMetadata: vi
+      .fn()
+      .mockResolvedValue(accepted(job({ state: "queued" }))),
+  });
+  const controller = await loadedController(transport, [
+    transport,
+    vi.fn(),
+    () => "key",
+    (callback) => {
+      scheduled = callback;
+      return timer;
+    },
+    cancelSchedule,
+  ]);
+  controller.setSource([new File(["# source"], "source.md")]);
+  await controller.submit();
+
+  scheduled();
+  await vi.waitFor(() =>
+    expect(controller.snapshot().active?.state).toBe("succeeded"),
+  );
+  expect(cancelSchedule).toHaveBeenCalledOnce();
+});
+
 test.each([
   ["non-202 status", { status: 200 }],
   ["missing Location", { location: undefined }],

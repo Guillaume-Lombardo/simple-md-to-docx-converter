@@ -443,7 +443,8 @@ export class ConversionController {
   }
 
   private clearPoll(): void {
-    if (this.pollTimer !== undefined) this.cancelSchedule(this.pollTimer);
+    const cancelSchedule = this.cancelSchedule;
+    if (this.pollTimer !== undefined) cancelSchedule(this.pollTimer);
     this.pollTimer = undefined;
   }
 
