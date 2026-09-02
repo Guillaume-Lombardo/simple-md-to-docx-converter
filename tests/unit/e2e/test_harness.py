@@ -345,14 +345,14 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
     conversion_failure_index = runner.index(
         "/e2e/browser-next-conversion-failure.test.mjs", auth_index
     )
-    admin_cookie_index = runner.index(
-        "/e2e/browser-next-admin-cookie.test.mjs", conversion_failure_index
-    )
     admission_index = runner.index(
-        "/e2e/browser-next-conversion-admission.test.mjs", admin_cookie_index
+        "/e2e/browser-next-conversion-admission.test.mjs", conversion_failure_index
     )
     recovery_index = runner.index(
         "/e2e/browser-next-conversion-restart.test.mjs", admission_index
+    )
+    admin_cookie_index = runner.index(
+        "/e2e/browser-next-admin-cookie.test.mjs", recovery_index
     )
     admin_index = runner.index("/e2e/browser-next-admin.test.mjs", recovery_index)
     expiry_index = runner.index("/e2e/browser-next-auth-expiry.test.mjs", admin_index)
@@ -364,9 +364,9 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
         < policy_values_index
         < auth_index
         < conversion_failure_index
-        < admin_cookie_index
         < admission_index
         < recovery_index
+        < admin_cookie_index
         < admin_index
         < expiry_index
     )
@@ -376,12 +376,12 @@ def test_runner_invokes_next_administration_with_restored_policy_evidence(
         "value.isascii() and value.isdecimal()"
         in runner[policy_values_index:auth_index]
     )
-    cookie_invocation = runner[conversion_failure_index:admission_index]
+    invocation = runner[recovery_index:expiry_index]
     assert (
         'podman exec \\\n  "$application_name" node --test '
-        "/e2e/browser-next-admin-cookie.test.mjs" in cookie_invocation
+        "/e2e/browser-next-admin-cookie.test.mjs\n"
+        "podman exec \\\n  --env MARKWEAVE_E2E_PROFILE=" in invocation
     )
-    invocation = runner[recovery_index:expiry_index]
     assert (
         "--env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="
         '"$checkpoint_user_idle_minutes"' in invocation
