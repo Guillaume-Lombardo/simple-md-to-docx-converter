@@ -5,6 +5,7 @@ import { createServer, request } from "node:http";
 import { request as secureRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { connect as connectTls } from "node:tls";
 import {
   createProductionRouter,
   HSTS,
@@ -372,6 +373,67 @@ test("TLS routing owns exact response-wide security headers", async () => {
         (server) => new Promise((resolve) => server.close(resolve)),
       ),
     );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("TLS header overflow returns a bounded secured 431", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "markweave-router-overflow-"));
+  const key = join(directory, "key.pem");
+  const cert = join(directory, "cert.pem");
+  try {
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=converter.example",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+      ],
+      { stdio: "ignore" },
+    );
+    const router = createProductionRouter({
+      backend: "http://127.0.0.1:1",
+      frontend: "http://127.0.0.1:1",
+      publicHosts: ["converter.example"],
+      tls: { cert: readFileSync(cert), key: readFileSync(key) },
+    });
+    router.listen(0, "127.0.0.1");
+    await new Promise((resolve) => router.once("listening", resolve));
+    const port = (router.address() as { port: number }).port;
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connectTls(
+        { host: "127.0.0.1", port, rejectUnauthorized: false },
+        () => {
+          socket.write(
+            `GET / HTTP/1.1\r\nHost: converter.example\r\nX-Large: ${"a".repeat(17_000)}\r\n\r\n`,
+          );
+        },
+      );
+      let received = "";
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => (received += chunk));
+      socket.on("end", () => resolve(received));
+      socket.on("error", reject);
+    });
+    expect(response).toBe(
+      "HTTP/1.1 431 Request Header Fields Too Large\r\n" +
+        "Connection: close\r\n" +
+        "Content-Length: 0\r\n" +
+        `Strict-Transport-Security: ${HSTS}\r\n` +
+        `Permissions-Policy: ${PERMISSIONS_POLICY}\r\n\r\n`,
+    );
+    await new Promise((resolve) => router.close(resolve));
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

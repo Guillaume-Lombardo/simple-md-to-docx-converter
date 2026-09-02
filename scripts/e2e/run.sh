@@ -301,6 +301,11 @@ require_http_status() {
   fi
 }
 
+e2e_podman() {
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" podman "$@"
+}
+
 hardened_runtime=(
   --user "$runtime_uid:0"
   --read-only
@@ -317,7 +322,11 @@ hardened_runtime=(
 
 start_production_router() {
   local backend_container="$1"
-  podman rm --force "$router_name" >/dev/null 2>&1 || true
+  local backend_origin="${2:-http://127.0.0.1:8080}"
+  local frontend_origin="${3:-http://frontend:3000}"
+  local expected_api_status="${4:-401}"
+  local probe_page="${5:-true}"
+  e2e_podman rm --force "$router_name" >/dev/null 2>&1 || true
   e2e_run_in_harness_directory \
     "$temporary_directory" "$temporary_directory_identity" \
     podman run --detach --name "$router_name" \
@@ -326,24 +335,52 @@ start_production_router() {
     --pids-limit=64 --memory=128m --cpus=0.5 \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
     --env ROUTER_HOST=127.0.0.1 --env ROUTER_PORT=3100 \
-    --env BACKEND_ORIGIN=http://127.0.0.1:8080 \
-    --env FRONTEND_ORIGIN=http://frontend:3000 \
+    --env "BACKEND_ORIGIN=$backend_origin" \
+    --env "FRONTEND_ORIGIN=$frontend_origin" \
     --env PUBLIC_HOSTS=localhost:3100 \
     --env ROUTER_REQUEST_MAX_BYTES=1100000 \
     "$frontend_image" node router.mjs >/dev/null
   for _ in $(seq 1 120); do
-    if podman exec "$backend_container" node -e \
-      'Promise.all([fetch("http://localhost:3100/login"), fetch("http://localhost:3100/api/v1/session")]).then(([page, api]) => process.exit(page.status === 200 && api.status === 401 ? 0 : 1))' \
+    if e2e_podman exec --env "EXPECTED_API_STATUS=$expected_api_status" \
+      --env "PROBE_PAGE=$probe_page" \
+      "$backend_container" node -e \
+      'const o={signal:AbortSignal.timeout(1000)}; const page=process.env.PROBE_PAGE === "true" ? fetch("http://localhost:3100/login",o) : Promise.resolve({status:200}); Promise.all([page,fetch("http://localhost:3100/api/v1/session",o)]).then(([p,a]) => process.exit(p.status === 200 && a.status === Number(process.env.EXPECTED_API_STATUS) ? 0 : 1)).catch(() => process.exit(1))' \
       >/dev/null 2>&1; then
       return 0
     fi
     if [[ "$(podman inspect "$router_name" --format '{{.State.Running}}' 2>/dev/null)" != true ]]; then
-      podman logs "$router_name" >&2 || true
+      e2e_podman logs "$router_name" >&2 || true
       return 1
     fi
     sleep 0.25
   done
   echo "Timed out waiting for the production router." >&2
+  e2e_podman logs "$router_name" >&2 || true
+  e2e_podman logs "$frontend_name" >&2 || true
+  return 1
+}
+
+start_frontend() {
+  e2e_podman rm --force "$frontend_name" >/dev/null 2>&1 || true
+  e2e_run_in_harness_directory \
+    "$temporary_directory" "$temporary_directory_identity" \
+    podman run --detach --name "$frontend_name" --network "$network_name" \
+    --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
+    --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m "$frontend_image" >/dev/null
+  for _ in $(seq 1 120); do
+    if e2e_podman exec "$frontend_name" node -e \
+      'const h=require("node:os").hostname(); fetch(`http://${h}:3001/_frontend/health/ready`,{signal:AbortSignal.timeout(1000)}).then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))' \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ "$(podman inspect "$frontend_name" --format '{{.State.Running}}' 2>/dev/null)" != true ]]; then
+      e2e_podman logs "$frontend_name" >&2 || true
+      return 1
+    fi
+    sleep 0.25
+  done
+  echo "Timed out waiting for the frontend readiness probe." >&2
   return 1
 }
 
@@ -352,9 +389,24 @@ restart_backend_and_router() {
   local backend_port
   # The router is a child of the backend network namespace. Remove it before
   # restarting that namespace owner, then recreate and probe it afterwards.
-  podman rm --force "$router_name" >/dev/null
-  podman restart --time 15 "$backend_container" >/dev/null
-  backend_port="$(podman port "$backend_container" 8080/tcp | sed 's/.*://')"
+  e2e_podman rm --force "$router_name" >/dev/null
+  e2e_podman restart --time 15 "$backend_container" >/dev/null
+  backend_port="$(e2e_podman port "$backend_container" 8080/tcp | sed 's/.*://')"
+  wait_for_url "http://127.0.0.1:$backend_port/health/ready" \
+    "$backend_container" '"status":"ready"'
+  start_production_router "$backend_container"
+}
+
+kill_backend_and_reconnect_router() {
+  local backend_container="$1"
+  local backend_port
+  # A forced backend restart must fence the router that shares its network
+  # namespace. Recreate the router only after the backend is ready again.
+  e2e_podman rm --force "$router_name" >/dev/null
+  e2e_podman kill --signal KILL "$backend_container" >/dev/null
+  test "$(e2e_podman inspect "$backend_container" --format '{{.State.ExitCode}}')" = 137
+  e2e_podman start "$backend_container" >/dev/null
+  backend_port="$(e2e_podman port "$backend_container" 8080/tcp | sed 's/.*://')"
   wait_for_url "http://127.0.0.1:$backend_port/health/ready" \
     "$backend_container" '"status":"ready"'
   start_production_router "$backend_container"
@@ -378,6 +430,7 @@ chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+bash scripts/e2e/rollback-rehearsal.sh "$profile"
 if [[ -n "$published_image" ]]; then
   podman pull --quiet "$image"
   test "$(podman image inspect "$image" --format '{{.Digest}}')" = "${image##*@}"
@@ -608,27 +661,11 @@ printf '%s\n%s,%s,user,true,true\n' \
 chmod 0444 "$provisioning_file"
 podman restart --time 15 "$application_name" >/dev/null
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
-podman exec \
-  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
-  --env MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
-  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
-  "$application_name" node --test /e2e/browser-provisioning-restart.test.mjs
-
 uv run python -m tests.e2e.service_workflow submit-recovery \
   --base-url "$base_url" --profile "$profile" --output both \
   --template "$evidence_directory/template.docx" \
   --state-file "$recovery_state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
-podman exec \
-  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
-  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
-  "$application_name" node --test /e2e/browser-recovery-checkpoint.test.mjs
 if [[ "$profile" == standalone ]]; then
   podman kill --signal KILL "$application_name" >/dev/null
   test "$(podman inspect "$application_name" --format '{{.State.ExitCode}}')" = 137
@@ -646,13 +683,6 @@ uv run python -m tests.e2e.service_workflow verify-recovery \
   --base-url "$base_url" --profile "$profile" \
   --state-file "$recovery_state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
-
-podman exec \
-  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  "$application_name" node --test /e2e/browser-recovery.test.mjs
 
 require_http_status "$base_url/health/live" 200
 if [[ "$profile" == standalone ]]; then
@@ -765,12 +795,7 @@ readonly checkpoint_user_idle_minutes checkpoint_admin_idle_minutes \
 # Exercise the final frontend and backend through the production same-origin router.
 podman rm --force "$application_name" >/dev/null
 created=("$router_name" "$frontend_name" "${created[@]}")
-e2e_run_in_harness_directory \
-  "$temporary_directory" "$temporary_directory_identity" \
-  podman run --detach --name "$frontend_name" --network "$network_name" \
-  --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
-  --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
-  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m "$frontend_image" >/dev/null
+start_frontend
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$application_name" --network "$network_name" \
@@ -781,6 +806,28 @@ e2e_run_in_harness_directory \
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
   "$application_name" '"status":"ready"'
 start_production_router "$application_name"
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
+  --env MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD="$provisioned_renewed_password" \
+  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_replacement_password" \
+  "$application_name" node --test /e2e/browser-provisioning-restart.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
+  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
+  "$application_name" node --test /e2e/browser-recovery-checkpoint.test.mjs
+kill_backend_and_reconnect_router "$application_name"
+podman exec \
+  --env MARKWEAVE_E2E_BASE_URL=http://localhost:3100 \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_RECOVERY_STATE=/browser-session/admin.json \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  "$application_name" node --test /e2e/browser-recovery.test.mjs
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
@@ -867,6 +914,50 @@ podman exec \
   --env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="$checkpoint_admin_idle_minutes" \
   --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision" \
   "$application_name" node --test /e2e/browser-next-admin.test.mjs
+
+# Prove asymmetric runtime failures and the custom-server admission boundary
+# through the production router against the exact final images.
+e2e_podman stop --time 15 "$frontend_name" >/dev/null
+e2e_podman exec \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage \
+  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs
+start_frontend
+start_production_router "$application_name" http://127.0.0.1:1 \
+  http://frontend:3000 502
+e2e_podman exec \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage \
+  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs
+
+e2e_podman rm --force "$router_name" >/dev/null
+e2e_podman rm --force "$frontend_name" >/dev/null
+rm -f -- "$evidence_directory"/frontend-*
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$frontend_name" --network "$network_name" \
+  --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+  --volume "$browser_runtime_directory:/e2e:ro,Z" \
+  --volume "$evidence_directory:/evidence:rw,Z" \
+  "$frontend_image" node /e2e/frontend-admission-fixture.mjs >/dev/null
+start_production_router "$application_name" http://127.0.0.1:8080 \
+  http://frontend:3000 401 false
+e2e_podman exec \
+  --env MARKWEAVE_E2E_RUNTIME_FAILURE=admission \
+  "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs &
+admission_test_pid=$!
+for _ in $(seq 1 200); do
+  [[ -f "$evidence_directory/frontend-request-drain" ]] && break
+  kill -0 "$admission_test_pid" 2>/dev/null || break
+  sleep 0.025
+done
+test -f "$evidence_directory/frontend-request-drain"
+e2e_podman kill --signal TERM "$frontend_name" >/dev/null
+wait "$admission_test_pid"
+test "$(e2e_podman wait "$frontend_name")" = 0
+e2e_podman rm "$frontend_name" >/dev/null
+start_frontend
+start_production_router "$application_name"
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime

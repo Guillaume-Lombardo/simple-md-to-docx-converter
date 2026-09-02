@@ -289,10 +289,6 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ matrix.domain == 'document-engines' }}",
             (
                 "heavy",
-                "Run authenticated conversion workflow in pinned Chrome",
-            ): "${{ matrix.domain == 'document-engines' }}",
-            (
-                "heavy",
                 "Prepare the RustFS test bucket",
             ): "${{ matrix.domain == 'storage-distributed' }}",
             (
@@ -308,7 +304,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="9aab81508685609cf735f5a94b2f48fe07ed77dbc520b064aa27fccc78a2442d",
+        canonical_digest="d85964d6b235ba4aeccbbb95907f8927e54995498ea39b22650d9a10cd82b8ca",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -677,6 +673,20 @@ def _job_steps(workflow: Mapping[str, Any], job_name: str) -> list[dict[str, Any
     return [step for value in steps if (step := _mapping(value)) is not None]
 
 
+def _validate_no_legacy_browser_command(workflow: Mapping[str, Any]) -> list[str]:
+    jobs = _mapping(workflow.get("jobs")) or {}
+    commands = (
+        str((_mapping(step) or {}).get("run", ""))
+        for job in jobs.values()
+        for step in (_mapping(job) or {}).get("steps", [])
+    )
+    return (
+        ["legacy browser workflow command must not remain in CI"]
+        if any("npm run test:web-browser" in command for command in commands)
+        else []
+    )
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -721,9 +731,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "npm run build\n"
             "npm run test:production\n"
         ),
-        ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
-            "npm run test:web-browser"
-        ),
         ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
@@ -742,6 +749,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ]
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
+
+    errors.extend(_validate_no_legacy_browser_command(workflow))
 
     required_conditions = {
         ("light", "Enforce changed application line coverage"): (

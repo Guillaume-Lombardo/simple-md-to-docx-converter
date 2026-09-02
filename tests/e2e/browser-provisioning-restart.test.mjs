@@ -28,17 +28,18 @@ test("startup CSV replaces an existing final-image account after restart", async
   const page = await context.newPage();
   try {
     await page.goto("/login", { waitUntil: "networkidle" });
-    await page.locator('input[name="username"]').fill(username);
-    await page.locator('input[name="password"]').fill(
+    await page.getByRole("textbox", { name: "Username" }).fill(username);
+    await page.getByLabel("Password").fill(
       process.env.MARKWEAVE_E2E_PROVISIONED_OLD_PASSWORD,
     );
     await page.getByRole("button", { name: "Sign in" }).click();
-    await page.locator(".alert").filter({
-      hasText: "The username or password is incorrect.",
-    }).waitFor();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "Username or password is incorrect." })
+      .waitFor();
 
-    await page.locator('input[name="username"]').fill(username);
-    await page.locator('input[name="password"]').fill(
+    await page.getByRole("textbox", { name: "Username" }).fill(username);
+    await page.getByLabel("Password").fill(
       process.env.MARKWEAVE_E2E_PROVISIONED_PASSWORD,
     );
     await Promise.all([

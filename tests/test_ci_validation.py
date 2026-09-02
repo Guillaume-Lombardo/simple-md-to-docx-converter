@@ -281,17 +281,22 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
     assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
     assert "mmdc --version" in workflow
     assert "google-chrome-stable --version" in workflow
-    assert "npm run test:web-browser" in workflow
+    assert "npm run test:web-browser" not in workflow
     assert "awk '{$1=$1; print}'" in workflow
 
 
 @pytest.mark.unit
-def test_validator_rejects_removed_real_browser_workflow() -> None:
-    """Pinned module tests cannot stand in for the real Chrome acceptance workflow."""
+def test_validator_rejects_stale_legacy_browser_workflow() -> None:
+    """The deleted legacy browser suite cannot remain wired into CI."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    weakened = workflow.replace("npm run test:web-browser", "npm run test:web")
+    stale = workflow.replace(
+        "      - name: Prepare the RustFS test bucket",
+        "      - name: Run removed legacy browser workflow\n"
+        "        run: npm run test:web-browser\n"
+        "      - name: Prepare the RustFS test bucket",
+    )
     assert any(
-        "test:web-browser" in error for error in validate_workflow_text(weakened)
+        "legacy browser workflow" in error for error in validate_workflow_text(stale)
     )
 
 

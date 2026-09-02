@@ -73,12 +73,13 @@ retain the API's generated names, `nosniff`, content digest, and authorization b
 
 ## Verification
 
-`npm run test:web` executes native JavaScript unit tests and independently blocks line, branch, and
-function coverage below 90% across both browser modules. Functional tests exercise the ASGI application through
-an HTTPS test origin over real SQLite and filesystem boundaries and separately verifies owner
+`npm --prefix web test` executes the isolated frontend unit and component suites and independently
+blocks line, branch, and function coverage below 90%. Functional tests exercise the ASGI
+application through an HTTPS test origin over real SQLite and filesystem boundaries and separately verify owner
 representation, search, authorization, and storage failures against live PostgreSQL and RustFS.
-A pinned-Chromium browser scenario runs two ordinary users and an administrator against a loopback
-HTTP server through template creation and invalid uploads, download, metadata changes including a
+A pinned-Chromium Next.js browser scenario runs two ordinary users and an administrator against the
+final rootless backend, frontend, and router images through template creation and invalid uploads,
+download, metadata changes including a
 stale `If-Match`, replacement, version history and restoration, preference changes, guarded
 archive/deletion, CSRF and revoked-session denial, account creation and search, status changes, and
 password reset. It also checks that duplicate form submission does not create duplicate mutations.
@@ -88,14 +89,12 @@ remain unavailable, renews the password, and verifies the required fresh login. 
 profiles it also mounts a startup CSV into the rootless API container, exercises its provisioned
 account, replaces the mounted password, restarts the image, and proves the old password was revoked.
 
-The browser suite requires the repository Python environment, the pinned Puppeteer dependency, and
-the pinned Chrome version installed by CI. Its committed CI-equivalent invocation is:
+The complete browser suite is part of the final-image E2E harness and runs in both storage profiles.
+Its committed CI-equivalent invocations are:
 
 ```bash
-npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
-MARKWEAVE_TEST_PUPPETEER="$PWD/spikes/toolchain/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js" \
-MARKWEAVE_TEST_CHROMIUM=/usr/bin/google-chrome-stable \
-npm run test:web-browser
+bash scripts/e2e/run.sh standalone
+bash scripts/e2e/run.sh distributed
 ```
 
 The final-image E2E suite exercises the primary administration workflows and relevant authorization,

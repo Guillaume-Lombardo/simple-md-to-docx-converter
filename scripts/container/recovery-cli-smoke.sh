@@ -51,10 +51,11 @@ readonly network="markweave-t37-${run_id}"
 readonly postgres="markweave-t37-postgres-${run_id}"
 readonly rustfs="markweave-t37-rustfs-${run_id}"
 readonly runtime_uid="${T38_RECOVERY_RUNTIME_UID:-54000}"
-readonly seccomp_profile="$PWD/spikes/toolchain/chrome-seccomp.json"
+readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
+readonly seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 workspace="$(mktemp -d -t markweave-t37-e2e.XXXXXXXX)"
 readonly workspace
-readonly setup_script="$PWD/tests/e2e/recovery_cli_setup.py"
+readonly setup_script="$repository/tests/e2e/recovery_cli_setup.py"
 
 cleanup() {
   podman rm --force "$postgres" "$rustfs" >/dev/null 2>&1 || true

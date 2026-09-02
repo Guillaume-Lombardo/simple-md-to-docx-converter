@@ -112,6 +112,20 @@ function empty(response, status, secure) {
   response.end();
 }
 
+function rejectMalformedRequest(socket, secure) {
+  if (!socket.writable || socket.destroyed) return;
+  const headers = [
+    "HTTP/1.1 431 Request Header Fields Too Large",
+    "Connection: close",
+    "Content-Length: 0",
+  ];
+  if (secure) {
+    headers.push(`Strict-Transport-Security: ${HSTS}`);
+    headers.push(`Permissions-Policy: ${PERMISSIONS_POLICY}`);
+  }
+  socket.end(`${headers.join("\r\n")}\r\n\r\n`);
+}
+
 /**
  * @param {{
  *   backend: string,
@@ -229,9 +243,13 @@ export function createProductionRouter({
     upstream.on("error", failUpstream);
   };
   const options = { maxHeaderSize: 16_384 };
-  return secure
+  const server = secure
     ? createHttpsServer({ ...options, ...tls }, handler)
     : createHttpServer(options, handler);
+  server.on("clientError", (_error, socket) =>
+    rejectMalformedRequest(socket, secure),
+  );
+  return server;
 }
 
 export function loadTls(certFile, keyFile) {

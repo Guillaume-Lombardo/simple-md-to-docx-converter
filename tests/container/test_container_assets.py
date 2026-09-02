@@ -110,11 +110,14 @@ def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
         "scripts/container/build.sh",
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
+        "scripts/container/assert-legacy-route-manifest.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
+        "scripts/container/wait-for-fake-clamav.sh",
+        "scripts/e2e/rollback-rehearsal.sh",
     ],
 )
 def test_container_shell_assets_are_syntactically_valid(script: str) -> None:
@@ -201,6 +204,69 @@ def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
     assert (
         '(Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)' in smoke
     )
+
+
+def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
+    readiness = Path("scripts/container/wait-for-fake-clamav.sh").read_text(
+        encoding="utf-8"
+    )
+    standalone = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+    distributed = Path("scripts/container/distributed-api-smoke.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'socket.create_connection(("127.0.0.1", 3310), timeout=1)' in readiness
+    assert 'scanner.sendall(b"zINSTREAM\\0\\0\\0\\0\\0")' in readiness
+    assert 'assert scanner.recv(64) == b"stream: OK\\0"' in readiness
+    assert "for _ in $(seq 1 60)" in readiness
+    assert "scanner did not become ready within 15 seconds" in readiness
+    assert 'podman logs --tail 50 "$container_name"' in readiness
+    assert standalone.index("wait-for-fake-clamav.sh") < standalone.index("settings=(")
+    assert distributed.index("wait-for-fake-clamav.sh") < distributed.index(
+        'podman run --detach --name "$postgres_name"'
+    )
+
+
+def test_container_ci_always_stages_bounded_status_evidence() -> None:
+    run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+
+    assert "printf 'Final-image validation started.\\n'" in run_ci
+    assert "trap record_ci_status EXIT" in run_ci
+    assert "Final-image validation failed with exit code %s." in run_ci
+    assert "MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY" in run_ci
+
+
+def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
+    route_manifest = Path(
+        "scripts/container/assert-legacy-route-manifest.sh"
+    ).read_text(encoding="utf-8")
+    evidence = json.loads(
+        Path("docs/evidence/t64-cutover-gates.json").read_text(encoding="utf-8")
+    )
+
+    assert 'bash scripts/e2e/rollback-rehearsal.sh "$profile"' in runner
+    assert "0.5.2@$released_digest" in rollback
+    assert (
+        "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+        in rollback
+    )
+    assert "MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST=true" in rollback
+    assert 'scripts/container/api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/distributed-api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/recovery-cli-smoke.sh" "$released_image"' in rollback
+    assert 'cd "$runtime_directory"' in rollback
+    assert 'MARKWEAVE_REPOSITORY_ROOT="$repository"' in rollback
+    for path in ("/login", "/convert", "/templates", "/static/conversion.js"):
+        assert path in route_manifest
+    assert evidence["schema"] == "t64-cutover-gates-v1"
+    assert evidence["pre_removal"] == {
+        "conclusion": "success",
+        "run_id": 33686251439,
+        "source_sha": "30c11b4f109bba147e8cc7685d0ba2a1b44ec579",
+    }
+    assert evidence["rollback"]["profiles"] == ["standalone", "distributed"]
 
 
 def test_final_image_version_comes_from_project_metadata() -> None:
@@ -421,6 +487,8 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
         "sbom.spdx.json",
         "vulnerabilities.json",
         "image-metadata.json",
+        "container-diagnostics/ci-status.txt",
+        "container-diagnostics/scanner-readiness.txt",
     ):
         assert artifact in upload["with"]["path"]
     assert workflow["permissions"] == {"contents": "read"}
