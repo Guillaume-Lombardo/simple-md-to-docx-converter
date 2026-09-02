@@ -61,7 +61,7 @@ test("JSON metadata preserves the server ETag", async () => {
   );
   await expect(
     new ApiTransport(fetcher).jsonWithMetadata("/api/v1/test", okSchema),
-  ).resolves.toEqual({ data: { ok: true }, etag: '"v2"' });
+  ).resolves.toEqual({ data: { ok: true }, etag: '"v2"', status: 200 });
 });
 
 test("multipart leaves content type to the browser", async () => {
@@ -80,6 +80,75 @@ test("multipart leaves content type to the browser", async () => {
     new Headers(fetcher.mock.calls[0]![1]?.headers).has("Content-Type"),
   ).toBe(false);
 });
+
+test("multipart metadata preserves accepted status, Location, and canonical Retry-After", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 202,
+      headers: {
+        "content-type": "application/json",
+        Location: "/api/v1/conversions/job-id",
+        "Retry-After": "7",
+      },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).multipartWithMetadata(
+      "/api/v1/conversions",
+      new FormData(),
+      okSchema,
+    ),
+  ).resolves.toEqual({
+    data: { ok: true },
+    location: "/api/v1/conversions/job-id",
+    retryAfterSeconds: 7,
+    status: 202,
+  });
+});
+
+test("multipart metadata permits an absent Retry-After", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    response('{"ok":true}', {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  await expect(
+    new ApiTransport(fetcher).multipartWithMetadata(
+      "/api/v1/conversions",
+      new FormData(),
+      okSchema,
+    ),
+  ).resolves.toEqual({ data: { ok: true }, status: 202 });
+});
+
+test.each(["0", "+1", "01", "1.5", "99999999999999999999"])(
+  "invalid Retry-After metadata fails closed: %s",
+  async (retryAfter) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      response('{"ok":true}', {
+        status: 202,
+        headers: {
+          "content-type": "application/json",
+          "Retry-After": retryAfter,
+        },
+      }),
+    );
+    await expect(
+      new ApiTransport(fetcher).multipartWithMetadata(
+        "/api/v1/conversions",
+        new FormData(),
+        okSchema,
+      ),
+    ).rejects.toEqual(
+      new ApiError(
+        202,
+        "UNEXPECTED_RESPONSE",
+        "The service returned an unexpected response.",
+      ),
+    );
+  },
+);
 
 test("download preserves response metadata and accepts abort signals", async () => {
   const result = response("file", {

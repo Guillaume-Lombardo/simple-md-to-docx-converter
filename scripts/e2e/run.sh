@@ -210,6 +210,52 @@ wait_for_url() {
   return 1
 }
 
+wait_for_embedded_worker_idle() {
+  local container="$1"
+  podman exec "$container" /opt/md-converter/venv/bin/python -c '
+from pathlib import Path
+from time import monotonic, sleep
+
+expected_name = "md-converter-embedded-worker"
+deadline = monotonic() + 15
+stable_task = None
+stable_samples = 0
+while monotonic() < deadline:
+    sleeping_task = None
+    for task in Path("/proc").glob("[0-9]*/task/[0-9]*"):
+        try:
+            name = (task / "comm").read_text(encoding="utf-8").strip()
+            status = (task / "status").read_text(encoding="utf-8")
+            wait_channel = (task / "wchan").read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        state = next(
+            (line.removeprefix("State:").strip() for line in status.splitlines()
+             if line.startswith("State:")),
+            "",
+        )
+        if (
+            name.startswith("md-converter-")
+            and expected_name.startswith(name)
+            and state.startswith("S")
+            and "futex" in wait_channel
+        ):
+            sleeping_task = str(task)
+            break
+    if sleeping_task == stable_task and sleeping_task is not None:
+        stable_samples += 1
+    else:
+        stable_task = sleeping_task
+        stable_samples = 1 if sleeping_task is not None else 0
+    if stable_samples >= 5:
+        raise SystemExit(0)
+    sleep(0.1)
+raise SystemExit(
+    "embedded worker did not enter an observable stable idle wait within 15 seconds"
+)
+'
+}
+
 require_http_status() {
   local url="$1"
   local expected="$2"
@@ -653,6 +699,93 @@ podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   "$application_name" node --test /e2e/browser-next-auth.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
+  "$application_name" node --test /e2e/browser-next-conversion.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
+
+# Hold job execution while exercising exact admission boundaries through the
+# real final-image API and Next.js UI. Distributed workers can be stopped
+# independently. Standalone is recreated with a long idle poll only for this
+# isolated phase; the named worker thread must observably remain asleep in its
+# interruptible futex wait after the initial empty claim before submissions begin.
+podman rm --force "$application_name" >/dev/null
+if [[ "$profile" == distributed ]]; then
+  podman stop --time 15 "$worker_one_name" "$worker_two_name" >/dev/null
+fi
+created=("$application_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$application_name" --network "$network_name" \
+  --network-alias application --publish 127.0.0.1::8080 \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+  --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
+  --env MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2 \
+  --env MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY=3 \
+  --env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600 \
+  "$image" "$application_mode" >/dev/null
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+if [[ "$profile" == standalone ]]; then
+  wait_for_embedded_worker_idle "$application_name"
+fi
+podman exec --detach "$application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$application_name" node -e \
+    'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$application_name" node --test /e2e/browser-next-conversion-admission.test.mjs
+
+# Restore the ordinary profile runtime before restart and expiry recovery.
+podman rm --force "$application_name" >/dev/null
+created=("$application_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$application_name" --network "$network_name" \
+  --network-alias application --publish 127.0.0.1::8080 \
+  "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
+  --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
+  "$image" "$application_mode" >/dev/null
+if [[ "$profile" == distributed ]]; then
+  podman start "$worker_one_name" "$worker_two_name" >/dev/null
+fi
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+podman exec --detach "$application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$application_name" node -e \
+    'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman restart --time 15 "$application_name" >/dev/null
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+podman exec --detach "$application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
+    'import urllib.request; urllib.request.urlopen("http://localhost:3100/login", timeout=2).read()' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
+  "$application_name" node --test /e2e/browser-next-conversion-restart.test.mjs
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime
@@ -686,6 +819,9 @@ podman exec "$expiry_application_name" node -e \
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$expiry_application_name" node --test /e2e/browser-next-auth-expiry.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$expiry_application_name" node --test /e2e/browser-next-conversion-expiry.test.mjs
 
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.
