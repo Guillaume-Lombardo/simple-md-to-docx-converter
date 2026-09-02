@@ -274,7 +274,7 @@ test("template search maps backend loss safely and delegates authoritative expir
   expect(expire).toHaveBeenCalledOnce();
 });
 
-test("ambiguous submission reuses one key while confirmed rejection and input change reset it", async () => {
+test("ambiguous and server-failed submissions reuse one key while client rejection resets it", async () => {
   const multipart = vi
     .fn()
     .mockRejectedValueOnce(new TypeError("offline"))
@@ -312,7 +312,9 @@ test("ambiguous submission reuses one key while confirmed rejection and input ch
   await controller.submit();
   expect(controller.snapshot().error).toMatch(/same request key/);
   await controller.submit();
-  expect(controller.snapshot().error).toBe("Try later.");
+  expect(controller.snapshot().error).toBe(
+    "Try later. Retrying will reuse the same request key.",
+  );
   await controller.submit();
   await controller.submit();
   controller.setOutput("pdf");
@@ -321,10 +323,10 @@ test("ambiguous submission reuses one key while confirmed rejection and input ch
   expect(multipart.mock.calls.map((call) => call[3].idempotencyKey)).toEqual([
     "key-1",
     "key-1",
-    "key-2",
+    "key-1",
+    "key-1",
     "key-2",
     "key-3",
-    "key-4",
   ]);
   expect(multipart.mock.calls[5]![1].get("output")).toBe("pdf");
 });
@@ -557,7 +559,9 @@ test("polling backs off, recovers transient failures, cancels through terminal s
   expect(scheduled.at(-1)?.delay).toBe(1_600);
   scheduled.pop()!.callback();
   await vi.waitFor(() =>
-    expect(controller.snapshot().error).toBe("Storage unavailable."),
+    expect(controller.snapshot().error).toBe(
+      "Storage unavailable. Polling will continue.",
+    ),
   );
   expect(scheduled.at(-1)?.delay).toBe(2_560);
   scheduled.pop()!.callback();
@@ -621,10 +625,9 @@ test("cancellation failures resume polling and successful downloads require safe
   });
   const succeeded = await loadedController(succeededTransport);
   await succeeded.openJob(job().id);
-  expect(await succeeded.download()).toEqual({
-    response,
-    filename: "source.docx",
-  });
+  const result = await succeeded.download();
+  expect(result?.filename).toBe("source.docx");
+  expect(await result?.blob.text()).toBe("bytes");
 
   (
     succeededTransport.download as ReturnType<typeof vi.fn>
@@ -710,10 +713,58 @@ test("polling stops on missing jobs and delegates cancellation expiry", async ()
     schedule,
   ]);
   await controller.openJob(job().id);
-  expect(controller.snapshot().error).toBe("Not found.");
+  expect(controller.snapshot().error).toBe(
+    "Not found. Polling has stopped. Reopen the conversion to try again.",
+  );
   expect(schedule).not.toHaveBeenCalled();
   await controller.cancel();
   expect(expire).toHaveBeenCalledOnce();
+});
+
+test("activating another job clears cancellation while fencing the stale result", async () => {
+  const first = job({ state: "running" });
+  const second = job({
+    id: "00000000-0000-4000-8000-000000000302",
+    state: "running",
+  });
+  let resolveCancellation!: (value: ConversionResponse) => void;
+  const cancellation = vi.fn(
+    () =>
+      new Promise<ConversionResponse>((resolve) => {
+        resolveCancellation = resolve;
+      }),
+  );
+  const transport = api({
+    cancel: cancellation,
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(options())
+      .mockResolvedValueOnce({
+        items: [first, second],
+        limit: 10,
+        offset: 0,
+        total: 2,
+      })
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second),
+  });
+  const controller = await loadedController(transport, [
+    transport,
+    vi.fn(),
+    () => "key",
+    vi.fn(() => 1 as unknown as ReturnType<typeof setTimeout>),
+  ]);
+  await controller.openJob(first.id);
+  const staleCancellation = controller.cancel();
+  expect(controller.snapshot().cancelling).toBe(true);
+
+  await controller.openJob(second.id);
+  expect(controller.snapshot().active?.id).toBe(second.id);
+  expect(controller.snapshot().cancelling).toBe(false);
+  resolveCancellation(job({ state: "cancelled" }));
+  await staleCancellation;
+  expect(controller.snapshot().active?.id).toBe(second.id);
+  expect(controller.snapshot().cancelling).toBe(false);
 });
 
 test("authoritative 401 during an authenticated operation expires once without replay", async () => {

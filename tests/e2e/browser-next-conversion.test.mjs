@@ -150,6 +150,9 @@ test(
         return input.files?.length ?? -1;
       });
       assert.equal(dropped, 0);
+      await alicePage
+        .getByText("Selected browser-source.md (30 bytes).")
+        .waitFor();
 
       let failFirstAccepted = true;
       let failedAcceptedResponses = 0;
@@ -173,7 +176,14 @@ test(
         .waitFor();
       assert.equal(failedAcceptedResponses, 1);
       await alicePage.unroute("**/api/v1/conversions", interceptAccepted);
+      const submissionAccepted = alicePage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/conversions") &&
+          response.request().method() === "POST" &&
+          response.status() === 202,
+      );
       await alicePage.getByRole("button", { name: "Start conversion" }).click();
+      const submittedJob = await (await submissionAccepted).json();
       await alicePage
         .getByText("Your conversion is ready to download.")
         .waitFor({
@@ -186,7 +196,10 @@ test(
       );
       assert.equal(listing.status, 200);
       assert.equal(listing.body.items.length >= 1, true);
-      const completed = listing.body.items[0];
+      const completed = listing.body.items.find(
+        (item) => item.id === submittedJob.id,
+      );
+      assert.ok(completed);
       assert.equal(completed.state, "succeeded");
       assert.equal(completed.template_mode, "pandoc-default");
       assert.equal(typeof completed.expires_at, "string");

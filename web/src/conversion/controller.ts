@@ -296,14 +296,14 @@ export class ConversionController {
     } catch (error) {
       if (generation !== this.submissionGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
-      const definitiveRejection =
-        error instanceof ApiError && error.status >= 400;
-      if (definitiveRejection) this.idempotencyKey = undefined;
+      const clientRejection =
+        error instanceof ApiError && error.status >= 400 && error.status < 500;
+      if (clientRejection) this.idempotencyKey = undefined;
       this.publish({
         ...this.state,
         submitting: false,
         notice: undefined,
-        error: definitiveRejection
+        error: clientRejection
           ? errorMessage(error)
           : `${errorMessage(error, "The conversion could not be submitted.")} Retrying will reuse the same request key.`,
       });
@@ -349,9 +349,7 @@ export class ConversionController {
     }
   }
 
-  async download(): Promise<
-    { response: Response; filename: string } | undefined
-  > {
+  async download(): Promise<{ blob: Blob; filename: string } | undefined> {
     const active = this.state.active;
     if (!active || active.state !== "succeeded") return undefined;
     try {
@@ -359,7 +357,8 @@ export class ConversionController {
         `/api/v1/conversions/${active.id}/result`,
       );
       const filename = validatedDownloadFilename(response);
-      return { response, filename };
+      const blob = await response.blob();
+      return { blob, filename };
     } catch (error) {
       if (this.authoritativeExpiry(error)) return undefined;
       this.publish({
@@ -404,14 +403,16 @@ export class ConversionController {
     } catch (error) {
       if (generation !== this.jobGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
+      const willRetry =
+        !(error instanceof ApiError) || ![401, 404].includes(error.status);
+      const detail = errorMessage(error, "Status is temporarily unavailable.");
       this.publish({
         ...this.state,
-        error: errorMessage(
-          error,
-          "Status is temporarily unavailable. Polling will continue.",
-        ),
+        error: willRetry
+          ? `${detail} Polling will continue.`
+          : `${detail} Polling has stopped. Reopen the conversion to try again.`,
       });
-      if (!(error instanceof ApiError) || ![401, 404].includes(error.status)) {
+      if (willRetry) {
         this.pollDelay = nextPollDelay(this.pollDelay);
         this.schedulePoll(jobId, generation);
       }
@@ -425,7 +426,11 @@ export class ConversionController {
     this.clearPoll();
     this.pollDelay = initialPollDelay;
     const known = this.state.recent.find((job) => job.id === jobId);
-    if (known) this.publish({ ...this.state, active: known, error: undefined });
+    this.publish({
+      ...this.state,
+      ...(known ? { active: known, error: undefined } : {}),
+      cancelling: false,
+    });
   }
 
   private schedulePoll(jobId: string, generation: number): void {

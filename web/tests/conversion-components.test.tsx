@@ -1,9 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach } from "vitest";
 import { AuthProvider } from "../src/auth/context";
 import { AuthController } from "../src/auth/controller";
 import type { ApiTransport } from "../src/api/transport";
 import { ConversionController } from "../src/conversion/controller";
-import { ConversionWorkspace } from "../src/conversion/workspace";
+import { ConversionWorkspace, saveDownload } from "../src/conversion/workspace";
+
+afterEach(() => vi.restoreAllMocks());
 
 const user = {
   active: true,
@@ -236,6 +239,16 @@ test("validated downloads use the server filename and dropped files reach submis
     .spyOn(HTMLAnchorElement.prototype, "click")
     .mockImplementation(() => undefined);
   const multipart = vi.fn().mockResolvedValue(accepted);
+  const download = vi.fn().mockResolvedValue(
+    new Response("document", {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": 'attachment; filename="dropped.docx"',
+        "Content-Type": "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }),
+  );
   renderWorkspace({
     json: vi
       .fn()
@@ -248,16 +261,7 @@ test("validated downloads use the server filename and dropped files reach submis
       .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
       .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 }),
     multipartWithMetadata: multipart,
-    download: vi.fn().mockResolvedValue(
-      new Response("document", {
-        headers: {
-          "Cache-Control": "private, no-store",
-          "Content-Disposition": 'attachment; filename="dropped.docx"',
-          "Content-Type": "application/octet-stream",
-          "X-Content-Type-Options": "nosniff",
-        },
-      }),
-    ),
+    download,
   });
   const source = new File(["# dropped"], "dropped.md");
   const hint = await screen.findByText(/Choose or drop exactly one/);
@@ -269,6 +273,7 @@ test("validated downloads use the server filename and dropped files reach submis
   fireEvent.dragEnter(dropZone);
   fireEvent.dragOver(dropZone);
   fireEvent.drop(dropZone, { dataTransfer: { files: [source] } });
+  expect(screen.getByText("Selected dropped.md (9 bytes).")).toBeVisible();
   expect(
     (screen.getByLabelText(/Source file/) as HTMLInputElement).files,
   ).toHaveLength(0);
@@ -278,7 +283,50 @@ test("validated downloads use the server filename and dropped files reach submis
   fireEvent.click(screen.getByRole("button", { name: "Download result" }));
   await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
   expect(createObjectURL).toHaveBeenCalledOnce();
-  expect(revokeObjectURL).toHaveBeenCalledWith("blob:validated-result");
+  await vi.waitFor(() =>
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:validated-result"),
+  );
+
+  const unreadable = new Response("unreadable", {
+    headers: {
+      "Cache-Control": "private, no-store",
+      "Content-Disposition": 'attachment; filename="dropped.docx"',
+      "Content-Type": "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+  vi.spyOn(unreadable, "blob").mockRejectedValue(new TypeError("body failed"));
+  download.mockResolvedValueOnce(unreadable);
+  fireEvent.click(screen.getByRole("button", { name: "Download result" }));
+  expect(
+    await screen.findByText("The result could not be downloaded."),
+  ).toBeVisible();
+  expect(anchorClick).toHaveBeenCalledOnce();
+});
+
+test("download saving defers object URL revocation", () => {
+  const createObjectURL = vi
+    .spyOn(URL, "createObjectURL")
+    .mockReturnValue("blob:deferred-result");
+  const revokeObjectURL = vi
+    .spyOn(URL, "revokeObjectURL")
+    .mockImplementation(() => undefined);
+  const anchorClick = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
+  const deferred: Array<() => void> = [];
+
+  saveDownload(
+    { blob: new Blob(["document"]), filename: "result.docx" },
+    (callback) => deferred.push(callback),
+  );
+
+  expect(createObjectURL).toHaveBeenCalledOnce();
+  expect(anchorClick).toHaveBeenCalledOnce();
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  expect(deferred).toHaveLength(1);
+  deferred[0]!();
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:deferred-result");
 });
 
 test("unavailable options expose a bounded retry without private failure details", async () => {

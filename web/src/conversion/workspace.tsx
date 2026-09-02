@@ -17,6 +17,18 @@ import {
   statusPresentation,
 } from "./controller";
 
+export function saveDownload(
+  download: { blob: Blob; filename: string },
+  defer: (callback: () => void) => void = (callback) => setTimeout(callback, 0),
+): void {
+  const url = URL.createObjectURL(download.blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = download.filename;
+  link.click();
+  defer(() => URL.revokeObjectURL(url));
+}
+
 export function ConversionWorkspace({
   controller: supplied,
 }: {
@@ -122,7 +134,9 @@ export function ConversionWorkspace({
                 <span className="text-sm text-muted">
                   {dragging
                     ? "Drop the file now."
-                    : `Choose or drop exactly one .md or .zip file (maximum ${state.maximumBytes} bytes).`}
+                    : state.source
+                      ? `Selected ${state.source.name} (${state.source.size} bytes).`
+                      : `Choose or drop exactly one .md or .zip file (maximum ${state.maximumBytes} bytes).`}
                 </span>
               </label>
               <fieldset className="space-y-2">
@@ -244,15 +258,9 @@ export function ConversionWorkspace({
                 <button
                   type="button"
                   onClick={() =>
-                    void controller.download().then(async (download) => {
+                    void controller.download().then((download) => {
                       if (!download) return;
-                      const blob = await download.response.blob();
-                      const url = URL.createObjectURL(blob);
-                      const link = document.createElement("a");
-                      link.href = url;
-                      link.download = download.filename;
-                      link.click();
-                      URL.revokeObjectURL(url);
+                      saveDownload(download);
                     })
                   }
                 >
