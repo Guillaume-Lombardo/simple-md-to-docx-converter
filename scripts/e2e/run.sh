@@ -307,6 +307,7 @@ start_production_router() {
     --env BACKEND_ORIGIN=http://127.0.0.1:8080 \
     --env FRONTEND_ORIGIN=http://frontend:3000 \
     --env PUBLIC_HOSTS=localhost:3100 \
+    --env ROUTER_REQUEST_MAX_BYTES=1100000 \
     "$frontend_image" node router.mjs >/dev/null
   for _ in $(seq 1 120); do
     if podman exec "$backend_container" node -e \

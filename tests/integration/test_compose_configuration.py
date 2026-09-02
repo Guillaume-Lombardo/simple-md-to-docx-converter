@@ -189,6 +189,7 @@ def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> Non
         "PUBLIC_HOSTS": "localhost:11279",
         "ROUTER_HOST": "0.0.0.0",  # noqa: S104 - rendered deployment binding
         "ROUTER_PORT": "8080",
+        "ROUTER_REQUEST_MAX_BYTES": "1100000",
     }
     assert router["ports"] == [
         {

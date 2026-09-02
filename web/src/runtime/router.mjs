@@ -116,6 +116,7 @@ function empty(response, status, secure) {
  * @param {{
  *   backend: string,
  *   frontend: string,
+ *   maxRequestBytes?: number,
  *   publicHosts: string[],
  *   tls?: import("node:https").ServerOptions,
  * }} options
@@ -123,6 +124,7 @@ function empty(response, status, secure) {
 export function createProductionRouter({
   backend,
   frontend,
+  maxRequestBytes = Number.MAX_SAFE_INTEGER,
   publicHosts,
   tls = undefined,
 }) {
@@ -130,6 +132,8 @@ export function createProductionRouter({
     backend: validatedOrigin(backend, "backend"),
     frontend: validatedOrigin(frontend, "frontend"),
   };
+  if (!Number.isSafeInteger(maxRequestBytes) || maxRequestBytes < 1)
+    throw new Error("maxRequestBytes must be a positive safe integer");
   if (!Array.isArray(publicHosts) || publicHosts.length === 0)
     throw new Error("at least one public host is required");
   const allowedHosts = new Set(
@@ -201,7 +205,23 @@ export function createProductionRouter({
         },
       );
       clientRequest.on("aborted", () => upstream.destroy());
-      clientRequest.pipe(upstream);
+      let receivedBytes = 0;
+      let rejected = false;
+      clientRequest.on("data", (chunk) => {
+        if (rejected) return;
+        receivedBytes += chunk.length;
+        if (receivedBytes > maxRequestBytes) {
+          rejected = true;
+          upstream.destroy();
+          empty(clientResponse, 413, secure);
+          return;
+        }
+        if (!upstream.write(chunk)) clientRequest.pause();
+      });
+      upstream.on("drain", () => clientRequest.resume());
+      clientRequest.on("end", () => {
+        if (!rejected) upstream.end();
+      });
     } catch {
       failUpstream();
       return;

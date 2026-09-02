@@ -413,6 +413,73 @@ test("invalid production origins fail before the router listens", () => {
       publicHosts: ["bad host"],
     }),
   ).toThrow("invalid public host");
+  for (const maxRequestBytes of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createRoutingFixture({
+        backend: "http://backend.example",
+        frontend: "http://frontend.example",
+        maxRequestBytes,
+        publicHosts: ["converter.example"],
+      }),
+    ).toThrow("positive safe integer");
+});
+
+test("request transport ceiling rejects streamed bodies without an error body", async () => {
+  let completedBodies = 0;
+  const upstream = createServer((incoming, response) => {
+    incoming.on("data", () => undefined);
+    incoming.on("end", () => {
+      completedBodies += 1;
+      response.end("accepted");
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    maxRequestBytes: 8,
+    publicHosts: ["converter.example"],
+  });
+  const routerOrigin = await listen(router);
+  const sendBody = (chunks: string[]) =>
+    new Promise<{ body: string; status: number }>((resolve, reject) => {
+      const destination = new URL(routerOrigin);
+      const outbound = request(
+        {
+          headers: { host: "converter.example", "transfer-encoding": "chunked" },
+          host: destination.hostname,
+          method: "POST",
+          path: "/api/v1/conversions",
+          port: destination.port,
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () =>
+            resolve({ body, status: response.statusCode! }),
+          );
+        },
+      );
+      outbound.on("error", reject);
+      for (const chunk of chunks) outbound.write(chunk);
+      outbound.end();
+    });
+
+  await expect(sendBody(["1234", "5678"])).resolves.toEqual({
+    body: "accepted",
+    status: 200,
+  });
+  await expect(sendBody(["1234", "5678", "9"])).resolves.toEqual({
+    body: "",
+    status: 413,
+  });
+  expect(completedBodies).toBe(1);
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
 });
 
 test("routing selection and normalization cover every ordered class", () => {

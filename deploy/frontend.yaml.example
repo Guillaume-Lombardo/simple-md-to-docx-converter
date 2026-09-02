@@ -110,6 +110,7 @@ spec:
             - {name: PUBLIC_HOSTS, value: "${MARKWEAVE_PUBLIC_HOSTS}"}
             - {name: ROUTER_HOST, value: "0.0.0.0"}
             - {name: ROUTER_PORT, value: "8443"}
+            - {name: ROUTER_REQUEST_MAX_BYTES, value: "${MARKWEAVE_REQUEST_MAX_BYTES}"}
             - {name: ROUTER_TLS_CERT_FILE, value: /run/tls/tls.crt}
             - {name: ROUTER_TLS_KEY_FILE, value: /run/tls/tls.key}
           ports:

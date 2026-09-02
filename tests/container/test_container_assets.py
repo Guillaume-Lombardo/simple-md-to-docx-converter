@@ -373,6 +373,7 @@ def test_frontend_deployment_separates_pages_probes_router_and_credentials() -> 
     assert environment["FRONTEND_ORIGIN"] == "http://md-converter-frontend:3000"
     assert environment["ROUTER_TLS_CERT_FILE"] == "/run/tls/tls.crt"
     assert environment["ROUTER_TLS_KEY_FILE"] == "/run/tls/tls.key"
+    assert environment["ROUTER_REQUEST_MAX_BYTES"] == "${MARKWEAVE_REQUEST_MAX_BYTES}"
     assert "includeSubDomains" not in Path("deploy/frontend.yaml.example").read_text(
         encoding="utf-8"
     )

@@ -29,6 +29,7 @@ podman run --detach --name "$router_name" --network "$network_name" \
   --env BACKEND_ORIGIN=http://frontend:3000 \
   --env FRONTEND_ORIGIN=http://frontend:3000 \
   --env PUBLIC_HOSTS="127.0.0.1:${router_port}" \
+  --env ROUTER_REQUEST_MAX_BYTES=1100000 \
   "$image" node router.mjs >/dev/null
 for _ in $(seq 1 50); do
   if curl --fail --silent --output /dev/null \
