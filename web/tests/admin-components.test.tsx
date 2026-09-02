@@ -673,6 +673,47 @@ test("template mutation failures keep server details bounded", async () => {
   expect(screen.queryByText("unsafe")).toBeNull();
 });
 
+test("guarded template deletion refreshes after 412 and requires an explicit retry", async () => {
+  const deleteTemplate = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new ApiError(412, "TEMPLATE_PRECONDITION_FAILED", "unsafe"),
+    )
+    .mockResolvedValueOnce(undefined);
+  const api = templateApi({ delete: deleteTemplate });
+  render(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={vi.fn()}
+      user={admin}
+    />,
+  );
+  await screen.findByText("Archived style");
+  fireEvent.click(
+    within(screen.getByText("Archived style").closest("li")!).getByRole(
+      "button",
+      { name: "Manage" },
+    ),
+  );
+  await screen.findByRole("heading", { name: "Manage Archived style" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Delete template permanently" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+  expect(await screen.findByText(/changed on the server/)).toBeVisible();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(deleteTemplate).toHaveBeenCalledOnce();
+  expect(api.template).toHaveBeenCalledTimes(2);
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Delete template permanently" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(await screen.findByText("Template deleted.")).toBeVisible();
+  expect(deleteTemplate).toHaveBeenCalledTimes(2);
+});
+
 test("template requests publish no late state after navigation", async () => {
   let resolveLibrary!: (value: unknown) => void;
   let resolveContext!: (value: unknown) => void;

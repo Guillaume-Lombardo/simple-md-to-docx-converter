@@ -742,6 +742,15 @@ test(
         name: "Delete template permanently?",
         exact: true,
       });
+      let deleteRequests = 0;
+      const countDeleteRequests = (request) => {
+        if (
+          request.url().endsWith(`/api/v1/templates/${template.id}`) &&
+          request.method() === "DELETE"
+        )
+          deleteRequests += 1;
+      };
+      adminPage.on("request", countDeleteRequests);
       const guardedDelete = adminPage.waitForResponse(
         (response) =>
           response.url().endsWith(`/api/v1/templates/${template.id}`) &&
@@ -750,10 +759,17 @@ test(
       await confirmation
         .getByRole("button", { name: "Confirm", exact: true })
         .click();
-      assert.equal((await guardedDelete).status(), 409);
+      assert.equal((await guardedDelete).status(), 412);
       await adminPage
-        .getByText("The requested value already exists.")
+        .getByText(
+          "This item changed on the server. Review the latest version and try again.",
+        )
         .waitFor();
+      assert.equal(
+        deleteRequests,
+        1,
+        "guarded deletion was automatically replayed",
+      );
       assert.equal(
         (
           await api(
@@ -764,6 +780,16 @@ test(
         ).status,
         204,
       );
+      await adminPage
+        .getByRole("button", {
+          name: "Delete template permanently",
+          exact: true,
+        })
+        .click();
+      confirmation = adminPage.getByRole("dialog", {
+        name: "Delete template permanently?",
+        exact: true,
+      });
       const deleteResponse = adminPage.waitForResponse(
         (response) =>
           response.url().endsWith(`/api/v1/templates/${template.id}`) &&
@@ -773,6 +799,8 @@ test(
         .getByRole("button", { name: "Confirm", exact: true })
         .click();
       assert.equal((await deleteResponse).status(), 204);
+      assert.equal(deleteRequests, 2);
+      adminPage.off("request", countDeleteRequests);
       await adminPage.getByText("Template deleted.").waitFor();
 
       await adminPage.goto(`${baseURL}/users`, { waitUntil: "networkidle" });
