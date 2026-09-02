@@ -6,6 +6,16 @@ import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
 const templateFixture = "/evidence/browser-template.docx";
+const expectedFonts = [
+  "Aptos",
+  "Aptos Display",
+  "Calibri",
+  "Cambria",
+  "Cambria Math",
+  "Consolas",
+  "Courier New",
+  "Times New Roman",
+];
 
 async function login(context, page, username, password) {
   await context.clearCookies();
@@ -214,9 +224,7 @@ test(
       };
       alicePage.on("request", countForbiddenUserLists);
       await alicePage.goto(`${baseURL}/users`, { waitUntil: "networkidle" });
-      await alicePage
-        .getByText("Administrator access is required.")
-        .waitFor();
+      await alicePage.getByText("Administrator access is required.").waitFor();
       assert.equal(forbiddenUserLists, 0);
       alicePage.off("request", countForbiddenUserLists);
       await alicePage.getByRole("link", { name: "Templates" }).click();
@@ -227,7 +235,7 @@ test(
         .fill("Owner body");
       await alicePage
         .getByRole("textbox", { name: /Expected fonts/ })
-        .fill(" Carlito, Caladea ");
+        .fill(` ${expectedFonts.join(", ")} `);
       await alicePage.getByLabel("DOCX file").setInputFiles(templateFixture);
       const createdResponse = alicePage.waitForResponse(
         (response) =>
@@ -246,10 +254,7 @@ test(
         `/api/v1/templates/${template.id}/versions`,
       );
       assert.equal(createdVersions.status, 200);
-      assert.deepEqual(createdVersions.body[0].declared_fonts, [
-        "Carlito",
-        "Caladea",
-      ]);
+      assert.deepEqual(createdVersions.body[0].declared_fonts, expectedFonts);
       const download = await alicePage.evaluate(async (templateId) => {
         const response = await fetch(`/api/v1/templates/${templateId}/content`);
         return {
@@ -324,13 +329,13 @@ test(
       await alicePage.getByRole("button", { name: "Save details" }).click();
       await alicePage.getByText("Template details updated.").waitFor();
 
-      await replace(alicePage, renamedTemplate, "Carlito, Caladea");
+      await replace(alicePage, renamedTemplate, expectedFonts.join(", "));
       let versions = await api(
         alicePage,
         "GET",
         `/api/v1/templates/${template.id}/versions`,
       );
-      assert.deepEqual(versions.body[0].declared_fonts, ["Carlito", "Caladea"]);
+      assert.deepEqual(versions.body[0].declared_fonts, expectedFonts);
       await replace(alicePage, renamedTemplate, "   ");
       versions = await api(
         alicePage,
