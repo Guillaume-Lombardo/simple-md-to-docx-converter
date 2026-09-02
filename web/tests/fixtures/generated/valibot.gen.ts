@@ -71,6 +71,17 @@ export const vErrorResponse = v.object({
 });
 
 /**
+ * IdleSessionPolicyDurationBoundsResponse
+ *
+ * Authoritative whole-minute bounds and default for one session role.
+ */
+export const vIdleSessionPolicyDurationBoundsResponse = v.object({
+    default_minutes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    maximum_minutes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    minimum_minutes: v.pipe(v.number(), v.integer(), v.minValue(1))
+});
+
+/**
  * IdleSessionPolicyResponse
  *
  * Effective singleton policy and optimistic-concurrency revision.
@@ -78,8 +89,11 @@ export const vErrorResponse = v.object({
 export const vIdleSessionPolicyResponse = v.object({
     absolute_lifetime_seconds: v.pipe(v.number(), v.integer(), v.gtValue(0)),
     admin_idle_minutes: v.pipe(v.number(), v.integer()),
+    admin_idle_minutes_bounds: vIdleSessionPolicyDurationBoundsResponse,
+    idle_minutes_granularity: v.pipe(v.number(), v.integer(), v.minValue(1)),
     revision: v.pipe(v.number(), v.integer()),
-    user_idle_minutes: v.pipe(v.number(), v.integer())
+    user_idle_minutes: v.pipe(v.number(), v.integer()),
+    user_idle_minutes_bounds: vIdleSessionPolicyDurationBoundsResponse
 });
 
 /**
