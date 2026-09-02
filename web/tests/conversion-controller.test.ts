@@ -359,6 +359,44 @@ test("accepted Retry-After schedules the initial status poll", async () => {
   expect(transport.json).toHaveBeenCalledTimes(2);
 });
 
+test("the scheduled initial poll publishes a terminal conversion failure", async () => {
+  vi.useFakeTimers();
+  try {
+    const failed = job({
+      error_code: "PDF_LIMIT_EXCEEDED",
+      error_message: "The PDF exceeds configured limits.",
+      state: "failed",
+      step: "validating",
+    });
+    const json = vi
+      .fn()
+      .mockResolvedValueOnce(options())
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+      .mockResolvedValueOnce(failed);
+    const transport = api({
+      json,
+      multipartWithMetadata: vi
+        .fn()
+        .mockResolvedValue(accepted(job({ state: "queued" }))),
+    });
+    const controller = await loadedController(transport);
+    controller.setSource([new File(["# source"], "source.md")]);
+    await controller.submit();
+
+    expect(controller.snapshot().active?.state).toBe("queued");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(json).toHaveBeenLastCalledWith(
+      `/api/v1/conversions/${job().id}`,
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(controller.snapshot().active).toEqual(failed);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test.each([
   ["non-202 status", { status: 200 }],
   ["missing Location", { location: undefined }],

@@ -237,28 +237,31 @@ test(
       await Promise.all([adminContext.close(), bobContext.close()]);
 
       const heavySource = oversizedPdfMarkdown();
-      const failurePage = await aliceContext.newPage();
-      await preparePdfSubmission(failurePage, "pdf-limit.md", heavySource);
-      const failureAccepted = failurePage.waitForResponse(
+      await alicePage.bringToFront();
+      await preparePdfSubmission(alicePage, "pdf-limit.md", heavySource);
+      const failureAccepted = alicePage.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/conversions") &&
           response.request().method() === "POST",
       );
-      await failurePage
-        .getByRole("button", { name: "Start conversion" })
-        .click();
+      const failurePolled = alicePage.waitForResponse(
+        (response) =>
+          /\/api\/v1\/conversions\/[0-9a-f-]+$/.test(response.url()) &&
+          response.request().method() === "GET",
+      );
+      await alicePage.getByRole("button", { name: "Start conversion" }).click();
       const failureResponse = await failureAccepted;
       assert.equal(failureResponse.status(), 202);
-      await failurePage
+      assert.equal((await failurePolled).status(), 200);
+      await alicePage
         .getByText(/PDF.*configured limits/)
         .waitFor({ timeout: 180_000 });
       assert.equal(
-        await failurePage
+        await alicePage
           .getByRole("button", { name: "Download result" })
           .count(),
         0,
       );
-      await failurePage.close();
 
       const untilExpiration = Math.max(
         0,
