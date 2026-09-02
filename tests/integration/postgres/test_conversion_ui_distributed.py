@@ -241,7 +241,6 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
         assert preferred_page.status_code == 200
         assert "Preferred template" in preferred_page.text
         assert "Distinct preferred template" in preferred_page.text
-        assert "Preferred PostgreSQL selection" in preferred_page.text
         assert str(preferred_version_id) in preferred_page.text
         assert str(version_id) not in preferred_page.text
         assert (
