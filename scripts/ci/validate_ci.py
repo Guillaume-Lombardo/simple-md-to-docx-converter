@@ -147,8 +147,12 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "2645ebf0f05beb703e8e86912041475895ba9087e3c3a42736a137981a448f91"
+    "2816ab748eb97c222e478114c56d562600d08bf1d372e92abe999f65970aa781"
 )
+CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
+    "01b75fdc4bf07ce8ac3b744860b39854506b2f76ac2b46a68bfb3bb887892462"
+)
+RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
 )
@@ -1444,6 +1448,48 @@ def validate_release_workflow_text(
     return errors
 
 
+def validate_container_publish_pair_text(text: str) -> list[str]:
+    """Validate the exact-byte, preflight-before-copy pair publisher."""
+    errors: list[str] = []
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != (
+        CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST
+    ):
+        errors.append("container pair publisher differs from the reviewed policy")
+    required_fragments = (
+        "set -euo pipefail",
+        "for role in backend frontend; do",
+        "scripts.container.verify_supply_chain verify",
+        '"oci-archive:$artifacts/$role/image.oci.tar" "dir:$staging_root/$role"',
+        "skopeo copy --preserve-digests",
+        'test "sha256:$(sha256sum "$staging_root/$role/manifest.json"',
+        "ghcr.io/guillaume-lombardo/md-converter-web",
+        "skopeo copy --preserve-digests --retry-times 3",
+        '[[ "$copied_digest" = "${intended_digests[$role]}" ]]',
+        'if remote_digest="$(inspect_remote_tag "$role" "$tag")"; then',
+        'test "$remote_digest" = "${intended_digests[$role]}"',
+        'test "$(inspect_remote_tag "$role" "$tag")" = "${intended_digests[$role]}"',
+        "scripts.container.release_pair create",
+        "backend-digest=%s\\nfrontend-digest=%s\\n",
+    )
+    errors.extend(
+        f"container pair publisher is missing: {required}"
+        for required in required_fragments
+        if required not in text
+    )
+    if "set +e" in text or "--privileged" in text.casefold():
+        errors.append("container pair publisher weakens the execution boundary")
+    stage_loop = text.find("for role in backend frontend; do")
+    copy_loop = text.find("for role in backend frontend; do", stage_loop + 1)
+    stage = text.find("oci-archive:$artifacts/$role/image.oci.tar", stage_loop)
+    preflight = text.find('inspect_remote_tag "$role" "$tag"', stage)
+    copy = text.find('copy_staged_tag "$role" "$tag"', copy_loop)
+    if not 0 <= stage_loop < stage < preflight < copy_loop < copy:
+        errors.append(
+            "container pair publisher must preflight both images before any copy"
+        )
+    return errors
+
+
 def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     text: str,
 ) -> list[str]:
@@ -1493,7 +1539,11 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release jobs do not match the exact contract")
     expected_permissions = {
         "build-and-publish": {"contents": "read", "packages": "write"},
-        "recover-evidence": {"actions": "read", "contents": "read"},
+        "recover-evidence": {
+            "actions": "read",
+            "contents": "read",
+            "packages": "write",
+        },
         "attest": {
             "attestations": "write",
             "contents": "read",
@@ -1554,10 +1604,13 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ):
             errors.append("automatic publication must not enter the recovery job")
         timeout = job.get("timeout-minutes")
+        maximum_timeout = (
+            120 if name == "build-and-publish" else MAX_RELEASE_TIMEOUT_MINUTES
+        )
         if (
             not isinstance(timeout, int)
             or isinstance(timeout, bool)
-            or not 0 < timeout <= MAX_RELEASE_TIMEOUT_MINUTES
+            or not 0 < timeout <= maximum_timeout
         ):
             errors.append(f"container release job {name!r} lacks a bounded timeout")
     errors.extend(
@@ -1568,6 +1621,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
                     "actions/attest-build-provenance",
                     "actions/checkout",
                     "actions/download-artifact",
+                    "actions/setup-node",
                     "actions/setup-python",
                     "actions/upload-artifact",
                     "astral-sh/setup-uv",
@@ -1581,32 +1635,30 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release workflow must not access stored secrets")
     if "--privileged" in text.casefold():
         errors.append("container release workflow must not use privileged containers")
+    try:
+        pair_publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        errors.append("container release pair publisher is missing")
+        pair_publisher = ""
+    errors.extend(validate_container_publish_pair_text(pair_publisher))
     for required in (
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
         '"localhost/md-converter:$RELEASE_VERSION"',
-        'bash scripts/container/recovery-cli-smoke.sh "$image"',
+        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
+        '"localhost/md-converter-web:$RELEASE_VERSION"',
+        'MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"',
+        'MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"',
+        "bash scripts/e2e/run.sh standalone",
+        "bash scripts/e2e/run.sh distributed",
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
         "skopeo --version",
-        'source_tag="source-$SOURCE_SHA"',
-        'registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"',
-        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
-        'test "$staged_manifest_digest" = "$intended_digest"',
-        "skopeo copy --preserve-digests --retry-times 3",
-        '"docker://$registry_repository:$tag"; then',
-        "copy_status=0",
-        'copy_status="$?"',
-        'if copied_digest="$(inspect_remote_tag "$tag")"; then',
-        '[[ "$copied_digest" = "$intended_digest" ]]',
-        'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then',
-        'test "$remote_digest" = "$intended_digest"',
-        'test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"',
-        'if [[ "$status" = 404 ]]; then',
-        "podman push --format oci",
-        "artifacts/container/registry-publication.json",
-        "scripts.container.recover_release_evidence",
+        "scripts/container/publish-release-pair.sh",
+        "scripts.container.release_pair verify",
         "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
         "run-id: ${{ inputs.artifact-run-id }}",
         "merge-multiple: true",
@@ -1618,12 +1670,13 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
         '.name == "build-and-publish"',
         '.conclusion == "success"',
-        ".total_count == 1",
-        ".size_in_bytes <= 2000000000",
+        "container-stage-$RELEASE_TAG",
+        ".size_in_bytes <= 4000000000",
         ".expired == false",
-        'scope=repository:$registry_path:pull"',
-        'test "$public_status" = 200',
-        "needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest",
+        "Retain staged pair before registry mutation",
+        "container-stage-${{ inputs.tag }}",
+        "needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest",
+        "needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest",
         '--repo "$GITHUB_REPOSITORY"',
         "--clobber",
     ):
@@ -1647,12 +1700,13 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")
-        if step.get("name") == "Build and validate the final rootless image"
+        if step.get("name") == "Build and validate the final rootless image pair once"
     ]
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
-        'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
-        'bash scripts/container/recovery-cli-smoke.sh "$image"',
+        'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"',
+        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
+        'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"automatic container build is missing: {required}")
@@ -1666,7 +1720,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         "Set up uv",
         "Synchronize locked recovery dependencies",
         "Validate release, source run, artifact, and public image identity",
+        "Install rootless Podman and Skopeo for exact-byte recovery",
         "Download the exact retained artifact by immutable ID",
+        "Recover or verify the exact retained pair publication",
         "Verify retained bundle integrity and release identity",
         "Transfer the exact verified evidence to this recovery run",
     ]
@@ -1689,11 +1745,10 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ".head_repository.id == $repository_id",
         ".workflow_run.repository_id == $repository_id",
         ".workflow_run.head_repository_id == $repository_id",
-        ".total_count == 1",
+        "container-stage-$RELEASE_TAG",
         'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
         'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
-        'scope=repository:$registry_path:pull"',
-        "printf 'artifact-id=%s\\ndigest=%s\\n'",
+        "printf 'artifact-id=%s\\n'",
     ):
         if not isinstance(recovery_identity, str) or required not in recovery_identity:
             errors.append(
@@ -1715,13 +1770,17 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     provenance = [
         index
         for index, step in enumerate(attest_steps)
-        if step.get("name") == "Attest the published image identity"
+        if step.get("name")
+        in {
+            "Attest the published backend image identity",
+            "Attest the published frontend image identity",
+        }
         and step.get("uses", "").startswith("actions/attest-build-provenance@")
     ]
     if (
         len(attest_login) != 1
-        or len(provenance) != 1
-        or attest_login[0] >= provenance[0]
+        or len(provenance) != len(RELEASE_IMAGE_ROLES)
+        or any(attest_login[0] >= index for index in provenance)
     ):
         errors.append("container attestation must authenticate to GHCR before push")
     evidence_steps = _job_steps(workflow, "release-evidence")
@@ -1745,28 +1804,16 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     publish_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")
-        if step.get("name") == "Publish without overwriting a conflicting release image"
+        if step.get("name")
+        == "Publish the bound pair without overwriting a conflicting image"
     ]
     publish_run = publish_steps[0].get("run") if len(publish_steps) == 1 else None
     if not isinstance(publish_run, str):
         errors.append("container release lacks the unique guarded publication step")
-    else:
-        inspect_marker = (
-            'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
+    elif "scripts/container/publish-release-pair.sh" not in publish_run:
+        errors.append(
+            "container release must invoke the reviewed pair publication boundary"
         )
-        stage_marker = "podman push --format oci"
-        copy_marker = 'copy_staged_tag "$RELEASE_VERSION"'
-        if (
-            inspect_marker not in publish_run
-            or stage_marker not in publish_run
-            or copy_marker not in publish_run
-            or publish_run.count(stage_marker) != 1
-            or publish_run.index(stage_marker) > publish_run.index(inspect_marker)
-            or publish_run.index(inspect_marker) > publish_run.index(copy_marker)
-        ):
-            errors.append(
-                "container release must stage exact bytes then inspect before registry copy"
-            )
     return errors
 
 

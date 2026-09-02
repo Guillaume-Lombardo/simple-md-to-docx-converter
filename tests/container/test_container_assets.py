@@ -134,16 +134,16 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
 def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     """Both reviewed final-image paths execute the complete recovery contract."""
 
-    command = 'bash scripts/container/recovery-cli-smoke.sh "$image"'
+    ci_command = 'bash scripts/container/recovery-cli-smoke.sh "$final_image"'
+    release_command = 'bash scripts/container/recovery-cli-smoke.sh "$backend_image"'
     run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
-    ci_command = command.replace('"$image"', '"$final_image"')
     release = yaml.safe_load(
         Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
     )
     release_run = next(
         step["run"]
         for step in release["jobs"]["build-and-publish"]["steps"]
-        if step["name"] == "Build and validate the final rootless image"
+        if step["name"] == "Build and validate the final rootless image pair once"
     )
 
     assert run_ci.count(ci_command) == 1
@@ -154,10 +154,10 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
             'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
         )
     )
-    assert release_run.count(command) == 1
+    assert release_run.count(release_command) == 1
     assert release_run.index(
-        'bash scripts/container/build.sh "$image"'
-    ) < release_run.index(command)
+        'bash scripts/container/build.sh "$backend_image"'
+    ) < release_run.index(release_command)
 
 
 def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:

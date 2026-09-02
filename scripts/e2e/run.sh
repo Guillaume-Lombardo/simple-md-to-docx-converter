@@ -10,6 +10,8 @@ readonly profile="$1"
 readonly repository="$(pwd)"
 readonly published_image="${MARKWEAVE_E2E_IMAGE:-}"
 readonly published_frontend_image="${MARKWEAVE_E2E_FRONTEND_IMAGE:-}"
+readonly local_image="${MARKWEAVE_E2E_LOCAL_IMAGE:-}"
+readonly local_frontend_image="${MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE:-}"
 if [[ -n "$published_image" ]] &&
   [[ ! "$published_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
   echo "MARKWEAVE_E2E_IMAGE must be an immutable version-and-digest Markweave image." >&2
@@ -25,7 +27,23 @@ if { [[ -n "$published_image" ]] && [[ -z "$published_frontend_image" ]]; } ||
   echo "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together." >&2
   exit 2
 fi
-readonly image="${published_image:-localhost/md-converter:t21-$profile}"
+if { [[ -n "$local_image" ]] && [[ -z "$local_frontend_image" ]]; } ||
+  { [[ -z "$local_image" ]] && [[ -n "$local_frontend_image" ]]; }; then
+  echo "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together." >&2
+  exit 2
+fi
+if [[ -n "$published_image" && -n "$local_image" ]]; then
+  echo "Published and local E2E image pairs are mutually exclusive." >&2
+  exit 2
+fi
+if [[ -n "$local_image" ]] && {
+  [[ ! "$local_image" =~ ^localhost/md-converter:[a-zA-Z0-9_.-]+$ ]] ||
+    [[ ! "$local_frontend_image" =~ ^localhost/md-converter-web:[a-zA-Z0-9_.-]+$ ]];
+}; then
+  echo "Local E2E images must use the isolated localhost Markweave package names." >&2
+  exit 2
+fi
+readonly image="${published_image:-${local_image:-localhost/md-converter:t21-$profile}}"
 readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
 readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly prefix="md-converter-t21-$profile"
@@ -35,7 +53,7 @@ readonly expiry_application_name="$prefix-expiry-api"
 readonly insecure_application_name="$prefix-insecure-api"
 readonly frontend_name="$prefix-frontend"
 readonly router_name="$prefix-router"
-readonly frontend_image="${published_frontend_image:-localhost/markweave-web:t64-$profile}"
+readonly frontend_image="${published_frontend_image:-${local_frontend_image:-localhost/markweave-web:t64-$profile}}"
 readonly clamav_name="$prefix-clamav"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
@@ -349,6 +367,9 @@ if [[ -n "$published_image" ]]; then
   podman pull --quiet "$frontend_image"
   test "$(podman image inspect "$frontend_image" --format '{{.Digest}}')" = \
     "${frontend_image##*@}"
+elif [[ -n "$local_image" ]]; then
+  podman image exists "$image"
+  podman image exists "$frontend_image"
 else
   podman pull --quiet "$base_image"
   test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"

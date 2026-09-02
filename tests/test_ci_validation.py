@@ -15,6 +15,7 @@ from scripts.ci.validate_ci import (
     WorkflowLoader,
     discover_workflow_paths,
     main,
+    validate_container_publish_pair_text,
     validate_container_release_workflow_text,
     validate_production_release_workflow_text,
     validate_python_imports,
@@ -538,7 +539,7 @@ def test_container_release_policy_requires_recovery_final_image_smoke() -> None:
         encoding="utf-8"
     )
     weakened = workflow.replace(
-        '          bash scripts/container/recovery-cli-smoke.sh "$image"\n',
+        '          bash scripts/container/recovery-cli-smoke.sh "$backend_image"\n',
         "",
         1,
     )
@@ -589,7 +590,11 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
         "type": "string",
     }
     recovery = workflow["jobs"]["recover-evidence"]
-    assert recovery["permissions"] == {"actions": "read", "contents": "read"}
+    assert recovery["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "packages": "write",
+    }
     identity = next(
         step["run"]
         for step in recovery["steps"]
@@ -601,7 +606,7 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
     assert '.path == ".github/workflows/container-release.yml"' in identity
     assert 'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"' in identity
     assert 'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"' in identity
-    assert 'scope=repository:$registry_path:pull"' in identity
+    assert "container-stage-$RELEASE_TAG" in identity
     download = next(
         step
         for step in recovery["steps"]
@@ -615,7 +620,7 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
         "run-id": "${{ inputs.artifact-run-id }}",
         "path": "artifacts/container",
     }
-    assert "scripts.container.recover_release_evidence" in next(
+    assert "scripts.container.release_pair verify" in next(
         step["run"]
         for step in recovery["steps"]
         if step["name"] == "Verify retained bundle integrity and release identity"
@@ -647,9 +652,9 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
             "container release is missing dynamic contract: artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
         ),
         (
-            "scripts.container.recover_release_evidence",
+            "scripts.container.release_pair verify",
             "scripts.container.verify_supply_chain",
-            "container release is missing dynamic contract: scripts.container.recover_release_evidence",
+            "container release is missing dynamic contract: scripts.container.release_pair verify",
         ),
     ],
 )
@@ -670,7 +675,11 @@ def test_container_recovery_routes_exact_digest_to_existing_jobs() -> None:
         encoding="utf-8"
     )
     assert (
-        "subject-digest: ${{ needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest }}"
+        "subject-digest: ${{ needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}"
+        in workflow
+    )
+    assert (
+        "subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}"
         in workflow
     )
     assert "needs.recover-evidence.result == 'success'" in workflow
@@ -904,83 +913,65 @@ def test_container_release_policy_requires_dynamic_exact_source_and_evidence() -
 
 @pytest.mark.unit
 def test_container_release_inspects_remote_version_before_push() -> None:
-    workflow = yaml.safe_load(
-        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+        encoding="utf-8"
     )
-    steps = workflow["jobs"]["build-and-publish"]["steps"]
-    [run] = [
-        step["run"]
-        for step in steps
-        if step["name"] == "Publish without overwriting a conflicting release image"
-    ]
-
-    stage = "podman push --format oci"
-    inspect = 'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
-    version_copy = 'copy_staged_tag "$RELEASE_VERSION"'
-    assert run.count(stage) == 1
-    assert run.index(stage) < run.index(inspect) < run.index(version_copy)
-    assert 'test "$staged_manifest_digest" = "$intended_digest"' in run
-    assert "skopeo copy --preserve-digests --retry-times 3" in run
-    assert '"docker://$registry_repository:$tag"; then' in run
-    assert "copy_status=0" in run
-    assert 'copy_status="$?"' in run
-    assert 'if copied_digest="$(inspect_remote_tag "$tag")"; then' in run
-    assert '[[ "$copied_digest" = "$intended_digest" ]]' in run
-    assert 'test "$remote_digest" = "$intended_digest"' in run
+    assert validate_container_publish_pair_text(publisher) == []
+    assert publisher.count("oci-archive:$artifacts/$role/image.oci.tar") == 1
+    first_loop = publisher.index("for role in backend frontend; do")
+    second_loop = publisher.index("for role in backend frontend; do", first_loop + 1)
+    stage = publisher.index("oci-archive:$artifacts/$role/image.oci.tar", first_loop)
+    inspect = publisher.index('inspect_remote_tag "$role" "$tag"', stage)
+    copy = publisher.index('copy_staged_tag "$role" "$tag"', second_loop)
+    assert first_loop < stage < inspect < second_loop < copy
 
 
 @pytest.mark.unit
 def test_container_release_rejects_unverified_skopeo_failure_tolerance() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '[[ "$copied_digest" = "$intended_digest" ]]',
+    weakened = publisher.replace(
+        '[[ "$copied_digest" = "${intended_digests[$role]}" ]]',
         '[[ "$copy_status" != 0 ]] # trust the tool failure without registry proof',
     )
-    errors = validate_container_release_workflow_text(weakened)
+    errors = validate_container_publish_pair_text(weakened)
     assert any("copied_digest" in error for error in errors)
 
 
 @pytest.mark.unit
 def test_container_release_rejects_errexit_toggle_around_skopeo() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '"docker://$registry_repository:$tag"; then',
-        '"docker://$registry_repository:$tag" # followed by a global errexit toggle',
-    )
-    errors = validate_container_release_workflow_text(weakened)
-    assert any(
-        '"docker://$registry_repository:$tag"; then' in error for error in errors
-    )
+    errors = validate_container_publish_pair_text(publisher + "\nset +e\n")
+    assert "container pair publisher weakens the execution boundary" in errors
 
 
 @pytest.mark.unit
 def test_container_release_policy_rejects_conflict_guard_removal() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        'test "$remote_digest" = "$intended_digest"',
+    weakened = publisher.replace(
+        'test "$remote_digest" = "${intended_digests[$role]}"',
         "true # permit overwrite",
     )
-    errors = validate_container_release_workflow_text(weakened)
+    errors = validate_container_publish_pair_text(weakened)
     assert any("remote_digest" in error for error in errors)
 
 
 @pytest.mark.unit
 def test_container_release_policy_rejects_remote_digest_derivation() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
-        '"localhost/md-converter:$RELEASE_VERSION" "docker://$registry_repository:unsafe"',
+    weakened = publisher.replace(
+        '"oci-archive:$artifacts/$role/image.oci.tar" "dir:$staging_root/$role"',
+        '"oci-archive:$artifacts/$role/image.oci.tar" "docker://${repositories[$role]}:unsafe"',
     )
-    errors = validate_container_release_workflow_text(weakened)
-    assert any("dir:$registry_stage" in error for error in errors)
+    errors = validate_container_publish_pair_text(weakened)
+    assert any("dir:$staging_root/$role" in error for error in errors)
 
 
 @pytest.mark.unit

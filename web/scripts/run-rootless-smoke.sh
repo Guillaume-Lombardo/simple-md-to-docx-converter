@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="localhost/markweave-web:t60-smoke"
+image="${1:-localhost/markweave-web:t60-smoke}"
+mode="${2:-build}"
+if [[ "$mode" != build && "$mode" != --existing ]]; then
+  echo "Usage: web/scripts/run-rootless-smoke.sh [IMAGE [--existing]]" >&2
+  exit 2
+fi
 name="markweave-web-t60-smoke-$$"
 router_name="$name-router"
 network_name="$name-network"
@@ -11,7 +16,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-podman build --format docker --tag "$image" --file web/Containerfile web
+if [[ "$mode" == build ]]; then
+  podman build --format docker --tag "$image" --file web/Containerfile web
+else
+  podman image exists "$image"
+fi
 podman network create "$network_name" >/dev/null
 podman run --detach --name "$name" --network "$network_name" \
   --network-alias frontend --user 10073:0 --read-only --cap-drop all \

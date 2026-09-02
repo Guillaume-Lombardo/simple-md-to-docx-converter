@@ -308,6 +308,13 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
         "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together"
         in runner
     )
+    assert (
+        "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together"
+        in runner
+    )
+    assert "Published and local E2E image pairs are mutually exclusive" in runner
+    assert 'podman image exists "$image"' in runner
+    assert 'podman image exists "$frontend_image"' in runner
     assert '"$frontend_image" node router.mjs' in runner
     assert "--env BACKEND_ORIGIN=http://127.0.0.1:8080" in runner
     assert "--env FRONTEND_ORIGIN=http://frontend:3000" in runner
