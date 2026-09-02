@@ -324,6 +324,31 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
 
 
 @pytest.mark.unit
+def test_router_is_removed_before_every_backend_network_parent() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+
+    assert 'podman rm --force "$router_name" "$application_name"' not in runner
+    assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 6
+    cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
+    assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
+        'for resource in "${created[@]}"'
+    )
+    assert (
+        runner.count(
+            'podman rm --force "$router_name" >/dev/null\n'
+            'podman rm --force "$application_name" >/dev/null'
+        )
+        == 3
+    )
+    assert (
+        'podman rm --force "$router_name" >/dev/null\n'
+        'podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null'
+        in runner
+    )
+
+
+@pytest.mark.unit
 def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
     main_index = runner.index("/e2e/browser-next-conversion.test.mjs")

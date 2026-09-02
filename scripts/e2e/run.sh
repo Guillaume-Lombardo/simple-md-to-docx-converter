@@ -175,6 +175,10 @@ cleanup() {
       exit_code=1
     fi
   fi
+  # The router joins the backend container's network namespace. Podman does
+  # not guarantee dependency order within a multi-container removal request,
+  # so detach that child before iterating over its possible parent entries.
+  podman rm --force "$router_name" >/dev/null 2>&1 || true
   for resource in "${created[@]}"; do
     if [[ "$resource" == network:* ]]; then
       podman network rm "${resource#network:}" >/dev/null 2>&1 || true
@@ -795,7 +799,8 @@ podman exec \
 # independently. Standalone is recreated with a long idle poll only for this
 # isolated phase; the named worker thread must observably remain asleep in its
 # interruptible futex wait after the initial empty claim before submissions begin.
-podman rm --force "$router_name" "$application_name" >/dev/null
+podman rm --force "$router_name" >/dev/null
+podman rm --force "$application_name" >/dev/null
 if [[ "$profile" == distributed ]]; then
   podman stop --time 15 "$worker_one_name" "$worker_two_name" >/dev/null
 fi
@@ -821,7 +826,8 @@ podman exec \
   "$application_name" node --test /e2e/browser-next-conversion-admission.test.mjs
 
 # Restore the ordinary profile runtime before restart and expiry recovery.
-podman rm --force "$router_name" "$application_name" >/dev/null
+podman rm --force "$router_name" >/dev/null
+podman rm --force "$application_name" >/dev/null
 created=("$application_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
@@ -867,7 +873,8 @@ podman exec \
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime
 # uses the operator-owned two-second absolute ceiling and performs no policy update.
-podman rm --force "$router_name" "$application_name" >/dev/null
+podman rm --force "$router_name" >/dev/null
+podman rm --force "$application_name" >/dev/null
 created=("$expiry_application_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
@@ -894,7 +901,8 @@ podman exec \
 
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.
-podman rm --force "$router_name" "$expiry_application_name" "$clamav_name" >/dev/null
+podman rm --force "$router_name" >/dev/null
+podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null
 created=("$insecure_application_name" "${created[@]}")
 e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \

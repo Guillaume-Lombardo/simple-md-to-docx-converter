@@ -736,9 +736,12 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert 'podman rm --force "$application_name"' in runner
     assert "MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2" in runner
     assert "verify-session-expiration" in runner
-    assert (
-        'podman rm --force "$router_name" "$expiry_application_name" "$clamav_name"'
-        in runner
+    router_removal = 'podman rm --force "$router_name" >/dev/null'
+    expiry_removal = (
+        'podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null'
+    )
+    assert runner.index(router_removal, runner.index("verify-session-expiration")) < (
+        runner.index(expiry_removal)
     )
     assert "--policy-evidence" in runner
     assert "--policy-evidence" not in RUNNER.read_text(encoding="utf-8")
