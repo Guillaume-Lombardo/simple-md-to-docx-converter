@@ -254,30 +254,12 @@ test(
         0,
       );
 
-      await alicePage.getByLabel(/Source file/).setInputFiles({
-        name: "restart-recovery.md",
-        mimeType: "text/markdown",
-        buffer: Buffer.from("# Recover this conversion after restart\n"),
-      });
-      await alicePage.getByRole("radio", { name: "DOCX", exact: true }).click();
-      const recoveryAccepted = alicePage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/conversions") &&
-          response.request().method() === "POST" &&
-          response.status() === 202,
-      );
-      await alicePage.getByRole("button", { name: "Start conversion" }).click();
-      const recoveryJob = await (await recoveryAccepted).json();
-      await alicePage
-        .getByText("Your conversion is ready to download.")
-        .waitFor({ timeout: 180_000 });
       const statePath = process.env.MARKWEAVE_E2E_CONVERSION_STATE;
       assert.ok(statePath);
-      await writeFile(
-        statePath,
-        `${JSON.stringify({ ...alice, job_id: recoveryJob.id })}\n`,
-        { encoding: "utf8", mode: 0o600 },
-      );
+      await writeFile(statePath, `${JSON.stringify(alice)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
 
       await aliceContext.close();
     } finally {

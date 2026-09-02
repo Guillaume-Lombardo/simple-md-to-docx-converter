@@ -13,6 +13,10 @@ import pytest
 HARNESS = Path("scripts/e2e/harness.sh").resolve()
 RUNNER = Path("scripts/e2e/run.sh").resolve()
 ADMIN_BROWSER = Path("tests/e2e/browser-next-admin.test.mjs").resolve()
+RESTART_PREPARATION_BROWSER = Path(
+    "tests/e2e/browser-next-conversion-restart-prepare.test.mjs"
+).resolve()
+RESTART_BROWSER = Path("tests/e2e/browser-next-conversion-restart.test.mjs").resolve()
 
 
 @pytest.mark.unit
@@ -300,8 +304,14 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     admission_index = runner.index(
         "/e2e/browser-next-conversion-admission.test.mjs", failure_index
     )
+    preparation_index = runner.index(
+        "/e2e/browser-next-conversion-restart-prepare.test.mjs", admission_index
+    )
+    preparation_command_index = runner.rindex(
+        "podman exec", admission_index, preparation_index
+    )
     restart_index = runner.index(
-        'podman restart --time 15 "$application_name"', admission_index
+        'podman restart --time 15 "$application_name"', preparation_index
     )
     recovery_index = runner.index(
         "/e2e/browser-next-conversion-restart.test.mjs", restart_index
@@ -314,19 +324,39 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert runner.count("/e2e/browser-next-conversion.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-failure.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-admission.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-restart-prepare.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
-    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 2
+    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 3
+    preparation = runner[preparation_command_index:restart_index]
+    assert (
+        '"$application_name" node --test \\\n'
+        "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
+    )
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
         < main_index
         < failure_index
         < admission_index
+        < preparation_index
         < restart_index
         < recovery_index
         < short_lifetime_index
         < expiry_index
     )
+
+
+@pytest.mark.unit
+def test_restart_checkpoint_is_fresh_and_authoritative() -> None:
+    preparation = RESTART_PREPARATION_BROWSER.read_text(encoding="utf-8")
+    recovery = RESTART_BROWSER.read_text(encoding="utf-8")
+
+    assert 'assert.equal(authoritative.body.state, "succeeded")' in preparation
+    assert "Date.parse(authoritative.body.expires_at) > Date.now()" in preparation
+    assert "expires_at: authoritative.body.expires_at" in preparation
+    assert "job_id: job.id" in preparation
+    assert "Date.parse(state.expires_at) > Date.now()" in recovery
+    assert "fresh recovery checkpoint expired before application restart" in recovery
 
 
 @pytest.mark.unit

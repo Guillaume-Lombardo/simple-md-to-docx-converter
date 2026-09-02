@@ -797,6 +797,11 @@ for _ in $(seq 1 120); do
 done
 podman exec "$application_name" node -e \
   'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
+  "$application_name" node --test \
+  /e2e/browser-next-conversion-restart-prepare.test.mjs
 podman restart --time 15 "$application_name" >/dev/null
 wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
   "$application_name" '"status":"ready"'

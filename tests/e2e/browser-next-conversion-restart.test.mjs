@@ -14,6 +14,11 @@ test("Next conversion workspace reopens a durable result after application resta
   assert.equal(typeof state.username, "string");
   assert.equal(typeof state.password, "string");
   assert.match(state.job_id, /^[0-9a-f-]{36}$/);
+  assert.equal(typeof state.expires_at, "string");
+  assert.ok(
+    Date.parse(state.expires_at) > Date.now(),
+    "fresh recovery checkpoint expired before application restart",
+  );
 
   const browser = await chromium.launch({
     executablePath:
