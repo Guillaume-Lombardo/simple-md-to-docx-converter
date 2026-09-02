@@ -126,16 +126,20 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
             "system_fallback_template_id": str(template_id),
             "template_max_archive_bytes": 1_000_000,
         }
+        fallback_page = client.get("/convert")
+        assert fallback_page.status_code == 200
+        assert "System fallback template" in fallback_page.text
+        assert str(version_id) in fallback_page.text
+
         selections.set_preferred(owner_id, template_id)
         assert (
             client.get("/api/v1/conversion-options").json()["selection_source"]
             == "preferred"
         )
-
-        page = client.get("/convert")
-        assert page.status_code == 200
-        assert "System fallback template" in page.text
-        assert str(version_id) in page.text
+        preferred_page = client.get("/convert")
+        assert preferred_page.status_code == 200
+        assert "Preferred template" in preferred_page.text
+        assert str(version_id) in preferred_page.text
         csrf = login.json()["csrf_token"]
         created = client.post(
             "/api/v1/conversions",
