@@ -308,8 +308,9 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
     worker = next(
         container
         for document in documents
+        if document.get("kind") in {"Deployment", "StatefulSet"}
         for container in document["spec"]["template"]["spec"]["containers"]
-        if container["args"] == [mode]
+        if container.get("args") == [mode]
     )
     security = worker["securityContext"]
     assert security == {
@@ -322,6 +323,59 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
         "memory": "${WORKER_MEMORY_BUDGET_BYTES}",
         "ephemeral-storage": "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}",
     }
+
+
+def test_frontend_deployment_separates_pages_probes_router_and_credentials() -> None:
+    documents = tuple(
+        yaml.safe_load_all(
+            Path("deploy/frontend.yaml.example").read_text(encoding="utf-8")
+        )
+    )
+    workloads = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document["kind"] == "Deployment"
+    }
+    frontend = workloads["md-converter-frontend"]["spec"]["template"]["spec"]
+    container = frontend["containers"][0]
+    assert frontend["automountServiceAccountToken"] is False
+    assert frontend["terminationGracePeriodSeconds"] == 30
+    assert container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert container["resources"] == {
+        "requests": {
+            "cpu": "100m",
+            "memory": "128Mi",
+            "ephemeral-storage": "32Mi",
+        },
+        "limits": {
+            "cpu": "500m",
+            "memory": "256Mi",
+            "ephemeral-storage": "64Mi",
+        },
+    }
+    assert container["livenessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/live",
+        "port": "probe",
+    }
+    assert container["readinessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/ready",
+        "port": "probe",
+    }
+    assert "env" not in container and "envFrom" not in container
+    assert {mount["mountPath"] for mount in container["volumeMounts"]} == {"/tmp"}  # noqa: S108
+
+    router = workloads["md-converter-router"]["spec"]["template"]["spec"]
+    router_container = router["containers"][0]
+    assert router_container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert router_container["command"] == ["node", "router.mjs"]
+    environment = {item["name"]: item["value"] for item in router_container["env"]}
+    assert environment["BACKEND_ORIGIN"] == "http://md-converter-api:8080"
+    assert environment["FRONTEND_ORIGIN"] == "http://md-converter-frontend:3000"
+    assert environment["ROUTER_TLS_CERT_FILE"] == "/run/tls/tls.crt"
+    assert environment["ROUTER_TLS_KEY_FILE"] == "/run/tls/tls.key"
+    assert "includeSubDomains" not in Path("deploy/frontend.yaml.example").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_distributed_test_profile_is_provider_neutral_rustfs() -> None:

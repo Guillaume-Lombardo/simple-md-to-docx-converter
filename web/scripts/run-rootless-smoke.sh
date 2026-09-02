@@ -3,38 +3,42 @@ set -euo pipefail
 
 image="localhost/markweave-web:t60-smoke"
 name="markweave-web-t60-smoke-$$"
-router_pid=""
-router_log="$(mktemp)"
+router_name="$name-router"
+network_name="$name-network"
 cleanup() {
-  if [[ -n "$router_pid" ]]; then kill "$router_pid" >/dev/null 2>&1 || true; fi
-  podman rm --force "$name" >/dev/null 2>&1 || true
-  rm --force -- "$router_log"
+  podman rm --force "$router_name" "$name" >/dev/null 2>&1 || true
+  podman network rm "$network_name" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 podman build --format docker --tag "$image" --file web/Containerfile web
-podman run --detach --name "$name" --user 10073:0 --read-only --cap-drop all \
+podman network create "$network_name" >/dev/null
+podman run --detach --name "$name" --network "$network_name" \
+  --network-alias frontend --user 10073:0 --read-only --cap-drop all \
   --security-opt no-new-privileges \
   --pids-limit 64 --memory 256m --cpus 0.5 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
-  --publish 127.0.0.1::3000 --publish 127.0.0.1::3001 "$image" >/dev/null
+  --publish 127.0.0.1::3001 "$image" >/dev/null
 
-page_port="$(podman port "$name" 3000/tcp | awk -F: 'NR == 1 {print $NF}')"
 probe_port="$(podman port "$name" 3001/tcp | awk -F: 'NR == 1 {print $NF}')"
 router_port="$((38000 + ($$ % 20000)))"
-PUBLIC_HOST="127.0.0.1:${router_port}" \
-  FRONTEND_ORIGIN="http://127.0.0.1:${page_port}" \
-  ROUTER_PORT="$router_port" node web/scripts/routing-fixture.mjs \
-  >"$router_log" 2>&1 &
-router_pid="$!"
+podman run --detach --name "$router_name" --network "$network_name" \
+  --user 10173:0 --read-only --cap-drop all \
+  --security-opt no-new-privileges --pids-limit 64 --memory 128m --cpus 0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+  --publish "127.0.0.1:${router_port}:8080" \
+  --env BACKEND_ORIGIN=http://frontend:3000 \
+  --env FRONTEND_ORIGIN=http://frontend:3000 \
+  --env PUBLIC_HOSTS="127.0.0.1:${router_port}" \
+  "$image" node router.mjs >/dev/null
 for _ in $(seq 1 50); do
-  if grep --quiet '^routing fixture listening' "$router_log"; then break; fi
-  if ! kill -0 "$router_pid" >/dev/null 2>&1; then
-    cat "$router_log" >&2
+  if curl --fail --silent --output /dev/null \
+    "http://127.0.0.1:${router_port}/convert"; then break; fi
+  if [[ "$(podman inspect "$router_name" --format '{{.State.Running}}')" != true ]]; then
+    podman logs "$router_name" >&2
     exit 1
   fi
   sleep 0.1
 done
-grep --quiet '^routing fixture listening' "$router_log"
 for _ in $(seq 1 60); do
   if curl --fail --silent --output /dev/null "http://127.0.0.1:${probe_port}/_frontend/health/ready"; then break; fi
   sleep 1
@@ -62,4 +66,7 @@ for path in \
 done
 test "$(podman inspect --format '{{.Config.User}}' "$name")" = "10073:0"
 test "$(podman inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$name")" = "true"
+test "$(podman inspect --format '{{.Config.User}}' "$router_name")" = "10173:0"
+test "$(podman inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$router_name")" = "true"
 podman exec "$name" test -r /opt/markweave-web/next.config.ts
+podman exec "$router_name" test -r /opt/markweave-web/router.mjs

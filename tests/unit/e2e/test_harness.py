@@ -283,7 +283,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 13
+    assert len(podman_runs) == 14
     assert all(
         '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs
@@ -292,6 +292,28 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+
+    assert "frontend-auth-router.mjs" not in runner
+    assert "routing-fixture.mjs" not in runner
+    assert (
+        'readonly published_frontend_image="${MARKWEAVE_E2E_FRONTEND_IMAGE:-}"'
+        in runner
+    )
+    assert (
+        "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together"
+        in runner
+    )
+    assert '"$frontend_image" node router.mjs' in runner
+    assert "--env BACKEND_ORIGIN=http://127.0.0.1:8080" in runner
+    assert "--env FRONTEND_ORIGIN=http://frontend:3000" in runner
+    assert "--env PUBLIC_HOSTS=localhost:3100" in runner
+    assert runner.count('start_production_router "$application_name"') == 3
+    assert runner.count('start_production_router "$expiry_application_name"') == 1
 
 
 @pytest.mark.unit

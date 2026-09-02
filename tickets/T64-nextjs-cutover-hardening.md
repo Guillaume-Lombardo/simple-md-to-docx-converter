@@ -2,7 +2,7 @@
 ticket: T64
 linear_id: G1L-528
 linear_url: https://linear.app/g1lom/issue/G1L-528/t64-cut-over-and-harden-the-nextjs-frontend
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -54,6 +54,8 @@ Complete the production cutover from FastAPI-rendered pages to the Next.js front
 ## Progress
 
 * 2026-09-01: Created as the sole production cutover after the authentication, conversion, administration, and backend session-policy work is complete and independently verified.
+* 2026-09-02: Started from exact verified GitHub `main` SHA `49dbd5913f2cea4d6c0bde9a608d29e83b3c528d` after T63 completed on `main`. The approved delivery uses release version `0.6.0`, keeps both quickstarts on loopback HTTP, implements the reviewed operator routing contract without bundling TLS certificates, and preserves exact HSTS without `includeSubDomains` or `preload`.
+* 2026-09-02: Implemented the pre-removal routing boundary: the rootless frontend image now packages the production same-origin router; candidate Compose overlays and both quickstarts require a matched immutable backend/frontend pair; deployment examples separate frontend pages, internal probes, router TLS, and FastAPI services. Production-router unit/contract/coverage, frontend build/production, rootless paired-image smoke, Compose rendering, harness, and deployment-asset checks pass locally. The legacy renderer remains present until the candidate branch completes both hosted storage-profile workflows, preserving a reproducible rollback point.
 
 ## Synchronization
 

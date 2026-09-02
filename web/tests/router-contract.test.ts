@@ -1,6 +1,18 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, request } from "node:http";
+import { request as secureRequest } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createProductionRouter,
+  HSTS,
+  loadTls,
+  normalizeRequestTarget,
+  PERMISSIONS_POLICY,
+  selectUpstream,
+} from "../src/runtime/router.mjs";
 import { createRoutingFixture } from "./fixtures/router.mjs";
 
 type Capture = {
@@ -28,7 +40,9 @@ async function call(
   const destination = new URL(origin);
   return new Promise<{ body: string; cookies: string[]; status: number }>(
     (resolve, reject) => {
-      const outbound = request(
+      const outbound = (
+        destination.protocol === "https:" ? secureRequest : request
+      )(
         {
           headers: {
             cookie: "session=a; csrf=b",
@@ -41,6 +55,7 @@ async function call(
           method,
           path,
           port: destination.port,
+          rejectUnauthorized: false,
         },
         (response) => {
           let body = "";
@@ -274,24 +289,155 @@ test("real router preserves backend credentials and isolates frontend credential
   );
 });
 
-test("synchronous upstream creation failures are contained without exiting", async () => {
-  const router = createRoutingFixture({
-    backend: "http://[invalid",
-    frontend: "http://[invalid",
-    publicHosts: ["converter.example"],
+test("TLS routing owns exact response-wide security headers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "markweave-router-tls-"));
+  const key = join(directory, "key.pem");
+  const cert = join(directory, "cert.pem");
+  try {
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=converter.example",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+      ],
+      { stdio: "ignore" },
+    );
+    const upstream = createServer((_incoming, response) => {
+      response.setHeader("Strict-Transport-Security", "max-age=1; preload");
+      response.setHeader("Permissions-Policy", "camera=*");
+      response.end("secure");
+    });
+    const upstreamOrigin = await listen(upstream);
+    const router = createProductionRouter({
+      backend: upstreamOrigin,
+      frontend: upstreamOrigin,
+      publicHosts: ["converter.example"],
+      tls: { cert: readFileSync(cert), key: readFileSync(key) },
+    });
+    router.listen(0, "127.0.0.1");
+    await new Promise((resolve) => router.once("listening", resolve));
+    const origin = `https://127.0.0.1:${(router.address() as { port: number }).port}`;
+    const response = await new Promise<{
+      body: string;
+      hsts: string | undefined;
+      permissions: string | undefined;
+      status: number;
+    }>((resolve, reject) => {
+      const outbound = secureRequest(
+        origin,
+        {
+          headers: { host: "converter.example" },
+          rejectUnauthorized: false,
+        },
+        (incoming) => {
+          let body = "";
+          incoming.setEncoding("utf8");
+          incoming.on("data", (chunk) => (body += chunk));
+          incoming.on("end", () => {
+            const hsts = incoming.headers["strict-transport-security"];
+            const permissions = incoming.headers["permissions-policy"];
+            resolve({
+              body,
+              hsts: Array.isArray(hsts) ? hsts.join(", ") : hsts,
+              permissions: Array.isArray(permissions)
+                ? permissions.join(", ")
+                : permissions,
+              status: incoming.statusCode!,
+            });
+          });
+        },
+      );
+      outbound.on("error", reject);
+      outbound.end();
+    });
+    expect(response).toEqual({
+      body: "secure",
+      hsts: HSTS,
+      permissions: PERMISSIONS_POLICY,
+      status: 200,
+    });
+    await Promise.all(
+      [router, upstream].map(
+        (server) => new Promise((resolve) => server.close(resolve)),
+      ),
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("invalid production origins fail before the router listens", () => {
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://[invalid",
+      frontend: "http://[invalid",
+      publicHosts: ["converter.example"],
+    }),
+  ).toThrow("Invalid URL");
+  for (const backend of [
+    "ftp://backend.example",
+    "http://user@backend.example",
+    "http://backend.example/path",
+    "http://backend.example/?query=1",
+    "http://backend.example/#fragment",
+  ])
+    expect(() =>
+      createRoutingFixture({
+        backend,
+        frontend: "http://frontend.example",
+        publicHosts: ["converter.example"],
+      }),
+    ).toThrow("must be an HTTP(S) origin");
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://backend.example",
+      frontend: "http://frontend.example",
+      publicHosts: [],
+    }),
+  ).toThrow("at least one public host");
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://backend.example",
+      frontend: "http://frontend.example",
+      publicHosts: ["bad host"],
+    }),
+  ).toThrow("invalid public host");
+});
+
+test("routing selection and normalization cover every ordered class", () => {
+  expect(selectUpstream("/api/v1")).toBe("backend");
+  expect(selectUpstream("/api/v1/jobs/1")).toBe("backend");
+  expect(selectUpstream("/health/live")).toBe("backend");
+  expect(selectUpstream("/metrics")).toBe("backend");
+  expect(selectUpstream("/docs/redirect")).toBe("backend");
+  expect(selectUpstream("/_FRONTEND/HEALTH/ready")).toBe("deny");
+  expect(selectUpstream("/API/v1")).toBe("frontend");
+  expect(selectUpstream("/missing")).toBe("frontend");
+  expect(normalizeRequestTarget("/a/./b/../c?q=1")).toEqual({
+    path: "/a/c",
+    requestTarget: "/a/c?q=1",
   });
-  const origin = await listen(router);
-  expect(await call(origin, "GET", "/missing%20path")).toEqual({
-    body: "",
-    cookies: [],
-    status: 502,
+  expect(normalizeRequestTarget("/a%5Cb")).toEqual({
+    path: "/a/b",
+    requestTarget: "/a/b",
   });
-  expect(await call(origin, "GET", "/caf%C3%A9")).toEqual({
-    body: "",
-    cookies: [],
-    status: 502,
-  });
-  await new Promise((resolve) => router.close(resolve));
+});
+
+test("TLS files are optional only as a complete pair", () => {
+  expect(loadTls(undefined, undefined)).toBeUndefined();
+  expect(() => loadTls("cert.pem", undefined)).toThrow("must be set together");
+  expect(() => loadTls(undefined, "key.pem")).toThrow("must be set together");
 });
 
 test("upstream failures are empty before headers and destroy started bodies", async () => {

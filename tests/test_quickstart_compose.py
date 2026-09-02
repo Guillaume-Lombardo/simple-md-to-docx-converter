@@ -25,6 +25,8 @@ SIMPLE_OVERLAY = ROOT / "compose.simple.yaml"
 PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
+NEXTJS_OVERLAY = ROOT / "compose.nextjs.yaml"
+NEXTJS_PODMAN_TRUSTED_OVERLAY = ROOT / "compose.nextjs-podman-trusted-upstream.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
 ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
@@ -239,6 +241,35 @@ def test_podman_trusted_upstream_overlay_uses_rootless_user_mode_network() -> No
     assert "ports:" not in overlay
 
 
+def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
+    overlay = NEXTJS_OVERLAY.read_text(encoding="utf-8")
+
+    assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in overlay
+    assert overlay.count("MARKWEAVE_CUTOVER_FRONTEND_IMAGE") == 2
+    assert "ports: !reset []" in overlay
+    assert "BACKEND_ORIGIN: http://markweave:8080" in overlay
+    assert "FRONTEND_ORIGIN: http://frontend:3000" in overlay
+    assert "command: [node, router.mjs]" in overlay
+    assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080" in overlay
+    assert "MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in overlay
+    assert "MARKWEAVE_STANDALONE_DATA_DIRECTORY" not in overlay
+    assert overlay.count("read_only: true") == 2
+    assert overlay.count('user: "1001:0"') == 2
+    assert overlay.count("pids_limit: 64") == 2
+    assert "/_frontend/health/ready" in overlay
+
+
+def test_nextjs_cni_free_overlay_shares_only_the_loopback_namespace() -> None:
+    overlay = NEXTJS_PODMAN_TRUSTED_OVERLAY.read_text(encoding="utf-8")
+
+    assert overlay.count("network_mode: service:markweave") == 2
+    assert overlay.count("networks: !reset []") == 2
+    assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:3100" in overlay
+    assert "BACKEND_ORIGIN: http://127.0.0.1:8080" in overlay
+    assert "FRONTEND_ORIGIN: http://127.0.0.1:3000" in overlay
+    assert 'ROUTER_PORT: "3100"' in overlay
+
+
 def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
     overlay = PODMAN_OVERLAY.read_text(encoding="utf-8")
 
@@ -261,7 +292,7 @@ def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None
     assert "driver_opts: !reset {}" in overlay
 
 
-def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> None:
+def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> None:  # noqa: PLR0915
     script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
 
     assert "sudo" not in script
@@ -315,6 +346,11 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "down --volumes" not in script
     assert "no physical capacity cap" in script
     assert "Markweave is ready with $runtime_name" in script
+    assert "compose.nextjs.yaml" in script
+    assert "compose.nextjs-podman-trusted-upstream.yaml" in script
+    assert "wait_for_router" in script
+    assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
+    assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
 
 
 def test_simple_quickstart_has_an_explicit_warned_insecure_mode() -> None:
@@ -366,6 +402,10 @@ def test_quickstart_script_uses_private_create_once_state_and_exact_cleanup() ->
     assert "markweave-data" not in script
     assert "clamav-signatures" not in script
     assert "/quickstart-template.docx" in (ROOT / ".gitignore").read_text()
+    assert "compose.nextjs.yaml" in script
+    assert "wait_for_router" in script
+    assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
+    assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
 
 
 @pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
@@ -388,7 +428,8 @@ def test_simple_quickstart_probes_the_browser_origin_before_readiness() -> None:
     script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
 
     assert 'os.environ.get("MARKWEAVE_PUBLIC_ORIGIN")' in script
-    assert 'headers={"Origin": origin}' in script
+    assert 'headers={"Content-Type": "application/json", "Origin": origin}' in script
+    assert '"http://127.0.0.1:8080/api/v1/login"' in script
     assert 'os.environ.get("MARKWEAVE_INSECURE_EVALUATION_MODE")' in script
     assert '("null", "https://attacker.invalid")' in script
     assert "does not match the requested login-origin policy" in script
@@ -413,6 +454,37 @@ def test_quickstarts_reject_multiline_public_origins(
 
     assert rejected.returncode != 0
     assert "The public origin must be a single-line HTTP origin." in rejected.stderr
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_reject_partial_or_mutable_cutover_pairs(
+    tmp_path: Path,
+    quickstart: Path,
+) -> None:
+    common = os.environ | {"XDG_STATE_HOME": str(tmp_path / "state")}
+    partial = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=common | {"MARKWEAVE_CUTOVER_BACKEND_IMAGE": MARKWEAVE_DIGEST},
+    )
+    mutable = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=common
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": "ghcr.io/guillaume-lombardo/md-converter:0.6.0",
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": "ghcr.io/guillaume-lombardo/md-converter-web:0.6.0",
+        },
+    )
+
+    assert partial.returncode != 0
+    assert "must be supplied together" in partial.stderr
+    assert mutable.returncode != 0
+    assert "immutable digest" in mutable.stderr
 
 
 @pytest.mark.parametrize(
@@ -664,7 +736,10 @@ def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:
     assert 'podman rm --force "$application_name"' in runner
     assert "MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2" in runner
     assert "verify-session-expiration" in runner
-    assert 'podman rm --force "$expiry_application_name" "$clamav_name"' in runner
+    assert (
+        'podman rm --force "$router_name" "$expiry_application_name" "$clamav_name"'
+        in runner
+    )
     assert "--policy-evidence" in runner
     assert "--policy-evidence" not in RUNNER.read_text(encoding="utf-8")
     assert "--policy-evidence" not in SIMPLE_RUNNER.read_text(encoding="utf-8")

@@ -13,6 +13,8 @@ readonly work_bytes=268435456
 readonly project="${MARKWEAVE_QUICKSTART_PROJECT:-markweave}"
 readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"
 readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"
+readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-}"
+readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-}"
 readonly work_volume="${project}_markweave-work"
 readonly blkid=/usr/sbin/blkid
 readonly losetup=/usr/sbin/losetup
@@ -32,12 +34,41 @@ fail() {
 }
 
 validate_project_and_port() {
+  local backend_version frontend_version
   [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || \
     fail "The quickstart project name must contain only lowercase letters, numbers, underscores, and hyphens."
   [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || \
     fail "The quickstart port must be an integer from 1 through 65535."
   [[ "$public_origin" != *$'\n'* && "$public_origin" != *$'\r'* ]] || \
     fail "The public origin must be a single-line HTTP origin."
+  if { [[ -n "$cutover_backend_image" ]] && [[ -z "$cutover_frontend_image" ]]; } ||
+    { [[ -z "$cutover_backend_image" ]] && [[ -n "$cutover_frontend_image" ]]; }; then
+    fail "The backend and frontend cutover images must be supplied together."
+  fi
+  if [[ -n "$cutover_backend_image" ]]; then
+    [[ "$cutover_backend_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || \
+      fail "The backend cutover image must use the trusted package, final version, and immutable digest."
+    [[ "$cutover_frontend_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter-web:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || \
+      fail "The frontend cutover image must use the trusted package, final version, and immutable digest."
+    backend_version="${cutover_backend_image##*:}"
+    backend_version="${backend_version%@*}"
+    frontend_version="${cutover_frontend_image##*:}"
+    frontend_version="${frontend_version%@*}"
+    [[ "$backend_version" == "$frontend_version" ]] || \
+      fail "The backend and frontend cutover image versions must match."
+  fi
+}
+
+router_public_host() {
+  local authority
+  case "$public_origin" in
+    http://*) authority="${public_origin#http://}" ;;
+    https://*) authority="${public_origin#https://}" ;;
+    *) fail "The public origin must use HTTP or HTTPS." ;;
+  esac
+  [[ -n "$authority" && "$authority" != *['/?#@']* ]] || \
+    fail "The public origin must contain only an origin without credentials or a path."
+  printf '%s\n' "$authority"
 }
 
 require_supported_host() {
@@ -289,15 +320,23 @@ write_runtime_env() {
   fi
   runtime_env="$(mktemp "$state_directory/compose.XXXXXX")"
   password="$(sed -n 's/^MARKWEAVE_INITIAL_ADMIN_PASSWORD=//p' "$password_file")"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$port" "$public_origin" "$device" >"$runtime_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=%s\nMARKWEAVE_ROUTER_PUBLIC_HOST=%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$public_origin" "$(router_public_host)" "$device" \
+    >"$runtime_env"
   chmod 0600 -- "$runtime_env"
 }
 
 compose() {
+  local files=(--file "$repository/compose.yaml")
+  if [[ -n "$cutover_backend_image" ]]; then
+    files+=(--file "$repository/compose.nextjs.yaml")
+  fi
   MARKWEAVE_PORT="$port" MARKWEAVE_PUBLIC_ORIGIN="$public_origin" \
+    MARKWEAVE_ROUTER_PUBLIC_HOST="$(router_public_host)" \
+    MARKWEAVE_CUTOVER_BACKEND_IMAGE="$cutover_backend_image" \
+    MARKWEAVE_CUTOVER_FRONTEND_IMAGE="$cutover_frontend_image" \
     docker compose --project-name "$project" --project-directory "$repository" \
-    --file "$repository/compose.yaml" --env-file "$runtime_env" "$@"
+    "${files[@]}" --env-file "$runtime_env" "$@"
 }
 
 application_container() {
@@ -311,6 +350,34 @@ application_is_running() {
   container="$(application_container)"
   [[ -n "$container" ]] || return 1
   [[ "$(docker inspect --format '{{.State.Running}}' "$container")" == true ]]
+}
+
+router_container() {
+  docker container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=router"
+}
+
+wait_for_router() {
+  local container
+  [[ -n "$cutover_backend_image" ]] || return 0
+  for _ in $(seq 1 120); do
+    container="$(router_container)"
+    if [[ -n "$container" ]] && \
+      curl --fail --silent --show-error --header "Host: $(router_public_host)" \
+        "http://127.0.0.1:$port/login" >/dev/null 2>&1 && \
+      [[ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --header "Host: $(router_public_host)" \
+        "http://127.0.0.1:$port/api/v1/session")" == 401 ]]; then
+      return 0
+    fi
+    if [[ -n "$container" ]] && \
+      [[ "$(docker inspect --format '{{.State.Status}}' "$container")" == exited ]]; then
+      fail "The Markweave router exited before becoming ready."
+    fi
+    sleep 2
+  done
+  fail "Timed out waiting for the Markweave router."
 }
 
 verify_application_public_origin() {
@@ -377,6 +444,7 @@ start() {
   compose_started=true
   compose up --detach
   verify_application_public_origin
+  wait_for_router
   start_succeeded=true
   echo "Markweave is starting at http://localhost:$port"
   echo "Template: $template_file"
@@ -451,7 +519,11 @@ case "${1:-}" in
     ;;
   logs)
     [[ $# -eq 1 ]] || fail "usage: scripts/quickstart.sh logs"
-    compose_status logs --follow clamav
+    if [[ -n "$cutover_backend_image" ]]; then
+      compose_status logs --follow markweave frontend router clamav
+    else
+      compose_status logs --follow markweave clamav
+    fi
     ;;
   *)
     fail "usage: scripts/quickstart.sh {up|down|password|ps|logs}"

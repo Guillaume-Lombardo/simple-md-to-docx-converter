@@ -45,6 +45,7 @@ test("tooling and runtime preserve the reviewed production configuration", async
     assert.ok(eslint.includes(JSON.stringify(ignored)));
   const container = await readFile("Containerfile", "utf8");
   assert.match(container, /COPY --from=build[^\n]+next\.config\.ts/);
+  assert.match(container, /COPY --chown=1001:0 router\.mjs \.\/router\.mjs/);
   const generator = await readFile("scripts/generate-openapi.mjs", "utf8");
   assert.doesNotMatch(generator, /process\.exit\s*\(/);
   assert.match(generator, /result\.error/);
