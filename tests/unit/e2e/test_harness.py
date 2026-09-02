@@ -304,6 +304,10 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
 @pytest.mark.unit
 def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
+    probe_function = runner.index("wait_for_embedded_worker_idle()")
+    probe_start = runner.index("from pathlib import Path", probe_function)
+    probe_end = runner.index("\n'\n}", probe_start)
+    compile(runner[probe_start:probe_end], str(RUNNER), "exec")
     main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
     admission_index = runner.index(
         "/e2e/browser-next-conversion-admission.test.mjs", main_index
@@ -313,7 +317,14 @@ def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() ->
     assert 'podman stop --time 15 "$worker_one_name" "$worker_two_name"' in phase
     assert "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2" in phase
     assert "MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY=3" in phase
-    assert "MARKWEAVE_WORKER_IDLE_POLL_SECONDS=60" in phase
+    assert "MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600" in phase
+    assert 'wait_for_embedded_worker_idle "$application_name"' in phase
+    assert 'expected_name = "md-converter-embedded-worker"' in runner
+    assert 'Path("/proc").glob("[0-9]*/task/[0-9]*")' in runner
+    assert 'and "futex" in wait_channel' in runner
+    assert "stable_samples >= 5" in runner
+    assert "deadline = monotonic() + 15" in runner
+    assert "sleep 1" not in phase
     assert phase.index('"${application_settings[@]}"') < phase.index(
         "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2"
     )
