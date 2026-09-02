@@ -256,7 +256,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 11
+    assert len(podman_runs) == 13
     assert all(
         '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs
@@ -265,3 +265,78 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
+    failure_index = runner.index(
+        "/e2e/browser-next-conversion-failure.test.mjs", main_index
+    )
+    admission_index = runner.index(
+        "/e2e/browser-next-conversion-admission.test.mjs", failure_index
+    )
+    restart_index = runner.index(
+        'podman restart --time 15 "$application_name"', admission_index
+    )
+    recovery_index = runner.index(
+        "/e2e/browser-next-conversion-restart.test.mjs", restart_index
+    )
+    short_lifetime_index = runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
+    expiry_index = runner.index(
+        "/e2e/browser-next-conversion-expiry.test.mjs", short_lifetime_index
+    )
+
+    assert runner.count("/e2e/browser-next-conversion.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-failure.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-admission.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
+    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 2
+    assert (
+        runner.index("/e2e/browser-next-auth.test.mjs")
+        < main_index
+        < failure_index
+        < admission_index
+        < restart_index
+        < recovery_index
+        < short_lifetime_index
+        < expiry_index
+    )
+
+
+@pytest.mark.unit
+def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    probe_function = runner.index("wait_for_embedded_worker_idle()")
+    probe_start = runner.index("from pathlib import Path", probe_function)
+    probe_end = runner.index("\n'\n}", probe_start)
+    compile(runner[probe_start:probe_end], str(RUNNER), "exec")
+    main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
+    admission_index = runner.index(
+        "/e2e/browser-next-conversion-admission.test.mjs", main_index
+    )
+    phase = runner[main_index:admission_index]
+
+    assert 'podman stop --time 15 "$worker_one_name" "$worker_two_name"' in phase
+    assert "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2" in phase
+    assert "MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY=3" in phase
+    assert "MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600" in phase
+    assert 'wait_for_embedded_worker_idle "$application_name"' in phase
+    assert 'expected_name = "md-converter-embedded-worker"' in runner
+    assert 'Path("/proc").glob("[0-9]*/task/[0-9]*")' in runner
+    assert 'and "futex" in wait_channel' in runner
+    assert "stable_samples >= 5" in runner
+    assert "deadline = monotonic() + 15" in runner
+    assert "sleep 1" not in phase
+    assert phase.index('"${application_settings[@]}"') < phase.index(
+        "MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2"
+    )
+    restore = runner[
+        admission_index : runner.index(
+            'podman restart --time 15 "$application_name"', admission_index
+        )
+    ]
+    assert 'podman start "$worker_one_name" "$worker_two_name"' in restore
+    assert restore.count('"${application_settings[@]}"') == 1
