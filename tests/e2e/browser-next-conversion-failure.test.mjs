@@ -49,19 +49,25 @@ test(
           response.url().endsWith("/api/v1/conversions") &&
           response.request().method() === "POST",
       );
+      const firstPoll = page.waitForResponse(
+        (response) =>
+          /^\/api\/v1\/conversions\/[0-9a-f-]{36}$/.test(
+            new URL(response.url()).pathname,
+          ) && response.request().method() === "GET",
+        { timeout: 30_000 },
+      );
       await page.getByRole("button", { name: "Start conversion" }).click();
       const acceptedResponse = await accepted;
       assert.equal(acceptedResponse.status(), 202);
       const acceptedJob = await acceptedResponse.json();
       assert.match(acceptedJob.id, /^[0-9a-f-]{36}$/);
 
-      const firstPoll = await page.waitForResponse(
-        (response) =>
-          response.url().endsWith(`/api/v1/conversions/${acceptedJob.id}`) &&
-          response.request().method() === "GET",
-        { timeout: 30_000 },
+      const firstPollResponse = await firstPoll;
+      assert.equal(
+        new URL(firstPollResponse.url()).pathname,
+        `/api/v1/conversions/${acceptedJob.id}`,
       );
-      assert.equal(firstPoll.status(), 200);
+      assert.equal(firstPollResponse.status(), 200);
       await page
         .getByText(/PDF.*configured limits/)
         .waitFor({ timeout: 180_000 });
