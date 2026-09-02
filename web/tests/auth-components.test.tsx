@@ -111,6 +111,7 @@ test("renewal provides labelled fields, logout, duration, and fresh-login naviga
     "true",
   );
   expect(screen.queryByText("Users")).toBeNull();
+  expect(screen.queryByText("Session policy")).toBeNull();
   const fields = screen.getAllByLabelText(/password/i);
   for (const field of fields)
     expect(field).toHaveAttribute("autocomplete", "new-password");

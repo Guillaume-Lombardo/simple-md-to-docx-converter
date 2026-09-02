@@ -134,3 +134,32 @@ test("user methods send exact safe JSON mutations", async () => {
     true,
   );
 });
+
+test("session policy methods require metadata, CSRF, and the current ETag", async () => {
+  const { api, transport } = setup();
+  transport.jsonWithMetadata.mockResolvedValue({
+    data: {},
+    etag: '"policy-8"',
+  });
+  await api.sessionPolicy();
+  await api.updateSessionPolicy('"policy-8"', 26, 11);
+  expect(transport.jsonWithMetadata.mock.calls[0]).toEqual([
+    "/api/v1/admin/session-policy",
+    expect.anything(),
+    { signal: undefined },
+  ]);
+  expect(transport.jsonWithMetadata.mock.calls[1]![0]).toBe(
+    "/api/v1/admin/session-policy",
+  );
+  expect(transport.jsonWithMetadata.mock.calls[1]![2]).toMatchObject({
+    csrf: true,
+    etag: '"policy-8"',
+    method: "PUT",
+  });
+  expect(JSON.parse(transport.jsonWithMetadata.mock.calls[1]![2].body)).toEqual(
+    {
+      admin_idle_minutes: 11,
+      user_idle_minutes: 26,
+    },
+  );
+});

@@ -1,6 +1,7 @@
 import { ApiError } from "../src/api/transport";
 import {
   administrationError,
+  idleMinutesError,
   appendExpectedFonts,
   expectedFonts,
   RequestFence,
@@ -22,6 +23,28 @@ test("expected fonts preserve trimmed order and explicit clearing", () => {
   const cleared = new FormData();
   appendExpectedFonts(cleared, " , ");
   expect(cleared.getAll("expected_fonts")).toEqual([""]);
+});
+
+test("policy duration validation consumes returned bounds, granularity, and ceiling", () => {
+  const bounds = {
+    default_minutes: 17,
+    maximum_minutes: 99,
+    minimum_minutes: 7,
+  };
+  expect(idleMinutesError("Duration", "9", bounds, 2, 600)).toBeUndefined();
+  expect(idleMinutesError("Duration", "8", bounds, 2, 600)).toContain(
+    "2-minute increments",
+  );
+  expect(idleMinutesError("Duration", "6", bounds, 2, 600)).toContain(
+    "between 7 and 10",
+  );
+  expect(idleMinutesError("Duration", "11", bounds, 2, 600)).toContain(
+    "between 7 and 10",
+  );
+  for (const invalid of ["", "1.5", "-1", " 9", "9007199254740993"])
+    expect(idleMinutesError("Duration", invalid, bounds, 2, 600)).toContain(
+      "whole number",
+    );
 });
 
 test("request fence aborts superseded work, blocks duplicates, and ignores late completion", () => {

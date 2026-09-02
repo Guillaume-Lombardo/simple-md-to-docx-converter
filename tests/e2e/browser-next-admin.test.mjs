@@ -73,6 +73,28 @@ function userCard(page, username) {
     });
 }
 
+function requiredPositiveInteger(name) {
+  const value = Number(process.env[name]);
+  assert.ok(Number.isSafeInteger(value) && value > 0, `${name} is required`);
+  return value;
+}
+
+function alternateDuration(policy, role, excluded = []) {
+  const bounds = policy[`${role}_idle_minutes_bounds`];
+  const maximum = Math.min(
+    bounds.maximum_minutes,
+    Math.floor(policy.absolute_lifetime_seconds / 60),
+  );
+  for (
+    let value = bounds.minimum_minutes;
+    value <= maximum;
+    value += policy.idle_minutes_granularity
+  ) {
+    if (!excluded.includes(value)) return value;
+  }
+  assert.fail(`No alternate ${role} policy duration is available`);
+}
+
 async function manage(page, name) {
   await templateCard(page, name)
     .getByRole("button", { name: "Manage" })
@@ -121,17 +143,183 @@ test(
       headless: true,
     });
     const contexts = [];
+    let adminPage;
+    let originalPolicy;
     try {
       for (const _name of ["admin", "alice", "bob"])
         contexts.push(
           await browser.newContext({ baseURL, serviceWorkers: "block" }),
         );
       const [adminContext, aliceContext, bobContext] = contexts;
-      const adminPage = await adminContext.newPage();
+      adminPage = await adminContext.newPage();
       const alicePage = await aliceContext.newPage();
       const bobPage = await bobContext.newPage();
 
       await login(adminContext, adminPage, "e2e-admin", "e2e-admin-password");
+
+      const checkpointUser = requiredPositiveInteger(
+        "MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES",
+      );
+      const checkpointAdmin = requiredPositiveInteger(
+        "MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES",
+      );
+      const checkpointRevision = requiredPositiveInteger(
+        "MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION",
+      );
+      originalPolicy = await api(
+        adminPage,
+        "GET",
+        "/api/v1/admin/session-policy",
+      );
+      assert.equal(originalPolicy.status, 200);
+      assert.ok(originalPolicy.etag);
+      assert.equal(originalPolicy.body.user_idle_minutes, checkpointUser);
+      assert.equal(originalPolicy.body.admin_idle_minutes, checkpointAdmin);
+      assert.equal(originalPolicy.body.revision, checkpointRevision);
+
+      await adminPage.getByRole("link", { name: "Session policy" }).click();
+      await adminPage.waitForURL("**/session-policy");
+      await adminPage
+        .getByRole("heading", { name: "Session policy", exact: true })
+        .waitFor();
+      assert.equal(
+        await adminPage
+          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .inputValue(),
+        String(checkpointUser),
+      );
+      assert.equal(
+        await adminPage
+          .getByRole("textbox", {
+            name: "Administrator inactivity duration (minutes)",
+          })
+          .inputValue(),
+        String(checkpointAdmin),
+      );
+      await adminPage.getByText(`${checkpointRevision}`, { exact: true }).waitFor();
+      await adminPage
+        .getByText(`${originalPolicy.body.absolute_lifetime_seconds} seconds`)
+        .waitFor();
+
+      let policyPuts = 0;
+      const countPolicyPuts = (request) => {
+        if (
+          request.url().endsWith("/api/v1/admin/session-policy") &&
+          request.method() === "PUT"
+        )
+          policyPuts += 1;
+      };
+      const externalUser = alternateDuration(originalPolicy.body, "user", [
+        checkpointUser,
+      ]);
+      const externalAdmin = alternateDuration(originalPolicy.body, "admin", [
+        checkpointAdmin,
+      ]);
+      const externallyChanged = await api(
+        adminPage,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {
+          admin_idle_minutes: externalAdmin,
+          user_idle_minutes: externalUser,
+        },
+        { "If-Match": originalPolicy.etag },
+      );
+      assert.equal(externallyChanged.status, 200);
+      adminPage.on("request", countPolicyPuts);
+      const desiredUser = alternateDuration(originalPolicy.body, "user", [
+        checkpointUser,
+        externalUser,
+      ]);
+      const desiredAdmin = alternateDuration(originalPolicy.body, "admin", [
+        checkpointAdmin,
+        externalAdmin,
+      ]);
+      await adminPage
+        .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+        .fill(String(desiredUser));
+      await adminPage
+        .getByRole("textbox", {
+          name: "Administrator inactivity duration (minutes)",
+        })
+        .fill(String(desiredAdmin));
+      const stalePolicy = adminPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/admin/session-policy") &&
+          response.request().method() === "PUT" &&
+          response.status() === 412,
+      );
+      await adminPage
+        .getByRole("button", { name: "Save session policy" })
+        .click();
+      await stalePolicy;
+      await adminPage.getByText(/changed on the server/).waitFor();
+      assert.equal(
+        await adminPage
+          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .inputValue(),
+        String(externalUser),
+      );
+      await adminPage
+        .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+        .fill(String(desiredUser));
+      await adminPage
+        .getByRole("textbox", {
+          name: "Administrator inactivity duration (minutes)",
+        })
+        .fill(String(desiredAdmin));
+      const savedPolicy = adminPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/admin/session-policy") &&
+          response.request().method() === "PUT" &&
+          response.status() === 200,
+      );
+      const authoritativeRefresh = adminPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/admin/session-policy") &&
+          response.request().method() === "GET" &&
+          response.status() === 200,
+      );
+      await adminPage
+        .getByRole("button", { name: "Save session policy" })
+        .click();
+      const savedPolicyResponse = await savedPolicy;
+      assert.deepEqual(await savedPolicyResponse.request().postDataJSON(), {
+        admin_idle_minutes: desiredAdmin,
+        user_idle_minutes: desiredUser,
+      });
+      const refreshedPolicy = await (await authoritativeRefresh).json();
+      assert.equal(refreshedPolicy.user_idle_minutes, desiredUser);
+      assert.equal(refreshedPolicy.admin_idle_minutes, desiredAdmin);
+      await adminPage.getByText("Session policy updated.").waitFor();
+      assert.equal(
+        await adminPage
+          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .inputValue(),
+        String(desiredUser),
+      );
+      assert.equal(policyPuts, 2, "a stale or successful policy PUT was replayed");
+      const authoritativePolicy = await api(
+        adminPage,
+        "GET",
+        "/api/v1/admin/session-policy",
+      );
+      assert.equal(authoritativePolicy.body.user_idle_minutes, desiredUser);
+      assert.equal(authoritativePolicy.body.admin_idle_minutes, desiredAdmin);
+      assert.ok(authoritativePolicy.body.revision > checkpointRevision);
+      const restoredPolicy = await api(
+        adminPage,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        {
+          admin_idle_minutes: checkpointAdmin,
+          user_idle_minutes: checkpointUser,
+        },
+        { "If-Match": authoritativePolicy.etag },
+      );
+      assert.equal(restoredPolicy.status, 200);
+      adminPage.off("request", countPolicyPuts);
+
       await adminPage.getByRole("link", { name: "Users" }).click();
       await adminPage.waitForURL("**/users");
       await adminPage
@@ -227,6 +415,25 @@ test(
       await alicePage.getByText("Administrator access is required.").waitFor();
       assert.equal(forbiddenUserLists, 0);
       alicePage.off("request", countForbiddenUserLists);
+      let forbiddenPolicyGets = 0;
+      const countForbiddenPolicyGets = (request) => {
+        if (
+          request.url().endsWith("/api/v1/admin/session-policy") &&
+          request.method() === "GET"
+        )
+          forbiddenPolicyGets += 1;
+      };
+      alicePage.on("request", countForbiddenPolicyGets);
+      await alicePage.goto(`${baseURL}/session-policy`, {
+        waitUntil: "networkidle",
+      });
+      await alicePage.getByText("Administrator access is required.").waitFor();
+      assert.equal(forbiddenPolicyGets, 0);
+      assert.equal(
+        (await api(alicePage, "GET", "/api/v1/admin/session-policy")).status,
+        403,
+      );
+      alicePage.off("request", countForbiddenPolicyGets);
       await alicePage.getByRole("link", { name: "Templates" }).click();
       await alicePage.waitForURL("**/templates");
       await alicePage.getByRole("textbox", { name: "Name" }).fill(templateName);
@@ -473,6 +680,34 @@ test(
         .getByText("Your session ended. Please sign in again.")
         .waitFor();
     } finally {
+      if (adminPage && originalPolicy?.etag) {
+        try {
+          const current = await api(
+            adminPage,
+            "GET",
+            "/api/v1/admin/session-policy",
+          );
+          if (
+            current.status === 200 &&
+            (current.body.user_idle_minutes !==
+              originalPolicy.body.user_idle_minutes ||
+              current.body.admin_idle_minutes !==
+                originalPolicy.body.admin_idle_minutes)
+          )
+            await api(
+              adminPage,
+              "PUT",
+              "/api/v1/admin/session-policy",
+              {
+                admin_idle_minutes: originalPolicy.body.admin_idle_minutes,
+                user_idle_minutes: originalPolicy.body.user_idle_minutes,
+              },
+              { "If-Match": current.etag },
+            );
+        } catch {
+          console.warn("Policy rollback could not be completed.");
+        }
+      }
       await Promise.allSettled(contexts.map((context) => context.close()));
       await browser.close();
     }

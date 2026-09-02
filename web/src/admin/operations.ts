@@ -1,4 +1,5 @@
 import { ApiError } from "../api/transport";
+import type { IdleSessionPolicyDurationBoundsResponse } from "../api/generated/types.gen";
 
 export const SESSION_ENDED = "Your session ended. Please sign in again.";
 
@@ -84,4 +85,37 @@ export function administrationError(
     return "The requested value already exists.";
   if (error instanceof ApiError && error.status === 422) return error.message;
   return fallback;
+}
+
+export function idleMinutesError(
+  label: string,
+  raw: string,
+  bounds: IdleSessionPolicyDurationBoundsResponse,
+  granularity: number,
+  absoluteLifetimeSeconds: number,
+): string | undefined {
+  if (!/^[0-9]+$/.test(raw))
+    return `${label} must be a whole number of minutes.`;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value))
+    return `${label} must be a whole number of minutes.`;
+  const effectiveMaximum = effectiveIdleMaximum(
+    bounds,
+    absoluteLifetimeSeconds,
+  );
+  if (value < bounds.minimum_minutes || value > effectiveMaximum)
+    return `${label} must be between ${bounds.minimum_minutes} and ${effectiveMaximum} minutes.`;
+  if ((value - bounds.minimum_minutes) % granularity !== 0)
+    return `${label} must use ${granularity}-minute increments starting at ${bounds.minimum_minutes}.`;
+  return undefined;
+}
+
+export function effectiveIdleMaximum(
+  bounds: IdleSessionPolicyDurationBoundsResponse,
+  absoluteLifetimeSeconds: number,
+): number {
+  return Math.min(
+    bounds.maximum_minutes,
+    Math.floor(absoluteLifetimeSeconds / 60),
+  );
 }

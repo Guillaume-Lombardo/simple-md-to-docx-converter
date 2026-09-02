@@ -99,6 +99,11 @@ test("Next authentication shell uses FastAPI authority for three identities", as
     await adminPage
       .getByRole("heading", { name: "Users", exact: true })
       .waitFor();
+    const policyLink = adminPage.getByRole("link", {
+      name: "Session policy",
+      exact: true,
+    });
+    assert.equal(await policyLink.getAttribute("href"), "/session-policy");
     await adminPage.goto(`${baseURL}/convert`, { waitUntil: "networkidle" });
     const adminSession = await api(adminPage, "GET", "/api/v1/session");
     assert.equal(adminSession.status, 200);
@@ -139,6 +144,10 @@ test("Next authentication shell uses FastAPI authority for three identities", as
     );
     assert.equal(
       await alicePage.getByText("Users", { exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await alicePage.getByText("Session policy", { exact: true }).count(),
       0,
     );
 

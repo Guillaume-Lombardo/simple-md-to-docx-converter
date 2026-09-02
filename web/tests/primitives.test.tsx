@@ -56,6 +56,10 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
     "href",
     "/users",
   );
+  expect(screen.getByRole("link", { name: "Session policy" })).toHaveAttribute(
+    "href",
+    "/session-policy",
+  );
   expect(screen.getByText("Admin (Administrator)")).toBeVisible();
   expect(screen.getByText(/15 minutes of inactivity/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();

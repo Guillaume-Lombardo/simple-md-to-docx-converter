@@ -1,4 +1,5 @@
 import type {
+  IdleSessionPolicyResponse,
   TemplateAdministrationContextResponse,
   TemplatePageResponse,
   TemplateResponse,
@@ -11,6 +12,7 @@ import {
   vCreateTemplateApiV1TemplatesPostResponse,
   vCreateUserApiV1AdminUsersPostResponse,
   vDeleteTemplateApiV1TemplatesTemplateIdDeleteResponse,
+  vGetSessionPolicyApiV1AdminSessionPolicyGetResponse,
   vGetTemplateAdministrationContextApiV1TemplateContextGetResponse,
   vGetTemplateApiV1TemplatesTemplateIdGetResponse,
   vListTemplateVersionsApiV1TemplatesTemplateIdVersionsGetResponse,
@@ -24,6 +26,7 @@ import {
   vSetUserActiveApiV1AdminUsersUserIdActivePatchResponse,
   vSetUserPasswordChangeRequiredApiV1AdminUsersUserIdPasswordChangeRequiredPatchResponse,
   vUpdateTemplateApiV1TemplatesTemplateIdPatchResponse,
+  vUpdateSessionPolicyApiV1AdminSessionPolicyPutResponse,
 } from "../api/generated/valibot.gen";
 import { ApiTransport, type JsonResult } from "../api/transport";
 import { appendExpectedFonts } from "./operations";
@@ -219,6 +222,38 @@ export class AdministrationApi {
       "/api/v1/admin/users",
       vListUsersApiV1AdminUsersGetResponse,
       { signal },
+    );
+  }
+
+  sessionPolicy(
+    signal?: AbortSignal,
+  ): Promise<JsonResult<IdleSessionPolicyResponse>> {
+    return this.transport.jsonWithMetadata(
+      "/api/v1/admin/session-policy",
+      vGetSessionPolicyApiV1AdminSessionPolicyGetResponse,
+      { signal },
+    );
+  }
+
+  updateSessionPolicy(
+    etag: string,
+    userIdleMinutes: number,
+    adminIdleMinutes: number,
+    signal?: AbortSignal,
+  ): Promise<JsonResult<IdleSessionPolicyResponse>> {
+    return this.transport.jsonWithMetadata(
+      "/api/v1/admin/session-policy",
+      vUpdateSessionPolicyApiV1AdminSessionPolicyPutResponse,
+      {
+        body: JSON.stringify({
+          admin_idle_minutes: adminIdleMinutes,
+          user_idle_minutes: userIdleMinutes,
+        }),
+        csrf: true,
+        etag,
+        method: "PUT",
+        signal,
+      },
     );
   }
 

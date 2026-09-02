@@ -64,10 +64,13 @@ export function AppShell({
               >
                 Users
               </Link>
-              {/* T66 supplies the authoritative metadata before T63 delivers this route. */}
-              <span aria-disabled="true" className="text-muted">
+              <Link
+                aria-current={current === "Session policy" ? "page" : undefined}
+                className="text-accent underline-offset-4 hover:underline"
+                href="/session-policy"
+              >
                 Session policy
-              </span>
+              </Link>
             </>
           )}
           {user && (

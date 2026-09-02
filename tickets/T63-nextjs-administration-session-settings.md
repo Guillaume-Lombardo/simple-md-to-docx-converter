@@ -52,6 +52,8 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 * 2026-09-02: Blocked on T65 for authoritative preferred/fallback template identifiers, template upload limits, and the operator-configured absolute session ceiling required by the administration UI.
 * 2026-09-02: Started from verified `main` at `634d3fe6112f9d2040a708b0acc9599b509f2d78` after T65 completion; implementing the presentation-only Next.js administration workflows with FastAPI remaining authoritative.
 * 2026-09-02: Template, user, and navigation work continues while the session-policy control waits for T66 to expose authoritative role-specific minimum, default, and maximum metadata; T63 remains In Progress and does not duplicate those backend values.
+* 2026-09-02: T66 landed on verified `main` at `27b166adb938f791e1ac4dba06c61dc25775c546`; session-policy implementation resumed using only its generated authoritative metadata while shared final-image harness integration remains pending T62.
+* 2026-09-02: Implemented the metadata-driven administrator session-policy workspace with required ETag/CSRF, atomic role updates, authoritative refresh, dynamic bounds and absolute-ceiling validation, stale-write no-replay behavior, session-expiry handling, accessible navigation, and dedicated unit/component/browser coverage. Frontend gates, the production build/runtime tests, focused backend policy tests, and documentation/CI-selection tests pass; both-profile final-image invocation and checkpoint environment wiring remain pending T62's shared-harness merge.
 
 ## Synchronization
 
