@@ -653,6 +653,10 @@ podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   "$application_name" node --test /e2e/browser-next-auth.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  "$application_name" node --test /e2e/browser-next-conversion.test.mjs
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime

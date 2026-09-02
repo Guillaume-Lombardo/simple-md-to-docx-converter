@@ -265,3 +265,22 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    invocation = (
+        "podman exec \\\n"
+        '  --env MARKWEAVE_E2E_PROFILE="$profile" \\\n'
+        "  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \\\n"
+        '  "$application_name" node --test '
+        "/e2e/browser-next-conversion.test.mjs"
+    )
+
+    assert runner.count(invocation) == 1
+    assert (
+        runner.index("/e2e/browser-next-auth.test.mjs")
+        < runner.index("/e2e/browser-next-conversion.test.mjs")
+        < runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
+    )

@@ -2,7 +2,7 @@
 ticket: T62
 linear_id: G1L-526
 linear_url: https://linear.app/g1lom/issue/G1L-526/t62-migrate-the-conversion-workflow-to-nextjs
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -47,6 +47,8 @@ Migrate the complete asynchronous conversion browser workflow to the Next.js fro
 
 * 2026-09-01: Created with exact behavioral parity to the delivered asynchronous conversion workflow and no backend-domain rewrite.
 * 2026-09-02: Blocked on T65 so the Next.js workspace can consume authoritative conversion upload limits and resolved immutable-template selection metadata instead of duplicating backend policy.
+* 2026-09-02: Implementation started from verified `main` at `634d3fe6112f9d2040a708b0acc9599b509f2d78` on `feat/T62-nextjs-conversion-ui`. Work is limited to the unpublished Next.js conversion workspace and dedicated tests; FastAPI remains authoritative and the legacy conversion page remains available until T64.
+* 2026-09-02: Implemented the protected Next.js conversion workspace, authoritative runtime-option loading, bounded file and template selection, stable idempotent submission, server-directed progressive polling, cancellation, recent-job reopening, safe result download, and deterministic request fencing. Added controller/component/transport coverage and a dedicated final-image browser workflow wired into both storage profiles; local frontend, unit, static, and build checks pass, while PostgreSQL, RustFS, and rootless final-image execution remain assigned to hosted CI.
 
 ## Synchronization
 

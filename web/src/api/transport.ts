@@ -32,6 +32,8 @@ export interface RequestOptions {
 export interface JsonResult<T> {
   data: T;
   etag?: string;
+  retryAfterSeconds?: number;
+  status: number;
 }
 
 function cookieValue(cookie: string, name: string): string | undefined {
@@ -120,7 +122,20 @@ export class ApiTransport {
     const parsed = safeParse(schema, value);
     if (!parsed.success) throw unexpected(response.status);
     const etag = response.headers.get("etag") ?? undefined;
-    return { data: parsed.output, ...(etag ? { etag } : {}) };
+    const retryAfter = response.headers.get("retry-after");
+    let retryAfterSeconds: number | undefined;
+    if (retryAfter !== null) {
+      if (!/^[1-9][0-9]*$/.test(retryAfter)) throw unexpected(response.status);
+      retryAfterSeconds = Number(retryAfter);
+      if (!Number.isSafeInteger(retryAfterSeconds))
+        throw unexpected(response.status);
+    }
+    return {
+      data: parsed.output,
+      status: response.status,
+      ...(etag ? { etag } : {}),
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    };
   }
 
   async multipart<
@@ -131,7 +146,18 @@ export class ApiTransport {
     schema: TSchema,
     options: Omit<RequestOptions, "body"> = {},
   ): Promise<InferOutput<TSchema>> {
-    return this.json(path, schema, {
+    return (await this.multipartWithMetadata(path, form, schema, options)).data;
+  }
+
+  async multipartWithMetadata<
+    TSchema extends BaseSchema<unknown, unknown, BaseIssue<unknown>>,
+  >(
+    path: ApiPath,
+    form: FormData,
+    schema: TSchema,
+    options: Omit<RequestOptions, "body"> = {},
+  ): Promise<JsonResult<InferOutput<TSchema>>> {
+    return this.jsonWithMetadata(path, schema, {
       ...options,
       body: form,
       method: options.method ?? "POST",
