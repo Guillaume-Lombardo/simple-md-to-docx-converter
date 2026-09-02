@@ -30,6 +30,7 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 * T59
 * T61
 * T17
+* T65
 
 ## Implementation boundary
 
@@ -47,6 +48,7 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 ## Progress
 
 * 2026-09-01: Created with the administrator inactivity-duration control explicitly dependent on the FastAPI-owned T59 policy.
+* 2026-09-02: Blocked on T65 for authoritative preferred/fallback template identifiers, template upload limits, and the operator-configured absolute session ceiling required by the administration UI.
 
 ## Synchronization
 

@@ -114,6 +114,30 @@ def test_list_and_search_forward_only_documented_filters(mocker, capsys) -> None
     assert output[1] == "No templates."
 
 
+def test_context_reads_authoritative_selection_and_upload_limit(mocker, capsys) -> None:
+    transport = _Transport(
+        _response(
+            200,
+            {
+                "preferred_template_id": TEMPLATE_ID,
+                "system_fallback_template_id": None,
+                "template_max_archive_bytes": 654_321,
+            },
+        )
+    )
+    _install(mocker, transport)
+
+    assert main(("--json", "templates", "context")) == 0
+    assert transport.requests == [("GET", "/api/v1/template-context", {})]
+    assert json.loads(capsys.readouterr().out) == {
+        "template_context": {
+            "preferred_template_id": TEMPLATE_ID,
+            "system_fallback_template_id": None,
+            "template_max_archive_bytes": 654_321,
+        }
+    }
+
+
 def test_search_requires_an_explicit_remote_filter(mocker, capsys) -> None:
     transport = _Transport()
     _install(mocker, transport)

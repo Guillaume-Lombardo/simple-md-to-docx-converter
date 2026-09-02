@@ -108,6 +108,7 @@ def test_admin_commands_cover_two_users_authorization_and_audit_pagination(
         "user_idle_minutes": 30,
         "admin_idle_minutes": 15,
         "revision": 0,
+        "absolute_lifetime_seconds": 28_800,
     }
     assert main(("session-policy", "get", "--profile", "alice")) == 1
     assert "not authorized" in capsys.readouterr().err

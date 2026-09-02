@@ -14,6 +14,7 @@ from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.schema import (
     ConversionJobRow,
     SystemTemplateSelectionRow,
+    TemplatePreferenceRow,
     TemplateRow,
     UserRow,
 )
@@ -27,7 +28,7 @@ from tests.template_records import publish_template_pair
 @pytest.mark.integration
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
-def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
+def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PLR0915
     request: pytest.FixtureRequest,
 ) -> None:
     unique = uuid4().hex
@@ -97,13 +98,39 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(
                         )
                     )
                 connection.execute(
+                    delete(TemplatePreferenceRow).where(
+                        TemplatePreferenceRow.user_id == str(owner_id)
+                    )
+                )
+                connection.execute(
                     delete(TemplateRow).where(TemplateRow.id == str(template_id))
                 )
                 connection.execute(delete(UserRow).where(UserRow.id == str(owner_id)))
             engine.dispose()
 
         request.addfinalizer(cleanup)
+        defaults = client.get("/api/v1/conversion-options").json()
+        assert defaults == {
+            "conversion_upload_max_bytes": 128,
+            "resolved_template": None,
+            "template_version_id": None,
+            "selection_source": "pandoc_default",
+        }
         selections.set_system_fallback(template_id)
+        options = client.get("/api/v1/conversion-options").json()
+        assert options["selection_source"] == "system_fallback"
+        assert options["resolved_template"]["id"] == str(template_id)
+        assert options["template_version_id"] == str(version_id)
+        assert client.get("/api/v1/template-context").json() == {
+            "preferred_template_id": None,
+            "system_fallback_template_id": str(template_id),
+            "template_max_archive_bytes": 1_000_000,
+        }
+        selections.set_preferred(owner_id, template_id)
+        assert (
+            client.get("/api/v1/conversion-options").json()["selection_source"]
+            == "preferred"
+        )
 
         page = client.get("/convert")
         assert page.status_code == 200

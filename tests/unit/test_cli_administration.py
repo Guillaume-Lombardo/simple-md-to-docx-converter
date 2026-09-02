@@ -379,8 +379,18 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
     remote, capsys
 ) -> None:
     _store, _constructor, client = remote
-    initial = {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
-    updated = {"user_idle_minutes": 25, "admin_idle_minutes": 10, "revision": 1}
+    initial = {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+        "absolute_lifetime_seconds": 28_800,
+    }
+    updated = {
+        "user_idle_minutes": 25,
+        "admin_idle_minutes": 10,
+        "revision": 1,
+        "absolute_lifetime_seconds": 28_800,
+    }
     client.request.side_effect = (
         _response(200, initial, etag='"idle-session-policy-0"'),
         _response(200, initial, etag='"idle-session-policy-0"'),
@@ -405,7 +415,8 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
         == 0
     )
     assert capsys.readouterr().out == (
-        "Users: 25 minutes; administrators: 10 minutes; revision: 1.\n"
+        "Users: 25 minutes; administrators: 10 minutes; absolute lifetime: "
+        "28800 seconds; revision: 1.\n"
     )
     update = client.request.call_args_list[-1]
     assert update.args == ("PUT", "/api/v1/admin/session-policy")

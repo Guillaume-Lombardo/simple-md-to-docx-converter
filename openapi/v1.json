@@ -234,6 +234,49 @@
         "title": "Body_replace_template_api_v1_templates__template_id__content_put",
         "type": "object"
       },
+      "ConversionOptionsResponse": {
+        "description": "Authoritative limits and immutable template selection for conversion.",
+        "properties": {
+          "conversion_upload_max_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Conversion Upload Max Bytes",
+            "type": "integer"
+          },
+          "resolved_template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selection_source": {
+            "$ref": "#/components/schemas/TemplateSelectionSource"
+          },
+          "template_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Version Id"
+          }
+        },
+        "required": [
+          "conversion_upload_max_bytes",
+          "resolved_template",
+          "template_version_id",
+          "selection_source"
+        ],
+        "title": "ConversionOptionsResponse",
+        "type": "object"
+      },
       "ConversionPageResponse": {
         "description": "Paginated owner conversion response.",
         "properties": {
@@ -453,6 +496,11 @@
       "IdleSessionPolicyResponse": {
         "description": "Effective singleton policy and optimistic-concurrency revision.",
         "properties": {
+          "absolute_lifetime_seconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "Absolute Lifetime Seconds",
+            "type": "integer"
+          },
           "admin_idle_minutes": {
             "title": "Admin Idle Minutes",
             "type": "integer"
@@ -469,7 +517,8 @@
         "required": [
           "user_idle_minutes",
           "admin_idle_minutes",
-          "revision"
+          "revision",
+          "absolute_lifetime_seconds"
         ],
         "title": "IdleSessionPolicyResponse",
         "type": "object"
@@ -606,6 +655,47 @@
         "title": "Role",
         "type": "string"
       },
+      "TemplateAdministrationContextResponse": {
+        "description": "Authoritative template selection identifiers and upload limit.",
+        "properties": {
+          "preferred_template_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Template Id"
+          },
+          "system_fallback_template_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Fallback Template Id"
+          },
+          "template_max_archive_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Template Max Archive Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "preferred_template_id",
+          "system_fallback_template_id",
+          "template_max_archive_bytes"
+        ],
+        "title": "TemplateAdministrationContextResponse",
+        "type": "object"
+      },
       "TemplateMetadataRequest": {
         "properties": {
           "description": {
@@ -721,6 +811,16 @@
         ],
         "title": "TemplateResponse",
         "type": "object"
+      },
+      "TemplateSelectionSource": {
+        "description": "Authoritative source of the template selected for a conversion.",
+        "enum": [
+          "pandoc_default",
+          "preferred",
+          "system_fallback"
+        ],
+        "title": "TemplateSelectionSource",
+        "type": "string"
       },
       "TemplateStatus": {
         "description": "Visibility lifecycle available before T15 adds version mutations.",
@@ -1960,6 +2060,74 @@
         ]
       }
     },
+    "/api/v1/conversion-options": {
+      "get": {
+        "operationId": "get_conversion_options_api_v1_conversion_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Conversion Options",
+        "tags": [
+          "conversions"
+        ]
+      }
+    },
     "/api/v1/conversions": {
       "get": {
         "operationId": "list_conversions_api_v1_conversions_get",
@@ -3171,6 +3339,74 @@
         "summary": "Api Session",
         "tags": [
           "authentication"
+        ]
+      }
+    },
+    "/api/v1/template-context": {
+      "get": {
+        "operationId": "get_template_administration_context_api_v1_template_context_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateAdministrationContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Template Administration Context",
+        "tags": [
+          "templates"
         ]
       }
     },

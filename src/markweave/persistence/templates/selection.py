@@ -31,6 +31,7 @@ from markweave.templates.errors import (
 from markweave.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
+    TemplateSelectionSource,
     TemplateStatus,
 )
 
@@ -152,6 +153,11 @@ class SqlTemplateSelectionRepository(_SqlTemplateStore):
             raise PersistenceError from None
 
     def resolve(self, user_id: UUID) -> TemplateIdentity | None:
+        return self.resolve_with_source(user_id)[0]
+
+    def resolve_with_source(
+        self, user_id: UUID
+    ) -> tuple[TemplateIdentity | None, TemplateSelectionSource]:
         try:
             with DatabaseSession(self._engine) as database:
                 preferred = database.scalar(
@@ -167,7 +173,7 @@ class SqlTemplateSelectionRepository(_SqlTemplateStore):
                     )
                 )
                 if preferred is not None:
-                    return _template(preferred)
+                    return _template(preferred), TemplateSelectionSource.PREFERRED
                 fallback = database.scalar(
                     select(TemplateRow)
                     .join(
@@ -181,7 +187,32 @@ class SqlTemplateSelectionRepository(_SqlTemplateStore):
                         TemplateRow.publication_state == "published",
                     )
                 )
-                return _template(fallback) if fallback is not None else None
+                if fallback is not None:
+                    return (
+                        _template(fallback),
+                        TemplateSelectionSource.SYSTEM_FALLBACK,
+                    )
+                return None, TemplateSelectionSource.PANDOC_DEFAULT
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def context(self, user_id: UUID) -> tuple[UUID | None, UUID | None]:
+        try:
+            with DatabaseSession(self._engine) as database:
+                preferred = database.scalar(
+                    select(TemplatePreferenceRow.template_id).where(
+                        TemplatePreferenceRow.user_id == str(user_id)
+                    )
+                )
+                fallback = database.scalar(
+                    select(SystemTemplateSelectionRow.fallback_template_id).where(
+                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID
+                    )
+                )
+                return (
+                    UUID(preferred) if preferred is not None else None,
+                    UUID(fallback) if fallback is not None else None,
+                )
         except SQLAlchemyError:
             raise PersistenceError from None
 

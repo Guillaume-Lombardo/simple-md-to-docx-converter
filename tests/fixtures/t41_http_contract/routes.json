@@ -316,6 +316,16 @@
   {
     "include_in_schema": true,
     "methods": [
+      "GET"
+    ],
+    "name": "get_conversion_options",
+    "path": "/api/v1/conversion-options",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
       "POST"
     ],
     "name": "create_conversion",
@@ -371,6 +381,16 @@
     "name": "download_conversion_manifest",
     "path": "/api/v1/conversions/{job_id}/result/manifest",
     "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "get_template_administration_context",
+    "path": "/api/v1/template-context",
+    "response_class": "JSONResponse",
     "status_code": null
   },
   {

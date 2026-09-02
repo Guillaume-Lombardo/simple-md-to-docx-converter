@@ -144,6 +144,13 @@ markweave templates preferred --clear --profile work
 markweave templates fallback TEMPLATE_UUID --profile admin
 ```
 
+Authenticated read commands expose the same authoritative runtime metadata used by browser
+clients. `markweave conversion-options --profile work` reports the configured conversion upload
+limit and resolved immutable template/version/source. `markweave templates context --profile
+work` reports the current preference, system fallback, and configured template archive limit.
+Both support the global `--json` output for automation. `markweave session-policy get` and update
+output also includes the exact operator-configured absolute lifetime in seconds.
+
 These commands preserve the authenticated actor carried by the stored session, so
 audit attribution and administrator-intervention evidence are identical to the web
 and direct API workflows. HTTP authorization failures and validation failures use

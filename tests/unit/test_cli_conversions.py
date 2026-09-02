@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from email.message import Message
 from pathlib import Path
@@ -112,6 +113,29 @@ def _response(
     **kwargs,
 ) -> ConversionHttpResponse:
     return ConversionHttpResponse(status, payload, **kwargs)
+
+
+def test_conversion_options_reads_and_validates_authoritative_metadata(
+    mocker, capsys
+) -> None:
+    client = mocker.Mock()
+    identity = {"current_version_id": VERSION_ID}
+    client.options.return_value = _response(
+        payload={
+            "conversion_upload_max_bytes": 321_123,
+            "resolved_template": identity,
+            "template_version_id": VERSION_ID,
+            "selection_source": "preferred",
+        }
+    )
+    mocker.patch.object(conversions, "_client", return_value=client)
+
+    assert main(("--json", "conversion-options")) == 0
+    payload = json.loads(capsys.readouterr().out)["conversion_options"]
+    assert payload["conversion_upload_max_bytes"] == 321_123
+    assert payload["resolved_template"] == identity
+    assert payload["selection_source"] == "preferred"
+    client.options.assert_called_once_with()
 
 
 def test_convert_submits_canonical_source_and_reports_polling_without_filename(

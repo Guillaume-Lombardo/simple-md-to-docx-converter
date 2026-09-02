@@ -101,6 +101,10 @@ class ConversionHttpClient:
             "POST", "/api/v1/conversions", csrf=True, headers=headers, body=body
         )
 
+    def options(self) -> ConversionHttpResponse:
+        """Read authoritative conversion limits and template selection."""
+        return self.request("GET", "/api/v1/conversion-options")
+
     def list_jobs(self, *, offset: int, limit: int) -> ConversionHttpResponse:
         query = urlencode({"offset": offset, "limit": limit})
         return self.request("GET", f"/api/v1/conversions?{query}")

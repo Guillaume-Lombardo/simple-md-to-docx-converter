@@ -639,19 +639,29 @@ def _audit_record(value: Any) -> dict[str, Any]:
 def _session_policy(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         raise CliError("response_invalid", "The service returned an invalid response.")
-    keys = ("user_idle_minutes", "admin_idle_minutes", "revision")
+    keys = (
+        "user_idle_minutes",
+        "admin_idle_minutes",
+        "revision",
+        "absolute_lifetime_seconds",
+    )
     if any(
         not isinstance(value.get(key), int) or isinstance(value.get(key), bool)
         for key in keys
     ):
         raise CliError("response_invalid", "The service returned an invalid response.")
-    return {key: value[key] for key in keys}
+    result = {key: value[key] for key in keys}
+    if result["absolute_lifetime_seconds"] <= 0:
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    return result
 
 
 def _human_session_policy(policy: Mapping[str, int]) -> str:
     return (
         f"Users: {policy['user_idle_minutes']} minutes; administrators: "
-        f"{policy['admin_idle_minutes']} minutes; revision: {policy['revision']}."
+        f"{policy['admin_idle_minutes']} minutes; absolute lifetime: "
+        f"{policy['absolute_lifetime_seconds']} seconds; revision: "
+        f"{policy['revision']}."
     )
 
 

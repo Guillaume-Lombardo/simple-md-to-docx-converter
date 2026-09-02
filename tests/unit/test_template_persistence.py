@@ -29,6 +29,7 @@ from markweave.templates.models import (
     TemplateIdentity,
     TemplatePublicationState,
     TemplateSearch,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -48,7 +49,7 @@ LEASE_REVISION: Any = importlib.import_module(
 
 
 @pytest.mark.unit
-def test_inprocess_template_repository_control_flow() -> None:
+def test_inprocess_template_repository_control_flow() -> None:  # noqa: PLR0915
     engine = create_database_engine("sqlite+pysqlite://")
     upgrade_database(engine)
     users = SqlUserRepository(engine)
@@ -95,13 +96,28 @@ def test_inprocess_template_repository_control_flow() -> None:
     assert selections.preferred_id(owner.id) is None
     assert selections.system_fallback_id() is None
     assert selections.resolve(owner.id) is None
+    assert selections.resolve_with_source(owner.id) == (
+        None,
+        TemplateSelectionSource.PANDOC_DEFAULT,
+    )
+    assert selections.context(owner.id) == (None, None)
     selections.set_system_fallback(other.id)
     assert selections.system_fallback_id() == other.id
     assert selections.resolve(owner.id) == other
+    assert selections.resolve_with_source(owner.id) == (
+        other,
+        TemplateSelectionSource.SYSTEM_FALLBACK,
+    )
+    assert selections.context(owner.id) == (None, other.id)
     selections.set_preferred(owner.id, active.id)
     selections.set_preferred(owner.id, other.id)
     assert selections.preferred_id(owner.id) == other.id
     assert selections.resolve(owner.id) == other
+    assert selections.resolve_with_source(owner.id) == (
+        other,
+        TemplateSelectionSource.PREFERRED,
+    )
+    assert selections.context(owner.id) == (other.id, other.id)
     preferred_audit = TemplateAuditRecord(
         uuid4(),
         owner.id,
@@ -613,6 +629,8 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
         lambda: selections.set_system_fallback(template.id),
         selections.system_fallback_id,
         lambda: selections.resolve(owner_id),
+        lambda: selections.resolve_with_source(owner_id),
+        lambda: selections.context(owner_id),
     )
     for operation in operations:
         with pytest.raises(PersistenceError) as caught:
