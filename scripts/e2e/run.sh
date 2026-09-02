@@ -656,7 +656,24 @@ podman exec \
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
   "$application_name" node --test /e2e/browser-next-conversion.test.mjs
+podman restart --time 15 "$application_name" >/dev/null
+wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
+  "$application_name" '"status":"ready"'
+podman exec --detach "$application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
+    'import urllib.request; urllib.request.urlopen("http://localhost:3100/login", timeout=2).read()' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
+  "$application_name" node --test /e2e/browser-next-conversion-restart.test.mjs
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime
@@ -690,6 +707,9 @@ podman exec "$expiry_application_name" node -e \
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$expiry_application_name" node --test /e2e/browser-next-auth-expiry.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$expiry_application_name" node --test /e2e/browser-next-conversion-expiry.test.mjs
 
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.

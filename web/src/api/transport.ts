@@ -32,6 +32,7 @@ export interface RequestOptions {
 export interface JsonResult<T> {
   data: T;
   etag?: string;
+  location?: string;
   retryAfterSeconds?: number;
   status: number;
 }
@@ -122,6 +123,7 @@ export class ApiTransport {
     const parsed = safeParse(schema, value);
     if (!parsed.success) throw unexpected(response.status);
     const etag = response.headers.get("etag") ?? undefined;
+    const location = response.headers.get("location") ?? undefined;
     const retryAfter = response.headers.get("retry-after");
     let retryAfterSeconds: number | undefined;
     if (retryAfter !== null) {
@@ -134,6 +136,7 @@ export class ApiTransport {
       data: parsed.output,
       status: response.status,
       ...(etag ? { etag } : {}),
+      ...(location ? { location } : {}),
       ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
     };
   }

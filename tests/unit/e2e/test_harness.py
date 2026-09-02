@@ -270,17 +270,27 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
 @pytest.mark.unit
 def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
-    invocation = (
-        "podman exec \\\n"
-        '  --env MARKWEAVE_E2E_PROFILE="$profile" \\\n'
-        "  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \\\n"
-        '  "$application_name" node --test '
-        "/e2e/browser-next-conversion.test.mjs"
+    main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
+    restart_index = runner.index(
+        'podman restart --time 15 "$application_name"', main_index
+    )
+    recovery_index = runner.index(
+        "/e2e/browser-next-conversion-restart.test.mjs", restart_index
+    )
+    short_lifetime_index = runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
+    expiry_index = runner.index(
+        "/e2e/browser-next-conversion-expiry.test.mjs", short_lifetime_index
     )
 
-    assert runner.count(invocation) == 1
+    assert runner.count("/e2e/browser-next-conversion.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
+    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 2
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
-        < runner.index("/e2e/browser-next-conversion.test.mjs")
-        < runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
+        < main_index
+        < restart_index
+        < recovery_index
+        < short_lifetime_index
+        < expiry_index
     )

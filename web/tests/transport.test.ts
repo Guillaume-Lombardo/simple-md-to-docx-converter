@@ -81,12 +81,13 @@ test("multipart leaves content type to the browser", async () => {
   ).toBe(false);
 });
 
-test("multipart metadata preserves accepted status and canonical Retry-After", async () => {
+test("multipart metadata preserves accepted status, Location, and canonical Retry-After", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
     response('{"ok":true}', {
       status: 202,
       headers: {
         "content-type": "application/json",
+        Location: "/api/v1/conversions/job-id",
         "Retry-After": "7",
       },
     }),
@@ -99,6 +100,7 @@ test("multipart metadata preserves accepted status and canonical Retry-After", a
     ),
   ).resolves.toEqual({
     data: { ok: true },
+    location: "/api/v1/conversions/job-id",
     retryAfterSeconds: 7,
     status: 202,
   });

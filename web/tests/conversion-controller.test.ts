@@ -59,6 +59,13 @@ const job = (
   ...overrides,
 });
 
+const accepted = (data: ConversionResponse = job()) => ({
+  data,
+  location: `/api/v1/conversions/${data.id}`,
+  retryAfterSeconds: 1,
+  status: 202,
+});
+
 function api(overrides: Partial<ApiTransport> = {}): ApiTransport {
   return {
     json: vi.fn(),
@@ -273,26 +280,27 @@ test("ambiguous submission reuses one key while confirmed rejection and input ch
     .mockRejectedValueOnce(new TypeError("offline"))
     .mockRejectedValueOnce(new ApiError(503, "CAPACITY", "Try later."))
     .mockResolvedValueOnce({ data: job(), status: 200 })
-    .mockResolvedValueOnce({
-      data: job({ state: "succeeded", progress: 100, step: "complete" }),
-      status: 202,
-    })
+    .mockResolvedValueOnce(
+      accepted(job({ state: "succeeded", progress: 100, step: "complete" })),
+    )
     .mockRejectedValueOnce(
       new ApiError(422, "JOB_REQUEST_INVALID", "Choose another file."),
     )
-    .mockResolvedValueOnce({
-      data: job({
-        id: "00000000-0000-4000-8000-000000000202",
-        state: "succeeded",
-      }),
-      status: 202,
-    });
+    .mockResolvedValueOnce(
+      accepted(
+        job({
+          id: "00000000-0000-4000-8000-000000000202",
+          state: "succeeded",
+        }),
+      ),
+    );
   const transport = api({
     json: vi
       .fn()
       .mockResolvedValueOnce(options())
       .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
-    multipartWithMetadata: multipart,
+    multipartWithMetadata:
+      multipart as unknown as ApiTransport["multipartWithMetadata"],
   });
   let key = 0;
   const controller = await loadedController(transport, [
@@ -302,7 +310,9 @@ test("ambiguous submission reuses one key while confirmed rejection and input ch
   ]);
   controller.setSource([new File(["# source"], "source.md")]);
   await controller.submit();
+  expect(controller.snapshot().error).toMatch(/same request key/);
   await controller.submit();
+  expect(controller.snapshot().error).toBe("Try later.");
   await controller.submit();
   await controller.submit();
   controller.setOutput("pdf");
@@ -311,10 +321,10 @@ test("ambiguous submission reuses one key while confirmed rejection and input ch
   expect(multipart.mock.calls.map((call) => call[3].idempotencyKey)).toEqual([
     "key-1",
     "key-1",
-    "key-1",
-    "key-1",
+    "key-2",
     "key-2",
     "key-3",
+    "key-4",
   ]);
   expect(multipart.mock.calls[5]![1].get("output")).toBe("pdf");
 });
@@ -329,6 +339,7 @@ test("accepted Retry-After schedules the initial status poll", async () => {
       .mockResolvedValueOnce(job({ state: "running", step: "validating" })),
     multipartWithMetadata: vi.fn().mockResolvedValue({
       data: job({ state: "queued" }),
+      location: `/api/v1/conversions/${job().id}`,
       retryAfterSeconds: 5,
       status: 202,
     }),
@@ -348,14 +359,79 @@ test("accepted Retry-After schedules the initial status poll", async () => {
   expect(transport.json).toHaveBeenCalledTimes(2);
 });
 
-test("selected submissions poll immediately, suppress duplicates, and ignore superseded responses", async () => {
+test.each([
+  ["non-202 status", { status: 200 }],
+  ["missing Location", { location: undefined }],
+  ["empty Location", { location: " " }],
+  ["foreign job Location", { location: "/api/v1/conversions/other" }],
+  ["missing Retry-After", { retryAfterSeconds: undefined }],
+] as const)(
+  "accepted responses reject %s without activating a job",
+  async (_label, override) => {
+    const multipart = vi.fn().mockResolvedValue({ ...accepted(), ...override });
+    const transport = api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+      multipartWithMetadata: multipart,
+    });
+    const controller = await loadedController(transport, [
+      transport,
+      vi.fn(),
+      () => "stable-key",
+    ]);
+    controller.setSource([new File(["# source"], "source.md")]);
+    await controller.submit();
+    await controller.submit();
+    expect(controller.snapshot().active).toBeUndefined();
+    expect(controller.snapshot().error).toMatch(/same request key/);
+    expect(multipart.mock.calls.map((call) => call[3].idempotencyKey)).toEqual([
+      "stable-key",
+      "stable-key",
+    ]);
+  },
+);
+
+test("changing request input aborts and clears a pending submission", async () => {
+  let aborted = false;
+  const multipart = vi.fn(
+    (_path, _form, _schema, request: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      }),
+  );
+  const transport = api({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce(options())
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+    multipartWithMetadata:
+      multipart as unknown as ApiTransport["multipartWithMetadata"],
+  });
+  const controller = await loadedController(transport);
+  controller.setSource([new File(["# source"], "source.md")]);
+  const pending = controller.submit();
+  expect(controller.snapshot().submitting).toBe(true);
+  controller.setOutput("pdf");
+  await pending;
+  expect(aborted).toBe(true);
+  expect(controller.snapshot().submitting).toBe(false);
+});
+
+test("selected submissions poll after acceptance, suppress duplicates, and ignore superseded responses", async () => {
   let resolveSubmission!: (value: {
     data: ConversionResponse;
+    location: string;
+    retryAfterSeconds: number;
     status: number;
   }) => void;
   const multipart = vi.fn(
     () =>
-      new Promise<{ data: ConversionResponse; status: number }>((resolve) => {
+      new Promise<ReturnType<typeof accepted>>((resolve) => {
         resolveSubmission = resolve;
       }),
   );
@@ -365,7 +441,15 @@ test("selected submissions poll immediately, suppress duplicates, and ignore sup
     .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
     .mockResolvedValueOnce(job({ state: "succeeded", progress: 100 }));
   const transport = api({ json, multipartWithMetadata: multipart });
-  const controller = await loadedController(transport);
+  const controller = await loadedController(transport, [
+    transport,
+    vi.fn(),
+    () => "key",
+    (callback) => {
+      queueMicrotask(callback);
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    },
+  ]);
   controller.setSource([new File(["# source"], "source.md")]);
   controller.chooseTemplate(template());
   const first = controller.submit();
@@ -376,10 +460,7 @@ test("selected submissions poll immediately, suppress duplicates, and ignore sup
   )[0]![1];
   expect(form.get("template_id")).toBe(template().id);
   expect(form.get("template_version_id")).toBe(template().current_version_id);
-  resolveSubmission({
-    data: job({ state: "running", step: "validating" }),
-    status: 202,
-  });
+  resolveSubmission(accepted(job({ state: "running", step: "validating" })));
   await first;
   await vi.waitFor(() =>
     expect(controller.snapshot().active?.state).toBe("succeeded"),

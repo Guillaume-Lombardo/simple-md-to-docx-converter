@@ -112,11 +112,11 @@ export function ConversionWorkspace({
                 <input
                   accept=".md,.zip,text/markdown,application/zip"
                   name="source"
+                  aria-required="true"
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     controller.setSource(event.target.files)
                   }
                   ref={fileInput}
-                  required
                   type="file"
                 />
                 <span className="text-sm text-muted">

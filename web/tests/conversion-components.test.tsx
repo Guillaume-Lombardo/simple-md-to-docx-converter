@@ -35,6 +35,13 @@ const conversionJob = {
   updated_at: "2026-09-02T08:00:00Z",
 };
 
+const accepted = {
+  data: conversionJob,
+  location: `/api/v1/conversions/${conversionJob.id}`,
+  retryAfterSeconds: 1,
+  status: 202,
+};
+
 function renderWorkspace(conversionApi: Partial<ApiTransport>) {
   const auth = new AuthController({
     json: vi.fn().mockResolvedValue(user),
@@ -74,6 +81,11 @@ test("workspace loads authoritative defaults and exposes accessible conversion c
     "accept",
     expect.stringContaining(".md"),
   );
+  expect(screen.getByLabelText(/Source file/)).toHaveAttribute(
+    "aria-required",
+    "true",
+  );
+  expect(screen.getByLabelText(/Source file/)).not.toHaveAttribute("required");
   expect(screen.getByRole("radio", { name: "DOCX" })).toBeChecked();
   expect(
     screen.getByText("Pandoc default", { selector: "strong" }),
@@ -126,11 +138,13 @@ test("template search displays text safely and supports selection and reset", as
 test("file validation, drop cardinality, output changes, and duplicate submit are deterministic", async () => {
   let resolveSubmission!: (value: {
     data: typeof conversionJob;
+    location: string;
+    retryAfterSeconds: number;
     status: number;
   }) => void;
   const multipart = vi.fn(
     () =>
-      new Promise<{ data: typeof conversionJob; status: number }>((resolve) => {
+      new Promise<typeof accepted>((resolve) => {
         resolveSubmission = resolve;
       }),
   );
@@ -170,7 +184,7 @@ test("file validation, drop cardinality, output changes, and duplicate submit ar
     screen.getByRole("button", { name: "Submitting conversion…" }),
   );
   expect(multipart).toHaveBeenCalledOnce();
-  resolveSubmission({ data: conversionJob, status: 202 });
+  resolveSubmission(accepted);
   expect(
     await screen.findByText("Your conversion is ready to download."),
   ).toBeVisible();
@@ -221,9 +235,7 @@ test("validated downloads use the server filename and dropped files reach submis
   const anchorClick = vi
     .spyOn(HTMLAnchorElement.prototype, "click")
     .mockImplementation(() => undefined);
-  const multipart = vi
-    .fn()
-    .mockResolvedValue({ data: conversionJob, status: 202 });
+  const multipart = vi.fn().mockResolvedValue(accepted);
   renderWorkspace({
     json: vi
       .fn()
@@ -257,9 +269,10 @@ test("validated downloads use the server filename and dropped files reach submis
   fireEvent.dragEnter(dropZone);
   fireEvent.dragOver(dropZone);
   fireEvent.drop(dropZone, { dataTransfer: { files: [source] } });
-  fireEvent.submit(
-    screen.getByRole("button", { name: "Start conversion" }).closest("form")!,
-  );
+  expect(
+    (screen.getByLabelText(/Source file/) as HTMLInputElement).files,
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
   await screen.findByText("Your conversion is ready to download.");
   expect((multipart.mock.calls[0]![1] as FormData).get("source")).toBe(source);
   fireEvent.click(screen.getByRole("button", { name: "Download result" }));

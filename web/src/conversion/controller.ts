@@ -129,6 +129,7 @@ export class ConversionController {
       this.publish({
         ...this.state,
         source: undefined,
+        submitting: false,
         error:
           files && files.length > 1
             ? "Choose exactly one Markdown or ZIP file."
@@ -142,6 +143,7 @@ export class ConversionController {
     this.publish({
       ...this.state,
       source: file,
+      submitting: false,
       error: undefined,
       notice: undefined,
     });
@@ -153,6 +155,7 @@ export class ConversionController {
     this.publish({
       ...this.state,
       output,
+      submitting: false,
       error: undefined,
       notice: undefined,
     });
@@ -177,6 +180,7 @@ export class ConversionController {
         source: "selected",
       },
       templates: [],
+      submitting: false,
       error: undefined,
       notice: undefined,
     });
@@ -188,6 +192,7 @@ export class ConversionController {
       ...this.state,
       selection: undefined,
       templates: [],
+      submitting: false,
       error: undefined,
       notice: undefined,
     });
@@ -267,6 +272,15 @@ export class ConversionController {
           "The service returned an unexpected response.",
         );
       const job = accepted.data;
+      if (
+        accepted.location !== `/api/v1/conversions/${job.id}` ||
+        accepted.retryAfterSeconds === undefined
+      )
+        throw new ApiError(
+          accepted.status,
+          "UNEXPECTED_RESPONSE",
+          "The service returned an unexpected response.",
+        );
       this.idempotencyKey = undefined;
       this.publish({
         ...this.state,
@@ -275,23 +289,21 @@ export class ConversionController {
         recent: upsertRecent(this.state.recent, job),
         notice: undefined,
       });
-      this.activateJob(job.id, (accepted.retryAfterSeconds ?? 1) * 1_000);
+      this.activateJob(job.id, accepted.retryAfterSeconds * 1_000);
       if (!isTerminal(job)) {
-        if (accepted.retryAfterSeconds === undefined)
-          void this.poll(job.id, this.jobGeneration);
-        else this.schedulePoll(job.id, this.jobGeneration);
+        this.schedulePoll(job.id, this.jobGeneration);
       }
     } catch (error) {
       if (generation !== this.submissionGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
-      const confirmed =
-        error instanceof ApiError && error.status >= 400 && error.status < 500;
-      if (confirmed) this.idempotencyKey = undefined;
+      const definitiveRejection =
+        error instanceof ApiError && error.status >= 400;
+      if (definitiveRejection) this.idempotencyKey = undefined;
       this.publish({
         ...this.state,
         submitting: false,
         notice: undefined,
-        error: confirmed
+        error: definitiveRejection
           ? errorMessage(error)
           : `${errorMessage(error, "The conversion could not be submitted.")} Retrying will reuse the same request key.`,
       });
