@@ -16,11 +16,14 @@ Expose the authoritative runtime metadata required by the Next.js conversion and
 ## Acceptance criteria
 
 * Add an authenticated domain-specific conversion-options read contract returning the configured positive conversion upload limit in bytes, the resolved immutable template and exact version when selected, and a stable `pandoc_default`, `preferred`, or `system_fallback` selection source.
+* Return the resolved template identity, exact immutable version, and selection source from one concurrency-consistent persistence snapshot rather than composing separate reads.
 * Add an authenticated template-administration context returning the current user's preferred template identifier, the system fallback template identifier, and the configured positive template upload limit in bytes.
 * Extend the administrator-only session-policy read response with the operator-configured absolute session lifetime ceiling in exact seconds.
 * Keep FastAPI authoritative for configuration, template resolution, authentication, authorization, and session policy; expose no secrets, internal paths, or deployment credentials.
 * Preserve backward compatibility through additive OpenAPI changes and regenerate and validate the canonical OpenAPI artifact and generated bindings.
 * Preserve CLI parity by exposing conversion options through a machine-readable `markweave` read command, exposing template context through the template CLI, and displaying the absolute lifetime ceiling through the existing session-policy CLI.
+* Own and update the shared `markweave` root-help snapshots and CLI contracts required by the new supported read command.
+* Update the normative delivery plan to include T65 and make T62 and T63 depend on this authoritative runtime-metadata prerequisite.
 * Cover authorization, null/default/fallback/preferred resolution, immutable template version reporting, configured bounds, and both SQLite and PostgreSQL profiles.
 * Add or update integration coverage and final rootless-image E2E assertions for both profiles in hosted GitHub Actions.
 * Do not implement the T62 or T63 Next.js workspaces in this ticket.
