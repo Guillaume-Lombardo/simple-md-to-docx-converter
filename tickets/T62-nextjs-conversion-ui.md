@@ -2,7 +2,7 @@
 ticket: T62
 linear_id: G1L-526
 linear_url: https://linear.app/g1lom/issue/G1L-526/t62-migrate-the-conversion-workflow-to-nextjs
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -59,6 +59,7 @@ Migrate the complete asynchronous conversion browser workflow to the Next.js fro
 * 2026-09-02: A subsequent distributed run showed that even a visible recent-job click produced no request after the second POST, proving the reused multi-context page was suspended rather than merely timer-throttled. Terminal PDF-limit coverage is now isolated in its own browser process with one fresh context and page; it submits through Next.js, requires the first real status poll, waits for the authoritative failure, and verifies that no download is offered in both profile matrices.
 * 2026-09-02: The next standalone run reproduced the missing poll on the initial fresh page and exposed the production cause: `clearTimeout` was stored as a callback but invoked as a controller method, so Chromium raised `Illegal invocation` when the timer callback cleared itself before its GET. `clearPoll` now calls the injected cancellation function without a receiver; a browser-like receiver regression covers the exact failure, and the isolated terminal-failure browser remains as final-image proof.
 * 2026-09-02: Hosted execution proved the polling repair in both the main and isolated failure workflows, then exposed that treating every 5xx as ambiguous incorrectly reused the request key after the definite pre-creation global-capacity rejection. Submission identity now rotates for all 4xx responses and the exact `503 CONVERSION_QUEUE_CAPACITY_EXCEEDED`, while other storage or server 5xx responses retain the key because a job may already exist.
+* 2026-09-02: Completed through implementation PR #173, squash-merged as `a9f781766de255e807679efef86b15135b7f3cc0`. Exact-main CI run `33646924333` passed every required job, including light and coverage gates, document engines, both storage profiles, and standalone and distributed final-image E2E suites.
 
 ## Synchronization
 
