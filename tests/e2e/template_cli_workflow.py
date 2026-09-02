@@ -233,6 +233,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
             "--profile",
             other_profile,
         ],
+        json_output=True,
     )
     if forbidden.returncode != 1 or "forbidden" not in forbidden.stderr.casefold():
         return _failure(
@@ -241,6 +242,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
     fallback_denied = _run_captured(
         plain_prefix,
         ["templates", "fallback", template_id, "--profile", other_profile],
+        json_output=True,
     )
     if (
         fallback_denied.returncode != 1
@@ -288,6 +290,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
             "--profile",
             owner_profile,
         ],
+        json_output=True,
     )
     if stale.returncode != 1 or "template_precondition_failed" not in stale.stderr:
         return _failure("stale template ETag", f"exit={stale.returncode}")
@@ -459,6 +462,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
     hidden = _run_captured(
         plain_prefix,
         ["templates", "show", template_id, "--profile", other_profile],
+        json_output=True,
     )
     if hidden.returncode != 1 or "template_not_found" not in hidden.stderr:
         return _failure("non-owner archived visibility", f"exit={hidden.returncode}")
@@ -475,6 +479,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
             "--profile",
             admin_profile,
         ],
+        json_output=True,
     )
     if guarded.returncode != 1 or "template_precondition_failed" not in guarded.stderr:
         return _failure("guarded template deletion", f"exit={guarded.returncode}")
@@ -605,9 +610,9 @@ def _user_setup_command(container: str) -> list[str]:
 
 
 def _run_captured(
-    prefix: list[str], arguments: list[str]
+    prefix: list[str], arguments: list[str], *, json_output: bool
 ) -> subprocess.CompletedProcess[str]:
-    command = [*prefix, "--json", *arguments]
+    command = [*prefix, *(["--json"] if json_output else []), *arguments]
     try:
         return subprocess.run(
             command,
@@ -629,9 +634,11 @@ def _plain_command(
     *,
     expected_stdout: str | None = None,
 ) -> int | None:
-    result = _run_captured(prefix, arguments)
+    result = _run_captured(prefix, arguments, json_output=False)
     if result.returncode != 0:
         return _failure(stage, f"exit={result.returncode}")
+    if result.stderr:
+        return _failure(stage, "unexpected stderr")
     if expected_stdout is not None and result.stdout != expected_stdout:
         return _failure(stage, "unexpected output")
     return None
@@ -640,7 +647,7 @@ def _plain_command(
 def _json_command(
     prefix: list[str], arguments: list[str], stage: str
 ) -> dict[str, object] | int:
-    result = _run_captured(prefix, arguments)
+    result = _run_captured(prefix, arguments, json_output=True)
     if result.returncode != 0:
         return _failure(stage, f"exit={result.returncode}")
     try:

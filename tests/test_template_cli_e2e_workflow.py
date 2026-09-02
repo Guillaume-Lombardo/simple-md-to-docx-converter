@@ -71,8 +71,8 @@ def test_template_cli_e2e_requires_exact_context_human_output(mocker, capsys) ->
     driver = _driver_module()
     expected = "Template upload limit: 1000000 bytes.\n"
     run = mocker.patch.object(
-        driver,
-        "_run_captured",
+        driver.subprocess,
+        "run",
         return_value=driver.subprocess.CompletedProcess([], 0, expected, ""),
     )
 
@@ -85,7 +85,33 @@ def test_template_cli_e2e_requires_exact_context_human_output(mocker, capsys) ->
         )
         is None
     )
-    run.return_value = driver.subprocess.CompletedProcess([], 0, expected.rstrip(), "")
+    assert run.call_args.args[0] == ["markweave", "templates", "context"]
+    assert "--json" not in run.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    ("result", "error"),
+    (
+        ((0, "Template upload limit: 1000000 bytes.", ""), "unexpected output"),
+        ((7, "", ""), "exit=7"),
+        (
+            (0, "Template upload limit: 1000000 bytes.\n", "warning"),
+            "unexpected stderr",
+        ),
+    ),
+)
+def test_template_cli_e2e_rejects_invalid_context_human_result(
+    result: tuple[int, str, str], error: str, mocker, capsys
+) -> None:
+    driver = _driver_module()
+    expected = "Template upload limit: 1000000 bytes.\n"
+    returncode, stdout, stderr = result
+    mocker.patch.object(
+        driver.subprocess,
+        "run",
+        return_value=driver.subprocess.CompletedProcess([], returncode, stdout, stderr),
+    )
+
     assert (
         driver._plain_command(
             ["markweave"],
@@ -95,7 +121,7 @@ def test_template_cli_e2e_requires_exact_context_human_output(mocker, capsys) ->
         )
         == 1
     )
-    assert "unexpected output" in capsys.readouterr().err
+    assert error in capsys.readouterr().err
 
 
 def test_template_cli_e2e_sends_login_secret_only_through_pty(mocker) -> None:
