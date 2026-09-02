@@ -2,7 +2,7 @@
 ticket: T61
 linear_id: G1L-525
 linear_url: https://linear.app/g1lom/issue/G1L-525/t61-migrate-authentication-and-the-application-shell-to-nextjs
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -65,6 +65,16 @@ Migrate the login, logout, password-renewal, authenticated application shell, an
   to the final FastAPI image and uses Chromium to prove one post-expiry authenticated request gets
   an authoritative `401`, reaches the fixed sign-in-again state, and is not replayed. The corrected
   final-image workflow passed for both standalone SQLite and distributed PostgreSQL.
+* 2026-09-02: Completed after implementation PR #167 merged exact approved head
+  `8c3c75e1cb91e7e79eeacaf3c44032a877400d78` as `main` commit
+  `532320956557e87adf369cf0cd65718008708d06`. Exact-head CI `33576979482` and exact-main CI
+  `33577754390` passed all 11 jobs and the final gate, including frontend, functional,
+  document-engine, standalone/distributed storage, and standalone/distributed final-image E2E.
+  Independent exact-revision review approved, both CodeRabbit findings were corrected, and all
+  review threads were resolved. Final evidence includes 1,979 passing unit tests, 94.32% total
+  coverage, 90.29% application branch coverage, 100% changed Python-line coverage, 75 frontend
+  tests above 91% branch coverage, and real Chromium authentication/expiry workflows for two users
+  and one administrator in both storage profiles.
 
 ## Synchronization
 
