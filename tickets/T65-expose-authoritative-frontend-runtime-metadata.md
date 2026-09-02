@@ -2,7 +2,7 @@
 ticket: T65
 linear_id: G1L-531
 linear_url: https://linear.app/g1lom/issue/G1L-531/t65-expose-authoritative-frontend-runtime-metadata
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -55,6 +55,7 @@ Expose the authoritative runtime metadata required by the Next.js conversion and
 * 2026-09-02: Implemented authenticated `conversion-options` and `template-context` contracts with atomic template/version/source resolution, added the administrator absolute-session ceiling, CLI parity, canonical OpenAPI and generated bindings, cross-profile contracts, final-image assertions, and operator documentation. Local SQLite/API/CLI/frontend and no-external-service suites pass; PostgreSQL, RustFS, and final-image execution remains assigned to hosted GitHub Actions.
 * 2026-09-02: Final review hardened template resolution to one priority-selecting SQL statement with a PostgreSQL interleaving contract, made the conversion-options CLI validate the complete advertised template identity, and extended both-profile final-image workflows to exercise every new CLI read and exact template-context selection state.
 * 2026-09-02: Final-image CLI coverage now verifies the exact human-readable conversion-options and template-context output in both storage-profile workflows alongside their machine-readable contracts.
+* 2026-09-02: Completed through implementation PR #169, squash-merged to `main` as `97a7a58019b32bad51da7551a2c66a81f4052f1d`. GitHub Actions run `33613247736` passed every required suite and gate, including standalone and distributed storage, standalone and distributed final-image E2E, and the required coverage/release gate.
 
 ## Synchronization
 
