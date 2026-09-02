@@ -678,6 +678,19 @@ def _session_policy(value: Any) -> dict[str, Any]:
                 "response_invalid", "The service returned an invalid response."
             )
         result[key] = {field: bounds[field] for field in required}
+    for duration_key, bounds_key in (
+        ("user_idle_minutes", "user_idle_minutes_bounds"),
+        ("admin_idle_minutes", "admin_idle_minutes_bounds"),
+    ):
+        bounds = result[bounds_key]
+        if (
+            not bounds["minimum_minutes"]
+            <= result[duration_key]
+            <= bounds["maximum_minutes"]
+        ):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
     granularity = value.get("idle_minutes_granularity")
     if (
         not isinstance(granularity, int)

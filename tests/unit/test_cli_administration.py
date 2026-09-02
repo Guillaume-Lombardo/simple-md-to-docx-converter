@@ -519,6 +519,10 @@ def test_session_policy_rejects_malformed_service_responses(
             "user_idle_minutes_bounds",
             {"minimum_minutes": 5, "default_minutes": 4, "maximum_minutes": 300},
         ),
+        ("user_idle_minutes", 4),
+        ("user_idle_minutes", 301),
+        ("admin_idle_minutes", 4),
+        ("admin_idle_minutes", 61),
         ("idle_minutes_granularity", 0),
     ),
 )
