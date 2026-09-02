@@ -347,6 +347,19 @@ start_production_router() {
   return 1
 }
 
+restart_backend_and_router() {
+  local backend_container="$1"
+  local backend_port
+  # The router is a child of the backend network namespace. Remove it before
+  # restarting that namespace owner, then recreate and probe it afterwards.
+  podman rm --force "$router_name" >/dev/null
+  podman restart --time 15 "$backend_container" >/dev/null
+  backend_port="$(podman port "$backend_container" 8080/tcp | sed 's/.*://')"
+  wait_for_url "http://127.0.0.1:$backend_port/health/ready" \
+    "$backend_container" '"status":"ready"'
+  start_production_router "$backend_container"
+}
+
 remove_artifacts
 mkdir -p -- "$data_directory" "$evidence_directory" \
   "$temporary_directory/browser-artifacts" "$browser_session_directory"
@@ -847,9 +860,7 @@ podman exec \
   --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
   "$application_name" node --test \
   /e2e/browser-next-conversion-restart-prepare.test.mjs
-podman restart --time 15 "$application_name" >/dev/null
-wait_for_url "http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')/health/ready" \
-  "$application_name" '"status":"ready"'
+restart_backend_and_router "$application_name"
 podman exec "$application_name" node -e \
   'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
 podman exec \

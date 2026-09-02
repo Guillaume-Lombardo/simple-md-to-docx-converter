@@ -320,6 +320,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "--env FRONTEND_ORIGIN=http://frontend:3000" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert runner.count('start_production_router "$application_name"') == 3
+    assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
 
 
@@ -329,7 +330,7 @@ def test_router_is_removed_before_every_backend_network_parent() -> None:
 
     assert 'podman rm --force "$router_name" "$application_name"' not in runner
     assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
-    assert runner.count('podman rm --force "$router_name" >/dev/null') == 6
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 7
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
         'for resource in "${created[@]}"'
@@ -346,6 +347,17 @@ def test_router_is_removed_before_every_backend_network_parent() -> None:
         'podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null'
         in runner
     )
+    helper_start = runner.index("restart_backend_and_router() {")
+    restart_helper = runner[
+        helper_start : runner.index("\nremove_artifacts\n", helper_start)
+    ]
+    remove_index = restart_helper.index('podman rm --force "$router_name"')
+    restart_index = restart_helper.index(
+        'podman restart --time 15 "$backend_container"'
+    )
+    ready_index = restart_helper.index("wait_for_url")
+    start_index = restart_helper.index('start_production_router "$backend_container"')
+    assert remove_index < restart_index < ready_index < start_index
 
 
 @pytest.mark.unit
@@ -364,11 +376,11 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     preparation_command_index = runner.rindex(
         "podman exec", admission_index, preparation_index
     )
-    restart_index = runner.index(
-        'podman restart --time 15 "$application_name"', preparation_index
+    restarted_router_index = runner.index(
+        'restart_backend_and_router "$application_name"', preparation_index
     )
     recovery_index = runner.index(
-        "/e2e/browser-next-conversion-restart.test.mjs", restart_index
+        "/e2e/browser-next-conversion-restart.test.mjs", restarted_router_index
     )
     short_lifetime_index = runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
     expiry_index = runner.index(
@@ -382,7 +394,8 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
     assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 3
-    preparation = runner[preparation_command_index:restart_index]
+    assert preparation_index < restarted_router_index < recovery_index
+    preparation = runner[preparation_command_index:restarted_router_index]
     assert (
         '"$application_name" node --test \\\n'
         "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
@@ -393,7 +406,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
         < failure_index
         < admission_index
         < preparation_index
-        < restart_index
+        < restarted_router_index
         < recovery_index
         < short_lifetime_index
         < expiry_index
@@ -543,7 +556,7 @@ def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() ->
     )
     restore = runner[
         admission_index : runner.index(
-            'podman restart --time 15 "$application_name"', admission_index
+            'restart_backend_and_router "$application_name"', admission_index
         )
     ]
     assert 'podman start "$worker_one_name" "$worker_two_name"' in restore
