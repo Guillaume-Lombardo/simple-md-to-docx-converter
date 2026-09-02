@@ -19,7 +19,7 @@ _RESULT = "/tmp/markweave-t33-result.zip"  # noqa: S108 - container tmpfs
 _MANIFEST = "/tmp/markweave-t33-manifest.json"  # noqa: S108 - container tmpfs
 
 
-def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
+def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True)
     parser.add_argument(
@@ -70,6 +70,12 @@ def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
         UUID(str(options["template_version_id"]))
     except KeyError, ValueError:
         return _failure("conversion options identity", 1)
+    human_options = _run([*prefix, "conversion-options"])
+    if not _has_exact_stdout(
+        human_options,
+        "Upload limit: 1000000 bytes; template selection: system fallback.\n",
+    ):
+        return _failure("conversion options human output", human_options.returncode)
     key = f"t33-final-image-{arguments.profile}"
     submission = _run(
         [
@@ -197,6 +203,10 @@ def _json_result(result: subprocess.CompletedProcess[str]) -> dict[str, object] 
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def _has_exact_stdout(result: subprocess.CompletedProcess[str], expected: str) -> bool:
+    return result.returncode == 0 and not result.stderr and result.stdout == expected
 
 
 def _run_pty(arguments: list[str], password: str) -> tuple[int, str]:

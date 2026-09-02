@@ -133,6 +133,14 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
         or initial.get("template_max_archive_bytes") != 1_000_000
     ):
         return _failure("initial template context", "unexpected metadata")
+    failure = _plain_command(
+        plain_prefix,
+        ["templates", "context", "--profile", owner_profile],
+        "template context human output",
+        expected_stdout="Template upload limit: 1000000 bytes.\n",
+    )
+    if failure is not None:
+        return failure
 
     fonts = [item for font in _TEMPLATE_FONTS for item in ("--font", font)]
     created = _json_command(
@@ -614,10 +622,18 @@ def _run_captured(
         return subprocess.CompletedProcess(command, 126, "", "")
 
 
-def _plain_command(prefix: list[str], arguments: list[str], stage: str) -> int | None:
+def _plain_command(
+    prefix: list[str],
+    arguments: list[str],
+    stage: str,
+    *,
+    expected_stdout: str | None = None,
+) -> int | None:
     result = _run_captured(prefix, arguments)
     if result.returncode != 0:
         return _failure(stage, f"exit={result.returncode}")
+    if expected_stdout is not None and result.stdout != expected_stdout:
+        return _failure(stage, "unexpected output")
     return None
 
 

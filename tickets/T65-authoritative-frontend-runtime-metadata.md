@@ -54,6 +54,7 @@ Expose the authoritative runtime metadata required by the Next.js conversion and
 * 2026-09-02: Created after product approval of the domain-specific API and CLI-parity approach. Implementation started from verified `main` at `cd9705dce86ca2decdb5acb99067290546af3ada` on `feat/T65-frontend-runtime-metadata`; hosted GitHub Actions owns service-backed integration and final-image E2E validation without 1Password.
 * 2026-09-02: Implemented authenticated `conversion-options` and `template-context` contracts with atomic template/version/source resolution, added the administrator absolute-session ceiling, CLI parity, canonical OpenAPI and generated bindings, cross-profile contracts, final-image assertions, and operator documentation. Local SQLite/API/CLI/frontend and no-external-service suites pass; PostgreSQL, RustFS, and final-image execution remains assigned to hosted GitHub Actions.
 * 2026-09-02: Final review hardened template resolution to one priority-selecting SQL statement with a PostgreSQL interleaving contract, made the conversion-options CLI validate the complete advertised template identity, and extended both-profile final-image workflows to exercise every new CLI read and exact template-context selection state.
+* 2026-09-02: Final-image CLI coverage now verifies the exact human-readable conversion-options and template-context output in both storage-profile workflows alongside their machine-readable contracts.
 
 ## Synchronization
 
