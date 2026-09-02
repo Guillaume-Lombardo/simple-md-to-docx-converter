@@ -71,6 +71,17 @@ def test_administration_e2e_exercises_authz_revocation_and_pagination(mocker) ->
         "admin_idle_minutes": 10,
         "absolute_lifetime_seconds": 28_800,
         "revision": 2,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
     }
 
     def plain(_prefix, command, **_kwargs):
@@ -79,7 +90,8 @@ def test_administration_e2e_exercises_authz_revocation_and_pagination(mocker) ->
         if tuple(command[:2]) == ("session-policy", "get"):
             return _completed(
                 "Users: 25 minutes; administrators: 10 minutes; absolute lifetime: "
-                "28800 seconds; revision: 2.\n"
+                "28800 seconds; revision: 2; user bounds: 5-300 minutes (default 30); "
+                "administrator bounds: 5-60 minutes (default 15); granularity: 1 minute.\n"
             )
         if tuple(command[:3]) == ("--json", "users", "list"):
             return _completed(listing)

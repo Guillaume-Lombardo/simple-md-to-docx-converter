@@ -13,9 +13,11 @@ SYSTEM_ACTOR_ID = UUID(int=0)
 IDLE_SESSION_POLICY_ID = UUID(int=1)
 DEFAULT_USER_IDLE_MINUTES = 30
 DEFAULT_ADMIN_IDLE_MINUTES = 15
-MINIMUM_IDLE_MINUTES = 5
+MINIMUM_USER_IDLE_MINUTES = 5
+MINIMUM_ADMIN_IDLE_MINUTES = 5
 MAXIMUM_USER_IDLE_MINUTES = 300
 MAXIMUM_ADMIN_IDLE_MINUTES = 60
+IDLE_SESSION_POLICY_GRANULARITY_MINUTES = 1
 
 
 class Role(StrEnum):
@@ -122,7 +124,7 @@ class IdleSessionPolicy:
             not isinstance(self.user_idle_minutes, int)
             or isinstance(self.user_idle_minutes, bool)
             or not (
-                MINIMUM_IDLE_MINUTES
+                MINIMUM_USER_IDLE_MINUTES
                 <= self.user_idle_minutes
                 <= MAXIMUM_USER_IDLE_MINUTES
             )
@@ -132,7 +134,7 @@ class IdleSessionPolicy:
             not isinstance(self.admin_idle_minutes, int)
             or isinstance(self.admin_idle_minutes, bool)
             or not (
-                MINIMUM_IDLE_MINUTES
+                MINIMUM_ADMIN_IDLE_MINUTES
                 <= self.admin_idle_minutes
                 <= MAXIMUM_ADMIN_IDLE_MINUTES
             )

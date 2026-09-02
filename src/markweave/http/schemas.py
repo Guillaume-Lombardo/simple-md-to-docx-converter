@@ -59,6 +59,14 @@ class IdleSessionPolicyUpdateRequest(BaseModel):
     admin_idle_minutes: Annotated[int, Field(strict=True, ge=5, le=60)]
 
 
+class IdleSessionPolicyDurationBoundsResponse(BaseModel):
+    """Authoritative whole-minute bounds and default for one session role."""
+
+    minimum_minutes: Annotated[int, Field(strict=True, ge=1)]
+    default_minutes: Annotated[int, Field(strict=True, ge=1)]
+    maximum_minutes: Annotated[int, Field(strict=True, ge=1)]
+
+
 class IdleSessionPolicyResponse(BaseModel):
     """Effective singleton policy and optimistic-concurrency revision."""
 
@@ -68,6 +76,9 @@ class IdleSessionPolicyResponse(BaseModel):
     admin_idle_minutes: int
     revision: int
     absolute_lifetime_seconds: Annotated[int, Field(strict=True, gt=0)]
+    user_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse
+    admin_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse
+    idle_minutes_granularity: Annotated[int, Field(strict=True, ge=1)]
 
 
 class UserResponse(BaseModel):

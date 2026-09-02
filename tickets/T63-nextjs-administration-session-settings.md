@@ -2,7 +2,7 @@
 ticket: T63
 linear_id: G1L-527
 linear_url: https://linear.app/g1lom/issue/G1L-527/t63-migrate-administration-and-session-settings-to-nextjs
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -31,6 +31,7 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 * T61
 * T17
 * T65
+* T66
 
 ## Implementation boundary
 
@@ -49,6 +50,8 @@ Migrate template, user, and session-policy administration to the Next.js fronten
 
 * 2026-09-01: Created with the administrator inactivity-duration control explicitly dependent on the FastAPI-owned T59 policy.
 * 2026-09-02: Blocked on T65 for authoritative preferred/fallback template identifiers, template upload limits, and the operator-configured absolute session ceiling required by the administration UI.
+* 2026-09-02: Started from verified `main` at `634d3fe6112f9d2040a708b0acc9599b509f2d78` after T65 completion; implementing the presentation-only Next.js administration workflows with FastAPI remaining authoritative.
+* 2026-09-02: Template, user, and navigation work continues while the session-policy control waits for T66 to expose authoritative role-specific minimum, default, and maximum metadata; T63 remains In Progress and does not duplicate those backend values.
 
 ## Synchronization
 

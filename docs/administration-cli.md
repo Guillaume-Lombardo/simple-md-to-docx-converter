@@ -40,6 +40,16 @@ server's newest-first order. Human output is stable tab-separated content-free
 metadata. `--json` returns `items`, `offset`, and `limit` without adding usernames,
 passwords, document data, or other fields absent from the API.
 
+## Session-policy inspection
+
+```text
+markweave session-policy get [--profile NAME]
+```
+
+The human and `--json` forms include effective role durations, the absolute lifetime ceiling,
+revision, authoritative per-role minimum/default/maximum bounds, and minute granularity. Clients
+must consume these fields instead of duplicating selectable values.
+
 ## Service inspection
 
 ```text

@@ -636,7 +636,7 @@ def _audit_record(value: Any) -> dict[str, Any]:
     return {key: value.get(key) for key in keys}
 
 
-def _session_policy(value: Any) -> dict[str, int]:
+def _session_policy(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CliError("response_invalid", "The service returned an invalid response.")
     keys = (
@@ -653,15 +653,68 @@ def _session_policy(value: Any) -> dict[str, int]:
     result = {key: value[key] for key in keys}
     if result["absolute_lifetime_seconds"] <= 0:
         raise CliError("response_invalid", "The service returned an invalid response.")
+    bounds_keys = (
+        "user_idle_minutes_bounds",
+        "admin_idle_minutes_bounds",
+    )
+    for key in bounds_keys:
+        bounds = value.get(key)
+        if not isinstance(bounds, dict):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
+        required = ("minimum_minutes", "default_minutes", "maximum_minutes")
+        if any(
+            not isinstance(bounds.get(field), int)
+            or isinstance(bounds.get(field), bool)
+            or bounds[field] <= 0
+            for field in required
+        ) or not (
+            bounds["minimum_minutes"]
+            <= bounds["default_minutes"]
+            <= bounds["maximum_minutes"]
+        ):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
+        result[key] = {field: bounds[field] for field in required}
+    for duration_key, bounds_key in (
+        ("user_idle_minutes", "user_idle_minutes_bounds"),
+        ("admin_idle_minutes", "admin_idle_minutes_bounds"),
+    ):
+        bounds = result[bounds_key]
+        if (
+            not bounds["minimum_minutes"]
+            <= result[duration_key]
+            <= bounds["maximum_minutes"]
+        ):
+            raise CliError(
+                "response_invalid", "The service returned an invalid response."
+            )
+    granularity = value.get("idle_minutes_granularity")
+    if (
+        not isinstance(granularity, int)
+        or isinstance(granularity, bool)
+        or granularity <= 0
+    ):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    result["idle_minutes_granularity"] = granularity
     return result
 
 
-def _human_session_policy(policy: Mapping[str, int]) -> str:
+def _human_session_policy(policy: Mapping[str, Any]) -> str:
+    user_bounds = policy["user_idle_minutes_bounds"]
+    admin_bounds = policy["admin_idle_minutes_bounds"]
     return (
         f"Users: {policy['user_idle_minutes']} minutes; administrators: "
         f"{policy['admin_idle_minutes']} minutes; absolute lifetime: "
         f"{policy['absolute_lifetime_seconds']} seconds; revision: "
-        f"{policy['revision']}."
+        f"{policy['revision']}; user bounds: {user_bounds['minimum_minutes']}-"
+        f"{user_bounds['maximum_minutes']} minutes (default "
+        f"{user_bounds['default_minutes']}); administrator bounds: "
+        f"{admin_bounds['minimum_minutes']}-{admin_bounds['maximum_minutes']} minutes "
+        f"(default {admin_bounds['default_minutes']}); granularity: "
+        f"{policy['idle_minutes_granularity']} minute."
     )
 
 
