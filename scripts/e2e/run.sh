@@ -665,6 +665,33 @@ uv run python -m tests.e2e.service_workflow verify-checkpoint \
   --template "$evidence_directory/template.docx" --state-file "$state_file" \
   --artifact-dir "$temporary_directory/browser-artifacts"
 
+checkpoint_policy_values="$(
+  uv run python -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as state_file:
+    state = json.load(state_file)
+keys = (
+    "policy_user_idle_minutes",
+    "policy_admin_idle_minutes",
+    "policy_revision",
+)
+values = [state.get(key) for key in keys]
+if not all(
+    isinstance(value, str) and value.isascii() and value.isdecimal()
+    for value in values
+):
+    raise SystemExit("checkpoint policy evidence is invalid")
+print(*values, sep="\t")
+' "$state_file"
+)"
+IFS=$'\t' read -r checkpoint_user_idle_minutes \
+  checkpoint_admin_idle_minutes checkpoint_policy_revision \
+  <<<"$checkpoint_policy_values"
+readonly checkpoint_user_idle_minutes checkpoint_admin_idle_minutes \
+  checkpoint_policy_revision
+
 # Exercise the unpublished T61 frontend through a test-only same-origin router.
 # Production traffic remains on the legacy FastAPI pages until T64.
 podman rm --force "$application_name" >/dev/null
@@ -707,6 +734,13 @@ podman exec \
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="$checkpoint_user_idle_minutes" \
+  --env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="$checkpoint_admin_idle_minutes" \
+  --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision" \
+  "$application_name" node --test /e2e/browser-next-admin.test.mjs
 
 # Hold job execution while exercising exact admission boundaries through the
 # real final-image API and Next.js UI. Distributed workers can be stopped
