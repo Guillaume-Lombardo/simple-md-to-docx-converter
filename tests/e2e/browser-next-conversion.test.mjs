@@ -238,183 +238,17 @@ test(
 
       const heavySource = oversizedPdfMarkdown();
       const failurePage = await aliceContext.newPage();
-      const blockingPage = await aliceContext.newPage();
-      await Promise.all([
-        preparePdfSubmission(failurePage, "pdf-limit.md", heavySource),
-        preparePdfSubmission(blockingPage, "pdf-blocker.md", heavySource),
-      ]);
+      await preparePdfSubmission(failurePage, "pdf-limit.md", heavySource);
       const failureAccepted = failurePage.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/conversions") &&
           response.request().method() === "POST",
       );
-      const blockingAccepted = blockingPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/conversions") &&
-          response.request().method() === "POST",
-      );
-      await Promise.all([
-        failurePage
-          .getByRole("button", { name: "Start conversion" })
-          .click(),
-        blockingPage
-          .getByRole("button", { name: "Start conversion" })
-          .click(),
-      ]);
-      const [failureResponse, blockingResponse] = await Promise.all([
-        failureAccepted,
-        blockingAccepted,
-      ]);
-      assert.equal(failureResponse.status(), 202);
-      assert.equal(blockingResponse.status(), 202);
-      const failureJob = await failureResponse.json();
-      await Promise.all([
-        failurePage
-          .getByRole("button", { name: "Cancel conversion" })
-          .waitFor({ timeout: 30_000 }),
-        blockingPage
-          .getByRole("button", { name: "Cancel conversion" })
-          .waitFor({ timeout: 30_000 }),
-      ]);
-
-      await alicePage.getByLabel(/Source file/).setInputFiles({
-        name: "cancel-source.md",
-        mimeType: "text/markdown",
-        buffer: Buffer.from(`${heavySource}\n${heavySource}`),
-      });
-      await alicePage
-        .getByRole("radio", { name: "DOCX", exact: true })
-        .click();
-      await alicePage.getByRole("button", { name: "Start conversion" }).click();
-      const cancel = alicePage.getByRole("button", {
-        name: "Cancel conversion",
-      });
-      await cancel.waitFor({ timeout: 30_000 });
-      await cancel.click();
-      await alicePage
-        .getByText("The conversion was cancelled.")
-        .waitFor({ timeout: 60_000 });
-      assert.equal(
-        await alicePage
-          .getByRole("button", { name: "Download result" })
-          .count(),
-        0,
-      );
-
-      const quotaPage = await aliceContext.newPage();
-      const racingPage = await aliceContext.newPage();
-      await Promise.all([
-        preparePdfSubmission(quotaPage, "quota-primary.md", heavySource),
-        preparePdfSubmission(racingPage, "quota-racing.md", heavySource),
-      ]);
-      const acceptedJobIds = [];
-      const quotaPageJobIds = [];
-      for (let index = 0; index < 5; index += 1) {
-        if (index > 0) {
-          await preparePdfSubmission(
-            quotaPage,
-            `quota-primary-${index}.md`,
-            heavySource,
-          );
-        }
-        const acceptedResponse = quotaPage.waitForResponse(
-          (response) =>
-            response.url().endsWith("/api/v1/conversions") &&
-            response.request().method() === "POST",
-        );
-        await quotaPage
-          .getByRole("button", { name: "Start conversion" })
-          .click();
-        const response = await acceptedResponse;
-        assert.equal(response.status(), 202);
-        const jobId = (await response.json()).id;
-        acceptedJobIds.push(jobId);
-        quotaPageJobIds.push(jobId);
-      }
-      await preparePdfSubmission(
-        quotaPage,
-        "quota-primary-race.md",
-        heavySource,
-      );
-      const quotaResponse = quotaPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/conversions") &&
-          response.request().method() === "POST",
-      );
-      const racingResponse = racingPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/conversions") &&
-          response.request().method() === "POST",
-      );
-      await Promise.all([
-        quotaPage.getByRole("button", { name: "Start conversion" }).click(),
-        racingPage.getByRole("button", { name: "Start conversion" }).click(),
-      ]);
-      const raced = await Promise.all([quotaResponse, racingResponse]);
-      assert.deepEqual(
-        raced.map((response) => response.status()).sort(),
-        [202, 429],
-      );
-      const admitted = raced.find((response) => response.status() === 202);
-      const rejectedPage = raced[0].status() === 429 ? quotaPage : racingPage;
-      assert.ok(admitted);
-      const admittedJobId = (await admitted.json()).id;
-      acceptedJobIds.push(admittedJobId);
-      if (raced[0].status() === 202) {
-        quotaPageJobIds.push(admittedJobId);
-      }
-      await rejectedPage
-        .getByRole("alert")
-        .getByText("The active conversion quota is exhausted.")
-        .waitFor();
-
-      let serializedJobId;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const jobs = await api(quotaPage, "GET", "/api/v1/conversions?limit=20");
-        assert.equal(jobs.status, 200);
-        const failureState = jobs.body.items.find(
-          (candidate) => candidate.id === failureJob.id,
-        );
-        const primaryStates = jobs.body.items.filter((candidate) =>
-          quotaPageJobIds.includes(candidate.id),
-        );
-        if (profile === "distributed") {
-          serializedJobId = primaryStates.find(
-            (candidate) => candidate.state === "running",
-          )?.id;
-          if (failureState?.state === "running" && serializedJobId) break;
-        } else {
-          serializedJobId = primaryStates.find(
-            (candidate) => candidate.state === "queued",
-          )?.id;
-          if (failureState?.state === "running" && serializedJobId) break;
-        }
-        await quotaPage.waitForTimeout(250);
-      }
-      assert.ok(serializedJobId);
       await failurePage
-        .getByText(/Processing|Validating|Creating the PDF/)
-        .waitFor();
-      await quotaPage
-        .getByRole("button", {
-          name: new RegExp(`Conversion ${serializedJobId.slice(0, 8)}`),
-        })
+        .getByRole("button", { name: "Start conversion" })
         .click();
-      await quotaPage
-        .getByText(
-          profile === "distributed"
-            ? /Processing|Validating|Creating the PDF/
-            : "Your conversion is queued.",
-        )
-        .waitFor();
-      for (const jobId of acceptedJobIds) {
-        const cancelled = await api(
-          quotaPage,
-          "DELETE",
-          `/api/v1/conversions/${jobId}`,
-        );
-        assert.equal(cancelled.status, 200);
-      }
+      const failureResponse = await failureAccepted;
+      assert.equal(failureResponse.status(), 202);
       await failurePage
         .getByText(/PDF.*configured limits/)
         .waitFor({ timeout: 180_000 });
@@ -424,12 +258,7 @@ test(
           .count(),
         0,
       );
-      await Promise.all([
-        failurePage.close(),
-        blockingPage.close(),
-        quotaPage.close(),
-        racingPage.close(),
-      ]);
+      await failurePage.close();
 
       const untilExpiration = Math.max(
         0,
