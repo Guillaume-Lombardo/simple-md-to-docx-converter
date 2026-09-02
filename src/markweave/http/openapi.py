@@ -75,6 +75,27 @@ def document_openapi_contract(app: FastAPI, *, session_cookie_name: str) -> None
         response = schema["paths"][path][method]["responses"][status_code]
         response.setdefault("headers", {})["ETag"] = etag_header
 
+    template_download_headers = {
+        "Cache-Control": {
+            "description": "Prevents shared and private caching of template content.",
+            "schema": {"type": "string", "const": "private, no-store"},
+        },
+        "Content-Disposition": {
+            "description": "Safe attachment filename derived from immutable identifiers.",
+            "schema": {"type": "string"},
+        },
+        "X-Content-Type-Options": {
+            "description": "Prevents content-type sniffing.",
+            "schema": {"type": "string", "const": "nosniff"},
+        },
+    }
+    for path in (
+        "/api/v1/templates/{template_id}/content",
+        "/api/v1/templates/{template_id}/versions/{version_id}/content",
+    ):
+        response = schema["paths"][path]["get"]["responses"]["200"]
+        response.setdefault("headers", {}).update(template_download_headers)
+
     policy_etag_header = {
         "description": "Current role-specific idle-session policy revision.",
         "schema": {"type": "string"},

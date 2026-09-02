@@ -264,6 +264,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
                     f'attachment; filename="template-{template_id}-v'
                     f'{version.number}.docx"'
                 ),
+                "Cache-Control": "private, no-store",
                 "ETag": f'"sha256-{version.sha256}"',
                 "X-Content-Type-Options": "nosniff",
             },

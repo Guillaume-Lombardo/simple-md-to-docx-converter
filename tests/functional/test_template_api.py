@@ -94,6 +94,15 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
         assert listing.json()["total"] == 1
         downloaded = admin.get(f"/api/v1/templates/{template_id}/content")
         assert downloaded.content == _docx()
+        assert downloaded.headers["cache-control"] == "private, no-store"
+        assert downloaded.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert downloaded.headers["content-disposition"] == (
+            f'attachment; filename="template-{template_id}-v1.docx"'
+        )
+        assert downloaded.headers["etag"].startswith('"sha256-')
+        assert downloaded.headers["etag"].endswith('"')
         assert "hostile-name" not in downloaded.headers["content-disposition"]
         assert downloaded.headers["x-content-type-options"] == "nosniff"
 
@@ -127,12 +136,19 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
         assert replaced.status_code == 201
         versions = admin.get(f"/api/v1/templates/{template_id}/versions").json()
         assert [item["number"] for item in versions] == [2, 1]
-        assert (
-            admin.get(
-                f"/api/v1/templates/{template_id}/versions/{first_version}/content"
-            ).content
-            == _docx()
+        historical = admin.get(
+            f"/api/v1/templates/{template_id}/versions/{first_version}/content"
         )
+        assert historical.content == _docx()
+        assert historical.headers["cache-control"] == "private, no-store"
+        assert historical.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert historical.headers["content-disposition"] == (
+            f'attachment; filename="template-{template_id}-v1.docx"'
+        )
+        assert historical.headers["etag"] == downloaded.headers["etag"]
+        assert historical.headers["x-content-type-options"] == "nosniff"
 
         restored = admin.post(
             f"/api/v1/templates/{template_id}/versions/{first_version}/restore",

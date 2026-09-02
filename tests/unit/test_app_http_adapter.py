@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
+from httpx import Response as HttpxResponse
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -62,6 +63,23 @@ from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 _HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+def _assert_template_download_response(
+    download: HttpxResponse,
+    template: TemplateIdentity,
+    version: TemplateVersion,
+) -> None:
+    assert download.content == b"docx"
+    assert download.headers["Cache-Control"] == "private, no-store"
+    assert download.headers["Content-Type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert download.headers["Content-Disposition"] == (
+        f'attachment; filename="template-{template.id}-v{version.number}.docx"'
+    )
+    assert download.headers["ETag"] == f'"sha256-{version.sha256}"'
+    assert download.headers["X-Content-Type-Options"] == "nosniff"
 
 
 @pytest.mark.unit
@@ -952,6 +970,20 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "type": "string",
             "format": "binary",
         }
+        headers = responses["200"]["headers"]
+        assert headers["Cache-Control"] == {
+            "description": "Prevents shared and private caching of template content.",
+            "schema": {"type": "string", "const": "private, no-store"},
+        }
+        assert headers["Content-Disposition"] == {
+            "description": "Safe attachment filename derived from immutable identifiers.",
+            "schema": {"type": "string"},
+        }
+        assert headers["ETag"]["schema"] == {"type": "string"}
+        assert headers["X-Content-Type-Options"] == {
+            "description": "Prevents content-type sniffing.",
+            "schema": {"type": "string", "const": "nosniff"},
+        }
         assert {"401", "404", "422", "503"} <= responses.keys()
 
 
@@ -1458,13 +1490,11 @@ def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
         assert (
             client.get(f"/api/v1/templates/{template.id}/versions").status_code == 200
         )
-        assert client.get(f"/api/v1/templates/{template.id}/content").content == b"docx"
-        assert (
-            client.get(
-                f"/api/v1/templates/{template.id}/versions/{version.id}/content"
-            ).content
-            == b"docx"
-        )
+        for path in (
+            f"/api/v1/templates/{template.id}/content",
+            f"/api/v1/templates/{template.id}/versions/{version.id}/content",
+        ):
+            _assert_template_download_response(client.get(path), template, version)
         assert (
             client.post(
                 f"/api/v1/templates/{template.id}/versions/{version.id}/restore",
