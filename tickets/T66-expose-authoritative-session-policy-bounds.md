@@ -2,7 +2,7 @@
 ticket: T66
 linear_id: G1L-532
 linear_url: https://linear.app/g1lom/issue/G1L-532/t66-expose-authoritative-session-policy-bounds
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -45,6 +45,7 @@ Expose the authoritative role-specific session-policy bounds, defaults, and minu
 
 * 2026-09-02: Created as the High-priority T63 prerequisite. Linear issue G1L-532 is In Progress, depends on T59 and T65, and blocks T63.
 * 2026-09-02: Implemented additive administrator-only role-bound metadata sourced from authentication policy constants, CLI JSON/human parity, canonical OpenAPI and TypeScript bindings, contract coverage, final-image workflow assertions, and documentation. Targeted API/CLI/OpenAPI tests, root browser checks, frontend quality gate, Ruff, and ty pass locally. The canonical Python suite has 2,246 passing tests and 95.57% coverage; PostgreSQL, RustFS, and final rootless-image execution remain assigned to hosted GitHub Actions because local service configuration is unavailable.
+* 2026-09-02: Completed on `main` as `27b166adb938f791e1ac4dba06c61dc25775c546` through PR #171. Post-merge GitHub Actions run `33622559406` passed all 11 jobs, including the gate, both storage profiles, and final rootless-image E2E suites. Linear G1L-532 is verified Done.
 
 ## Synchronization
 
