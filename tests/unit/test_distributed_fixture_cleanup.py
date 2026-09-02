@@ -6,9 +6,48 @@ from typing import Any, cast
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.storage import ObjectStoreError
 from tests.integration.postgres import conftest as distributed_conftest
+from tests.integration.postgres import (
+    test_conversion_ui_distributed as conversion_ui_distributed,
+)
 
 pytestmark = pytest.mark.unit
+
+
+def test_distributed_ui_cleanup_attempts_every_action_without_raising(capsys) -> None:
+    attempts: list[str] = []
+
+    def action(name: str, *, fails: bool = False) -> None:
+        attempts.append(name)
+        if fails:
+            raise RuntimeError(name)
+
+    conversion_ui_distributed._best_effort(
+        (
+            lambda: action("database", fails=True),
+            lambda: action("objects", fails=True),
+            lambda: action("engine"),
+        )
+    )
+
+    assert attempts == ["database", "objects", "engine"]
+    assert "RuntimeError, RuntimeError" in capsys.readouterr().err
+
+
+def test_distributed_ui_object_cleanup_attempts_every_key(mocker, capsys) -> None:
+    store = mocker.Mock()
+    keys = tuple(mocker.Mock() for _ in range(3))
+    store.delete.side_effect = (
+        ObjectStoreError("first"),
+        None,
+        ObjectStoreError("third"),
+    )
+
+    conversion_ui_distributed._delete_objects(store, keys)
+
+    assert [call.args[0] for call in store.delete.call_args_list] == list(keys)
+    assert "ObjectStoreError, ObjectStoreError" in capsys.readouterr().err
 
 
 def _environment(monkeypatch: pytest.MonkeyPatch) -> None:

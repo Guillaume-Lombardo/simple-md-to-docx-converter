@@ -2,6 +2,9 @@
 
 import hashlib
 import os
+import sys
+from collections.abc import Callable
+from functools import partial
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,7 +14,6 @@ from sqlalchemy import delete, select, update
 from markweave.app import create_app
 from markweave.config import Settings
 from markweave.malware import TrustingUploadScanner
-from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.schema import (
     ConversionJobRow,
     SystemTemplateSelectionRow,
@@ -22,21 +24,27 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.sql import create_database_engine
 from markweave.persistence.templates import SqlTemplateSelectionRepository
-from markweave.storage import ObjectKey, ObjectScope, ObjectStore, ObjectStoreError
+from markweave.storage import ObjectKey, ObjectScope, ObjectStore
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
 
-def _delete_objects(store: ObjectStore, keys: tuple[ObjectKey, ...]) -> None:
-    first_error: ObjectStoreError | None = None
-    for key in keys:
+def _best_effort(actions: tuple[Callable[[], None], ...]) -> None:
+    failures: list[str] = []
+    for action in actions:
         try:
-            store.delete(key)
-        except ObjectStoreError as error:
-            if first_error is None:
-                first_error = error
-    if first_error is not None:
-        raise first_error
+            action()
+        except Exception as error:
+            failures.append(type(error).__name__)
+    if failures:
+        print(
+            f"Distributed test cleanup failures: {', '.join(failures)}",
+            file=sys.stderr,
+        )
+
+
+def _delete_objects(store: ObjectStore, keys: tuple[ObjectKey, ...]) -> None:
+    _best_effort(tuple(partial(store.delete, key) for key in keys))
 
 
 @pytest.mark.integration
@@ -85,7 +93,6 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
         engine = create_database_engine(database_url)
         selections = SqlTemplateSelectionRepository(engine)
         previous_fallback = selections.system_fallback_id()
-        job_id: UUID | None = None
         template_ids = (str(template_id), str(preferred_template_id))
         version_keys = (
             ObjectKey(ObjectScope.TEMPLATE_VERSION, owner_id, version_id),
@@ -94,16 +101,33 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
 
         def cleanup() -> None:
             owned_objects = list(version_keys)
-            try:
-                if job_id is not None:
-                    job = SqlJobRepository(engine).get(job_id)
-                    if job is not None:
-                        owned_objects.append(
-                            ObjectKey(
-                                ObjectScope.UPLOAD, owner_id, job.source_object_id
-                            )
-                        )
+            owner = str(owner_id)
+
+            def cleanup_database() -> None:
                 with engine.begin() as connection:
+                    jobs = connection.execute(
+                        select(
+                            ConversionJobRow.source_object_id,
+                            ConversionJobRow.result_object_id,
+                            ConversionJobRow.result_manifest_object_id,
+                        ).where(ConversionJobRow.owner_id == owner)
+                    ).all()
+                    for source_id, result_id, manifest_id in jobs:
+                        owned_objects.append(
+                            ObjectKey(ObjectScope.UPLOAD, owner_id, UUID(source_id))
+                        )
+                        if result_id is not None:
+                            owned_objects.append(
+                                ObjectKey(ObjectScope.RESULT, owner_id, UUID(result_id))
+                            )
+                        if manifest_id is not None:
+                            owned_objects.append(
+                                ObjectKey(
+                                    ObjectScope.RESULT_MANIFEST,
+                                    owner_id,
+                                    UUID(manifest_id),
+                                )
+                            )
                     current = connection.scalar(
                         select(SystemTemplateSelectionRow.fallback_template_id).where(
                             SystemTemplateSelectionRow.id == 1
@@ -118,12 +142,11 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
                                 .where(SystemTemplateSelectionRow.id == 1)
                                 .values(fallback_template_id=str(previous_fallback))
                             )
-                    if job_id is not None:
-                        connection.execute(
-                            delete(ConversionJobRow).where(
-                                ConversionJobRow.id == str(job_id)
-                            )
+                    connection.execute(
+                        delete(ConversionJobRow).where(
+                            ConversionJobRow.owner_id == owner
                         )
+                    )
                     connection.execute(
                         delete(TemplatePreferenceRow).where(
                             TemplatePreferenceRow.user_id == str(owner_id)
@@ -140,13 +163,11 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
                     connection.execute(
                         delete(UserRow).where(UserRow.id == str(owner_id))
                     )
-            finally:
-                try:
-                    _delete_objects(
-                        app.state.components.object_store, tuple(owned_objects)
-                    )
-                finally:
-                    engine.dispose()
+
+            def cleanup_objects() -> None:
+                _delete_objects(app.state.components.object_store, tuple(owned_objects))
+
+            _best_effort((cleanup_database, cleanup_objects, engine.dispose))
 
         request.addfinalizer(cleanup)
         publish_template_pair(
@@ -238,8 +259,15 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
             },
         )
         assert created.status_code == 202
-        job_id = UUID(created.json()["id"])
+        created_payload = created.json()
+        assert created_payload["template_id"] == str(preferred_template_id)
+        assert created_payload["template_version_id"] == str(preferred_version_id)
+        assert created_payload["template_mode"] == "versioned"
         assert app.state.components.object_store.is_ready()
         status = client.get(created.headers["Location"])
         assert status.status_code == 200
-        assert status.json()["state"] == "queued"
+        status_payload = status.json()
+        assert status_payload["state"] == "queued"
+        assert status_payload["template_id"] == str(preferred_template_id)
+        assert status_payload["template_version_id"] == str(preferred_version_id)
+        assert status_payload["template_mode"] == "versioned"
