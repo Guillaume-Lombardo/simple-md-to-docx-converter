@@ -177,6 +177,12 @@ def test_runtime_metadata_is_authenticated_configured_and_selection_aware(
             client.get("/api/v1/conversion-options").json()["selection_source"]
             == "pandoc_default"
         )
+        incomplete = TemplateIdentity(
+            uuid4(), actor_id, "Incomplete", "Corrupt selection", TemplateStatus.ACTIVE
+        )
+        catalog.add(incomplete)
+        selections.set_system_fallback(incomplete.id)
+        assert client.get("/api/v1/conversion-options").status_code == 503
         engine.dispose()
 
         csrf_token = login.json()["csrf_token"]

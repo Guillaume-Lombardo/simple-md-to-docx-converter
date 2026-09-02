@@ -85,6 +85,27 @@ def test_conversion_options_rejects_inconsistent_selection_pairs(
 
 
 @pytest.mark.unit
+def test_conversion_options_rejects_a_mismatched_immutable_version() -> None:
+    selected_version = uuid4()
+    with pytest.raises(ValidationError):
+        ConversionOptionsResponse(
+            conversion_upload_max_bytes=1,
+            resolved_template={
+                "id": uuid4(),
+                "owner_id": uuid4(),
+                "name": "Selected",
+                "description": "Runtime selection",
+                "status": "active",
+                "revision": 1,
+                "current_version_id": selected_version,
+                "owner_username": "owner",
+            },
+            template_version_id=uuid4(),
+            selection_source=TemplateSelectionSource.PREFERRED,
+        )
+
+
+@pytest.mark.unit
 def test_idle_session_policy_validator_accepts_only_canonical_etags() -> None:
     assert idle_session_policy_etag(0) == '"idle-session-policy-0"'
     assert expected_idle_session_policy_revision('"idle-session-policy-0"') == 0

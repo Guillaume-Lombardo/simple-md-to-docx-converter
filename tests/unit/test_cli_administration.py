@@ -464,6 +464,12 @@ def test_session_policy_help_exposes_http_only_read_and_update(capsys) -> None:
         {"user_idle_minutes": True, "admin_idle_minutes": 15, "revision": 0},
         {"user_idle_minutes": 30, "admin_idle_minutes": "15", "revision": 0},
         {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": False},
+        {
+            "user_idle_minutes": 30,
+            "admin_idle_minutes": 15,
+            "revision": 0,
+            "absolute_lifetime_seconds": 0,
+        },
     ),
 )
 def test_session_policy_rejects_malformed_service_responses(
