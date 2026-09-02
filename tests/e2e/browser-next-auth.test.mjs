@@ -129,7 +129,7 @@ test("Next authentication shell uses FastAPI authority for three identities", as
         .waitFor(),
     );
     assert.equal(
-      await alicePage.getByRole("link", { name: "Users" }).count(),
+      await alicePage.getByText("Users", { exact: true }).count(),
       0,
     );
 

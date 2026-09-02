@@ -110,7 +110,7 @@ test("renewal provides labelled fields, logout, duration, and fresh-login naviga
     "aria-disabled",
     "true",
   );
-  expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
+  expect(screen.queryByText("Users")).toBeNull();
   const fields = screen.getAllByLabelText(/password/i);
   for (const field of fields)
     expect(field).toHaveAttribute("autocomplete", "new-password");
