@@ -22,7 +22,9 @@ const expectedFonts = [
 async function login(context, page, username, password) {
   await context.clearCookies();
   await page.goto(`${baseURL}/login`, { waitUntil: "networkidle" });
-  await page.getByRole("textbox", { name: "Username" }).fill(username);
+  await page
+    .getByRole("textbox", { name: "Username", exact: true })
+    .fill(username);
   await page.getByLabel("Password").fill(password);
   await Promise.all([
     page.waitForURL("**/convert"),
@@ -348,7 +350,7 @@ test(
         .waitFor();
 
       await adminPage
-        .getByRole("textbox", { name: "Username" })
+        .getByRole("textbox", { name: "Username", exact: true })
         .fill(alice.username);
       await adminPage.getByLabel("Temporary password").fill(alice.password);
       const aliceResponse = adminPage.waitForResponse(
@@ -386,7 +388,7 @@ test(
       adminPage.off("request", countCreation);
 
       await adminPage
-        .getByRole("textbox", { name: "Username" })
+        .getByRole("textbox", { name: "Username", exact: true })
         .fill(bob.username);
       await adminPage.getByLabel("Temporary password").fill(bob.password);
       await Promise.all([
