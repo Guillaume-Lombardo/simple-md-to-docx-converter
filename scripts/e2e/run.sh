@@ -736,13 +736,6 @@ podman exec \
   "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
 podman exec \
   "$application_name" node --test /e2e/browser-next-admin-cookie.test.mjs
-podman exec \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="$checkpoint_user_idle_minutes" \
-  --env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="$checkpoint_admin_idle_minutes" \
-  --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision" \
-  "$application_name" node --test /e2e/browser-next-admin.test.mjs
 
 # Hold job execution while exercising exact admission boundaries through the
 # real final-image API and Next.js UI. Distributed workers can be stopped
@@ -822,6 +815,17 @@ podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
   "$application_name" node --test /e2e/browser-next-conversion-restart.test.mjs
+
+# Keep the T62 durable-result checkpoint inside its deliberate 60-second
+# retention window. The longer administration journey runs only after restart
+# recovery has proved the original result remains authoritative.
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
+  --env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="$checkpoint_user_idle_minutes" \
+  --env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="$checkpoint_admin_idle_minutes" \
+  --env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="$checkpoint_policy_revision" \
+  "$application_name" node --test /e2e/browser-next-admin.test.mjs
 
 # Prove absolute session expiry against the real final image without waiting for
 # the administrator policy's approved five-minute minimum. This isolated runtime
