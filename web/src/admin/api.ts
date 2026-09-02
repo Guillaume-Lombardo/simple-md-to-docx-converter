@@ -28,7 +28,7 @@ import {
   vUpdateTemplateApiV1TemplatesTemplateIdPatchResponse,
   vUpdateSessionPolicyApiV1AdminSessionPolicyPutResponse,
 } from "../api/generated/valibot.gen";
-import { ApiTransport, type JsonResult } from "../api/transport";
+import { ApiTransport, type ApiPath, type JsonResult } from "../api/transport";
 import { appendExpectedFonts } from "./operations";
 
 export interface TemplateFilters {
@@ -104,6 +104,17 @@ export class AdministrationApi {
       vListTemplateVersionsApiV1TemplatesTemplateIdVersionsGetResponse,
       { signal },
     );
+  }
+
+  templateContent(
+    templateId: string,
+    versionId?: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const path: ApiPath = versionId
+      ? `/api/v1/templates/${templateId}/versions/${versionId}/content`
+      : `/api/v1/templates/${templateId}/content`;
+    return this.transport.download(path, { signal });
   }
 
   create(

@@ -2,6 +2,13 @@ import { ApiError } from "../api/transport";
 import type { IdleSessionPolicyDurationBoundsResponse } from "../api/generated/types.gen";
 
 export const SESSION_ENDED = "Your session ended. Please sign in again.";
+const DOCX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export interface TemplateDownload {
+  blob: Blob;
+  filename: string;
+}
 
 export class RequestFence {
   private generation = 0;
@@ -54,6 +61,69 @@ export function appendExpectedFonts(form: FormData, value: string): void {
     return;
   }
   for (const font of fonts) form.append("expected_fonts", font);
+}
+
+function downloadFilename(response: Response): string | undefined {
+  const disposition = response.headers.get("content-disposition");
+  if (!disposition) return undefined;
+  const encoded = /(?:^|;)\s*filename\*=UTF-8''([^;]+)(?:;|$)/i.exec(
+    disposition,
+  )?.[1];
+  const quoted = /(?:^|;)\s*filename="([^"\\\r\n]+)"(?:;|$)/i.exec(
+    disposition,
+  )?.[1];
+  let filename = quoted;
+  if (encoded) {
+    try {
+      filename = decodeURIComponent(encoded);
+    } catch {
+      return undefined;
+    }
+  }
+  if (
+    !filename ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    /[\r\n]/.test(filename)
+  )
+    return undefined;
+  return filename;
+}
+
+export async function readTemplateDownload(
+  response: Response,
+): Promise<TemplateDownload> {
+  if (
+    response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() !== DOCX_MEDIA_TYPE ||
+    response.headers.get("cache-control")?.toLowerCase() !==
+      "private, no-store" ||
+    response.headers.get("x-content-type-options")?.toLowerCase() !== "nosniff"
+  )
+    throw new TypeError("Unexpected template download response.");
+  const filename = downloadFilename(response);
+  if (!filename?.toLowerCase().endsWith(".docx"))
+    throw new TypeError("Unexpected template download filename.");
+  return { blob: await response.blob(), filename };
+}
+
+export function saveTemplateDownload(
+  download: TemplateDownload,
+  defer: (callback: () => void) => void = (callback) =>
+    window.setTimeout(callback, 0),
+): void {
+  const url = URL.createObjectURL(download.blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = download.filename;
+  try {
+    anchor.click();
+  } finally {
+    defer(() => URL.revokeObjectURL(url));
+  }
 }
 
 export function isAbort(error: unknown): boolean {

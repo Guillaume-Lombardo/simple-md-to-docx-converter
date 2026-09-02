@@ -120,6 +120,20 @@ async function replace(page, name, fonts) {
   await page.getByText("Template content replaced.").waitFor();
 }
 
+async function assertRenderedTemplateDownload(page, button, filenamePattern) {
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  assert.match(download.suggestedFilename(), filenamePattern);
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  assert.deepEqual(
+    [...Buffer.concat(chunks).subarray(0, 4)],
+    [0x50, 0x4b, 0x03, 0x04],
+  );
+}
+
 test(
   "Next administration preserves template and account authority in the final image",
   { timeout: 360_000 },
@@ -196,7 +210,9 @@ test(
           .inputValue(),
         String(checkpointAdmin),
       );
-      await adminPage.getByText(`${checkpointRevision}`, { exact: true }).waitFor();
+      await adminPage
+        .getByText(`${checkpointRevision}`, { exact: true })
+        .waitFor();
       await adminPage
         .getByText(`${originalPolicy.body.absolute_lifetime_seconds} seconds`)
         .waitFor();
@@ -298,7 +314,11 @@ test(
           .inputValue(),
         String(desiredUser),
       );
-      assert.equal(policyPuts, 2, "a stale or successful policy PUT was replayed");
+      assert.equal(
+        policyPuts,
+        2,
+        "a stale or successful policy PUT was replayed",
+      );
       const authoritativePolicy = await api(
         adminPage,
         "GET",
@@ -475,6 +495,13 @@ test(
       assert.deepEqual(download.bytes, [0x50, 0x4b, 0x03, 0x04]);
       assert.equal(download.cache, "private, no-store");
       assert.match(download.disposition, /^attachment;/i);
+      await assertRenderedTemplateDownload(
+        alicePage,
+        templateCard(alicePage, templateName).getByRole("button", {
+          name: "Download current DOCX",
+        }),
+        new RegExp(`^template-${template.id}-v1\\.docx$`),
+      );
 
       await bobPage.getByRole("link", { name: "Templates" }).click();
       await bobPage.waitForURL("**/templates");
@@ -521,6 +548,15 @@ test(
       await alicePage
         .getByRole("textbox", { name: "Template name" })
         .fill(renamedTemplate);
+      let metadataPatches = 0;
+      const countMetadataPatches = (request) => {
+        if (
+          request.url().endsWith(`/api/v1/templates/${template.id}`) &&
+          request.method() === "PATCH"
+        )
+          metadataPatches += 1;
+      };
+      alicePage.on("request", countMetadataPatches);
       const staleResponse = alicePage.waitForResponse(
         (response) =>
           response.url().endsWith(`/api/v1/templates/${template.id}`) &&
@@ -530,11 +566,31 @@ test(
       await alicePage.getByRole("button", { name: "Save details" }).click();
       await staleResponse;
       await alicePage.getByText(/changed on the server/).waitFor();
+      await alicePage.getByRole("textbox", { name: "Template name" }).waitFor();
+      assert.equal(
+        await alicePage
+          .getByRole("textbox", { name: "Template name" })
+          .inputValue(),
+        templateName,
+      );
+      assert.equal(
+        await alicePage
+          .getByRole("textbox", { name: "Template description" })
+          .inputValue(),
+        "Concurrent body",
+      );
+      assert.equal(
+        metadataPatches,
+        1,
+        "stale metadata was automatically replayed",
+      );
       await alicePage
         .getByRole("textbox", { name: "Template name" })
         .fill(renamedTemplate);
       await alicePage.getByRole("button", { name: "Save details" }).click();
       await alicePage.getByText("Template details updated.").waitFor();
+      assert.equal(metadataPatches, 2);
+      alicePage.off("request", countMetadataPatches);
 
       await replace(alicePage, renamedTemplate, expectedFonts.join(", "));
       let versions = await api(
@@ -553,6 +609,13 @@ test(
 
       await manage(alicePage, renamedTemplate);
       const oldest = versions.body.at(-1);
+      await assertRenderedTemplateDownload(
+        alicePage,
+        alicePage.getByRole("button", {
+          name: `Download version ${oldest.number}`,
+        }),
+        new RegExp(`^template-${template.id}-v${oldest.number}\\.docx$`),
+      );
       const restoreResponse = alicePage.waitForResponse(
         (response) =>
           response.url().endsWith(`/versions/${oldest.id}/restore`) &&
@@ -659,11 +722,30 @@ test(
       await adminPage
         .getByText("Password reset and sessions revoked.")
         .waitFor();
-      await alicePage.reload({ waitUntil: "networkidle" });
+      let expiredDownloads = 0;
+      const countExpiredDownloads = (request) => {
+        if (
+          request.url().endsWith(`/api/v1/templates/${template.id}/content`) &&
+          request.method() === "GET"
+        )
+          expiredDownloads += 1;
+      };
+      alicePage.on("request", countExpiredDownloads);
+      const expiredDownload = alicePage.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/api/v1/templates/${template.id}/content`) &&
+          response.status() === 401,
+      );
+      await templateCard(alicePage, renamedTemplate)
+        .getByRole("button", { name: "Download current DOCX" })
+        .click();
+      await expiredDownload;
       await alicePage.waitForURL("**/login");
       await alicePage
         .getByText("Your session ended. Please sign in again.")
         .waitFor();
+      assert.equal(expiredDownloads, 1, "expired download was replayed");
+      alicePage.off("request", countExpiredDownloads);
 
       await adminPage
         .getByRole("textbox", { name: "Search by username" })

@@ -22,7 +22,13 @@ import {
   TextField,
 } from "../../components/primitives";
 import { AdministrationApi } from "./api";
-import { administrationError, RequestFence } from "./operations";
+import { ApiError } from "../api/transport";
+import {
+  administrationError,
+  readTemplateDownload,
+  RequestFence,
+  saveTemplateDownload,
+} from "./operations";
 
 interface ManagedTemplate {
   etag: string;
@@ -108,23 +114,36 @@ export function TemplatesWorkspace({
     });
   }, [mine, query, status, templates, user.id]);
 
+  async function fetchManaged(
+    templateId: string,
+    signal: AbortSignal,
+  ): Promise<ManagedTemplate | undefined> {
+    const [snapshot, versions] = await Promise.all([
+      api.template(templateId, signal),
+      api.versions(templateId, signal),
+    ]);
+    if (!snapshot.etag) return undefined;
+    return { etag: snapshot.etag, template: snapshot.data, versions };
+  }
+
   async function manage(template: TemplateResponse): Promise<void> {
     const request = fence.current.startRead();
     setLoading(true);
     setError(undefined);
     try {
-      const [snapshot, versions] = await Promise.all([
-        api.template(template.id, request.controller.signal),
-        api.versions(template.id, request.controller.signal),
-      ]);
+      const snapshot = await fetchManaged(
+        template.id,
+        request.controller.signal,
+      );
       if (!fence.current.current(request.generation)) return;
-      if (!snapshot.etag) {
+      if (!snapshot) {
+        setManaged(undefined);
         setError(
           "The server did not provide the template revision. Reload and try again.",
         );
         return;
       }
-      setManaged({ etag: snapshot.etag, template: snapshot.data, versions });
+      setManaged(snapshot);
     } catch (reason) {
       if (!fence.current.current(request.generation)) return;
       setError(
@@ -158,20 +177,82 @@ export function TemplatesWorkspace({
       await load();
       return true;
     } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 412 && managed) {
+        try {
+          const latest = await fetchManaged(
+            managed.template.id,
+            request.controller.signal,
+          );
+          if (!fence.current.finishMutation(request.generation)) return false;
+          setPending(false);
+          setConfirmation(undefined);
+          if (!latest) {
+            setManaged(undefined);
+            setError(
+              "The server did not provide the template revision. Reload and try again.",
+            );
+            return false;
+          }
+          setManaged(latest);
+          setError(
+            "This item changed on the server. Review the latest version and try again.",
+          );
+        } catch (refreshReason) {
+          if (!fence.current.finishMutation(request.generation)) return false;
+          setPending(false);
+          setManaged(undefined);
+          setError(
+            administrationError(
+              refreshReason,
+              expire,
+              "The latest template could not be loaded. Reload and try again.",
+            ),
+          );
+        }
+        return false;
+      }
       if (!fence.current.finishMutation(request.generation)) return false;
       setPending(false);
-      const message = administrationError(
-        reason,
-        expire,
-        "The template change could not be completed. Try again.",
+      setError(
+        administrationError(
+          reason,
+          expire,
+          "The template change could not be completed. Try again.",
+        ),
       );
-      if (message?.startsWith("This item changed") && managed) {
-        await manage(managed.template);
-        setError(message);
-      } else {
-        setError(message);
-      }
       return false;
+    }
+  }
+
+  async function downloadTemplate(
+    templateId: string,
+    versionId?: string,
+  ): Promise<void> {
+    const request = fence.current.startMutation();
+    if (!request) return;
+    setPending(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const response = await api.templateContent(
+        templateId,
+        versionId,
+        request.controller.signal,
+      );
+      const download = await readTemplateDownload(response);
+      if (!fence.current.finishMutation(request.generation)) return;
+      setPending(false);
+      saveTemplateDownload(download);
+    } catch (reason) {
+      if (!fence.current.finishMutation(request.generation)) return;
+      setPending(false);
+      setError(
+        administrationError(
+          reason,
+          expire,
+          "The template could not be downloaded. Try again.",
+        ),
+      );
     }
   }
 
@@ -310,9 +391,13 @@ export function TemplatesWorkspace({
                   </p>
                   <div className="flex flex-wrap gap-3">
                     {template.status === "active" && (
-                      <a href={`/api/v1/templates/${template.id}/content`}>
+                      <button
+                        disabled={pending}
+                        onClick={() => void downloadTemplate(template.id)}
+                        type="button"
+                      >
                         Download current DOCX
-                      </a>
+                      </button>
                     )}
                     {template.status === "active" && (
                       <button
@@ -384,6 +469,7 @@ export function TemplatesWorkspace({
           </h2>
           <MetadataForm
             disabled={pending}
+            key={`metadata-${managed.etag}`}
             managed={managed}
             submit={(name, description) =>
               mutation(
@@ -403,6 +489,7 @@ export function TemplatesWorkspace({
             <ReplacementForm
               disabled={pending}
               invalid={setError}
+              key={`replacement-${managed.etag}-${managed.template.current_version_id}`}
               managed={managed}
               validate={validateFile}
               submit={(file, fonts) =>
@@ -427,11 +514,15 @@ export function TemplatesWorkspace({
                 <span>
                   Version {version.number} · {version.size} bytes
                 </span>
-                <a
-                  href={`/api/v1/templates/${managed.template.id}/versions/${version.id}/content`}
+                <button
+                  disabled={pending}
+                  onClick={() =>
+                    void downloadTemplate(managed.template.id, version.id)
+                  }
+                  type="button"
                 >
                   Download version {version.number}
-                </a>
+                </button>
                 {managed.template.status === "active" &&
                   version.id !== managed.template.current_version_id && (
                     <button

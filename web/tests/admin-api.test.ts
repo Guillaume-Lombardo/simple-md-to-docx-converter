@@ -3,6 +3,7 @@ import type { ApiTransport } from "../src/api/transport";
 
 function setup() {
   const transport = {
+    download: vi.fn(),
     json: vi.fn(),
     jsonWithMetadata: vi.fn(),
     multipart: vi.fn(),
@@ -12,6 +13,27 @@ function setup() {
     transport,
   };
 }
+
+test("template downloads use the authenticated current and historical API paths", async () => {
+  const { api, transport } = setup();
+  const response = new Response("docx");
+  transport.download.mockResolvedValue(response);
+  const currentSignal = new AbortController().signal;
+  const historicalSignal = new AbortController().signal;
+  await expect(
+    api.templateContent("template-id", undefined, currentSignal),
+  ).resolves.toBe(response);
+  await expect(
+    api.templateContent("template-id", "version-id", historicalSignal),
+  ).resolves.toBe(response);
+  expect(transport.download.mock.calls).toEqual([
+    ["/api/v1/templates/template-id/content", { signal: currentSignal }],
+    [
+      "/api/v1/templates/template-id/versions/version-id/content",
+      { signal: historicalSignal },
+    ],
+  ]);
+});
 
 test("template library follows every page and carries encoded filters", async () => {
   const { api, transport } = setup();

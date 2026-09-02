@@ -5,8 +5,18 @@ import {
   appendExpectedFonts,
   expectedFonts,
   RequestFence,
+  readTemplateDownload,
+  saveTemplateDownload,
   SESSION_ENDED,
 } from "../src/admin/operations";
+
+const docxHeaders = {
+  "Cache-Control": "private, no-store",
+  "Content-Disposition": 'attachment; filename="template-id-v3.docx"',
+  "Content-Type":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "X-Content-Type-Options": "nosniff",
+};
 
 test("expected fonts preserve trimmed order and explicit clearing", () => {
   expect(expectedFonts(" Carlito, , Liberation Serif, Carlito ")).toEqual([
@@ -93,4 +103,74 @@ test("aborted administration requests publish no error", () => {
       "fallback",
     ),
   ).toBeUndefined();
+});
+
+test("template downloads validate metadata, preserve filename, and revoke their URL", async () => {
+  const response = new Response("docx bytes", { headers: docxHeaders });
+  const download = await readTemplateDownload(response);
+  expect(download.filename).toBe("template-id-v3.docx");
+  expect(await download.blob.text()).toBe("docx bytes");
+
+  const createObjectURL = vi
+    .spyOn(URL, "createObjectURL")
+    .mockReturnValue("blob:template-download");
+  const revokeObjectURL = vi
+    .spyOn(URL, "revokeObjectURL")
+    .mockImplementation(() => undefined);
+  let clickedDownload: string | undefined;
+  let clickedHref: string | undefined;
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      clickedDownload = this.download;
+      clickedHref = this.href;
+    });
+  let deferred!: () => void;
+  saveTemplateDownload(download, (callback) => {
+    deferred = callback;
+  });
+  expect(createObjectURL).toHaveBeenCalledWith(download.blob);
+  expect(click).toHaveBeenCalledOnce();
+  expect(clickedDownload).toBe("template-id-v3.docx");
+  expect(clickedHref).toBe("blob:template-download");
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  deferred();
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:template-download");
+  vi.restoreAllMocks();
+});
+
+test("template downloads decode the authoritative UTF-8 filename", async () => {
+  const download = await readTemplateDownload(
+    new Response("docx", {
+      headers: {
+        ...docxHeaders,
+        "Content-Disposition":
+          "attachment; filename*=UTF-8''template%20id-v3.docx",
+      },
+    }),
+  );
+  expect(download.filename).toBe("template id-v3.docx");
+});
+
+test.each([
+  [{ ...docxHeaders, "Content-Type": "text/html" }],
+  [
+    {
+      ...docxHeaders,
+      "Content-Disposition": 'attachment; filename="../x.docx"',
+    },
+  ],
+  [{ ...docxHeaders, "Content-Disposition": 'attachment; filename="x.txt"' }],
+  [
+    {
+      ...docxHeaders,
+      "Content-Disposition": "attachment; filename*=UTF-8''%GG",
+    },
+  ],
+  [{ ...docxHeaders, "Cache-Control": "public" }],
+  [{ ...docxHeaders, "X-Content-Type-Options": "" }],
+])("template downloads reject unsafe response metadata", async (headers) => {
+  await expect(
+    readTemplateDownload(new Response("unsafe", { headers })),
+  ).rejects.toThrow("Unexpected template download");
 });

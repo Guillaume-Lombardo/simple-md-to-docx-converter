@@ -67,6 +67,18 @@ const version = {
   validation_trace: ["static_ooxml"],
 };
 
+function templateDownloadResponse(filename: string): Response {
+  return new Response("docx bytes", {
+    headers: {
+      "Cache-Control": "private, no-store",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 function templateApi(overrides: Record<string, unknown> = {}) {
   return {
     allTemplates: vi.fn().mockResolvedValue([fallback, preferred, archived]),
@@ -84,6 +96,11 @@ function templateApi(overrides: Record<string, unknown> = {}) {
         etag: '"template-etag"',
       }),
     ),
+    templateContent: vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(templateDownloadResponse("template-v2.docx")),
+      ),
     templateContext: vi.fn().mockResolvedValue({
       preferred_template_id: preferred.id,
       system_fallback_template_id: fallback.id,
@@ -347,6 +364,183 @@ test("template management uses server ETag, edits and explicitly clears replacem
       expect.any(AbortSignal),
     ),
   );
+});
+
+test("stale template metadata resets every field to the authoritative snapshot and waits for explicit retry", async () => {
+  const authoritativeVersion = {
+    ...version,
+    declared_fonts: ["Aptos", "Carlito"],
+    id: "10000000-0000-4000-8000-000000000009",
+    number: 9,
+  };
+  const authoritativeTemplate = {
+    ...preferred,
+    current_version_id: authoritativeVersion.id,
+    description: "Authoritative description",
+    name: "Authoritative template",
+    revision: 9,
+  };
+  const api = templateApi({
+    template: vi
+      .fn()
+      .mockResolvedValueOnce({ data: preferred, etag: '"template-etag"' })
+      .mockResolvedValueOnce({
+        data: authoritativeTemplate,
+        etag: '"authoritative-etag"',
+      }),
+    updateMetadata: vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(412, "STALE", "unsafe"))
+      .mockResolvedValueOnce({
+        data: authoritativeTemplate,
+        etag: '"next"',
+      }),
+    versions: vi
+      .fn()
+      .mockResolvedValueOnce([version])
+      .mockResolvedValueOnce([authoritativeVersion]),
+  });
+  render(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={vi.fn()}
+      user={admin}
+    />,
+  );
+  await screen.findByText("Fallback body");
+  fireEvent.click(
+    within(screen.getByText("Preferred template").closest("li")!).getByRole(
+      "button",
+      { name: "Manage" },
+    ),
+  );
+  const name = await screen.findByRole("textbox", { name: "Template name" });
+  fireEvent.change(name, { target: { value: "Stale local name" } });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Template description" }),
+    { target: { value: "Stale local description" } },
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: /Replacement expected fonts/ }),
+    { target: { value: "Stale Local Font" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+
+  expect(await screen.findByText(/changed on the server/)).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "Manage Authoritative template" }),
+  ).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Template name" })).toHaveValue(
+    "Authoritative template",
+  );
+  expect(
+    screen.getByRole("textbox", { name: "Template description" }),
+  ).toHaveValue("Authoritative description");
+  expect(
+    screen.getByRole("textbox", { name: /Replacement expected fonts/ }),
+  ).toHaveValue("Aptos, Carlito");
+  expect(screen.getByText(/Version 9 · 120 bytes/)).toBeVisible();
+  expect(api.updateMetadata).toHaveBeenCalledOnce();
+
+  await act(async () => Promise.resolve());
+  expect(api.updateMetadata).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+  await waitFor(() => expect(api.updateMetadata).toHaveBeenCalledTimes(2));
+  expect(api.updateMetadata.mock.calls[1]).toEqual([
+    preferred.id,
+    '"authoritative-etag"',
+    "Authoritative template",
+    "Authoritative description",
+    expect.any(AbortSignal),
+  ]);
+});
+
+test("template download controls preserve server filenames for current and historical content", async () => {
+  const api = templateApi({
+    templateContent: vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve(templateDownloadResponse("preferred-current.docx")),
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve(templateDownloadResponse("preferred-v2.docx")),
+      ),
+  });
+  const createObjectURL = vi
+    .spyOn(URL, "createObjectURL")
+    .mockReturnValueOnce("blob:current")
+    .mockReturnValueOnce("blob:historical");
+  const downloadedFilenames: string[] = [];
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedFilenames.push(this.download);
+    });
+  render(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={vi.fn()}
+      user={admin}
+    />,
+  );
+  await screen.findByText("Fallback body");
+  const preferredItem = screen.getByText("Preferred template").closest("li")!;
+  fireEvent.click(
+    within(preferredItem).getByRole("button", {
+      name: "Download current DOCX",
+    }),
+  );
+  await waitFor(() => expect(api.templateContent).toHaveBeenCalledOnce());
+  await waitFor(() => expect(click).toHaveBeenCalledOnce());
+  expect(downloadedFilenames[0]).toBe("preferred-current.docx");
+
+  fireEvent.click(
+    within(preferredItem).getByRole("button", { name: "Manage" }),
+  );
+  await screen.findByRole("heading", { name: "Manage Preferred template" });
+  fireEvent.click(screen.getByRole("button", { name: "Download version 2" }));
+  await waitFor(() => expect(api.templateContent).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+  expect(api.templateContent.mock.calls).toEqual([
+    [preferred.id, undefined, expect.any(AbortSignal)],
+    [preferred.id, version.id, expect.any(AbortSignal)],
+  ]);
+  expect(downloadedFilenames[1]).toBe("preferred-v2.docx");
+  expect(createObjectURL).toHaveBeenCalledTimes(2);
+  vi.restoreAllMocks();
+});
+
+test("an authoritative 401 during a rendered template download expires the session", async () => {
+  const expire = vi.fn();
+  const api = templateApi({
+    templateContent: vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(401, "AUTHENTICATION_REQUIRED", "unsafe"),
+      ),
+  });
+  const createObjectURL = vi.spyOn(URL, "createObjectURL");
+  render(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={expire}
+      user={admin}
+    />,
+  );
+  await screen.findByText("Fallback body");
+  fireEvent.click(
+    within(screen.getByText("Preferred template").closest("li")!).getByRole(
+      "button",
+      { name: "Download current DOCX" },
+    ),
+  );
+  expect(
+    await screen.findByText("Your session ended. Please sign in again."),
+  ).toBeVisible();
+  expect(expire).toHaveBeenCalledOnce();
+  expect(api.templateContent).toHaveBeenCalledOnce();
+  expect(createObjectURL).not.toHaveBeenCalled();
+  vi.restoreAllMocks();
 });
 
 test("template preference, fallback, restore, confirmation, stale writes, and session loss are bounded", async () => {
