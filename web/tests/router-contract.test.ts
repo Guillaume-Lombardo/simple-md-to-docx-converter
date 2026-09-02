@@ -446,7 +446,10 @@ test("request transport ceiling rejects streamed bodies without an error body", 
       const destination = new URL(routerOrigin);
       const outbound = request(
         {
-          headers: { host: "converter.example", "transfer-encoding": "chunked" },
+          headers: {
+            host: "converter.example",
+            "transfer-encoding": "chunked",
+          },
           host: destination.hostname,
           method: "POST",
           path: "/api/v1/conversions",
