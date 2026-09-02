@@ -864,11 +864,30 @@ test(
       await adminPage
         .getByText("Account deactivated and sessions revoked.")
         .waitFor();
-      await bobPage.reload({ waitUntil: "networkidle" });
+      let revokedLogouts = 0;
+      const countRevokedLogouts = (request) => {
+        if (
+          request.url().endsWith("/api/v1/logout") &&
+          request.method() === "POST"
+        )
+          revokedLogouts += 1;
+      };
+      bobPage.on("request", countRevokedLogouts);
+      const revokedLogout = bobPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/logout") &&
+          response.status() === 401,
+      );
+      await bobPage
+        .getByRole("button", { name: "Sign out", exact: true })
+        .click();
+      await revokedLogout;
       await bobPage.waitForURL("**/login");
       await bobPage
         .getByText("Your session ended. Please sign in again.")
         .waitFor();
+      assert.equal(revokedLogouts, 1, "revoked sign-out was replayed");
+      bobPage.off("request", countRevokedLogouts);
     } finally {
       if (adminPage && originalPolicy?.etag) {
         try {
