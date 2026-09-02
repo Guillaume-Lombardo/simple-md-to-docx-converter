@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,32 @@ import pytest
 
 HARNESS = Path("scripts/e2e/harness.sh").resolve()
 RUNNER = Path("scripts/e2e/run.sh").resolve()
+ADMIN_BROWSER = Path("tests/e2e/browser-next-admin.test.mjs").resolve()
+RESTART_PREPARATION_BROWSER = Path(
+    "tests/e2e/browser-next-conversion-restart-prepare.test.mjs"
+).resolve()
+RESTART_BROWSER = Path("tests/e2e/browser-next-conversion-restart.test.mjs").resolve()
+
+
+@pytest.mark.unit
+def test_admin_browser_disambiguates_concurrent_account_fields() -> None:
+    source = ADMIN_BROWSER.read_text(encoding="utf-8")
+
+    assert source.count('getByRole("textbox", { name: "Username", exact: true })') == 3
+    assert (
+        source.count(
+            'getByRole("textbox", { name: "Search by username", exact: true })'
+        )
+        == 3
+    )
+    assert source.count('getByLabel("Temporary password", { exact: true })') == 2
+    assert source.count('getByLabel("New temporary password", { exact: true })') == 1
+    assert 'getByRole("textbox", { name: "Username" })' not in source
+    assert 'getByRole("textbox", { name: "Search by username" })' not in source
+    assert 'getByLabel("Temporary password")' not in source
+    assert 'getByLabel("New temporary password")' not in source
+    assert ".first()" not in source
+    assert ".nth(" not in source
 
 
 @pytest.mark.unit
@@ -277,8 +304,14 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     admission_index = runner.index(
         "/e2e/browser-next-conversion-admission.test.mjs", failure_index
     )
+    preparation_index = runner.index(
+        "/e2e/browser-next-conversion-restart-prepare.test.mjs", admission_index
+    )
+    preparation_command_index = runner.rindex(
+        "podman exec", admission_index, preparation_index
+    )
     restart_index = runner.index(
-        'podman restart --time 15 "$application_name"', admission_index
+        'podman restart --time 15 "$application_name"', preparation_index
     )
     recovery_index = runner.index(
         "/e2e/browser-next-conversion-restart.test.mjs", restart_index
@@ -291,19 +324,140 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert runner.count("/e2e/browser-next-conversion.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-failure.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-admission.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-restart-prepare.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
-    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 2
+    assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 3
+    preparation = runner[preparation_command_index:restart_index]
+    assert (
+        '"$application_name" node --test \\\n'
+        "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
+    )
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
         < main_index
         < failure_index
         < admission_index
+        < preparation_index
         < restart_index
         < recovery_index
         < short_lifetime_index
         < expiry_index
     )
+
+
+@pytest.mark.unit
+def test_restart_checkpoint_is_fresh_and_authoritative() -> None:
+    preparation = RESTART_PREPARATION_BROWSER.read_text(encoding="utf-8")
+    recovery = RESTART_BROWSER.read_text(encoding="utf-8")
+
+    assert 'assert.equal(authoritative.body.state, "succeeded")' in preparation
+    assert "Date.parse(authoritative.body.expires_at) > Date.now()" in preparation
+    assert "expires_at: authoritative.body.expires_at" in preparation
+    assert "job_id: job.id" in preparation
+    assert "Date.parse(state.expires_at) > Date.now()" in recovery
+    assert "fresh recovery checkpoint expired before application restart" in recovery
+
+
+@pytest.mark.unit
+def test_runner_invokes_next_administration_with_restored_policy_evidence(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    restore_index = runner.index("# Prove that an isolated snapshot restores")
+    checkpoint_verify_index = runner.index(
+        "tests.e2e.service_workflow verify-checkpoint", restore_index
+    )
+    policy_values_index = runner.index(
+        '"policy_user_idle_minutes"', checkpoint_verify_index
+    )
+    auth_index = runner.index("/e2e/browser-next-auth.test.mjs", policy_values_index)
+    conversion_failure_index = runner.index(
+        "/e2e/browser-next-conversion-failure.test.mjs", auth_index
+    )
+    admission_index = runner.index(
+        "/e2e/browser-next-conversion-admission.test.mjs", conversion_failure_index
+    )
+    recovery_index = runner.index(
+        "/e2e/browser-next-conversion-restart.test.mjs", admission_index
+    )
+    admin_cookie_index = runner.index(
+        "/e2e/browser-next-admin-cookie.test.mjs", recovery_index
+    )
+    admin_index = runner.index("/e2e/browser-next-admin.test.mjs", recovery_index)
+    expiry_index = runner.index("/e2e/browser-next-auth-expiry.test.mjs", admin_index)
+
+    assert runner.count("/e2e/browser-next-admin-cookie.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-admin.test.mjs") == 1
+    assert (
+        checkpoint_verify_index
+        < policy_values_index
+        < auth_index
+        < conversion_failure_index
+        < admission_index
+        < recovery_index
+        < admin_cookie_index
+        < admin_index
+        < expiry_index
+    )
+    assert '"policy_admin_idle_minutes"' in runner[policy_values_index:auth_index]
+    assert '"policy_revision"' in runner[policy_values_index:auth_index]
+    assert (
+        "value.isascii() and value.isdecimal()"
+        in runner[policy_values_index:auth_index]
+    )
+    invocation = runner[recovery_index:expiry_index]
+    assert (
+        'podman exec \\\n  "$application_name" node --test '
+        "/e2e/browser-next-admin-cookie.test.mjs\n"
+        "podman exec \\\n  --env MARKWEAVE_E2E_PROFILE=" in invocation
+    )
+    assert (
+        "--env MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES="
+        '"$checkpoint_user_idle_minutes"' in invocation
+    )
+    assert (
+        "--env MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES="
+        '"$checkpoint_admin_idle_minutes"' in invocation
+    )
+    assert (
+        "--env MARKWEAVE_E2E_CHECKPOINT_POLICY_REVISION="
+        '"$checkpoint_policy_revision"' in invocation
+    )
+    assert "MARKWEAVE_E2E_CHECKPOINT_USER_IDLE_MINUTES=25" not in runner
+    assert "MARKWEAVE_E2E_CHECKPOINT_ADMIN_IDLE_MINUTES=10" not in runner
+
+    extraction_start = runner.index("import json", checkpoint_verify_index)
+    extraction_end = runner.index('\n\' "$state_file"', extraction_start)
+    extraction = runner[extraction_start:extraction_end]
+    compile(extraction, str(RUNNER), "exec")
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        '{"policy_user_idle_minutes":"26",'
+        '"policy_admin_idle_minutes":"11","policy_revision":"7"}\n',
+        encoding="utf-8",
+    )
+    valid = subprocess.run(
+        [sys.executable, "-c", extraction, str(state_file)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert valid.returncode == 0
+    assert valid.stdout == "26\t11\t7\n"
+    state_file.write_text(
+        '{"policy_user_idle_minutes":"-1",'
+        '"policy_admin_idle_minutes":"11","policy_revision":"7"}\n',
+        encoding="utf-8",
+    )
+    invalid = subprocess.run(
+        [sys.executable, "-c", extraction, str(state_file)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid.returncode != 0
+    assert "checkpoint policy evidence is invalid" in invalid.stderr
 
 
 @pytest.mark.unit

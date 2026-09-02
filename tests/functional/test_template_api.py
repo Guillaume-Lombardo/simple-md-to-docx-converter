@@ -94,6 +94,15 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
         assert listing.json()["total"] == 1
         downloaded = admin.get(f"/api/v1/templates/{template_id}/content")
         assert downloaded.content == _docx()
+        assert downloaded.headers["cache-control"] == "private, no-store"
+        assert downloaded.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert downloaded.headers["content-disposition"] == (
+            f'attachment; filename="template-{template_id}-v1.docx"'
+        )
+        assert downloaded.headers["etag"].startswith('"sha256-')
+        assert downloaded.headers["etag"].endswith('"')
         assert "hostile-name" not in downloaded.headers["content-disposition"]
         assert downloaded.headers["x-content-type-options"] == "nosniff"
 
@@ -127,12 +136,19 @@ def test_template_http_lifecycle_downloads_etags_and_authorization(
         assert replaced.status_code == 201
         versions = admin.get(f"/api/v1/templates/{template_id}/versions").json()
         assert [item["number"] for item in versions] == [2, 1]
-        assert (
-            admin.get(
-                f"/api/v1/templates/{template_id}/versions/{first_version}/content"
-            ).content
-            == _docx()
+        historical = admin.get(
+            f"/api/v1/templates/{template_id}/versions/{first_version}/content"
         )
+        assert historical.content == _docx()
+        assert historical.headers["cache-control"] == "private, no-store"
+        assert historical.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert historical.headers["content-disposition"] == (
+            f'attachment; filename="template-{template_id}-v1.docx"'
+        )
+        assert historical.headers["etag"] == downloaded.headers["etag"]
+        assert historical.headers["x-content-type-options"] == "nosniff"
 
         restored = admin.post(
             f"/api/v1/templates/{template_id}/versions/{first_version}/restore",
@@ -199,3 +215,79 @@ def test_invalid_template_is_sanitized_and_never_published(tmp_path: Path) -> No
         assert blank.status_code == 422
         assert blank.json()["error"]["code"] == "TEMPLATE_REQUEST_INVALID"
         assert client.get("/api/v1/templates").json()["total"] == 0
+
+
+def test_expected_font_empty_sentinel_clears_without_normalizing_invalid_values(
+    tmp_path: Path,
+) -> None:
+    with _client(tmp_path) as client:
+        csrf = _login(client, "admin", "admin-password")
+        created = client.post(
+            "/api/v1/templates",
+            headers={"X-CSRF-Token": csrf},
+            data={
+                "name": "No declaration",
+                "description": "Explicitly cleared",
+                "expected_fonts": "",
+            },
+            files={"content": ("template.docx", _docx(), "application/octet-stream")},
+        )
+        assert created.status_code == 201
+        template_id = created.json()["id"]
+        versions = client.get(f"/api/v1/templates/{template_id}/versions")
+        assert versions.status_code == 200
+        assert versions.json()[0]["declared_fonts"] == []
+        assert versions.json()[0]["resolved_fonts"] == []
+
+        replaced = client.put(
+            f"/api/v1/templates/{template_id}/content",
+            headers={
+                "X-CSRF-Token": csrf,
+                "If-Match": created.headers["etag"],
+            },
+            data={"expected_fonts": ""},
+            files={
+                "content": ("replacement.docx", _docx(), "application/octet-stream")
+            },
+        )
+        assert replaced.status_code == 201
+        assert replaced.json()["declared_fonts"] == []
+        assert replaced.json()["resolved_fonts"] == []
+
+        for expected_fonts in (("   ",), ("Calibri", ""), ("", "Calibri")):
+            invalid_create = client.post(
+                "/api/v1/templates",
+                headers={"X-CSRF-Token": csrf},
+                data={
+                    "name": "Invalid declaration",
+                    "description": "Must not be normalized",
+                    "expected_fonts": expected_fonts,
+                },
+                files={
+                    "content": ("template.docx", _docx(), "application/octet-stream")
+                },
+            )
+            assert invalid_create.status_code == 422
+            assert invalid_create.json()["error"]["code"] == "TEMPLATE_FONT_CONTRACT"
+
+            invalid_replace = client.put(
+                f"/api/v1/templates/{template_id}/content",
+                headers={
+                    "X-CSRF-Token": csrf,
+                    "If-Match": replaced.headers["etag"],
+                },
+                data={"expected_fonts": expected_fonts},
+                files={
+                    "content": (
+                        "replacement.docx",
+                        _docx(),
+                        "application/octet-stream",
+                    )
+                },
+            )
+            assert invalid_replace.status_code == 422
+            assert invalid_replace.json()["error"]["code"] == ("TEMPLATE_FONT_CONTRACT")
+
+        final_versions = client.get(f"/api/v1/templates/{template_id}/versions")
+        assert final_versions.status_code == 200
+        assert len(final_versions.json()) == 2

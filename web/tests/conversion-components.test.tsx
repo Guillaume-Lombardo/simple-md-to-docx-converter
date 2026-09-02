@@ -249,22 +249,25 @@ test("validated downloads use the server filename and dropped files reach submis
       },
     }),
   );
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce({
+      conversion_upload_max_bytes: 1_000_000,
+      resolved_template: null,
+      selection_source: "pandoc_default",
+      template_version_id: null,
+    })
+    .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+    .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 });
   renderWorkspace({
-    json: vi
-      .fn()
-      .mockResolvedValueOnce({
-        conversion_upload_max_bytes: 1_000_000,
-        resolved_template: null,
-        selection_source: "pandoc_default",
-        template_version_id: null,
-      })
-      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
-      .mockResolvedValue({ items: [], limit: 20, offset: 0, total: 0 }),
+    json,
     multipartWithMetadata: multipart,
     download,
   });
   const source = new File(["# dropped"], "dropped.md");
   const hint = await screen.findByText(/Choose or drop exactly one/);
+  // Settle the debounced initial search before asserting later download errors.
+  await vi.waitFor(() => expect(json).toHaveBeenCalledTimes(3));
   const dropZone = hint.closest("label")!;
   fireEvent.dragEnter(dropZone);
   expect(screen.getByText("Drop the file now.")).toBeVisible();

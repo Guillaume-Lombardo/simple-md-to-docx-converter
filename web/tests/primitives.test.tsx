@@ -48,13 +48,18 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
       Work
     </AppShell>,
   );
-  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
-  expect(screen.getByText("Templates")).toHaveAttribute(
-    "aria-disabled",
-    "true",
+  expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute(
+    "aria-current",
+    "page",
   );
-  expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
-  expect(screen.getByText("Users")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
+    "href",
+    "/users",
+  );
+  expect(screen.getByRole("link", { name: "Session policy" })).toHaveAttribute(
+    "href",
+    "/session-policy",
+  );
   expect(screen.getByText("Admin (Administrator)")).toBeVisible();
   expect(screen.getByText(/15 minutes of inactivity/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();

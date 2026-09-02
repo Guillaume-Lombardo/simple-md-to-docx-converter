@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
+from httpx import Response as HttpxResponse
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -35,6 +36,7 @@ from markweave.http.responses import (
     idle_session_policy_etag,
 )
 from markweave.http.routers.conversions import _result_content_disposition
+from markweave.http.routers.templates import _expected_fonts_from_form
 from markweave.http.schemas import ConversionOptionsResponse, ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
@@ -62,6 +64,35 @@ from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 _HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+def _assert_template_download_response(
+    download: HttpxResponse,
+    template: TemplateIdentity,
+    version: TemplateVersion,
+) -> None:
+    assert download.content == b"docx"
+    assert download.headers["Cache-Control"] == "private, no-store"
+    assert download.headers["Content-Type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert download.headers["Content-Disposition"] == (
+        f'attachment; filename="template-{template.id}-v{version.number}.docx"'
+    )
+    assert download.headers["ETag"] == f'"sha256-{version.sha256}"'
+    assert download.headers["X-Content-Type-Options"] == "nosniff"
+
+
+@pytest.mark.unit
+def test_template_form_font_sentinel_is_exact_and_order_preserving() -> None:
+    assert _expected_fonts_from_form([""]) == ()
+    assert _expected_fonts_from_form(["   "]) == ("   ",)
+    assert _expected_fonts_from_form(["Calibri", ""]) == ("Calibri", "")
+    assert _expected_fonts_from_form(["", "Calibri"]) == ("", "Calibri")
+    assert _expected_fonts_from_form(["Cambria", "Calibri"]) == (
+        "Cambria",
+        "Calibri",
+    )
 
 
 @pytest.mark.unit
@@ -853,6 +884,18 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
     assert readiness.json()["error"]["code"] == "NOT_READY"
     paths = schema["paths"]
+    schemas = schema["components"]["schemas"]
+    for body_schema in (
+        "Body_create_template_api_v1_templates_post",
+        "Body_replace_template_api_v1_templates__template_id__content_put",
+    ):
+        expected_fonts = schemas[body_schema]["properties"]["expected_fonts"]
+        assert expected_fonts == {
+            "items": {"type": "string"},
+            "title": "Expected Fonts",
+            "type": "array",
+        }
+        assert "expected_fonts" in schemas[body_schema]["required"]
     for path in paths.values():
         for operation_name, operation in path.items():
             if operation_name not in {
@@ -951,6 +994,20 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
         assert responses["200"]["content"][docx_type]["schema"] == {
             "type": "string",
             "format": "binary",
+        }
+        headers = responses["200"]["headers"]
+        assert headers["Cache-Control"] == {
+            "description": "Prevents shared and private caching of template content.",
+            "schema": {"type": "string", "const": "private, no-store"},
+        }
+        assert headers["Content-Disposition"] == {
+            "description": "Safe attachment filename derived from immutable identifiers.",
+            "schema": {"type": "string"},
+        }
+        assert headers["ETag"]["schema"] == {"type": "string"}
+        assert headers["X-Content-Type-Options"] == {
+            "description": "Prevents content-type sniffing.",
+            "schema": {"type": "string", "const": "nosniff"},
         }
         assert {"401", "404", "422", "503"} <= responses.keys()
 
@@ -1458,13 +1515,11 @@ def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
         assert (
             client.get(f"/api/v1/templates/{template.id}/versions").status_code == 200
         )
-        assert client.get(f"/api/v1/templates/{template.id}/content").content == b"docx"
-        assert (
-            client.get(
-                f"/api/v1/templates/{template.id}/versions/{version.id}/content"
-            ).content
-            == b"docx"
-        )
+        for path in (
+            f"/api/v1/templates/{template.id}/content",
+            f"/api/v1/templates/{template.id}/versions/{version.id}/content",
+        ):
+            _assert_template_download_response(client.get(path), template, version)
         assert (
             client.post(
                 f"/api/v1/templates/{template.id}/versions/{version.id}/restore",

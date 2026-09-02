@@ -184,7 +184,7 @@ class TemplateFontDeclaration:
     def validate(self, limits: TemplateLimits, policy: FontPolicy) -> tuple[str, ...]:
         """Return normalized names after bounded policy validation."""
 
-        if not self.families or len(self.families) > limits.max_declared_fonts:
+        if len(self.families) > limits.max_declared_fonts:
             _font_contract()
         normalized: list[str] = []
         keys: set[str] = set()
@@ -697,7 +697,12 @@ def _validate_template(
         if (resolved := policy.resolve(family)) is not None
     }
     if enforce_referenced_fonts and any(
-        _font_key(family) not in declared_keys | resolved_keys for family in referenced
+        (
+            policy.resolve(family) is None
+            if not declared
+            else _font_key(family) not in declared_keys | resolved_keys
+        )
+        for family in referenced
     ):
         _font_contract()
     resolved = tuple((family, policy.resolve(family) or "") for family in declared)

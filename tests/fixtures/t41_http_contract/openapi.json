@@ -4685,9 +4685,29 @@
             },
             "description": "Immutable current Word template",
             "headers": {
+              "Cache-Control": {
+                "description": "Prevents shared and private caching of template content.",
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Safe attachment filename derived from immutable identifiers.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "ETag": {
                 "description": "Current template identity or immutable content validator.",
                 "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content-type sniffing.",
+                "schema": {
+                  "const": "nosniff",
                   "type": "string"
                 }
               },
@@ -5474,9 +5494,29 @@
             },
             "description": "Immutable historical Word template",
             "headers": {
+              "Cache-Control": {
+                "description": "Prevents shared and private caching of template content.",
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Safe attachment filename derived from immutable identifiers.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "ETag": {
                 "description": "Current template identity or immutable content validator.",
                 "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content-type sniffing.",
+                "schema": {
+                  "const": "nosniff",
                   "type": "string"
                 }
               },
