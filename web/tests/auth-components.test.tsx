@@ -105,7 +105,11 @@ test("renewal provides labelled fields, logout, duration, and fresh-login naviga
     await screen.findByRole("heading", { name: "Change your password" }),
   ).toBeVisible();
   expect(screen.getByText(/17 minutes of inactivity/)).toBeVisible();
-  expect(screen.getByRole("link", { name: "Templates" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
+  expect(screen.getByText("Templates")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
   const fields = screen.getAllByLabelText(/password/i);
   for (const field of fields)

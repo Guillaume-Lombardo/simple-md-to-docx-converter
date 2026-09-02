@@ -548,6 +548,33 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("idle_seconds", "public_minutes"), ((1, 1), (59, 1), (61, 2), (119, 2))
+)
+def test_legacy_idle_duration_uses_positive_ceiling_minutes(
+    idle_seconds: int, public_minutes: int
+) -> None:
+    hasher = FakeHasher()
+    clock = FakeClock()
+    service = AuthenticationService(
+        users=MemoryUserRepository(),
+        sessions=MemorySessionRepository(),
+        security=SecurityRuntime(hasher=hasher, tokens=SequenceTokens(), clock=clock),
+        policy=SessionPolicy(idle_seconds=idle_seconds, absolute_seconds=300),
+    )
+    service.bootstrap_admin("admin", "correct")
+
+    assert service.effective_idle_minutes(Role.ADMIN) == public_minutes
+    assert service.effective_idle_minutes(Role.USER) == public_minutes
+    login = service.login("admin", "correct")
+    session = service.sessions.get(digest_token(login.session_token))
+    assert session is not None
+    assert session.idle_expires_at - session.created_at == timedelta(
+        seconds=idle_seconds
+    )
+
+
+@pytest.mark.unit
 def test_policy_update_is_atomic_versioned_audited_and_absolute_is_hard_ceiling() -> (
     None
 ):

@@ -78,6 +78,16 @@ test("no application route duplicates the FastAPI API", async () => {
   assert.doesNotMatch(nextConfig, /rewrites|redirects|headers\s*\(/);
 });
 
+test("shell links target only delivered application routes", async () => {
+  const shell = await readFile("components/primitives.tsx", "utf8");
+  const destinations = [...shell.matchAll(/<Link[\s\S]*?href="([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(destinations, ["/convert"]);
+  for (const destination of destinations)
+    assert.ok((await stat(`app${destination}`)).isDirectory());
+});
+
 test("authentication keeps authority and secrets outside browser persistence", async () => {
   const controller = await readFile("src/auth/controller.ts", "utf8");
   const context = await readFile("src/auth/context.tsx", "utf8");

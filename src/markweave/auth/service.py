@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from math import ceil
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -326,7 +327,8 @@ class AuthenticationService:
 
     def effective_idle_minutes(self, role: Role) -> int:
         """Return the server-enforced inactivity duration for one effective role."""
-        return int(self._idle_lifetime(role).total_seconds() // 60)
+        seconds = self._idle_lifetime(role).total_seconds()
+        return max(1, ceil(seconds / 60))
 
     def update_idle_session_policy(
         self,

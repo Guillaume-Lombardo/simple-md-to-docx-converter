@@ -22,7 +22,11 @@ test("application shell exposes navigation and skip target", () => {
     "aria-current",
     "page",
   );
-  expect(screen.getByRole("link", { name: "Templates" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
+  expect(screen.getByText("Templates")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   expect(screen.getByRole("main")).toHaveAttribute("id", "main");
 });
 
@@ -44,14 +48,13 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
       Work
     </AppShell>,
   );
-  expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute(
-    "aria-current",
-    "page",
+  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
+  expect(screen.getByText("Templates")).toHaveAttribute(
+    "aria-disabled",
+    "true",
   );
-  expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
-    "href",
-    "/templates#users",
-  );
+  expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
+  expect(screen.getByText("Users")).toHaveAttribute("aria-disabled", "true");
   expect(screen.getByText("Admin (Administrator)")).toBeVisible();
   expect(screen.getByText(/15 minutes of inactivity/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();

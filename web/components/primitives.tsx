@@ -42,20 +42,14 @@ export function AppShell({
           >
             Convert
           </Link>
-          <Link
-            aria-current={current === "Templates" ? "page" : undefined}
-            className="text-accent underline-offset-4 hover:underline"
-            href="/templates"
-          >
+          {/* T62 and T63 replace these labels when their routes are delivered. */}
+          <span aria-disabled="true" className="text-muted">
             Templates
-          </Link>
+          </span>
           {user?.role === "admin" && (
-            <Link
-              className="text-accent underline-offset-4 hover:underline"
-              href="/templates#users"
-            >
+            <span aria-disabled="true" className="text-muted">
               Users
-            </Link>
+            </span>
           )}
           {user && (
             <div className="ml-auto flex flex-wrap items-center gap-3">
