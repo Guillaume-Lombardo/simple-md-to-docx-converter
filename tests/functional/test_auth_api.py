@@ -149,9 +149,12 @@ def test_json_login_sets_hardened_cookie_without_exposing_session_token(
         assert "Max-Age=28800" in cookie
         body = response.json()
         assert set(body) == {"user", "csrf_token"}
+        assert body["user"]["effective_idle_minutes"] == 15
         assert "admin-password" not in response.text.casefold()
         assert "argon2" not in response.text.casefold()
-        assert client.get("/api/v1/session").json()["username"] == "Admin"
+        session = client.get("/api/v1/session").json()
+        assert session["username"] == "Admin"
+        assert session["effective_idle_minutes"] == 15
 
 
 @pytest.mark.functional

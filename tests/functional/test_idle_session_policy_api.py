@@ -100,6 +100,12 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             "revision": 1,
         }
         assert updated.headers["etag"] == '"idle-session-policy-1"'
+        assert client.get("/api/v1/session").json()["effective_idle_minutes"] == 60
+        client.cookies.clear()
+        user_session = login(client, "alice", "alice-password")
+        assert user_session["user"]["effective_idle_minutes"] == 5
+        assert client.get("/api/v1/session").json()["effective_idle_minutes"] == 5
+        use_session(client, admin_token)
 
         stale = client.put(
             "/api/v1/admin/session-policy",

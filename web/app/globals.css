@@ -20,3 +20,12 @@
     @apply outline-3 outline-offset-2 outline-focus;
   }
 }
+
+@layer components {
+  .auth-card {
+    @apply mx-auto mt-16 grid max-w-md gap-6 rounded-control bg-surface p-8 shadow-lg;
+  }
+  .primary-button {
+    @apply rounded-control bg-accent px-4 py-2 font-semibold text-white hover:bg-accent-strong disabled:opacity-60;
+  }
+}

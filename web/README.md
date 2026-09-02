@@ -1,8 +1,17 @@
-# Markweave Web foundation
+# Markweave Web application
 
-This directory contains the unpublished Next.js presentation foundation introduced by T60. The
-FastAPI-rendered pages remain the production browser interface until T64. This process has no
-backend credentials or persistence and browser code calls relative `/api/v1` URLs directly.
+This directory contains the unpublished Next.js presentation application introduced by T60 and
+the authentication shell implemented by T61. The FastAPI-rendered pages remain the production
+browser interface until T64. This process has no backend credentials or persistence and browser
+code calls relative `/api/v1` URLs directly.
+
+The browser loads its current principal from `/api/v1/session`. Login, logout, and password
+renewal go directly to FastAPI through the same origin. The application never reads the HttpOnly
+session cookie; it copies only the readable CSRF cookie into authenticated mutation requests.
+There is no session polling or client security countdown: FastAPI decides expiry, and one
+authoritative `401` clears stale browser state without replaying a mutation. Fixed navigation
+destinations prevent open redirects. The shell displays the effective role-specific inactivity
+duration returned by session inspection, including administrator changes.
 
 Use the reviewed Node.js 24.19.0 and npm 11.17.0 toolchain:
 

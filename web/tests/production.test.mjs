@@ -101,6 +101,8 @@ async function assertNonceHtml(
 
 test("all dynamic and generated error HTML receives fresh nonce policies", async () => {
   await assertNonceHtml("/convert", 200);
+  await assertNonceHtml("/login", 200);
+  await assertNonceHtml("/change-password", 200);
   await assertNonceHtml("/missing", 404);
   await assertNonceHtml("/missing.js", 404);
   await assertNonceHtml("/favicon.ico", 404);

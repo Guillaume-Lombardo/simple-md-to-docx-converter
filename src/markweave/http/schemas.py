@@ -79,6 +79,14 @@ class UserResponse(BaseModel):
     role: Role
     active: bool
     password_change_required: bool
+    effective_idle_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Current server-enforced inactivity duration. Present on login and "
+            "session inspection responses."
+        ),
+        exclude_if=lambda value: value is None,
+    )
 
 
 class LoginResponse(BaseModel):

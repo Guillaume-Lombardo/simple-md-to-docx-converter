@@ -2,7 +2,7 @@
 ticket: T61
 linear_id: G1L-525
 linear_url: https://linear.app/g1lom/issue/G1L-525/t61-migrate-authentication-and-the-application-shell-to-nextjs
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -46,6 +46,25 @@ Migrate the login, logout, password-renewal, authenticated application shell, an
 ## Progress
 
 * 2026-09-01: Created after the backend session policy and frontend foundation tickets were defined.
+* 2026-09-02: Implementation started from verified main `79088b01`. Added the additive
+  role-effective inactivity value to session/login responses and implemented the unpublished
+  Next.js authentication state machine, accessible login and renewal pages, protected shell,
+  fixed navigation, safe expiry behavior, generated bindings, and focused frontend/backend tests.
+* 2026-09-02: Implementation is complete pending review. The root-scoped controller now fences
+  duplicate, aborted, late, and navigation-racing requests without timers or polling, keeps the
+  opaque session token outside JavaScript, and handles restricted renewal and authoritative
+  expiry without replay. Final rootless-image workflows passed for standalone SQLite and
+  distributed PostgreSQL with an administrator and two users, including restart persistence,
+  renewal, deactivation, and absolute expiry. Frontend, OpenAPI, Python unit, lint, and type checks
+  also passed; the canonical all-domain pytest invocation requires separately configured
+  PostgreSQL and RustFS test endpoints, which were unavailable outside the self-cleaning E2E
+  harness.
+* 2026-09-02: Independent-review corrections made login progress visibly announced and disabled
+  duplicate submission while preserving controller fencing and deterministic abort/navigation
+  supersession. The isolated two-second absolute-lifetime phase now routes the final Next.js image
+  to the final FastAPI image and uses Chromium to prove one post-expiry authenticated request gets
+  an authoritative `401`, reaches the fixed sign-in-again state, and is not replayed. The corrected
+  final-image workflow passed for both standalone SQLite and distributed PostgreSQL.
 
 ## Synchronization
 

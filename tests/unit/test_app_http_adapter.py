@@ -173,6 +173,9 @@ def isolated_client(
     auth.bootstrap_admin.return_value = admin
     auth.login.return_value = LoginResult(admin, "session-token", "csrf-token")
     auth.authenticate.return_value = admin
+    auth.effective_idle_minutes.side_effect = lambda role: (
+        15 if role is Role.ADMIN else 30
+    )
     auth.list_users.return_value = [admin, alice]
     auth.create_user.return_value = alice
     auth.set_active.return_value = alice

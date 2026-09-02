@@ -496,6 +496,8 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
     service, _, clock = build_role_policy_service()
     admin = service.bootstrap_admin("admin", "correct")
     user = service.create_user(admin, "alice", "correct")
+    assert service.effective_idle_minutes(Role.ADMIN) == 15
+    assert service.effective_idle_minutes(Role.USER) == 30
 
     admin_login = service.login("admin", "correct")
     user_login = service.login("alice", "correct")
@@ -515,6 +517,8 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
         admin_idle_minutes=10,
         expected_revision=0,
     ) == IdleSessionPolicy(5, 10, 1)
+    assert service.effective_idle_minutes(Role.ADMIN) == 10
+    assert service.effective_idle_minutes(Role.USER) == 5
     clock.advance(minutes=6)
     assert_error(
         "AUTHENTICATION_REQUIRED",
@@ -540,6 +544,33 @@ def test_role_defaults_tightening_role_change_and_relaxation_never_revive() -> N
     assert_error(
         "AUTHENTICATION_REQUIRED",
         lambda: service.authenticate(fresh_user.session_token),
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("idle_seconds", "public_minutes"), ((1, 1), (59, 1), (61, 2), (119, 2))
+)
+def test_legacy_idle_duration_uses_positive_ceiling_minutes(
+    idle_seconds: int, public_minutes: int
+) -> None:
+    hasher = FakeHasher()
+    clock = FakeClock()
+    service = AuthenticationService(
+        users=MemoryUserRepository(),
+        sessions=MemorySessionRepository(),
+        security=SecurityRuntime(hasher=hasher, tokens=SequenceTokens(), clock=clock),
+        policy=SessionPolicy(idle_seconds=idle_seconds, absolute_seconds=300),
+    )
+    service.bootstrap_admin("admin", "correct")
+
+    assert service.effective_idle_minutes(Role.ADMIN) == public_minutes
+    assert service.effective_idle_minutes(Role.USER) == public_minutes
+    login = service.login("admin", "correct")
+    session = service.sessions.get(digest_token(login.session_token))
+    assert session is not None
+    assert session.idle_expires_at - session.created_at == timedelta(
+        seconds=idle_seconds
     )
 
 

@@ -856,6 +856,18 @@
             "title": "Active",
             "type": "boolean"
           },
+          "effective_idle_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current server-enforced inactivity duration. Present on login and session inspection responses.",
+            "title": "Effective Idle Minutes"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",

@@ -178,7 +178,8 @@ export class ApiTransport {
     if (typeof options.body === "string")
       headers.set("Content-Type", "application/json");
 
-    const response = await this.fetcher(normalizedPath, {
+    const fetcher = this.fetcher;
+    const response = await fetcher(normalizedPath, {
       body: options.body,
       cache: "no-store",
       credentials: "same-origin",

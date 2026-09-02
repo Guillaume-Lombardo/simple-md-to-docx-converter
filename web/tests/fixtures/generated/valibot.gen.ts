@@ -279,6 +279,7 @@ export const vUserCreateRequest = v.object({
  */
 export const vUserResponse = v.object({
     active: v.boolean(),
+    effective_idle_minutes: v.nullish(v.pipe(v.number(), v.integer())),
     id: v.pipe(v.string(), v.uuid()),
     password_change_required: v.boolean(),
     role: vRole,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from math import ceil
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -323,6 +324,11 @@ class AuthenticationService:
         """Return the effective persisted/default policy to an administrator."""
         AuthorizationService.require_admin(actor)
         return self.idle_policies.get()
+
+    def effective_idle_minutes(self, role: Role) -> int:
+        """Return the server-enforced inactivity duration for one effective role."""
+        seconds = self._idle_lifetime(role).total_seconds()
+        return max(1, ceil(seconds / 60))
 
     def update_idle_session_policy(
         self,
