@@ -1,5 +1,6 @@
 """Conversion UI composition over live PostgreSQL and S3-compatible storage."""
 
+import hashlib
 import os
 from uuid import UUID, uuid4
 
@@ -16,13 +17,26 @@ from markweave.persistence.schema import (
     SystemTemplateSelectionRow,
     TemplatePreferenceRow,
     TemplateRow,
+    TemplateVersionRow,
     UserRow,
 )
 from markweave.persistence.sql import create_database_engine
 from markweave.persistence.templates import SqlTemplateSelectionRepository
-from markweave.storage import ObjectKey, ObjectScope
+from markweave.storage import ObjectKey, ObjectScope, ObjectStore, ObjectStoreError
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
+
+
+def _delete_objects(store: ObjectStore, keys: tuple[ObjectKey, ...]) -> None:
+    first_error: ObjectStoreError | None = None
+    for key in keys:
+        try:
+            store.delete(key)
+        except ObjectStoreError as error:
+            if first_error is None:
+                first_error = error
+    if first_error is not None:
+        raise first_error
 
 
 @pytest.mark.integration
@@ -63,52 +77,107 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
         assert login.status_code == 200
         owner_id = UUID(login.json()["user"]["id"])
         template_id, version_id = uuid4(), uuid4()
+        preferred_template_id, preferred_version_id = uuid4(), uuid4()
+        assert preferred_template_id != template_id
+        assert preferred_version_id != version_id
+        fallback_content = b"distributed-fallback-template"
+        preferred_content = b"distributed-preferred-template"
         engine = create_database_engine(database_url)
-        publish_template_pair(engine, owner_id, template_id, version_id)
         selections = SqlTemplateSelectionRepository(engine)
         previous_fallback = selections.system_fallback_id()
         job_id: UUID | None = None
+        template_ids = (str(template_id), str(preferred_template_id))
+        version_keys = (
+            ObjectKey(ObjectScope.TEMPLATE_VERSION, owner_id, version_id),
+            ObjectKey(ObjectScope.TEMPLATE_VERSION, owner_id, preferred_version_id),
+        )
 
         def cleanup() -> None:
-            if job_id is not None:
-                job = SqlJobRepository(engine).get(job_id)
-                if job is not None:
-                    app.state.components.object_store.delete(
-                        ObjectKey(ObjectScope.UPLOAD, owner_id, job.source_object_id)
-                    )
-            with engine.begin() as connection:
-                current = connection.scalar(
-                    select(SystemTemplateSelectionRow.fallback_template_id).where(
-                        SystemTemplateSelectionRow.id == 1
-                    )
-                )
-                if current == str(template_id):
-                    if previous_fallback is None:
-                        connection.execute(delete(SystemTemplateSelectionRow))
-                    else:
-                        connection.execute(
-                            update(SystemTemplateSelectionRow)
-                            .where(SystemTemplateSelectionRow.id == 1)
-                            .values(fallback_template_id=str(previous_fallback))
-                        )
+            owned_objects = list(version_keys)
+            try:
                 if job_id is not None:
-                    connection.execute(
-                        delete(ConversionJobRow).where(
-                            ConversionJobRow.id == str(job_id)
+                    job = SqlJobRepository(engine).get(job_id)
+                    if job is not None:
+                        owned_objects.append(
+                            ObjectKey(
+                                ObjectScope.UPLOAD, owner_id, job.source_object_id
+                            )
+                        )
+                with engine.begin() as connection:
+                    current = connection.scalar(
+                        select(SystemTemplateSelectionRow.fallback_template_id).where(
+                            SystemTemplateSelectionRow.id == 1
                         )
                     )
-                connection.execute(
-                    delete(TemplatePreferenceRow).where(
-                        TemplatePreferenceRow.user_id == str(owner_id)
+                    if current == str(template_id):
+                        if previous_fallback is None:
+                            connection.execute(delete(SystemTemplateSelectionRow))
+                        else:
+                            connection.execute(
+                                update(SystemTemplateSelectionRow)
+                                .where(SystemTemplateSelectionRow.id == 1)
+                                .values(fallback_template_id=str(previous_fallback))
+                            )
+                    if job_id is not None:
+                        connection.execute(
+                            delete(ConversionJobRow).where(
+                                ConversionJobRow.id == str(job_id)
+                            )
+                        )
+                    connection.execute(
+                        delete(TemplatePreferenceRow).where(
+                            TemplatePreferenceRow.user_id == str(owner_id)
+                        )
                     )
-                )
-                connection.execute(
-                    delete(TemplateRow).where(TemplateRow.id == str(template_id))
-                )
-                connection.execute(delete(UserRow).where(UserRow.id == str(owner_id)))
-            engine.dispose()
+                    connection.execute(
+                        delete(TemplateVersionRow).where(
+                            TemplateVersionRow.template_id.in_(template_ids)
+                        )
+                    )
+                    connection.execute(
+                        delete(TemplateRow).where(TemplateRow.id.in_(template_ids))
+                    )
+                    connection.execute(
+                        delete(UserRow).where(UserRow.id == str(owner_id))
+                    )
+            finally:
+                try:
+                    _delete_objects(
+                        app.state.components.object_store, tuple(owned_objects)
+                    )
+                finally:
+                    engine.dispose()
 
         request.addfinalizer(cleanup)
+        publish_template_pair(
+            engine,
+            owner_id,
+            template_id,
+            version_id,
+            sha256=hashlib.sha256(fallback_content).hexdigest(),
+            size=len(fallback_content),
+        )
+        publish_template_pair(
+            engine,
+            owner_id,
+            preferred_template_id,
+            preferred_version_id,
+            sha256=hashlib.sha256(preferred_content).hexdigest(),
+            size=len(preferred_content),
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                update(TemplateRow)
+                .where(TemplateRow.id == str(preferred_template_id))
+                .values(
+                    name="Distinct preferred template",
+                    normalized_name="distinct preferred template",
+                    description="Preferred PostgreSQL selection",
+                    normalized_description="preferred postgresql selection",
+                )
+            )
+        app.state.components.object_store.put(version_keys[0], fallback_content)
+        app.state.components.object_store.put(version_keys[1], preferred_content)
         defaults = client.get("/api/v1/conversion-options").json()
         assert defaults == {
             "conversion_upload_max_bytes": 128,
@@ -130,24 +199,41 @@ def test_distributed_conversion_ui_submits_to_postgresql_and_rustfs(  # noqa: PL
         assert fallback_page.status_code == 200
         assert "System fallback template" in fallback_page.text
         assert str(version_id) in fallback_page.text
-
-        selections.set_preferred(owner_id, template_id)
         assert (
-            client.get("/api/v1/conversion-options").json()["selection_source"]
-            == "preferred"
+            app.state.components.object_store.get(version_keys[0]) == fallback_content
         )
+
+        selections.set_preferred(owner_id, preferred_template_id)
+        preferred = client.get("/api/v1/conversion-options").json()
+        assert preferred["selection_source"] == "preferred"
+        assert preferred["resolved_template"]["id"] == str(preferred_template_id)
+        assert preferred["resolved_template"]["current_version_id"] == str(
+            preferred_version_id
+        )
+        assert preferred["template_version_id"] == str(preferred_version_id)
+        assert client.get("/api/v1/template-context").json() == {
+            "preferred_template_id": str(preferred_template_id),
+            "system_fallback_template_id": str(template_id),
+            "template_max_archive_bytes": 1_000_000,
+        }
         preferred_page = client.get("/convert")
         assert preferred_page.status_code == 200
         assert "Preferred template" in preferred_page.text
-        assert str(version_id) in preferred_page.text
+        assert "Distinct preferred template" in preferred_page.text
+        assert "Preferred PostgreSQL selection" in preferred_page.text
+        assert str(preferred_version_id) in preferred_page.text
+        assert str(version_id) not in preferred_page.text
+        assert (
+            app.state.components.object_store.get(version_keys[1]) == preferred_content
+        )
         csrf = login.json()["csrf_token"]
         created = client.post(
             "/api/v1/conversions",
             headers={"X-CSRF-Token": csrf, "Idempotency-Key": f"ui-{unique}"},
             files={"source": ("source.md", b"# Distributed UI", "text/markdown")},
             data={
-                "template_id": str(template_id),
-                "template_version_id": str(version_id),
+                "template_id": str(preferred_template_id),
+                "template_version_id": str(preferred_version_id),
                 "output": "pdf",
             },
         )
