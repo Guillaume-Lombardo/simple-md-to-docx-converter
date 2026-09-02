@@ -399,6 +399,58 @@ test("the scheduled initial poll publishes a terminal conversion failure", async
   }
 });
 
+test("a new submission schedules polling after reopening an earlier success", async () => {
+  const earlier = job({ state: "succeeded", progress: 100, step: "complete" });
+  const next = job({
+    id: "00000000-0000-4000-8000-000000000302",
+    state: "queued",
+  });
+  const scheduled: Array<{ callback: () => void; delay: number }> = [];
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockResolvedValueOnce({ items: [earlier], limit: 10, offset: 0, total: 1 })
+    .mockResolvedValueOnce(earlier)
+    .mockResolvedValueOnce(
+      job({
+        error_code: "PDF_LIMIT_EXCEEDED",
+        error_message: "The PDF exceeds configured limits.",
+        id: next.id,
+        state: "failed",
+        step: "validating",
+      }),
+    );
+  const transport = api({
+    json,
+    multipartWithMetadata: vi.fn().mockResolvedValue(accepted(next)),
+  });
+  const controller = await loadedController(transport, [
+    transport,
+    vi.fn(),
+    () => "next-key",
+    (callback, delay) => {
+      scheduled.push({ callback, delay });
+      return scheduled.length as unknown as ReturnType<typeof setTimeout>;
+    },
+    vi.fn(),
+  ]);
+  await controller.openJob(earlier.id);
+  controller.setSource([new File(["# next"], "next.md")]);
+  controller.setOutput("pdf");
+  await controller.submit();
+
+  expect(controller.snapshot().active?.id).toBe(next.id);
+  expect(scheduled.at(-1)?.delay).toBe(1_000);
+  scheduled.at(-1)!.callback();
+  await vi.waitFor(() =>
+    expect(controller.snapshot().active).toMatchObject({
+      error_code: "PDF_LIMIT_EXCEEDED",
+      id: next.id,
+      state: "failed",
+    }),
+  );
+});
+
 test.each([
   ["non-202 status", { status: 200 }],
   ["missing Location", { location: undefined }],

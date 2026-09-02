@@ -64,6 +64,26 @@ async function api(page, method, path, body) {
   );
 }
 
+async function reopenUntilVisible(page, jobId, text, timeout = 180_000) {
+  const deadline = Date.now() + timeout;
+  const jobPath = `/api/v1/conversions/${jobId}`;
+  const recentJob = page.getByRole("button", {
+    name: new RegExp(`Conversion ${jobId.slice(0, 8)}`),
+  });
+  while (Date.now() < deadline) {
+    const refreshed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(jobPath) &&
+        response.request().method() === "GET",
+    );
+    await recentJob.click();
+    assert.equal((await refreshed).status(), 200);
+    if (await page.getByText(text).isVisible()) return;
+    await page.waitForTimeout(500);
+  }
+  assert.fail(`conversion ${jobId} did not expose its terminal state`);
+}
+
 test(
   "Next conversion workspace preserves real final-image workflow and authority",
   { timeout: 600_000 },
@@ -257,18 +277,15 @@ test(
           response.url().endsWith("/api/v1/conversions") &&
           response.request().method() === "POST",
       );
-      const failurePolled = alicePage.waitForResponse(
-        (response) =>
-          /\/api\/v1\/conversions\/[0-9a-f-]+$/.test(response.url()) &&
-          response.request().method() === "GET",
-      );
       await alicePage.getByRole("button", { name: "Start conversion" }).click();
       const failureResponse = await failureAccepted;
       assert.equal(failureResponse.status(), 202);
-      assert.equal((await failurePolled).status(), 200);
-      await alicePage
-        .getByText(/PDF.*configured limits/)
-        .waitFor({ timeout: 180_000 });
+      const failureJob = await failureResponse.json();
+      await reopenUntilVisible(
+        alicePage,
+        failureJob.id,
+        /PDF.*configured limits/,
+      );
       assert.equal(
         await alicePage
           .getByRole("button", { name: "Download result" })
