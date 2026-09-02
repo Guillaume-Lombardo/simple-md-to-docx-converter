@@ -42,28 +42,36 @@ export function UsersWorkspace({
   const [notice, setNotice] = useState<string>();
   const [resetTarget, setResetTarget] = useState<UserResponse>();
 
-  const load = useCallback(async () => {
-    if (user.role !== "admin") return;
-    const request = fence.current.startRead();
-    setLoading(true);
-    try {
-      const accounts = await api.users(request.controller.signal);
-      if (!fence.current.current(request.generation)) return;
-      setUsers(accounts);
-      setError(undefined);
-    } catch (reason) {
-      if (!fence.current.current(request.generation)) return;
-      setError(
-        administrationError(
-          reason,
-          expireSession,
-          "Accounts could not be loaded. Try again.",
-        ),
-      );
-    } finally {
-      if (fence.current.current(request.generation)) setLoading(false);
-    }
-  }, [api, expireSession, user.role]);
+  const load = useCallback(
+    async (activeRequest?: {
+      controller: AbortController;
+      generation: number;
+    }): Promise<boolean> => {
+      if (user.role !== "admin") return false;
+      const request = activeRequest ?? fence.current.startRead();
+      setLoading(true);
+      try {
+        const accounts = await api.users(request.controller.signal);
+        if (!fence.current.current(request.generation)) return false;
+        setUsers(accounts);
+        setError(undefined);
+        return true;
+      } catch (reason) {
+        if (!fence.current.current(request.generation)) return false;
+        setError(
+          administrationError(
+            reason,
+            expireSession,
+            "Accounts could not be loaded. Try again.",
+          ),
+        );
+        return false;
+      } finally {
+        if (fence.current.current(request.generation)) setLoading(false);
+      }
+    },
+    [api, expireSession, user.role],
+  );
 
   useEffect(() => {
     const activeFence = fence.current;
@@ -87,6 +95,7 @@ export function UsersWorkspace({
   async function mutation(
     action: (signal: AbortSignal) => Promise<unknown>,
     success: string,
+    afterReload?: () => void,
   ): Promise<boolean> {
     const request = fence.current.startMutation();
     if (!request) return false;
@@ -95,11 +104,17 @@ export function UsersWorkspace({
     setNotice(undefined);
     try {
       await action(request.controller.signal);
+      if (!fence.current.current(request.generation)) return false;
+      const reloaded = await load(request);
+      if (!reloaded) {
+        if (fence.current.finishMutation(request.generation)) setPending(false);
+        return false;
+      }
+      afterReload?.();
       if (!fence.current.finishMutation(request.generation)) return false;
       setPending(false);
       setResetTarget(undefined);
       setNotice(success);
-      await load();
       return true;
     } catch (reason) {
       if (!fence.current.finishMutation(request.generation)) return false;
@@ -119,7 +134,7 @@ export function UsersWorkspace({
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const created = await mutation(
+    await mutation(
       (signal) =>
         api.createUser(
           String(form.get("username") ?? ""),
@@ -128,8 +143,8 @@ export function UsersWorkspace({
           signal,
         ),
       "Account created.",
+      () => formElement.reset(),
     );
-    if (created) formElement.reset();
   }
 
   if (user.role !== "admin")
@@ -161,20 +176,22 @@ export function UsersWorkspace({
         <form className="grid gap-4" onSubmit={(event) => void create(event)}>
           <TextField
             autoComplete="off"
+            disabled={pending}
             label="Username"
             name="username"
             required
           />
           <TextField
             autoComplete="new-password"
+            disabled={pending}
             label="Temporary password"
             name="password"
             required
             type="password"
           />
           <label>
-            <input name="renewal" type="checkbox" /> Require password change at
-            next sign-in
+            <input disabled={pending} name="renewal" type="checkbox" /> Require
+            password change at next sign-in
           </label>
           <button disabled={pending} type="submit">
             {pending ? "Saving…" : "Create account"}

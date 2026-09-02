@@ -226,7 +226,14 @@ test("template load and revision failures remain safe and actionable", async () 
 test("template creation validates files, prevents duplicates, and reloads after success", async () => {
   const interaction = userEvent.setup();
   let finish!: (value: unknown) => void;
+  let finishReload!: (value: unknown) => void;
   const api = templateApi({
+    allTemplates: vi
+      .fn()
+      .mockResolvedValueOnce([fallback, preferred, archived])
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finishReload = resolve)),
+      ),
     create: vi
       .fn()
       .mockImplementation(() => new Promise((resolve) => (finish = resolve))),
@@ -264,9 +271,25 @@ test("template creation validates files, prevents duplicates, and reloads after 
     expectedFonts: " Carlito, Caladea ",
     name: "Owned",
   });
-  finish(preferred);
+  act(() => finish(preferred));
+  await waitFor(() => expect(api.allTemplates).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText("Template created.")).toBeNull();
+  expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+  fireEvent.submit(submit.closest("form")!);
+  expect(api.create).toHaveBeenCalledOnce();
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Owned");
+  expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
+  expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+    "Body",
+  );
+  expect(screen.getByRole("textbox", { name: "Description" })).toBeDisabled();
+  expect(screen.getByLabelText("DOCX file")).toBeDisabled();
+  act(() => finishReload([fallback, preferred, archived]));
   expect(await screen.findByText("Template created.")).toBeVisible();
   expect(api.allTemplates).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("");
+  expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Create template" })).toBeEnabled();
 });
 
 test("template creation enforces the authoritative upload bound", async () => {
@@ -800,10 +823,17 @@ test("ordinary users receive no account data or controls", async () => {
 
 test("administrator account workflows filter, guard duplicates, and reload", async () => {
   let finish!: (value: unknown) => void;
+  let finishReload!: (value: unknown) => void;
   const api = userApi({
     createUser: vi
       .fn()
       .mockImplementation(() => new Promise((resolve) => (finish = resolve))),
+    users: vi
+      .fn()
+      .mockResolvedValueOnce([admin, alice])
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finishReload = resolve)),
+      ),
   });
   render(
     <UsersWorkspace
@@ -833,8 +863,36 @@ test("administrator account workflows filter, guard duplicates, and reload", asy
   fireEvent.click(create);
   fireEvent.click(create);
   expect(api.createUser).toHaveBeenCalledOnce();
-  finish(alice);
+  act(() => finish(alice));
+  await waitFor(() => expect(api.users).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText("Account created.")).toBeNull();
+  expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+  fireEvent.submit(create.closest("form")!);
+  expect(api.createUser).toHaveBeenCalledOnce();
+  expect(screen.getByRole("textbox", { name: "Username" })).toHaveValue("Bob");
+  expect(screen.getByRole("textbox", { name: "Username" })).toBeDisabled();
+  expect(screen.getByLabelText("Temporary password")).toHaveValue("temporary");
+  expect(screen.getByLabelText("Temporary password")).toBeDisabled();
+  expect(
+    screen.getByRole("checkbox", {
+      name: /Require password change at next sign-in/,
+    }),
+  ).toBeChecked();
+  expect(
+    screen.getByRole("checkbox", {
+      name: /Require password change at next sign-in/,
+    }),
+  ).toBeDisabled();
+  act(() => finishReload([admin, alice]));
   expect(await screen.findByText("Account created.")).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Username" })).toHaveValue("");
+  expect(screen.getByLabelText("Temporary password")).toHaveValue("");
+  expect(
+    screen.getByRole("checkbox", {
+      name: /Require password change at next sign-in/,
+    }),
+  ).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Create account" })).toBeEnabled();
 });
 
 test("failed account creation preserves fields for correction", async () => {

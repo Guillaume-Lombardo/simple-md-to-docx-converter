@@ -64,31 +64,39 @@ export function TemplatesWorkspace({
   const [notice, setNotice] = useState<string>();
   const [confirmation, setConfirmation] = useState<Confirmation>();
 
-  const load = useCallback(async () => {
-    const request = fence.current.startRead();
-    setLoading(true);
-    try {
-      const [library, selection] = await Promise.all([
-        api.allTemplates({}, request.controller.signal),
-        api.templateContext(request.controller.signal),
-      ]);
-      if (!fence.current.current(request.generation)) return;
-      setTemplates(library);
-      setContext(selection);
-      setError(undefined);
-    } catch (reason) {
-      if (!fence.current.current(request.generation)) return;
-      setError(
-        administrationError(
-          reason,
-          expireSession,
-          "Templates could not be loaded. Try again.",
-        ),
-      );
-    } finally {
-      if (fence.current.current(request.generation)) setLoading(false);
-    }
-  }, [api, expireSession]);
+  const load = useCallback(
+    async (activeRequest?: {
+      controller: AbortController;
+      generation: number;
+    }): Promise<boolean> => {
+      const request = activeRequest ?? fence.current.startRead();
+      setLoading(true);
+      try {
+        const [library, selection] = await Promise.all([
+          api.allTemplates({}, request.controller.signal),
+          api.templateContext(request.controller.signal),
+        ]);
+        if (!fence.current.current(request.generation)) return false;
+        setTemplates(library);
+        setContext(selection);
+        setError(undefined);
+        return true;
+      } catch (reason) {
+        if (!fence.current.current(request.generation)) return false;
+        setError(
+          administrationError(
+            reason,
+            expireSession,
+            "Templates could not be loaded. Try again.",
+          ),
+        );
+        return false;
+      } finally {
+        if (fence.current.current(request.generation)) setLoading(false);
+      }
+    },
+    [api, expireSession],
+  );
 
   useEffect(() => {
     const activeFence = fence.current;
@@ -163,6 +171,7 @@ export function TemplatesWorkspace({
   async function mutation(
     action: (signal: AbortSignal) => Promise<unknown>,
     success: string,
+    afterReload?: () => void,
   ): Promise<boolean> {
     const request = fence.current.startMutation();
     if (!request) return false;
@@ -171,12 +180,18 @@ export function TemplatesWorkspace({
     setNotice(undefined);
     try {
       await action(request.controller.signal);
+      if (!fence.current.current(request.generation)) return false;
+      const reloaded = await load(request);
+      if (!reloaded) {
+        if (fence.current.finishMutation(request.generation)) setPending(false);
+        return false;
+      }
+      afterReload?.();
       if (!fence.current.finishMutation(request.generation)) return false;
       setPending(false);
       setManaged(undefined);
       setConfirmation(undefined);
       setNotice(success);
-      await load();
       return true;
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 412 && managed) {
@@ -281,7 +296,7 @@ export function TemplatesWorkspace({
       setError(validation);
       return;
     }
-    const created = await mutation(
+    await mutation(
       (signal) =>
         api.create(
           {
@@ -293,8 +308,8 @@ export function TemplatesWorkspace({
           signal,
         ),
       "Template created.",
+      () => formElement.reset(),
     );
-    if (created) formElement.reset();
   }
 
   const canManage =
@@ -318,16 +333,18 @@ export function TemplatesWorkspace({
           className="grid gap-4"
           onSubmit={(event) => void createTemplate(event)}
         >
-          <TextField label="Name" name="name" required />
+          <TextField disabled={pending} label="Name" name="name" required />
           <label className="grid gap-2 font-medium">
             Description
             <textarea
               className="rounded-control border border-muted bg-surface px-3 py-2 font-normal"
+              disabled={pending}
               name="description"
               required
             />
           </label>
           <TextField
+            disabled={pending}
             label="Expected fonts (comma separated)"
             name="expected-fonts"
           />
@@ -335,6 +352,7 @@ export function TemplatesWorkspace({
             DOCX file
             <input
               accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={pending}
               name="content"
               required
               type="file"
