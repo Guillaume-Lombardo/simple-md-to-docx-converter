@@ -704,6 +704,9 @@ podman exec \
   --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
   --env MARKWEAVE_E2E_CONVERSION_STATE=/browser-session/next-conversion.json \
   "$application_name" node --test /e2e/browser-next-conversion.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
 
 # Hold job execution while exercising exact admission boundaries through the
 # real final-image API and Next.js UI. Distributed workers can be stopped

@@ -5,25 +5,6 @@ import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
 
-function oversizedPdfMarkdown() {
-  const paragraph = "Bounded final-image PDF validation text. ".repeat(8);
-  return `# PDF output limit\n\n${Array.from(
-    { length: 1_000 },
-    (_, index) => `${index}. ${paragraph}`,
-  ).join("\n\n")}\n`;
-}
-
-async function preparePdfSubmission(page, name, source) {
-  await page.goto(`${baseURL}/convert`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "New conversion" }).waitFor();
-  await page.getByLabel(/Source file/).setInputFiles({
-    name,
-    mimeType: "text/markdown",
-    buffer: Buffer.from(source),
-  });
-  await page.getByRole("radio", { name: "PDF", exact: true }).click();
-}
-
 async function login(page, username, password) {
   await page.goto(`${baseURL}/login`, { waitUntil: "networkidle" });
   const retry = page.getByRole("button", { name: "Try again" });
@@ -62,26 +43,6 @@ async function api(page, method, path, body) {
     },
     { method, path, body },
   );
-}
-
-async function reopenUntilVisible(page, jobId, text, timeout = 180_000) {
-  const deadline = Date.now() + timeout;
-  const jobPath = `/api/v1/conversions/${jobId}`;
-  const recentJob = page.getByRole("button", {
-    name: new RegExp(`Conversion ${jobId.slice(0, 8)}`),
-  });
-  while (Date.now() < deadline) {
-    const refreshed = page.waitForResponse(
-      (response) =>
-        response.url().endsWith(jobPath) &&
-        response.request().method() === "GET",
-    );
-    await recentJob.click();
-    assert.equal((await refreshed).status(), 200);
-    if (await page.getByText(text).isVisible()) return;
-    await page.waitForTimeout(500);
-  }
-  assert.fail(`conversion ${jobId} did not expose its terminal state`);
 }
 
 test(
@@ -268,30 +229,6 @@ test(
         404,
       );
       await Promise.all([adminContext.close(), bobContext.close()]);
-
-      const heavySource = oversizedPdfMarkdown();
-      await alicePage.bringToFront();
-      await preparePdfSubmission(alicePage, "pdf-limit.md", heavySource);
-      const failureAccepted = alicePage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/conversions") &&
-          response.request().method() === "POST",
-      );
-      await alicePage.getByRole("button", { name: "Start conversion" }).click();
-      const failureResponse = await failureAccepted;
-      assert.equal(failureResponse.status(), 202);
-      const failureJob = await failureResponse.json();
-      await reopenUntilVisible(
-        alicePage,
-        failureJob.id,
-        /PDF.*configured limits/,
-      );
-      assert.equal(
-        await alicePage
-          .getByRole("button", { name: "Download result" })
-          .count(),
-        0,
-      );
 
       const untilExpiration = Math.max(
         0,

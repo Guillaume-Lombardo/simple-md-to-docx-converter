@@ -271,8 +271,11 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
 def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
     main_index = runner.index("/e2e/browser-next-conversion.test.mjs")
+    failure_index = runner.index(
+        "/e2e/browser-next-conversion-failure.test.mjs", main_index
+    )
     admission_index = runner.index(
-        "/e2e/browser-next-conversion-admission.test.mjs", main_index
+        "/e2e/browser-next-conversion-admission.test.mjs", failure_index
     )
     restart_index = runner.index(
         'podman restart --time 15 "$application_name"', admission_index
@@ -286,6 +289,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     )
 
     assert runner.count("/e2e/browser-next-conversion.test.mjs") == 1
+    assert runner.count("/e2e/browser-next-conversion-failure.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-admission.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
@@ -293,6 +297,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert (
         runner.index("/e2e/browser-next-auth.test.mjs")
         < main_index
+        < failure_index
         < admission_index
         < restart_index
         < recovery_index
