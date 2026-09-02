@@ -18,6 +18,7 @@ import {
   TextField,
 } from "../../components/primitives";
 import { AdministrationApi } from "./api";
+import { useStableVoidCallback } from "./hooks";
 import { administrationError, RequestFence } from "./operations";
 
 const defaultAdministrationApi = new AdministrationApi();
@@ -32,6 +33,7 @@ export function UsersWorkspace({
   user: EffectiveUser;
 }) {
   const fence = useRef(new RequestFence());
+  const expireSession = useStableVoidCallback(expire);
   const [users, setUsers] = useState<UserResponse[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(user.role === "admin");
@@ -54,14 +56,14 @@ export function UsersWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "Accounts could not be loaded. Try again.",
         ),
       );
     } finally {
       if (fence.current.current(request.generation)) setLoading(false);
     }
-  }, [api, expire, user.role]);
+  }, [api, expireSession, user.role]);
 
   useEffect(() => {
     const activeFence = fence.current;
@@ -105,7 +107,7 @@ export function UsersWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The account change could not be completed. Try again.",
         ),
       );

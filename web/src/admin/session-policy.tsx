@@ -12,6 +12,7 @@ import { ApiError } from "../api/transport";
 import type { EffectiveUser } from "../auth/controller";
 import { Alert, LoadingStatus, TextField } from "../../components/primitives";
 import { AdministrationApi } from "./api";
+import { useStableVoidCallback } from "./hooks";
 import {
   administrationError,
   effectiveIdleMaximum,
@@ -31,6 +32,7 @@ export function SessionPolicyWorkspace({
   user: EffectiveUser;
 }) {
   const fence = useRef(new RequestFence());
+  const expireSession = useStableVoidCallback(expire);
   const [policy, setPolicy] = useState<IdleSessionPolicyResponse>();
   const [etag, setEtag] = useState<string>();
   const [userMinutes, setUserMinutes] = useState("");
@@ -76,7 +78,7 @@ export function SessionPolicyWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The session policy could not be loaded. Try again.",
         ),
       );
@@ -84,7 +86,7 @@ export function SessionPolicyWorkspace({
     } finally {
       if (fence.current.current(request.generation)) setLoading(false);
     }
-  }, [accept, api, expire, user.role]);
+  }, [accept, api, expireSession, user.role]);
 
   useEffect(() => {
     const activeFence = fence.current;
@@ -153,7 +155,7 @@ export function SessionPolicyWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The session policy could not be updated. Try again.",
         ),
       );

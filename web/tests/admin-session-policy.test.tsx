@@ -180,6 +180,62 @@ test("atomic save is duplicate-safe and publishes only the authoritative follow-
   expect(api.sessionPolicy).toHaveBeenCalledTimes(2);
 });
 
+test("a parent rerender neither aborts an in-flight policy save nor leaves it pending", async () => {
+  let finish!: (value: unknown) => void;
+  let updateSignal: AbortSignal | undefined;
+  const api = policyApi({
+    updateSessionPolicy: vi
+      .fn()
+      .mockImplementation(
+        (
+          _etag: string,
+          _userMinutes: number,
+          _adminMinutes: number,
+          signal: AbortSignal,
+        ) => {
+          updateSignal = signal;
+          return new Promise((resolve) => (finish = resolve));
+        },
+      ),
+  });
+  const view = render(
+    <SessionPolicyWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={() => undefined}
+      user={admin}
+    />,
+  );
+  await screen.findByDisplayValue("27");
+  fireEvent.submit(
+    screen
+      .getByRole("button", { name: "Save session policy" })
+      .closest("form")!,
+  );
+  expect(await screen.findByRole("button", { name: "Saving…" })).toBeDisabled();
+
+  view.rerender(
+    <SessionPolicyWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={() => undefined}
+      user={admin}
+    />,
+  );
+  expect(api.sessionPolicy).toHaveBeenCalledOnce();
+  expect(api.updateSessionPolicy).toHaveBeenCalledOnce();
+  expect(updateSignal?.aborted).toBe(false);
+  expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+
+  await act(async () => {
+    finish({ data: { ...policy, revision: 8 }, etag: '"ignored"' });
+  });
+  expect(await screen.findByText("Session policy updated.")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Save session policy" }),
+  ).toBeEnabled();
+  expect(api.sessionPolicy).toHaveBeenCalledTimes(2);
+  expect(updateSignal?.aborted).toBe(false);
+});
+
 test("missing ETag prevents mutation", async () => {
   const api = policyApi({
     sessionPolicy: vi.fn().mockResolvedValue({ data: policy }),

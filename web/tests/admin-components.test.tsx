@@ -714,6 +714,63 @@ test("template requests publish no late state after navigation", async () => {
   expect(mutationApi.allTemplates).toHaveBeenCalledOnce();
 });
 
+test("a parent rerender does not abort or restart template loading", async () => {
+  let resolveLibrary!: (value: unknown) => void;
+  let resolveContext!: (value: unknown) => void;
+  let librarySignal: AbortSignal | undefined;
+  let contextSignal: AbortSignal | undefined;
+  const api = templateApi({
+    allTemplates: vi
+      .fn()
+      .mockImplementation((_filters: unknown, signal: AbortSignal) => {
+        librarySignal = signal;
+        return new Promise((resolve) => (resolveLibrary = resolve));
+      }),
+    setPreferred: vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(401, "AUTHENTICATION_REQUIRED", "unsafe"),
+      ),
+    templateContext: vi.fn().mockImplementation((signal: AbortSignal) => {
+      contextSignal = signal;
+      return new Promise((resolve) => (resolveContext = resolve));
+    }),
+  });
+  const firstExpire = vi.fn();
+  const latestExpire = vi.fn();
+  const view = render(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={firstExpire}
+      user={alice}
+    />,
+  );
+  await waitFor(() => expect(api.allTemplates).toHaveBeenCalledOnce());
+  view.rerender(
+    <TemplatesWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={latestExpire}
+      user={alice}
+    />,
+  );
+  expect(api.allTemplates).toHaveBeenCalledOnce();
+  expect(api.templateContext).toHaveBeenCalledOnce();
+  expect(librarySignal?.aborted).toBe(false);
+  expect(contextSignal?.aborted).toBe(false);
+  await act(async () => {
+    resolveLibrary([fallback]);
+    resolveContext({
+      preferred_template_id: null,
+      system_fallback_template_id: fallback.id,
+      template_max_archive_bytes: 1024,
+    });
+  });
+  const item = (await screen.findByText("Fallback body")).closest("li")!;
+  fireEvent.click(within(item).getByRole("button", { name: "Make preferred" }));
+  await waitFor(() => expect(latestExpire).toHaveBeenCalledOnce());
+  expect(firstExpire).not.toHaveBeenCalled();
+});
+
 function userApi(overrides: Record<string, unknown> = {}) {
   return {
     createUser: vi.fn().mockResolvedValue(alice),
@@ -923,4 +980,36 @@ test("account requests publish no late state after navigation", async () => {
     await Promise.resolve();
   });
   expect(api.users).toHaveBeenCalledOnce();
+});
+
+test("a parent rerender does not abort or restart account loading", async () => {
+  let resolveUsers!: (value: unknown) => void;
+  let usersSignal: AbortSignal | undefined;
+  const api = userApi({
+    users: vi.fn().mockImplementation((signal: AbortSignal) => {
+      usersSignal = signal;
+      return new Promise((resolve) => (resolveUsers = resolve));
+    }),
+  });
+  const view = render(
+    <UsersWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={() => undefined}
+      user={admin}
+    />,
+  );
+  await waitFor(() => expect(api.users).toHaveBeenCalledOnce());
+  view.rerender(
+    <UsersWorkspace
+      api={api as unknown as AdministrationApi}
+      expire={() => undefined}
+      user={admin}
+    />,
+  );
+  expect(api.users).toHaveBeenCalledOnce();
+  expect(usersSignal?.aborted).toBe(false);
+  await act(async () => resolveUsers([alice]));
+  expect(await screen.findByRole("heading", { name: "Alice" })).toBeVisible();
+  expect(api.users).toHaveBeenCalledOnce();
+  expect(usersSignal?.aborted).toBe(false);
 });

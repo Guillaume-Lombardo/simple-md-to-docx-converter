@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
+import { cookieValue } from "./browser-next-admin-helpers.mjs";
 
 const baseURL = "http://localhost:3100";
+const csrfCookieName = "__Host-md_converter_csrf";
 const templateFixture = "/evidence/browser-template.docx";
 const expectedFonts = [
   "Aptos",
@@ -29,13 +31,12 @@ async function login(context, page, username, password) {
 }
 
 async function api(page, method, path, body, headers = {}) {
+  const csrf = cookieValue(
+    await page.evaluate(() => document.cookie),
+    csrfCookieName,
+  );
   return page.evaluate(
-    async ({ method, path, body, headers }) => {
-      const csrf = document.cookie
-        .split(";")
-        .map((part) => part.trim())
-        .find((part) => part.startsWith("__Host-md_converter_csrf="))
-        ?.split("=", 2)[1];
+    async ({ method, path, body, headers, csrf }) => {
       const response = await fetch(path, {
         method,
         cache: "no-store",
@@ -53,7 +54,7 @@ async function api(page, method, path, body, headers = {}) {
         status: response.status,
       };
     },
-    { method, path, body, headers },
+    { method, path, body, headers, csrf },
   );
 }
 

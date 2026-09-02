@@ -23,6 +23,7 @@ import {
 } from "../../components/primitives";
 import { AdministrationApi } from "./api";
 import { ApiError } from "../api/transport";
+import { useStableVoidCallback } from "./hooks";
 import {
   administrationError,
   readTemplateDownload,
@@ -49,6 +50,7 @@ export function TemplatesWorkspace({
   user: EffectiveUser;
 }) {
   const fence = useRef(new RequestFence());
+  const expireSession = useStableVoidCallback(expire);
   const [templates, setTemplates] = useState<TemplateResponse[]>([]);
   const [context, setContext] =
     useState<TemplateAdministrationContextResponse>();
@@ -79,14 +81,14 @@ export function TemplatesWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "Templates could not be loaded. Try again.",
         ),
       );
     } finally {
       if (fence.current.current(request.generation)) setLoading(false);
     }
-  }, [api, expire]);
+  }, [api, expireSession]);
 
   useEffect(() => {
     const activeFence = fence.current;
@@ -149,7 +151,7 @@ export function TemplatesWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The template could not be loaded. Try again.",
         ),
       );
@@ -204,7 +206,7 @@ export function TemplatesWorkspace({
           setError(
             administrationError(
               refreshReason,
-              expire,
+              expireSession,
               "The latest template could not be loaded. Reload and try again.",
             ),
           );
@@ -216,7 +218,7 @@ export function TemplatesWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The template change could not be completed. Try again.",
         ),
       );
@@ -249,7 +251,7 @@ export function TemplatesWorkspace({
       setError(
         administrationError(
           reason,
-          expire,
+          expireSession,
           "The template could not be downloaded. Try again.",
         ),
       );
