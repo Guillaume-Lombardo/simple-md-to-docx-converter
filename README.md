@@ -4,9 +4,10 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). The reviewed Python package, application, and
-quickstart image version is `0.5.2`. Compose pins the published image by its verified immutable
-registry digest.
+The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.6.0`.
+The default public quickstart remains pinned to the last published `0.5.2` backend digest until the
+`0.6.0` backend/frontend pair is published and adopted by its separate receipt-verification pull
+request; candidate testing requires both immutable image references.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.

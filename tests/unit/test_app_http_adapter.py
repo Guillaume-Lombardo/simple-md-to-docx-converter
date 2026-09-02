@@ -19,8 +19,6 @@ from pytest_mock import MockerFixture
 from markweave.app import AppComponents, create_app
 from markweave.auth.errors import (
     INVALID_CREDENTIALS,
-    PASSWORD_CHANGE_REQUIRED,
-    PASSWORD_CONFIRMATION_INVALID,
 )
 from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
@@ -461,21 +459,6 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
     with client:
         assert client.get("/health/live").json() == {"status": "ok"}
         assert client.get("/health/ready").json() == {"status": "ready"}
-        assert "Sign in" in client.get("/login").text
-
-        browser = client.post(
-            "/login",
-            data={"username": "admin", "password": "admin-password"},
-            follow_redirects=False,
-        )
-        assert browser.status_code == 303
-        assert browser.headers["location"] == "/convert"
-        browser_cookies = browser.headers.get_list("set-cookie")
-        assert "__Host-md_converter_csrf=csrf-token" in browser_cookies[-1]
-        assert "Secure" in browser_cookies[-1]
-        assert "SameSite=lax" in browser_cookies[-1]
-        assert "HttpOnly" not in browser_cookies[-1]
-        assert any("HttpOnly" in cookie for cookie in browser_cookies)
 
         logged_in = client.post(
             "/api/v1/login",
@@ -540,7 +523,7 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
 
 
 @pytest.mark.unit
-def test_password_change_required_browser_and_api_routes_are_isolated(
+def test_password_change_required_api_clears_session(
     mocker: MockerFixture,
 ) -> None:
     client, auth, admin, _alice = isolated_client(mocker)
@@ -552,179 +535,50 @@ def test_password_change_required_browser_and_api_routes_are_isolated(
         admin.role,
         password_change_required=True,
     )
-    auth.login.return_value = LoginResult(required, "session-token", "csrf-token")
     auth.authenticate.return_value = required
 
     with client:
-        login_response = client.post(
-            "/login",
-            data={"username": "admin", "password": "admin-password"},
-            follow_redirects=False,
-        )
-        assert login_response.headers["location"] == "/change-password"
-        page = client.get("/change-password")
-        assert page.status_code == 200
-        assert "current password was accepted" in page.text
-
-        auth.change_password.side_effect = PASSWORD_CONFIRMATION_INVALID.new()
-        rejected = client.post(
-            "/change-password",
-            data={
-                "password": "new-password",
-                "confirmation": "different",
-                "csrf_token": "csrf-token",
-            },
-        )
-        assert rejected.status_code == 422
-        assert "do not match" in rejected.text
-
-        auth.change_password.side_effect = None
         changed = client.post(
             "/api/v1/password",
             headers={"X-CSRF-Token": "csrf-token"},
-            json={
-                "password": "new-password",
-                "confirmation": "new-password",
-            },
-        )
-        assert changed.status_code == 204
-        assert any(
-            "md_converter_session=" in cookie and "Max-Age=0" in cookie
-            for cookie in changed.headers.get_list("set-cookie")
+            json={"password": "new-password", "confirmation": "new-password"},
         )
 
-        def restricted_authenticate(
-            _token: str | None, *, allow_password_change: bool = False
-        ) -> User:
-            if allow_password_change:
-                return required
-            raise PASSWORD_CHANGE_REQUIRED.new()
-
-        auth.authenticate.side_effect = restricted_authenticate
-        conversion = client.get("/convert", follow_redirects=False)
-        assert conversion.status_code == 303
-        assert conversion.headers["location"] == "/change-password"
-        templates = client.get("/templates", follow_redirects=False)
-        assert templates.status_code == 303
-        assert templates.headers["location"] == "/change-password"
-
-        auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-        unauthenticated = client.get("/change-password", follow_redirects=False)
-        assert unauthenticated.status_code == 303
-        assert unauthenticated.headers["location"] == "/login"
-
-
-@pytest.mark.unit
-def test_authenticated_conversion_page_and_assets_are_hardened(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, admin, _alice = isolated_client(mocker)
-    templates = mocker.Mock(spec=TemplateService)
-    template = TemplateIdentity(
-        uuid4(),
-        admin.id,
-        "Default",
-        "Shared",
-        TemplateStatus.ACTIVE,
-        current_version_id=uuid4(),
+    assert changed.status_code == 204
+    assert any(
+        "md_converter_session=" in cookie and "Max-Age=0" in cookie
+        for cookie in changed.headers.get_list("set-cookie")
     )
-    templates.resolve.return_value = template
-    templates.selection_label.return_value = "System fallback template"
-    object.__setattr__(client.app.state.components, "templates", templates)
-    client.app.state.components.jobs.list_owner.return_value = JobPage((), 0, 0, 10)
-
-    with client:
-        root = client.get("/", follow_redirects=False)
-        page = client.get("/convert")
-        script = client.get("/static/conversion.js")
-        stylesheet = client.get("/static/conversion.css")
-    assert page.status_code == 200
-    assert root.status_code == 303 and root.headers["location"] == "/convert"
-    assert "System fallback template" in page.text
-    assert str(template.current_version_id) in page.text
-    assert "default-src 'none'" in page.headers["Content-Security-Policy"]
-    assert page.headers["Cache-Control"] == "no-store"
-    assert script.headers["X-Content-Type-Options"] == "nosniff"
-    assert script.headers["Content-Type"].startswith("text/javascript")
-    assert stylesheet.headers["Content-Type"].startswith("text/css")
-    templates.resolve.assert_called_once_with(admin)
-    auth.authenticate.assert_called()
-
-
-@pytest.mark.unit
-def test_authenticated_administration_page_and_assets_are_hardened(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, admin, _alice = isolated_client(mocker)
-    templates = mocker.Mock(spec=TemplateService)
-    template = TemplateIdentity(
-        uuid4(),
-        admin.id,
-        "Preferred",
-        "Private description",
-        TemplateStatus.ACTIVE,
-        current_version_id=uuid4(),
+    auth.change_password.assert_called_once_with(
+        required, "new-password", "new-password"
     )
-    templates.resolve.return_value = template
-    templates.selection_label.return_value = "Preferred template"
-    object.__setattr__(client.app.state.components, "templates", templates)
-
-    with client:
-        page = client.get("/templates")
-        script = client.get("/static/administration.js")
-        stylesheet = client.get("/static/administration.css")
-
-    assert page.status_code == 200
-    assert str(template.id) in page.text
-    assert 'data-user-role="admin"' in page.text
-    assert page.headers["Cache-Control"] == "no-store"
-    assert script.headers["X-Content-Type-Options"] == "nosniff"
-    assert script.headers["Content-Type"].startswith("text/javascript")
-    assert stylesheet.headers["Content-Type"].startswith("text/css")
-    templates.resolve.assert_called_once_with(admin)
-    templates.selection_label.assert_called_once_with(admin, template)
-
-    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        anonymous = client.get("/templates", follow_redirects=False)
-    assert anonymous.status_code == 303
-    assert anonymous.headers["location"] == "/login"
 
 
 @pytest.mark.unit
-def test_conversion_page_redirects_when_session_is_absent(
-    mocker: MockerFixture,
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("get", "/"),
+        ("get", "/login"),
+        ("post", "/login"),
+        ("get", "/change-password"),
+        ("post", "/change-password"),
+        ("get", "/convert"),
+        ("get", "/templates"),
+        ("post", "/logout"),
+        ("get", "/static/conversion.js"),
+        ("get", "/static/administration.css"),
+    ),
+)
+def test_removed_legacy_browser_routes_are_absent(
+    mocker: MockerFixture, method: str, path: str
 ) -> None:
-    client, auth, _admin, _alice = isolated_client(mocker)
-    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        response = client.get("/convert", follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/login"
-
-
-@pytest.mark.unit
-def test_http_adapter_handles_browser_authentication_failure(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, _, _ = isolated_client(mocker)
-    auth.login.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        response = client.post(
-            "/login", data={"username": "admin", "password": "wrong"}
-        )
-    assert response.status_code == 401
-    assert "The username or password is incorrect." in response.text
-
-
-@pytest.mark.unit
-def test_login_page_preserves_same_origin_form_origin(mocker: MockerFixture) -> None:
-    client, _, _, _ = isolated_client(mocker)
+    client, _auth, _admin, _alice = isolated_client(mocker)
 
     with client:
-        response = client.get("/login")
+        response = getattr(client, method)(path)
 
-    assert response.headers["Referrer-Policy"] == "same-origin"
+    assert response.status_code == 404
 
 
 @pytest.mark.unit
@@ -1023,14 +877,7 @@ def test_route_manifest_records_effective_default_response_class(
 
     routes_by_name = {route["name"]: route for route in _route_manifest(app)}
     assert routes_by_name["live"]["response_class"] == "JSONResponse"
-    assert routes_by_name["browser_root"] == {
-        "path": "/",
-        "methods": ["GET"],
-        "name": "browser_root",
-        "include_in_schema": False,
-        "status_code": None,
-        "response_class": "JSONResponse",
-    }
+    assert not any(name.startswith("browser_") for name in routes_by_name)
     assert all(
         route["response_class"] != "DefaultPlaceholder"
         for route in routes_by_name.values()

@@ -1,9 +1,9 @@
 # Template and account administration interface
 
-The authenticated interface is available at `/templates`. Unauthenticated requests redirect to
-`/login`. The initial HTML is server-rendered, has a restrictive self-only content security policy,
-and loads one external native JavaScript module. User-controlled names and identity text are placed
-into the DOM with text nodes rather than interpreted markup.
+The authenticated Next.js interface is available at `/templates`. Unauthenticated requests are
+sent to `/login` by the frontend after the FastAPI session authority rejects the session. Dynamic
+HTML carries the reviewed nonce CSP, and user-controlled names and identity text are rendered as
+text rather than interpreted markup. FastAPI exposes no administration page or static browser asset.
 
 ## Template library
 

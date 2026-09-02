@@ -162,8 +162,9 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 
 ## Approved Next.js cutover topology
 
-The currently published image and examples continue to serve the legacy FastAPI browser pages.
-T60–T63 must not change production routing. T64 implements the separate frontend image and the
+The repository's `0.6.0` candidate source no longer contains FastAPI browser pages. The public
+default remains on the last published release until both `0.6.0` image receipts are verified and a
+separate adoption pull request pins their digests. T64 implements the separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 

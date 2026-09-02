@@ -358,7 +358,6 @@ test("runner fallback CLI repairs missing and malformed diagnostics at its exact
 });
 
 test("resource collection keeps failure-only ordering", async () => {
-  const browserSource = await readFile("tests/e2e/browser-final-image.test.mjs", "utf8");
   const runnerSource = await readFile("scripts/e2e/run.sh", "utf8");
   const collectorIndex = runnerSource.indexOf(
     "podman exec \"$application_name\" node /e2e/resource-diagnostics.mjs",
@@ -386,8 +385,4 @@ test("resource collection keeps failure-only ordering", async () => {
   assert.ok(failureCopyIndex > runnerSource.indexOf("podman unshare chown -R 0:0"));
   assert.ok(runnerSource.includes("if ! collect_failure_artifacts; then\n      exit_code=1"));
   assert.ok(collectorIndex > runnerSource.indexOf("collect_failure_artifacts()"));
-  assert.ok(
-    browserSource.indexOf("retainResourceDiagnostics(settings.artifactRoot)")
-      < browserSource.indexOf("await retainFailureArtifacts({"),
-  );
 });

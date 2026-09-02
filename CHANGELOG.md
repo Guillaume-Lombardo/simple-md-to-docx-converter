@@ -8,6 +8,30 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-0"></a>
+
+## [0.6.0] - 2026-09-03
+
+### Added
+
+- A separate rootless Next.js frontend image and same-origin production router now serve the
+  complete browser workflow while FastAPI remains the sole API and operational authority.
+- Release evidence binds the exact tested backend and frontend image bytes, SBOMs, scans,
+  provenance, publication receipts, source revision, version, and frontend lockfile.
+
+### Changed
+
+- Browser pages, framework assets, and unknown browser paths route to Next.js; exact API,
+  download, OpenAPI, health, readiness, and metrics paths route directly to FastAPI.
+- Standalone and distributed deployment examples and quickstarts accept only a matched immutable
+  backend/frontend pair. Public defaults remain on the last published pair until the
+  post-publication digest-adoption pull request.
+
+### Removed
+
+- The legacy FastAPI-rendered pages and their static browser assets. The backend no longer serves
+  `/`, `/login`, `/change-password`, `/convert`, `/templates`, `/logout`, or `/static/**`.
+
 <a id="release-0-5-2"></a>
 
 ## [0.5.2] - 2026-09-01

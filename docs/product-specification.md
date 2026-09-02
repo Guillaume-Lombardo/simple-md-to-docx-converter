@@ -203,9 +203,9 @@ Deployment manifests pin both exact digests and prohibit mixed frontend/backend 
 publication is recovered from retained exact bytes without rebuilding or is treated as a failed
 release.
 
-T60–T63 must leave the legacy FastAPI pages on the production route while building and verifying
+T60–T63 left the legacy FastAPI pages on the production route while building and verifying
 the frontend foundation, authentication, conversion, and administration parity. In T64, complete
-parity and rollback rehearsal while the candidate branch still contains the legacy renderer, then
+parity and rollback rehearsal while the candidate branch still contained the legacy renderer, then
 remove the legacy code and assets, build and serialize the final matched images exactly once, and
 run the complete two-profile rootless acceptance matrix against those staged bytes. Publish and
 deploy only those verified bytes; no post-verification removal or rebuild is permitted. Cutover

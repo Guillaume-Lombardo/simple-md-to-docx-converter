@@ -1,7 +1,6 @@
 """Shared HTTP response, cookie, and optimistic-concurrency helpers."""
 
 from fastapi import Response
-from fastapi.responses import HTMLResponse
 
 from markweave.auth.policy_errors import (
     IdleSessionPolicyConflictError,
@@ -15,7 +14,6 @@ from markweave.templates.errors import (
     TemplatePreconditionRequiredError,
 )
 from markweave.templates.models import TemplateIdentity
-from markweave.web import WEB_SECURITY_HEADERS
 
 from .schemas import ConversionResponse, TemplateResponse
 
@@ -61,14 +59,6 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
         secure=True,
         samesite="lax",
         path="/",
-    )
-
-
-def web_response(content: str, *, status_code: int = 200) -> HTMLResponse:
-    return HTMLResponse(
-        content,
-        status_code=status_code,
-        headers={**WEB_SECURITY_HEADERS, "Cache-Control": "no-store"},
     )
 
 

@@ -598,19 +598,6 @@ uv run python -m tests.e2e.conversion_cli_workflow \
 uv run python -m tests.e2e.administration_cli_workflow \
   --container "$application_name"
 
-podman exec \
-  --env MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080 \
-  --env MARKWEAVE_E2E_PROFILE="$profile" \
-  --env MARKWEAVE_E2E_TEMPLATE_FIXTURE=/evidence/browser-template.docx \
-  --env MARKWEAVE_E2E_SOURCE_FIXTURE=/evidence/source.md \
-  --env MARKWEAVE_E2E_ARTIFACT_DIR=/browser-artifacts \
-  --env MARKWEAVE_E2E_ADMIN_USERNAME=e2e-admin \
-  --env MARKWEAVE_E2E_ADMIN_PASSWORD=e2e-admin-password \
-  --env MARKWEAVE_E2E_PROVISIONED_USERNAME="$provisioned_username" \
-  --env MARKWEAVE_E2E_PROVISIONED_PASSWORD="$provisioned_initial_password" \
-  --env MARKWEAVE_E2E_PROVISIONED_RENEWED_PASSWORD="$provisioned_renewed_password" \
-  "$application_name" node --test /e2e/browser-final-image.test.mjs
-
 uv run python -m tests.e2e.template_cli_workflow \
   --container "$application_name" --profile "$profile"
 

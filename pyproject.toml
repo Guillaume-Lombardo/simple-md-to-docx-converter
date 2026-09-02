@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "markweave"
 # A version change merged to main is the sole automatic publication trigger.
-version = "0.5.2"
+version = "0.6.0"
 description = "Secure Markdown-to-DOCX and PDF conversion service and HTTP CLI"
 readme = "README.md"
 license = "Apache-2.0"

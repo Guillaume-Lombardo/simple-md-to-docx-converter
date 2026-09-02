@@ -163,8 +163,8 @@ delete external release state outside this protected automation without explicit
 
 ## Frontend publication after T64
 
-The current release workflow publishes only the existing backend image. T64 must extend, not
-replace, its trust model for the approved Next.js cutover. The frontend package identity is
+The release workflow publishes the backend and frontend as one evidence-bound pair without
+replacing the established trust model. The frontend package identity is
 `ghcr.io/guillaume-lombardo/md-converter-web`; it shares the Markweave version, source SHA,
 `v<version>` tag, GitHub Release, and protected human gate with the backend but has its own registry
 manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance.
@@ -172,7 +172,7 @@ manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance
 One release is deployable only when the PyPI artifact and both image receipts agree on version and
 source SHA, both public digests are anonymously readable, and the release evidence manifest binds
 the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
-removing the legacy renderer from candidate source. Only after that removal does the release
+removing the legacy renderer from candidate source. The `0.6.0` source satisfies that gate; the release
 workflow build and serialize each final image once, run the complete rootless acceptance matrix
 against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
 another after legacy removal. If publication is partial, recover the missing image/evidence from

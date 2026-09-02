@@ -1,5 +1,10 @@
 # Local development
 
+Browser development now lives under `web/`; FastAPI serves only API, download, OpenAPI, health,
+readiness, and metrics routes. Run the frontend quality gates from `web/` and the root Python gates
+with `uv`. Production-bound testing must exercise the separate rootless frontend and backend images
+through `web/router.mjs`; the development server is not production evidence.
+
 ## Bootstrap
 
 Install `uv` using its supported installation method. From the repository root, synchronize every

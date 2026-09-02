@@ -55,13 +55,13 @@ def test_conversion_cli_e2e_json_parser_fails_closed() -> None:
     assert driver._json_result(invalid) is None
 
 
-def test_conversion_cli_e2e_runs_after_shared_cli_and_before_browser() -> None:
+def test_conversion_cli_e2e_runs_after_shared_cli_and_before_template_cli() -> None:
     runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
     shared_cli = runner.index("tests.e2e.cli_workflow")
     conversions = runner.index("tests.e2e.conversion_cli_workflow")
-    browser = runner.index("/e2e/browser-final-image.test.mjs")
+    templates = runner.index("tests.e2e.template_cli_workflow")
 
-    assert shared_cli < conversions < browser
+    assert shared_cli < conversions < templates
     assert runner.count("tests.e2e.conversion_cli_workflow") == 1
 
 

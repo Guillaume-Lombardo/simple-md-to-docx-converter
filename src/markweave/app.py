@@ -15,7 +15,6 @@ from markweave.http.routers import (
     authentication,
     conversions,
     templates,
-    web,
 )
 from markweave.jobs.runner import EmbeddedWorker
 from markweave.malware import UploadScanner
@@ -86,7 +85,6 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     )
     routers = (
         audit_observability.build_router(dependencies, embedded_worker),
-        web.build_router(dependencies),
         authentication.build_router(dependencies),
         administration.build_router(dependencies),
         conversions.build_router(dependencies),

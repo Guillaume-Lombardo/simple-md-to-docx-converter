@@ -56,7 +56,6 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "tests/corpus/**",
         "tests/conftest.py",
         "tests/golden/**",
-        "tests/browser/**",
         "tests/integration/document_engines/**",
         "tests/unit/test_golden_*.py",
     ),

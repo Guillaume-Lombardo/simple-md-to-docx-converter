@@ -1,5 +1,10 @@
 # Architecture
 
+Version `0.6.0` completes the browser cutover: the backend composition root contains no HTML or
+static-asset router. Next.js owns browser presentation, the same-origin router owns only transport
+routing and minimum response headers, and FastAPI remains the sole business and persistence
+authority.
+
 Markweave currently uses a server-rendered FastAPI browser interface with durable asynchronous
 conversion workers. The approved T58 target replaces only that browser presentation with a
 separate Next.js process; FastAPI and the worker/storage architecture remain authoritative. See

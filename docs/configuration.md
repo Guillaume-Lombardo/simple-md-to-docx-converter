@@ -1,5 +1,11 @@
 # Configuration reference
 
+The `0.6.0` deployment has separate backend, frontend, and public-router processes. Frontend and
+router origins, host allowlists, TLS key/certificate paths, and router transport limits belong to
+their process configuration; they do not grant the frontend database, object-store, scanner, or
+authentication credentials. Loopback quickstarts remain HTTP and require a matched immutable image
+pair when testing an unpublished candidate.
+
 The application reads case-insensitive `MARKWEAVE_*` environment variables and fails startup with a
 content-free error when the assembled settings are invalid. "Required" below means there is
 deliberately no application default; operators must choose an approved value. Defaults are
