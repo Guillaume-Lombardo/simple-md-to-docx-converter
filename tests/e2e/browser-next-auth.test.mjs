@@ -47,6 +47,13 @@ async function api(page, method, path, body) {
   );
 }
 
+async function assertDisabledNavigationItem(page, name) {
+  const item = page.getByText(name, { exact: true });
+  await assert.doesNotReject(() => item.waitFor());
+  assert.equal(await item.getAttribute("aria-disabled"), "true");
+  assert.equal(await page.getByRole("link", { name, exact: true }).count(), 0);
+}
+
 test("Next authentication shell uses FastAPI authority for three identities", async () => {
   const profile = process.env.MARKWEAVE_E2E_PROFILE;
   assert.ok(profile === "standalone" || profile === "distributed");
@@ -83,9 +90,7 @@ test("Next authentication shell uses FastAPI authority for three identities", as
     const bobPage = await bobContext.newPage();
 
     await login(adminPage, "e2e-admin", "e2e-admin-password");
-    await assert.doesNotReject(() =>
-      adminPage.getByRole("link", { name: "Users" }).waitFor(),
-    );
+    await assertDisabledNavigationItem(adminPage, "Users");
     const adminSession = await api(adminPage, "GET", "/api/v1/session");
     assert.equal(adminSession.status, 200);
     assert.ok(Number.isInteger(adminSession.body.effective_idle_minutes));
