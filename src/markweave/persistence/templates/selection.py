@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -31,6 +31,7 @@ from markweave.templates.errors import (
 from markweave.templates.models import (
     TemplateAuditRecord,
     TemplateIdentity,
+    TemplateSelectionSource,
     TemplateStatus,
 )
 
@@ -152,36 +153,69 @@ class SqlTemplateSelectionRepository(_SqlTemplateStore):
             raise PersistenceError from None
 
     def resolve(self, user_id: UUID) -> TemplateIdentity | None:
+        return self.resolve_with_source(user_id)[0]
+
+    def resolve_with_source(
+        self, user_id: UUID
+    ) -> tuple[TemplateIdentity | None, TemplateSelectionSource]:
+        try:
+            with DatabaseSession(self._engine) as database:
+                preferred_id = (
+                    select(TemplatePreferenceRow.template_id)
+                    .where(TemplatePreferenceRow.user_id == str(user_id))
+                    .scalar_subquery()
+                )
+                fallback_id = (
+                    select(SystemTemplateSelectionRow.fallback_template_id)
+                    .where(
+                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID
+                    )
+                    .scalar_subquery()
+                )
+                source = case(
+                    (
+                        TemplateRow.id == preferred_id,
+                        TemplateSelectionSource.PREFERRED.value,
+                    ),
+                    else_=TemplateSelectionSource.SYSTEM_FALLBACK.value,
+                ).label("selection_source")
+                priority = case((TemplateRow.id == preferred_id, 0), else_=1)
+                selected = database.execute(
+                    select(TemplateRow, source)
+                    .where(
+                        TemplateRow.id.in_((preferred_id, fallback_id)),
+                        TemplateRow.status == TemplateStatus.ACTIVE.value,
+                        TemplateRow.publication_state == "published",
+                    )
+                    .order_by(priority)
+                    .limit(1)
+                ).first()
+                if selected is not None:
+                    template, selection_source = selected
+                    return _template(template), TemplateSelectionSource(
+                        selection_source
+                    )
+                return None, TemplateSelectionSource.PANDOC_DEFAULT
+        except SQLAlchemyError:
+            raise PersistenceError from None
+
+    def context(self, user_id: UUID) -> tuple[UUID | None, UUID | None]:
         try:
             with DatabaseSession(self._engine) as database:
                 preferred = database.scalar(
-                    select(TemplateRow)
-                    .join(
-                        TemplatePreferenceRow,
-                        TemplatePreferenceRow.template_id == TemplateRow.id,
-                    )
-                    .where(
-                        TemplatePreferenceRow.user_id == str(user_id),
-                        TemplateRow.status == TemplateStatus.ACTIVE.value,
-                        TemplateRow.publication_state == "published",
+                    select(TemplatePreferenceRow.template_id).where(
+                        TemplatePreferenceRow.user_id == str(user_id)
                     )
                 )
-                if preferred is not None:
-                    return _template(preferred)
                 fallback = database.scalar(
-                    select(TemplateRow)
-                    .join(
-                        SystemTemplateSelectionRow,
-                        SystemTemplateSelectionRow.fallback_template_id
-                        == TemplateRow.id,
-                    )
-                    .where(
-                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID,
-                        TemplateRow.status == TemplateStatus.ACTIVE.value,
-                        TemplateRow.publication_state == "published",
+                    select(SystemTemplateSelectionRow.fallback_template_id).where(
+                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID
                     )
                 )
-                return _template(fallback) if fallback is not None else None
+                return (
+                    UUID(preferred) if preferred is not None else None,
+                    UUID(fallback) if fallback is not None else None,
+                )
         except SQLAlchemyError:
             raise PersistenceError from None
 

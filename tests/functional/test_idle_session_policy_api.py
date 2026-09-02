@@ -46,6 +46,7 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             "user_idle_minutes": 30,
             "admin_idle_minutes": 15,
             "revision": 0,
+            "absolute_lifetime_seconds": 28_800,
         }
         assert defaults.headers["etag"] == '"idle-session-policy-0"'
 
@@ -98,6 +99,7 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             "user_idle_minutes": 5,
             "admin_idle_minutes": 60,
             "revision": 1,
+            "absolute_lifetime_seconds": 28_800,
         }
         assert updated.headers["etag"] == '"idle-session-policy-1"'
         assert client.get("/api/v1/session").json()["effective_idle_minutes"] == 60
@@ -149,6 +151,7 @@ def test_policy_persists_across_application_restart(tmp_path: Path) -> None:
             "user_idle_minutes": 300,
             "admin_idle_minutes": 5,
             "revision": 1,
+            "absolute_lifetime_seconds": 28_800,
         }
 
 
@@ -157,6 +160,7 @@ def test_policy_update_cannot_exceed_operator_absolute_lifetime(tmp_path: Path) 
     with make_client(tmp_path, session_absolute_seconds=10 * 60) as client:
         admin = login(client)
         current = client.get("/api/v1/admin/session-policy")
+        assert current.json()["absolute_lifetime_seconds"] == 600
         rejected = client.put(
             "/api/v1/admin/session-policy",
             headers={**csrf(admin), "If-Match": current.headers["etag"]},

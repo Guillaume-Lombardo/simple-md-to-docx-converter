@@ -97,6 +97,14 @@ def test_cli_conversion_lifecycle_idempotency_capacity_authorization_and_downloa
     service_url, application, settings = running_conversion_service
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     _save_login(service_url, "default", "admin", "admin-password")
+    assert main(("--json", "conversion-options")) == 0
+    options = _last_json(capsys.readouterr().out)["conversion_options"]
+    assert options == {
+        "conversion_upload_max_bytes": 1_000_000,
+        "resolved_template": None,
+        "template_version_id": None,
+        "selection_source": "pandoc_default",
+    }
     source = tmp_path / "private-customer-name.md"
     source.write_text("# Durable CLI conversion", encoding="utf-8")
 

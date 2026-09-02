@@ -15,6 +15,7 @@ from markweave.http.responses import (
     template_response,
 )
 from markweave.http.schemas import (
+    TemplateAdministrationContextResponse,
     TemplateMetadataRequest,
     TemplatePageResponse,
     TemplateResponse,
@@ -42,6 +43,26 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
     settings = dependencies.settings
     components = dependencies.components
     auth = dependencies.authentication
+
+    @router.get(
+        "/api/v1/template-context",
+        response_model=TemplateAdministrationContextResponse,
+        tags=["templates"],
+        responses=error_responses(401, 503),
+    )
+    def get_template_administration_context(
+        response: Response,
+        actor: Annotated[User, Depends(dependencies.current_user)],
+    ) -> TemplateAdministrationContextResponse:
+        response.headers["Cache-Control"] = "no-store"
+        preferred_id, fallback_id = dependencies.template_runtime().selection_context(
+            actor
+        )
+        return TemplateAdministrationContextResponse(
+            preferred_template_id=preferred_id,
+            system_fallback_template_id=fallback_id,
+            template_max_archive_bytes=settings.template_max_archive_bytes,
+        )
 
     @router.get(
         "/api/v1/templates",

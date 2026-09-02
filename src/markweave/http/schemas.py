@@ -4,11 +4,11 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from markweave.auth.models import Role
 from markweave.jobs.models import JobOutput, TemplateMode
-from markweave.templates.models import TemplateStatus
+from markweave.templates.models import TemplateSelectionSource, TemplateStatus
 
 
 class LoginRequest(BaseModel):
@@ -67,6 +67,7 @@ class IdleSessionPolicyResponse(BaseModel):
     user_idle_minutes: int
     admin_idle_minutes: int
     revision: int
+    absolute_lifetime_seconds: Annotated[int, Field(strict=True, gt=0)]
 
 
 class UserResponse(BaseModel):
@@ -149,6 +150,37 @@ class TemplateResponse(BaseModel):
     revision: int
     current_version_id: UUID | None
     owner_username: str
+
+
+class ConversionOptionsResponse(BaseModel):
+    """Authoritative limits and immutable template selection for conversion."""
+
+    conversion_upload_max_bytes: Annotated[int, Field(strict=True, gt=0)]
+    resolved_template: TemplateResponse | None
+    template_version_id: UUID | None
+    selection_source: TemplateSelectionSource
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> ConversionOptionsResponse:
+        has_template = self.resolved_template is not None
+        has_version = self.template_version_id is not None
+        is_default = self.selection_source is TemplateSelectionSource.PANDOC_DEFAULT
+        if has_template != has_version or is_default == has_template:
+            raise ValueError("Template selection fields are inconsistent")
+        if (
+            self.resolved_template is not None
+            and self.resolved_template.current_version_id != self.template_version_id
+        ):
+            raise ValueError("Template version fields are inconsistent")
+        return self
+
+
+class TemplateAdministrationContextResponse(BaseModel):
+    """Authoritative template selection identifiers and upload limit."""
+
+    preferred_template_id: UUID | None
+    system_fallback_template_id: UUID | None
+    template_max_archive_bytes: Annotated[int, Field(strict=True, gt=0)]
 
 
 class TemplatePageResponse(BaseModel):

@@ -379,8 +379,18 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
     remote, capsys
 ) -> None:
     _store, _constructor, client = remote
-    initial = {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
-    updated = {"user_idle_minutes": 25, "admin_idle_minutes": 10, "revision": 1}
+    initial = {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+        "absolute_lifetime_seconds": 28_800,
+    }
+    updated = {
+        "user_idle_minutes": 25,
+        "admin_idle_minutes": 10,
+        "revision": 1,
+        "absolute_lifetime_seconds": 28_800,
+    }
     client.request.side_effect = (
         _response(200, initial, etag='"idle-session-policy-0"'),
         _response(200, initial, etag='"idle-session-policy-0"'),
@@ -405,7 +415,8 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
         == 0
     )
     assert capsys.readouterr().out == (
-        "Users: 25 minutes; administrators: 10 minutes; revision: 1.\n"
+        "Users: 25 minutes; administrators: 10 minutes; absolute lifetime: "
+        "28800 seconds; revision: 1.\n"
     )
     update = client.request.call_args_list[-1]
     assert update.args == ("PUT", "/api/v1/admin/session-policy")
@@ -453,6 +464,12 @@ def test_session_policy_help_exposes_http_only_read_and_update(capsys) -> None:
         {"user_idle_minutes": True, "admin_idle_minutes": 15, "revision": 0},
         {"user_idle_minutes": 30, "admin_idle_minutes": "15", "revision": 0},
         {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": False},
+        {
+            "user_idle_minutes": 30,
+            "admin_idle_minutes": 15,
+            "revision": 0,
+            "absolute_lifetime_seconds": 0,
+        },
     ),
 )
 def test_session_policy_rejects_malformed_service_responses(
@@ -508,7 +525,13 @@ def test_policy_audit_requires_an_object() -> None:
 def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -> None:
     _store, _constructor, client = remote
     client.request.return_value = _response(
-        200, {"user_idle_minutes": 30, "admin_idle_minutes": 15, "revision": 0}
+        200,
+        {
+            "user_idle_minutes": 30,
+            "admin_idle_minutes": 15,
+            "revision": 0,
+            "absolute_lifetime_seconds": 28_800,
+        },
     )
 
     assert (
@@ -527,7 +550,9 @@ def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -
         == 1
     )
     assert "invalid response" in capsys.readouterr().err
-    client.request.assert_called_once()
+    client.request.assert_called_once_with(
+        "GET", "/api/v1/admin/session-policy", profile=_profile()
+    )
 
 
 def test_policy_response_requires_an_object() -> None:

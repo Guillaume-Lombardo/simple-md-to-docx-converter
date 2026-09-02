@@ -253,6 +253,8 @@ def exercise_idle_session_policy(
         current.get("admin_idle_minutes"),
     ) != (30, 15):
         raise WorkflowFailure("read idle-session policy: defaults mismatch")
+    if current.get("absolute_lifetime_seconds") != 28_800:
+        raise WorkflowFailure("read idle-session policy: absolute ceiling mismatch")
 
     def race(payload: dict[str, int]) -> HttpResult:
         return admin.request(
@@ -295,6 +297,42 @@ def exercise_idle_session_policy(
         for record in audits
     ):
         raise WorkflowFailure("idle-session policy audit evidence is missing")
+
+
+def require_runtime_metadata(  # noqa: PLR0913 - explicit expected metadata contract
+    client: ServiceClient,
+    *,
+    source: str,
+    template_id: str | None = None,
+    version_id: str | None = None,
+    preferred_id: str | None = None,
+    fallback_id: str | None = None,
+) -> None:
+    """Require exact final-image limits and one consistent template selection."""
+    options_result = client.request("GET", "/api/v1/conversion-options")
+    expect(options_result, 200, "conversion options")
+    options = decode_object(options_result, "conversion options")
+    resolved = options.get("resolved_template")
+    if (
+        options_result.headers.get("cache-control") != "no-store"
+        or options.get("conversion_upload_max_bytes") != 1_000_000
+        or options.get("selection_source") != source
+        or options.get("template_version_id") != version_id
+        or (resolved.get("id") if isinstance(resolved, dict) else None) != template_id
+        or (resolved.get("current_version_id") if isinstance(resolved, dict) else None)
+        != version_id
+    ):
+        raise WorkflowFailure("conversion options: runtime metadata mismatch")
+    context_result = client.request("GET", "/api/v1/template-context")
+    expect(context_result, 200, "template context")
+    context = decode_object(context_result, "template context")
+    if (
+        context_result.headers.get("cache-control") != "no-store"
+        or context.get("template_max_archive_bytes") != 1_000_000
+        or context.get("preferred_template_id") != preferred_id
+        or context.get("system_fallback_template_id") != fallback_id
+    ):
+        raise WorkflowFailure("template context: runtime metadata mismatch")
 
 
 def create_template(
@@ -1118,6 +1156,7 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     bob = ServiceClient(arguments.base_url)
     alice.login(alice_name, alice_password)
     bob.login(bob_name, bob_password)
+    require_runtime_metadata(alice, source="pandoc_default")
     exercise_idle_session_policy(admin, alice)
 
     json_request(
@@ -1156,6 +1195,38 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
 
     template = create_template(alice, arguments.template, run_id=run_id)
     template_id = required_string(template, "id", "template")
+    version_id = required_string(template, "current_version_id", "template")
+    fallback = admin.request(
+        "PUT", f"/api/v1/templates/{template_id}/system-fallback", mutate=True
+    )
+    expect(fallback, 204, "set system fallback for runtime metadata")
+    require_runtime_metadata(
+        bob,
+        source="system_fallback",
+        template_id=template_id,
+        version_id=version_id,
+        fallback_id=template_id,
+    )
+    preferred = alice.request(
+        "PUT", f"/api/v1/templates/{template_id}/preferred", mutate=True
+    )
+    expect(preferred, 204, "set preferred template for runtime metadata")
+    require_runtime_metadata(
+        alice,
+        source="preferred",
+        template_id=template_id,
+        version_id=version_id,
+        preferred_id=template_id,
+        fallback_id=template_id,
+    )
+    context = decode_object(
+        alice.request("GET", "/api/v1/template-context"), "selected template context"
+    )
+    if (
+        context.get("preferred_template_id") != template_id
+        or context.get("system_fallback_template_id") != template_id
+    ):
+        raise WorkflowFailure("template context: selection identifiers mismatch")
     visible = bob.request("GET", f"/api/v1/templates/{template_id}")
     expect(visible, 200, "Bob template visibility")
     visible_etag = visible.headers.get("etag", "")
@@ -1531,6 +1602,7 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
         "user_idle_minutes": int(state["policy_user_idle_minutes"]),
         "admin_idle_minutes": int(state["policy_admin_idle_minutes"]),
         "revision": int(state["policy_revision"]),
+        "absolute_lifetime_seconds": 28_800,
     }
     if policy != expected_policy:
         raise WorkflowFailure("checkpoint idle-session policy was not preserved")

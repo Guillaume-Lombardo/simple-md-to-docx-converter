@@ -84,6 +84,12 @@ def _set_request_value(namespace: argparse.Namespace, key: str, value: Any) -> N
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register conversion submission and complete owner job lifecycle commands."""
+    options = subparsers.add_parser(
+        "conversion-options", help="Show authoritative conversion options."
+    )
+    _configure(options, "conversion-options", _conversion_options)
+    _profile_argument(options)
+
     convert = subparsers.add_parser("convert", help="Submit a conversion.")
     convert.set_defaults(
         command_name=_Request(
@@ -245,6 +251,22 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
         result["idempotency_key"] = idempotency_key
     writer.success(
         f"Submitted job {job['id']}; poll after {poll_after:g} seconds.", result
+    )
+
+
+def _conversion_options(
+    context: CommandContext, writer: OutputWriter, request: _Request
+) -> None:
+    response = _client(context, request).options()
+    payload = _payload(
+        response, expected_status=_SUCCESS, fallback="conversion_options_read_failed"
+    )
+    options = _validated_conversion_options(payload)
+    selection = options["selection_source"].replace("_", " ")
+    writer.success(
+        f"Upload limit: {options['conversion_upload_max_bytes']} bytes; "
+        f"template selection: {selection}.",
+        {"conversion_options": options},
     )
 
 
@@ -462,6 +484,72 @@ def _job(value: Any) -> dict[str, Any]:
     ):
         raise _invalid_response()
     return {**value, "id": canonical_id, "correlation_id": canonical_correlation}
+
+
+def _validated_conversion_options(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _invalid_response()
+    upload_limit = value.get("conversion_upload_max_bytes")
+    source = value.get("selection_source")
+    template = value.get("resolved_template")
+    version_id = value.get("template_version_id")
+    if (
+        not isinstance(upload_limit, int)
+        or isinstance(upload_limit, bool)
+        or upload_limit <= 0
+        or source not in {"pandoc_default", "preferred", "system_fallback"}
+    ):
+        raise _invalid_response()
+    if source == "pandoc_default":
+        if template is not None or version_id is not None:
+            raise _invalid_response()
+    else:
+        if not isinstance(template, dict) or not isinstance(version_id, str):
+            raise _invalid_response()
+        canonical_version = _canonical_response_uuid(version_id)
+        template = _validated_template_identity(template)
+        current_version = template["current_version_id"]
+        if canonical_version != current_version:
+            raise _invalid_response()
+        version_id = canonical_version
+    return {
+        "conversion_upload_max_bytes": upload_limit,
+        "resolved_template": template,
+        "template_version_id": version_id,
+        "selection_source": source,
+    }
+
+
+def _validated_template_identity(value: dict[str, Any]) -> dict[str, Any]:
+    identity = dict(value)
+    for key in ("id", "owner_id", "current_version_id"):
+        identity[key] = _canonical_response_uuid(value.get(key))
+    revision = value.get("revision")
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision <= 0
+        or value.get("status") not in {"active", "archived"}
+        or any(
+            not isinstance(value.get(key), str)
+            for key in ("name", "description", "owner_username")
+        )
+    ):
+        raise _invalid_response()
+    identity["revision"] = revision
+    return identity
+
+
+def _canonical_response_uuid(value: Any) -> str:
+    if not isinstance(value, str):
+        raise _invalid_response()
+    try:
+        canonical = str(UUID(value))
+    except ValueError as error:
+        raise _invalid_response() from error
+    if canonical != value:
+        raise _invalid_response()
+    return canonical
 
 
 def _job_summary(job: dict[str, Any]) -> str:

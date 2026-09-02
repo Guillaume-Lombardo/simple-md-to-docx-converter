@@ -76,6 +76,7 @@ export const vErrorResponse = v.object({
  * Effective singleton policy and optimistic-concurrency revision.
  */
 export const vIdleSessionPolicyResponse = v.object({
+    absolute_lifetime_seconds: v.pipe(v.number(), v.integer(), v.gtValue(0)),
     admin_idle_minutes: v.pipe(v.number(), v.integer()),
     revision: v.pipe(v.number(), v.integer()),
     user_idle_minutes: v.pipe(v.number(), v.integer())
@@ -159,6 +160,17 @@ export const vPasswordResetRequest = v.object({
 export const vRole = v.picklist(['user', 'admin']);
 
 /**
+ * TemplateAdministrationContextResponse
+ *
+ * Authoritative template selection identifiers and upload limit.
+ */
+export const vTemplateAdministrationContextResponse = v.object({
+    preferred_template_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    system_fallback_template_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    template_max_archive_bytes: v.pipe(v.number(), v.integer(), v.gtValue(0))
+});
+
+/**
  * TemplateMetadataRequest
  */
 export const vTemplateMetadataRequest = v.object({
@@ -212,6 +224,17 @@ export const vConversionPageResponse = v.object({
 });
 
 /**
+ * TemplateSelectionSource
+ *
+ * Authoritative source of the template selected for a conversion.
+ */
+export const vTemplateSelectionSource = v.picklist([
+    'pandoc_default',
+    'preferred',
+    'system_fallback'
+]);
+
+/**
  * TemplateStatus
  *
  * Visibility lifecycle available before T15 adds version mutations.
@@ -232,6 +255,18 @@ export const vTemplateResponse = v.object({
     owner_username: v.string(),
     revision: v.pipe(v.number(), v.integer()),
     status: vTemplateStatus
+});
+
+/**
+ * ConversionOptionsResponse
+ *
+ * Authoritative limits and immutable template selection for conversion.
+ */
+export const vConversionOptionsResponse = v.object({
+    conversion_upload_max_bytes: v.pipe(v.number(), v.integer(), v.gtValue(0)),
+    resolved_template: v.nullable(vTemplateResponse),
+    selection_source: vTemplateSelectionSource,
+    template_version_id: v.nullable(v.pipe(v.string(), v.uuid()))
 });
 
 /**
@@ -388,6 +423,11 @@ export const vListAuditRecordsApiV1AuditGetQuery = v.object({
  */
 export const vListAuditRecordsApiV1AuditGetResponse = v.array(vAuditRecordResponse);
 
+/**
+ * Successful Response
+ */
+export const vGetConversionOptionsApiV1ConversionOptionsGetResponse = vConversionOptionsResponse;
+
 export const vListConversionsApiV1ConversionsGetQuery = v.object({
     offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50)
@@ -481,6 +521,11 @@ export const vChangeOwnPasswordApiV1PasswordPostResponse = v.void();
  * Successful Response
  */
 export const vApiSessionApiV1SessionGetResponse = vUserResponse;
+
+/**
+ * Successful Response
+ */
+export const vGetTemplateAdministrationContextApiV1TemplateContextGetResponse = vTemplateAdministrationContextResponse;
 
 export const vClearPreferredTemplateApiV1TemplatePreferenceDeleteHeaders = v.object({
     'X-CSRF-Token': v.nullish(v.string())

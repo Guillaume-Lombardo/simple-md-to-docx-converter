@@ -74,6 +74,14 @@ on a conflict, fetch current state and reconcile. Content replacement and restor
 version atomically. See [versioned template API](templates.md) for authorization, audit, archive,
 retention, and exact endpoint behavior.
 
+`GET /api/v1/conversion-options` is an authenticated, non-cacheable read of the configured
+`conversion_upload_max_bytes` and the resolved immutable template selection. It returns the
+selected template and exact `template_version_id`, or a strict null pair, plus one stable
+`selection_source`: `pandoc_default`, `preferred`, or `system_fallback`. `GET
+/api/v1/template-context` similarly returns the current user's `preferred_template_id`, the
+`system_fallback_template_id`, and configured `template_max_archive_bytes`. Neither response
+contains storage paths, credentials, or deployment secrets.
+
 ## Administration and audit
 
 Administrators can list and create users, change active state, reset a password, and set or cancel
@@ -83,8 +91,9 @@ the next-login renewal requirement under `/api/v1/admin/users`. Creation and res
 version. `GET /api/v1/audit` exposes paginated audit records to authorized
 administrators; records contain identifiers and action metadata, not document bodies or passwords.
 
-`GET /api/v1/admin/session-policy` returns `user_idle_minutes`, `admin_idle_minutes`, and the
-current `revision` with an `ETag`. `PUT` on the same path requires the session CSRF header plus that
+`GET /api/v1/admin/session-policy` returns `user_idle_minutes`, `admin_idle_minutes`, the exact
+positive `absolute_lifetime_seconds` operator ceiling, and the current `revision` with an `ETag`.
+`PUT` on the same path requires the session CSRF header plus that
 validator in `If-Match` and atomically replaces both values. Standard-user values must be whole
 minutes from 5 through 300 inclusive; administrator values must be whole minutes from 5 through 60
 inclusive. Missing preconditions return `428`; malformed or stale validators return `412`, leave

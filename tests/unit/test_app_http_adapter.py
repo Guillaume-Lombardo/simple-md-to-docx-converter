@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
 from markweave.app import AppComponents, create_app
@@ -34,7 +35,7 @@ from markweave.http.responses import (
     idle_session_policy_etag,
 )
 from markweave.http.routers.conversions import _result_content_disposition
-from markweave.http.schemas import ErrorResponse
+from markweave.http.schemas import ConversionOptionsResponse, ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
@@ -52,6 +53,7 @@ from markweave.persistence.errors import PersistenceError
 from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -60,6 +62,59 @@ from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 _HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("template", "version", "source"),
+    (
+        (None, uuid4(), TemplateSelectionSource.PANDOC_DEFAULT),
+        (None, None, TemplateSelectionSource.PREFERRED),
+    ),
+)
+def test_conversion_options_rejects_inconsistent_selection_pairs(
+    template, version, source
+) -> None:
+    with pytest.raises(ValidationError):
+        ConversionOptionsResponse(
+            conversion_upload_max_bytes=1,
+            resolved_template=template,
+            template_version_id=version,
+            selection_source=source,
+        )
+
+
+@pytest.mark.unit
+def test_conversion_options_rejects_a_mismatched_immutable_version() -> None:
+    selected_version = uuid4()
+    with pytest.raises(ValidationError):
+        ConversionOptionsResponse(
+            conversion_upload_max_bytes=1,
+            resolved_template={
+                "id": uuid4(),
+                "owner_id": uuid4(),
+                "name": "Selected",
+                "description": "Runtime selection",
+                "status": "active",
+                "revision": 1,
+                "current_version_id": selected_version,
+                "owner_username": "owner",
+            },
+            template_version_id=uuid4(),
+            selection_source=TemplateSelectionSource.PREFERRED,
+        )
+
+
+@pytest.mark.unit
+def test_conversion_options_accepts_a_consistent_default_selection() -> None:
+    response = ConversionOptionsResponse(
+        conversion_upload_max_bytes=1,
+        resolved_template=None,
+        template_version_id=None,
+        selection_source=TemplateSelectionSource.PANDOC_DEFAULT,
+    )
+
+    assert response.selection_source is TemplateSelectionSource.PANDOC_DEFAULT
 
 
 @pytest.mark.unit

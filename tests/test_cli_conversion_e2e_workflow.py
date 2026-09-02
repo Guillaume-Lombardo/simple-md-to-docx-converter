@@ -63,3 +63,31 @@ def test_conversion_cli_e2e_runs_after_shared_cli_and_before_browser() -> None:
 
     assert shared_cli < conversions < browser
     assert runner.count("tests.e2e.conversion_cli_workflow") == 1
+
+
+def test_conversion_cli_e2e_reads_authoritative_options() -> None:
+    source = Path("tests/e2e/conversion_cli_workflow.py").read_text(encoding="utf-8")
+
+    assert '"--json", "conversion-options"' in source
+    assert 'options.get("conversion_upload_max_bytes") != 1_000_000' in source
+    assert 'options.get("selection_source") != "system_fallback"' in source
+    assert '[*prefix, "conversion-options"]' in source
+    assert (
+        '"Upload limit: 1000000 bytes; template selection: system fallback.\\n"'
+        in source
+    )
+
+
+def test_conversion_cli_e2e_requires_exact_human_output() -> None:
+    driver = _driver_module()
+    expected = "Upload limit: 1000000 bytes; template selection: system fallback.\n"
+
+    assert driver._has_exact_stdout(
+        driver.subprocess.CompletedProcess([], 0, expected, ""), expected
+    )
+    assert not driver._has_exact_stdout(
+        driver.subprocess.CompletedProcess([], 0, expected.rstrip(), ""), expected
+    )
+    assert not driver._has_exact_stdout(
+        driver.subprocess.CompletedProcess([], 0, expected, "warning"), expected
+    )

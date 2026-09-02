@@ -19,7 +19,7 @@ _RESULT = "/tmp/markweave-t33-result.zip"  # noqa: S108 - container tmpfs
 _MANIFEST = "/tmp/markweave-t33-manifest.json"  # noqa: S108 - container tmpfs
 
 
-def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
+def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True)
     parser.add_argument(
@@ -49,6 +49,33 @@ def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
     )
     if login != 0 or password in login_output:
         return _failure("login", login)
+    options_result = _json_result(_run([*prefix, "--json", "conversion-options"]))
+    options = (
+        options_result.get("conversion_options")
+        if isinstance(options_result, dict)
+        else None
+    )
+    selected = options.get("resolved_template") if isinstance(options, dict) else None
+    if (
+        not isinstance(options, dict)
+        or options.get("conversion_upload_max_bytes") != 1_000_000
+        or options.get("selection_source") != "system_fallback"
+        or not isinstance(selected, dict)
+        or selected.get("current_version_id") != options.get("template_version_id")
+    ):
+        return _failure("conversion options", 1)
+    try:
+        UUID(str(selected["id"]))
+        UUID(str(selected["owner_id"]))
+        UUID(str(options["template_version_id"]))
+    except KeyError, ValueError:
+        return _failure("conversion options identity", 1)
+    human_options = _run([*prefix, "conversion-options"])
+    if not _has_exact_stdout(
+        human_options,
+        "Upload limit: 1000000 bytes; template selection: system fallback.\n",
+    ):
+        return _failure("conversion options human output", human_options.returncode)
     key = f"t33-final-image-{arguments.profile}"
     submission = _run(
         [
@@ -176,6 +203,10 @@ def _json_result(result: subprocess.CompletedProcess[str]) -> dict[str, object] 
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def _has_exact_stdout(result: subprocess.CompletedProcess[str], expected: str) -> bool:
+    return result.returncode == 0 and not result.stderr and result.stdout == expected
 
 
 def _run_pty(arguments: list[str], password: str) -> tuple[int, str]:

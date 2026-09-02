@@ -191,6 +191,30 @@ def _exercise(container: str) -> None:
 
     admin_username, admin_password = _administrator_login()
     _login(container, _ADMIN_PROFILE, admin_username, admin_password)
+    policy_result = _plain(
+        plain,
+        ("--json", "session-policy", "get", "--profile", _ADMIN_PROFILE),
+    )
+    try:
+        policy = json.loads(policy_result.stdout)["session_policy"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise _WorkflowFailure("session policy metadata") from error
+    if (
+        not isinstance(policy, dict)
+        or not isinstance(policy.get("user_idle_minutes"), int)
+        or not isinstance(policy.get("admin_idle_minutes"), int)
+        or not isinstance(policy.get("revision"), int)
+        or policy.get("absolute_lifetime_seconds") != 28_800
+    ):
+        raise _WorkflowFailure("session policy metadata")
+    human_policy = _plain(plain, ("session-policy", "get", "--profile", _ADMIN_PROFILE))
+    expected_policy = (
+        f"Users: {policy['user_idle_minutes']} minutes; administrators: "
+        f"{policy['admin_idle_minutes']} minutes; absolute lifetime: 28800 seconds; "
+        f"revision: {policy['revision']}.\n"
+    )
+    if human_policy.stdout != expected_policy:
+        raise _WorkflowFailure("session policy human output")
     _interactive(
         container,
         (

@@ -44,6 +44,16 @@ class _TemplateHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self._record()
+        if self.path == "/api/v1/template-context":
+            self._json(
+                200,
+                {
+                    "preferred_template_id": None,
+                    "system_fallback_template_id": TEMPLATE_ID,
+                    "template_max_archive_bytes": 1_000_000,
+                },
+            )
+            return
         if self.path.startswith("/api/v1/templates?"):
             self._json(
                 200,
@@ -274,6 +284,15 @@ def test_complete_template_cli_contract_over_real_http_for_each_storage_profile(
     alice = ("--profile", f"{storage_profile}-alice")
     admin = ("--profile", f"{storage_profile}-admin")
     bob = ("--profile", f"{storage_profile}-bob")
+
+    assert main(("--json", "templates", "context", *alice)) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "template_context": {
+            "preferred_template_id": None,
+            "system_fallback_template_id": TEMPLATE_ID,
+            "template_max_archive_bytes": 1_000_000,
+        }
+    }
 
     assert main(("templates", "list", *bob)) == 0
     assert main(("templates", "show", TEMPLATE_ID, *alice)) == 0

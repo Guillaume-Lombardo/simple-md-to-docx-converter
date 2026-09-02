@@ -114,6 +114,58 @@ def test_list_and_search_forward_only_documented_filters(mocker, capsys) -> None
     assert output[1] == "No templates."
 
 
+def test_context_reads_authoritative_selection_and_upload_limit(mocker, capsys) -> None:
+    transport = _Transport(
+        _response(
+            200,
+            {
+                "preferred_template_id": TEMPLATE_ID,
+                "system_fallback_template_id": None,
+                "template_max_archive_bytes": 654_321,
+            },
+        )
+    )
+    _install(mocker, transport)
+
+    assert main(("--json", "templates", "context")) == 0
+    assert transport.requests == [("GET", "/api/v1/template-context", {})]
+    assert json.loads(capsys.readouterr().out) == {
+        "template_context": {
+            "preferred_template_id": TEMPLATE_ID,
+            "system_fallback_template_id": None,
+            "template_max_archive_bytes": 654_321,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "preferred_template_id": None,
+            "system_fallback_template_id": None,
+            "template_max_archive_bytes": 0,
+        },
+        {
+            "preferred_template_id": "not-a-uuid",
+            "system_fallback_template_id": None,
+            "template_max_archive_bytes": 1,
+        },
+        {
+            "preferred_template_id": 42,
+            "system_fallback_template_id": None,
+            "template_max_archive_bytes": 1,
+        },
+    ),
+)
+def test_context_rejects_malformed_runtime_metadata(mocker, capsys, payload) -> None:
+    transport = _Transport(_response(200, payload))
+    _install(mocker, transport)
+
+    assert main(("templates", "context")) == 1
+    assert "invalid response" in capsys.readouterr().err
+
+
 def test_search_requires_an_explicit_remote_filter(mocker, capsys) -> None:
     transport = _Transport()
     _install(mocker, transport)

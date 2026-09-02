@@ -31,6 +31,14 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     router = APIRouter()
     auth = dependencies.authentication
 
+    def policy_response(policy) -> IdleSessionPolicyResponse:
+        return IdleSessionPolicyResponse(
+            user_idle_minutes=policy.user_idle_minutes,
+            admin_idle_minutes=policy.admin_idle_minutes,
+            revision=policy.revision,
+            absolute_lifetime_seconds=dependencies.settings.session_absolute_seconds,
+        )
+
     def admin_actor(
         user: Annotated[User, Depends(dependencies.mutation_actor)],
     ) -> User:
@@ -132,7 +140,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     ) -> IdleSessionPolicyResponse:
         policy = auth.get_idle_session_policy(actor)
         response.headers["ETag"] = idle_session_policy_etag(policy.revision)
-        return IdleSessionPolicyResponse.model_validate(policy)
+        return policy_response(policy)
 
     @router.put(
         "/api/v1/admin/session-policy",
@@ -156,6 +164,6 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         if updated is None:
             raise IdleSessionPolicyConflictError
         response.headers["ETag"] = idle_session_policy_etag(updated.revision)
-        return IdleSessionPolicyResponse.model_validate(updated)
+        return policy_response(updated)
 
     return router

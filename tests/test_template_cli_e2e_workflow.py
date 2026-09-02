@@ -57,6 +57,73 @@ def test_template_cli_e2e_declares_the_complete_activation_font_set() -> None:
     )
 
 
+def test_template_cli_e2e_reads_default_and_selected_context() -> None:
+    source = Path("tests/e2e/template_cli_workflow.py").read_text(encoding="utf-8")
+
+    assert source.count('["templates", "context", "--profile", owner_profile]') == 3
+    assert 'initial.get("preferred_template_id") is not None' in source
+    assert 'selected.get("preferred_template_id") != template_id' in source
+    assert 'selected.get("system_fallback_template_id") != fallback_id' in source
+    assert 'expected_stdout="Template upload limit: 1000000 bytes.\\n"' in source
+
+
+def test_template_cli_e2e_requires_exact_context_human_output(mocker, capsys) -> None:
+    driver = _driver_module()
+    expected = "Template upload limit: 1000000 bytes.\n"
+    run = mocker.patch.object(
+        driver.subprocess,
+        "run",
+        return_value=driver.subprocess.CompletedProcess([], 0, expected, ""),
+    )
+
+    assert (
+        driver._plain_command(
+            ["markweave"],
+            ["templates", "context"],
+            "context",
+            expected_stdout=expected,
+        )
+        is None
+    )
+    assert run.call_args.args[0] == ["markweave", "templates", "context"]
+    assert "--json" not in run.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    ("result", "error"),
+    (
+        ((0, "Template upload limit: 1000000 bytes.", ""), "unexpected output"),
+        ((7, "", ""), "exit=7"),
+        (
+            (0, "Template upload limit: 1000000 bytes.\n", "warning"),
+            "unexpected stderr",
+        ),
+    ),
+)
+def test_template_cli_e2e_rejects_invalid_context_human_result(
+    result: tuple[int, str, str], error: str, mocker, capsys
+) -> None:
+    driver = _driver_module()
+    expected = "Template upload limit: 1000000 bytes.\n"
+    returncode, stdout, stderr = result
+    mocker.patch.object(
+        driver.subprocess,
+        "run",
+        return_value=driver.subprocess.CompletedProcess([], returncode, stdout, stderr),
+    )
+
+    assert (
+        driver._plain_command(
+            ["markweave"],
+            ["templates", "context"],
+            "context",
+            expected_stdout=expected,
+        )
+        == 1
+    )
+    assert error in capsys.readouterr().err
+
+
 def test_template_cli_e2e_sends_login_secret_only_through_pty(mocker) -> None:
     driver = _driver_module()
     sentinel = "sentinel-login-secret"

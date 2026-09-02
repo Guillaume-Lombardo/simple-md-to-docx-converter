@@ -132,6 +132,8 @@ def register(  # noqa: PLR0915 - the fixed public family is registered together
     )
     commands = parser.add_subparsers(dest="templates_command", metavar="COMMAND")
 
+    _leaf(commands, "context", "Show authoritative template administration context.")
+
     listing = _leaf(commands, "list", "List visible templates.")
     _listing_options(listing)
 
@@ -284,6 +286,7 @@ def _run(context: CommandContext, writer: OutputWriter, command: _Command) -> No
     profile = ProfileStore().load(profile_name)
     transport = _TemplateTransport(profile, context.timeout_seconds)
     handlers = {
+        "context": _context,
         "list": _list,
         "search": _search,
         "show": _show,
@@ -300,6 +303,29 @@ def _run(context: CommandContext, writer: OutputWriter, command: _Command) -> No
         "fallback": _fallback,
     }
     handlers[command.name](context, writer, command, transport)
+
+
+def _context(
+    context: CommandContext,
+    writer: OutputWriter,
+    command: _Command,
+    transport: _TemplateTransport,
+) -> None:
+    del context, command
+    payload = _expect_json(transport.request("GET", "/api/v1/template-context"), 200)
+    limit = payload.get("template_max_archive_bytes")
+    preferred = _nullable_uuid(payload.get("preferred_template_id"))
+    fallback = _nullable_uuid(payload.get("system_fallback_template_id"))
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    result = {
+        "preferred_template_id": preferred,
+        "system_fallback_template_id": fallback,
+        "template_max_archive_bytes": limit,
+    }
+    writer.success(
+        f"Template upload limit: {limit} bytes.", {"template_context": result}
+    )
 
 
 def _list(
@@ -827,6 +853,19 @@ def _expect_json(response: _Response, expected: int) -> dict[str, Any]:
     if not isinstance(response.payload, dict):
         raise CliError("invalid_response", "The service returned an invalid response.")
     return dict(response.payload)
+
+
+def _nullable_uuid(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise CliError("response_invalid", "The service returned an invalid response.")
+    try:
+        return str(UUID(value))
+    except ValueError as error:
+        raise CliError(
+            "response_invalid", "The service returned an invalid response."
+        ) from error
 
 
 def _expect_list(response: _Response, expected: int) -> list[dict[str, Any]]:

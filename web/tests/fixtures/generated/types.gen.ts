@@ -136,6 +136,24 @@ export type BodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = {
 };
 
 /**
+ * ConversionOptionsResponse
+ *
+ * Authoritative limits and immutable template selection for conversion.
+ */
+export type ConversionOptionsResponse = {
+    /**
+     * Conversion Upload Max Bytes
+     */
+    conversion_upload_max_bytes: number;
+    resolved_template: TemplateResponse | null;
+    selection_source: TemplateSelectionSource;
+    /**
+     * Template Version Id
+     */
+    template_version_id: string | null;
+};
+
+/**
  * ConversionPageResponse
  *
  * Paginated owner conversion response.
@@ -268,6 +286,10 @@ export type ErrorResponse = {
  */
 export type IdleSessionPolicyResponse = {
     /**
+     * Absolute Lifetime Seconds
+     */
+    absolute_lifetime_seconds: number;
+    /**
      * Admin Idle Minutes
      */
     admin_idle_minutes: number;
@@ -387,6 +409,26 @@ export type PasswordResetRequest = {
 export type Role = 'user' | 'admin';
 
 /**
+ * TemplateAdministrationContextResponse
+ *
+ * Authoritative template selection identifiers and upload limit.
+ */
+export type TemplateAdministrationContextResponse = {
+    /**
+     * Preferred Template Id
+     */
+    preferred_template_id: string | null;
+    /**
+     * System Fallback Template Id
+     */
+    system_fallback_template_id: string | null;
+    /**
+     * Template Max Archive Bytes
+     */
+    template_max_archive_bytes: number;
+};
+
+/**
  * TemplateMetadataRequest
  */
 export type TemplateMetadataRequest = {
@@ -465,6 +507,13 @@ export type TemplateResponse = {
     revision: number;
     status: TemplateStatus;
 };
+
+/**
+ * TemplateSelectionSource
+ *
+ * Authoritative source of the template selected for a conversion.
+ */
+export type TemplateSelectionSource = 'pandoc_default' | 'preferred' | 'system_fallback';
 
 /**
  * TemplateStatus
@@ -931,6 +980,35 @@ export type ListAuditRecordsApiV1AuditGetResponses = {
 
 export type ListAuditRecordsApiV1AuditGetResponse = ListAuditRecordsApiV1AuditGetResponses[keyof ListAuditRecordsApiV1AuditGetResponses];
 
+export type GetConversionOptionsApiV1ConversionOptionsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/conversion-options';
+};
+
+export type GetConversionOptionsApiV1ConversionOptionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetConversionOptionsApiV1ConversionOptionsGetError = GetConversionOptionsApiV1ConversionOptionsGetErrors[keyof GetConversionOptionsApiV1ConversionOptionsGetErrors];
+
+export type GetConversionOptionsApiV1ConversionOptionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ConversionOptionsResponse;
+};
+
+export type GetConversionOptionsApiV1ConversionOptionsGetResponse = GetConversionOptionsApiV1ConversionOptionsGetResponses[keyof GetConversionOptionsApiV1ConversionOptionsGetResponses];
+
 export type ListConversionsApiV1ConversionsGetData = {
     body?: never;
     path?: never;
@@ -1355,6 +1433,35 @@ export type ApiSessionApiV1SessionGetResponses = {
 };
 
 export type ApiSessionApiV1SessionGetResponse = ApiSessionApiV1SessionGetResponses[keyof ApiSessionApiV1SessionGetResponses];
+
+export type GetTemplateAdministrationContextApiV1TemplateContextGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/template-context';
+};
+
+export type GetTemplateAdministrationContextApiV1TemplateContextGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetTemplateAdministrationContextApiV1TemplateContextGetError = GetTemplateAdministrationContextApiV1TemplateContextGetErrors[keyof GetTemplateAdministrationContextApiV1TemplateContextGetErrors];
+
+export type GetTemplateAdministrationContextApiV1TemplateContextGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TemplateAdministrationContextResponse;
+};
+
+export type GetTemplateAdministrationContextApiV1TemplateContextGetResponse = GetTemplateAdministrationContextApiV1TemplateContextGetResponses[keyof GetTemplateAdministrationContextApiV1TemplateContextGetResponses];
 
 export type ClearPreferredTemplateApiV1TemplatePreferenceDeleteData = {
     body?: never;

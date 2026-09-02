@@ -28,6 +28,7 @@ Migrate the complete asynchronous conversion browser workflow to the Next.js fro
 * T61
 * T16
 * T57
+* T65
 
 ## Implementation boundary
 
@@ -45,6 +46,7 @@ Migrate the complete asynchronous conversion browser workflow to the Next.js fro
 ## Progress
 
 * 2026-09-01: Created with exact behavioral parity to the delivered asynchronous conversion workflow and no backend-domain rewrite.
+* 2026-09-02: Blocked on T65 so the Next.js workspace can consume authoritative conversion upload limits and resolved immutable-template selection metadata instead of duplicating backend policy.
 
 ## Synchronization
 

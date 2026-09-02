@@ -22,8 +22,12 @@ from starlette.concurrency import run_in_threadpool
 from markweave.auth.models import Role, User
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import error_responses
-from markweave.http.responses import conversion_response
-from markweave.http.schemas import ConversionPageResponse, ConversionResponse
+from markweave.http.responses import conversion_response, template_response
+from markweave.http.schemas import (
+    ConversionOptionsResponse,
+    ConversionPageResponse,
+    ConversionResponse,
+)
 from markweave.jobs.errors import JobRequestError
 from markweave.jobs.models import (
     JobOutput,
@@ -32,6 +36,7 @@ from markweave.jobs.models import (
     source_kind_for_filename,
 )
 from markweave.observability import CORRELATION_HEADER, CORRELATION_STATE_KEY
+from markweave.persistence.errors import PersistenceError
 from markweave.version import VERSION
 
 COMPONENT_VERSIONS = (
@@ -75,6 +80,32 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     router = APIRouter()
     settings = dependencies.settings
     components = dependencies.components
+
+    @router.get(
+        "/api/v1/conversion-options",
+        response_model=ConversionOptionsResponse,
+        tags=["conversions"],
+        responses=error_responses(401, 503),
+    )
+    def get_conversion_options(
+        response: Response,
+        actor: Annotated[User, Depends(dependencies.current_user)],
+    ) -> ConversionOptionsResponse:
+        response.headers["Cache-Control"] = "no-store"
+        template, source = dependencies.template_runtime().resolve_with_source(actor)
+        version_id = template.current_version_id if template is not None else None
+        if template is not None and version_id is None:
+            raise PersistenceError
+        return ConversionOptionsResponse(
+            conversion_upload_max_bytes=settings.conversion_upload_max_bytes,
+            resolved_template=(
+                template_response(template, dependencies.authentication)
+                if template is not None
+                else None
+            ),
+            template_version_id=version_id,
+            selection_source=source,
+        )
 
     @router.post(
         "/api/v1/conversions",
