@@ -26,7 +26,7 @@ test("session loading distinguishes anonymous, unavailable, and authenticated st
     .mockResolvedValueOnce(user());
   const controller = controllerWith(json);
   await controller.load();
-  expect(controller.snapshot()).toEqual({ phase: "anonymous" });
+  expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: false });
   await controller.load();
   expect(controller.snapshot()).toEqual({ phase: "unavailable" });
   expect(controller.unavailableMessage()).toBe(
@@ -62,6 +62,7 @@ test("login maps invalid credentials safely and accepts restricted sessions", as
   await controller.login("submitted-name", "submitted-password");
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
+    pending: false,
     notice: "Username or password is incorrect.",
   });
   await controller.login("Alice", "temporary");
@@ -79,6 +80,7 @@ test("login uses one fixed failure for non-credential errors", async () => {
   await controller.login("submitted-name", "submitted-password");
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
+    pending: false,
     notice: "Sign-in could not be completed. Try again.",
   });
 });
@@ -93,6 +95,7 @@ test("duplicate login and renewal submits are fenced", async () => {
   );
   const controller = controllerWith(json);
   const first = controller.login("Alice", "password");
+  expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: true });
   const duplicate = controller.login("Alice", "password");
   expect(json).toHaveBeenCalledOnce();
   resolveLogin({
@@ -115,8 +118,39 @@ test("duplicate login and renewal submits are fenced", async () => {
   await Promise.all([renewal, repeated]);
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
+    pending: false,
     notice: "Password changed. Sign in with your new password.",
   });
+});
+
+test("session navigation aborts and supersedes a pending login", async () => {
+  let resolveLogin!: (value: unknown) => void;
+  let loginSignal: AbortSignal | undefined;
+  const json = vi
+    .fn()
+    .mockImplementationOnce((_path, _schema, options) => {
+      loginSignal = options.signal;
+      return new Promise((resolve) => {
+        resolveLogin = resolve;
+      });
+    })
+    .mockResolvedValueOnce(user({ username: "Current" }))
+    .mockResolvedValueOnce(undefined);
+  const controller = controllerWith(json);
+  const login = controller.login("Alice", "password");
+
+  await controller.load();
+  expect(loginSignal?.aborted).toBe(true);
+  resolveLogin({ csrf_token: "stale", user: user({ username: "Stale" }) });
+  await login;
+  expect(controller.snapshot()).toMatchObject({
+    phase: "authenticated",
+    user: { username: "Current" },
+  });
+
+  await controller.logout();
+  expect(json).toHaveBeenCalledTimes(3);
+  expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: false });
 });
 
 test.each([
@@ -174,6 +208,7 @@ test("authoritative renewal and logout session failures converge on one expiry s
   await controller.logout();
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
+    pending: false,
     notice: "Your session ended. Please sign in again.",
   });
 });
@@ -219,6 +254,7 @@ test("successful logout revokes the visible session and expiry clears an active 
   controller.expire();
   expect(controller.snapshot()).toEqual({
     phase: "anonymous",
+    pending: false,
     notice: "Your session ended. Please sign in again.",
   });
   json
@@ -226,7 +262,7 @@ test("successful logout revokes the visible session and expiry clears an active 
     .mockResolvedValueOnce(undefined);
   await controller.login("Alice", "password");
   await controller.logout();
-  expect(controller.snapshot()).toEqual({ phase: "anonymous" });
+  expect(controller.snapshot()).toEqual({ phase: "anonymous", pending: false });
 });
 
 test("subscribers receive changes and disposal aborts active requests", async () => {

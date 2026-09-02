@@ -665,6 +665,7 @@ e2e_run_in_harness_directory \
   --network-alias application --publish 127.0.0.1::8080 \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2 \
+  --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
   "$image" "$application_mode" >/dev/null
 expiry_application_port="$(podman port "$expiry_application_name" 8080/tcp | sed 's/.*://')"
 expiry_base_url="http://127.0.0.1:$expiry_application_port"
@@ -673,6 +674,18 @@ wait_for_url "$expiry_base_url/health/ready" "$expiry_application_name" \
 uv run python -m tests.e2e.service_workflow verify-session-expiration \
   --base-url "$expiry_base_url" --profile "$profile" \
   --artifact-dir "$temporary_directory/browser-artifacts"
+podman exec --detach "$expiry_application_name" node /e2e/frontend-auth-router.mjs
+for _ in $(seq 1 120); do
+  if podman exec "$expiry_application_name" node -e \
+    'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))' \
+    >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+podman exec "$expiry_application_name" node -e \
+  'fetch("http://localhost:3100/api/v1/session").then(r => process.exit(r.status === 401 ? 0 : 1))'
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  "$expiry_application_name" node --test /e2e/browser-next-auth-expiry.test.mjs
 
 # Prove the final image's explicit insecure exception without a scanner. The
 # published port remains loopback-only even though login origins are ignored.

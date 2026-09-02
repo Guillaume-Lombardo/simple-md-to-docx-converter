@@ -50,6 +50,46 @@ test("login is accessible, non-reflective, and routes an authenticated user", as
   expect(document.body).not.toHaveTextContent("private-password");
 });
 
+test("login pending is announced, disabled, and duplicate clicks send one request", async () => {
+  let rejectLogin!: (reason: unknown) => void;
+  const json = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new ApiError(401, "AUTHENTICATION_REQUIRED", "ignored"),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectLogin = reject;
+        }),
+    );
+  setup(json, <LoginPage />);
+  await screen.findByRole("heading", { name: "Sign in" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Username" }), {
+    target: { value: "Alice" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "private-password" },
+  });
+  const submit = screen.getByRole("button", { name: "Sign in" });
+  fireEvent.click(submit);
+  fireEvent.click(submit);
+
+  const pending = await screen.findByRole("button", { name: "Signing in…" });
+  expect(pending).toBeDisabled();
+  expect(pending).toHaveAttribute("aria-live", "polite");
+  expect(
+    json.mock.calls.filter(([path]) => path === "/api/v1/login"),
+  ).toHaveLength(1);
+
+  rejectLogin(new ApiError(401, "INVALID_CREDENTIALS", "ignored"));
+  const retry = await screen.findByRole("button", { name: "Sign in" });
+  expect(retry).toBeEnabled();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Username or password is incorrect.",
+  );
+});
+
 test("renewal provides labelled fields, logout, duration, and fresh-login navigation", async () => {
   const restricted = {
     ...regular,

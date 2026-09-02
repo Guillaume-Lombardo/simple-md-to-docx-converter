@@ -48,7 +48,7 @@ export function LoginPage() {
     <main className="auth-card">
       <h1 className="text-3xl font-semibold">Sign in</h1>
       {state.notice && <Alert tone="danger">{state.notice}</Alert>}
-      <form className="space-y-5" onSubmit={submit}>
+      <form aria-busy={state.pending} className="space-y-5" onSubmit={submit}>
         <TextField
           autoComplete="username"
           label="Username"
@@ -63,8 +63,13 @@ export function LoginPage() {
           required
           type="password"
         />
-        <button className="primary-button" type="submit">
-          Sign in
+        <button
+          aria-live="polite"
+          className="primary-button"
+          disabled={state.pending}
+          type="submit"
+        >
+          {state.pending ? "Signing in…" : "Sign in"}
         </button>
       </form>
     </main>

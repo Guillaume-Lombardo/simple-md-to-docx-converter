@@ -9,7 +9,7 @@ import { ApiError, ApiTransport } from "../api/transport";
 
 export type AuthState =
   | { phase: "loading" }
-  | { phase: "anonymous"; notice?: string }
+  | { phase: "anonymous"; pending: boolean; notice?: string }
   | { phase: "unavailable" }
   | {
       phase: "authenticated" | "restricted";
@@ -48,6 +48,7 @@ export class AuthController {
   }
 
   async load(): Promise<void> {
+    this.operationPending = false;
     const { controller, generation } = this.start();
     this.publish({ phase: "loading" });
     try {
@@ -61,7 +62,7 @@ export class AuthController {
       if (!this.current(generation) || isAbort(error)) return;
       this.publish(
         error instanceof ApiError && error.status === 401
-          ? { phase: "anonymous" }
+          ? { phase: "anonymous", pending: false }
           : { phase: "unavailable" },
       );
     }
@@ -71,7 +72,7 @@ export class AuthController {
     if (this.pending()) return;
     this.operationPending = true;
     const { controller, generation } = this.start();
-    this.publishPending(true);
+    this.publish({ phase: "anonymous", pending: true });
     try {
       const result = await this.api.json(
         "/api/v1/login",
@@ -93,7 +94,7 @@ export class AuthController {
         error instanceof ApiError && error.code === "INVALID_CREDENTIALS"
           ? "Username or password is incorrect."
           : "Sign-in could not be completed. Try again.";
-      this.publish({ phase: "anonymous", notice: message });
+      this.publish({ phase: "anonymous", pending: false, notice: message });
     }
   }
 
@@ -111,7 +112,7 @@ export class AuthController {
       });
       if (this.current(generation)) {
         this.operationPending = false;
-        this.publish({ phase: "anonymous" });
+        this.publish({ phase: "anonymous", pending: false });
       }
     } catch (error) {
       if (!this.current(generation) || isAbort(error)) return;
@@ -120,7 +121,11 @@ export class AuthController {
         error instanceof ApiError &&
         (error.status === 401 || error.code === "CSRF_MISSING")
       ) {
-        this.publish({ phase: "anonymous", notice: SIGN_IN_AGAIN });
+        this.publish({
+          phase: "anonymous",
+          pending: false,
+          notice: SIGN_IN_AGAIN,
+        });
       } else {
         this.publish({
           ...previous,
@@ -152,6 +157,7 @@ export class AuthController {
         this.operationPending = false;
         this.publish({
           phase: "anonymous",
+          pending: false,
           notice: "Password changed. Sign in with your new password.",
         });
       }
@@ -162,7 +168,11 @@ export class AuthController {
         error instanceof ApiError &&
         (error.status === 401 || error.code === "CSRF_MISSING")
       ) {
-        this.publish({ phase: "anonymous", notice: SIGN_IN_AGAIN });
+        this.publish({
+          phase: "anonymous",
+          pending: false,
+          notice: SIGN_IN_AGAIN,
+        });
         return;
       }
       const errorMessage =
@@ -177,9 +187,13 @@ export class AuthController {
   }
 
   expire(): void {
-    if (this.state.phase === "anonymous") return;
+    if (this.state.phase === "anonymous" && !this.state.pending) return;
     this.dispose();
-    this.publish({ phase: "anonymous", notice: SIGN_IN_AGAIN });
+    this.publish({
+      phase: "anonymous",
+      pending: false,
+      notice: SIGN_IN_AGAIN,
+    });
   }
 
   unavailableMessage(): string {

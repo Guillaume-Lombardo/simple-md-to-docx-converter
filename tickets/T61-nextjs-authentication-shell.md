@@ -59,6 +59,12 @@ Migrate the login, logout, password-renewal, authenticated application shell, an
   also passed; the canonical all-domain pytest invocation requires separately configured
   PostgreSQL and RustFS test endpoints, which were unavailable outside the self-cleaning E2E
   harness.
+* 2026-09-02: Independent-review corrections made login progress visibly announced and disabled
+  duplicate submission while preserving controller fencing and deterministic abort/navigation
+  supersession. The isolated two-second absolute-lifetime phase now routes the final Next.js image
+  to the final FastAPI image and uses Chromium to prove one post-expiry authenticated request gets
+  an authoritative `401`, reaches the fixed sign-in-again state, and is not replayed. The corrected
+  final-image workflow passed for both standalone SQLite and distributed PostgreSQL.
 
 ## Synchronization
 
