@@ -702,7 +702,7 @@ test("guarded template deletion refreshes after 412 and requires an explicit ret
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
   expect(await screen.findByText(/changed on the server/)).toBeVisible();
-  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(deleteTemplate).toHaveBeenCalledOnce();
   expect(api.template).toHaveBeenCalledTimes(2);
 
