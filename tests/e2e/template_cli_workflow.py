@@ -118,6 +118,22 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
         if failure is not None:
             return failure
 
+    initial_context = _json_command(
+        plain_prefix,
+        ["templates", "context", "--profile", owner_profile],
+        "initial template context",
+    )
+    if isinstance(initial_context, int):
+        return initial_context
+    initial = initial_context.get("template_context")
+    if (
+        not isinstance(initial, dict)
+        or initial.get("preferred_template_id") is not None
+        or not isinstance(initial.get("system_fallback_template_id"), str)
+        or initial.get("template_max_archive_bytes") != 1_000_000
+    ):
+        return _failure("initial template context", "unexpected metadata")
+
     fonts = [item for font in _TEMPLATE_FONTS for item in ("--font", font)]
     created = _json_command(
         plain_prefix,
@@ -316,6 +332,7 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
         )
     ) is not None:
         return failure
+
     restored = _json_command(
         plain_prefix,
         [
@@ -381,6 +398,22 @@ def _template_workflow(  # noqa: PLR0911, PLR0912, PLR0915 - E2E matrix
         )
     ) is not None:
         return failure
+
+    selected_context = _json_command(
+        plain_prefix,
+        ["templates", "context", "--profile", owner_profile],
+        "selected template context",
+    )
+    if isinstance(selected_context, int):
+        return selected_context
+    selected = selected_context.get("template_context")
+    if (
+        not isinstance(selected, dict)
+        or selected.get("preferred_template_id") != template_id
+        or selected.get("system_fallback_template_id") != fallback_id
+        or selected.get("template_max_archive_bytes") != 1_000_000
+    ):
+        return _failure("selected template context", "unexpected metadata")
 
     archived = _json_command(
         plain_prefix,

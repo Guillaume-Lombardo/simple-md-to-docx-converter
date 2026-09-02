@@ -299,12 +299,14 @@ def exercise_idle_session_policy(
         raise WorkflowFailure("idle-session policy audit evidence is missing")
 
 
-def require_runtime_metadata(
+def require_runtime_metadata(  # noqa: PLR0913 - explicit expected metadata contract
     client: ServiceClient,
     *,
     source: str,
     template_id: str | None = None,
     version_id: str | None = None,
+    preferred_id: str | None = None,
+    fallback_id: str | None = None,
 ) -> None:
     """Require exact final-image limits and one consistent template selection."""
     options_result = client.request("GET", "/api/v1/conversion-options")
@@ -327,6 +329,8 @@ def require_runtime_metadata(
     if (
         context_result.headers.get("cache-control") != "no-store"
         or context.get("template_max_archive_bytes") != 1_000_000
+        or context.get("preferred_template_id") != preferred_id
+        or context.get("system_fallback_template_id") != fallback_id
     ):
         raise WorkflowFailure("template context: runtime metadata mismatch")
 
@@ -1201,6 +1205,7 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         source="system_fallback",
         template_id=template_id,
         version_id=version_id,
+        fallback_id=template_id,
     )
     preferred = alice.request(
         "PUT", f"/api/v1/templates/{template_id}/preferred", mutate=True
@@ -1211,6 +1216,8 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
         source="preferred",
         template_id=template_id,
         version_id=version_id,
+        preferred_id=template_id,
+        fallback_id=template_id,
     )
     context = decode_object(
         alice.request("GET", "/api/v1/template-context"), "selected template context"

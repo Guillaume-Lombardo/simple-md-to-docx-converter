@@ -49,6 +49,27 @@ def main() -> int:  # noqa: PLR0911, PLR0912 - bounded stage-specific E2E driver
     )
     if login != 0 or password in login_output:
         return _failure("login", login)
+    options_result = _json_result(_run([*prefix, "--json", "conversion-options"]))
+    options = (
+        options_result.get("conversion_options")
+        if isinstance(options_result, dict)
+        else None
+    )
+    selected = options.get("resolved_template") if isinstance(options, dict) else None
+    if (
+        not isinstance(options, dict)
+        or options.get("conversion_upload_max_bytes") != 1_000_000
+        or options.get("selection_source") != "system_fallback"
+        or not isinstance(selected, dict)
+        or selected.get("current_version_id") != options.get("template_version_id")
+    ):
+        return _failure("conversion options", 1)
+    try:
+        UUID(str(selected["id"]))
+        UUID(str(selected["owner_id"]))
+        UUID(str(options["template_version_id"]))
+    except KeyError, ValueError:
+        return _failure("conversion options identity", 1)
     key = f"t33-final-image-{arguments.profile}"
     submission = _run(
         [

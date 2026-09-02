@@ -63,3 +63,11 @@ def test_conversion_cli_e2e_runs_after_shared_cli_and_before_browser() -> None:
 
     assert shared_cli < conversions < browser
     assert runner.count("tests.e2e.conversion_cli_workflow") == 1
+
+
+def test_conversion_cli_e2e_reads_authoritative_options() -> None:
+    source = Path("tests/e2e/conversion_cli_workflow.py").read_text(encoding="utf-8")
+
+    assert '"--json", "conversion-options"' in source
+    assert 'options.get("conversion_upload_max_bytes") != 1_000_000' in source
+    assert 'options.get("selection_source") != "system_fallback"' in source

@@ -31,6 +31,7 @@ JOB_ID = "11111111-1111-4111-8111-111111111111"
 CORRELATION_ID = "22222222-2222-4222-8222-222222222222"
 TEMPLATE_ID = "33333333-3333-4333-8333-333333333333"
 VERSION_ID = "44444444-4444-4444-8444-444444444444"
+OWNER_ID = "55555555-5555-4555-8555-555555555555"
 
 
 @pytest.mark.parametrize("arguments", (("convert",), ("jobs", "wait")))
@@ -87,7 +88,7 @@ def test_conversion_parser_keeps_request_values_local_to_each_parse() -> None:
 def _job(state: str = "queued", *, progress: int = 0) -> dict[str, object]:
     return {
         "id": JOB_ID,
-        "owner_id": "55555555-5555-4555-8555-555555555555",
+        "owner_id": OWNER_ID,
         "template_mode": "pandoc-default",
         "template_id": None,
         "template_version_id": None,
@@ -107,6 +108,19 @@ def _job(state: str = "queued", *, progress: int = 0) -> dict[str, object]:
     }
 
 
+def _template_identity() -> dict[str, object]:
+    return {
+        "id": TEMPLATE_ID,
+        "owner_id": OWNER_ID,
+        "name": "Finance",
+        "description": "Quarterly styles",
+        "status": "active",
+        "revision": 2,
+        "current_version_id": VERSION_ID,
+        "owner_username": "alice",
+    }
+
+
 def _response(
     status: int = 200,
     payload: dict[str, object] | None = None,
@@ -119,7 +133,7 @@ def test_conversion_options_reads_and_validates_authoritative_metadata(
     mocker, capsys
 ) -> None:
     client = mocker.Mock()
-    identity = {"current_version_id": VERSION_ID}
+    identity = _template_identity()
     client.options.return_value = _response(
         payload={
             "conversion_upload_max_bytes": 321_123,
@@ -136,6 +150,32 @@ def test_conversion_options_reads_and_validates_authoritative_metadata(
     assert payload["resolved_template"] == identity
     assert payload["selection_source"] == "preferred"
     client.options.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "identity",
+    (
+        {"current_version_id": VERSION_ID},
+        {**_template_identity(), "id": "not-a-uuid"},
+        {**_template_identity(), "id": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"},
+        {**_template_identity(), "owner_id": None},
+        {**_template_identity(), "revision": True},
+        {**_template_identity(), "status": "draft"},
+        {**_template_identity(), "owner_username": None},
+    ),
+)
+def test_conversion_options_rejects_incomplete_or_invalid_template_identity(
+    identity: dict[str, object],
+) -> None:
+    with pytest.raises(CliError, match="invalid response"):
+        conversions._validated_conversion_options(
+            {
+                "conversion_upload_max_bytes": 1,
+                "resolved_template": identity,
+                "template_version_id": VERSION_ID,
+                "selection_source": "preferred",
+            }
+        )
 
 
 def test_convert_submits_canonical_source_and_reports_polling_without_filename(

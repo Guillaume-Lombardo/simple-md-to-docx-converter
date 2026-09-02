@@ -506,11 +506,9 @@ def _validated_conversion_options(value: Any) -> dict[str, Any]:
     else:
         if not isinstance(template, dict) or not isinstance(version_id, str):
             raise _invalid_response()
-        try:
-            canonical_version = str(UUID(version_id))
-            current_version = str(UUID(template.get("current_version_id")))
-        except (TypeError, ValueError) as error:
-            raise _invalid_response() from error
+        canonical_version = _canonical_response_uuid(version_id)
+        template = _validated_template_identity(template)
+        current_version = template["current_version_id"]
         if canonical_version != current_version:
             raise _invalid_response()
         version_id = canonical_version
@@ -520,6 +518,38 @@ def _validated_conversion_options(value: Any) -> dict[str, Any]:
         "template_version_id": version_id,
         "selection_source": source,
     }
+
+
+def _validated_template_identity(value: dict[str, Any]) -> dict[str, Any]:
+    identity = dict(value)
+    for key in ("id", "owner_id", "current_version_id"):
+        identity[key] = _canonical_response_uuid(value.get(key))
+    revision = value.get("revision")
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision <= 0
+        or value.get("status") not in {"active", "archived"}
+        or any(
+            not isinstance(value.get(key), str)
+            for key in ("name", "description", "owner_username")
+        )
+    ):
+        raise _invalid_response()
+    identity["revision"] = revision
+    return identity
+
+
+def _canonical_response_uuid(value: Any) -> str:
+    if not isinstance(value, str):
+        raise _invalid_response()
+    try:
+        canonical = str(UUID(value))
+    except ValueError as error:
+        raise _invalid_response() from error
+    if canonical != value:
+        raise _invalid_response()
+    return canonical
 
 
 def _job_summary(job: dict[str, Any]) -> str:

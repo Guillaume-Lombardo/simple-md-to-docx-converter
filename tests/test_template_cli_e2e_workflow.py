@@ -57,6 +57,15 @@ def test_template_cli_e2e_declares_the_complete_activation_font_set() -> None:
     )
 
 
+def test_template_cli_e2e_reads_default_and_selected_context() -> None:
+    source = Path("tests/e2e/template_cli_workflow.py").read_text(encoding="utf-8")
+
+    assert source.count('["templates", "context", "--profile", owner_profile]') == 2
+    assert 'initial.get("preferred_template_id") is not None' in source
+    assert 'selected.get("preferred_template_id") != template_id' in source
+    assert 'selected.get("system_fallback_template_id") != fallback_id' in source
+
+
 def test_template_cli_e2e_sends_login_secret_only_through_pty(mocker) -> None:
     driver = _driver_module()
     sentinel = "sentinel-login-secret"

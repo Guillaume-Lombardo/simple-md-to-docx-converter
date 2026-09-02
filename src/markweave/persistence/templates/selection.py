@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -160,37 +160,40 @@ class SqlTemplateSelectionRepository(_SqlTemplateStore):
     ) -> tuple[TemplateIdentity | None, TemplateSelectionSource]:
         try:
             with DatabaseSession(self._engine) as database:
-                preferred = database.scalar(
-                    select(TemplateRow)
-                    .join(
-                        TemplatePreferenceRow,
-                        TemplatePreferenceRow.template_id == TemplateRow.id,
-                    )
+                preferred_id = (
+                    select(TemplatePreferenceRow.template_id)
+                    .where(TemplatePreferenceRow.user_id == str(user_id))
+                    .scalar_subquery()
+                )
+                fallback_id = (
+                    select(SystemTemplateSelectionRow.fallback_template_id)
                     .where(
-                        TemplatePreferenceRow.user_id == str(user_id),
+                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID
+                    )
+                    .scalar_subquery()
+                )
+                source = case(
+                    (
+                        TemplateRow.id == preferred_id,
+                        TemplateSelectionSource.PREFERRED.value,
+                    ),
+                    else_=TemplateSelectionSource.SYSTEM_FALLBACK.value,
+                ).label("selection_source")
+                priority = case((TemplateRow.id == preferred_id, 0), else_=1)
+                selected = database.execute(
+                    select(TemplateRow, source)
+                    .where(
+                        TemplateRow.id.in_((preferred_id, fallback_id)),
                         TemplateRow.status == TemplateStatus.ACTIVE.value,
                         TemplateRow.publication_state == "published",
                     )
-                )
-                if preferred is not None:
-                    return _template(preferred), TemplateSelectionSource.PREFERRED
-                fallback = database.scalar(
-                    select(TemplateRow)
-                    .join(
-                        SystemTemplateSelectionRow,
-                        SystemTemplateSelectionRow.fallback_template_id
-                        == TemplateRow.id,
-                    )
-                    .where(
-                        SystemTemplateSelectionRow.id == SYSTEM_TEMPLATE_SELECTION_ID,
-                        TemplateRow.status == TemplateStatus.ACTIVE.value,
-                        TemplateRow.publication_state == "published",
-                    )
-                )
-                if fallback is not None:
-                    return (
-                        _template(fallback),
-                        TemplateSelectionSource.SYSTEM_FALLBACK,
+                    .order_by(priority)
+                    .limit(1)
+                ).first()
+                if selected is not None:
+                    template, selection_source = selected
+                    return _template(template), TemplateSelectionSource(
+                        selection_source
                     )
                 return None, TemplateSelectionSource.PANDOC_DEFAULT
         except SQLAlchemyError:

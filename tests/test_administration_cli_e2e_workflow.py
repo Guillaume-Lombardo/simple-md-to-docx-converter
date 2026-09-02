@@ -66,8 +66,21 @@ def test_administration_e2e_exercises_authz_revocation_and_pagination(mocker) ->
     user_id = "00000000-0000-0000-0000-000000000002"
     listing = json.dumps({"users": [{"id": user_id, "username": driver._USER_NAME}]})
     audit = json.dumps({"items": [{}, {}], "offset": 1, "limit": 2})
+    policy = {
+        "user_idle_minutes": 25,
+        "admin_idle_minutes": 10,
+        "absolute_lifetime_seconds": 28_800,
+        "revision": 2,
+    }
 
     def plain(_prefix, command, **_kwargs):
+        if tuple(command[:3]) == ("--json", "session-policy", "get"):
+            return _completed(json.dumps({"session_policy": policy}))
+        if tuple(command[:2]) == ("session-policy", "get"):
+            return _completed(
+                "Users: 25 minutes; administrators: 10 minutes; absolute lifetime: "
+                "28800 seconds; revision: 2.\n"
+            )
         if tuple(command[:3]) == ("--json", "users", "list"):
             return _completed(listing)
         if tuple(command[:3]) == ("--json", "audit", "--offset"):
@@ -84,6 +97,10 @@ def test_administration_e2e_exercises_authz_revocation_and_pagination(mocker) ->
     assert ("users", "list", "--profile", driver._USER_PROFILE) in commands
     assert commands.count(("whoami", "--profile", driver._USER_PROFILE)) == 3
     assert any(command[:3] == ("--json", "audit", "--offset") for command in commands)
+    assert any(
+        command[:3] == ("--json", "session-policy", "get") for command in commands
+    )
+    assert any(command[:2] == ("session-policy", "get") for command in commands)
     assert any(command[1:2] == ("deactivate",) for command in commands)
     assert any(command[1:2] == ("activate",) for command in commands)
     assert login.call_count == 4
