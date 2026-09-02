@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,70 @@ import pytest
 
 HARNESS = Path("scripts/e2e/harness.sh").resolve()
 RUNNER = Path("scripts/e2e/run.sh").resolve()
+ADMIN_BROWSER = Path("tests/e2e/browser-next-admin.test.mjs").resolve()
+
+
+def _javascript_method_calls(source: str, method: str) -> list[str]:
+    marker = f".{method}("
+    calls: list[str] = []
+    cursor = 0
+    while (start := source.find(marker, cursor)) != -1:
+        index = start + len(marker)
+        depth = 1
+        quote = ""
+        escaped = False
+        while index < len(source) and depth:
+            character = source[index]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = ""
+            elif character in {'"', "'", "`"}:
+                quote = character
+            elif character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            index += 1
+        assert depth == 0, f"unterminated {method} call"
+        calls.append(source[start:index])
+        cursor = index
+    return calls
+
+
+def _inexact_accessible_name_calls(source: str) -> list[str]:
+    role_calls = [
+        call
+        for call in _javascript_method_calls(source, "getByRole")
+        if "name:" in call
+        and re.search(r"name:\s*/", call) is None
+        and "exact: true" not in call
+    ]
+    label_calls = [
+        call
+        for call in _javascript_method_calls(source, "getByLabel")
+        if re.search(r"\.getByLabel\(\s*/", call) is None and "exact: true" not in call
+    ]
+    return role_calls + label_calls
+
+
+@pytest.mark.unit
+def test_admin_browser_literal_accessible_names_require_exact_matching() -> None:
+    source = ADMIN_BROWSER.read_text(encoding="utf-8")
+
+    assert _javascript_method_calls(source, "getByRole")
+    assert _javascript_method_calls(source, "getByLabel")
+    assert _inexact_accessible_name_calls(source) == []
+    assert _inexact_accessible_name_calls(
+        'page.getByRole("textbox", { name: "Username" });\n'
+        'page.getByLabel("Temporary password");'
+    ) == [
+        '.getByRole("textbox", { name: "Username" })',
+        '.getByLabel("Temporary password")',
+    ]
 
 
 @pytest.mark.unit

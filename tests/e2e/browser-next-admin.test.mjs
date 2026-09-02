@@ -25,10 +25,10 @@ async function login(context, page, username, password) {
   await page
     .getByRole("textbox", { name: "Username", exact: true })
     .fill(username);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await Promise.all([
     page.waitForURL("**/convert"),
-    page.getByRole("button", { name: "Sign in" }).click(),
+    page.getByRole("button", { name: "Sign in", exact: true }).click(),
   ]);
 }
 
@@ -62,14 +62,14 @@ async function api(page, method, path, body, headers = {}) {
 
 function templateCard(page, name) {
   return page
-    .getByRole("list", { name: "Visible templates" })
+    .getByRole("list", { name: "Visible templates", exact: true })
     .locator("li")
     .filter({ has: page.getByRole("heading", { name, exact: true }) });
 }
 
 function userCard(page, username) {
   return page
-    .getByRole("list", { name: "Local accounts" })
+    .getByRole("list", { name: "Local accounts", exact: true })
     .locator("li")
     .filter({
       has: page.getByRole("heading", { name: username, exact: true }),
@@ -100,9 +100,11 @@ function alternateDuration(policy, role, excluded = []) {
 
 async function manage(page, name) {
   await templateCard(page, name)
-    .getByRole("button", { name: "Manage" })
+    .getByRole("button", { name: "Manage", exact: true })
     .click();
-  await page.getByRole("heading", { name: `Manage ${name}` }).waitFor();
+  await page
+    .getByRole("heading", { name: `Manage ${name}`, exact: true })
+    .waitFor();
 }
 
 async function replace(page, name, fonts) {
@@ -110,7 +112,9 @@ async function replace(page, name, fonts) {
   await page
     .getByRole("textbox", { name: /Replacement expected fonts/ })
     .fill(fonts);
-  await page.getByLabel("Replacement DOCX").setInputFiles(templateFixture);
+  await page
+    .getByLabel("Replacement DOCX", { exact: true })
+    .setInputFiles(templateFixture);
   const responsePromise = page.waitForResponse(
     (response) =>
       response.url().includes("/api/v1/templates/") &&
@@ -118,7 +122,9 @@ async function replace(page, name, fonts) {
       response.request().method() === "PUT",
     { timeout: 120_000 },
   );
-  await page.getByRole("button", { name: "Replace content" }).click();
+  await page
+    .getByRole("button", { name: "Replace content", exact: true })
+    .click();
   assert.equal((await responsePromise).status(), 201);
   await page.getByText("Template content replaced.").waitFor();
 }
@@ -194,14 +200,19 @@ test(
       assert.equal(originalPolicy.body.admin_idle_minutes, checkpointAdmin);
       assert.equal(originalPolicy.body.revision, checkpointRevision);
 
-      await adminPage.getByRole("link", { name: "Session policy" }).click();
+      await adminPage
+        .getByRole("link", { name: "Session policy", exact: true })
+        .click();
       await adminPage.waitForURL("**/session-policy");
       await adminPage
         .getByRole("heading", { name: "Session policy", exact: true })
         .waitFor();
       assert.equal(
         await adminPage
-          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .getByRole("textbox", {
+            name: "User inactivity duration (minutes)",
+            exact: true,
+          })
           .inputValue(),
         String(checkpointUser),
       );
@@ -209,6 +220,7 @@ test(
         await adminPage
           .getByRole("textbox", {
             name: "Administrator inactivity duration (minutes)",
+            exact: true,
           })
           .inputValue(),
         String(checkpointAdmin),
@@ -255,11 +267,15 @@ test(
         externalAdmin,
       ]);
       await adminPage
-        .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+        .getByRole("textbox", {
+          name: "User inactivity duration (minutes)",
+          exact: true,
+        })
         .fill(String(desiredUser));
       await adminPage
         .getByRole("textbox", {
           name: "Administrator inactivity duration (minutes)",
+          exact: true,
         })
         .fill(String(desiredAdmin));
       const stalePolicy = adminPage.waitForResponse(
@@ -269,22 +285,29 @@ test(
           response.status() === 412,
       );
       await adminPage
-        .getByRole("button", { name: "Save session policy" })
+        .getByRole("button", { name: "Save session policy", exact: true })
         .click();
       await stalePolicy;
       await adminPage.getByText(/changed on the server/).waitFor();
       assert.equal(
         await adminPage
-          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .getByRole("textbox", {
+            name: "User inactivity duration (minutes)",
+            exact: true,
+          })
           .inputValue(),
         String(externalUser),
       );
       await adminPage
-        .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+        .getByRole("textbox", {
+          name: "User inactivity duration (minutes)",
+          exact: true,
+        })
         .fill(String(desiredUser));
       await adminPage
         .getByRole("textbox", {
           name: "Administrator inactivity duration (minutes)",
+          exact: true,
         })
         .fill(String(desiredAdmin));
       const savedPolicy = adminPage.waitForResponse(
@@ -300,7 +323,7 @@ test(
           response.status() === 200,
       );
       await adminPage
-        .getByRole("button", { name: "Save session policy" })
+        .getByRole("button", { name: "Save session policy", exact: true })
         .click();
       const savedPolicyResponse = await savedPolicy;
       assert.deepEqual(await savedPolicyResponse.request().postDataJSON(), {
@@ -313,7 +336,10 @@ test(
       await adminPage.getByText("Session policy updated.").waitFor();
       assert.equal(
         await adminPage
-          .getByRole("textbox", { name: "User inactivity duration (minutes)" })
+          .getByRole("textbox", {
+            name: "User inactivity duration (minutes)",
+            exact: true,
+          })
           .inputValue(),
         String(desiredUser),
       );
@@ -343,16 +369,18 @@ test(
       assert.equal(restoredPolicy.status, 200);
       adminPage.off("request", countPolicyPuts);
 
-      await adminPage.getByRole("link", { name: "Users" }).click();
+      await adminPage.getByRole("link", { name: "Users", exact: true }).click();
       await adminPage.waitForURL("**/users");
       await adminPage
-        .getByRole("heading", { name: "Local accounts" })
+        .getByRole("heading", { name: "Local accounts", exact: true })
         .waitFor();
 
       await adminPage
         .getByRole("textbox", { name: "Username", exact: true })
         .fill(alice.username);
-      await adminPage.getByLabel("Temporary password").fill(alice.password);
+      await adminPage
+        .getByLabel("Temporary password", { exact: true })
+        .fill(alice.password);
       const aliceResponse = adminPage.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/admin/users") &&
@@ -368,7 +396,7 @@ test(
       };
       adminPage.on("request", countCreation);
       await adminPage
-        .getByRole("button", { name: "Create account" })
+        .getByRole("button", { name: "Create account", exact: true })
         .evaluate((button) => {
           const form = button.closest("form");
           form.dispatchEvent(
@@ -390,7 +418,9 @@ test(
       await adminPage
         .getByRole("textbox", { name: "Username", exact: true })
         .fill(bob.username);
-      await adminPage.getByLabel("Temporary password").fill(bob.password);
+      await adminPage
+        .getByLabel("Temporary password", { exact: true })
+        .fill(bob.password);
       await Promise.all([
         adminPage.waitForResponse(
           (response) =>
@@ -398,7 +428,9 @@ test(
             response.request().method() === "POST" &&
             response.status() === 201,
         ),
-        adminPage.getByRole("button", { name: "Create account" }).click(),
+        adminPage
+          .getByRole("button", { name: "Create account", exact: true })
+          .click(),
       ]);
       await adminPage.getByText("Account created.").waitFor();
 
@@ -412,7 +444,7 @@ test(
       };
       adminPage.on("request", countUserLists);
       await adminPage
-        .getByRole("textbox", { name: "Search by username" })
+        .getByRole("textbox", { name: "Search by username", exact: true })
         .fill(alice.username);
       await userCard(adminPage, alice.username).waitFor();
       assert.equal(await userCard(adminPage, bob.username).count(), 0);
@@ -457,23 +489,31 @@ test(
         403,
       );
       alicePage.off("request", countForbiddenPolicyGets);
-      await alicePage.getByRole("link", { name: "Templates" }).click();
-      await alicePage.waitForURL("**/templates");
-      await alicePage.getByRole("textbox", { name: "Name" }).fill(templateName);
       await alicePage
-        .getByRole("textbox", { name: "Description" })
+        .getByRole("link", { name: "Templates", exact: true })
+        .click();
+      await alicePage.waitForURL("**/templates");
+      await alicePage
+        .getByRole("textbox", { name: "Name", exact: true })
+        .fill(templateName);
+      await alicePage
+        .getByRole("textbox", { name: "Description", exact: true })
         .fill("Owner body");
       await alicePage
         .getByRole("textbox", { name: /Expected fonts/ })
         .fill(` ${expectedFonts.join(", ")} `);
-      await alicePage.getByLabel("DOCX file").setInputFiles(templateFixture);
+      await alicePage
+        .getByLabel("DOCX file", { exact: true })
+        .setInputFiles(templateFixture);
       const createdResponse = alicePage.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/templates") &&
           response.request().method() === "POST",
         { timeout: 120_000 },
       );
-      await alicePage.getByRole("button", { name: "Create template" }).click();
+      await alicePage
+        .getByRole("button", { name: "Create template", exact: true })
+        .click();
       const created = await createdResponse;
       assert.equal(created.status(), 201);
       const template = await created.json();
@@ -502,11 +542,14 @@ test(
         alicePage,
         templateCard(alicePage, templateName).getByRole("button", {
           name: "Download current DOCX",
+          exact: true,
         }),
         new RegExp(`^template-${template.id}-v1\\.docx$`),
       );
 
-      await bobPage.getByRole("link", { name: "Templates" }).click();
+      await bobPage
+        .getByRole("link", { name: "Templates", exact: true })
+        .click();
       await bobPage.waitForURL("**/templates");
       const bobView = templateCard(bobPage, templateName);
       await bobView.waitFor();
@@ -514,7 +557,9 @@ test(
         .getByText(`Owner: ${alice.username}`, { exact: false })
         .waitFor();
       assert.equal(
-        await bobView.getByRole("button", { name: "Manage" }).count(),
+        await bobView
+          .getByRole("button", { name: "Manage", exact: true })
+          .count(),
         0,
       );
       assert.equal(
@@ -549,7 +594,7 @@ test(
         200,
       );
       await alicePage
-        .getByRole("textbox", { name: "Template name" })
+        .getByRole("textbox", { name: "Template name", exact: true })
         .fill(renamedTemplate);
       let metadataPatches = 0;
       const countMetadataPatches = (request) => {
@@ -566,19 +611,23 @@ test(
           response.request().method() === "PATCH" &&
           response.status() === 412,
       );
-      await alicePage.getByRole("button", { name: "Save details" }).click();
+      await alicePage
+        .getByRole("button", { name: "Save details", exact: true })
+        .click();
       await staleResponse;
       await alicePage.getByText(/changed on the server/).waitFor();
-      await alicePage.getByRole("textbox", { name: "Template name" }).waitFor();
+      await alicePage
+        .getByRole("textbox", { name: "Template name", exact: true })
+        .waitFor();
       assert.equal(
         await alicePage
-          .getByRole("textbox", { name: "Template name" })
+          .getByRole("textbox", { name: "Template name", exact: true })
           .inputValue(),
         templateName,
       );
       assert.equal(
         await alicePage
-          .getByRole("textbox", { name: "Template description" })
+          .getByRole("textbox", { name: "Template description", exact: true })
           .inputValue(),
         "Concurrent body",
       );
@@ -588,9 +637,11 @@ test(
         "stale metadata was automatically replayed",
       );
       await alicePage
-        .getByRole("textbox", { name: "Template name" })
+        .getByRole("textbox", { name: "Template name", exact: true })
         .fill(renamedTemplate);
-      await alicePage.getByRole("button", { name: "Save details" }).click();
+      await alicePage
+        .getByRole("button", { name: "Save details", exact: true })
+        .click();
       await alicePage.getByText("Template details updated.").waitFor();
       assert.equal(metadataPatches, 2);
       alicePage.off("request", countMetadataPatches);
@@ -616,6 +667,7 @@ test(
         alicePage,
         alicePage.getByRole("button", {
           name: `Download version ${oldest.number}`,
+          exact: true,
         }),
         new RegExp(`^template-${template.id}-v${oldest.number}\\.docx$`),
       );
@@ -626,7 +678,10 @@ test(
         { timeout: 120_000 },
       );
       await alicePage
-        .getByRole("button", { name: `Restore version ${oldest.number}` })
+        .getByRole("button", {
+          name: `Restore version ${oldest.number}`,
+          exact: true,
+        })
         .click();
       assert.equal((await restoreResponse).status(), 201);
       await alicePage
@@ -637,7 +692,7 @@ test(
         .click();
       await alicePage.getByText("Preferred template updated.").waitFor();
       await alicePage
-        .getByRole("button", { name: "Clear preferred template" })
+        .getByRole("button", { name: "Clear preferred template", exact: true })
         .click();
       await alicePage.getByText("Preferred template cleared.").waitFor();
 
@@ -655,35 +710,46 @@ test(
       const candidate = templateCard(adminPage, renamedTemplate);
       await candidate.waitFor();
       await candidate
-        .getByRole("button", { name: "Set system fallback" })
+        .getByRole("button", { name: "Set system fallback", exact: true })
         .click();
       await adminPage.getByText("System fallback updated.").waitFor();
       await manage(adminPage, renamedTemplate);
-      await adminPage.getByRole("button", { name: "Archive template" }).click();
+      await adminPage
+        .getByRole("button", { name: "Archive template", exact: true })
+        .click();
       let confirmation = adminPage.getByRole("dialog", {
         name: "Archive template?",
+        exact: true,
       });
       const archiveResponse = adminPage.waitForResponse(
         (response) =>
           response.url().endsWith(`/api/v1/templates/${template.id}/archive`) &&
           response.request().method() === "POST",
       );
-      await confirmation.getByRole("button", { name: "Confirm" }).click();
+      await confirmation
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
       assert.equal((await archiveResponse).status(), 200);
       await adminPage.getByText("Template archived.").waitFor();
       await manage(adminPage, renamedTemplate);
       await adminPage
-        .getByRole("button", { name: "Delete template permanently" })
+        .getByRole("button", {
+          name: "Delete template permanently",
+          exact: true,
+        })
         .click();
       confirmation = adminPage.getByRole("dialog", {
         name: "Delete template permanently?",
+        exact: true,
       });
       const guardedDelete = adminPage.waitForResponse(
         (response) =>
           response.url().endsWith(`/api/v1/templates/${template.id}`) &&
           response.request().method() === "DELETE",
       );
-      await confirmation.getByRole("button", { name: "Confirm" }).click();
+      await confirmation
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
       assert.equal((await guardedDelete).status(), 409);
       await adminPage
         .getByText("The requested value already exists.")
@@ -703,25 +769,33 @@ test(
           response.url().endsWith(`/api/v1/templates/${template.id}`) &&
           response.request().method() === "DELETE",
       );
-      await confirmation.getByRole("button", { name: "Confirm" }).click();
+      await confirmation
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
       assert.equal((await deleteResponse).status(), 204);
       await adminPage.getByText("Template deleted.").waitFor();
 
       await adminPage.goto(`${baseURL}/users`, { waitUntil: "networkidle" });
       await adminPage
-        .getByRole("textbox", { name: "Search by username" })
+        .getByRole("textbox", { name: "Search by username", exact: true })
         .fill(alice.username);
       await userCard(adminPage, alice.username)
-        .getByRole("button", { name: `Reset password for ${alice.username}` })
+        .getByRole("button", {
+          name: `Reset password for ${alice.username}`,
+          exact: true,
+        })
         .click();
       const resetDialog = adminPage.getByRole("dialog", {
         name: `Reset password for ${alice.username}`,
+        exact: true,
       });
       await resetDialog
-        .getByLabel("New temporary password")
+        .getByLabel("New temporary password", { exact: true })
         .fill(`${alice.password}-reset`);
       await resetDialog.getByRole("checkbox").check();
-      await resetDialog.getByRole("button", { name: "Reset password" }).click();
+      await resetDialog
+        .getByRole("button", { name: "Reset password", exact: true })
+        .click();
       await adminPage
         .getByText("Password reset and sessions revoked.")
         .waitFor();
@@ -740,7 +814,7 @@ test(
           response.status() === 401,
       );
       await templateCard(alicePage, renamedTemplate)
-        .getByRole("button", { name: "Download current DOCX" })
+        .getByRole("button", { name: "Download current DOCX", exact: true })
         .click();
       await expiredDownload;
       await alicePage.waitForURL("**/login");
@@ -751,10 +825,13 @@ test(
       alicePage.off("request", countExpiredDownloads);
 
       await adminPage
-        .getByRole("textbox", { name: "Search by username" })
+        .getByRole("textbox", { name: "Search by username", exact: true })
         .fill(bob.username);
       await userCard(adminPage, bob.username)
-        .getByRole("button", { name: `Deactivate ${bob.username}` })
+        .getByRole("button", {
+          name: `Deactivate ${bob.username}`,
+          exact: true,
+        })
         .click();
       await adminPage
         .getByText("Account deactivated and sessions revoked.")
