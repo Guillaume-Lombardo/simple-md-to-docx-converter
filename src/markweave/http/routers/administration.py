@@ -5,7 +5,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response, status
 
-from markweave.auth.models import User
+from markweave.auth.models import (
+    DEFAULT_ADMIN_IDLE_MINUTES,
+    DEFAULT_USER_IDLE_MINUTES,
+    IDLE_SESSION_POLICY_GRANULARITY_MINUTES,
+    MAXIMUM_ADMIN_IDLE_MINUTES,
+    MAXIMUM_USER_IDLE_MINUTES,
+    MINIMUM_ADMIN_IDLE_MINUTES,
+    MINIMUM_USER_IDLE_MINUTES,
+    User,
+)
 from markweave.auth.policy_errors import IdleSessionPolicyConflictError
 from markweave.auth.service import AuthorizationService
 from markweave.http.dependencies import HttpDependencies
@@ -16,6 +25,7 @@ from markweave.http.responses import (
 )
 from markweave.http.schemas import (
     ActiveUpdateRequest,
+    IdleSessionPolicyDurationBoundsResponse,
     IdleSessionPolicyResponse,
     IdleSessionPolicyUpdateRequest,
     PasswordChangeRequirementRequest,
@@ -37,6 +47,17 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
             admin_idle_minutes=policy.admin_idle_minutes,
             revision=policy.revision,
             absolute_lifetime_seconds=dependencies.settings.session_absolute_seconds,
+            user_idle_minutes_bounds=IdleSessionPolicyDurationBoundsResponse(
+                minimum_minutes=MINIMUM_USER_IDLE_MINUTES,
+                default_minutes=DEFAULT_USER_IDLE_MINUTES,
+                maximum_minutes=MAXIMUM_USER_IDLE_MINUTES,
+            ),
+            admin_idle_minutes_bounds=IdleSessionPolicyDurationBoundsResponse(
+                minimum_minutes=MINIMUM_ADMIN_IDLE_MINUTES,
+                default_minutes=DEFAULT_ADMIN_IDLE_MINUTES,
+                maximum_minutes=MAXIMUM_ADMIN_IDLE_MINUTES,
+            ),
+            idle_minutes_granularity=IDLE_SESSION_POLICY_GRANULARITY_MINUTES,
         )
 
     def admin_actor(

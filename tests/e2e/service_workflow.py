@@ -255,6 +255,22 @@ def exercise_idle_session_policy(
         raise WorkflowFailure("read idle-session policy: defaults mismatch")
     if current.get("absolute_lifetime_seconds") != 28_800:
         raise WorkflowFailure("read idle-session policy: absolute ceiling mismatch")
+    if (
+        current.get("user_idle_minutes_bounds")
+        != {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        }
+        or current.get("admin_idle_minutes_bounds")
+        != {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        }
+        or current.get("idle_minutes_granularity") != 1
+    ):
+        raise WorkflowFailure("read idle-session policy: authoritative bounds mismatch")
 
     def race(payload: dict[str, int]) -> HttpResult:
         return admin.request(
@@ -1603,6 +1619,17 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
         "admin_idle_minutes": int(state["policy_admin_idle_minutes"]),
         "revision": int(state["policy_revision"]),
         "absolute_lifetime_seconds": 28_800,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
     }
     if policy != expected_policy:
         raise WorkflowFailure("checkpoint idle-session policy was not preserved")

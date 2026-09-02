@@ -384,12 +384,34 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
         "admin_idle_minutes": 15,
         "revision": 0,
         "absolute_lifetime_seconds": 28_800,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
     }
     updated = {
         "user_idle_minutes": 25,
         "admin_idle_minutes": 10,
         "revision": 1,
         "absolute_lifetime_seconds": 28_800,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
     }
     client.request.side_effect = (
         _response(200, initial, etag='"idle-session-policy-0"'),
@@ -416,7 +438,8 @@ def test_session_policy_get_update_preserves_etag_csrf_and_audit_fields(
     )
     assert capsys.readouterr().out == (
         "Users: 25 minutes; administrators: 10 minutes; absolute lifetime: "
-        "28800 seconds; revision: 1.\n"
+        "28800 seconds; revision: 1; user bounds: 5-300 minutes (default 30); "
+        "administrator bounds: 5-60 minutes (default 15); granularity: 1 minute.\n"
     )
     update = client.request.call_args_list[-1]
     assert update.args == ("PUT", "/api/v1/admin/session-policy")
@@ -487,6 +510,55 @@ def test_session_policy_rejects_malformed_service_responses(
 @pytest.mark.parametrize(
     ("field", "value"),
     (
+        ("user_idle_minutes_bounds", []),
+        (
+            "admin_idle_minutes_bounds",
+            {"minimum_minutes": True, "default_minutes": 15, "maximum_minutes": 60},
+        ),
+        (
+            "user_idle_minutes_bounds",
+            {"minimum_minutes": 5, "default_minutes": 4, "maximum_minutes": 300},
+        ),
+        ("user_idle_minutes", 4),
+        ("user_idle_minutes", 301),
+        ("admin_idle_minutes", 4),
+        ("admin_idle_minutes", 61),
+        ("idle_minutes_granularity", 0),
+    ),
+)
+def test_session_policy_rejects_invalid_authoritative_metadata(
+    remote, capsys, field: str, value: object
+) -> None:
+    _store, _constructor, client = remote
+    payload = {
+        "user_idle_minutes": 30,
+        "admin_idle_minutes": 15,
+        "revision": 0,
+        "absolute_lifetime_seconds": 28_800,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
+    }
+    payload[field] = value
+    client.request.return_value = _response(
+        200, payload, etag='"idle-session-policy-0"'
+    )
+
+    assert main(("session-policy", "get")) == 1
+    assert "invalid response" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
         ("operation", None),
         ("administrator_intervention", "yes"),
         ("target_version", 1),
@@ -531,6 +603,17 @@ def test_policy_update_rejects_a_missing_etag_without_mutation(remote, capsys) -
             "admin_idle_minutes": 15,
             "revision": 0,
             "absolute_lifetime_seconds": 28_800,
+            "user_idle_minutes_bounds": {
+                "minimum_minutes": 5,
+                "default_minutes": 30,
+                "maximum_minutes": 300,
+            },
+            "admin_idle_minutes_bounds": {
+                "minimum_minutes": 5,
+                "default_minutes": 15,
+                "maximum_minutes": 60,
+            },
+            "idle_minutes_granularity": 1,
         },
     )
 

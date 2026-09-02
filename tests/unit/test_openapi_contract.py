@@ -87,6 +87,26 @@ def test_artifact_covers_cross_cutting_http_contracts() -> None:
         "$ref": "#/components/schemas/TemplateMode"
     }
 
+    policy = schemas["IdleSessionPolicyResponse"]
+    bounds = schemas["IdleSessionPolicyDurationBoundsResponse"]
+    assert {
+        "user_idle_minutes_bounds",
+        "admin_idle_minutes_bounds",
+        "idle_minutes_granularity",
+    }.issubset(policy["required"])
+    assert policy["properties"]["user_idle_minutes_bounds"] == {
+        "$ref": "#/components/schemas/IdleSessionPolicyDurationBoundsResponse"
+    }
+    assert policy["properties"]["admin_idle_minutes_bounds"] == {
+        "$ref": "#/components/schemas/IdleSessionPolicyDurationBoundsResponse"
+    }
+    assert policy["properties"]["idle_minutes_granularity"]["minimum"] == 1.0
+    assert set(bounds["required"]) == {
+        "minimum_minutes",
+        "default_minutes",
+        "maximum_minutes",
+    }
+
     for path in ("/api/v1/conversions", "/api/v1/templates", "/api/v1/audit"):
         parameters = _parameters(paths[path]["get"])
         assert ("query", "offset") in parameters

@@ -52,8 +52,9 @@ new password on the dedicated page, and then signs in again with the new passwor
 ## Idle-session policy API
 
 FastAPI exposes the administrator-only `GET` and `PUT /api/v1/admin/session-policy` operations.
-The read returns both role-specific whole-minute durations, the operator-configured absolute
-lifetime ceiling in exact seconds, a revision, and an `ETag`. The update
+The read returns both role-specific whole-minute durations, authoritative per-role minimum/default/
+maximum bounds, the one-minute granularity, the operator-configured absolute lifetime ceiling in
+exact seconds, a revision, and an `ETag`. The update
 must send that exact validator in `If-Match` and replaces both values in one transaction; a missing
 precondition returns `428`, and a stale or malformed validator returns `412` without partial state
 or audit. Standard-user access is forbidden. The accepted inclusive ranges are 5–300 minutes for

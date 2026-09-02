@@ -280,6 +280,26 @@ export type ErrorResponse = {
 };
 
 /**
+ * IdleSessionPolicyDurationBoundsResponse
+ *
+ * Authoritative whole-minute bounds and default for one session role.
+ */
+export type IdleSessionPolicyDurationBoundsResponse = {
+    /**
+     * Default Minutes
+     */
+    default_minutes: number;
+    /**
+     * Maximum Minutes
+     */
+    maximum_minutes: number;
+    /**
+     * Minimum Minutes
+     */
+    minimum_minutes: number;
+};
+
+/**
  * IdleSessionPolicyResponse
  *
  * Effective singleton policy and optimistic-concurrency revision.
@@ -293,6 +313,11 @@ export type IdleSessionPolicyResponse = {
      * Admin Idle Minutes
      */
     admin_idle_minutes: number;
+    admin_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse;
+    /**
+     * Idle Minutes Granularity
+     */
+    idle_minutes_granularity: number;
     /**
      * Revision
      */
@@ -301,6 +326,7 @@ export type IdleSessionPolicyResponse = {
      * User Idle Minutes
      */
     user_idle_minutes: number;
+    user_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse;
 };
 
 /**

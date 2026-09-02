@@ -493,6 +493,33 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "IdleSessionPolicyDurationBoundsResponse": {
+        "description": "Authoritative whole-minute bounds and default for one session role.",
+        "properties": {
+          "default_minutes": {
+            "minimum": 1.0,
+            "title": "Default Minutes",
+            "type": "integer"
+          },
+          "maximum_minutes": {
+            "minimum": 1.0,
+            "title": "Maximum Minutes",
+            "type": "integer"
+          },
+          "minimum_minutes": {
+            "minimum": 1.0,
+            "title": "Minimum Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minimum_minutes",
+          "default_minutes",
+          "maximum_minutes"
+        ],
+        "title": "IdleSessionPolicyDurationBoundsResponse",
+        "type": "object"
+      },
       "IdleSessionPolicyResponse": {
         "description": "Effective singleton policy and optimistic-concurrency revision.",
         "properties": {
@@ -505,6 +532,14 @@
             "title": "Admin Idle Minutes",
             "type": "integer"
           },
+          "admin_idle_minutes_bounds": {
+            "$ref": "#/components/schemas/IdleSessionPolicyDurationBoundsResponse"
+          },
+          "idle_minutes_granularity": {
+            "minimum": 1.0,
+            "title": "Idle Minutes Granularity",
+            "type": "integer"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -512,13 +547,19 @@
           "user_idle_minutes": {
             "title": "User Idle Minutes",
             "type": "integer"
+          },
+          "user_idle_minutes_bounds": {
+            "$ref": "#/components/schemas/IdleSessionPolicyDurationBoundsResponse"
           }
         },
         "required": [
           "user_idle_minutes",
           "admin_idle_minutes",
           "revision",
-          "absolute_lifetime_seconds"
+          "absolute_lifetime_seconds",
+          "user_idle_minutes_bounds",
+          "admin_idle_minutes_bounds",
+          "idle_minutes_granularity"
         ],
         "title": "IdleSessionPolicyResponse",
         "type": "object"

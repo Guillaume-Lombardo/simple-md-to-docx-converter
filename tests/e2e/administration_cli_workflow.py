@@ -205,13 +205,19 @@ def _exercise(container: str) -> None:
         or not isinstance(policy.get("admin_idle_minutes"), int)
         or not isinstance(policy.get("revision"), int)
         or policy.get("absolute_lifetime_seconds") != 28_800
+        or policy.get("user_idle_minutes_bounds")
+        != {"minimum_minutes": 5, "default_minutes": 30, "maximum_minutes": 300}
+        or policy.get("admin_idle_minutes_bounds")
+        != {"minimum_minutes": 5, "default_minutes": 15, "maximum_minutes": 60}
+        or policy.get("idle_minutes_granularity") != 1
     ):
         raise _WorkflowFailure("session policy metadata")
     human_policy = _plain(plain, ("session-policy", "get", "--profile", _ADMIN_PROFILE))
     expected_policy = (
         f"Users: {policy['user_idle_minutes']} minutes; administrators: "
         f"{policy['admin_idle_minutes']} minutes; absolute lifetime: 28800 seconds; "
-        f"revision: {policy['revision']}.\n"
+        f"revision: {policy['revision']}; user bounds: 5-300 minutes (default 30); "
+        "administrator bounds: 5-60 minutes (default 15); granularity: 1 minute.\n"
     )
     if human_policy.stdout != expected_policy:
         raise _WorkflowFailure("session policy human output")

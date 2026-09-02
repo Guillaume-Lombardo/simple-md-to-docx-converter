@@ -92,7 +92,10 @@ version. `GET /api/v1/audit` exposes paginated audit records to authorized
 administrators; records contain identifiers and action metadata, not document bodies or passwords.
 
 `GET /api/v1/admin/session-policy` returns `user_idle_minutes`, `admin_idle_minutes`, the exact
-positive `absolute_lifetime_seconds` operator ceiling, and the current `revision` with an `ETag`.
+positive `absolute_lifetime_seconds` operator ceiling, current `revision`, and an `ETag`. Its
+authoritative `user_idle_minutes_bounds` and `admin_idle_minutes_bounds` objects each provide
+`minimum_minutes`, `default_minutes`, and `maximum_minutes`; `idle_minutes_granularity` is `1`.
+Clients, including the frontend, consume those values rather than duplicating policy bounds.
 `PUT` on the same path requires the session CSRF header plus that
 validator in `If-Match` and atomically replaces both values. Standard-user values must be whole
 minutes from 5 through 300 inclusive; administrator values must be whole minutes from 5 through 60

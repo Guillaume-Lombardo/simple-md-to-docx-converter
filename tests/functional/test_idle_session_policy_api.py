@@ -4,6 +4,15 @@ from pathlib import Path
 
 import pytest
 
+from markweave.auth.models import (
+    DEFAULT_ADMIN_IDLE_MINUTES,
+    DEFAULT_USER_IDLE_MINUTES,
+    IDLE_SESSION_POLICY_GRANULARITY_MINUTES,
+    MAXIMUM_ADMIN_IDLE_MINUTES,
+    MAXIMUM_USER_IDLE_MINUTES,
+    MINIMUM_ADMIN_IDLE_MINUTES,
+    MINIMUM_USER_IDLE_MINUTES,
+)
 from tests.functional.test_auth_api import (
     csrf,
     login,
@@ -11,6 +20,20 @@ from tests.functional.test_auth_api import (
     session_cookie,
     use_session,
 )
+
+POLICY_METADATA = {
+    "user_idle_minutes_bounds": {
+        "minimum_minutes": MINIMUM_USER_IDLE_MINUTES,
+        "default_minutes": DEFAULT_USER_IDLE_MINUTES,
+        "maximum_minutes": MAXIMUM_USER_IDLE_MINUTES,
+    },
+    "admin_idle_minutes_bounds": {
+        "minimum_minutes": MINIMUM_ADMIN_IDLE_MINUTES,
+        "default_minutes": DEFAULT_ADMIN_IDLE_MINUTES,
+        "maximum_minutes": MAXIMUM_ADMIN_IDLE_MINUTES,
+    },
+    "idle_minutes_granularity": IDLE_SESSION_POLICY_GRANULARITY_MINUTES,
+}
 
 
 @pytest.mark.functional
@@ -47,6 +70,7 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             "admin_idle_minutes": 15,
             "revision": 0,
             "absolute_lifetime_seconds": 28_800,
+            **POLICY_METADATA,
         }
         assert defaults.headers["etag"] == '"idle-session-policy-0"'
 
@@ -100,6 +124,7 @@ def test_policy_defaults_authorization_bounds_concurrency_and_audit(
             "admin_idle_minutes": 60,
             "revision": 1,
             "absolute_lifetime_seconds": 28_800,
+            **POLICY_METADATA,
         }
         assert updated.headers["etag"] == '"idle-session-policy-1"'
         assert client.get("/api/v1/session").json()["effective_idle_minutes"] == 60
@@ -152,6 +177,7 @@ def test_policy_persists_across_application_restart(tmp_path: Path) -> None:
             "admin_idle_minutes": 5,
             "revision": 1,
             "absolute_lifetime_seconds": 28_800,
+            **POLICY_METADATA,
         }
 
 
