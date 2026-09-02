@@ -34,6 +34,14 @@ from markweave.templates.models import (
 )
 
 
+def _expected_fonts_from_form(values: list[str]) -> tuple[str, ...]:
+    """Decode the explicit multipart sentinel used to clear a declaration."""
+
+    if values == [""]:
+        return ()
+    return tuple(values)
+
+
 def build_router(  # noqa: PLR0915 - route declarations are intentionally grouped
     dependencies: HttpDependencies,
 ) -> APIRouter:
@@ -138,7 +146,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
                 actor,
                 TemplateCreate(uuid4(), name, description),
                 data,
-                tuple(expected_fonts),
+                _expected_fonts_from_form(expected_fonts),
             )
         except ValueError:
             raise TemplateRequestError from None
@@ -228,7 +236,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
             template_id,
             expected_revision=expected_revision(template_id, if_match),
             content=data,
-            expected_fonts=tuple(expected_fonts),
+            expected_fonts=_expected_fonts_from_form(expected_fonts),
         )
         response.headers["ETag"] = template_etag(template)
         return TemplateVersionResponse.model_validate(version)

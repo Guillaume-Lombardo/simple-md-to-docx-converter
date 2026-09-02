@@ -36,6 +36,7 @@ from markweave.http.responses import (
     idle_session_policy_etag,
 )
 from markweave.http.routers.conversions import _result_content_disposition
+from markweave.http.routers.templates import _expected_fonts_from_form
 from markweave.http.schemas import ConversionOptionsResponse, ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
@@ -80,6 +81,18 @@ def _assert_template_download_response(
     )
     assert download.headers["ETag"] == f'"sha256-{version.sha256}"'
     assert download.headers["X-Content-Type-Options"] == "nosniff"
+
+
+@pytest.mark.unit
+def test_template_form_font_sentinel_is_exact_and_order_preserving() -> None:
+    assert _expected_fonts_from_form([""]) == ()
+    assert _expected_fonts_from_form(["   "]) == ("   ",)
+    assert _expected_fonts_from_form(["Calibri", ""]) == ("Calibri", "")
+    assert _expected_fonts_from_form(["", "Calibri"]) == ("", "Calibri")
+    assert _expected_fonts_from_form(["Cambria", "Calibri"]) == (
+        "Cambria",
+        "Calibri",
+    )
 
 
 @pytest.mark.unit
@@ -871,6 +884,18 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
     assert readiness.json()["error"]["code"] == "NOT_READY"
     paths = schema["paths"]
+    schemas = schema["components"]["schemas"]
+    for body_schema in (
+        "Body_create_template_api_v1_templates_post",
+        "Body_replace_template_api_v1_templates__template_id__content_put",
+    ):
+        expected_fonts = schemas[body_schema]["properties"]["expected_fonts"]
+        assert expected_fonts == {
+            "items": {"type": "string"},
+            "title": "Expected Fonts",
+            "type": "array",
+        }
+        assert "expected_fonts" in schemas[body_schema]["required"]
     for path in paths.values():
         for operation_name, operation in path.items():
             if operation_name not in {

@@ -92,6 +92,14 @@ test("template creation and replacement preserve expected-font semantics", async
   const createForm = transport.multipart.mock.calls[0]![1] as FormData;
   expect(createForm.getAll("expected_fonts")).toEqual(["A", "B"]);
   expect(createForm.get("content")).toBe(file);
+  await api.create({
+    content: file,
+    description: "Cleared",
+    expectedFonts: "  ",
+    name: "No declaration",
+  });
+  const clearedCreateForm = transport.multipart.mock.calls[1]![1] as FormData;
+  expect(clearedCreateForm.getAll("expected_fonts")).toEqual([""]);
   await api.replace("template-id", '"etag"', file, "  ");
   const replaceCall = transport.jsonWithMetadata.mock.calls[0]!;
   expect((replaceCall[2].body as FormData).getAll("expected_fonts")).toEqual([
@@ -102,6 +110,11 @@ test("template creation and replacement preserve expected-font semantics", async
     etag: '"etag"',
     method: "PUT",
   });
+  await api.replace("template-id", '"etag-2"', file, " B, A ");
+  const populatedReplaceCall = transport.jsonWithMetadata.mock.calls[1]!;
+  expect(
+    (populatedReplaceCall[2].body as FormData).getAll("expected_fonts"),
+  ).toEqual(["B", "A"]);
 });
 
 test("template lifecycle methods preserve CSRF, If-Match, and exact paths", async () => {
