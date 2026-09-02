@@ -19,7 +19,7 @@ export function AppShell({
   user,
 }: {
   children: ReactNode;
-  current: "Convert" | "Password" | "Templates";
+  current: "Convert" | "Password" | "Session policy" | "Templates" | "Users";
   onLogout?: () => void;
   pending?: boolean;
   user?: EffectiveUser;
@@ -42,14 +42,33 @@ export function AppShell({
           >
             Convert
           </Link>
-          {/* T62 and T63 replace these labels when their routes are delivered. */}
-          <span aria-disabled="true" className="text-muted">
-            Templates
-          </span>
-          {user?.role === "admin" && (
+          {user && !user.password_change_required ? (
+            <Link
+              aria-current={current === "Templates" ? "page" : undefined}
+              className="text-accent underline-offset-4 hover:underline"
+              href="/templates"
+            >
+              Templates
+            </Link>
+          ) : (
             <span aria-disabled="true" className="text-muted">
-              Users
+              Templates
             </span>
+          )}
+          {user?.role === "admin" && !user.password_change_required && (
+            <>
+              <Link
+                aria-current={current === "Users" ? "page" : undefined}
+                className="text-accent underline-offset-4 hover:underline"
+                href="/users"
+              >
+                Users
+              </Link>
+              {/* T66 supplies the authoritative metadata before T63 delivers this route. */}
+              <span aria-disabled="true" className="text-muted">
+                Session policy
+              </span>
+            </>
           )}
           {user && (
             <div className="ml-auto flex flex-wrap items-center gap-3">

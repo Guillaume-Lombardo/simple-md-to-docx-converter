@@ -90,7 +90,16 @@ test("Next authentication shell uses FastAPI authority for three identities", as
     const bobPage = await bobContext.newPage();
 
     await login(adminPage, "e2e-admin", "e2e-admin-password");
-    await assertDisabledNavigationItem(adminPage, "Users");
+    const usersLink = adminPage.getByRole("link", {
+      name: "Users",
+      exact: true,
+    });
+    assert.equal(await usersLink.getAttribute("href"), "/users");
+    await Promise.all([adminPage.waitForURL("**/users"), usersLink.click()]);
+    await adminPage
+      .getByRole("heading", { name: "Users", exact: true })
+      .waitFor();
+    await adminPage.goto(`${baseURL}/convert`, { waitUntil: "networkidle" });
     const adminSession = await api(adminPage, "GET", "/api/v1/session");
     assert.equal(adminSession.status, 200);
     assert.ok(Number.isInteger(adminSession.body.effective_idle_minutes));
