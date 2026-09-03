@@ -38,6 +38,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Documents to Markdown | Local Firecrawl anydoc with no hosted fallback; T69 pins and validates the exact release and integration surface before production use |
 | Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links and a ZIP containing the Markdown and referenced local assets when assets are present |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
+| Reverse-conversion compute | CPU-only and low-compute: use anydoc as an in-process native library with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document-engine subprocess |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
 | Python distribution | `markweave` on PyPI with public import `markweave`; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
@@ -264,6 +265,13 @@ uses a pinned local Firecrawl anydoc engine and never opts into Firecrawl Parse,
 other network fallback. T69 must approve the exact supported format and content-detection matrix
 before production implementation. Scanned or image-only inputs that require OCR fail locally with a
 stable safe error.
+
+The production path is CPU-only and optimized for low compute. It must not discover, request, or
+use a GPU or accelerator, load an ML model, start a browser, invoke Pandoc or LibreOffice, or spawn
+another document-engine process. T69 measures cold and warm wall time, CPU time, peak resident
+memory, retained asset bytes, and concurrency scaling on representative and configured-limit inputs.
+Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
+no unmeasured numeric threshold is fixed in this specification.
 
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
@@ -663,6 +671,9 @@ the ticket before touching any path owned by another active ticket.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.
+- T69 also owns the measured CPU-time, wall-time, peak-memory, thread-count, and concurrency
+  evidence used to define the low-compute operating envelope. T71 keeps those production budgets
+  configurable and prevents reverse jobs from starving forward conversions.
 - OCR and Firecrawl's hosted Parse fallback are excluded from T69-T73. Adding either requires a
   separate product, privacy, security, cost, egress, retention, and operations decision.
 

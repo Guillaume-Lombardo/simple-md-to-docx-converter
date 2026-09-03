@@ -28,6 +28,10 @@ backend/frontend images in both storage profiles.
 * Prove the final backend runs anydoc under arbitrary UID, read-only root, no added capabilities,
   bounded `/work`, and the approved no-document-egress policy; retain bounded failure artifacts only
   on failure.
+* Prove the exact final image requests no GPU or accelerator resource, loads no ML runtime, and
+  starts no browser, Pandoc, LibreOffice, or other document-engine subprocess during reverse jobs.
+  Record CPU time, wall time, peak memory, threads, and concurrency behavior against the approved
+  T69 low-compute envelope.
 * Exercise result integrity: safe root Markdown filename, safe `assets/` paths, exact relative image
   references, media signatures/extensions, no orphaned assets, deterministic ordering/digest,
   private download headers, and traceability manifest.
@@ -61,12 +65,15 @@ backend/frontend images in both storage profiles.
 
 * Preserve the matched backend/frontend release identity and existing production routing/security
   contracts.
+* Treat regression beyond the approved CPU, memory, thread, or concurrency envelope as blocking.
 * Require independent review and exact-head plus exact-main CI evidence before completion.
 * Keep repository artifacts and user-facing text in English.
 
 ## Progress
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70, T71, and T72.
+* 2026-09-03: Final-image acceptance now includes explicit CPU-only proof and measured low-compute
+  regression gates.
 
 ## Synchronization
 

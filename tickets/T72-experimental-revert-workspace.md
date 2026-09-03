@@ -28,6 +28,8 @@ downloading their results.
   replay a mutation when the outcome is unknown.
 * Clearly state that conversion is local and does not perform OCR; present scanned/image-only PDF
   failures without offering or invoking hosted Firecrawl OCR.
+* Describe the workflow as CPU-only and low-compute without making an unmeasured speed or resource
+  guarantee.
 * Render authenticated/loading/session-expiry/backend-unavailable states consistently with the
   existing production shell.
 * Add strict TypeScript, component, transport, accessibility, responsive-layout, browser-behavior,
@@ -57,6 +59,8 @@ downloading their results.
 ## Progress
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T71.
+* 2026-09-03: User-facing scope now communicates CPU-only, low-compute processing without an
+  unsupported performance claim.
 
 ## Synchronization
 

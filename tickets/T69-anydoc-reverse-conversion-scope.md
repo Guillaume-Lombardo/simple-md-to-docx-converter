@@ -19,6 +19,12 @@ normative product, security, packaging, and compatibility contract before implem
 * Pin and evaluate an exact `firecrawl-anydoc` release under Python 3.14 in the UBI 9 backend image,
   including x86-64 wheel compatibility, license/provenance, startup/import behavior, memory,
   duration, and cancellation constraints.
+* Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
+  count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
+  the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
+  unmeasured fixed threshold.
+* Prove conversion is CPU-only and uses no GPU or accelerator, ML model, browser, Pandoc,
+  LibreOffice, or other document-engine subprocess.
 * Test the supported input families with a redistributable corpus: Word, PowerPoint, Excel,
   OpenDocument, RTF, EPUB, CSV, and text-based PDF; record an explicit extension/content-detection
   matrix and reject unsupported, encrypted, malformed, resource-exhausting, scanned, and image-only
@@ -55,6 +61,8 @@ normative product, security, packaging, and compatibility contract before implem
 ## Quality requirements
 
 * Keep every document-controlled operation local and network-independent.
+* Prefer the in-process Python binding, bounded threads, and the smallest concurrency that meets the
+  measured service objective; any different integration surface requires explicit T69 evidence.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -65,6 +73,9 @@ normative product, security, packaging, and compatibility contract before implem
   blocking asset contract gap: Python exposes embedded bytes and source-position asset identifiers
   through `Document`, but the public Markdown renderer emits only alt text for embedded images and
   PDF conversion exposes no `Document` asset model.
+* 2026-09-03: Product scope was tightened to an exclusively CPU-only, low-compute workflow. T69 now
+  owns measured CPU, wall-time, peak-memory, thread, asset, and concurrency evidence before any
+  production budget is selected.
 
 ## Synchronization
 

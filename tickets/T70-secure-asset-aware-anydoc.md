@@ -21,6 +21,9 @@ for reverse conversion.
   verification.
 * Parse only the format matrix approved by T69 from bounded in-memory or isolated-workspace inputs
   after the existing malware-scanning boundary.
+* Use the approved in-process native binding with bounded threads and memory. The production path
+  must be CPU-only and must not load GPU/accelerator or ML runtimes or invoke a browser, Pandoc,
+  LibreOffice, or another document-engine subprocess.
 * Convert structured content into deterministic UTF-8 GitHub-Flavored Markdown while preserving
   supported headings, lists, tables, links, notes, code, equations, and document order.
 * Emit a deterministic ZIP containing one root Markdown file plus referenced files under `assets/`;
@@ -55,6 +58,8 @@ for reverse conversion.
 
 * Preserve arbitrary-UID, read-only-root, bounded-workspace, no-document-egress, and malware-
   scanning invariants.
+* Meet the measured low-compute envelope approved by T69 and expose no unbounded internal
+  parallelism.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
 * Keep repository artifacts and user-facing errors in English.
@@ -62,6 +67,8 @@ for reverse conversion.
 ## Progress
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T69.
+* 2026-09-03: Scope now requires an exclusively CPU-only in-process path and the measured
+  low-compute envelope from T69.
 
 ## Synchronization
 

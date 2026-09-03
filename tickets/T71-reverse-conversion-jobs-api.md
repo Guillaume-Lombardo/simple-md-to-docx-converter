@@ -37,6 +37,9 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 * Add configuration for approved source/result size, asset count/bytes, active jobs, queue capacity,
   duration, retention, and cleanup values without silently changing existing forward-conversion
   limits.
+* Enforce the T69 low-compute CPU, memory, thread, and concurrency envelope independently for
+  reverse jobs; schedule them fairly so they cannot starve forward conversions or bypass global
+  capacity controls.
 * Extend deterministic OpenAPI compatibility validation, observability, metrics, and safe
   structured logs for the new job family.
 * Add unit, functional, real SQLite/filesystem, real PostgreSQL/S3, restart, recovery, concurrency,
@@ -61,6 +64,7 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 
 * Maintain both storage profiles, queue safety, scanner ordering, content-free logs, and existing
   resource budgets.
+* Request no GPU or accelerator resource and keep the worker path CPU-only in both profiles.
 * Cover every new real boundary with integration tests and retain the repository coverage
   thresholds.
 * Keep repository artifacts and API text in English.
@@ -68,6 +72,8 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 ## Progress
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70.
+* 2026-09-03: Added a distinct measured low-compute budget and fair-scheduling requirement for the
+  CPU-only reverse workload.
 
 ## Synchronization
 
