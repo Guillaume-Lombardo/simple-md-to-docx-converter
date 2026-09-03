@@ -224,6 +224,10 @@ def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
         raise AlignmentError(
             "cutover overlay has no valid frontend and router image defaults"
         ) from error
+    if any(not isinstance(image, str) for image in configured):
+        raise AlignmentError(
+            "cutover frontend services must share one trusted immutable public default"
+        )
     matches = [expression.fullmatch(image) for image in configured]
     images = [match.group("image") for match in matches if match is not None]
     if (

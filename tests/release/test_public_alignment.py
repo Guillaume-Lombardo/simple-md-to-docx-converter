@@ -618,6 +618,20 @@ def test_frontend_compose_parser_requires_one_exact_shared_public_default() -> N
         parse_frontend_compose_identity(divergent)
 
 
+@pytest.mark.parametrize("invalid_image", ["[]", "{}"])
+def test_frontend_compose_parser_rejects_non_string_named_images(
+    invalid_image: str,
+) -> None:
+    overlay = (
+        "services:\n"
+        f"  frontend:\n    image: {invalid_image}\n"
+        f"  router:\n    image: {invalid_image}\n"
+    )
+
+    with pytest.raises(AlignmentError, match="share one trusted immutable"):
+        parse_frontend_compose_identity(overlay)
+
+
 @pytest.mark.unit
 def test_main_reads_exact_base_and_head_only_for_pending_transition(
     tmp_path: Path, mocker, capsys
