@@ -147,7 +147,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "2816ab748eb97c222e478114c56d562600d08bf1d372e92abe999f65970aa781"
+    "221d3b72b83664c1c28246f04f03fea71c06ab8123c83f28bb91adde9497fbfe"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
     "5b1966cda4facf8b7faf10fa643270dc525eb20355f5e545da14406f984f9588"
@@ -1735,6 +1735,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
         'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"',
+        'podman build --format oci --timestamp "$source_date_epoch"',
         'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
         'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
     ):

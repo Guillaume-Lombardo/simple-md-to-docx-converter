@@ -43,7 +43,10 @@ fi
 temporary_directory="$(mktemp -d)"
 if [[ "$runtime" == podman ]]; then
   runtime_socket="$temporary_directory/podman-compose.sock"
-  compose_command=(podman --url "unix://$runtime_socket" compose)
+  compose_command=(
+    env "DOCKER_HOST=unix://$runtime_socket"
+    podman --url "unix://$runtime_socket" compose
+  )
 fi
 state_home="$temporary_directory/state"
 state_directory="$state_home/markweave-quickstart-simple"
@@ -97,10 +100,12 @@ cleanup() {
   if [[ "$succeeded" != true && -f "$fault_env" ]]; then
     compose logs --no-color >&2 2>/dev/null || true
   fi
-  quickstart down >/dev/null 2>&1 || true
-  password="$(quickstart password 2>/dev/null)" || true
-  write_fault_env
-  compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1 || true
+  if [[ "$succeeded" != true ]]; then
+    quickstart down >/dev/null 2>&1 || true
+    password="$(quickstart password 2>/dev/null)" || true
+    write_fault_env
+    compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1 || true
+  fi
   for volume in "$work_volume" "$data_volume" "$signatures_volume"; do
     "${runtime_command[@]}" volume rm "$volume" >/dev/null 2>&1 || true
   done

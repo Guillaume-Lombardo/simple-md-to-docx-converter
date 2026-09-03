@@ -320,6 +320,7 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "candidate=docker" in script
     assert "candidate=podman" in script
     assert "podman compose" in script
+    assert 'env "DOCKER_HOST=unix://$podman_socket"' in script
     assert "rootless Podman only" in script
     assert 'CONTAINERS_CONF="$podman_config_file"' in script
     assert "spikes/toolchain/chrome-seccomp.json" in script
@@ -728,6 +729,8 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert "tests.e2e.service_workflow exercise-mermaid" in runner
     assert "verify_helper_service_stopped" in runner
     assert "podman-compose.sock" in runner
+    assert 'env "DOCKER_HOST=unix://$runtime_socket"' in runner
+    assert 'if [[ "$succeeded" != true ]]; then' in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
     assert 'port "$application_id" 8080/tcp' in runner
     assert 'port "$scanner_id"' in runner

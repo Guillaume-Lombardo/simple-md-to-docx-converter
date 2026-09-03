@@ -581,6 +581,18 @@ def test_container_release_policy_requires_recovery_final_image_smoke() -> None:
 
 
 @pytest.mark.unit
+def test_container_release_policy_requires_oci_frontend_build() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace("podman build --format oci", "podman build")
+
+    errors = validate_container_release_workflow_text(weakened)
+
+    assert any("podman build --format oci" in error for error in errors)
+
+
+@pytest.mark.unit
 def test_container_release_recovery_is_bound_to_existing_release_identity() -> None:
     workflow = Path(".github/workflows/container-release.yml").read_text(
         encoding="utf-8"

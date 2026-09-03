@@ -522,6 +522,18 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
     )
 
 
+def test_every_frontend_image_build_preserves_oci_config_identity() -> None:
+    sources = (
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8"),
+        Path("scripts/e2e/run.sh").read_text(encoding="utf-8"),
+        Path("web/scripts/run-rootless-smoke.sh").read_text(encoding="utf-8"),
+    )
+
+    for source in sources:
+        assert "podman build --format oci" in source
+        assert "podman build --format docker" not in source
+
+
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
     mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
