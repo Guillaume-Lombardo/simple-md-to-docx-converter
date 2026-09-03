@@ -1,6 +1,19 @@
 // @vitest-environment node
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, request } from "node:http";
+import { request as secureRequest } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { connect as connectTls } from "node:tls";
+import {
+  createProductionRouter,
+  HSTS,
+  loadTls,
+  normalizeRequestTarget,
+  PERMISSIONS_POLICY,
+  selectUpstream,
+} from "../src/runtime/router.mjs";
 import { createRoutingFixture } from "./fixtures/router.mjs";
 
 type Capture = {
@@ -28,7 +41,9 @@ async function call(
   const destination = new URL(origin);
   return new Promise<{ body: string; cookies: string[]; status: number }>(
     (resolve, reject) => {
-      const outbound = request(
+      const outbound = (
+        destination.protocol === "https:" ? secureRequest : request
+      )(
         {
           headers: {
             cookie: "session=a; csrf=b",
@@ -41,6 +56,7 @@ async function call(
           method,
           path,
           port: destination.port,
+          rejectUnauthorized: false,
         },
         (response) => {
           let body = "";
@@ -274,24 +290,417 @@ test("real router preserves backend credentials and isolates frontend credential
   );
 });
 
-test("synchronous upstream creation failures are contained without exiting", async () => {
-  const router = createRoutingFixture({
-    backend: "http://[invalid",
-    frontend: "http://[invalid",
+test("TLS routing owns exact response-wide security headers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "markweave-router-tls-"));
+  const key = join(directory, "key.pem");
+  const cert = join(directory, "cert.pem");
+  try {
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=converter.example",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+      ],
+      { stdio: "ignore" },
+    );
+    const upstream = createServer((_incoming, response) => {
+      response.setHeader("Strict-Transport-Security", "max-age=1; preload");
+      response.setHeader("Permissions-Policy", "camera=*");
+      response.end("secure");
+    });
+    const upstreamOrigin = await listen(upstream);
+    const router = createProductionRouter({
+      backend: upstreamOrigin,
+      frontend: upstreamOrigin,
+      publicHosts: ["converter.example"],
+      tls: { cert: readFileSync(cert), key: readFileSync(key) },
+    });
+    router.listen(0, "127.0.0.1");
+    await new Promise((resolve) => router.once("listening", resolve));
+    const origin = `https://127.0.0.1:${(router.address() as { port: number }).port}`;
+    const response = await new Promise<{
+      body: string;
+      hsts: string | undefined;
+      permissions: string | undefined;
+      status: number;
+    }>((resolve, reject) => {
+      const outbound = secureRequest(
+        origin,
+        {
+          headers: { host: "converter.example" },
+          rejectUnauthorized: false,
+        },
+        (incoming) => {
+          let body = "";
+          incoming.setEncoding("utf8");
+          incoming.on("data", (chunk) => (body += chunk));
+          incoming.on("end", () => {
+            const hsts = incoming.headers["strict-transport-security"];
+            const permissions = incoming.headers["permissions-policy"];
+            resolve({
+              body,
+              hsts: Array.isArray(hsts) ? hsts.join(", ") : hsts,
+              permissions: Array.isArray(permissions)
+                ? permissions.join(", ")
+                : permissions,
+              status: incoming.statusCode!,
+            });
+          });
+        },
+      );
+      outbound.on("error", reject);
+      outbound.end();
+    });
+    expect(response).toEqual({
+      body: "secure",
+      hsts: HSTS,
+      permissions: PERMISSIONS_POLICY,
+      status: 200,
+    });
+    await Promise.all(
+      [router, upstream].map(
+        (server) => new Promise((resolve) => server.close(resolve)),
+      ),
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("TLS header overflow returns a bounded secured 431", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "markweave-router-overflow-"));
+  const key = join(directory, "key.pem");
+  const cert = join(directory, "cert.pem");
+  let router: ReturnType<typeof createProductionRouter> | undefined;
+  try {
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=converter.example",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+      ],
+      { stdio: "ignore" },
+    );
+    router = createProductionRouter({
+      backend: "http://127.0.0.1:1",
+      frontend: "http://127.0.0.1:1",
+      publicHosts: ["converter.example"],
+      tls: { cert: readFileSync(cert), key: readFileSync(key) },
+    });
+    const activeRouter = router;
+    activeRouter.listen(0, "127.0.0.1");
+    await new Promise((resolve) => activeRouter.once("listening", resolve));
+    const port = (activeRouter.address() as { port: number }).port;
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connectTls(
+        { host: "127.0.0.1", port, rejectUnauthorized: false },
+        () => {
+          socket.write(
+            `GET / HTTP/1.1\r\nHost: converter.example\r\nX-Large: ${"a".repeat(17_000)}\r\n\r\n`,
+          );
+        },
+      );
+      let received = "";
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => (received += chunk));
+      socket.on("end", () => resolve(received));
+      socket.on("error", reject);
+    });
+    expect(response).toBe(
+      "HTTP/1.1 431 Request Header Fields Too Large\r\n" +
+        "Connection: close\r\n" +
+        "Content-Length: 0\r\n" +
+        `Strict-Transport-Security: ${HSTS}\r\n` +
+        `Permissions-Policy: ${PERMISSIONS_POLICY}\r\n\r\n`,
+    );
+  } finally {
+    if (router?.listening) {
+      const activeRouter = router;
+      await new Promise((resolve) => activeRouter.close(resolve));
+    }
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("invalid production origins fail before the router listens", () => {
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://[invalid",
+      frontend: "http://[invalid",
+      publicHosts: ["converter.example"],
+    }),
+  ).toThrow("Invalid URL");
+  for (const backend of [
+    "ftp://backend.example",
+    "http://user@backend.example",
+    "http://backend.example/path",
+    "http://backend.example/?query=1",
+    "http://backend.example/#fragment",
+  ])
+    expect(() =>
+      createRoutingFixture({
+        backend,
+        frontend: "http://frontend.example",
+        publicHosts: ["converter.example"],
+      }),
+    ).toThrow("must be an HTTP(S) origin");
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://backend.example",
+      frontend: "http://frontend.example",
+      publicHosts: [],
+    }),
+  ).toThrow("at least one public host");
+  expect(() =>
+    createRoutingFixture({
+      backend: "http://backend.example",
+      frontend: "http://frontend.example",
+      publicHosts: ["bad host"],
+    }),
+  ).toThrow("invalid public host");
+  for (const maxRequestBytes of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createRoutingFixture({
+        backend: "http://backend.example",
+        frontend: "http://frontend.example",
+        maxRequestBytes,
+        publicHosts: ["converter.example"],
+      }),
+    ).toThrow("positive safe integer");
+  for (const upstreamTimeoutMs of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createRoutingFixture({
+        backend: "http://backend.example",
+        frontend: "http://frontend.example",
+        publicHosts: ["converter.example"],
+        upstreamTimeoutMs,
+      }),
+    ).toThrow("positive safe integer");
+});
+
+test("request transport ceiling rejects streamed bodies without an error body", async () => {
+  let completedBodies = 0;
+  const upstream = createServer((incoming, response) => {
+    incoming.on("data", () => undefined);
+    incoming.on("end", () => {
+      completedBodies += 1;
+      response.end("accepted");
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    maxRequestBytes: 8,
     publicHosts: ["converter.example"],
   });
-  const origin = await listen(router);
-  expect(await call(origin, "GET", "/missing%20path")).toEqual({
+  const routerOrigin = await listen(router);
+  const sendBody = (chunks: string[]) =>
+    new Promise<{ body: string; status: number }>((resolve, reject) => {
+      const destination = new URL(routerOrigin);
+      const outbound = request(
+        {
+          headers: {
+            host: "converter.example",
+            "transfer-encoding": "chunked",
+          },
+          host: destination.hostname,
+          method: "POST",
+          path: "/api/v1/conversions",
+          port: destination.port,
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () =>
+            resolve({ body, status: response.statusCode! }),
+          );
+        },
+      );
+      outbound.on("error", reject);
+      for (const chunk of chunks) outbound.write(chunk);
+      outbound.end();
+    });
+
+  await expect(sendBody(["1234", "5678"])).resolves.toEqual({
+    body: "accepted",
+    status: 200,
+  });
+  await expect(sendBody(["1234", "5678", "9"])).resolves.toEqual({
+    body: "",
+    status: 413,
+  });
+  expect(completedBodies).toBe(1);
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
+});
+
+test("request ceiling wins when an upstream responds before the full body", async () => {
+  const upstream = createServer((incoming, response) => {
+    if (incoming.url === "/ok") {
+      response.writeHead(202, { "Content-Type": "text/plain" });
+      response.end("premature acceptance");
+      return;
+    }
+    incoming.once("data", () => {
+      response.writeHead(202, { "Content-Type": "text/plain" });
+      response.end("premature acceptance");
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    maxRequestBytes: 8,
+    publicHosts: ["converter.example"],
+  });
+  const routerOrigin = await listen(router);
+  const rejected = await new Promise<{ body: string; status: number }>(
+    (resolve, reject) => {
+      const destination = new URL(routerOrigin);
+      const outbound = request(
+        {
+          headers: {
+            host: "converter.example",
+            "transfer-encoding": "chunked",
+          },
+          host: destination.hostname,
+          method: "POST",
+          path: "/api/v1/conversions",
+          port: destination.port,
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () =>
+            resolve({ body, status: response.statusCode! }),
+          );
+        },
+      );
+      outbound.on("error", reject);
+      outbound.write("1234");
+      setTimeout(() => outbound.end("56789"), 20);
+    },
+  );
+  expect(rejected).toEqual({ body: "", status: 413 });
+  await expect(call(routerOrigin, "GET", "/ok")).resolves.toEqual({
+    body: "premature acceptance",
+    cookies: [],
+    status: 202,
+  });
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
+});
+
+test("stalled upstreams time out and downstream disconnects abort upstream work", async () => {
+  let activeUpstreamRequests = 0;
+  let observeDisconnect: (() => void) | undefined;
+  const disconnected = new Promise<void>((resolve) => {
+    observeDisconnect = resolve;
+  });
+  const upstream = createServer((incoming) => {
+    activeUpstreamRequests += 1;
+    incoming.on("close", () => {
+      activeUpstreamRequests -= 1;
+      observeDisconnect?.();
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    publicHosts: ["converter.example"],
+    upstreamTimeoutMs: 30,
+  });
+  const routerOrigin = await listen(router);
+  await expect(call(routerOrigin, "GET", "/convert")).resolves.toEqual({
     body: "",
     cookies: [],
     status: 502,
   });
-  expect(await call(origin, "GET", "/caf%C3%A9")).toEqual({
-    body: "",
-    cookies: [],
-    status: 502,
+  await disconnected;
+
+  const secondDisconnected = new Promise<void>((resolve) => {
+    observeDisconnect = resolve;
   });
-  await new Promise((resolve) => router.close(resolve));
+  let observeSecondRequest: (() => void) | undefined;
+  const secondRequest = new Promise<void>((resolve) => {
+    observeSecondRequest = resolve;
+  });
+  upstream.once("request", () => observeSecondRequest?.());
+  const destination = new URL(routerOrigin);
+  const abandoned = request({
+    headers: { host: "converter.example" },
+    host: destination.hostname,
+    path: "/convert",
+    port: destination.port,
+  });
+  abandoned.on("error", () => undefined);
+  abandoned.end();
+  await secondRequest;
+  abandoned.destroy();
+  await secondDisconnected;
+  expect(activeUpstreamRequests).toBe(0);
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
+});
+
+test("routing selection and normalization cover every ordered class", () => {
+  expect(selectUpstream("/api/v1")).toBe("backend");
+  expect(selectUpstream("/api/v1/jobs/1")).toBe("backend");
+  expect(selectUpstream("/health/live")).toBe("backend");
+  expect(selectUpstream("/metrics")).toBe("backend");
+  expect(selectUpstream("/docs/redirect")).toBe("backend");
+  expect(selectUpstream("/_FRONTEND/HEALTH/ready")).toBe("deny");
+  expect(selectUpstream("/API/v1")).toBe("frontend");
+  expect(selectUpstream("/missing")).toBe("frontend");
+  expect(normalizeRequestTarget("/a/./b/../c?q=1")).toEqual({
+    path: "/a/c",
+    requestTarget: "/a/c?q=1",
+  });
+  expect(normalizeRequestTarget("/a%5Cb")).toEqual({
+    path: "/a/b",
+    requestTarget: "/a/b",
+  });
+});
+
+test("TLS files are optional only as a complete pair", () => {
+  expect(loadTls(undefined, undefined)).toBeUndefined();
+  expect(() => loadTls("cert.pem", undefined)).toThrow("must be set together");
+  expect(() => loadTls(undefined, "key.pem")).toThrow("must be set together");
 });
 
 test("upstream failures are empty before headers and destroy started bodies", async () => {

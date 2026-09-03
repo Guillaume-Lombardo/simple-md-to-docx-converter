@@ -1,0 +1,29 @@
+# The CNI-free trusted-upstream profile shares the application's slirp4netns
+# namespace. The public router remains the only published listener.
+services:
+  markweave:
+    ports:
+      - "127.0.0.1:${MARKWEAVE_PORT:-8080}:3100"
+
+  frontend:
+    network_mode: service:markweave
+    networks: !reset []
+
+  router:
+    network_mode: service:markweave
+    networks: !reset []
+    ports: !reset []
+    environment:
+      BACKEND_ORIGIN: http://127.0.0.1:8080
+      FRONTEND_ORIGIN: http://127.0.0.1:3000
+      ROUTER_HOST: 127.0.0.1
+      ROUTER_PORT: "3100"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3100/login',
+          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}})
+          .then(response => process.exit(response.status === 200 ? 0 : 1))

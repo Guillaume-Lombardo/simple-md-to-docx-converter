@@ -1,0 +1,85 @@
+# Pre-publication cutover overlay. CI supplies the exact locally staged image
+# identities. The post-publication adoption change replaces these inputs with
+# the two verified public release digests before quickstarts select this stack.
+services:
+  markweave:
+    image: "${MARKWEAVE_CUTOVER_BACKEND_IMAGE:?Set the exact staged backend image}"
+    ports: !reset []
+
+  frontend:
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:?Set the exact staged frontend image}"
+    platform: linux/amd64
+    depends_on:
+      markweave:
+        condition: service_healthy
+    networks:
+      - frontend
+    read_only: true
+    user: "1001:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3001/_frontend/health/ready')
+          .then(response => process.exit(response.status === 200 ? 0 : 1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  router:
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:?Set the exact staged frontend image}"
+    platform: linux/amd64
+    command: [node, router.mjs]
+    depends_on:
+      frontend:
+        condition: service_healthy
+      markweave:
+        condition: service_healthy
+    environment:
+      BACKEND_ORIGIN: http://markweave:8080
+      FRONTEND_ORIGIN: http://frontend:3000
+      PUBLIC_HOSTS: "${MARKWEAVE_ROUTER_PUBLIC_HOST:-localhost:${MARKWEAVE_PORT:-8080},127.0.0.1:${MARKWEAVE_PORT:-8080}}"
+      ROUTER_HOST: 0.0.0.0
+      ROUTER_PORT: "8080"
+      ROUTER_REQUEST_MAX_BYTES: "1100000"
+      ROUTER_UPSTREAM_TIMEOUT_MS: "30000"
+    ports:
+      - "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080"
+    networks:
+      - frontend
+    read_only: true
+    user: "1001:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8080/login',
+          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}})
+          .then(response => process.exit(response.status === 200 ? 0 : 1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s

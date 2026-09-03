@@ -110,11 +110,14 @@ def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
         "scripts/container/build.sh",
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
+        "scripts/container/assert-legacy-route-manifest.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
+        "scripts/container/wait-for-fake-clamav.sh",
+        "scripts/e2e/rollback-rehearsal.sh",
     ],
 )
 def test_container_shell_assets_are_syntactically_valid(script: str) -> None:
@@ -134,16 +137,16 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
 def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     """Both reviewed final-image paths execute the complete recovery contract."""
 
-    command = 'bash scripts/container/recovery-cli-smoke.sh "$image"'
+    ci_command = 'bash scripts/container/recovery-cli-smoke.sh "$final_image"'
+    release_command = 'bash scripts/container/recovery-cli-smoke.sh "$backend_image"'
     run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
-    ci_command = command.replace('"$image"', '"$final_image"')
     release = yaml.safe_load(
         Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
     )
     release_run = next(
         step["run"]
         for step in release["jobs"]["build-and-publish"]["steps"]
-        if step["name"] == "Build and validate the final rootless image"
+        if step["name"] == "Build and validate the final rootless image pair once"
     )
 
     assert run_ci.count(ci_command) == 1
@@ -154,10 +157,10 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
             'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
         )
     )
-    assert release_run.count(command) == 1
+    assert release_run.count(release_command) == 1
     assert release_run.index(
-        'bash scripts/container/build.sh "$image"'
-    ) < release_run.index(command)
+        'bash scripts/container/build.sh "$backend_image"'
+    ) < release_run.index(release_command)
 
 
 def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
@@ -201,6 +204,74 @@ def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
     assert (
         '(Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)' in smoke
     )
+
+
+def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
+    readiness = Path("scripts/container/wait-for-fake-clamav.sh").read_text(
+        encoding="utf-8"
+    )
+    standalone = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+    distributed = Path("scripts/container/distributed-api-smoke.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'socket.create_connection(("127.0.0.1", 3310), timeout=1)' in readiness
+    assert 'scanner.sendall(b"zINSTREAM\\0\\0\\0\\0\\0")' in readiness
+    assert 'expected = b"stream: OK\\0"' in readiness
+    assert "while len(response) < len(expected):" in readiness
+    assert "scanner.recv(len(expected) - len(response))" in readiness
+    assert "assert response == expected" in readiness
+    assert "scanner.recv(64)" not in readiness
+    assert "for _ in $(seq 1 60)" in readiness
+    assert "scanner did not become ready within 15 seconds" in readiness
+    assert 'podman logs --tail 50 "$container_name"' in readiness
+    assert standalone.index("wait-for-fake-clamav.sh") < standalone.index("settings=(")
+    assert distributed.index("wait-for-fake-clamav.sh") < distributed.index(
+        'podman run --detach --name "$postgres_name"'
+    )
+
+
+def test_container_ci_always_stages_bounded_status_evidence() -> None:
+    run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+
+    assert "printf 'Final-image validation started.\\n'" in run_ci
+    assert "trap record_ci_status EXIT" in run_ci
+    assert "Final-image validation failed with exit code %s." in run_ci
+    assert "MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY" in run_ci
+
+
+def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
+    route_manifest = Path(
+        "scripts/container/assert-legacy-route-manifest.sh"
+    ).read_text(encoding="utf-8")
+    evidence = json.loads(
+        Path("docs/evidence/t64-cutover-gates.json").read_text(encoding="utf-8")
+    )
+
+    assert 'bash scripts/e2e/rollback-rehearsal.sh "$profile"' in runner
+    assert "curl --connect-timeout 2 --max-time 5" in route_manifest
+    assert "0.5.2@$released_digest" in rollback
+    assert (
+        "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+        in rollback
+    )
+    assert "MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST=true" in rollback
+    assert 'scripts/container/api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/distributed-api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/recovery-cli-smoke.sh" "$released_image"' in rollback
+    assert 'cd "$runtime_directory"' in rollback
+    assert 'MARKWEAVE_REPOSITORY_ROOT="$repository"' in rollback
+    for path in ("/login", "/convert", "/templates", "/static/conversion.js"):
+        assert path in route_manifest
+    assert evidence["schema"] == "t64-cutover-gates-v1"
+    assert evidence["pre_removal"] == {
+        "conclusion": "success",
+        "run_id": 33686251439,
+        "source_sha": "30c11b4f109bba147e8cc7685d0ba2a1b44ec579",
+    }
+    assert evidence["rollback"]["profiles"] == ["standalone", "distributed"]
 
 
 def test_final_image_version_comes_from_project_metadata() -> None:
@@ -308,8 +379,9 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
     worker = next(
         container
         for document in documents
+        if document.get("kind") in {"Deployment", "StatefulSet"}
         for container in document["spec"]["template"]["spec"]["containers"]
-        if container["args"] == [mode]
+        if container.get("args") == [mode]
     )
     security = worker["securityContext"]
     assert security == {
@@ -322,6 +394,63 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
         "memory": "${WORKER_MEMORY_BUDGET_BYTES}",
         "ephemeral-storage": "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}",
     }
+
+
+def test_frontend_deployment_separates_pages_probes_router_and_credentials() -> None:
+    documents = tuple(
+        yaml.safe_load_all(
+            Path("deploy/frontend.yaml.example").read_text(encoding="utf-8")
+        )
+    )
+    workloads = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document["kind"] == "Deployment"
+    }
+    frontend = workloads["md-converter-frontend"]["spec"]["template"]["spec"]
+    container = frontend["containers"][0]
+    assert frontend["automountServiceAccountToken"] is False
+    assert frontend["terminationGracePeriodSeconds"] == 30
+    assert container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert container["resources"] == {
+        "requests": {
+            "cpu": "100m",
+            "memory": "128Mi",
+            "ephemeral-storage": "32Mi",
+        },
+        "limits": {
+            "cpu": "500m",
+            "memory": "256Mi",
+            "ephemeral-storage": "64Mi",
+        },
+    }
+    assert container["livenessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/live",
+        "port": "probe",
+    }
+    assert container["readinessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/ready",
+        "port": "probe",
+    }
+    assert "env" not in container and "envFrom" not in container
+    assert {mount["mountPath"] for mount in container["volumeMounts"]} == {"/tmp"}  # noqa: S108
+
+    router = workloads["md-converter-router"]["spec"]["template"]["spec"]
+    router_container = router["containers"][0]
+    assert router_container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert router_container["command"] == ["node", "router.mjs"]
+    environment = {item["name"]: item["value"] for item in router_container["env"]}
+    assert environment["BACKEND_ORIGIN"] == "http://md-converter-api:8080"
+    assert environment["FRONTEND_ORIGIN"] == "http://md-converter-frontend:3000"
+    assert environment["ROUTER_TLS_CERT_FILE"] == "/run/tls/tls.crt"
+    assert environment["ROUTER_TLS_KEY_FILE"] == "/run/tls/tls.key"
+    assert environment["ROUTER_REQUEST_MAX_BYTES"] == "${MARKWEAVE_REQUEST_MAX_BYTES}"
+    assert environment["ROUTER_UPSTREAM_TIMEOUT_MS"] == (
+        "${MARKWEAVE_ROUTER_UPSTREAM_TIMEOUT_MS}"
+    )
+    assert "includeSubDomains" not in Path("deploy/frontend.yaml.example").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_distributed_test_profile_is_provider_neutral_rustfs() -> None:
@@ -366,6 +495,8 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
         "sbom.spdx.json",
         "vulnerabilities.json",
         "image-metadata.json",
+        "container-diagnostics/ci-status.txt",
+        "container-diagnostics/scanner-readiness.txt",
     ):
         assert artifact in upload["with"]["path"]
     assert workflow["permissions"] == {"contents": "read"}

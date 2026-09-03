@@ -15,6 +15,8 @@ from markweave.config import MalwareScanningMode, Settings
 pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[2]
+CANDIDATE_BACKEND = "localhost/markweave-backend:t64"
+CANDIDATE_FRONTEND = "localhost/markweave-frontend:t64"
 
 
 def _load_rendered_settings(
@@ -135,3 +137,113 @@ def test_clamav_free_compose_can_enable_insecure_evaluation_mode() -> None:
         for name in document["services"]["markweave"]["environment"]
     )
     assert "clamav" not in document["services"]["markweave"].get("depends_on", {})
+
+
+def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "markweave-nextjs-contract",
+            "--file",
+            str(ROOT / "compose.yaml"),
+            "--file",
+            str(ROOT / "compose.simple.yaml"),
+            "--file",
+            str(ROOT / "compose.nextjs.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": CANDIDATE_BACKEND,
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": CANDIDATE_FRONTEND,
+            "MARKWEAVE_INITIAL_ADMIN_PASSWORD": "compose-contract-password",
+            "MARKWEAVE_PORT": "11279",
+            "MARKWEAVE_PUBLIC_ORIGIN": "http://localhost:11279",
+            "MARKWEAVE_ROUTER_PUBLIC_HOST": "localhost:11279",
+            "MARKWEAVE_WORK_DEVICE": "/dev/null",
+        },
+    )
+    services: dict[str, Any] = json.loads(result.stdout)["services"]
+    backend = services["markweave"]
+    frontend = services["frontend"]
+    router = services["router"]
+
+    assert backend["image"] == CANDIDATE_BACKEND
+    assert "ports" not in backend
+    assert frontend["image"] == CANDIDATE_FRONTEND
+    assert set(frontend["networks"]) == {"frontend"}
+    assert "environment" not in frontend
+    assert "volumes" not in frontend
+    assert router["image"] == CANDIDATE_FRONTEND
+    assert router["command"] == ["node", "router.mjs"]
+    assert router["environment"] == {
+        "BACKEND_ORIGIN": "http://markweave:8080",
+        "FRONTEND_ORIGIN": "http://frontend:3000",
+        "PUBLIC_HOSTS": "localhost:11279",
+        "ROUTER_HOST": "0.0.0.0",  # noqa: S104 - rendered deployment binding
+        "ROUTER_PORT": "8080",
+        "ROUTER_REQUEST_MAX_BYTES": "1100000",
+        "ROUTER_UPSTREAM_TIMEOUT_MS": "30000",
+    }
+    assert router["ports"] == [
+        {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 8080,
+            "published": "11279",
+            "protocol": "tcp",
+        }
+    ]
+
+
+def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "markweave-nextjs-podman-contract",
+            "--file",
+            str(ROOT / "compose.yaml"),
+            "--file",
+            str(ROOT / "compose.simple.yaml"),
+            "--file",
+            str(ROOT / "compose.podman.yaml"),
+            "--file",
+            str(ROOT / "compose.trusted-upstream.yaml"),
+            "--file",
+            str(ROOT / "compose.podman-trusted-upstream.yaml"),
+            "--file",
+            str(ROOT / "compose.nextjs.yaml"),
+            "--file",
+            str(ROOT / "compose.nextjs-podman-trusted-upstream.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": CANDIDATE_BACKEND,
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": CANDIDATE_FRONTEND,
+            "MARKWEAVE_INITIAL_ADMIN_PASSWORD": "compose-contract-password",
+            "MARKWEAVE_PORT": "11279",
+            "MARKWEAVE_PUBLIC_ORIGIN": "http://localhost:11279",
+            "MARKWEAVE_ROUTER_PUBLIC_HOST": "localhost:11279",
+            "MARKWEAVE_WORK_DEVICE": "/dev/null",
+        },
+    )
+    router = json.loads(result.stdout)["services"]["router"]
+
+    assert router["environment"]["ROUTER_PORT"] == "3100"
+    assert "http://127.0.0.1:3100/login" in router["healthcheck"]["test"][-1]
+    assert "http://127.0.0.1:8080/login" not in router["healthcheck"]["test"][-1]

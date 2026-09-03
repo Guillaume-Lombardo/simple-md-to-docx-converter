@@ -85,14 +85,11 @@ def provisioning_settings(data_directory: Path, source: Path | None) -> Settings
 
 
 @pytest.mark.functional
-def test_health_login_page_docs_and_openapi_contract(tmp_path: Path) -> None:
+def test_health_docs_and_openapi_contract(tmp_path: Path) -> None:
     with make_client(tmp_path) as client:
         assert client.get("/health/live").json() == {"status": "ok"}
         assert client.get("/health/ready").json() == {"status": "ready"}
-        page = client.get("/login")
-        assert page.status_code == 200
-        assert 'lang="en"' in page.text
-        assert "Sign in" in page.text
+        assert client.get("/login").status_code == 404
         assert client.get("/docs").status_code == 200
         paths = client.get("/openapi.json").json()["paths"]
         assert not any("signup" in path or "register" in path for path in paths)
@@ -174,12 +171,6 @@ def test_startup_csv_upsert_and_required_password_renewal_workflow(
         authenticated = login(client, "alice", "temporary-password")
         assert authenticated["user"]["password_change_required"] is True
         assert client.get("/api/v1/session").status_code == 200
-        restricted = client.get("/convert", follow_redirects=False)
-        assert restricted.status_code == 303
-        assert restricted.headers["location"] == "/change-password"
-        page = client.get("/change-password")
-        assert page.status_code == 200
-        assert "current password was accepted" in page.text
         assert client.get("/api/v1/admin/users").status_code == 403
 
         mismatch = client.post(
@@ -410,24 +401,6 @@ def test_csrf_replay_session_rotation_and_logout(tmp_path: Path) -> None:
         assert logout.status_code == 204
         assert "Max-Age=0" in logout.headers["set-cookie"]
         assert first.get("/api/v1/session").status_code == 401
-
-
-@pytest.mark.functional
-def test_browser_login_has_stable_failure_and_redirect_success(tmp_path: Path) -> None:
-    with make_client(tmp_path) as client:
-        failed = client.post(
-            "/login",
-            data={"username": "admin", "password": "wrong"},
-        )
-        assert failed.status_code == 401
-        assert "The username or password is incorrect." in failed.text
-        success = client.post(
-            "/login",
-            data={"username": "admin", "password": "admin-password"},
-            follow_redirects=False,
-        )
-        assert success.status_code == 303
-        assert success.headers["location"] == "/convert"
 
 
 @pytest.mark.functional

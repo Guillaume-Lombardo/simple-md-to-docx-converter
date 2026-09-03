@@ -5,7 +5,8 @@ there; an unauthenticated request redirects to `/login`. The Next.js workspace p
 template search, asynchronous submission, polling, cancellation, recent jobs, and downloads while
 calling FastAPI directly through same-origin `/api/v1` requests. FastAPI remains authoritative for
 authentication, validation, template resolution, quotas, capacity, persistence, job state, and result
-headers. The legacy FastAPI-rendered conversion page remains deployable until the T64 routing cutover.
+headers. The T64 cutover removed the legacy FastAPI-rendered conversion page after the complete
+pre-removal matrix passed in both storage profiles.
 
 ## Start a conversion
 
@@ -47,5 +48,5 @@ cd web && npm run test:coverage
 ```
 
 Unit tests cover rendering, schema handling, request identity, races, polling, cancellation, and safe
-downloads. The dedicated real-browser final-image workflow runs through the test-only same-origin
-router for both SQLite and PostgreSQL profiles; production browser routing remains unchanged until T64.
+downloads. The dedicated real-browser final-image workflow runs through the production same-origin
+router for both SQLite and PostgreSQL profiles.

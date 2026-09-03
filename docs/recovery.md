@@ -1,5 +1,11 @@
 # Backup and recovery
 
+The `0.6.0` release identity is a matched backend/frontend digest pair plus its route manifest and
+evidence checksum. Rollback restores the prior backend containing the legacy UI and its matching
+route manifest as one release-level operation; never combine either image across releases. Storage
+restore requirements remain profile-specific and are determined by schema/data compatibility, not
+by the stateless frontend.
+
 The recovery targets are profile-specific:
 
 | Profile | Maximum RPO | Maximum RTO |

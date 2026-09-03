@@ -69,13 +69,16 @@ repositories.
    Release only after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI
    job then rechecks that the version is still unpublished and uploads the verified files with
    PEP 740 attestations through OIDC.
-6. The reusable container workflow checks out the same SHA, derives the image tag from the detected
-   version, and runs the rootless final-image and Critical-vulnerability gates. It serializes the
-   image once into a private `dir:` transport, verifies the registry manifest bytes against
-   Podman's digest file, and uses Skopeo to copy those exact staged bytes to the `source-<SHA>` and
-   version tags. Authenticated preflight accepts only an absent tag or that same digest, and each
-   copy is followed by an exact remote digest check. It then generates provenance and attaches the
-   SBOM, publication receipt, and evidence to the verified Release identity. Because job
+6. The reusable container workflow checks out the same SHA, derives both image tags from the
+   detected version, and runs the rootless final-image, paired E2E, and Critical-vulnerability
+   gates. It serializes each image once into a private `dir:` transport and uploads the complete
+   backend/frontend staging artifact before any registry mutation. Authenticated preflight checks
+   every source and version tag for both roles before the first copy, accepting only an absent tag
+   or the exact intended digest. Skopeo then copies those exact staged bytes and verifies every
+   remote digest. A later copy failure may leave a partial pair, but the retained staging artifact
+   is sufficient for the bounded recovery path below; neither normal publication nor recovery
+   rebuilds an image. The workflow then generates provenance and attaches both SBOM sets,
+   publication receipts, and paired evidence to the verified Release identity. Because job
    credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
    before pushing provenance; it does not reuse or persist the publication job's credentials.
 
@@ -101,23 +104,25 @@ not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` the
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. Recovery must not rebuild the container: registry
+state before authorizing any manual recovery. Recovery must not rebuild either container: registry
 serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
 `container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
-source SHA, and the ID of a failed source run whose `build-and-publish` job succeeded and retained
-the exact evidence artifact.
+source SHA, and the ID of a failed source run whose `build-and-publish` job successfully retained
+the exact pre-mutation staging artifact before the job failed.
 
 Before download, recovery verifies the source run belongs to this upstream repository and exact
 workflow, ran from trusted `main` at a descendant of the release source and an ancestor of the
-current trusted `main` workflow SHA, completed with a successful build job, and has one bounded
-non-expired artifact with matching repository/run metadata. It downloads by immutable artifact ID,
-not name alone. It then validates the exact regular-file set,
-closed checksum bundle, OCI archive and metadata relationship, publication receipt, release
-version/tag/source, and the anonymously readable public GHCR digest. Only after those checks does
-it transfer the unchanged evidence into the recovery run, attest that exact public digest, and
-attach the SBOM and evidence to the already verified Release. The recovery job has no package-write
-or OIDC permission, never enters the PyPI environment, and cannot invoke either build or Python
-publication.
+current trusted `main` workflow SHA, reached the successful pre-mutation staging step, and has one
+bounded non-expired artifact with matching repository/run metadata. It downloads by immutable
+artifact ID, not name alone. It then validates the exact regular-file set, closed checksum bundle,
+OCI archives and metadata relationships, publication receipts, release version/tag/source, and the
+state of both public GHCR digests. The recovery job has scoped `packages: write` permission because
+it may need to publish the missing role from the retained bytes; it preflights both roles before
+copying, accepts an already-correct role idempotently, and rejects any conflicting digest. Only
+after both exact digests are public does it transfer the unchanged evidence into the recovery run.
+Separate jobs attest those exact public digests and attach the evidence to the already verified
+Release. Recovery has no OIDC permission, never enters the PyPI environment, and cannot invoke
+either build or Python publication.
 
 The dispatch shape is:
 
@@ -163,8 +168,8 @@ delete external release state outside this protected automation without explicit
 
 ## Frontend publication after T64
 
-The current release workflow publishes only the existing backend image. T64 must extend, not
-replace, its trust model for the approved Next.js cutover. The frontend package identity is
+The release workflow publishes the backend and frontend as one evidence-bound pair without
+replacing the established trust model. The frontend package identity is
 `ghcr.io/guillaume-lombardo/md-converter-web`; it shares the Markweave version, source SHA,
 `v<version>` tag, GitHub Release, and protected human gate with the backend but has its own registry
 manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance.
@@ -172,7 +177,7 @@ manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance
 One release is deployable only when the PyPI artifact and both image receipts agree on version and
 source SHA, both public digests are anonymously readable, and the release evidence manifest binds
 the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
-removing the legacy renderer from candidate source. Only after that removal does the release
+removing the legacy renderer from candidate source. The `0.6.0` source satisfies that gate; the release
 workflow build and serialize each final image once, run the complete rootless acceptance matrix
 against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
 another after legacy removal. If publication is partial, recover the missing image/evidence from

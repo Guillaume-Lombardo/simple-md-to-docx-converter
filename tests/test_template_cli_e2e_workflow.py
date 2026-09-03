@@ -197,11 +197,13 @@ def test_template_cli_e2e_turns_command_timeout_into_staged_failure(
     assert "CLI E2E failed at list: exit=124" in capsys.readouterr().err
 
 
-def test_template_cli_e2e_runs_after_browser_workflow_and_before_restart() -> None:
+def test_template_cli_e2e_runs_after_administration_cli_and_before_provisioning_restart() -> (
+    None
+):
     runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
-    browser = runner.index("/e2e/browser-final-image.test.mjs")
+    administration = runner.index("tests.e2e.administration_cli_workflow")
     templates = runner.index("tests.e2e.template_cli_workflow")
-    restart = runner.index('podman restart --time 15 "$application_name"')
+    restart = runner.index('chmod 0644 "$provisioning_file"')
 
-    assert browser < templates < restart
+    assert administration < templates < restart
     assert runner.count("tests.e2e.template_cli_workflow") == 1

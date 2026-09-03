@@ -9,7 +9,8 @@ readonly application_name=md-converter-t20-distributed-api-smoke
 readonly worker_name=md-converter-t20-distributed-worker-smoke
 readonly clamav_name=md-converter-t20-distributed-clamav-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
-seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
+readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
+seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=()
 template_directory="$(mktemp -d)"
@@ -47,10 +48,12 @@ podman run --detach --name "$clamav_name" --network "$network_name" \
   --network-alias clamav --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
-  --volume "$(pwd)/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
+  --volume "$repository/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
   --entrypoint /opt/md-converter/venv/bin/python \
   "$image" /fake-clamav.py >/dev/null
 created=("$clamav_name" "${created[@]}")
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed
 podman run --detach --name "$postgres_name" --network "$network_name" \
   --network-alias postgres \
   --env POSTGRES_DB=md_converter_test \
@@ -185,7 +188,7 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   "${settings[@]}" "$image" worker >/dev/null
 created=("$worker_name" "${created[@]}")
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
-for _ in $(seq 1 80); do
+for _ in $(seq 1 240); do
   if curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
       | grep -Fq '"status":"ready"'; then
     break
@@ -200,6 +203,10 @@ for _ in $(seq 1 80); do
 done
 curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
   | grep -Fq '"status":"ready"'
+if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
+  bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
+    "http://127.0.0.1:$application_port"
+fi
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
 podman exec "$application_name" pandoc /tmp/t20-template.md \
@@ -225,7 +232,7 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   --shm-size=128m \
   "${settings[@]}" \
   --env MARKWEAVE_CONVERSION_MERMAID_EXECUTABLE=/blocking-mmdc.sh \
-  --volume "$(pwd)/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
+  --volume "$repository/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
   --volume "$blocking_evidence_directory:/evidence:rw,Z" \
   "$image" worker >/dev/null
 test "$(podman inspect "$worker_name" --format '{{.State.Running}}')" = true

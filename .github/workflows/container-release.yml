@@ -38,12 +38,13 @@ jobs:
   build-and-publish:
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'push' && github.sha == inputs.source-sha }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
     outputs:
-      digest: ${{ steps.push.outputs.digest }}
+      backend-digest: ${{ steps.push.outputs.backend-digest }}
+      frontend-digest: ${{ steps.push.outputs.frontend-digest }}
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +61,11 @@ jobs:
         with:
           version: "0.12.1"
           enable-cache: false
+      - name: Set up pinned Node for the frontend image
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
       - name: Validate the reviewed release identity
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,28 +98,56 @@ jobs:
           base=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
           podman pull --quiet "$base"
           test "$(podman image inspect "$base" --format '{{.Digest}}')" = sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
-      - name: Build and validate the final rootless image
+      - name: Build and validate the final rootless image pair once
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          image="localhost/md-converter:$RELEASE_VERSION"
-          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"
-          bash scripts/container/smoke.sh "$image"
-          bash scripts/container/api-smoke.sh "$image"
-          bash scripts/container/distributed-api-smoke.sh "$image"
-          bash scripts/container/recovery-cli-smoke.sh "$image"
-      - name: Generate and verify release SBOM evidence
+          backend_image="localhost/md-converter:$RELEASE_VERSION"
+          frontend_image="localhost/md-converter-web:$RELEASE_VERSION"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"
+          podman build --format docker --timestamp "$source_date_epoch" \
+            --tag "$frontend_image" --file web/Containerfile web
+          bash scripts/container/smoke.sh "$backend_image"
+          bash scripts/container/api-smoke.sh "$backend_image"
+          bash scripts/container/distributed-api-smoke.sh "$backend_image"
+          bash scripts/container/recovery-cli-smoke.sh "$backend_image"
+          bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing
+      - name: Generate and verify release SBOM evidence for both images
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-        run: bash scripts/container/supply-chain.sh "localhost/md-converter:$RELEASE_VERSION" artifacts/container release
+        run: |
+          set -euo pipefail
+          bash scripts/container/supply-chain.sh \
+            "localhost/md-converter:$RELEASE_VERSION" artifacts/container/backend release
+          bash scripts/container/supply-chain.sh \
+            "localhost/md-converter-web:$RELEASE_VERSION" artifacts/container/frontend release
+      - name: Test the exact staged image pair in both storage profiles
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          export MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"
+          export MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"
+          bash scripts/e2e/run.sh standalone
+          bash scripts/e2e/run.sh distributed
+      - name: Retain staged pair before registry mutation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-stage-${{ inputs.tag }}
+          path: |
+            artifacts/container/backend/
+            artifacts/container/frontend/
+          if-no-files-found: error
+          retention-days: 90
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Publish without overwriting a conflicting release image
+      - name: Publish the bound pair without overwriting a conflicting image
         id: push
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -121,122 +155,31 @@ jobs:
           SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          registry_repository="ghcr.io/guillaume-lombardo/md-converter"
-          registry_path="guillaume-lombardo/md-converter"
-          source_tag="source-$SOURCE_SHA"
-          registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"
-          chmod 700 "$registry_stage"
-          cleanup() {
-            rm -rf -- "$registry_stage"
-          }
-          trap cleanup EXIT
-          podman push --format oci --digestfile "$RUNNER_TEMP/staged-image-digest" \
-            "localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"
-          intended_digest="$(cat "$RUNNER_TEMP/staged-image-digest")"
-          [[ "$intended_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          staged_manifest_digest="sha256:$(sha256sum "$registry_stage/manifest.json" | cut -d' ' -f1)"
-          test "$staged_manifest_digest" = "$intended_digest"
-          registry_token="$(curl --fail --silent --show-error \
-            --user "$GITHUB_ACTOR:$GHCR_TOKEN" \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull,push" \
-            | jq --exit-status --raw-output '.token // .access_token')"
-
-          inspect_remote_tag() {
-            local tag="$1"
-            local headers="$RUNNER_TEMP/registry-headers"
-            local status
-            if ! status="$(curl --silent --show-error --output /dev/null \
-              --dump-header "$headers" --write-out '%{http_code}' \
-              --header "Authorization: Bearer $registry_token" \
-              --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-              "https://ghcr.io/v2/$registry_path/manifests/$tag")"; then
-              return 5
-            fi
-            if [[ "$status" = 404 ]]; then
-              return 4
-            fi
-            [[ "$status" = 200 ]] || return 5
-            local digest
-            digest="$(awk -F ': ' 'tolower($1) == "docker-content-digest" {gsub("\\r", "", $2); print $2}' "$headers")"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 5
-            printf '%s\n' "$digest"
-          }
-          copy_staged_tag() {
-            local tag="$1"
-            local copy_status
-            local copied_digest
-            local inspect_status
-            if skopeo copy --preserve-digests --retry-times 3 \
-              "dir:$registry_stage" "docker://$registry_repository:$tag"; then
-              copy_status=0
-            else
-              copy_status="$?"
-            fi
-            if copied_digest="$(inspect_remote_tag "$tag")"; then
-              if [[ "$copied_digest" = "$intended_digest" ]]; then
-                if [[ "$copy_status" != 0 ]]; then
-                  echo "Skopeo returned $copy_status after GHCR stored the exact expected manifest for $tag; accepting the verified registry postcondition." >&2
-                fi
-                return 0
-              fi
-              echo "GHCR tag $tag resolves to unexpected digest $copied_digest after copy." >&2
-              return 1
-            else
-              inspect_status="$?"
-              echo "GHCR tag $tag could not be verified after Skopeo returned $copy_status (inspection status $inspect_status)." >&2
-              return 1
-            fi
-          }
-
-          if remote_digest="$(inspect_remote_tag "$source_tag")"; then
-            test "$remote_digest" = "$intended_digest"
-          else
-            test "$?" = 4
-            copy_staged_tag "$source_tag"
-            test "$(inspect_remote_tag "$source_tag")" = "$intended_digest"
-          fi
-
-          if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then
-            test "$remote_digest" = "$intended_digest"
-          else
-            test "$?" = 4
-            copy_staged_tag "$RELEASE_VERSION"
-            test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"
-          fi
-          archive_digest="$(jq --exit-status --raw-output '.image.oci_manifest_digest' artifacts/container/image-metadata.json)"
-          [[ "$archive_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          jq --null-input \
-            --arg archive_digest "$archive_digest" \
-            --arg registry_digest "$intended_digest" \
-            --arg source_sha "$SOURCE_SHA" \
-            --arg version "$RELEASE_VERSION" \
-            '{oci_archive_manifest_digest: $archive_digest, registry_manifest_digest: $registry_digest, source_sha: $source_sha, version: $version}' \
-            > artifacts/container/registry-publication.json
-          printf 'digest=%s\n' "$intended_digest" >> "$GITHUB_OUTPUT"
+          bash scripts/container/publish-release-pair.sh \
+            artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA"
       - name: Retain exact release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: container-release-${{ inputs.tag }}
           path: |
-            artifacts/container/image.oci.tar
-            artifacts/container/sbom.cdx.json
-            artifacts/container/sbom.spdx.json
-            artifacts/container/vulnerabilities.json
-            artifacts/container/image-metadata.json
-            artifacts/container/registry-publication.json
-            artifacts/container/release-bundle.sha256
+            artifacts/container/backend/
+            artifacts/container/frontend/
+            artifacts/container/release-images.json
+            artifacts/container/release-images.sha256
           if-no-files-found: error
           retention-days: 90
 
   recover-evidence:
     if: ${{ github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: read
+      packages: write
     outputs:
-      digest: ${{ steps.identity.outputs.digest }}
+      backend-digest: ${{ steps.push.outputs.backend-digest }}
+      frontend-digest: ${{ steps.push.outputs.frontend-digest }}
     steps:
       - name: Check out the trusted recovery implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -284,44 +227,39 @@ jobs:
             = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
 
           workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/container-release.yml" --jq .id)"
+          release_workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml" --jq .id)"
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID")"
           jq --exit-status \
             --argjson repository_id "$EXPECTED_REPOSITORY_ID" \
             --argjson run_id "$ARTIFACT_RUN_ID" \
             --argjson workflow_id "$workflow_id" \
-            '.id == $run_id and .repository.id == $repository_id and .head_repository.id == $repository_id and .workflow_id == $workflow_id and .path == ".github/workflows/container-release.yml" and .event == "workflow_dispatch" and .head_branch == "main" and .status == "completed" and .conclusion == "failure"' \
+            --argjson release_workflow_id "$release_workflow_id" \
+            '.id == $run_id and .repository.id == $repository_id and .head_repository.id == $repository_id and ((.workflow_id == $workflow_id and .path == ".github/workflows/container-release.yml" and .event == "workflow_dispatch") or (.workflow_id == $release_workflow_id and .path == ".github/workflows/release.yml" and .event == "push")) and .head_branch == "main" and .status == "completed" and .conclusion == "failure"' \
             <<< "$run_json" >/dev/null
           run_sha="$(jq --exit-status --raw-output '.head_sha | select(test("^[0-9a-f]{40}$"))' <<< "$run_json")"
           git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"
           git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"
 
           jobs_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs")"
-          test "$(jq '[.jobs[] | select(.name == "build-and-publish" and .status == "completed" and .conclusion == "success")] | length' <<< "$jobs_json")" = 1
+          test "$(jq '[.jobs[] | select((.name == "build-and-publish" or (.name | endswith(" / build-and-publish"))) and .status == "completed" and ([.steps[] | select(.name == "Retain staged pair before registry mutation" and .status == "completed" and .conclusion == "success")] | length) == 1)] | length' <<< "$jobs_json")" = 1
           artifact_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts" \
-            | jq --exit-status --arg name "container-release-$RELEASE_TAG" \
-              'if .total_count == 1 and (.artifacts | length) == 1 and .artifacts[0].name == $name then .artifacts[0] else error("expected the single retained artifact") end')"
+            | jq --exit-status --arg name "container-stage-$RELEASE_TAG" \
+              '[.artifacts[] | select(.name == $name)] | if length == 1 then .[0] else error("expected one exact staged-pair artifact") end')"
           jq --exit-status \
             --argjson repository_id "$EXPECTED_REPOSITORY_ID" \
             --argjson run_id "$ARTIFACT_RUN_ID" \
             --arg run_sha "$run_sha" \
-            '.expired == false and .size_in_bytes > 0 and .size_in_bytes <= 2000000000 and .workflow_run.id == $run_id and .workflow_run.repository_id == $repository_id and .workflow_run.head_repository_id == $repository_id and .workflow_run.head_sha == $run_sha' \
+            '.expired == false and .size_in_bytes > 0 and .size_in_bytes <= 4000000000 and .workflow_run.id == $run_id and .workflow_run.repository_id == $repository_id and .workflow_run.head_repository_id == $repository_id and .workflow_run.head_sha == $run_sha' \
             <<< "$artifact_json" >/dev/null
           artifact_id="$(jq --exit-status --raw-output '.id | select(. > 0)' <<< "$artifact_json")"
-
-          registry_path="guillaume-lombardo/md-converter"
-          registry_token="$(curl --fail --silent --show-error \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:$registry_path:pull" \
-            | jq --exit-status --raw-output '.token // .access_token')"
-          public_headers="$RUNNER_TEMP/public-registry-headers"
-          public_status="$(curl --silent --show-error --output /dev/null \
-            --dump-header "$public_headers" --write-out '%{http_code}' \
-            --header "Authorization: Bearer $registry_token" \
-            --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/$registry_path/manifests/$RELEASE_VERSION")"
-          test "$public_status" = 200
-          public_digest="$(awk -F ': ' 'tolower($1) == "docker-content-digest" {gsub("\\r", "", $2); print $2}' "$public_headers")"
-          [[ "$public_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          printf 'artifact-id=%s\ndigest=%s\n' "$artifact_id" "$public_digest" >> "$GITHUB_OUTPUT"
+          printf 'artifact-id=%s\n' "$artifact_id" >> "$GITHUB_OUTPUT"
+      - name: Install rootless Podman and Skopeo for exact-byte recovery
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes podman skopeo
+          podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true
+          skopeo --version
       - name: Download the exact retained artifact by immutable ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -331,31 +269,43 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.artifact-run-id }}
           path: artifacts/container
+      - name: Recover or verify the exact retained pair publication
+        id: push
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          set -euo pipefail
+          git show "$SOURCE_SHA:web/package-lock.json" > "$RUNNER_TEMP/release-package-lock.json"
+          bash scripts/container/publish-release-pair.sh \
+            artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA" \
+            "$RUNNER_TEMP/release-package-lock.json"
       - name: Verify retained bundle integrity and release identity
         env:
-          PUBLIC_DIGEST: ${{ steps.identity.outputs.digest }}
+          BACKEND_DIGEST: ${{ steps.push.outputs.backend-digest }}
+          FRONTEND_DIGEST: ${{ steps.push.outputs.frontend-digest }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_VERSION: ${{ inputs.version }}
           SOURCE_SHA: ${{ inputs.source-sha }}
         run: >-
-          uv run python -m scripts.container.recover_release_evidence
+          uv run python -m scripts.container.release_pair verify
           --artifacts artifacts/container
           --version "$RELEASE_VERSION"
           --tag "$RELEASE_TAG"
           --source-sha "$SOURCE_SHA"
-          --registry-digest "$PUBLIC_DIGEST"
+          --frontend-lock-sha256 "$(git show "$SOURCE_SHA:web/package-lock.json" | sha256sum | cut -d' ' -f1)"
+          --backend-registry-digest "$BACKEND_DIGEST"
+          --frontend-registry-digest "$FRONTEND_DIGEST"
       - name: Transfer the exact verified evidence to this recovery run
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: container-release-${{ inputs.tag }}
           path: |
-            artifacts/container/image.oci.tar
-            artifacts/container/sbom.cdx.json
-            artifacts/container/sbom.spdx.json
-            artifacts/container/vulnerabilities.json
-            artifacts/container/image-metadata.json
-            artifacts/container/registry-publication.json
-            artifacts/container/release-bundle.sha256
+            artifacts/container/backend/
+            artifacts/container/frontend/
+            artifacts/container/release-images.json
+            artifacts/container/release-images.sha256
           if-no-files-found: error
           retention-days: 90
 
@@ -376,11 +326,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Attest the published image identity
+      - name: Attest the published backend image identity
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ghcr.io/guillaume-lombardo/md-converter
-          subject-digest: ${{ needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest }}
+          subject-digest: ${{ needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}
+          push-to-registry: true
+      - name: Attest the published frontend image identity
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/guillaume-lombardo/md-converter-web
+          subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}
           push-to-registry: true
 
   release-evidence:
@@ -407,12 +363,16 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
             --jq '[.tag_name, .target_commitish, .draft, .prerelease] | @tsv')" \
             = "$RELEASE_TAG"$'\t'"$SOURCE_SHA"$'\tfalse\tfalse'
+          release_assets="$RUNNER_TEMP/release-assets"
+          mkdir "$release_assets"
+          for role in backend frontend; do
+            for name in sbom.cdx.json sbom.spdx.json vulnerabilities.json image-metadata.json registry-publication.json release-bundle.sha256; do
+              cp -- "artifacts/container/$role/$name" "$release_assets/$role-$name"
+            done
+          done
           gh release upload "$RELEASE_TAG" \
-            artifacts/container/sbom.cdx.json \
-            artifacts/container/sbom.spdx.json \
-            artifacts/container/vulnerabilities.json \
-            artifacts/container/image-metadata.json \
-            artifacts/container/registry-publication.json \
-            artifacts/container/release-bundle.sha256 \
+            "$release_assets"/* \
+            artifacts/container/release-images.json \
+            artifacts/container/release-images.sha256 \
             --repo "$GITHUB_REPOSITORY" \
             --clobber

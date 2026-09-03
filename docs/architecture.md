@@ -1,8 +1,13 @@
 # Architecture
 
-Markweave currently uses a server-rendered FastAPI browser interface with durable asynchronous
-conversion workers. The approved T58 target replaces only that browser presentation with a
-separate Next.js process; FastAPI and the worker/storage architecture remain authoritative. See
+Version `0.6.0` completes the browser cutover: the backend composition root contains no HTML or
+static-asset router. Next.js owns browser presentation, the same-origin router owns only transport
+routing and minimum response headers, and FastAPI remains the sole business and persistence
+authority.
+
+Markweave uses a separate Next.js browser interface with durable asynchronous conversion workers.
+The T58/T64 cutover replaced only browser presentation; FastAPI and the worker/storage architecture
+remain authoritative. See
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md) for the staged
 topology and parity contract. Markweave accepts Markdown, local resources, and validated DOCX
 reference templates; Pandoc creates DOCX, local Mermaid CLI and sandboxed Chromium render diagrams,
@@ -10,8 +15,8 @@ and headless LibreOffice creates PDF.
 
 ## Component boundaries
 
-- The HTTP and Web layer authenticates local users, enforces same-origin and CSRF rules, validates
-  request structure, serves the browser interface, and exposes job state.
+- The FastAPI HTTP layer authenticates local users, enforces same-origin and CSRF rules, validates
+  request structure, and exposes job state; the separate Next.js process serves browser presentation.
 - The application layer coordinates account, template, conversion, audit, and cleanup workflows.
 - Domain code defines immutable identifiers, authorization, template versions, job states, leases,
   cancellation, and stable failures without depending on a storage product.

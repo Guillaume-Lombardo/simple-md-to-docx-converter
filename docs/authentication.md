@@ -1,5 +1,12 @@
 # Local authentication
 
+Browser authentication is implemented by the separate Next.js runtime using relative same-origin
+calls to FastAPI. The production router strips cookies from every frontend request but preserves
+them unchanged on API routes; FastAPI remains the only session, CSRF, password, and authorization
+authority. The backend no longer serves `/login` or `/change-password` pages.
+Next.js owns the `/login`, `/change-password`, `/convert`, and `/templates` browser routes;
+FastAPI owns only their `/api/v1/**` authentication, conversion, and template operations.
+
 ## Provisioning and startup
 
 Public registration is not exposed. Startup requires the initial administrator through

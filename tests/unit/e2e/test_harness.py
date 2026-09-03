@@ -17,6 +17,7 @@ RESTART_PREPARATION_BROWSER = Path(
     "tests/e2e/browser-next-conversion-restart-prepare.test.mjs"
 ).resolve()
 RESTART_BROWSER = Path("tests/e2e/browser-next-conversion-restart.test.mjs").resolve()
+ADMISSION_FIXTURE = Path("tests/e2e/frontend-admission-fixture.mjs").resolve()
 
 
 @pytest.mark.unit
@@ -283,7 +284,7 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
         if line.lstrip().startswith("podman run")
     ]
 
-    assert len(podman_runs) == 13
+    assert len(podman_runs) == 15
     assert all(
         '"$temporary_directory" "$temporary_directory_identity"' in lines[index - 1]
         for index in podman_runs
@@ -292,6 +293,200 @@ def test_every_final_image_container_monitor_inherits_owned_directory() -> None:
     removal_index = runner.index("if ! e2e_remove_harness_directory")
     worktree_index = runner.index("if ! e2e_require_worktree_state_unchanged")
     assert removal_index < worktree_index
+
+
+@pytest.mark.unit
+def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+
+    assert "frontend-auth-router.mjs" not in runner
+    assert "routing-fixture.mjs" not in runner
+    assert (
+        'readonly published_frontend_image="${MARKWEAVE_E2E_FRONTEND_IMAGE:-}"'
+        in runner
+    )
+    assert (
+        "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together"
+        in runner
+    )
+    assert (
+        "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together"
+        in runner
+    )
+    assert "Published and local E2E image pairs are mutually exclusive" in runner
+    assert "Published backend and frontend E2E image versions must match" in runner
+    assert "Local backend and frontend E2E image versions must match" in runner
+    assert 'podman image exists "$image"' in runner
+    assert 'podman image exists "$frontend_image"' in runner
+    assert '"$frontend_image" node router.mjs' in runner
+    assert 'local backend_origin="${2:-http://127.0.0.1:8080}"' in runner
+    assert 'local frontend_origin="${3:-http://frontend:3000}"' in runner
+    assert 'local expected_api_status="${4:-401}"' in runner
+    assert 'local probe_page="${5:-true}"' in runner
+    assert "AbortSignal.timeout(1000)" in runner
+    assert "--env PUBLIC_HOSTS=localhost:3100" in runner
+    assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
+    assert runner.count('start_production_router "$application_name"') == 6
+    assert runner.count('restart_backend_and_router "$application_name"') == 1
+    assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
+    assert runner.count('start_production_router "$expiry_application_name"') == 1
+    provisioning = runner.index("/e2e/browser-provisioning-restart.test.mjs")
+    first_router = runner.index('start_production_router "$application_name"')
+    assert first_router < provisioning
+    assert (
+        "MARKWEAVE_E2E_BASE_URL=http://localhost:3100"
+        in runner[first_router:provisioning]
+    )
+    assert (
+        'start_production_router "$application_name" http://127.0.0.1:1 \\\n'
+        "  http://frontend:3000 502" in runner
+    )
+    assert "MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage" in runner
+    assert "MARKWEAVE_E2E_RUNTIME_FAILURE=backend-outage" in runner
+    assert "MARKWEAVE_E2E_RUNTIME_FAILURE=admission" in runner
+    assert 'podman kill --signal TERM "$frontend_name"' in runner
+    assert "/e2e/frontend-admission-fixture.mjs" in runner
+    fixture_started = runner.index("/e2e/frontend-admission-fixture.mjs")
+    fixture_ready = runner.index(
+        '[[ -f "$evidence_directory/frontend-admission-ready" ]] && break'
+    )
+    admission_router = runner.index(
+        'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
+        "  http://frontend:3000 401 false"
+    )
+    assert fixture_started < fixture_ready < admission_router
+    assert 'echo "Timed out waiting for the admission frontend." >&2' in runner
+    assert (
+        'e2e_podman logs "$frontend_name" >&2 || true'
+        in runner[fixture_ready:admission_router]
+    )
+    assert (
+        'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
+        "  http://frontend:3000 401 false" in runner
+    )
+    assert 'podman logs "$router_name" >&2 || true' in runner
+    assert 'podman logs "$frontend_name" >&2 || true' in runner
+    assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.unit
+def test_admission_fixture_reports_only_listening_readiness() -> None:
+    source = ADMISSION_FIXTURE.read_text(encoding="utf-8")
+
+    listen = source.index('page.server.listen(3000, "0.0.0.0", () => {')
+    ready = source.index("frontend-admission-ready")
+    assert listen < ready
+    assert 'page.server.listen(3000, "0.0.0.0");' not in source
+
+
+@pytest.mark.parametrize(
+    ("backend", "frontend", "message"),
+    [
+        (
+            "ghcr.io/guillaume-lombardo/md-converter:0.6.0@sha256:" + "a" * 64,
+            "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "b" * 64,
+            "Published backend and frontend E2E image versions must match.",
+        ),
+        (
+            "localhost/md-converter:0.6.0",
+            "localhost/md-converter-web:0.6.1",
+            "Local backend and frontend E2E image versions must match.",
+        ),
+    ],
+)
+def test_e2e_runner_rejects_mismatched_pair_versions(
+    backend: str,
+    frontend: str,
+    message: str,
+) -> None:
+    prefix = "MARKWEAVE_E2E" if backend.startswith("ghcr.io") else "MARKWEAVE_E2E_LOCAL"
+    result = subprocess.run(
+        [str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            f"{prefix}_IMAGE": backend,
+            f"{prefix}_FRONTEND_IMAGE": frontend,
+        },
+    )
+
+    assert result.returncode == 2
+    assert message in result.stderr
+
+
+@pytest.mark.unit
+def test_router_is_removed_before_every_backend_network_parent() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+
+    assert 'podman rm --force "$router_name" "$application_name"' not in runner
+    assert 'podman rm --force "$router_name" "$expiry_application_name"' not in runner
+    assert runner.count('podman rm --force "$router_name" >/dev/null') == 9
+    cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
+    assert cleanup.index('podman rm --force "$router_name"') < cleanup.index(
+        'for resource in "${created[@]}"'
+    )
+    assert (
+        runner.count(
+            'podman rm --force "$router_name" >/dev/null\n'
+            'podman rm --force "$application_name" >/dev/null'
+        )
+        == 3
+    )
+    assert (
+        'podman rm --force "$router_name" >/dev/null\n'
+        'podman rm --force "$expiry_application_name" "$clamav_name" >/dev/null'
+        in runner
+    )
+    helper_start = runner.index("restart_backend_and_router() {")
+    restart_helper = runner[
+        helper_start : runner.index("\nremove_artifacts\n", helper_start)
+    ]
+    remove_index = restart_helper.index('podman rm --force "$router_name"')
+    restart_index = restart_helper.index(
+        'podman restart --time 15 "$backend_container"'
+    )
+    ready_index = restart_helper.index("wait_for_url")
+    start_index = restart_helper.index('start_production_router "$backend_container"')
+    assert remove_index < restart_index < ready_index < start_index
+
+    kill_helper_start = runner.index("kill_backend_and_reconnect_router() {")
+    kill_helper = runner[
+        kill_helper_start : runner.index("\nremove_artifacts\n", kill_helper_start)
+    ]
+    remove_index = kill_helper.index('podman rm --force "$router_name"')
+    kill_index = kill_helper.index('podman kill --signal KILL "$backend_container"')
+    assert_exit_index = kill_helper.index(".State.ExitCode")
+    backend_start_index = kill_helper.index('podman start "$backend_container"')
+    ready_index = kill_helper.index("wait_for_url")
+    router_start_index = kill_helper.index(
+        'start_production_router "$backend_container"'
+    )
+    assert (
+        remove_index
+        < kill_index
+        < assert_exit_index
+        < backend_start_index
+        < ready_index
+        < router_start_index
+    )
+
+
+@pytest.mark.unit
+def test_browser_recovery_uses_final_router_and_exact_forced_restart() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    router_index = runner.index('start_production_router "$application_name"')
+    checkpoint_index = runner.index("/e2e/browser-recovery-checkpoint.test.mjs")
+    kill_index = runner.index(
+        'kill_backend_and_reconnect_router "$application_name"', checkpoint_index
+    )
+    verify_index = runner.index("/e2e/browser-recovery.test.mjs", kill_index)
+
+    assert router_index < checkpoint_index < kill_index < verify_index
+    phase = runner[router_index:verify_index]
+    assert phase.count("MARKWEAVE_E2E_BASE_URL=http://localhost:3100") >= 2
+    assert "MARKWEAVE_E2E_BASE_URL=http://127.0.0.1:8080" not in runner
 
 
 @pytest.mark.unit
@@ -310,11 +505,11 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     preparation_command_index = runner.rindex(
         "podman exec", admission_index, preparation_index
     )
-    restart_index = runner.index(
-        'podman restart --time 15 "$application_name"', preparation_index
+    restarted_router_index = runner.index(
+        'restart_backend_and_router "$application_name"', preparation_index
     )
     recovery_index = runner.index(
-        "/e2e/browser-next-conversion-restart.test.mjs", restart_index
+        "/e2e/browser-next-conversion-restart.test.mjs", restarted_router_index
     )
     short_lifetime_index = runner.index("MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2")
     expiry_index = runner.index(
@@ -328,7 +523,8 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
     assert runner.count("/e2e/browser-next-conversion-restart.test.mjs") == 1
     assert runner.count("/e2e/browser-next-conversion-expiry.test.mjs") == 1
     assert runner.count("MARKWEAVE_E2E_CONVERSION_STATE=") == 3
-    preparation = runner[preparation_command_index:restart_index]
+    assert preparation_index < restarted_router_index < recovery_index
+    preparation = runner[preparation_command_index:restarted_router_index]
     assert (
         '"$application_name" node --test \\\n'
         "  /e2e/browser-next-conversion-restart-prepare.test.mjs\n" in preparation
@@ -339,7 +535,7 @@ def test_runner_invokes_next_conversion_browser_in_both_profile_matrix() -> None
         < failure_index
         < admission_index
         < preparation_index
-        < restart_index
+        < restarted_router_index
         < recovery_index
         < short_lifetime_index
         < expiry_index
@@ -489,7 +685,7 @@ def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() ->
     )
     restore = runner[
         admission_index : runner.index(
-            'podman restart --time 15 "$application_name"', admission_index
+            'restart_backend_and_router "$application_name"', admission_index
         )
     ]
     assert 'podman start "$worker_one_name" "$worker_two_name"' in restore

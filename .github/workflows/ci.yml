@@ -367,7 +367,7 @@ jobs:
             --connect-timeout 20 --max-time 180 --retry 3 --retry-all-errors \
             --output "$chrome_deb" "$CHROME_URL"
           echo "$CHROME_SHA256  $chrome_deb" | sha256sum --check --strict
-          sudo apt-get install --yes "$chrome_deb"
+          sudo apt-get install --yes --allow-downgrades "$chrome_deb"
           echo "$MERMAID_LOCK_SHA256  spikes/toolchain/package-lock.json" \
             | sha256sum --check --strict
           npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
@@ -376,12 +376,6 @@ jobs:
           test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.16.0"
           test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
             = "Google Chrome 151.0.7922.173"
-      - name: Run authenticated conversion workflow in pinned Chrome
-        if: ${{ matrix.domain == 'document-engines' }}
-        env:
-          MARKWEAVE_TEST_CHROMIUM: /usr/bin/google-chrome-stable
-          PUPPETEER_SKIP_DOWNLOAD: "true"
-        run: npm run test:web-browser
       - name: Prepare the RustFS test bucket
         if: ${{ matrix.domain == 'storage-distributed' }}
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
@@ -410,6 +404,8 @@ jobs:
             artifacts/container/sbom.spdx.json
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
+            artifacts/container-diagnostics/ci-status.txt
+            artifacts/container-diagnostics/scanner-readiness.txt
           if-no-files-found: error
           retention-days: 30
 

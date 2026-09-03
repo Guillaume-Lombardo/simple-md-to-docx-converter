@@ -48,6 +48,15 @@ spec:
         - name: shared-memory
           emptyDir: {medium: Memory, sizeLimit: "${SHM_LIMIT_BYTES}"}
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: md-converter-api
+spec:
+  selector: {app.kubernetes.io/name: md-converter-api}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

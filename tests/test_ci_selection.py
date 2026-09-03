@@ -239,17 +239,18 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
     "path",
     [
         "package.json",
-        "tests/browser/conversion.browser.test.mjs",
-        "tests/browser/server.py",
+        "scripts/run-web-tests.mjs",
+        "tests/e2e/browser-next-conversion.test.mjs",
+        "tests/e2e/browser-next-admin.test.mjs",
     ],
 )
 def test_browser_workflow_changes_select_document_engine_domain(path: str) -> None:
     """Browser scripts and tests cannot skip the Chrome-provisioned heavy job."""
     selected = select_domains([path])
-    assert "document-engines" in selected
     if path == "package.json":
-        assert "e2e-distributed" in selected
-        assert "e2e-standalone" in selected
+        assert "document-engines" in selected
+    assert "e2e-distributed" in selected
+    assert "e2e-standalone" in selected
 
 
 @pytest.mark.unit

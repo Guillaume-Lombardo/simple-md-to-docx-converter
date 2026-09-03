@@ -7,7 +7,6 @@ import { chromium } from "playwright-core";
 
 import {
   discardTrace,
-  login,
   retainFailureArtifacts,
   startTrace,
 } from "./browser-helpers.mjs";
@@ -42,7 +41,14 @@ test("authenticated browser state is checkpointed before forced restart", {
     context = await browser.newContext({ baseURL: baseUrl, serviceWorkers: "block" });
     page = await context.newPage();
     step = "login before recovery checkpoint";
-    await login(page, baseUrl, username, password);
+    await page.goto("/login", { waitUntil: "networkidle" });
+    await page.getByRole("textbox", { name: "Username" }).fill(username);
+    await page.getByLabel("Password").fill(password);
+    await Promise.all([
+      page.waitForURL("**/convert"),
+      page.getByRole("button", { name: "Sign in" }).click(),
+    ]);
+    assert.equal(page.url(), `${baseUrl}/convert`, "login did not reach conversion");
     trace = await startTrace(context);
     step = "write authenticated recovery checkpoint";
     await context.storageState({ path: recoveryState });

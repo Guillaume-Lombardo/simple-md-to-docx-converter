@@ -3,8 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:web": "node --test --experimental-test-coverage --test-coverage-include=src/markweave/static/*.js --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 tests/javascript/*.test.js",
-    "test:web-browser": "node --test tests/browser/*.browser.test.mjs",
+    "test:web": "node scripts/run-web-tests.mjs",
     "test:e2e-browser": "node --test tests/e2e/browser*.test.mjs"
   },
   "devDependencies": {

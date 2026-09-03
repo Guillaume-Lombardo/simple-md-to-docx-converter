@@ -162,8 +162,9 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 
 ## Approved Next.js cutover topology
 
-The currently published image and examples continue to serve the legacy FastAPI browser pages.
-T60–T63 must not change production routing. T64 implements the separate frontend image and the
+The repository's `0.6.0` candidate source no longer contains FastAPI browser pages. The public
+default remains on the last published release until both `0.6.0` image receipts are verified and a
+separate adoption pull request pins their digests. T64 implements the separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
@@ -207,6 +208,9 @@ The TLS router owns the response-wide minimum headers
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`. Do not add HSTS
 `includeSubDomains` or `preload` without a separate domain-ownership decision. T64 verifies exact,
 non-duplicated values across frontend, FastAPI, error, and download responses.
+It also applies the positive `ROUTER_UPSTREAM_TIMEOUT_MS` inactivity bound to backend and frontend
+relays and destroys upstream work when the downstream connection closes. The loopback Compose
+candidate uses 30 seconds; production manifests require the operator to supply the reviewed value.
 
 At release, deploy only a matched backend/frontend version pair pinned by both verified registry
 manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes
