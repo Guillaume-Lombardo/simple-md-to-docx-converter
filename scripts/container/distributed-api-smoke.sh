@@ -203,6 +203,8 @@ for _ in $(seq 1 240); do
 done
 curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
   | grep -Fq '"status":"ready"'
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed-network "$application_name" clamav
 if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
   bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
     "http://127.0.0.1:$application_port"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -216,7 +217,10 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
         encoding="utf-8"
     )
 
-    assert 'socket.create_connection(("127.0.0.1", 3310), timeout=1)' in readiness
+    assert 'readonly probe_container="${3:-$container_name}"' in readiness
+    assert 'readonly probe_host="${4:-127.0.0.1}"' in readiness
+    assert 'podman exec "$probe_container"' in readiness
+    assert "socket.create_connection((sys.argv[1], 3310), timeout=1)" in readiness
     assert 'scanner.sendall(b"zINSTREAM\\0\\0\\0\\0\\0")' in readiness
     assert 'expected = b"stream: OK\\0"' in readiness
     assert "while len(response) < len(expected):" in readiness
@@ -226,10 +230,73 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
     assert "for _ in $(seq 1 60)" in readiness
     assert "scanner did not become ready within 15 seconds" in readiness
     assert 'podman logs --tail 50 "$container_name"' in readiness
+    assert 'podman logs --tail 50 "$probe_container"' in readiness
     assert standalone.index("wait-for-fake-clamav.sh") < standalone.index("settings=(")
     assert distributed.index("wait-for-fake-clamav.sh") < distributed.index(
         'podman run --detach --name "$postgres_name"'
     )
+    assert '"$clamav_name" standalone-network "$container_name" clamav' in standalone
+    assert (
+        '"$clamav_name" distributed-network "$application_name" clamav' in distributed
+    )
+    assert standalone.index("standalone-network") < standalone.index(
+        "scripts.container.api_workflow_smoke"
+    )
+    assert distributed.index("distributed-network") < distributed.index(
+        "scripts.container.api_workflow_smoke"
+    )
+
+
+def test_final_e2e_proves_scanner_network_path_before_user_workflows() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+
+    network_probe = '"$clamav_name" "$profile-network" "$application_name" e2e-clamav'
+    assert network_probe in runner
+    assert runner.index(network_probe) < runner.index(
+        "tests.e2e.service_workflow exercise-security-boundaries"
+    )
+
+
+def test_scanner_readiness_runs_exact_protocol_probe_from_network_peer(
+    tmp_path: Path,
+) -> None:
+    commands = tmp_path / "commands"
+    podman = tmp_path / "podman"
+    podman.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf \'%s\\n\' "$*" >>"$COMMANDS"\n'
+        'if [[ "$1" == exec ]]; then exit 0; fi\n'
+        "if [[ \"$1 $2\" == 'container exists' ]]; then exit 0; fi\n"
+        'if [[ "$1" == inspect ]]; then printf true; exit 0; fi\n'
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    podman.chmod(0o755)
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "scripts/container/wait-for-fake-clamav.sh",
+            "scanner",
+            "network",
+            "application",
+            "clamav",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "COMMANDS": str(commands),
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        },
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    invoked = commands.read_text(encoding="utf-8")
+    assert "exec application /opt/md-converter/venv/bin/python -c" in invoked
+    assert invoked.rstrip().endswith("clamav")
 
 
 def test_container_ci_always_stages_bounded_status_evidence() -> None:

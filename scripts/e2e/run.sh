@@ -570,6 +570,8 @@ fi
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" "$profile-network" "$application_name" e2e-clamav
 podman exec "$application_name" python -c '
 from pathlib import Path
 
