@@ -287,6 +287,12 @@ scanner_container() {
     --filter "label=com.docker.compose.service=clamav"
 }
 
+frontend_container() {
+  "${runtime_command[@]}" container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=frontend"
+}
+
 router_container() {
   "${runtime_command[@]}" container ls --all --quiet \
     --filter "label=com.docker.compose.project=$project" \
@@ -388,6 +394,25 @@ wait_for_application() {
   fail "Timed out waiting for Markweave readiness."
 }
 
+wait_for_frontend() {
+  local container
+  for _ in $(seq 1 120); do
+    container="$(frontend_container)"
+    if [[ -n "$container" ]] && \
+      "${runtime_command[@]}" exec "$container" node -e \
+        "fetch('http://127.0.0.1:3001/_frontend/health/ready', {signal: AbortSignal.timeout(2000)}).then(response => process.exit(response.status === 200 ? 0 : 1))" \
+        >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ -n "$container" ]] && \
+      [[ "$("${runtime_command[@]}" inspect --format '{{.State.Status}}' "$container")" == exited ]]; then
+      fail "The Markweave frontend exited before becoming ready."
+    fi
+    sleep 2
+  done
+  fail "Timed out waiting for the Markweave frontend."
+}
+
 wait_for_router() {
   local container
   [[ -n "$cutover_backend_image" ]] || return 0
@@ -408,6 +433,20 @@ wait_for_router() {
     sleep 2
   done
   fail "Timed out waiting for the Markweave router."
+}
+
+start_browser_tier() {
+  [[ -n "$cutover_backend_image" ]] || return 0
+  if [[ "$runtime_name" == podman ]]; then
+    # Dependencies are already staged and probed. Avoid the Podman Compose
+    # provider's unbounded wait on health transitions through its Docker API.
+    compose up --detach --no-deps frontend
+    wait_for_frontend
+    compose up --detach --no-deps router
+  else
+    compose up --detach frontend router
+  fi
+  wait_for_router
 }
 
 verify_application_public_origin() {
@@ -457,10 +496,7 @@ start_podman_stack() {
   wait_for_podman_scanner
   compose up --detach markweave
   wait_for_application
-  if [[ -n "$cutover_backend_image" ]]; then
-    compose up --detach frontend router
-    wait_for_router
-  fi
+  start_browser_tier
 }
 
 start_trusted_upstream_stack() {
@@ -471,10 +507,7 @@ start_trusted_upstream_stack() {
   fi
   compose up --detach markweave
   wait_for_application
-  if [[ -n "$cutover_backend_image" ]]; then
-    compose up --detach frontend router
-    wait_for_router
-  fi
+  start_browser_tier
 }
 
 cleanup() {

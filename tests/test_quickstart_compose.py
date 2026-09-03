@@ -413,8 +413,9 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     )
     assert "wait_for_podman_scanner" in script
     assert "wait_for_application" in script
-    assert script.index("wait_for_application\n  if [[ -n") < script.index(
-        "compose up --detach frontend router"
+    podman_start = script.split("start_podman_stack() {", 1)[1].split("\n}", 1)[0]
+    assert podman_start.index("wait_for_application") < podman_start.index(
+        "start_browser_tier"
     )
     assert "wait_for_router" in script
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
@@ -427,9 +428,37 @@ def test_nextjs_podman_overlay_matches_the_staged_startup_contract() -> None:
     assert document == {
         "services": {
             "frontend": {"depends_on": {"markweave": {"condition": "service_started"}}},
-            "router": {"depends_on": {"markweave": {"condition": "service_started"}}},
+            "router": {
+                "depends_on": {
+                    "frontend": {"condition": "service_started"},
+                    "markweave": {"condition": "service_started"},
+                }
+            },
         }
     }
+
+
+def test_simple_quickstart_stages_podman_browser_services_with_bounded_probes() -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+    frontend_wait = script.split("wait_for_frontend() {", 1)[1].split("\n}", 1)[0]
+    browser_start = script.split("start_browser_tier() {", 1)[1].split("\n}", 1)[0]
+
+    assert "for _ in $(seq 1 120)" in frontend_wait
+    assert "AbortSignal.timeout(2000)" in frontend_wait
+    assert "http://127.0.0.1:3001/_frontend/health/ready" in frontend_wait
+    assert "sleep 2" in frontend_wait
+    assert "exited before becoming ready" in frontend_wait
+    assert "Timed out waiting for the Markweave frontend." in frontend_wait
+    assert browser_start.index("compose up --detach --no-deps frontend") < (
+        browser_start.index("wait_for_frontend")
+    )
+    assert browser_start.index("wait_for_frontend") < browser_start.index(
+        "compose up --detach --no-deps router"
+    )
+    assert browser_start.index("compose up --detach --no-deps router") < (
+        browser_start.index("wait_for_router")
+    )
+    assert "compose up --detach frontend router" in browser_start
 
 
 def test_simple_quickstart_has_an_explicit_warned_insecure_mode() -> None:
