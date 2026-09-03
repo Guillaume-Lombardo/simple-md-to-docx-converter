@@ -9,13 +9,15 @@ runtime, or network access when OCR is explicitly `reject`.
 
 The product manager approved both decisions required for T70 implementation.
 
-For execution, each attempt runs in one disposable, separately supervised process or container.
-The anydoc call remains in-process only inside that single-attempt isolation unit. Its external
-supervisor owns the lease heartbeat and attempt token, applies a kernel-enforced per-attempt memory
-boundary, and is the only component allowed to publish. The child receives and returns only bounded
-local data and has neither network access nor database/object-store credentials. On cancellation,
-deadline, lease loss, or a hard resource limit, the supervisor terminates the complete isolation
-unit, waits for it to exit, verifies it is absent, and only then permits recovery or another attempt.
+For execution, each attempt runs in one disposable, separately supervised process or container
+placed in its own stable kernel isolation unit or cgroup. The anydoc call remains in-process only
+inside that single-attempt unit. Its external supervisor owns the lease heartbeat and attempt token
+and is the only component allowed to publish. T71 supplies configurable CPU, memory, PID/descendant,
+and bounded workspace or ephemeral-storage budgets enforced at that kernel boundary; the T69
+harness does not select their numeric values. The child receives and returns only bounded local data
+and has neither network access nor database/object-store credentials. On cancellation, deadline,
+lease loss, or a hard resource limit, the supervisor hard-kills the complete stable unit rather than
+a PID, proves the unit empty and terminated, and only then permits recovery or another attempt.
 Successful completion is still fenced by a fresh lease and attempt-token check before publication.
 
 For asset serialization, T70 may implement one narrowly bounded Markweave-maintained internal
@@ -200,7 +202,9 @@ has the same shared-service problem and still supplies no per-call memory bounda
 
 Consequently, publication fencing alone is insufficient and the complete cancellation/timeout/
 memory/heartbeat/no-overlap set is not enforceable in a shared process. The approved design moves
-the native call into a disposable single-attempt isolation unit while the supervisor remains
-outside it. T70 owns the bounded runner and terminate-and-verify protocol; T71 integrates its
-attempt identity with durable leases, heartbeats, recovery, and publication fencing. Recovery must
-remain blocked whenever termination of the previous isolation identity cannot be proved.
+the native call into a disposable single-attempt kernel isolation unit while the supervisor remains
+outside it. T70 owns the bounded runner and whole-unit terminate-and-verify protocol; T71 configures
+the CPU, memory, PID/descendant, and workspace/ephemeral budgets and integrates the stable unit
+identity with durable leases, heartbeats, recovery, and publication fencing. Recovery must remain
+blocked whenever the prior unit cannot be proved empty and terminated; observing the recorded PID
+exit is never sufficient.

@@ -39,7 +39,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
 | Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
-| Reverse-conversion execution isolation | Run each anydoc native call in-process only inside one disposable, separately supervised process or container dedicated to one attempt; use a kernel-enforced per-attempt memory boundary, hard whole-unit termination, termination proof before recovery, and supervisor-owned heartbeat and publication fencing |
+| Reverse-conversion execution isolation | Run each anydoc native call in-process only inside one disposable, separately supervised process or container placed in a dedicated stable kernel isolation unit/cgroup for one attempt; enforce configurable CPU, memory, PID/descendant, and workspace/ephemeral-storage budgets at that boundary, hard-kill the whole unit, prove it empty and terminated before recovery, and keep heartbeat and publication in the supervisor |
 | Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
@@ -285,16 +285,18 @@ Those measurements determine reviewed configurable budgets and a bounded thread/
 no unmeasured numeric threshold is fixed in this specification.
 
 The synchronous native call runs in-process only inside one disposable process or container
-isolation unit dedicated to one attempt. A supervisor outside that unit owns the durable attempt
+placed in a dedicated stable kernel isolation unit or cgroup for one attempt. A supervisor outside that unit owns the durable attempt
 token and lease heartbeat, gives the child only bounded local input, and receives only a bounded
 local result. The child has no network access, persistence credentials, or publication capability.
-The isolation unit has a kernel-enforced per-attempt memory boundary; userspace RSS sampling is
-observability, not containment. T70 owns the runner abstraction and its terminate-and-verify
-protocol. T71 binds the durable attempt and isolation identity to worker orchestration.
+T71 configures per-attempt CPU, memory, PID/descendant, and bounded workspace or ephemeral-storage
+budgets enforced at the kernel isolation boundary; T69 does not select their numeric values.
+Userspace sampling is observability, not containment. T70 owns the runner abstraction and its
+whole-unit terminate-and-verify protocol. T71 binds the durable attempt and stable isolation-unit
+identity to worker orchestration.
 
 On cancellation, wall-time deadline, lease loss, or a hard resource-limit event, the supervisor
-hard-terminates the whole isolation unit, waits for it to exit, and verifies that the recorded
-process/container identity and its descendants are absent. It must stop accepting child output at
+hard-kills the whole stable isolation unit, waits for it to exit, and proves the unit empty and
+terminated; observing a recorded PID exit is not sufficient. It must stop accepting child output at
 the first terminal signal. The lease cannot become recoverable and another attempt cannot start
 until that termination proof is durable; if proof is unavailable, recovery remains blocked and
 readiness/operations expose a content-free fault instead of risking overlap. After normal child
@@ -737,7 +739,8 @@ the ticket before touching any path owned by another active ticket.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
   contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
-  contract uses a disposable supervised isolation unit per attempt and the bounded internal adapter;
+  contract uses a disposable supervised process/container in a dedicated stable kernel isolation
+  unit per attempt, configurable T71-owned CPU/memory/PID/workspace budgets, and the bounded internal adapter;
   no implementation may broaden the validated format/PDF claims or fall back to shared-process
   execution, a second parser, or an unconstrained serializer fork.
 - T70 owns deterministic canonical generation of the content-free traceability manifest, including

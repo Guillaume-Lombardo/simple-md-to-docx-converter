@@ -72,8 +72,10 @@ normative product, security, packaging, and compatibility contract before implem
 ## Quality requirements
 
 * Keep every document-controlled operation local and network-independent.
-* Keep the Python binding in-process only inside the approved disposable per-attempt isolation unit,
-  with bounded threads and the smallest concurrency that meets the measured service objective.
+* Keep the Python binding in-process only inside the approved disposable per-attempt kernel
+  isolation unit, with bounded threads and the smallest concurrency that meets the measured service
+  objective. Leave CPU, memory, PID/descendant, and workspace/ephemeral budget values configurable
+  for T71.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -110,9 +112,11 @@ normative product, security, packaging, and compatibility contract before implem
   The bounded corpus now contains a probed fixture for every one of the 21 admitted extensions;
   generated alias fixtures record Apache-2.0 provenance and copied upstream fixtures remain MIT.
 * 2026-09-03: The product manager resolved both blockers. Each attempt is authorized to run in one
-  disposable supervised process or container with a kernel-enforced memory boundary. The external
-  supervisor owns heartbeat and publication, hard-terminates the whole unit on cancellation,
-  deadline, lease loss, or resource failure, and proves termination before recovery or overlap.
+  disposable supervised process or container placed in a dedicated stable kernel isolation unit or
+  cgroup. T71 configures CPU, memory, PID/descendant, and bounded workspace/ephemeral budgets at
+  that boundary. The external supervisor owns heartbeat and publication, hard-kills the whole unit
+  on cancellation, deadline, lease loss, or resource failure, and proves the stable unit empty and
+  terminated before recovery or overlap; PID exit alone is insufficient.
   T70 is also authorized to maintain one narrowly bounded internal adapter around the pinned anydoc
   model and renderer behavior, with no second parser or broad fork. Security, serializer parity,
   asset position, version compatibility, SBOM/license inventory, named T70 ownership, and removal

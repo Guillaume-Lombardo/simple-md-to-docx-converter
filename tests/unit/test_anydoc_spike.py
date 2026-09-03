@@ -86,16 +86,33 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
     contract = _json("contract.json")
     assert contract["decision_status"] == "approved_for_t70_implementation"
     decisions = contract["product_decisions"]
-    assert set(decisions) == {"execution_isolation", "asset_serialization"}
-    assert all(decision["status"] == "approved" for decision in decisions.values())
-    assert decisions["execution_isolation"]["selected"] == (
-        "disposable_supervised_per_attempt_process_or_container"
-    )
-    assert decisions["asset_serialization"]["selected"] == (
-        "bounded_maintained_internal_adapter_around_pinned_anydoc_internals"
-    )
-    assert len(decisions["execution_isolation"]["requirements"]) == 7
-    assert len(decisions["asset_serialization"]["requirements"]) == 6
+    assert decisions == {
+        "execution_isolation": {
+            "status": "approved",
+            "selected": "disposable_supervised_per_attempt_kernel_isolation_unit",
+            "requirements": [
+                "the anydoc native call runs in-process only inside one disposable process or container placed in a dedicated kernel isolation unit for one attempt",
+                "an external supervisor owns heartbeat and the attempt token and is the only component allowed to publish",
+                "the isolation unit has no persistence credentials or network access and receives and returns only bounded local data",
+                "T71 configures per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced at the kernel isolation boundary",
+                "cancellation, deadline, lease loss, or a hard resource limit hard-kills the stable isolation unit rather than a recorded PID",
+                "the supervisor proves the stable isolation unit empty and terminated before recovery or another attempt may start",
+                "publication revalidates the active lease and attempt token after successful child exit",
+            ],
+        },
+        "asset_serialization": {
+            "status": "approved",
+            "selected": "bounded_maintained_internal_adapter_around_pinned_anydoc_internals",
+            "requirements": [
+                "consume the single parsed anydoc Document and never introduce a second document parser",
+                "confine all private or mirrored upstream renderer behavior to one owned compatibility boundary",
+                "fail closed on an unknown anydoc version or document-model variant",
+                "pass security review and serializer-parity, asset-position, and upstream-version compatibility tests",
+                "inventory the exact private surface and copied upstream code in SBOM and license evidence",
+                "assign maintenance ownership to T70 and remove the adapter when upstream provides an official asset-aware hook",
+            ],
+        },
+    }
     engine = contract["engine"]
     assert engine["version"] == "0.2.4"
     assert engine["source_commit"] == "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
@@ -125,18 +142,34 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
     assert unavailable["asset_count"] == unavailable["asset_bytes"] == 0
     assert "occurrences" in unavailable["unavailable_asset_count"]
     execution = contract["execution"]
-    assert execution["native_api_has_cancellation"] is False
-    assert execution["native_api_has_deadline"] is False
-    assert execution["native_api_has_memory_budget"] is False
-    assert execution["hard_control_decision"] == (
-        "disposable_supervised_per_attempt_isolation"
-    )
-    assert execution["supervisor_owns_heartbeat_and_publication"] is True
-    assert execution["terminate_and_verify_before_recovery"] is True
-    assert execution["kernel_enforced_per_attempt_memory_boundary"] is True
-    assert execution["child_has_network_or_persistence_credentials"] is False
-    assert execution["production_budget"] is None
-    assert execution["reverse_concurrency"] is None
+    assert execution == {
+        "cpu_only": True,
+        "ocr": False,
+        "hosted_fallback": False,
+        "native_api_has_cancellation": False,
+        "native_api_has_deadline": False,
+        "native_api_has_memory_budget": False,
+        "hard_control_decision": "disposable_supervised_per_attempt_kernel_isolation_unit",
+        "isolation_unit_sharing": "one attempt only",
+        "isolation_unit_identity": (
+            "stable kernel isolation unit or cgroup identity, never PID identity alone"
+        ),
+        "native_call_scope": "in-process inside the disposable isolation unit only",
+        "supervisor_owns_heartbeat_and_publication": True,
+        "hard_kill_target": "complete stable isolation unit including every descendant",
+        "recovery_precondition": "stable isolation unit proved empty and terminated",
+        "pid_only_termination_proof_allowed": False,
+        "kernel_enforced_configurable_budgets": [
+            "cpu",
+            "memory",
+            "pids_and_descendants",
+            "workspace_or_ephemeral_storage",
+        ],
+        "budget_configuration_owner": "T71",
+        "child_has_network_or_persistence_credentials": False,
+        "production_budget": None,
+        "reverse_concurrency": None,
+    }
 
 
 @pytest.mark.unit
@@ -146,12 +179,12 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
     t70 = (root / "tickets/T70-secure-asset-aware-anydoc.md").read_text()
     for document in (product_spec, t70):
         assert "disposable" in document
-        assert "kernel-enforced" in document
+        assert "kernel isolation unit" in document
         assert "termination" in document
         assert "bounded internal" in document
         assert "second parser" in document
         assert "asset-aware hook" in document
-    assert "supervisor-owned heartbeat and publication fencing" in product_spec
+    assert "keep heartbeat and publication in the supervisor" in product_spec
     assert "no child publication capability" in t70
     assert "broad fork is not authorized" in t70
 
