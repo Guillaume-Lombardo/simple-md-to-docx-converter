@@ -1,0 +1,803 @@
+{
+  "cancellation": {
+    "call_completed_only_normally": true,
+    "child_processes_observed": [],
+    "cpu_ms": 442.061,
+    "future_cancel_returned": false,
+    "input_bytes": 2800210,
+    "native_work_running_after_cancel_attempt": true,
+    "peak_rss_kib": 225184,
+    "peak_threads": 3,
+    "rss_growth_kib": 177776,
+    "threads_after": 2,
+    "wall_ms": 405.865
+  },
+  "cases": [
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[23].inline[1]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "doc",
+      "fixture": "doc/text.doc",
+      "input_bytes": 20480,
+      "measurements": [
+        {
+          "cpu_ms": 0.27,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.268
+        },
+        {
+          "cpu_ms": 0.166,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.165
+        },
+        {
+          "cpu_ms": 0.139,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.138
+        },
+        {
+          "cpu_ms": 0.133,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.132
+        },
+        {
+          "cpu_ms": 0.132,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.131
+        }
+      ],
+      "name": "word-binary",
+      "output_units": 27,
+      "retained_asset_bytes": 70,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[23].inline[1]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "docx",
+      "fixture": "docx/text.docx",
+      "input_bytes": 10159,
+      "measurements": [
+        {
+          "cpu_ms": 0.867,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.866
+        },
+        {
+          "cpu_ms": 0.658,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.658
+        },
+        {
+          "cpu_ms": 0.705,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.704
+        },
+        {
+          "cpu_ms": 0.827,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.825
+        },
+        {
+          "cpu_ms": 1.031,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 1.03
+        }
+      ],
+      "name": "word-openxml",
+      "output_units": 28,
+      "retained_asset_bytes": 70,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "ppt",
+      "fixture": "ppt/handmade-multimaster.ppt",
+      "input_bytes": 9728,
+      "measurements": [
+        {
+          "cpu_ms": 0.049,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.048
+        },
+        {
+          "cpu_ms": 0.043,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.042
+        },
+        {
+          "cpu_ms": 0.022,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.021
+        },
+        {
+          "cpu_ms": 0.021,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.02
+        },
+        {
+          "cpu_ms": 0.019,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.019
+        }
+      ],
+      "name": "powerpoint-binary",
+      "output_units": 2,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "pptx",
+      "fixture": "pptx/pres.pptx",
+      "input_bytes": 15734,
+      "measurements": [
+        {
+          "cpu_ms": 0.97,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.969
+        },
+        {
+          "cpu_ms": 0.732,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.731
+        },
+        {
+          "cpu_ms": 0.713,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.712
+        },
+        {
+          "cpu_ms": 0.731,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.73
+        },
+        {
+          "cpu_ms": 0.706,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.705
+        }
+      ],
+      "name": "powerpoint-openxml",
+      "output_units": 8,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "xlsx",
+      "fixture": "xls/sheet.xls",
+      "input_bytes": 7168,
+      "measurements": [
+        {
+          "cpu_ms": 0.119,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.119
+        },
+        {
+          "cpu_ms": 0.101,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.101
+        },
+        {
+          "cpu_ms": 0.086,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.086
+        },
+        {
+          "cpu_ms": 0.081,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.08
+        },
+        {
+          "cpu_ms": 0.078,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.078
+        }
+      ],
+      "name": "excel-binary",
+      "output_units": 4,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "xlsx",
+      "fixture": "xlsx/sheet.xlsx",
+      "input_bytes": 7106,
+      "measurements": [
+        {
+          "cpu_ms": 0.456,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.455
+        },
+        {
+          "cpu_ms": 0.42,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.419
+        },
+        {
+          "cpu_ms": 0.412,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.411
+        },
+        {
+          "cpu_ms": 0.426,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.425
+        },
+        {
+          "cpu_ms": 0.433,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.432
+        }
+      ],
+      "name": "excel-openxml",
+      "output_units": 4,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "xlsx",
+      "fixture": "xlsb/handmade-sheet.xlsb",
+      "input_bytes": 1602,
+      "measurements": [
+        {
+          "cpu_ms": 0.101,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.1
+        },
+        {
+          "cpu_ms": 0.087,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.087
+        },
+        {
+          "cpu_ms": 0.082,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.082
+        },
+        {
+          "cpu_ms": 0.072,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.071
+        },
+        {
+          "cpu_ms": 0.069,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.069
+        }
+      ],
+      "name": "excel-binary-workbook",
+      "output_units": 1,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[22].inline[1]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "odt",
+      "fixture": "odt/text.odt",
+      "input_bytes": 25489,
+      "measurements": [
+        {
+          "cpu_ms": 0.564,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.563
+        },
+        {
+          "cpu_ms": 0.567,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.566
+        },
+        {
+          "cpu_ms": 0.571,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.57
+        },
+        {
+          "cpu_ms": 0.547,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.546
+        },
+        {
+          "cpu_ms": 0.554,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.553
+        }
+      ],
+      "name": "opendocument-text",
+      "output_units": 27,
+      "retained_asset_bytes": 70,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "ods",
+      "fixture": "ods/sheet.ods",
+      "input_bytes": 16142,
+      "measurements": [
+        {
+          "cpu_ms": 0.374,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.373
+        },
+        {
+          "cpu_ms": 0.37,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.369
+        },
+        {
+          "cpu_ms": 0.361,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.361
+        },
+        {
+          "cpu_ms": 0.36,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.36
+        },
+        {
+          "cpu_ms": 0.371,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.37
+        }
+      ],
+      "name": "opendocument-sheet",
+      "output_units": 4,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[6].inline[0]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "odp",
+      "fixture": "odp/pres.odp",
+      "input_bytes": 19065,
+      "measurements": [
+        {
+          "cpu_ms": 0.841,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.84
+        },
+        {
+          "cpu_ms": 0.86,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.86
+        },
+        {
+          "cpu_ms": 0.865,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.864
+        },
+        {
+          "cpu_ms": 0.862,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.861
+        },
+        {
+          "cpu_ms": 0.858,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.857
+        }
+      ],
+      "name": "opendocument-presentation",
+      "output_units": 10,
+      "retained_asset_bytes": 2354,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[22].inline[1]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "rtf",
+      "fixture": "rtf/text.rtf",
+      "input_bytes": 20136,
+      "measurements": [
+        {
+          "cpu_ms": 0.698,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.697
+        },
+        {
+          "cpu_ms": 0.674,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.673
+        },
+        {
+          "cpu_ms": 0.669,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.669
+        },
+        {
+          "cpu_ms": 0.651,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.65
+        },
+        {
+          "cpu_ms": 0.669,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.668
+        }
+      ],
+      "name": "rtf",
+      "output_units": 27,
+      "retained_asset_bytes": 70,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 1,
+      "asset_positions": [
+        {
+          "asset_id": 0,
+          "path": "document.block[11].inline[0]",
+          "source_kind": "asset"
+        }
+      ],
+      "child_processes_observed": [],
+      "detected_format": "epub",
+      "fixture": "epub/book.epub",
+      "input_bytes": 6167,
+      "measurements": [
+        {
+          "cpu_ms": 0.3,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.299
+        },
+        {
+          "cpu_ms": 0.259,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.258
+        },
+        {
+          "cpu_ms": 0.25,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.249
+        },
+        {
+          "cpu_ms": 0.267,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.267
+        },
+        {
+          "cpu_ms": 0.235,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.234
+        }
+      ],
+      "name": "epub",
+      "output_units": 19,
+      "retained_asset_bytes": 70,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": null,
+      "fixture": "csv/sheet.csv",
+      "input_bytes": 210,
+      "measurements": [
+        {
+          "cpu_ms": 0.111,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.111
+        },
+        {
+          "cpu_ms": 0.095,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.094
+        },
+        {
+          "cpu_ms": 0.091,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.091
+        },
+        {
+          "cpu_ms": 0.089,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.088
+        },
+        {
+          "cpu_ms": 0.09,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.089
+        }
+      ],
+      "name": "csv",
+      "output_units": 1,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "pdf",
+      "fixture": "pdf/text.pdf",
+      "input_bytes": 90060,
+      "measurements": [
+        {
+          "cpu_ms": 7.073,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 7.221
+        },
+        {
+          "cpu_ms": 5.225,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 5.577
+        },
+        {
+          "cpu_ms": 5.266,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 5.547
+        },
+        {
+          "cpu_ms": 5.257,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 5.444
+        },
+        {
+          "cpu_ms": 5.205,
+          "peak_rss_kib": 45420,
+          "rss_growth_kib": 0,
+          "wall_ms": 5.658
+        }
+      ],
+      "name": "text-pdf",
+      "output_units": 1096,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 2
+    }
+  ],
+  "concurrency": [
+    {
+      "batch_wall_ms": 152.601,
+      "child_processes_observed": [],
+      "conversions_per_worker": 25,
+      "fixture": "pdf/text.pdf",
+      "measurements": [
+        {
+          "thread_cpu_ms": 106.463,
+          "wall_ms": 151.438
+        }
+      ],
+      "process_peak_rss_kib": 45420,
+      "process_threads_after": 2,
+      "workers": 1
+    },
+    {
+      "batch_wall_ms": 169.522,
+      "child_processes_observed": [],
+      "conversions_per_worker": 25,
+      "fixture": "pdf/text.pdf",
+      "measurements": [
+        {
+          "thread_cpu_ms": 116.663,
+          "wall_ms": 168.741
+        },
+        {
+          "thread_cpu_ms": 108.625,
+          "wall_ms": 168.21
+        }
+      ],
+      "process_peak_rss_kib": 45420,
+      "process_threads_after": 2,
+      "workers": 2
+    },
+    {
+      "batch_wall_ms": 242.078,
+      "child_processes_observed": [],
+      "conversions_per_worker": 25,
+      "fixture": "pdf/text.pdf",
+      "measurements": [
+        {
+          "thread_cpu_ms": 121.792,
+          "wall_ms": 227.6
+        },
+        {
+          "thread_cpu_ms": 125.203,
+          "wall_ms": 241.029
+        },
+        {
+          "thread_cpu_ms": 119.529,
+          "wall_ms": 225.411
+        },
+        {
+          "thread_cpu_ms": 121.993,
+          "wall_ms": 226.905
+        }
+      ],
+      "process_peak_rss_kib": 45420,
+      "process_threads_after": 2,
+      "workers": 4
+    }
+  ],
+  "environment": {
+    "anydoc_version": "0.2.4",
+    "extension": "_anydoc.abi3.so",
+    "extension_sha256": "5bd7463287a54040d08e26130737a660f733028a2480b880069b6eedb2311041",
+    "implementation": "CPython",
+    "import_cpu_ms": 12.961,
+    "import_wall_ms": 12.964,
+    "initial_peak_rss_kib": 45420,
+    "initial_threads": 1,
+    "machine": "x86_64",
+    "platform": "Linux-6.12.107+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.14.6",
+    "rayon_num_threads": "1",
+    "visible_accelerators": {
+      "CUDA_VISIBLE_DEVICES": null,
+      "ROCR_VISIBLE_DEVICES": null
+    }
+  },
+  "failures": [
+    {
+      "exception": "UnsupportedError",
+      "expected_category": "unsupported",
+      "limit": null,
+      "page_count": null
+    },
+    {
+      "exception": "MalformedError",
+      "expected_category": "malformed",
+      "limit": null,
+      "page_count": null
+    },
+    {
+      "exception": "EncryptedError",
+      "expected_category": "encrypted",
+      "limit": null,
+      "page_count": null
+    },
+    {
+      "exception": "ResourceLimitError",
+      "expected_category": "resource_limit",
+      "limit": "max_entry_bytes",
+      "page_count": null
+    },
+    {
+      "exception": "NeedsOcrError",
+      "expected_category": "needs_ocr",
+      "limit": null,
+      "page_count": 2
+    }
+  ],
+  "offline_no_ocr": {
+    "firecrawl_environment_ignored": true,
+    "page_count": 2,
+    "pages": [
+      1,
+      2
+    ],
+    "result": "needs_ocr"
+  },
+  "process_inventory": {
+    "engine_executables_on_path": {
+      "chromium": null,
+      "google-chrome": null,
+      "libreoffice": null,
+      "pandoc": null,
+      "soffice": null
+    },
+    "executable": "/home/g1lom/dev/github/simple-md-to-docx-converter-t69/spikes/anydoc/.venv/bin/python3",
+    "loaded_module_names": []
+  },
+  "schema_version": 1
+}

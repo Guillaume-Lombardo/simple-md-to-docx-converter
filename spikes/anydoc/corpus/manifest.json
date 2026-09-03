@@ -1,0 +1,25 @@
+{
+  "license_file": "../LICENSE.anydoc",
+  "source_commit": "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c",
+  "source_repository": "https://github.com/firecrawl/anydoc",
+  "source_tag": "v0.2.4",
+  "files": [
+    {"path": "abuse/imagebomb--errors.docx", "sha256": "2331f48e333162ead5f2897ae948295b743793c85a70cd4227d9db19302fc524", "size": 197082, "purpose": "resource-limit rejection"},
+    {"path": "csv/sheet.csv", "sha256": "4a19b2cd06b8571a6f39cbb11b51c90857effe25878094b1c817ba63300005fd", "size": 210, "purpose": "CSV representative"},
+    {"path": "doc/text.doc", "sha256": "0d7c077cf4b49939a05ccd5f8012164649752be0c5841fa50da6258e0517e6e5", "size": 20480, "purpose": "binary Word representative with embedded PNG"},
+    {"path": "docx/text.docx", "sha256": "6b674297884f9ed57809763c9f60ea3a849d5cc6fb28c9837c714e322eceddcf", "size": 10159, "purpose": "OOXML Word representative with embedded PNG"},
+    {"path": "epub/book.epub", "sha256": "292cba3ea8019684cb59cb890de6caf31bc9399d9f983b25db1506e275f83563", "size": 6167, "purpose": "EPUB representative with embedded PNG"},
+    {"path": "malformed/encrypted--errors.odt", "sha256": "3143f94edf73d6add594bf1bf835f437c1a8f0597f62c6323fc7887e27ea5a27", "size": 658, "purpose": "encrypted rejection"},
+    {"path": "odp/pres.odp", "sha256": "6b5e859ad2591be8f1cbc0246d7e757fbc0ffa06e8ccd022a3e1612f67169df1", "size": 19065, "purpose": "OpenDocument presentation representative"},
+    {"path": "ods/sheet.ods", "sha256": "e2c092eb2173b9c7ea8dd2c42e8dd7ef284cf37de40e206f3c8e43571de88454", "size": 16142, "purpose": "OpenDocument spreadsheet representative"},
+    {"path": "odt/text.odt", "sha256": "614b107dcd9f48364b33fa98ad1db32b43667701adeb510b081961ced54438ee", "size": 25489, "purpose": "OpenDocument text representative with embedded PNG"},
+    {"path": "pdf/handmade-scanned.pdf", "sha256": "f298b75294aa55400691fb88abb7c30e88fbde4ad04a9a43d809c12b214545c4", "size": 1046, "purpose": "image-only PDF rejection"},
+    {"path": "pdf/text.pdf", "sha256": "7d1fd0932634cffa80bf9fb1bd73a6871f82a2cb29b4d7bcfb689927bc5d84e7", "size": 90060, "purpose": "text PDF representative"},
+    {"path": "ppt/handmade-multimaster.ppt", "sha256": "7f4ccf9350fb4b366f2638f1d1b54bd9f88bd1e7492141df02d709b001ae2026", "size": 9728, "purpose": "binary PowerPoint representative"},
+    {"path": "pptx/pres.pptx", "sha256": "c96aa52da19f273f602040490203d9319872f512707e1a6c5a3fc53251b6d050", "size": 15734, "purpose": "OOXML PowerPoint representative"},
+    {"path": "rtf/text.rtf", "sha256": "8af25d8d79f898c5fd8c65782a6b73b04b4869fe621c6d39bf201ce4478ec731", "size": 20136, "purpose": "RTF representative with embedded PNG"},
+    {"path": "xls/sheet.xls", "sha256": "1b3fc8f35f4c7ad6bb4dcf9b9f1fdf4ddf1f4c7f2f6748f33b7948204f940136", "size": 7168, "purpose": "binary Excel representative"},
+    {"path": "xlsb/handmade-sheet.xlsb", "sha256": "6f965c3d4c9c9d4028c8e2bb8409c28473cd6310c4af05266cf54f4852f94fbf", "size": 1602, "purpose": "binary OOXML workbook representative"},
+    {"path": "xlsx/sheet.xlsx", "sha256": "ddfec7c1e98c7b50611b1c3ac55c0aa0d9d413135aa7afc36732338e44f4d26c", "size": 7106, "purpose": "OOXML Excel representative"}
+  ]
+}

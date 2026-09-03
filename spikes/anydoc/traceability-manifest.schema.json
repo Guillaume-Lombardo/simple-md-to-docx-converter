@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://markweave.invalid/schemas/reverse-traceability-v1.json",
+  "title": "Markweave reverse-conversion traceability manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "engine", "source", "result", "execution"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "firecrawl-anydoc"},
+        "version": {"const": "0.2.4"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "detected_format"],
+      "properties": {
+        "family": {"enum": ["word", "powerpoint", "excel", "opendocument", "rtf", "epub", "csv", "pdf"]},
+        "detected_format": {"enum": ["doc", "docx", "ppt", "pptx", "xlsx", "odt", "ods", "odp", "rtf", "epub", "csv", "pdf"]}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "asset_count", "asset_bytes"],
+      "properties": {
+        "mode": {"const": "markdown_with_assets"},
+        "asset_count": {"type": "integer", "minimum": 1},
+        "asset_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "ocr", "hosted_fallback"],
+      "properties": {
+        "local": {"const": true},
+        "ocr": {"const": false},
+        "hosted_fallback": {"const": false}
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "decision_status": "blocked_pending_product_decision",
+  "engine": {
+    "distribution": "firecrawl-anydoc",
+    "version": "0.2.4",
+    "python_import": "anydoc",
+    "binding": "CPython abi3 in-process native extension",
+    "source_commit": "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
+  },
+  "format_families": [
+    {"family": "word", "extensions": [".doc", ".docx", ".docm"], "detected_formats": ["doc", "docx"], "content_detection": "OLE WordDocument stream, or OPC officeDocument relationship/content type/root/main-part fallback"},
+    {"family": "powerpoint", "extensions": [".ppt", ".pps", ".pot", ".pptx", ".pptm", ".ppsx", ".ppsm"], "detected_formats": ["ppt", "pptx"], "content_detection": "OLE PowerPoint Document stream, or OPC officeDocument relationship/content type/root/main-part fallback"},
+    {"family": "excel", "extensions": [".xls", ".xlsx", ".xlsm", ".xlsb"], "detected_formats": ["xlsx"], "content_detection": "OLE Workbook/Book stream, or OPC officeDocument relationship/content type/root/main-part fallback; the binding reports the shared parser as xlsx"},
+    {"family": "opendocument", "extensions": [".odt", ".ods", ".odp"], "detected_formats": ["odt", "ods", "odp"], "content_detection": "ZIP mimetype entry or root manifest media type; template MIME variants map to their base parser"},
+    {"family": "rtf", "extensions": [".rtf"], "detected_formats": ["rtf"], "content_detection": "bytes start with the RTF opening group {\\rtf"},
+    {"family": "epub", "extensions": [".epub"], "detected_formats": ["epub"], "content_detection": "ZIP mimetype application/epub+zip or OCF META-INF/container.xml"},
+    {"family": "csv", "extensions": [".csv"], "detected_formats": [], "content_detection": "no content signature; .csv is only an admission hint and the server must explicitly select the CSV parser after bounded text validation"},
+    {"family": "pdf", "extensions": [".pdf"], "detected_formats": ["pdf"], "content_detection": "%PDF- within the first 1024 bytes, after higher-priority RTF/OLE/ZIP checks"}
+  ],
+  "admission": {
+    "extension_is_authoritative": false,
+    "mismatch_policy": "reject when the content-detected family differs from the extension family",
+    "undetected_policy": "reject except CSV after bounded text validation",
+    "scanner_order": "malware scan before format parsing or durable persistence",
+    "stable_failure_categories": ["unsupported", "malformed", "encrypted", "resource_limit", "needs_ocr", "asset_invalid", "cancelled", "timed_out", "lease_lost"]
+  },
+  "pdf": {
+    "contract": "text extraction only",
+    "document_model_available": false,
+    "embedded_assets_available": false,
+    "image_preservation": false,
+    "mixed_or_image_only_pages": "reject the complete input as needs_ocr when any page yields no text",
+    "warning": "PDF images, layout, and source-position image links are not preserved"
+  },
+  "output": {
+    "asset_free": {"media_type": "text/markdown; charset=utf-8", "extension": ".md"},
+    "with_assets": {
+      "media_type": "application/zip",
+      "root_markdown": "document.md",
+      "asset_pattern": "assets/image-{first_reference_ordinal:04d}.png",
+      "manifest": "manifest.json (schema: traceability-manifest.schema.json)",
+      "entry_order": ["document.md", "assets in first-reference order", "manifest.json"]
+    },
+    "assets": {
+      "selection": "only embedded image assets referenced by an image inline in the shared Document model",
+      "duplicates": "the same asset id reuses one filename; byte-identical different ids deduplicate to the first-reference filename",
+      "normalization": "reuse the T08 signature-checked, single-frame, bounded deterministic PNG normalization and network-disabled SVG rasterization boundary",
+      "external": "reject document-controlled external image sources; never fetch them",
+      "unavailable": "retain escaped alt text without an image link and record only an unavailable-asset count in the manifest"
+    },
+    "manifest_schema": {
+      "schema_version": 1,
+      "engine": {"name": "firecrawl-anydoc", "version": "0.2.4"},
+      "source": {"family": "ordered capability-family identifier", "detected_format": "normalized parser identifier"},
+      "result": {"mode": "markdown_with_assets", "asset_count": "non-negative integer", "asset_bytes": "non-negative integer"},
+      "execution": {"local": true, "ocr": false, "hosted_fallback": false}
+    }
+  },
+  "authorization": {
+    "lifecycle_and_content": "owner_only",
+    "administrator_content_access": false,
+    "administrator_operational_fields": ["opaque_job_id", "owner_id", "state", "safe_failure_category", "attempt", "lease_state", "timing", "byte_counts"],
+    "administrator_forbidden_fields": ["source_bytes", "result_bytes", "original_filename", "markdown", "asset_names", "asset_bytes", "content_digest", "download_capability"]
+  },
+  "execution": {
+    "cpu_only": true,
+    "ocr": false,
+    "hosted_fallback": false,
+    "native_api_has_cancellation": false,
+    "native_api_has_deadline": false,
+    "native_api_has_memory_budget": false,
+    "hard_control_decision": "not_enforceable_in_the_current_shared_worker_process",
+    "production_budget": null,
+    "reverse_concurrency": null
+  }
+}

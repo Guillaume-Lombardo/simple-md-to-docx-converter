@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "assessed_on": "2026-09-03",
+  "distribution": "firecrawl-anydoc",
+  "version": "0.2.4",
+  "license_expression": "MIT",
+  "license_sha256": "03a9e7657aac6536fb6458bd220347c4e7f85bd0a51d8d9e8528530b7a682ade",
+  "source": {
+    "repository": "https://github.com/firecrawl/anydoc",
+    "tag": "v0.2.4",
+    "commit": "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
+  },
+  "linux_x86_64_wheel": {
+    "filename": "firecrawl_anydoc-0.2.4-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "size": 3506751,
+    "sha256": "0e5aed01bf6d4e5c588d3363888293f2ceeb9feb00449a32e0ba993797cf0bd3",
+    "requires_python": ">=3.10",
+    "pypi_trusted_publisher": {
+      "kind": "GitHub",
+      "repository": "firecrawl/anydoc",
+      "workflow": "release.yml",
+      "predicate_type": "https://docs.pypi.org/attestations/publish/v1",
+      "sigstore_transparency_entry": 2618684387
+    }
+  },
+  "source_distribution": {
+    "filename": "firecrawl_anydoc-0.2.4.tar.gz",
+    "size": 270706,
+    "sha256": "3e29460272fea81cde08fd5af11f6b0f1ff05919214ddc939867f72362c83032"
+  },
+  "observations": [
+    "The wheel contains one stripped abi3 native extension and no Python runtime dependencies.",
+    "PyPI publish provenance binds the x86-64 wheel digest to firecrawl/anydoc release.yml at the v0.2.4 source commit.",
+    "The upstream repository and Python package declare MIT; the copied corpus remains under that license.",
+    "pip-audit 2.10.0 reported no known Python-package vulnerabilities on 2026-09-03.",
+    "The wheel does not carry a component SBOM, so the Rust transitive dependency inventory and vulnerability result must be regenerated from upstream Cargo.lock before production adoption."
+  ]
+}

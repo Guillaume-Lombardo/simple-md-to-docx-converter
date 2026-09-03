@@ -1,0 +1,30 @@
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+FROM ${BASE_IMAGE}
+
+USER 0
+
+ARG UV_VERSION=0.12.1
+ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
+RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+        --output /tmp/uv.tar.gz \
+    && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \
+    && tar --extract --gzip --file /tmp/uv.tar.gz --strip-components=1 \
+        --directory /usr/local/bin uv-x86_64-unknown-linux-gnu/uv \
+    && rm /tmp/uv.tar.gz \
+    && test "$(uv --version)" = "uv ${UV_VERSION} (x86_64-unknown-linux-gnu)"
+
+WORKDIR /opt/anydoc-spike
+COPY spikes/anydoc/pyproject.toml spikes/anydoc/uv.lock ./
+RUN uv sync --locked --no-dev \
+    && .venv/bin/python -c \
+        'import anydoc, importlib.metadata as m; assert m.version("firecrawl-anydoc") == "0.2.4"' \
+    && rm -rf /root/.cache/uv /usr/local/bin/uv
+
+COPY --chown=1001:0 spikes/anydoc/probe.py ./probe.py
+COPY --chown=1001:0 spikes/anydoc/corpus ./corpus
+RUN chmod -R a-w /opt/anydoc-spike
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 RAYON_NUM_THREADS=1
+USER 1001:0
+ENTRYPOINT ["/opt/anydoc-spike/.venv/bin/python", "/opt/anydoc-spike/probe.py"]

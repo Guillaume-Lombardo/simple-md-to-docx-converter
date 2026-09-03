@@ -2,7 +2,7 @@
 ticket: T69
 linear_id: G1L-537
 linear_url: https://linear.app/g1lom/issue/G1L-537/t69-validate-and-specify-anydoc-reverse-conversion
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -87,6 +87,27 @@ normative product, security, packaging, and compatibility contract before implem
 * 2026-09-03: Product scope was tightened to an exclusively CPU-only, low-compute workflow. T69 now
   owns measured CPU, wall-time, peak-memory, thread, asset, and concurrency evidence before any
   production budget is selected.
+* 2026-09-03: Added a hash-locked MIT corpus and reproducible host/exact-UBI probe for
+  `firecrawl-anydoc 0.2.4`. The CPython ABI3 wheel loads on Python 3.14, all eight requested format
+  families convert locally, embedded assets and their source-position ids are exposed for tested
+  non-PDF models, PDF remains text-only, and scanned PDF, malformed, encrypted, unsupported, and
+  resource-limit failures have stable upstream classes. The no-network UBI run used one CPU,
+  512 MiB, 64 PIDs, a read-only root, no capabilities, and `RAYON_NUM_THREADS=1`; it observed no
+  document-engine child, GPU/ML runtime, or hosted fallback. Exact measurements, provenance, format
+  matrix, candidate package schema, and authorization contract are retained under
+  `spikes/anydoc/`.
+* 2026-09-03: T70 remains blocked pending a product-manager decision. The synchronous Python API
+  supplies no cancellation token, deadline, or memory budget; cancelling a running Future leaves
+  native work active, and a shared-process cgroup or forced exit cannot isolate one call. Lease
+  publication fencing is possible, but lease expiry cannot both prevent overlapping native work
+  and recover a crashed attempt. In addition, the public renderer strips embedded image references
+  and exposes no `Document` renderer or asset resolver, so T70 cannot preserve image positions
+  without duplicating the upstream serializer. The PM must either permit a disposable supervised
+  per-attempt process/container with hard termination and termination-before-recovery, or defer T70
+  until upstream provides cooperative execution controls and an asset-aware renderer hook. The
+  normative product-specification edit is intentionally pending because T67 currently owns that
+  file; Linear synchronization is also pending because this task explicitly prohibits external
+  mutations.
 
 ## Synchronization
 
