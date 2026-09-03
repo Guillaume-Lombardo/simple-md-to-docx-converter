@@ -2,7 +2,7 @@
 ticket: T46
 linear_id: G1L-421
 linear_url: https://linear.app/g1lom/issue/G1L-421/t46-add-security-reporting-and-support-policies
-status: Blocked
+status: Backlog
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Progress
 
+* 2026-09-03: Deferred by the product manager. The completed policy implementation remains preserved on `docs/T46-security-support-policy`; resume only when private vulnerability reporting and a usable support channel are authorized.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized policy links after T40 and removed package metadata from T46 ownership.
 * 2026-08-29: Final audit follow-up moved shared documentation navigation exclusively to T50.
@@ -44,7 +45,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Coordination
 
-* Status: Blocked.
+* Status: Backlog; deferred by product-manager decision.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
