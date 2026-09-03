@@ -985,6 +985,12 @@ def test_podman_insecure_e2e_proves_host_routing_and_bounded_cleanup() -> None:
     assert "quickstart up --insecure" in runner
     assert MARKWEAVE_DIGEST in runner
     assert FRONTEND_DIGEST in runner
+    assert "config --images" in runner
+    assert 'grep -Fxc "$backend_image"' in runner
+    assert 'grep -Fxc "$frontend_image"' in runner
+    assert "podman image inspect \"$image_id\" --format '{{.Digest}}'" in runner
+    assert '"${expected_image##*@}"' in runner
+    assert "--format '{{.ImageName}}'" not in runner
     assert "ROUTER_HOST=0.0.0.0" in runner
     assert 'podman port "$application_id" 3100/tcp' in runner
     assert '"$public_endpoint/login"' in runner

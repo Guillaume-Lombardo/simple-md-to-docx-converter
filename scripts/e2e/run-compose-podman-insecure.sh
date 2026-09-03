@@ -44,6 +44,15 @@ file_sha256() {
   sha256sum -- "$1" | awk '{print $1}'
 }
 
+assert_container_image_digest() {
+  local container_id="$1"
+  local expected_image="$2"
+  local image_id
+  image_id="$(podman inspect --format '{{.Image}}' "$container_id")"
+  test "$(podman image inspect "$image_id" --format '{{.Digest}}')" = \
+    "${expected_image##*@}"
+}
+
 verify_helper_service_stopped() {
   test ! -e "$state_directory/podman-compose.sock"
   if pgrep -f \
@@ -75,6 +84,28 @@ trap cleanup EXIT
 quickstart up --insecure
 verify_helper_service_stopped
 
+rendered_images="$(
+  env \
+    MARKWEAVE_INITIAL_ADMIN_PASSWORD=compose-e2e-contract-password \
+    "MARKWEAVE_PORT=$port" \
+    "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:$port" \
+    "MARKWEAVE_ROUTER_PUBLIC_HOST=$public_host" \
+    MARKWEAVE_INSECURE_EVALUATION_MODE=true \
+    MARKWEAVE_WORK_DEVICE=/dev/null \
+    docker compose --project-name "$project" --project-directory "$repository" \
+      --file "$repository/compose.yaml" \
+      --file "$repository/compose.simple.yaml" \
+      --file "$repository/compose.podman.yaml" \
+      --file "$repository/compose.trusted-upstream.yaml" \
+      --file "$repository/compose.podman-trusted-upstream.yaml" \
+      --file "$repository/compose.nextjs.yaml" \
+      --file "$repository/compose.nextjs-podman.yaml" \
+      --file "$repository/compose.nextjs-podman-trusted-upstream.yaml" \
+      config --images
+)"
+test "$(grep -Fxc "$backend_image" <<<"$rendered_images")" = 1
+test "$(grep -Fxc "$frontend_image" <<<"$rendered_images")" = 2
+
 application_id="$(container_for_service markweave)"
 frontend_id="$(container_for_service frontend)"
 router_id="$(container_for_service router)"
@@ -83,10 +114,11 @@ test -n "$frontend_id"
 test -n "$router_id"
 test -z "$(container_for_service clamav)"
 
-# Prove the exact published release pair is used, without rebuilding either image.
-test "$(podman inspect --format '{{.ImageName}}' "$application_id")" = "$backend_image"
-test "$(podman inspect --format '{{.ImageName}}' "$frontend_id")" = "$frontend_image"
-test "$(podman inspect --format '{{.ImageName}}' "$router_id")" = "$frontend_image"
+# Prove the running containers use the exact published release pair. Podman may
+# canonicalize ImageName by dropping the tag, so compare the stored image digest.
+assert_container_image_digest "$application_id" "$backend_image"
+assert_container_image_digest "$frontend_id" "$frontend_image"
+assert_container_image_digest "$router_id" "$frontend_image"
 
 # slirp4netns forwards the host-loopback publication to the shared namespace
 # interface. The router must therefore bind the namespace, while its own local
