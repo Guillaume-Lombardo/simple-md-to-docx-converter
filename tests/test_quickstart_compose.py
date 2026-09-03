@@ -993,6 +993,8 @@ def test_podman_insecure_e2e_proves_host_routing_and_bounded_cleanup() -> None:
     assert "--format '{{.ImageName}}'" not in runner
     assert "ROUTER_HOST=0.0.0.0" in runner
     assert 'podman port "$application_id" 3100/tcp' in runner
+    assert "{{json .HostConfig.PortBindings}}" in runner
+    assert 'podman port "$router_id"' not in runner
     assert '"$public_endpoint/login"' in runner
     assert '"$public_endpoint/api/v1/session"' in runner
     assert "quickstart down" in runner

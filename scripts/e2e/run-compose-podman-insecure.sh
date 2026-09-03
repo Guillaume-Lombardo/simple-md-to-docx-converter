@@ -124,7 +124,7 @@ assert_container_image_digest "$router_id" "$frontend_image"
 # interface. The router must therefore bind the namespace, while its own local
 # readiness probe can continue to use namespace loopback.
 test "$(podman port "$application_id" 3100/tcp)" = "127.0.0.1:$port"
-test -z "$(podman port "$router_id")"
+test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' "$router_id")" = null
 podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$router_id" \
   | grep -Fx 'ROUTER_HOST=0.0.0.0'
 podman exec "$router_id" node -e \
