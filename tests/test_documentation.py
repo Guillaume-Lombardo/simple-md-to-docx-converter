@@ -205,6 +205,7 @@ def test_local_frontend_commands_start_at_the_repository_root() -> None:
     local_development = (ROOT / "docs" / "local-development.md").read_text(
         encoding="utf-8"
     )
+    assert "scripts/javascript/bootstrap-pnpm.sh" in local_development
     javascript_commands = local_development.split(
         "scripts/javascript/bootstrap-pnpm.sh", 1
     )[0]
