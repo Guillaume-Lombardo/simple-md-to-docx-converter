@@ -33,8 +33,14 @@ backend/frontend images in both storage profiles.
   Record CPU time, wall time, peak memory, threads, and concurrency behavior against the approved
   T69 low-compute envelope.
 * Exercise result integrity: safe root Markdown filename, safe `assets/` paths, exact relative image
-  references, media signatures/extensions, no orphaned assets, deterministic ordering/digest,
-  private download headers, and traceability manifest.
+  references, decoded media signatures/extensions, rejection of non-image/mismatched/polyglot and
+  animated/multi-frame assets, hostile-SVG sanitization and network isolation, no orphaned assets,
+  deterministic ordering/digest, private download headers, and the T70-generated content-free
+  traceability manifest.
+* Prove with two regular users and one administrator that reverse source, status, cancellation, and
+  result routes are owner-only and non-enumerating. Verify that administrator operational metadata
+  is separately authorized, audited, content-free, and cannot reveal filenames, Markdown, assets,
+  content-derived digests, or a download capability.
 * Extend selective and scheduled CI domains, SBOM/vulnerability/license evidence, mutation scope
   where risk-ranked, and release-install verification for the native anydoc dependency.
 * Complete user, API, operations, security, configuration, supported-format, limitation,
@@ -49,6 +55,10 @@ backend/frontend images in both storage profiles.
 * T21
 * T22
 * T23
+* T46
+* T48
+* T50
+* T67
 * T70
 * T71
 * T72
@@ -57,6 +67,14 @@ backend/frontend images in both storage profiles.
 
 * Own final-image integration, two-profile browser/API acceptance, selective CI wiring, cross-
   cutting documentation, and release-readiness evidence.
+* Begin only after T46, T48, T50, and T67 complete their baseline policy, mutation, documentation,
+  acceptance, and JavaScript-tooling ownership. Add narrowly scoped reverse-conversion extensions
+  to the established surfaces without reopening those tickets' baseline decisions.
+* Do not edit `SECURITY.md`, `SUPPORT.md`, README, `docs/index.md`, shared cross-guide navigation,
+  the pnpm/Corepack bootstrap, root workspace topology, or T48's baseline mutation runner/gate unless
+  ownership is explicitly transferred. Put reverse documentation in dedicated guides, use T67's
+  finalized workspace, and extend only the approved reverse mutation targets through T48's
+  established extension mechanism.
 * Do not expand the approved format matrix or add OCR.
 * Do not publish a release or change a public deployment digest without a separately approved
   release ticket.

@@ -19,6 +19,12 @@ normative product, security, packaging, and compatibility contract before implem
 * Pin and evaluate an exact `firecrawl-anydoc` release under Python 3.14 in the UBI 9 backend image,
   including x86-64 wheel compatibility, license/provenance, startup/import behavior, memory,
   duration, and cancellation constraints.
+* For the synchronous in-process native call, prove and choose enforceable cancellation, wall-time
+  timeout, memory containment, lease-heartbeat, lost-lease fencing, and no-publication-after-loss
+  semantics. A Python timeout or cancellation flag that leaves native work running is insufficient,
+  and lease expiry must not permit overlapping native execution. If the fixed in-process, no-engine-
+  subprocess contract cannot satisfy these properties, stop T70 and escalate the conflicting
+  product or isolation decision to the product manager instead of weakening it.
 * Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
   count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
   the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
@@ -39,8 +45,13 @@ normative product, security, packaging, and compatibility contract before implem
   document model or embedded assets. Define the supported PDF contract without claiming image
   preservation that cannot be proved.
 * Define deterministic output layout, filename/media-type normalization, duplicate handling,
-  ordering, manifest/traceability metadata, limits, retention, ownership, remote-link behavior, and
-  safe error contracts.
+  ordering, the content-free manifest/traceability schema, limits, retention, ownership, remote-link
+  behavior, and safe error contracts. T70, not T69, owns the canonical manifest generator.
+* Define reverse authorization explicitly: every `/api/v1/reversions` source, status, cancellation,
+  and result route is owner-only. Administrators receive no document bytes, filenames, Markdown,
+  assets, content-derived digests, impersonation, or download capability; separately audited
+  administrator observability may expose only the minimum content-free operational metadata needed
+  for capacity and execution diagnosis.
 * Update `docs/product-specification.md` and the follow-up ticket contracts with the approved
   decision. This ticket introduces no production behavior.
 

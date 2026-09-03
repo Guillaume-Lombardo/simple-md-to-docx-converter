@@ -30,6 +30,15 @@ for reverse conversion.
   every exported image has a safe relative `![]()` link at the corresponding source position, a
   normalized allowed media type and extension, bounded bytes/dimensions/count, collision-free
   stable name, and no orphan or escaping archive path.
+* Treat every exported image as untrusted using the T08-equivalent security boundary: identify
+  decoded signatures independently of source names and declared media types; reject non-image,
+  mismatched, and polyglot payloads; bound dimensions, decoded bytes, and decompression work; reject
+  animated or multi-frame content; and sanitize then rasterize SVG locally with external entities,
+  scripts, external references, and network access disabled before deterministic normalization.
+* Generate the approved content-free traceability manifest through one T70-owned canonical
+  serializer with stable field and ZIP-entry ordering. Do not include source/result text, original
+  filenames, asset source names, local paths, secrets, or nondeterministic timestamps, and do not
+  leave a second manifest generator for T71.
 * Reject or safely degrade unavailable images and document-controlled remote images according to
   the T69 contract; never download remote resources.
 * Keep OCR and every hosted Firecrawl path disabled. Scanned or image-only PDF input fails with a
@@ -37,8 +46,9 @@ for reverse conversion.
 * Map anydoc and packaging failures to stable content-free Markweave errors without filenames,
   document content, secrets, or local paths.
 * Add unit, corpus/golden, fuzz-or-mutation, security, and real-library integration coverage for
-  success and relevant malformed, encrypted, decompression, nesting, asset, timeout, cancellation,
-  and resource-limit failures.
+  success and relevant malformed, encrypted, decompression, nesting, signature/type mismatch,
+  non-image, polyglot, animated/multi-frame, hostile-SVG, timeout, cancellation, and
+  resource-limit failures.
 
 ## Dependencies
 
@@ -49,8 +59,9 @@ for reverse conversion.
 
 ## Implementation boundary
 
-* Own the anydoc adapter, asset-aware serializer/package builder, reverse-conversion domain errors,
-  format corpus, dependency lock, and directly affected backend-image contents.
+* Own the anydoc adapter, asset-aware serializer/package builder, the single deterministic content-
+  free manifest generator, reverse-conversion domain errors, format corpus, dependency lock, and
+  directly affected backend-image contents.
 * Do not add HTTP routes, persistent jobs, database migrations, or browser UI.
 * Do not implement OCR or any network-backed fallback.
 

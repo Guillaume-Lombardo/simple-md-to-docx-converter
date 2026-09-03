@@ -273,19 +273,42 @@ memory, retained asset bytes, and concurrency scaling on representative and conf
 Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
 no unmeasured numeric threshold is fixed in this specification.
 
+Because the approved binding is a synchronous in-process native call, T69 must also prove and
+specify enforceable cancellation, wall-time timeout, memory containment, lease-heartbeat, and lost-
+lease fencing semantics. A Python task timeout or cancellation flag is not sufficient if native
+execution can continue, retain memory, or publish after the lease is lost. The approved design must
+prevent publication after cancellation, timeout, or lease loss and must prevent an expired lease
+from causing overlapping native executions. If those properties cannot be enforced within the
+fixed in-process, no-engine-subprocess contract, T69 blocks T70 and escalates the conflicting
+product or isolation decision to the product manager; implementation must not silently weaken the
+contract.
+
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
 embedded image reported at a source position under deterministic safe `assets/` paths and reference
-it from the root Markdown with a relative `![]()` link. Never download an external image. A result
-with assets is a deterministic ZIP containing exactly one root Markdown file, its referenced local
-assets, and the approved content-free traceability metadata. T69 decides the asset-free download
-contract and the honest PDF contract because anydoc's current PDF path produces Markdown directly
-without exposing the shared document model or embedded assets.
+it from the root Markdown with a relative `![]()` link. Never download an external image. Treat
+every exported image byte stream as untrusted input: identify it by decoded signature rather than
+its source name or declared media type, reject non-image and mismatched/polyglot payloads, enforce
+bounded decode dimensions and bytes, reject animated or multi-frame content, and reuse the T08
+sanitization and local network-disabled rasterization contract for SVG before deterministic image
+normalization. A result with assets is a deterministic ZIP containing exactly one root Markdown
+file, its referenced local assets, and content-free traceability metadata. T69 defines the approved
+metadata schema; T70 owns its deterministic canonical generation together with the package builder.
+T69 decides the asset-free download contract and the honest PDF contract because anydoc's current
+PDF path produces Markdown directly without exposing the shared document model or embedded assets.
 
 Reverse jobs preserve the existing scanner ordering, owner isolation, persistent queue states,
 idempotency, leases, recovery, cancellation, expiration, capacity, retention, content-free logging,
 and both-storage-profile contracts. Their limits and metrics are explicit and cannot silently reuse
 forward-conversion values when the workloads differ.
+
+Every `/api/v1/reversions` source, job-status, cancellation, and result operation is owner-only;
+global administrator status does not grant document-content access or impersonation. Administrators
+may use only the separately authorized operational observability and audit surfaces for content-free
+metadata needed to diagnose capacity and execution, such as opaque job identity, owner identity,
+state, safe failure category, attempt/lease state, timing, and byte counts. Those surfaces expose no
+source or result bytes, original filename, Markdown, asset name or bytes, content-derived digest, or
+download capability, and every administrator access follows the existing audit contract.
 
 ## 4. Input contract
 
@@ -374,7 +397,11 @@ Use `/api/v1`. The contract must include:
 - template creation, metadata update, current/previous content download, replacement, version listing, copy-forward restoration, deletion/archive, and per-user default selection;
 - `/health/live`, `/health/ready`, metrics, and `/docs`.
 
-Support `Idempotency-Key` for job creation. Enforce owner/administrator access to source, state, cancellation, and result. Return stable functional error codes without traces or local paths. Keep readiness cheap; it must not run a conversion.
+Support `Idempotency-Key` for job creation. Preserve the existing forward-conversion authorization
+contract. For reverse conversions, enforce the stricter owner-only content and lifecycle contract
+in section 3.5; administrator visibility is limited to its separately audited, content-free
+operational metadata. Return stable functional error codes without traces or local paths. Keep
+readiness cheap; it must not run a conversion.
 
 ## 8. Security and operations
 
@@ -614,8 +641,8 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
 | T70 | Implement the secure local anydoc adapter and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
-| T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T71 |
-| T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T70, T71, T72 |
+| T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
+| T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -625,9 +652,14 @@ publication boundary.
 
 For experimental reverse conversion, T69 is a blocking evidence and contract spike. T70 implements
 the local engine and package builder only after the asset-position strategy and PDF limitations are
-approved. T71 then adds the persistent backend workflow, followed by the T72 Revert workspace. T73
-owns the complete final-image, two-profile, cross-format, security, documentation, and release-
-readiness acceptance matrix. OCR remains outside this sequence.
+approved. T71 then adds the persistent backend workflow. T67 must finish the JavaScript workspace
+migration before T72 changes frontend dependencies, commands, tests, or lockfiles. T72 then builds
+the Revert workspace on that finalized toolchain. T46, T48, and T50 must finish their baseline
+security/support policies, mutation gate, and cross-surface documentation/acceptance ownership
+before T73 begins. T73 may then add only reverse-specific extensions to those established surfaces;
+it does not reopen their baseline scope or edit an exclusively owned path while another ticket is
+active. T73 owns the complete final-image, two-profile, cross-format, reverse-security, dedicated
+reverse-documentation, and release-readiness acceptance matrix. OCR remains outside this sequence.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
@@ -665,9 +697,14 @@ the ticket before touching any path owned by another active ticket.
 - PDF/A output and automatic Word or PDF table-of-contents generation are outside the initial
   product scope. Adding either capability requires separately approved future scope.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
-  serializer strategy, asset-free download type, and honest text-PDF/image contract. Until T69 is
-  approved, no implementation may claim that every anydoc-supported extension or PDF-embedded
-  image is supported.
+  serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
+  contract, and enforceable synchronous-native-call cancellation/timeout/memory/lease decision.
+  Until T69 is approved, no implementation may claim that every anydoc-supported extension or PDF-
+  embedded image is supported. If the fixed in-process contract cannot enforce those execution
+  controls, T69 requires a product-manager decision and T70 remains blocked.
+- T70 owns deterministic canonical generation of the content-free traceability manifest, including
+  stable field and archive-entry ordering, together with the Markdown/assets package builder. T71
+  may persist and return the resulting package but must not introduce a second manifest serializer.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.

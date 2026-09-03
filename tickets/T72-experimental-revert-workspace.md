@@ -40,12 +40,16 @@ downloading their results.
 * T60
 * T61
 * T64
+* T67
 * T71
 
 ## Implementation boundary
 
 * Own the Revert navigation entry, experimental visual treatment, `/revert` presentation, typed
   client contract, and frontend tests.
+* Start only after T67 finalizes the pnpm workspace. Use its established commands and lockfile; do
+  not reintroduce npm application lockfiles, migrate the isolated Mermaid toolchain, or redesign the
+  JavaScript workspace.
 * Do not duplicate FastAPI validation or business behavior and do not add OCR.
 * Do not change the existing Convert workflow except for the shared navigation entry.
 
