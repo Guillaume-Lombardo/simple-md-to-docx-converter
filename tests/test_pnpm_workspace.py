@@ -231,3 +231,7 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
         "manifest-lock-sha256.txt",
     ):
         assert contract in benchmark
+    assert (
+        benchmark.count("final-image 1 podman build --no-cache --format oci --tag") == 2
+    )
+    assert benchmark.count("image: podman build --no-cache --format oci") == 2

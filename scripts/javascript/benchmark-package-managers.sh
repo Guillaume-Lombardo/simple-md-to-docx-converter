@@ -60,8 +60,8 @@ printf '%s\n' \
   'pnpm cold/warm: pnpm --dir <root> install --frozen-lockfile --ignore-scripts --store-dir <store>' \
   'npm build: npm run --prefix <root>/web build' \
   'pnpm build: pnpm --dir <root> --filter @markweave/web run build' \
-  'npm image: podman build --format oci --file <npm-root>/web/Containerfile <npm-root>/web' \
-  'pnpm image: podman build --format oci --file <pnpm-root>/web/Containerfile <pnpm-root>' \
+  'npm image: podman build --no-cache --format oci --file <npm-root>/web/Containerfile <npm-root>/web' \
+  'pnpm image: podman build --no-cache --format oci --file <pnpm-root>/web/Containerfile <pnpm-root>' \
   'cache archive: tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - <cache> | gzip --no-name | wc --bytes' \
   > "$output_directory/commands.txt"
 
@@ -134,9 +134,9 @@ done
 
 rm -rf -- "$npm_tree/node_modules" "$npm_tree/web/node_modules" "$npm_tree/web/.next" \
   "$pnpm_tree/node_modules" "$pnpm_tree/web/node_modules" "$pnpm_tree/web/.next"
-run_timed npm final-image 1 podman build --format oci --tag "$npm_image" \
+run_timed npm final-image 1 podman build --no-cache --format oci --tag "$npm_image" \
   --file "$npm_tree/web/Containerfile" "$npm_tree/web"
-run_timed pnpm final-image 1 podman build --format oci --tag "$pnpm_image" \
+run_timed pnpm final-image 1 podman build --no-cache --format oci --tag "$pnpm_image" \
   --file "$pnpm_tree/web/Containerfile" "$pnpm_tree"
 {
   printf 'manager\timage_bytes\n'
