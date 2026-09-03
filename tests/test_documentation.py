@@ -187,3 +187,35 @@ def test_frontend_guides_use_unambiguous_workspace_commands() -> None:
     runtime = architecture.split("## Runtime image and rootless boundary", 1)[1]
     assert "Application builds do not use that bundled npm" in runtime
     assert "No package-manager binary or package-manager cache is present" in runtime
+
+
+def test_contributor_checks_bootstrap_the_verified_package_manager() -> None:
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for contract in (
+        "[verified bootstrap procedure](docs/package-management.md#reviewed-bootstrap)",
+        'cd "$(git rev-parse --show-toplevel)"',
+        'scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"',
+        'export PATH="$PWD/.pnpm-tools/bin:$PATH"',
+        'COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0',
+    ):
+        assert contract in contributing
+
+
+def test_local_frontend_commands_start_at_the_repository_root() -> None:
+    local_development = (ROOT / "docs" / "local-development.md").read_text(
+        encoding="utf-8"
+    )
+    javascript_commands = local_development.split(
+        "scripts/javascript/bootstrap-pnpm.sh", 1
+    )[0]
+    assert 'cd "$(git rev-parse --show-toplevel)"' in javascript_commands
+
+
+def test_web_readme_describes_the_published_browser_interface() -> None:
+    readme = (ROOT / "web" / "README.md").read_text(encoding="utf-8")
+    prose = " ".join(readme.split())
+    assert "published as Markweave's browser interface by T64" in prose
+    assert "FastAPI remains the authentication and API authority" in prose
+    assert "has no backend credentials or persistence" in prose
+    assert "unpublished Next.js" not in readme
+    assert "remain the production browser interface until T64" not in readme

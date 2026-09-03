@@ -31,7 +31,16 @@ regenerate `build-constraints.txt` using the command in the local development gu
 
 ## Canonical checks
 
+Start from the repository root and install the reviewed JavaScript package-manager toolchain using
+the [verified bootstrap procedure](docs/package-management.md#reviewed-bootstrap). The bootstrap
+checks Corepack's published integrity and pins pnpm; the offline settings below prevent Corepack
+from selecting or downloading an ambient package manager.
+
 ```bash
+cd "$(git rev-parse --show-toplevel)"
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
 uv run ruff format .
 uv run ruff check .
 uv run ty check

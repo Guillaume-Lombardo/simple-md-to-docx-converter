@@ -78,6 +78,7 @@ workspace boundary, isolated Mermaid exception, cache policy, benchmark requirem
 procedure.
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
 export PATH="$PWD/.pnpm-tools/bin:$PATH"
 export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
