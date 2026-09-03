@@ -266,13 +266,27 @@ def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
     assert 'MARKWEAVE_REPOSITORY_ROOT="$repository"' in rollback
     for path in ("/login", "/convert", "/templates", "/static/conversion.js"):
         assert path in route_manifest
-    assert evidence["schema"] == "t64-cutover-gates-v1"
+    assert evidence["schema"] == "t64-cutover-gates-v2"
     assert evidence["pre_removal"] == {
         "conclusion": "success",
         "run_id": 33686251439,
         "source_sha": "30c11b4f109bba147e8cc7685d0ba2a1b44ec579",
     }
     assert evidence["rollback"]["profiles"] == ["standalone", "distributed"]
+    assert evidence["publication"] == {
+        "backend_image": (
+            "ghcr.io/guillaume-lombardo/md-converter:0.6.1@"
+            "sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea"
+        ),
+        "conclusion": "success",
+        "frontend_image": (
+            "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@"
+            "sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e"
+        ),
+        "run_id": 33725900729,
+        "source_sha": "78cb86d450e940a3190591de62ee0ebade216d8b",
+        "version": "0.6.1",
+    }
 
 
 def test_final_image_version_comes_from_project_metadata() -> None:

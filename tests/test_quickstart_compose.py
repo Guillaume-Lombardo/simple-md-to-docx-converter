@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -47,8 +48,12 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.5.2@"
-    "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+    "ghcr.io/guillaume-lombardo/md-converter:0.6.1@"
+    "sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea"
+)
+FRONTEND_DIGEST = (
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@"
+    "sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
@@ -246,6 +251,8 @@ def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
 
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in overlay
     assert overlay.count("MARKWEAVE_CUTOVER_FRONTEND_IMAGE") == 2
+    assert MARKWEAVE_DIGEST in overlay
+    assert overlay.count(FRONTEND_DIGEST) == 2
     assert "ports: !reset []" in overlay
     assert "BACKEND_ORIGIN: http://markweave:8080" in overlay
     assert "FRONTEND_ORIGIN: http://frontend:3000" in overlay
@@ -525,6 +532,75 @@ def test_quickstarts_compare_the_version_before_the_digest(
     assert script.index('backend_version="${cutover_backend_image%@*}"') < script.index(
         'backend_version="${backend_version##*:}"'
     )
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_default_to_the_published_cutover_pair(quickstart: Path) -> None:
+    script = quickstart.read_text(encoding="utf-8")
+
+    assert MARKWEAVE_DIGEST in script
+    assert FRONTEND_DIGEST in script
+    assert 'cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"' in (
+        script
+    )
+    assert 'cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"' in (
+        script
+    )
+
+
+def test_simple_quickstart_image_selection_consumes_producer_and_propagates_failure(
+    tmp_path: Path,
+) -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+    match = re.search(
+        r"application_image=\"\$\(compose config --images \| awk \\\n\s+'([^']+)'\)\"",
+        script,
+    )
+    assert match is not None
+    awk_program = match.group(1)
+    assert "exit" not in awk_program
+
+    producer = tmp_path / "compose-images"
+    producer.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "printf '%s\\n' 'ghcr.io/guillaume-lombardo/md-converter:0.6.1@sha256:"
+        + "f"
+        * 64
+        + "'\n"
+        "for index in $(seq 1 20000); do printf 'unrelated-%s\\n' \"$index\"; done\n"
+        'if [[ "${2:-}" == fail ]]; then exit 23; fi\n'
+        'printf complete >"$1"\n',
+        encoding="utf-8",
+    )
+    producer.chmod(0o755)
+    marker = tmp_path / "producer-complete"
+    command = (
+        'set -euo pipefail; image="$("$1" "$2" "${4:-}" | awk "$3")"; '
+        '[[ "$image" == ghcr.io/guillaume-lombardo/md-converter:* ]]'
+    )
+
+    completed = subprocess.run(
+        ["bash", "-c", command, "bash", str(producer), str(marker), awk_program],
+        check=False,
+    )
+    failed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            command,
+            "bash",
+            str(producer),
+            str(marker),
+            awk_program,
+            "fail",
+        ],
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert marker.read_text(encoding="utf-8") == "complete"
+    assert failed.returncode == 23
 
 
 @pytest.mark.parametrize(

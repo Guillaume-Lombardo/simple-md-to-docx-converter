@@ -41,6 +41,11 @@ or unrelated response does not prove absence. Only the normal protected `0.6.1` 
 may pass that state. It performs a new ordinary paired release; it does not rebuild or recover
 `0.6.0`.
 
+That exception is now historical: protected release run `33725900729` published the paired `0.6.1`
+images from source `78cb86d450e940a3190591de62ee0ebade216d8b`, and the separate adoption change pins both verified
+registry digests in Compose, the quickstarts, and the durable cutover evidence. Normal fully aligned
+public-release checks apply after adoption.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment

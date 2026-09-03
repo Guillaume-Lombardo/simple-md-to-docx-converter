@@ -13,8 +13,10 @@ readonly work_bytes=268435456
 readonly project="${MARKWEAVE_QUICKSTART_PROJECT:-markweave}"
 readonly port="${MARKWEAVE_QUICKSTART_PORT:-8080}"
 readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"
-readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-}"
-readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-}"
+readonly cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"
+readonly cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"
+readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.6.1@sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea}"
+readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e}"
 readonly work_volume="${project}_markweave-work"
 readonly blkid=/usr/sbin/blkid
 readonly losetup=/usr/sbin/losetup
@@ -41,8 +43,7 @@ validate_project_and_port() {
     fail "The quickstart port must be an integer from 1 through 65535."
   [[ "$public_origin" != *$'\n'* && "$public_origin" != *$'\r'* ]] || \
     fail "The public origin must be a single-line HTTP origin."
-  if { [[ -n "$cutover_backend_image" ]] && [[ -z "$cutover_frontend_image" ]]; } ||
-    { [[ -z "$cutover_backend_image" ]] && [[ -n "$cutover_frontend_image" ]]; }; then
+  if [[ "$cutover_backend_supplied" != "$cutover_frontend_supplied" ]]; then
     fail "The backend and frontend cutover images must be supplied together."
   fi
   if [[ -n "$cutover_backend_image" ]]; then

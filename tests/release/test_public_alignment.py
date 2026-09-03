@@ -19,6 +19,7 @@ from scripts.release.public_alignment import (
     RegistryCredentials,
     check_alignment,
     parse_compose_identity,
+    parse_frontend_compose_identity,
     parse_project_version,
 )
 
@@ -147,6 +148,44 @@ def _skipped_container_transport() -> FakeTransport:
     return transport
 
 
+def _paired_transport() -> FakeTransport:
+    version = "0.6.1"
+    tag = f"v{version}"
+    transport = _public_transport(version=version)
+    release_url = f"{public_alignment.GITHUB_API}/releases/tags/{tag}"
+    release_response = transport.responses[release_url]
+    assert isinstance(release_response, HttpResponse)
+    release = json.loads(release_response.body)
+    release["assets"] = []
+    transport.responses[release_url] = _json_response(release)
+    legacy_receipt = (
+        f"{public_alignment.GITHUB_RELEASES}/{tag}/registry-publication.json"
+    )
+    del transport.responses[legacy_receipt]
+    for role in ("backend", "frontend"):
+        name = f"{role}-registry-publication.json"
+        url = f"{public_alignment.GITHUB_RELEASES}/{tag}/{name}"
+        release["assets"].append({"name": name, "browser_download_url": url})
+        transport.responses[url] = _json_response(
+            {
+                "oci_archive_manifest_digest": f"sha256:{'b' * 64}",
+                "registry_manifest_digest": REGISTRY_DIGEST,
+                "source_sha": SOURCE_SHA,
+                "version": version,
+            }
+        )
+    transport.responses[release_url] = _json_response(release)
+    frontend_token = (
+        "https://ghcr.io/token?service=ghcr.io&scope=repository:"
+        f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
+    )
+    transport.responses[frontend_token] = _json_response({"token": "frontend-token"})
+    transport.responses[
+        f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/{version}"
+    ] = HttpResponse(200, {"Docker-Content-Digest": REGISTRY_DIGEST}, REGISTRY_MANIFEST)
+    return transport
+
+
 @pytest.mark.unit
 def test_accepts_fully_aligned_public_release() -> None:
     transport = _public_transport()
@@ -167,6 +206,50 @@ def test_accepts_fully_aligned_public_release() -> None:
         public_alignment.GHCR_TOKEN_URL,
         f"https://ghcr.io/v2/{public_alignment.REGISTRY_PATH}/manifests/0.4.0",
     ]
+
+
+@pytest.mark.unit
+def test_accepts_paired_public_release_only_after_both_exact_receipts() -> None:
+    transport = _paired_transport()
+    identity = ComposeIdentity("0.6.1", REGISTRY_DIGEST)
+
+    state = check_alignment(
+        project_version="0.6.1",
+        compose=identity,
+        frontend=identity,
+        event_name="schedule",
+        transport=transport,
+    )
+
+    assert state == "aligned"
+    requested = [url for url, _headers in transport.requests]
+    assert (
+        f"{public_alignment.GITHUB_RELEASES}/v0.6.1/backend-registry-publication.json"
+        in requested
+    )
+    assert (
+        f"{public_alignment.GITHUB_RELEASES}/v0.6.1/frontend-registry-publication.json"
+        in requested
+    )
+    assert (
+        f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.1"
+        in requested
+    )
+
+
+@pytest.mark.unit
+def test_paired_public_release_rejects_missing_or_mismatched_frontend() -> None:
+    for frontend in (None, ComposeIdentity("0.6.2", REGISTRY_DIGEST)):
+        with pytest.raises(
+            AlignmentError, match="backend and frontend Compose versions"
+        ):
+            check_alignment(
+                project_version="0.6.1",
+                compose=ComposeIdentity("0.6.1", REGISTRY_DIGEST),
+                frontend=frontend,
+                event_name="schedule",
+                transport=_paired_transport(),
+            )
 
 
 @pytest.mark.unit
@@ -505,6 +588,22 @@ def test_parsers_require_canonical_version_and_exact_immutable_compose_ref() -> 
         parse_compose_identity(
             "services:\n  markweave:\n    image: ghcr.io/example/markweave:0.5.0\n"
         )
+
+
+@pytest.mark.unit
+def test_frontend_compose_parser_requires_one_exact_shared_public_default() -> None:
+    image = "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "d" * 64
+    overlay = (
+        "services:\n"
+        f'  frontend:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{image}}}"\n'
+        f'  router:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{image}}}"\n'
+    )
+
+    assert parse_frontend_compose_identity(overlay) == ComposeIdentity(
+        "0.6.1", f"sha256:{'d' * 64}"
+    )
+    with pytest.raises(AlignmentError, match="share one trusted immutable"):
+        parse_frontend_compose_identity(overlay.replace("md-converter-web", "other", 1))
 
 
 @pytest.mark.unit
