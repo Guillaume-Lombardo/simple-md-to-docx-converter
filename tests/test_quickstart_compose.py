@@ -996,10 +996,37 @@ def test_podman_insecure_e2e_proves_host_routing_and_bounded_cleanup() -> None:
     assert "{{json .HostConfig.PortBindings}}" in runner
     assert 'podman port "$router_id"' not in runner
     assert '"$public_endpoint/login"' in runner
+    assert "<title>Markweave</title>" in runner
     assert '"$public_endpoint/api/v1/session"' in runner
     assert "quickstart down" in runner
     assert 'volume inspect "$data_volume"' in runner
     assert 'volume inspect "$work_volume"' in runner
+
+
+@pytest.mark.parametrize(
+    ("bindings", "accepted"),
+    [
+        ("null", True),
+        ("{}", True),
+        ('{"3100/tcp":[{"HostIp":"127.0.0.1","HostPort":"11279"}]}', False),
+    ],
+)
+def test_podman_insecure_e2e_accepts_only_empty_router_port_bindings(
+    bindings: str, accepted: bool
+) -> None:
+    runner = PODMAN_INSECURE_RUNNER.read_text(encoding="utf-8")
+    start = runner.index("assert_no_port_bindings() {")
+    end = runner.index("\n}", start) + 2
+    function = runner[start:end]
+
+    result = subprocess.run(
+        ["bash", "-c", f'{function}\nassert_no_port_bindings "$1"', "bash", bindings],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert (result.returncode == 0) is accepted
 
 
 def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:

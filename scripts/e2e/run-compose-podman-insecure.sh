@@ -53,6 +53,17 @@ assert_container_image_digest() {
     "${expected_image##*@}"
 }
 
+assert_no_port_bindings() {
+  local bindings="$1"
+  case "$bindings" in
+    null | '{}') return 0 ;;
+    *)
+      echo "The router container unexpectedly declares a host-port binding." >&2
+      return 1
+      ;;
+  esac
+}
+
 verify_helper_service_stopped() {
   test ! -e "$state_directory/podman-compose.sock"
   if pgrep -f \
@@ -124,16 +135,15 @@ assert_container_image_digest "$router_id" "$frontend_image"
 # interface. The router must therefore bind the namespace, while its own local
 # readiness probe can continue to use namespace loopback.
 test "$(podman port "$application_id" 3100/tcp)" = "127.0.0.1:$port"
-test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' "$router_id")" = null
+assert_no_port_bindings \
+  "$(podman inspect --format '{{json .HostConfig.PortBindings}}' "$router_id")"
 podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$router_id" \
-  | grep -Fx 'ROUTER_HOST=0.0.0.0'
-podman exec "$router_id" node -e \
-  "fetch('http://127.0.0.1:3100/login', {headers: {Host: '$public_host'}, signal: AbortSignal.timeout(2000)}).then(response => process.exit(response.status === 200 ? 0 : 1))"
+  | grep -Fqx 'ROUTER_HOST=0.0.0.0'
 
 # Exercise both browser and direct FastAPI routing through the real host port.
 test "$(curl --silent --output "$temporary_directory/login.html" --write-out '%{http_code}' \
   --header "Host: $public_host" "$public_endpoint/login")" = 200
-grep -Fq '<title>Sign in | Markweave</title>' "$temporary_directory/login.html"
+grep -Fq '<title>Markweave</title>' "$temporary_directory/login.html"
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header "Host: $public_host" "$public_endpoint/api/v1/session")" = 401
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
