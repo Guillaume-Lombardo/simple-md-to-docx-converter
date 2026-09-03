@@ -7,13 +7,10 @@ the requested local format families, exposes embedded bytes plus source-position
 for every tested non-PDF document model, and runs without document-engine executables, an ML
 runtime, or network access when OCR is explicitly `reject`.
 
-It is **not approved for production integration**. T70 is blocked because the fixed synchronous
-in-process interface cannot enforce the required hard cancellation, deadline, per-call memory, and
-lost-lease/no-overlap semantics. The public serializer also cannot render an already parsed
-`Document` or resolve an embedded asset id to a relative image link. Implementing that behavior in
-Markweave would duplicate the upstream serializer, which T69 explicitly forbids.
+It is **not approved for production integration**. T70 is blocked on two independent PM decisions:
+execution isolation and asset serialization. Resolving either one alone does not unblock T70.
 
-The product manager must choose one of these contract changes before T70 starts:
+For execution isolation, the product manager must choose one of these contract changes:
 
 1. Permit one disposable, separately supervised reverse-conversion process or container per active
    attempt. The anydoc call remains in-process inside that isolated worker, while its supervisor
@@ -22,13 +19,25 @@ The product manager must choose one of these contract changes before T70 starts:
    shared-worker interpretation of “in-process” and requires a standalone restart/availability
    design.
 2. Keep the existing in-process shared-worker contract and defer T70 until upstream exposes
-   cooperative cancellation/deadline/resource-budget inputs plus an asset-aware renderer hook.
+   cooperative cancellation/deadline/resource-budget inputs.
+
+Separately, the public serializer cannot render an already parsed `Document` or resolve an
+embedded asset id to a relative image link. For asset serialization, the product manager must
+choose one of these paths:
+
+1. Defer T70 until upstream exposes a supported asset-aware renderer hook.
+2. Explicitly approve a narrowly bounded Markweave-maintained adapter or upstream fork. Approval
+   must define the exact upstream surface retained, prohibit a second independent document parser,
+   and require security review, serializer-parity tests, upstream-version compatibility tests,
+   dependency/SBOM/license review, named maintenance ownership, and a removal or rebase plan.
+
+Without that explicit second decision, duplicating or forking the serializer remains prohibited.
 
 Silently relying on an asyncio timeout, `Future.cancel()`, a cancellation flag, lease-token
 publication fencing alone, or a process-wide memory ceiling is not an acceptable third option.
 
 `contract.json` records the validated candidate format, packaging, PDF, authorization, and safe
-error contract. It remains non-normative while this decision is blocked and while
+error contract. It remains non-normative while either decision is blocked and while
 `docs/product-specification.md` is owned by T67.
 
 ## Pinned artifact and provenance
@@ -62,46 +71,53 @@ Host probe:
 
 ```bash
 uv sync --project spikes/anydoc --locked
+uv run --project spikes/anydoc --group dev ruff check spikes/anydoc/probe.py
+uv run --project spikes/anydoc --group dev ty check spikes/anydoc/probe.py
 RAYON_NUM_THREADS=1 uv run --project spikes/anydoc --locked \
-  python spikes/anydoc/probe.py --iterations 5
+  python spikes/anydoc/probe.py --iterations 5 \
+  --output spikes/anydoc/measurements-host.json
 ```
 
 Exact UBI 9 probe:
 
 ```bash
-podman build -f spikes/anydoc/Containerfile \
+podman build --network slirp4netns -f spikes/anydoc/Containerfile \
   -t localhost/markweave-anydoc-t69:0.2.4 .
 podman run --rm --network none --read-only --cap-drop all \
   --security-opt no-new-privileges --pids-limit 64 --memory 512m --cpus 1 \
-  localhost/markweave-anydoc-t69:0.2.4 --iterations 5
+  localhost/markweave-anydoc-t69:0.2.4 --iterations 5 \
+  > spikes/anydoc/measurements-ubi9.json
 ```
 
 The retained `measurements-host.json` and `measurements-ubi9.json` are observations, not deterministic
 goldens. The deterministic tests validate their schema and invariant conclusions rather than timing
 values. The UBI run used base digest
 `sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653`, image ID
-`52283fbb112d613b98ac22d58ab4773aaba3827548e072c440a2c57419d8e0c7`, one CPU, 512 MiB,
+`ce437fbb571195383b5914d3a6e3e491e0a24466117bf0065bcc8eec3361e323`, one CPU, 512 MiB,
 64 PIDs, no capabilities, a read-only root, and no network.
 
 ## Results and low-compute envelope
 
-The UBI import took 13.467 ms wall / 13.470 ms CPU with initial peak RSS 37,176 KiB. For the small
-redistributable representatives, first-call conversion ranged from 0.031 ms (binary PowerPoint) to
-7.489 ms (text PDF), and warm calls ranged from 0.014 ms to 5.860 ms. Every requested family
+The UBI import took 16.288 ms wall / 16.287 ms CPU with initial peak RSS 37,452 KiB. For the small
+redistributable representatives, first-call conversion ranged from 0.033 ms (binary PowerPoint) to
+7.862 ms (text PDF), and warm calls ranged from 0.013 ms to 6.580 ms. Every requested family
 converted. Embedded retained bytes were 70 bytes for the Word, OpenDocument Text, RTF, and EPUB
 fixtures and 2,354 bytes for the OpenDocument Presentation fixture. No conversion child process
 was observed.
 
 With `RAYON_NUM_THREADS=1`, non-PDF parsing stayed at one process thread and PDF initialized one
 bounded Rayon thread (two process threads total). On the one-CPU UBI run, 25 text-PDF conversions
-took 154.793 ms at concurrency 1, 263.759 ms at concurrency 2, and 683.327 ms at concurrency 4.
-Peak RSS increased from 38,392 KiB to 44,920 KiB. More in-process concurrency reduced neither
-latency nor CPU cost, so the only evidence-supported candidate is one active reverse conversion per
+took 154.419, 332.263, and 629.110 ms wall at concurrency 1, 2, and 4; whole-process CPU for those
+complete batches was 158.536, 330.888, and 661.650 ms. Sampled peak live process threads, including
+the Rayon thread, were 3, 4, and 6, and peak RSS was 38,296, 40,600, and 44,696 KiB. The refreshed
+host run recorded wall/whole-process CPU pairs of 149.515/151.823, 173.943/332.033, and
+236.954/680.683 ms, with peak live thread counts 3, 4, and 6. More in-process concurrency did not
+reduce CPU cost, so the only evidence-supported candidate is one active reverse conversion per
 worker with one Rayon thread. T71 must keep both configurable and must reserve capacity separately
 from forward work.
 
-The bounded 2,800,210-byte CSV stress input completed in 501.831 ms wall / 450.322 ms CPU but raised
-peak RSS from the prior 44,920 KiB to 227,516 KiB. The upstream image-bomb fixture fails locally as
+The bounded 2,800,210-byte CSV stress input completed in 493.978 ms wall / 462.688 ms CPU but raised
+peak RSS from the prior 44,696 KiB to 227,292 KiB. The upstream image-bomb fixture fails locally as
 `ResourceLimitError(max_entry_bytes)`. These results show that source bytes do not predict peak
 native memory and that 512 MiB is only a measured spike ceiling, not an approved production budget.
 No timeout, memory, upload, or result threshold can be approved until the isolation decision and a
@@ -144,19 +160,25 @@ or asset resolver. A safe implementation therefore requires the upstream rendere
 in the product decision; alt-text replacement is ambiguous and a Markweave renderer would duplicate
 upstream structure semantics.
 
-If that hook and enforceable execution isolation are approved, asset-free results are plain UTF-8
-Markdown. Results with assets are deterministic ZIPs containing `document.md`, normalized PNGs in
-first-reference order under `assets/`, then `manifest.json`. Only referenced assets are emitted;
-same ids and byte-identical ids reuse the first name; remote image sources are rejected and never
-downloaded; unavailable image sources degrade to escaped alt text. T70 owns the sole canonical
-manifest and archive serializer.
+After both PM decisions are resolved, a result is plain UTF-8 Markdown only when the document model
+contains no embedded-asset or unavailable-image source position. A result with an exportable asset
+is a deterministic ZIP containing `document.md`, normalized PNGs in first-reference order under
+`assets/`, then `manifest.json`. If every reported image is unavailable, the result is still a ZIP
+containing `document.md` then `manifest.json`; this preserves explicit traceability instead of
+making partial output indistinguishable from an asset-free document. Its mode is
+`markdown_with_unavailable_assets`, emitted `asset_count` and `asset_bytes` are zero, and
+`unavailable_asset_count` counts image-inline occurrences in source-position traversal order.
+Mixed results use `markdown_with_assets` and report the same unavailable occurrence count.
+Only referenced assets are emitted; same ids and byte-identical ids reuse the first name; remote
+image sources are rejected and never downloaded; unavailable image sources degrade to escaped alt
+text. T70 owns the sole canonical manifest and archive serializer.
 
 ## Why execution is blocked
 
 The 0.2.4 Python signatures accept only bytes/path and optional format. PyO3 calls the Rust parser
 inside `py.detach`, releasing the GIL, but passes no cancellation token, deadline, allocator, or
 memory budget. In the UBI cancellation probe, `Future.cancel()` returned false after the call began;
-native work continued beyond the attempted cancellation and returned only after 501.831 ms. Python
+native work continued beyond the attempted cancellation and returned only after 493.978 ms. Python
 task cancellation and signal handlers cannot unwind this native frame.
 
 A separate heartbeat thread can renew a lease because the GIL is released. It can also notice
@@ -169,5 +191,6 @@ has the same shared-service problem and still supplies no per-call memory bounda
 
 Consequently, publication fencing is enforceable but the complete cancellation/timeout/memory/
 heartbeat/no-overlap set is not enforceable in the current shared process. T70 must remain blocked
-until the product manager chooses isolated disposable execution or waits for the required upstream
-APIs.
+until the product manager resolves the execution-isolation decision. Independently, T70 remains
+blocked until the PM also selects the upstream renderer hook or explicitly approves the bounded
+maintained adapter/fork path and its required review obligations.

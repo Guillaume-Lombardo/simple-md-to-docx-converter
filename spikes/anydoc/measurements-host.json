@@ -2,15 +2,15 @@
   "cancellation": {
     "call_completed_only_normally": true,
     "child_processes_observed": [],
-    "cpu_ms": 442.061,
+    "cpu_ms": 402.234,
     "future_cancel_returned": false,
     "input_bytes": 2800210,
     "native_work_running_after_cancel_attempt": true,
     "peak_rss_kib": 225184,
     "peak_threads": 3,
-    "rss_growth_kib": 177776,
+    "rss_growth_kib": 177856,
     "threads_after": 2,
-    "wall_ms": 405.865
+    "wall_ms": 380.269
   },
   "cases": [
     {
@@ -28,34 +28,34 @@
       "input_bytes": 20480,
       "measurements": [
         {
-          "cpu_ms": 0.27,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.287,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.268
+          "wall_ms": 0.285
         },
         {
-          "cpu_ms": 0.166,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.167,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.165
+          "wall_ms": 0.166
         },
         {
-          "cpu_ms": 0.139,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.144,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.138
-        },
-        {
-          "cpu_ms": 0.133,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.132
+          "wall_ms": 0.143
         },
         {
           "cpu_ms": 0.132,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.131
+        },
+        {
+          "cpu_ms": 0.131,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.13
         }
       ],
       "name": "word-binary",
@@ -78,34 +78,34 @@
       "input_bytes": 10159,
       "measurements": [
         {
-          "cpu_ms": 0.867,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.845,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.866
+          "wall_ms": 0.844
         },
         {
-          "cpu_ms": 0.658,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.692,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.658
+          "wall_ms": 0.691
         },
         {
-          "cpu_ms": 0.705,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.709,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.704
+          "wall_ms": 0.715
         },
         {
-          "cpu_ms": 0.827,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.669,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.825
+          "wall_ms": 0.668
         },
         {
-          "cpu_ms": 1.031,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.637,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 1.03
+          "wall_ms": 0.636
         }
       ],
       "name": "word-openxml",
@@ -122,34 +122,34 @@
       "input_bytes": 9728,
       "measurements": [
         {
-          "cpu_ms": 0.049,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.029,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.048
+          "wall_ms": 0.028
         },
         {
-          "cpu_ms": 0.043,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.017,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.042
+          "wall_ms": 0.017
         },
         {
-          "cpu_ms": 0.022,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.014,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.021
+          "wall_ms": 0.013
+        },
+        {
+          "cpu_ms": 0.014,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.014
         },
         {
           "cpu_ms": 0.021,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.02
-        },
-        {
-          "cpu_ms": 0.019,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.019
         }
       ],
       "name": "powerpoint-binary",
@@ -166,34 +166,34 @@
       "input_bytes": 15734,
       "measurements": [
         {
-          "cpu_ms": 0.97,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.701,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.969
+          "wall_ms": 0.7
         },
         {
-          "cpu_ms": 0.732,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.681,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.731
+          "wall_ms": 0.68
         },
         {
-          "cpu_ms": 0.713,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.636,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.712
+          "wall_ms": 0.636
         },
         {
-          "cpu_ms": 0.731,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.643,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.73
+          "wall_ms": 0.642
         },
         {
-          "cpu_ms": 0.706,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.639,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.705
+          "wall_ms": 0.638
         }
       ],
       "name": "powerpoint-openxml",
@@ -210,34 +210,34 @@
       "input_bytes": 7168,
       "measurements": [
         {
-          "cpu_ms": 0.119,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.112,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.119
-        },
-        {
-          "cpu_ms": 0.101,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.101
+          "wall_ms": 0.111
         },
         {
           "cpu_ms": 0.086,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.086
         },
         {
-          "cpu_ms": 0.081,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.08
-        },
-        {
           "cpu_ms": 0.078,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.078
+        },
+        {
+          "cpu_ms": 0.074,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.074
+        },
+        {
+          "cpu_ms": 0.077,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.077
         }
       ],
       "name": "excel-binary",
@@ -254,34 +254,34 @@
       "input_bytes": 7106,
       "measurements": [
         {
-          "cpu_ms": 0.456,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.444,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.455
-        },
-        {
-          "cpu_ms": 0.42,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.419
+          "wall_ms": 0.443
         },
         {
           "cpu_ms": 0.412,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.411
         },
         {
-          "cpu_ms": 0.426,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.386,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.425
+          "wall_ms": 0.385
         },
         {
-          "cpu_ms": 0.433,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.388,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.432
+          "wall_ms": 0.388
+        },
+        {
+          "cpu_ms": 0.389,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.388
         }
       ],
       "name": "excel-openxml",
@@ -298,34 +298,34 @@
       "input_bytes": 1602,
       "measurements": [
         {
-          "cpu_ms": 0.101,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.096,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.1
+          "wall_ms": 0.095
         },
         {
-          "cpu_ms": 0.087,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.078,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.087
+          "wall_ms": 0.078
         },
         {
-          "cpu_ms": 0.082,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.082
-        },
-        {
-          "cpu_ms": 0.072,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.071,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.071
         },
         {
-          "cpu_ms": 0.069,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.076,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.069
+          "wall_ms": 0.075
+        },
+        {
+          "cpu_ms": 0.069,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.068
         }
       ],
       "name": "excel-binary-workbook",
@@ -348,34 +348,34 @@
       "input_bytes": 25489,
       "measurements": [
         {
-          "cpu_ms": 0.564,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.535,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.563
+          "wall_ms": 0.535
         },
         {
-          "cpu_ms": 0.567,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.526,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.566
+          "wall_ms": 0.525
         },
         {
-          "cpu_ms": 0.571,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.52,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.57
+          "wall_ms": 0.519
         },
         {
-          "cpu_ms": 0.547,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.511,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.546
+          "wall_ms": 0.51
         },
         {
-          "cpu_ms": 0.554,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.511,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.553
+          "wall_ms": 0.511
         }
       ],
       "name": "opendocument-text",
@@ -392,34 +392,34 @@
       "input_bytes": 16142,
       "measurements": [
         {
+          "cpu_ms": 0.353,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.352
+        },
+        {
+          "cpu_ms": 0.351,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.35
+        },
+        {
           "cpu_ms": 0.374,
-          "peak_rss_kib": 45420,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.373
         },
         {
-          "cpu_ms": 0.37,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.34,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.369
+          "wall_ms": 0.339
         },
         {
-          "cpu_ms": 0.361,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.338,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.361
-        },
-        {
-          "cpu_ms": 0.36,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.36
-        },
-        {
-          "cpu_ms": 0.371,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.37
+          "wall_ms": 0.338
         }
       ],
       "name": "opendocument-sheet",
@@ -442,34 +442,34 @@
       "input_bytes": 19065,
       "measurements": [
         {
-          "cpu_ms": 0.841,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.792,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.84
+          "wall_ms": 0.791
         },
         {
-          "cpu_ms": 0.86,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.81,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.86
+          "wall_ms": 0.81
         },
         {
-          "cpu_ms": 0.865,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.827,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.864
+          "wall_ms": 0.826
         },
         {
-          "cpu_ms": 0.862,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.811,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.861
+          "wall_ms": 0.81
         },
         {
-          "cpu_ms": 0.858,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.812,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.857
+          "wall_ms": 0.811
         }
       ],
       "name": "opendocument-presentation",
@@ -492,34 +492,34 @@
       "input_bytes": 20136,
       "measurements": [
         {
-          "cpu_ms": 0.698,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.672,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.697
+          "wall_ms": 0.671
         },
         {
-          "cpu_ms": 0.674,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.653,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.673
+          "wall_ms": 0.653
         },
         {
-          "cpu_ms": 0.669,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.629,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.669
+          "wall_ms": 0.629
         },
         {
-          "cpu_ms": 0.651,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.632,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.65
+          "wall_ms": 0.631
         },
         {
-          "cpu_ms": 0.669,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.636,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.668
+          "wall_ms": 0.635
         }
       ],
       "name": "rtf",
@@ -542,34 +542,34 @@
       "input_bytes": 6167,
       "measurements": [
         {
-          "cpu_ms": 0.3,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.288,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.299
+          "wall_ms": 0.287
         },
         {
-          "cpu_ms": 0.259,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.249,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.258
+          "wall_ms": 0.248
         },
         {
-          "cpu_ms": 0.25,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.239,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.249
+          "wall_ms": 0.238
         },
         {
-          "cpu_ms": 0.267,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.265,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.267
+          "wall_ms": 0.264
         },
         {
-          "cpu_ms": 0.235,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.241,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.234
+          "wall_ms": 0.24
         }
       ],
       "name": "epub",
@@ -586,34 +586,34 @@
       "input_bytes": 210,
       "measurements": [
         {
-          "cpu_ms": 0.111,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.102,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.111
+          "wall_ms": 0.101
         },
         {
-          "cpu_ms": 0.095,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.094
-        },
-        {
-          "cpu_ms": 0.091,
-          "peak_rss_kib": 45420,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.091
-        },
-        {
-          "cpu_ms": 0.089,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.088,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
           "wall_ms": 0.088
         },
         {
-          "cpu_ms": 0.09,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 0.085,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 0.089
+          "wall_ms": 0.085
+        },
+        {
+          "cpu_ms": 0.083,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.082
+        },
+        {
+          "cpu_ms": 0.083,
+          "peak_rss_kib": 46200,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.082
         }
       ],
       "name": "csv",
@@ -630,34 +630,34 @@
       "input_bytes": 90060,
       "measurements": [
         {
-          "cpu_ms": 7.073,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 6.776,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 7.221
+          "wall_ms": 7.018
         },
         {
-          "cpu_ms": 5.225,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 5.3,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 5.577
+          "wall_ms": 5.639
         },
         {
-          "cpu_ms": 5.266,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 5.315,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 5.547
+          "wall_ms": 5.75
         },
         {
-          "cpu_ms": 5.257,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 5.566,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 5.444
+          "wall_ms": 5.929
         },
         {
-          "cpu_ms": 5.205,
-          "peak_rss_kib": 45420,
+          "cpu_ms": 5.562,
+          "peak_rss_kib": 46200,
           "rss_growth_kib": 0,
-          "wall_ms": 5.658
+          "wall_ms": 5.924
         }
       ],
       "name": "text-pdf",
@@ -668,63 +668,69 @@
   ],
   "concurrency": [
     {
-      "batch_wall_ms": 152.601,
+      "batch_process_cpu_ms": 151.823,
+      "batch_wall_ms": 149.515,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 106.463,
-          "wall_ms": 151.438
+          "thread_cpu_ms": 106.722,
+          "wall_ms": 148.318
         }
       ],
-      "process_peak_rss_kib": 45420,
+      "peak_live_process_threads": 3,
+      "process_peak_rss_kib": 46200,
       "process_threads_after": 2,
       "workers": 1
     },
     {
-      "batch_wall_ms": 169.522,
+      "batch_process_cpu_ms": 332.033,
+      "batch_wall_ms": 173.943,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 116.663,
-          "wall_ms": 168.741
+          "thread_cpu_ms": 116.817,
+          "wall_ms": 172.724
         },
         {
-          "thread_cpu_ms": 108.625,
-          "wall_ms": 168.21
+          "thread_cpu_ms": 113.463,
+          "wall_ms": 170.468
         }
       ],
-      "process_peak_rss_kib": 45420,
+      "peak_live_process_threads": 4,
+      "process_peak_rss_kib": 46200,
       "process_threads_after": 2,
       "workers": 2
     },
     {
-      "batch_wall_ms": 242.078,
+      "batch_process_cpu_ms": 680.683,
+      "batch_wall_ms": 236.954,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 121.792,
-          "wall_ms": 227.6
+          "thread_cpu_ms": 119.708,
+          "wall_ms": 222.626
         },
         {
-          "thread_cpu_ms": 125.203,
-          "wall_ms": 241.029
+          "thread_cpu_ms": 120.714,
+          "wall_ms": 234.002
         },
         {
-          "thread_cpu_ms": 119.529,
-          "wall_ms": 225.411
+          "thread_cpu_ms": 122.988,
+          "wall_ms": 234.453
         },
         {
-          "thread_cpu_ms": 121.993,
-          "wall_ms": 226.905
+          "thread_cpu_ms": 119.988,
+          "wall_ms": 235.63
         }
       ],
-      "process_peak_rss_kib": 45420,
+      "peak_live_process_threads": 6,
+      "process_peak_rss_kib": 46200,
       "process_threads_after": 2,
       "workers": 4
     }
@@ -734,9 +740,9 @@
     "extension": "_anydoc.abi3.so",
     "extension_sha256": "5bd7463287a54040d08e26130737a660f733028a2480b880069b6eedb2311041",
     "implementation": "CPython",
-    "import_cpu_ms": 12.961,
-    "import_wall_ms": 12.964,
-    "initial_peak_rss_kib": 45420,
+    "import_cpu_ms": 11.539,
+    "import_wall_ms": 11.536,
+    "initial_peak_rss_kib": 46200,
     "initial_threads": 1,
     "machine": "x86_64",
     "platform": "Linux-6.12.107+deb13-amd64-x86_64-with-glibc2.41",

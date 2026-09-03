@@ -1,6 +1,16 @@
 {
   "schema_version": 1,
   "decision_status": "blocked_pending_product_decision",
+  "blocking_decisions": {
+    "execution_isolation": {
+      "status": "unresolved",
+      "choices": ["approve_disposable_supervised_per_attempt_isolation", "defer_until_upstream_execution_controls"]
+    },
+    "asset_serialization": {
+      "status": "unresolved",
+      "choices": ["defer_until_upstream_asset_aware_renderer_hook", "approve_bounded_maintained_adapter_or_fork_after_security_and_maintenance_review"]
+    }
+  },
   "engine": {
     "distribution": "firecrawl-anydoc",
     "version": "0.2.4",
@@ -34,7 +44,7 @@
     "warning": "PDF images, layout, and source-position image links are not preserved"
   },
   "output": {
-    "asset_free": {"media_type": "text/markdown; charset=utf-8", "extension": ".md"},
+    "asset_free": {"condition": "no embedded-asset or unavailable-image source position exists", "media_type": "text/markdown; charset=utf-8", "extension": ".md"},
     "with_assets": {
       "media_type": "application/zip",
       "root_markdown": "document.md",
@@ -42,18 +52,27 @@
       "manifest": "manifest.json (schema: traceability-manifest.schema.json)",
       "entry_order": ["document.md", "assets in first-reference order", "manifest.json"]
     },
+    "all_assets_unavailable": {
+      "condition": "one or more unavailable-image source positions exist and no exportable embedded asset exists",
+      "media_type": "application/zip",
+      "mode": "markdown_with_unavailable_assets",
+      "entries": ["document.md", "manifest.json"],
+      "asset_count": 0,
+      "asset_bytes": 0,
+      "unavailable_asset_count": "number of unavailable image-inline occurrences in source-position traversal order"
+    },
     "assets": {
       "selection": "only embedded image assets referenced by an image inline in the shared Document model",
       "duplicates": "the same asset id reuses one filename; byte-identical different ids deduplicate to the first-reference filename",
       "normalization": "reuse the T08 signature-checked, single-frame, bounded deterministic PNG normalization and network-disabled SVG rasterization boundary",
       "external": "reject document-controlled external image sources; never fetch them",
-      "unavailable": "retain escaped alt text without an image link and record only an unavailable-asset count in the manifest"
+      "unavailable": "retain escaped alt text without an image link; emit a ZIP whenever at least one unavailable image-inline occurrence exists, including when every asset is unavailable"
     },
     "manifest_schema": {
       "schema_version": 1,
       "engine": {"name": "firecrawl-anydoc", "version": "0.2.4"},
       "source": {"family": "ordered capability-family identifier", "detected_format": "normalized parser identifier"},
-      "result": {"mode": "markdown_with_assets", "asset_count": "non-negative integer", "asset_bytes": "non-negative integer"},
+      "result": {"mode": "markdown_with_assets or markdown_with_unavailable_assets", "asset_count": "number of emitted normalized assets", "asset_bytes": "total emitted normalized asset bytes", "unavailable_asset_count": "number of unavailable image-inline occurrences"},
       "execution": {"local": true, "ocr": false, "hosted_fallback": false}
     }
   },

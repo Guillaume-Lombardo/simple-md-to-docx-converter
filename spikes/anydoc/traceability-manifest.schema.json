@@ -28,11 +28,12 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "asset_count", "asset_bytes"],
+      "required": ["mode", "asset_count", "asset_bytes", "unavailable_asset_count"],
       "properties": {
-        "mode": {"const": "markdown_with_assets"},
-        "asset_count": {"type": "integer", "minimum": 1},
-        "asset_bytes": {"type": "integer", "minimum": 1}
+        "mode": {"enum": ["markdown_with_assets", "markdown_with_unavailable_assets"]},
+        "asset_count": {"type": "integer", "minimum": 0},
+        "asset_bytes": {"type": "integer", "minimum": 0},
+        "unavailable_asset_count": {"type": "integer", "minimum": 0}
       }
     },
     "execution": {
@@ -45,5 +46,15 @@
         "hosted_fallback": {"const": false}
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"result": {"properties": {"mode": {"const": "markdown_with_assets"}}}}},
+      "then": {"properties": {"result": {"properties": {"asset_count": {"minimum": 1}, "asset_bytes": {"minimum": 1}}}}}
+    },
+    {
+      "if": {"properties": {"result": {"properties": {"mode": {"const": "markdown_with_unavailable_assets"}}}}},
+      "then": {"properties": {"result": {"properties": {"asset_count": {"const": 0}, "asset_bytes": {"const": 0}, "unavailable_asset_count": {"minimum": 1}}}}}
+    }
+  ]
 }

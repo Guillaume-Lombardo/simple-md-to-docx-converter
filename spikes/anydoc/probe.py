@@ -184,14 +184,24 @@ def _concurrency_probe(corpus: Path, workers: int) -> dict[str, Any]:
         }
 
     wall_before = time.perf_counter_ns()
+    cpu_before = time.process_time_ns()
+    peak_live_threads = _thread_count()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        measurements = list(executor.map(lambda _: run(), range(workers)))
+        futures = [executor.submit(run) for _ in range(workers)]
+        while any(not future.done() for future in futures):
+            peak_live_threads = max(peak_live_threads, _thread_count())
+            time.sleep(0.0005)
+        measurements = [future.result() for future in futures]
     return {
         "workers": workers,
         "fixture": "pdf/text.pdf",
         "conversions_per_worker": conversions_per_worker,
         "batch_wall_ms": round((time.perf_counter_ns() - wall_before) / 1_000_000, 3),
+        "batch_process_cpu_ms": round(
+            (time.process_time_ns() - cpu_before) / 1_000_000, 3
+        ),
         "process_peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "peak_live_process_threads": peak_live_threads,
         "process_threads_after": _thread_count(),
         "child_processes_observed": _child_pids(),
         "measurements": measurements,

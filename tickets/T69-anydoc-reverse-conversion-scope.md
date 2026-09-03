@@ -102,10 +102,19 @@ normative product, security, packaging, and compatibility contract before implem
   publication fencing is possible, but lease expiry cannot both prevent overlapping native work
   and recover a crashed attempt. In addition, the public renderer strips embedded image references
   and exposes no `Document` renderer or asset resolver, so T70 cannot preserve image positions
-  without duplicating the upstream serializer. The PM must either permit a disposable supervised
-  per-attempt process/container with hard termination and termination-before-recovery, or defer T70
-  until upstream provides cooperative execution controls and an asset-aware renderer hook. The
-  normative product-specification edit is intentionally pending because T67 currently owns that
+  without duplicating the upstream serializer. T70 is blocked on two independent PM decisions.
+  For execution, the PM must either permit a disposable supervised per-attempt process/container
+  with hard termination and termination-before-recovery, or defer T70 until upstream provides
+  cooperative cancellation, deadline, and resource-budget controls. For asset serialization, the
+  PM must independently either wait for an upstream asset-aware renderer hook or explicitly approve
+  a narrowly bounded maintained adapter/fork with security, serializer-parity, compatibility,
+  supply-chain, maintenance-ownership, and removal/rebase review. Resolving only one decision does
+  not unblock T70. All-unavailable images are defined as a deterministic ZIP with Markdown plus the
+  closed content-free manifest, zero emitted assets/bytes, and an unavailable-inline occurrence
+  count; plain Markdown is reserved for documents with no embedded or unavailable image position.
+  Refreshed host and exact-UBI reports measure whole-process CPU for every complete concurrency
+  batch and sample peak live process threads during the batch, including the bounded Rayon thread.
+  The normative product-specification edit is intentionally pending because T67 currently owns that
   file; Linear synchronization is also pending because this task explicitly prohibits external
   mutations.
 
