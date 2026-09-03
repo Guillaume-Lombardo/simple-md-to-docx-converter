@@ -16,7 +16,9 @@ services:
     environment:
       BACKEND_ORIGIN: http://127.0.0.1:8080
       FRONTEND_ORIGIN: http://127.0.0.1:3000
-      ROUTER_HOST: 127.0.0.1
+      # slirp4netns forwards the host port to the namespace interface, not to
+      # the namespace's internal loopback. Host publication remains loopback-only.
+      ROUTER_HOST: 0.0.0.0
       ROUTER_PORT: "3100"
     healthcheck:
       test:

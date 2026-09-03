@@ -259,7 +259,7 @@ def test_nextjs_podman_uses_staged_backend_readiness_without_compose_health() ->
     )
 
 
-def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None:
+def test_nextjs_podman_shared_namespace_exposes_router_to_host_forwarding() -> None:
     result = subprocess.run(
         [
             "docker",
@@ -309,6 +309,19 @@ def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None
     assert frontend["depends_on"]["markweave"]["condition"] == "service_started"
     assert router["depends_on"]["markweave"]["condition"] == "service_started"
     assert router["depends_on"]["frontend"]["condition"] == "service_started"
+    assert router["environment"]["ROUTER_HOST"] == "0.0.0.0"  # noqa: S104
     assert router["environment"]["ROUTER_PORT"] == "3100"
+    assert backend["ports"] == [
+        {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 3100,
+            "published": "11279",
+            "protocol": "tcp",
+        }
+    ]
+    assert backend["network_mode"] == "slirp4netns"
+    assert router["network_mode"] == "service:markweave"
+    assert "ports" not in router
     assert "http://127.0.0.1:3100/login" in router["healthcheck"]["test"][-1]
     assert "http://127.0.0.1:8080/login" not in router["healthcheck"]["test"][-1]

@@ -105,7 +105,9 @@ an operator-asserted external security boundary. Never use the option merely to 
 unavailable scanner. Under rootless Podman, this explicit mode requires `slirp4netns` and uses it
 directly instead of creating CNI bridge networks. This permits the loopback-only published port on
 hosts whose CNI `portmap` plugin cannot use nftables; the default ClamAV topology still requires
-Podman's normal container-network support.
+Podman's normal container-network support. The router listens on the shared namespace interface so
+`slirp4netns` can deliver the forwarded connection, while Podman still publishes that port only on
+host `127.0.0.1`.
 
 This uses an ordinary engine-managed named volume for disposable `/work` data. The application
 still runs as a non-root user with a read-only root filesystem, no Linux capabilities,

@@ -33,6 +33,7 @@ README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
 ALL_RUNNER = ROOT / "scripts/e2e/run-compose-all.sh"
 SIMPLE_RUNNER = ROOT / "scripts/e2e/run-compose-simple.sh"
+PODMAN_INSECURE_RUNNER = ROOT / "scripts/e2e/run-compose-podman-insecure.sh"
 QUICKSTART = ROOT / "scripts/quickstart.sh"
 SIMPLE_QUICKSTART = ROOT / "scripts/quickstart-simple.sh"
 FINAL_IMAGE_RUNNER = ROOT / "scripts/e2e/run.sh"
@@ -309,7 +310,7 @@ def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
     assert 'ROUTER_UPSTREAM_TIMEOUT_MS: "30000"' in overlay
 
 
-def test_nextjs_cni_free_overlay_shares_only_the_loopback_namespace() -> None:
+def test_nextjs_cni_free_overlay_exposes_only_the_shared_namespace_router() -> None:
     overlay = NEXTJS_PODMAN_TRUSTED_OVERLAY.read_text(encoding="utf-8")
 
     assert overlay.count("network_mode: service:markweave") == 2
@@ -317,6 +318,8 @@ def test_nextjs_cni_free_overlay_shares_only_the_loopback_namespace() -> None:
     assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:3100" in overlay
     assert "BACKEND_ORIGIN: http://127.0.0.1:8080" in overlay
     assert "FRONTEND_ORIGIN: http://127.0.0.1:3000" in overlay
+    assert "ROUTER_HOST: 0.0.0.0" in overlay
+    assert "ROUTER_HOST: 127.0.0.1" not in overlay
     assert 'ROUTER_PORT: "3100"' in overlay
     assert "fetch('http://127.0.0.1:3100/login'" in overlay
     assert "process.env.PUBLIC_HOSTS.split(',')[0]" in overlay
@@ -972,7 +975,58 @@ def test_compose_ci_runs_secure_and_simple_real_e2e_paths() -> None:
         "bash scripts/e2e/run-compose.sh\n"
         "MARKWEAVE_SIMPLE_E2E_RUNTIME=docker bash scripts/e2e/run-compose-simple.sh\n"
         "MARKWEAVE_SIMPLE_E2E_RUNTIME=podman bash scripts/e2e/run-compose-simple.sh\n"
+        "bash scripts/e2e/run-compose-podman-insecure.sh\n"
     )
+
+
+def test_podman_insecure_e2e_proves_host_routing_and_bounded_cleanup() -> None:
+    runner = PODMAN_INSECURE_RUNNER.read_text(encoding="utf-8")
+
+    assert "quickstart up --insecure" in runner
+    assert MARKWEAVE_DIGEST in runner
+    assert FRONTEND_DIGEST in runner
+    assert "config --images" in runner
+    assert 'grep -Fxc "$backend_image"' in runner
+    assert 'grep -Fxc "$frontend_image"' in runner
+    assert "podman image inspect \"$image_id\" --format '{{.Digest}}'" in runner
+    assert '"${expected_image##*@}"' in runner
+    assert "--format '{{.ImageName}}'" not in runner
+    assert "ROUTER_HOST=0.0.0.0" in runner
+    assert 'podman port "$application_id" 3100/tcp' in runner
+    assert "{{json .HostConfig.PortBindings}}" in runner
+    assert 'podman port "$router_id"' not in runner
+    assert '"$public_endpoint/login"' in runner
+    assert "<title>Markweave</title>" in runner
+    assert '"$public_endpoint/api/v1/session"' in runner
+    assert "quickstart down" in runner
+    assert 'volume inspect "$data_volume"' in runner
+    assert 'volume inspect "$work_volume"' in runner
+
+
+@pytest.mark.parametrize(
+    ("bindings", "accepted"),
+    [
+        ("null", True),
+        ("{}", True),
+        ('{"3100/tcp":[{"HostIp":"127.0.0.1","HostPort":"11279"}]}', False),
+    ],
+)
+def test_podman_insecure_e2e_accepts_only_empty_router_port_bindings(
+    bindings: str, accepted: bool
+) -> None:
+    runner = PODMAN_INSECURE_RUNNER.read_text(encoding="utf-8")
+    start = runner.index("assert_no_port_bindings() {")
+    end = runner.index("\n}", start) + 2
+    function = runner[start:end]
+
+    result = subprocess.run(
+        ["bash", "-c", f'{function}\nassert_no_port_bindings "$1"', "bash", bindings],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert (result.returncode == 0) is accepted
 
 
 def test_standalone_final_image_rejects_spoofed_proxy_origin_headers() -> None:

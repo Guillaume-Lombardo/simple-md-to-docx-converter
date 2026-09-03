@@ -31,6 +31,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "compose.simple.yaml",
         "compose.podman.yaml",
         "compose.nextjs-podman.yaml",
+        "compose.nextjs-podman-trusted-upstream.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/quickstart-template.docx.base64",
@@ -39,6 +40,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "scripts/quickstart.sh",
         "scripts/e2e/run-compose-all.sh",
         "scripts/e2e/run-compose-simple.sh",
+        "scripts/e2e/run-compose-podman-insecure.sh",
         "tests/test_quickstart_compose.py",
     ],
 )
