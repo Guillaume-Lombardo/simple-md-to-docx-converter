@@ -392,7 +392,7 @@ jobs:
           path: ~/.local/share/pnpm/store/v11
           key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Rehearse the exact npm rollback candidate
-        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
           T67_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}

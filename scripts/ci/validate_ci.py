@@ -63,6 +63,7 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.number",
         "github.event_name",
         "github.actor",
+        "github.head_ref",
         "github.ref",
         "github.repository",
         "github.run_attempt",
@@ -112,6 +113,11 @@ READ_ONLY_ENV_STEPS = frozenset(
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
+T67_ROLLBACK_REHEARSAL_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository }}"
+)
 
 
 @dataclass(frozen=True)
@@ -315,10 +321,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             (
                 "heavy",
                 "Rehearse the exact npm rollback candidate",
-            ): (
-                "${{ matrix.domain == 'frontend' && "
-                "github.event_name == 'pull_request' }}"
-            ),
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
             (
                 "heavy",
                 "Install verified Mermaid and Chrome for document-engine tests",
@@ -340,7 +343,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="271d48e9bed299c61feeeb7eec79eefc6c521214a65ac0afa5b226d07a1e40ac",
+        canonical_digest="7d5ba2ebde81201c56e3015b39f95967aa69112aa826ad37296106cd5e97b8b5",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -873,7 +876,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Rehearse the exact npm rollback candidate"): (
-            "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}"
+            T67_ROLLBACK_REHEARSAL_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"

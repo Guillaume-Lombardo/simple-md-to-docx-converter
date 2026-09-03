@@ -392,6 +392,20 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "Rehearse the exact npm rollback candidate" in workflow
     assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
     assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
+    rollback_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+        "github.head_ref == 'chore/T67-pnpm-workspace' && "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert f"if: {rollback_condition}" in workflow
+    future_frontend_pr = workflow.replace(
+        rollback_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(future_frontend_pr)
+    )
     weakened = workflow.replace(
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"
