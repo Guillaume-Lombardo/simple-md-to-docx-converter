@@ -389,6 +389,9 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
     assert "node-version: 24.19.0" in workflow
     assert "pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}" in workflow
+    assert "Rehearse the exact npm rollback candidate" in workflow
+    assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
+    assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
     weakened = workflow.replace(
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"

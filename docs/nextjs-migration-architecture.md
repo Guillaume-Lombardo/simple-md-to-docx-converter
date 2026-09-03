@@ -141,9 +141,11 @@ and [minimal runtime](https://catalog.redhat.com/en/software/containers/ubi9/nod
 - runtime:
   `registry.access.redhat.com/ubi9/nodejs-24-minimal@sha256:ec0fcd4a3b6c64a1b9b1571c9528172508471f8a295f857215057a140aa5f2b4`.
 
-These are the reviewed AMD64 image digests observed on 2026-09-01 and both resolve to Node.js
-`24.19.0` and npm `11.17.0`. A refresh must update the digest and expected tool versions together
-and repeat supply-chain and runtime verification. The runtime copies only the production `.next`
+These are the reviewed AMD64 image digests observed on 2026-09-01 and both bundle Node.js
+`24.19.0` and npm `11.17.0`. Application builds do not use that bundled npm: the builder installs
+the integrity-verified Corepack `0.36.0` artifact and activates the root manifest's integrity-bound
+pnpm `11.25.0` selection. A refresh must update the image digest and all expected tool versions
+together and repeat supply-chain and runtime verification. The runtime copies only the production `.next`
 build output, exact pruned production `node_modules`, public assets, required notices, and
 `web/server.mjs`. The reviewed custom server uses the supported Next.js production server API; it
 must not be packaged with `output: "standalone"`. The image contains no compiler, package cache,
@@ -153,8 +155,9 @@ The process listens for page traffic on unprivileged port 3000 and for Service-i
 unprivileged port 3001, and runs as an arbitrary non-zero UID in group 0. It
 requires a read-only root filesystem, `no-new-privileges`, an empty capability set, RuntimeDefault
 seccomp, no privilege escalation, and no service-account token. The only writable mount is a
-memory-backed `/tmp`; `HOME`, npm cache, and Next.js runtime caches are disabled or point into that
-bounded mount. The application must run with no writable current directory. It receives SIGTERM,
+memory-backed `/tmp`; `HOME` and Next.js runtime caches are disabled or point into that bounded
+mount. No package-manager binary or package-manager cache is present in the runtime image. The
+application must run with no writable current directory. It receives SIGTERM,
 stops accepting new requests, and exits within the platform grace period without writing durable
 state.
 

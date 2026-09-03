@@ -104,6 +104,7 @@ READ_ONLY_ENV_STEPS = frozenset(
             "Install verified fonts and LibreOffice for document-engine tests",
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
+        ("heavy", "Rehearse the exact npm rollback candidate"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
@@ -313,6 +314,13 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             (
                 "heavy",
+                "Rehearse the exact npm rollback candidate",
+            ): (
+                "${{ matrix.domain == 'frontend' && "
+                "github.event_name == 'pull_request' }}"
+            ),
+            (
+                "heavy",
                 "Install verified Mermaid and Chrome for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
@@ -332,7 +340,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="fe2d3a1c76e49836d70ee1d52d1ac78be90c097492af597f318721c9c393c980",
+        canonical_digest="271d48e9bed299c61feeeb7eec79eefc6c521214a65ac0afa5b226d07a1e40ac",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -820,6 +828,10 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "pnpm install --frozen-lockfile --ignore-scripts "
             "--filter md-converter-web-tests"
         ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            "bash scripts/javascript/rehearse-npm-rollback.sh "
+            '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
+        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -859,6 +871,9 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Set up pinned Node for rootless E2E"): (
             "${{ startsWith(matrix.domain, 'e2e-') }}"
+        ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}"
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"

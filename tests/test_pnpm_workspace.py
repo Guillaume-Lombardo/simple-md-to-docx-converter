@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+NPM_BASELINE = "1594128bc84290df3699390643c729ef9d5d6d30"
 
 
 @pytest.mark.unit
@@ -84,3 +89,119 @@ def test_release_recovery_supports_pnpm_and_historical_npm_locks() -> None:
         encoding="utf-8"
     )
     assert "${4:-pnpm-lock.yaml}" in publisher
+
+
+def _write_rollback_tool_stubs(directory: Path) -> Path:
+    directory.mkdir()
+    node = directory / "node"
+    node.write_text("#!/bin/sh\nprintf '%s\\n' v24.19.0\n", encoding="utf-8")
+    npm = directory / "npm"
+    npm.write_text(
+        "#!/bin/sh\n"
+        'if [ "${1:-}" = --version ]; then\n'
+        "  printf '%s\\n' 11.17.0\n"
+        "else\n"
+        '  printf \'%s\\n\' "$*" >> "$ROLLBACK_NPM_LOG"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    node.chmod(node.stat().st_mode | stat.S_IXUSR)
+    npm.chmod(npm.stat().st_mode | stat.S_IXUSR)
+    return directory
+
+
+@pytest.mark.unit
+def test_rollback_rehearses_the_candidate_series_from_its_exact_npm_parent(
+    tmp_path: Path,
+) -> None:
+    tools = _write_rollback_tool_stubs(tmp_path / "bin")
+    log = tmp_path / "npm.log"
+    environment = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "ROLLBACK_NPM_LOG": str(log),
+    }
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "scripts/javascript/rehearse-npm-rollback.sh",
+            "HEAD",
+            NPM_BASELINE,
+        ],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "ci --ignore-scripts",
+        "run test:web",
+        "ci --prefix web --ignore-scripts",
+        "run --prefix web bindings:check",
+        "run --prefix web build",
+        "run --prefix web test:production",
+    ]
+    assert "Rehearsed exact T67 candidate" in completed.stdout
+
+
+@pytest.mark.unit
+def test_rollback_contract_covers_every_migration_surface() -> None:
+    rehearsal = Path("scripts/javascript/rehearse-npm-rollback.sh").read_text(
+        encoding="utf-8"
+    )
+    for contract in (
+        'rev-list --first-parent --reverse "$baseline..$candidate"',
+        "unrelated first-parent commit in candidate range",
+        "unrelated merge commit in candidate range",
+        "baseline is not the direct npm parent of the T67 series",
+        "rollback did not restore exact baseline bytes",
+        "package-lock.json",
+        "web/package-lock.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "docs/package-management.md",
+        "scripts/javascript/bootstrap-pnpm.sh",
+        "cache: npm",
+        "COPY package.json package-lock.json ./",
+        "npm run build && npm prune --omit=dev --ignore-scripts",
+        "PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts",
+        "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts",
+        "grep -RIE '(pnpm|corepack)'",
+    ):
+        assert contract in rehearsal
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("candidate", "baseline", "failure"),
+    [
+        (NPM_BASELINE, NPM_BASELINE, "candidate does not contain T67"),
+        ("HEAD", "HEAD^", "audited root npm lock"),
+    ],
+)
+def test_rollback_rejects_unrelated_candidate_or_baseline_refs(
+    tmp_path: Path, candidate: str, baseline: str, failure: str
+) -> None:
+    tools = _write_rollback_tool_stubs(tmp_path / "bin")
+    completed = subprocess.run(
+        [
+            "bash",
+            "scripts/javascript/rehearse-npm-rollback.sh",
+            candidate,
+            baseline,
+        ],
+        check=False,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "ROLLBACK_NPM_LOG": str(tmp_path / "npm.log"),
+        },
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert failure in completed.stderr

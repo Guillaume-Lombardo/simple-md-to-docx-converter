@@ -50,14 +50,15 @@ npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
 
 ## Rollback and benchmark evidence
 
-A T67 rollback is one revert of the migration commit. That revert must restore both npm locks,
+A T67 rollback reverses the complete, reviewed T67 candidate series from its exact npm parent. It
+must restore both npm locks,
 the `npm@11.17.0` frontend manager metadata, npm CI caches and commands, and the frontend's `web/`
 build context while removing every pnpm/Corepack workspace surface. Before merging a rollback,
-run the rehearsal against the exact parent of the T67 migration commit on Node.js `24.19.0` and
-npm `11.17.0`:
+run the rehearsal with the exact candidate and the direct npm parent of its first T67 commit on
+Node.js `24.19.0` and npm `11.17.0`:
 
 ```bash
-scripts/javascript/rehearse-npm-rollback.sh '<T67-migration-commit>^'
+scripts/javascript/rehearse-npm-rollback.sh '<T67-candidate>' '<T67-migration-commit>^'
 ```
 
 The last pre-migration lock digests are root

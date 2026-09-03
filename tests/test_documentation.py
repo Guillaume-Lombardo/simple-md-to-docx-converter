@@ -163,3 +163,27 @@ def test_documentation_index_exposes_all_role_guides() -> None:
         "agent-workflow.md",
     ):
         assert f"({guide})" in index
+
+
+def test_local_development_links_the_package_management_guide() -> None:
+    local_development = (ROOT / "docs" / "local-development.md").read_text(
+        encoding="utf-8"
+    )
+    assert "[JavaScript package-management guide](package-management.md)" in (
+        local_development
+    )
+
+
+def test_frontend_guides_use_unambiguous_workspace_commands() -> None:
+    administration = (ROOT / "docs" / "administration-ui.md").read_text(
+        encoding="utf-8"
+    )
+    assert "pnpm --filter @markweave/web run test:coverage" in administration
+    assert "npm --prefix web" not in administration
+
+    architecture = (ROOT / "docs" / "nextjs-migration-architecture.md").read_text(
+        encoding="utf-8"
+    )
+    runtime = architecture.split("## Runtime image and rootless boundary", 1)[1]
+    assert "Application builds do not use that bundled npm" in runtime
+    assert "No package-manager binary or package-manager cache is present" in runtime
