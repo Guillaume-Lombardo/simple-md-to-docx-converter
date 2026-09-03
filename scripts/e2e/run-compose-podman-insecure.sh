@@ -141,12 +141,15 @@ podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$router_id"
   | grep -Fqx 'ROUTER_HOST=0.0.0.0'
 
 # Exercise both browser and direct FastAPI routing through the real host port.
-test "$(curl --silent --output "$temporary_directory/login.html" --write-out '%{http_code}' \
+test "$(curl --connect-timeout 2 --max-time 10 --silent \
+  --output "$temporary_directory/login.html" --write-out '%{http_code}' \
   --header "Host: $public_host" "$public_endpoint/login")" = 200
 grep -Fq '<title>Markweave</title>' "$temporary_directory/login.html"
-test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+test "$(curl --connect-timeout 2 --max-time 10 --silent \
+  --output /dev/null --write-out '%{http_code}' \
   --header "Host: $public_host" "$public_endpoint/api/v1/session")" = 401
-test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+test "$(curl --connect-timeout 2 --max-time 10 --silent \
+  --output /dev/null --write-out '%{http_code}' \
   "$public_endpoint/health/ready")" = 421
 
 password_sha256="$(file_sha256 "$state_directory/password.env")"
