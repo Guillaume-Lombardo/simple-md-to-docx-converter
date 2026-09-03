@@ -59,13 +59,16 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.base.sha",
         "github.event.pull_request.draft",
         "github.event.pull_request.head.sha",
+        "github.event.pull_request.head.repo.full_name",
         "github.event.pull_request.number",
         "github.event_name",
+        "github.actor",
         "github.ref",
         "github.repository",
         "github.run_attempt",
         "github.run_id",
         "github.sha",
+        "github.token",
     }
 )
 RELEASE_FORBIDDEN_TRIGGERS = frozenset(
@@ -147,7 +150,7 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "2816ab748eb97c222e478114c56d562600d08bf1d372e92abe999f65970aa781"
+    "221d3b72b83664c1c28246f04f03fea71c06ab8123c83f28bb91adde9497fbfe"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
     "5b1966cda4facf8b7faf10fa643270dc525eb20355f5e545da14406f984f9588"
@@ -194,7 +197,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "detect": frozenset(
                 {"name", "outputs", "runs-on", "steps", "timeout-minutes"}
             ),
-            "light": frozenset({"name", "runs-on", "steps", "timeout-minutes"}),
+            "light": frozenset(
+                {"name", "permissions", "runs-on", "steps", "timeout-minutes"}
+            ),
             "domain-plan": frozenset(
                 {"name", "needs", "runs-on", "steps", "timeout-minutes"}
             ),
@@ -304,7 +309,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="6e1a23a4cd54ae8d0762c30e2d14385412e6c9ee94b5c8409324a3d3b27e2206",
+        canonical_digest="ffaa8700470db3c61d89cb939fcef6bb2f599b66c39888a65e975e1bb90c3266",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -552,7 +557,12 @@ def _validate_read_only_job(
         or timeout > maximum
     ):
         errors.append(f"job {job_name!r} must define an allowlisted bounded timeout")
-    if "permissions" in job:
+    if job_name == "light":
+        if job.get("permissions") != {"contents": "read", "packages": "read"}:
+            errors.append(
+                "light job permissions must be exactly contents: read and packages: read"
+            )
+    elif "permissions" in job:
         errors.append(
             f"read-only job {job_name!r} must not override workflow permissions"
         )
@@ -703,6 +713,43 @@ def _validate_chrome_downgrade_install(workflow: Mapping[str, Any]) -> list[str]
     )
 
 
+def _validate_public_alignment_credentials(
+    workflow: Mapping[str, Any],
+) -> list[str]:
+    alignment_steps = [
+        step
+        for step in _job_steps(workflow, "light")
+        if step.get("name") == "Verify public release alignment"
+    ]
+    expected = {
+        "BASE_SHA": (
+            "${{ github.event.pull_request.base.sha || "
+            "github.event.merge_group.base_sha || github.event.before }}"
+        ),
+        "EVENT_NAME": "${{ github.event_name }}",
+        "GHCR_TOKEN": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.token || '' }}"
+        ),
+        "GHCR_USERNAME": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.actor || '' }}"
+        ),
+        "HEAD_SHA": (
+            "${{ github.event.pull_request.head.sha || "
+            "github.event.merge_group.head_sha || github.sha }}"
+        ),
+    }
+    if len(alignment_steps) != 1 or alignment_steps[0].get("env") != expected:
+        return [
+            "public alignment must receive only the ephemeral read-only GHCR "
+            "credentials"
+        ]
+    return []
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -768,6 +815,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
 
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
+    errors.extend(_validate_public_alignment_credentials(workflow))
 
     required_conditions = {
         ("light", "Enforce changed application line coverage"): (
@@ -1735,6 +1783,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
         'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"',
+        'podman build --format oci --timestamp "$source_date_epoch"',
         'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
         'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
     ):

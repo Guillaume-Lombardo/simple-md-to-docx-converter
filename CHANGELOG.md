@@ -8,6 +8,17 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-1"></a>
+
+## [0.6.1] - 2026-09-03
+
+### Fixed
+
+- Frontend release images now retain their exact OCI config identity through staging, allowing the
+  paired backend/frontend supply-chain evidence to be verified before registry publication.
+- Final-image admission and simple Podman Compose lifecycle checks now use deterministic dedicated
+  connections and private-socket teardown behavior.
+
 <a id="release-0-6-0"></a>
 
 ## [0.6.0] - 2026-09-03
@@ -172,6 +183,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.1](#release-0-6-1)
 - [0.6.0](#release-0-6-0)
 - [0.5.2](#release-0-5-2)
 - [0.5.1](#release-0-5-1)

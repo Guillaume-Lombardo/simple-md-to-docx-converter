@@ -18,6 +18,9 @@ RESTART_PREPARATION_BROWSER = Path(
 ).resolve()
 RESTART_BROWSER = Path("tests/e2e/browser-next-conversion-restart.test.mjs").resolve()
 ADMISSION_FIXTURE = Path("tests/e2e/frontend-admission-fixture.mjs").resolve()
+RUNTIME_FAILURE_BROWSER = Path(
+    "tests/e2e/browser-next-runtime-failures.test.mjs"
+).resolve()
 
 
 @pytest.mark.unit
@@ -377,6 +380,24 @@ def test_admission_fixture_reports_only_listening_readiness() -> None:
     ready = source.index("frontend-admission-ready")
     assert listen < ready
     assert 'page.server.listen(3000, "0.0.0.0");' not in source
+
+
+@pytest.mark.unit
+def test_admission_browser_opens_every_hold_on_a_dedicated_connected_socket() -> None:
+    source = RUNTIME_FAILURE_BROWSER.read_text(encoding="utf-8")
+
+    assert 'import http from "node:http";' in source
+    assert "request = http.request(" in source
+    assert "`${baseURL}${path}`" in source
+    assert "{ agent: false }" in source
+    assert 'socket.once("connect", resolve);' in source
+    assert "await Promise.all(held.map(({ connected }) => connected));" in source
+    assert source.index("await Promise.all(held.map") < source.index(
+        'await waitFor("/evidence/frontend-saturated")'
+    )
+    assert "} finally {" in source
+    assert "held.forEach(({ request }) => request.destroy());" in source
+    assert "new AbortController()" not in source
 
 
 @pytest.mark.parametrize(

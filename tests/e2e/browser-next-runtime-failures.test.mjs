@@ -1,11 +1,36 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import http from "node:http";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
+
+function openDedicatedRequest(path) {
+  let request;
+  const connected = new Promise((resolve, reject) => {
+    request = http.request(
+      `${baseURL}${path}`,
+      { agent: false },
+      (response) => {
+        response.resume();
+      },
+    );
+    request.once("error", reject);
+    request.once("socket", (socket) => {
+      if (!socket.connecting) {
+        resolve();
+        return;
+      }
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    request.end();
+  });
+  return { connected, request };
+}
 
 async function waitFor(path) {
   await assert.doesNotReject(async () => {
@@ -55,12 +80,17 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
       process.env.MARKWEAVE_E2E_CHROMIUM || "/usr/bin/google-chrome-stable",
     headless: true,
   });
-  const context = await browser.newContext({ baseURL, serviceWorkers: "block" });
+  const context = await browser.newContext({
+    baseURL,
+    serviceWorkers: "block",
+  });
   const page = await context.newPage();
   const apiRequests = [];
   page.on("request", (request) => {
     if (request.url().includes("/api/v1/"))
-      apiRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      apiRequests.push(
+        `${request.method()} ${new URL(request.url()).pathname}`,
+      );
   });
   try {
     await page.goto("/login", { waitUntil: "networkidle" });
@@ -69,8 +99,8 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
       .getByRole("alert")
       .filter({ hasText: "Markweave is unavailable. Try again shortly." })
       .waitFor();
-    const secondSession = page.waitForResponse(
-      (response) => response.url().endsWith("/api/v1/session"),
+    const secondSession = page.waitForResponse((response) =>
+      response.url().endsWith("/api/v1/session"),
     );
     await page.getByRole("button", { name: "Try again" }).click();
     assert.equal((await secondSession).status(), 502);
@@ -86,22 +116,29 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
 
 test("production route exposes exact saturation and draining failures", async () => {
   if (process.env.MARKWEAVE_E2E_RUNTIME_FAILURE !== "admission") return;
-  const controllers = Array.from({ length: 128 }, () => new AbortController());
-  const pending = controllers.map((controller) =>
-    fetch(`${baseURL}/hold`, { signal: controller.signal }).catch(() => undefined),
-  );
-  await waitFor("/evidence/frontend-saturated");
-  const saturated = await fetch(`${baseURL}/overflow`);
-  assert.equal(saturated.status, 503);
-  assert.equal(await saturated.text(), "");
-  assert.equal(saturated.headers.get("content-security-policy"), null);
-  await writeFile("/evidence/frontend-request-drain", "true\n", { mode: 0o600 });
-  await waitFor("/evidence/frontend-draining");
-  const draining = await fetch(`${baseURL}/draining`);
-  assert.equal(draining.status, 503);
-  assert.equal(await draining.text(), "");
-  assert.equal(draining.headers.get("content-security-policy"), null);
-  controllers.forEach((controller) => controller.abort());
-  await Promise.all(pending);
-  await writeFile("/evidence/frontend-release", "true\n", { mode: 0o600 });
+  // Each request owns a socket. Global fetch/undici connection pooling may
+  // queue part of this burst client-side and therefore never exercise all 128
+  // production-server admission slots.
+  const held = Array.from({ length: 128 }, () => openDedicatedRequest("/hold"));
+  try {
+    await Promise.all(held.map(({ connected }) => connected));
+    await waitFor("/evidence/frontend-saturated");
+    const saturated = await fetch(`${baseURL}/overflow`);
+    assert.equal(saturated.status, 503);
+    assert.equal(await saturated.text(), "");
+    assert.equal(saturated.headers.get("content-security-policy"), null);
+    await writeFile("/evidence/frontend-request-drain", "true\n", {
+      mode: 0o600,
+    });
+    await waitFor("/evidence/frontend-draining");
+    const draining = await fetch(`${baseURL}/draining`);
+    assert.equal(draining.status, 503);
+    assert.equal(await draining.text(), "");
+    assert.equal(draining.headers.get("content-security-policy"), null);
+  } finally {
+    held.forEach(({ request }) => request.destroy());
+    await writeFile("/evidence/frontend-release", "true\n", {
+      mode: 0o600,
+    }).catch(() => undefined);
+  }
 });

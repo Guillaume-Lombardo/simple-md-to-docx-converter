@@ -26,6 +26,21 @@ evidence for the base version must remain valid. Scheduled, Release, and manual 
 this exception. A later revision at the unchanged new version also fails until the published image
 has been adopted.
 
+The sole historical skipped-container exception covers the failed `0.6.0` cutover publication:
+PyPI and the exact GitHub tag/Release exist at the reviewed `0.6.0` base source, Compose remains on
+the `0.5.2` digest verified against its publication receipt and anonymous GHCR manifest bytes, and
+no container staging artifact was created. Both backend and frontend repositories must return the
+exact bounded structured `MANIFEST_UNKNOWN` response for the requested `0.6.0` tag. The check uses
+anonymous pull first. Only an exact anonymous `DENIED` response from the historical frontend
+repository may fall back to the ephemeral GitHub Actions identity with `packages: read`; backend
+denial never does. Credentials are populated only for a trusted push or a pull request whose head
+repository exactly matches this repository. Fork and merge-group validation therefore fail closed
+when this one-time exception is needed and require successful trusted same-repository pull-request
+validation. A missing credential, authenticated denial, existing private tag, malformed, oversized,
+or unrelated response does not prove absence. Only the normal protected `0.6.1` pending transition
+may pass that state. It performs a new ordinary paired release; it does not rebuild or recover
+`0.6.0`.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
@@ -177,8 +192,8 @@ manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance
 One release is deployable only when the PyPI artifact and both image receipts agree on version and
 source SHA, both public digests are anonymously readable, and the release evidence manifest binds
 the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
-removing the legacy renderer from candidate source. The `0.6.0` source satisfies that gate; the release
-workflow build and serialize each final image once, run the complete rootless acceptance matrix
+removing the legacy renderer from candidate source. The `0.6.1` continuation source satisfies that
+gate; the release workflow builds and serializes each final image once, runs the complete rootless acceptance matrix
 against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
 another after legacy removal. If publication is partial, recover the missing image/evidence from
 the retained exact staged bytes without rebuilding, or fail the release. Never pair an older

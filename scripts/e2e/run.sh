@@ -463,7 +463,7 @@ else
   podman pull --quiet "$base_image"
   test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
   bash scripts/container/build.sh "$image"
-  podman build --format docker --tag "$frontend_image" --file web/Containerfile web
+  podman build --format oci --tag "$frontend_image" --file web/Containerfile web
 fi
 
 podman network create "$network_name" >/dev/null

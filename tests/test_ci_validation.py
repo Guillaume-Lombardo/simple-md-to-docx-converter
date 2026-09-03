@@ -257,6 +257,44 @@ def test_ci_uses_only_github_hosted_runners() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "      packages: read",
+            "      packages: write",
+            "light job permissions must be exactly contents: read and packages: read",
+        ),
+        (
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.repository == github.repository",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_TOKEN: ${{ (github.event_name == 'push'",
+            "          GHCR_TOKEN: attacker-controlled",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_USERNAME: ${{ (github.event_name == 'push'",
+            "          GHCR_USERNAME: hard-coded",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+    ],
+)
+def test_ci_limits_public_alignment_registry_fallback_credentials(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    errors = validate_workflow_text(
+        workflow.replace(needle, replacement, 1), workflow_name="ci.yml"
+    )
+
+    assert message in errors
+
+
+@pytest.mark.unit
 def test_document_engine_job_installs_checksum_locked_document_engines() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "if: ${{ matrix.domain == 'document-engines' }}" in workflow
@@ -578,6 +616,18 @@ def test_container_release_policy_requires_recovery_final_image_smoke() -> None:
     )
     errors = validate_container_release_workflow_text(weakened)
     assert any("recovery-cli-smoke.sh" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_policy_requires_oci_frontend_build() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace("podman build --format oci", "podman build")
+
+    errors = validate_container_release_workflow_text(weakened)
+
+    assert any("podman build --format oci" in error for error in errors)
 
 
 @pytest.mark.unit

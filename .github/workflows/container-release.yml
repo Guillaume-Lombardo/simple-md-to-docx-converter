@@ -107,7 +107,7 @@ jobs:
           frontend_image="localhost/md-converter-web:$RELEASE_VERSION"
           source_date_epoch="$(git show -s --format=%ct HEAD)"
           SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"
-          podman build --format docker --timestamp "$source_date_epoch" \
+          podman build --format oci --timestamp "$source_date_epoch" \
             --tag "$frontend_image" --file web/Containerfile web
           bash scripts/container/smoke.sh "$backend_image"
           bash scripts/container/api-smoke.sh "$backend_image"

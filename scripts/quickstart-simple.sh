@@ -112,7 +112,10 @@ select_runtime() {
       runtime_name=podman
       runtime_command=(podman)
       start_private_podman_service
-      compose_command=(podman --url "unix://$podman_socket" compose)
+      compose_command=(
+        env "DOCKER_HOST=unix://$podman_socket"
+        podman --url "unix://$podman_socket" compose
+      )
       ;;
     *)
       fail "MARKWEAVE_SIMPLE_RUNTIME must be auto, docker, or podman."
