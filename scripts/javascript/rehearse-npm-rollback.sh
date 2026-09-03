@@ -32,31 +32,13 @@ baseline_web_lock_sha256="$(
   && "$baseline_web_lock_sha256" == "$web_lock_sha256" ]] \
   || fail "baseline is not the audited npm state"
 
-git -C "$repository" merge-base --is-ancestor "$baseline" "$candidate" \
-  || fail "baseline is not an ancestor of candidate"
-mapfile -t first_parent_commits < <(
-  git -C "$repository" rev-list --first-parent --reverse "$baseline..$candidate"
-)
-(( ${#first_parent_commits[@]} > 0 )) || fail "candidate does not contain T67"
-
-t67_commits=()
-for commit in "${first_parent_commits[@]}"; do
-  read -r -a parents <<< "$(git -C "$repository" show -s --format=%P "$commit")"
-  if (( ${#parents[@]} > 1 )); then
-    [[ "$commit" == "$reviewed_integration_merge" ]] \
-      || fail "unrelated merge commit in candidate range: $commit"
-    continue
-  fi
-  subject="$(git -C "$repository" show -s --format=%s "$commit")"
-  [[ "$subject" =~ ^(chore|docs|test|fix)\(T67\):[[:space:]] ]] \
-    || fail "unrelated first-parent commit in candidate range: $commit $subject"
-  t67_commits+=("$commit")
-done
-(( ${#t67_commits[@]} > 0 )) || fail "candidate range has no T67 commit"
-
-oldest_parent="$(git -C "$repository" show -s --format=%P "${t67_commits[0]}")"
-[[ "$oldest_parent" == "$baseline" ]] \
-  || fail "baseline is not the direct npm parent of the T67 series"
+if ! selected_commits="$(
+  bash "$repository/scripts/javascript/select-t67-rollback-commits.sh" \
+    "$candidate" "$baseline" "$reviewed_integration_merge" 2>&1
+)"; then
+  fail "$selected_commits"
+fi
+mapfile -t t67_commits <<< "$selected_commits"
 
 allowed_path() {
   case "$1" in
@@ -69,7 +51,9 @@ allowed_path() {
     scripts/ci/validate_ci.py|scripts/container/publish-release-pair.sh|\
     scripts/container/run-ci.sh|scripts/e2e/run.sh|scripts/javascript/bootstrap-pnpm.sh|\
     scripts/javascript/benchmark-package-managers.sh|\
-    scripts/javascript/rehearse-npm-rollback.sh|scripts/javascript/validate-workspace.mjs|\
+    scripts/javascript/rehearse-npm-rollback.sh|\
+    scripts/javascript/select-t67-rollback-commits.sh|\
+    scripts/javascript/validate-workspace.mjs|\
     tests/test_ci_selection.py|tests/test_ci_validation.py|tests/test_documentation.py|\
     tests/test_pnpm_workspace.py|tests/test_t22_maintenance.py|\
     tickets/T67-migrate-javascript-tooling-pnpm-workspace.md|web/Containerfile|\
@@ -94,7 +78,9 @@ done < <(
 )
 
 for required_path in pnpm-lock.yaml pnpm-workspace.yaml \
-  scripts/javascript/bootstrap-pnpm.sh scripts/javascript/validate-workspace.mjs; do
+  scripts/javascript/bootstrap-pnpm.sh \
+  scripts/javascript/select-t67-rollback-commits.sh \
+  scripts/javascript/validate-workspace.mjs; do
   git -C "$repository" cat-file -e "$candidate:$required_path" \
     || fail "candidate lacks $required_path"
 done
@@ -142,6 +128,7 @@ done
 [[ ! -e "$rehearsal/.npmrc" && ! -e "$rehearsal/docs/package-management.md" ]] \
   || fail "package-manager selection or documentation state remains"
 [[ ! -e "$rehearsal/scripts/javascript/bootstrap-pnpm.sh" \
+  && ! -e "$rehearsal/scripts/javascript/select-t67-rollback-commits.sh" \
   && ! -e "$rehearsal/scripts/javascript/validate-workspace.mjs" \
   && ! -e "$rehearsal/scripts/javascript/rehearse-npm-rollback.sh" ]] \
   || fail "pnpm/Corepack scripts remain"

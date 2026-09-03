@@ -103,34 +103,20 @@ def _commit(repository: Path, subject: str, content: str) -> str:
     return _git(repository, "rev-parse", "HEAD")
 
 
-def _candidate_series(
+def _run_candidate_selector(
     repository: Path, candidate: str, baseline: str, reviewed_merge: str
 ) -> tuple[str, ...]:
-    _git(repository, "merge-base", "--is-ancestor", baseline, candidate)
-    commits = _git(
-        repository,
-        "rev-list",
-        "--first-parent",
-        "--reverse",
-        f"{baseline}..{candidate}",
-    ).splitlines()
-    selected: list[str] = []
-    for commit in commits:
-        parents = _git(repository, "show", "-s", "--format=%P", commit).split()
-        if len(parents) > 1:
-            if commit != reviewed_merge:
-                raise ValueError("unrelated merge")
-            continue
-        subject = _git(repository, "show", "-s", "--format=%s", commit)
-        if "(T67): " not in subject:
-            raise ValueError("unrelated commit")
-        selected.append(commit)
-    if (
-        not selected
-        or _git(repository, "show", "-s", "--format=%P", selected[0]) != baseline
-    ):
-        raise ValueError("wrong baseline")
-    return tuple(selected)
+    selector = Path("scripts/javascript/select-t67-rollback-commits.sh").resolve()
+    completed = subprocess.run(
+        ["bash", str(selector), candidate, baseline, reviewed_merge],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError(completed.stderr.strip())
+    return tuple(completed.stdout.splitlines())
 
 
 def _synthetic_candidate(repository: Path) -> tuple[str, str, str]:
@@ -157,9 +143,10 @@ def test_rollback_candidate_selection_uses_explicit_synthetic_history(
 ) -> None:
     baseline, candidate, reviewed_merge = _synthetic_candidate(tmp_path)
 
-    selected = _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
+    selected = _run_candidate_selector(tmp_path, candidate, baseline, reviewed_merge)
 
     assert len(selected) == 2
+    assert selected[-1] == candidate
 
 
 @pytest.mark.unit
@@ -174,15 +161,19 @@ def test_rollback_candidate_selection_ignores_checkout_merge_ref_and_future_hist
     _git(tmp_path, "merge", "--no-ff", candidate, "-m", "Synthetic pull request merge")
     merge_ref = _git(tmp_path, "rev-parse", "HEAD")
 
-    assert _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
+    selected = _run_candidate_selector(tmp_path, candidate, baseline, reviewed_merge)
+    assert selected[-1] == candidate
     with pytest.raises(ValueError, match="unrelated"):
-        _candidate_series(tmp_path, merge_ref, baseline, reviewed_merge)
+        _run_candidate_selector(tmp_path, merge_ref, baseline, reviewed_merge)
 
     _git(tmp_path, "checkout", "-b", "future-pr", candidate)
     future = _commit(tmp_path, "feat: future frontend work", "future pnpm\n")
-    assert _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
+    assert (
+        _run_candidate_selector(tmp_path, candidate, baseline, reviewed_merge)
+        == selected
+    )
     with pytest.raises(ValueError, match="unrelated"):
-        _candidate_series(tmp_path, future, baseline, reviewed_merge)
+        _run_candidate_selector(tmp_path, future, baseline, reviewed_merge)
 
 
 @pytest.mark.unit
@@ -190,11 +181,18 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
     rehearsal = Path("scripts/javascript/rehearse-npm-rollback.sh").read_text(
         encoding="utf-8"
     )
+    selector = Path("scripts/javascript/select-t67-rollback-commits.sh").read_text(
+        encoding="utf-8"
+    )
     for contract in (
         'rev-list --first-parent --reverse "$baseline..$candidate"',
         "unrelated first-parent commit in candidate range",
         "unrelated merge commit in candidate range",
         "baseline is not the direct npm parent of the T67 series",
+    ):
+        assert contract in selector
+    for contract in (
+        "select-t67-rollback-commits.sh",
         "rollback did not restore exact baseline bytes",
         "package-lock.json",
         "web/package-lock.json",
@@ -202,6 +200,7 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "pnpm-workspace.yaml",
         "docs/package-management.md",
         "scripts/javascript/bootstrap-pnpm.sh",
+        "scripts/javascript/select-t67-rollback-commits.sh",
         "cache: npm",
         "COPY package.json package-lock.json ./",
         "npm run build && npm prune --omit=dev --ignore-scripts",
