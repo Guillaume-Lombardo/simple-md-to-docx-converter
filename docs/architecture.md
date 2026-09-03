@@ -1,6 +1,6 @@
 # Architecture
 
-Version `0.6.0` completes the browser cutover: the backend composition root contains no HTML or
+Version `0.6.1` delivers the browser cutover: the backend composition root contains no HTML or
 static-asset router. Next.js owns browser presentation, the same-origin router owns only transport
 routing and minimum response headers, and FastAPI remains the sole business and persistence
 authority.

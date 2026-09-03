@@ -26,12 +26,16 @@ PROJECT = "markweave"
 REPOSITORY = "Guillaume-Lombardo/simple-md-to-docx-converter"
 IMAGE_REPOSITORY = "ghcr.io/guillaume-lombardo/md-converter"
 REGISTRY_PATH = "guillaume-lombardo/md-converter"
+FRONTEND_REGISTRY_PATH = "guillaume-lombardo/md-converter-web"
 PYPI_URL = f"https://pypi.org/pypi/{PROJECT}/json"
 GITHUB_API = f"https://api.github.com/repos/{REPOSITORY}"
 GITHUB_RELEASES = f"https://github.com/{REPOSITORY}/releases/download"
 GHCR_TOKEN_URL = (
     f"https://ghcr.io/token?service=ghcr.io&scope=repository:{REGISTRY_PATH}:pull"
 )
+SKIPPED_CONTAINER_DEPLOYMENT_VERSION = "0.5.2"
+SKIPPED_CONTAINER_PUBLIC_VERSION = "0.6.0"
+SKIPPED_CONTAINER_CONTINUATION_VERSION = "0.6.1"
 PENDING_EVENTS = frozenset({"pull_request", "merge_group", "push"})
 KNOWN_EVENTS = PENDING_EVENTS | frozenset({"release", "workflow_dispatch", "schedule"})
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
@@ -46,6 +50,8 @@ MAX_RECEIPT_BYTES = 16_384
 MAX_TOKEN_BYTES = 16_384
 HTTP_TIMEOUT_SECONDS = 10.0
 HTTP_OK = 200
+HTTP_FORBIDDEN = 403
+HTTP_NOT_FOUND = 404
 OCI_SCHEMA_VERSION = 2
 
 
@@ -110,7 +116,20 @@ class UrlLibTransport:
                     },
                     body=body,
                 )
-        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+        except urllib.error.HTTPError as error:
+            body = error.read(self._maximum_bytes + 1)
+            if len(body) > self._maximum_bytes:
+                raise AlignmentError(
+                    "public endpoint response exceeds the size limit"
+                ) from error
+            return HttpResponse(
+                status=error.code,
+                headers={
+                    key.lower(): value for key, value in (error.headers or {}).items()
+                },
+                body=body,
+            )
+        except (OSError, urllib.error.URLError) as error:
             raise AlignmentError(f"public endpoint request failed: {url}") from error
 
 
@@ -120,6 +139,14 @@ class ComposeIdentity:
 
     version: str
     digest: str
+
+
+@dataclass(frozen=True)
+class BaseIdentity:
+    """The exact repository base for one pending release transition."""
+
+    version: str
+    source_sha: str
 
 
 def _canonical_final_version(value: object, *, label: str) -> str:
@@ -197,9 +224,7 @@ def _pypi_version(transport: Transport) -> str:
     return _canonical_final_version(info.get("version"), label="latest PyPI version")
 
 
-def _release_receipt(
-    transport: Transport, *, version: str, expected_digest: str
-) -> None:
+def _release_identity(transport: Transport, *, version: str) -> tuple[str, list[Any]]:
     tag = f"v{version}"
     release_url = f"{GITHUB_API}/releases/tags/{tag}"
     release = _json_response(transport, release_url)
@@ -227,6 +252,14 @@ def _release_receipt(
     assets = release.get("assets")
     if not isinstance(assets, list):
         raise AlignmentError("GitHub Release assets are invalid")
+    return source_sha, assets
+
+
+def _release_receipt(
+    transport: Transport, *, version: str, expected_digest: str
+) -> None:
+    source_sha, assets = _release_identity(transport, version=version)
+    tag = f"v{version}"
     receipt_url = f"{GITHUB_RELEASES}/{tag}/registry-publication.json"
     receipts = [
         asset
@@ -259,14 +292,18 @@ def _release_receipt(
         )
 
 
-def _ghcr_digest(transport: Transport, *, version: str) -> str:
-    token_document = _json_response(transport, GHCR_TOKEN_URL)
+def _ghcr_manifest_response(
+    transport: Transport, *, repository_path: str, version: str
+) -> HttpResponse:
+    token_url = (
+        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository_path}:pull"
+    )
+    token_document = _json_response(transport, token_url)
     token = token_document.get("token", token_document.get("access_token"))
     if not isinstance(token, str) or not token or len(token) > MAX_TOKEN_BYTES:
         raise AlignmentError("GHCR returned no bounded anonymous pull token")
-    manifest_url = f"https://ghcr.io/v2/{REGISTRY_PATH}/manifests/{version}"
-    response = transport.request(
-        manifest_url,
+    return transport.request(
+        f"https://ghcr.io/v2/{repository_path}/manifests/{version}",
         headers={
             "Accept": (
                 "application/vnd.oci.image.manifest.v1+json, "
@@ -274,6 +311,59 @@ def _ghcr_digest(transport: Transport, *, version: str) -> str:
             ),
             "Authorization": f"Bearer {token}",
         },
+    )
+
+
+def _ghcr_tag_is_publicly_absent(
+    transport: Transport, *, repository_path: str, version: str
+) -> bool:
+    token_url = (
+        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository_path}:pull"
+    )
+    token_response = transport.request(
+        token_url, headers={"Accept": "application/json"}
+    )
+    if token_response.status == HTTP_FORBIDDEN:
+        try:
+            denial = json.loads(token_response.body)
+        except UnicodeDecodeError, json.JSONDecodeError:
+            return False
+        errors = denial.get("errors") if isinstance(denial, dict) else None
+        return (
+            isinstance(errors, list)
+            and len(errors) == 1
+            and isinstance(errors[0], dict)
+            and errors[0].get("code") == "DENIED"
+        )
+    if token_response.status != HTTP_OK or len(token_response.body) > MAX_JSON_BYTES:
+        raise AlignmentError("GHCR returned an invalid anonymous token response")
+    try:
+        token_document = json.loads(token_response.body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AlignmentError(
+            "GHCR returned an invalid anonymous token response"
+        ) from error
+    if not isinstance(token_document, dict):
+        raise AlignmentError("GHCR returned an invalid anonymous token response")
+    token = token_document.get("token", token_document.get("access_token"))
+    if not isinstance(token, str) or not token or len(token) > MAX_TOKEN_BYTES:
+        raise AlignmentError("GHCR returned no bounded anonymous pull token")
+    response = transport.request(
+        f"https://ghcr.io/v2/{repository_path}/manifests/{version}",
+        headers={
+            "Accept": (
+                "application/vnd.oci.image.manifest.v1+json, "
+                "application/vnd.docker.distribution.manifest.v2+json"
+            ),
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    return response.status == HTTP_NOT_FOUND
+
+
+def _ghcr_digest(transport: Transport, *, version: str) -> str:
+    response = _ghcr_manifest_response(
+        transport, repository_path=REGISTRY_PATH, version=version
     )
     headers = {key.lower(): value for key, value in response.headers.items()}
     digest = headers.get("docker-content-digest")
@@ -297,6 +387,49 @@ def _ghcr_digest(transport: Transport, *, version: str) -> str:
     return digest
 
 
+def _require_skipped_container_release(
+    transport: Transport,
+    *,
+    project_version: str,
+    compose_version: str,
+    base: BaseIdentity | None,
+) -> None:
+    expected = (
+        SKIPPED_CONTAINER_CONTINUATION_VERSION,
+        SKIPPED_CONTAINER_DEPLOYMENT_VERSION,
+        SKIPPED_CONTAINER_PUBLIC_VERSION,
+    )
+    if (project_version, compose_version, base.version if base else None) != expected:
+        raise AlignmentError(
+            "repository state is not an exact pending version transition"
+        )
+    if base is None or FULL_SHA.fullmatch(base.source_sha) is None:
+        raise AlignmentError(
+            "skipped-container continuation requires its release source"
+        )
+    source_sha, assets = _release_identity(
+        transport, version=SKIPPED_CONTAINER_PUBLIC_VERSION
+    )
+    if source_sha != base.source_sha:
+        raise AlignmentError(
+            "skipped-container release does not match the exact base source"
+        )
+    if any(
+        isinstance(asset, dict) and asset.get("name") == "registry-publication.json"
+        for asset in assets
+    ):
+        raise AlignmentError(
+            "skipped-container release already has a publication receipt"
+        )
+    for repository_path in (REGISTRY_PATH, FRONTEND_REGISTRY_PATH):
+        if not _ghcr_tag_is_publicly_absent(
+            transport,
+            repository_path=repository_path,
+            version=SKIPPED_CONTAINER_PUBLIC_VERSION,
+        ):
+            raise AlignmentError("skipped-container image tag is not publicly absent")
+
+
 def _git_output(arguments: Sequence[str]) -> bytes:
     try:
         return subprocess.run(  # noqa: S603 - fixed executable and bounded arguments
@@ -306,9 +439,9 @@ def _git_output(arguments: Sequence[str]) -> bytes:
         raise AlignmentError("cannot inspect the exact Git transition") from error
 
 
-def _base_project_version(
+def _base_identity(
     repository: Path, *, base: str, head: str, current_version: str
-) -> str:
+) -> BaseIdentity:
     if (
         FULL_SHA.fullmatch(base) is None
         or base == ZERO_SHA
@@ -329,7 +462,10 @@ def _base_project_version(
         raise AlignmentError(
             "head project.version does not match the checked-out source"
         )
-    return parse_project_version(previous, label="base pyproject.toml")
+    return BaseIdentity(
+        version=parse_project_version(previous, label="base pyproject.toml"),
+        source_sha=base,
+    )
 
 
 def check_alignment(
@@ -338,26 +474,39 @@ def check_alignment(
     compose: ComposeIdentity,
     event_name: str,
     transport: Transport,
-    base_version: str | None = None,
+    base: BaseIdentity | None = None,
 ) -> str:
     """Verify normal alignment or the sole exact pending-release transition."""
     if event_name not in KNOWN_EVENTS:
         raise AlignmentError(f"unsupported GitHub event: {event_name}")
     pypi_version = _pypi_version(transport)
     if pypi_version != compose.version:
-        raise AlignmentError("latest PyPI version and Compose image tag differ")
+        if (
+            event_name not in PENDING_EVENTS
+            or pypi_version != SKIPPED_CONTAINER_PUBLIC_VERSION
+        ):
+            raise AlignmentError("latest PyPI version and Compose image tag differ")
+        _require_skipped_container_release(
+            transport,
+            project_version=project_version,
+            compose_version=compose.version,
+            base=base,
+        )
+        return "pending-skipped-container"
     if project_version != compose.version:
         if event_name not in PENDING_EVENTS:
             raise AlignmentError("this event requires fully published alignment")
-        if base_version != compose.version or Version(project_version) <= Version(
-            base_version
+        if (
+            base is None
+            or base.version != compose.version
+            or Version(project_version) <= Version(base.version)
         ):
             raise AlignmentError(
                 "repository state is not an exact pending version transition"
             )
         state = "pending"
     else:
-        if base_version is not None:
+        if base is not None:
             raise AlignmentError("base version is only valid for a pending transition")
         state = "aligned"
     _release_receipt(transport, version=compose.version, expected_digest=compose.digest)
@@ -385,11 +534,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
         compose = parse_compose_identity(
             (options.repository / "compose.yaml").read_text(encoding="utf-8")
         )
-        base_version = None
+        base = None
         if project_version != compose.version:
             if options.event_name not in PENDING_EVENTS:
                 raise AlignmentError("this event requires fully published alignment")
-            base_version = _base_project_version(
+            base = _base_identity(
                 options.repository,
                 base=options.base,
                 head=options.head,
@@ -400,7 +549,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             compose=compose,
             event_name=options.event_name,
             transport=UrlLibTransport(),
-            base_version=base_version,
+            base=base,
         )
     except (AlignmentError, OSError) as error:
         print(f"public release alignment failed: {error}", file=sys.stderr)
