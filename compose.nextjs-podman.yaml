@@ -1,0 +1,13 @@
+# The rootless Podman profile intentionally disables the backend healthcheck.
+# The simple quickstart starts Markweave separately and proves its in-container
+# readiness before it creates the browser tier.
+services:
+  frontend:
+    depends_on:
+      markweave:
+        condition: service_started
+
+  router:
+    depends_on:
+      markweave:
+        condition: service_started

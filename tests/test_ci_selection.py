@@ -30,6 +30,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "README.md",
         "compose.simple.yaml",
         "compose.podman.yaml",
+        "compose.nextjs-podman.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/quickstart-template.docx.base64",

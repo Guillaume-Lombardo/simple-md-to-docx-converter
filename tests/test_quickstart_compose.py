@@ -27,6 +27,7 @@ PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
 NEXTJS_OVERLAY = ROOT / "compose.nextjs.yaml"
+NEXTJS_PODMAN_OVERLAY = ROOT / "compose.nextjs-podman.yaml"
 NEXTJS_PODMAN_TRUSTED_OVERLAY = ROOT / "compose.nextjs-podman-trusted-upstream.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
@@ -138,6 +139,15 @@ def test_compose_runners_probe_the_canonical_host_and_retain_421_policy(
         assert compose_function.index(
             '"$podman_overlay_file"'
         ) < compose_function.index('"$nextjs_overlay_file"')
+        assert (
+            'readonly nextjs_podman_overlay_file="$repository/compose.nextjs-podman.yaml"'
+            in script
+        )
+        assert '! -f "$nextjs_podman_overlay_file"' in script
+        assert '--file "$nextjs_podman_overlay_file"' in script
+        assert compose_function.index(
+            '"$nextjs_overlay_file"'
+        ) < compose_function.index('"$nextjs_podman_overlay_file"')
     assert 'readonly public_endpoint="http://127.0.0.1:$port"' in script
     assert 'readonly public_host="localhost:$port"' in script
     assert 'readonly public_base_url="http://$public_host"' in script
@@ -390,10 +400,36 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "no physical capacity cap" in script
     assert "Markweave is ready with $runtime_name" in script
     assert "compose.nextjs.yaml" in script
+    assert "compose.nextjs-podman.yaml" in script
     assert "compose.nextjs-podman-trusted-upstream.yaml" in script
+    compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
+    assert compose_function.index('"$repository/compose.nextjs.yaml"') < (
+        compose_function.index('"$repository/compose.nextjs-podman.yaml"')
+    )
+    assert compose_function.index('"$repository/compose.nextjs-podman.yaml"') < (
+        compose_function.index(
+            '"$repository/compose.nextjs-podman-trusted-upstream.yaml"'
+        )
+    )
+    assert "wait_for_podman_scanner" in script
+    assert "wait_for_application" in script
+    assert script.index("wait_for_application\n  if [[ -n") < script.index(
+        "compose up --detach frontend router"
+    )
     assert "wait_for_router" in script
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
     assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
+
+
+def test_nextjs_podman_overlay_matches_the_staged_startup_contract() -> None:
+    document = yaml.safe_load(NEXTJS_PODMAN_OVERLAY.read_text(encoding="utf-8"))
+
+    assert document == {
+        "services": {
+            "frontend": {"depends_on": {"markweave": {"condition": "service_started"}}},
+            "router": {"depends_on": {"markweave": {"condition": "service_started"}}},
+        }
+    }
 
 
 def test_simple_quickstart_has_an_explicit_warned_insecure_mode() -> None:

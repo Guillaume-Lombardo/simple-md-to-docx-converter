@@ -256,8 +256,11 @@ compose() {
   fi
   if [[ -n "$cutover_backend_image" ]]; then
     files+=(--file "$repository/compose.nextjs.yaml")
-    if [[ "$runtime_name" == podman && "$trusted_upstream_antivirus" == true ]]; then
-      files+=(--file "$repository/compose.nextjs-podman-trusted-upstream.yaml")
+    if [[ "$runtime_name" == podman ]]; then
+      files+=(--file "$repository/compose.nextjs-podman.yaml")
+      if [[ "$trusted_upstream_antivirus" == true ]]; then
+        files+=(--file "$repository/compose.nextjs-podman-trusted-upstream.yaml")
+      fi
     fi
   fi
   if [[ "$insecure" == true ]]; then
