@@ -959,6 +959,19 @@ e2e_run_in_harness_directory \
   --volume "$browser_runtime_directory:/e2e:ro,Z" \
   --volume "$evidence_directory:/evidence:rw,Z" \
   "$frontend_image" node /e2e/frontend-admission-fixture.mjs >/dev/null
+for _ in $(seq 1 120); do
+  [[ -f "$evidence_directory/frontend-admission-ready" ]] && break
+  if [[ "$(podman inspect "$frontend_name" --format '{{.State.Running}}' 2>/dev/null)" != true ]]; then
+    e2e_podman logs "$frontend_name" >&2 || true
+    break
+  fi
+  sleep 0.25
+done
+if [[ ! -f "$evidence_directory/frontend-admission-ready" ]]; then
+  echo "Timed out waiting for the admission frontend." >&2
+  e2e_podman logs "$frontend_name" >&2 || true
+  exit 1
+fi
 start_production_router "$application_name" http://127.0.0.1:8080 \
   http://frontend:3000 401 false
 e2e_podman exec \

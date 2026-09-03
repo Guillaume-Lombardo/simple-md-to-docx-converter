@@ -13,7 +13,11 @@ page = createPageServer((_request, response) => {
   if (page.admission.inFlight === 128)
     writeFileSync(`${evidence}/frontend-saturated`, "128\n", { mode: 0o600 });
 });
-page.server.listen(3000, "0.0.0.0");
+page.server.listen(3000, "0.0.0.0", () => {
+  writeFileSync(`${evidence}/frontend-admission-ready`, "true\n", {
+    mode: 0o600,
+  });
+});
 
 let stopping = false;
 process.on("SIGTERM", async () => {

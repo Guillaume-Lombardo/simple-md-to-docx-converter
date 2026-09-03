@@ -17,6 +17,7 @@ RESTART_PREPARATION_BROWSER = Path(
     "tests/e2e/browser-next-conversion-restart-prepare.test.mjs"
 ).resolve()
 RESTART_BROWSER = Path("tests/e2e/browser-next-conversion-restart.test.mjs").resolve()
+ADMISSION_FIXTURE = Path("tests/e2e/frontend-admission-fixture.mjs").resolve()
 
 
 @pytest.mark.unit
@@ -345,6 +346,20 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "MARKWEAVE_E2E_RUNTIME_FAILURE=admission" in runner
     assert 'podman kill --signal TERM "$frontend_name"' in runner
     assert "/e2e/frontend-admission-fixture.mjs" in runner
+    fixture_started = runner.index("/e2e/frontend-admission-fixture.mjs")
+    fixture_ready = runner.index(
+        '[[ -f "$evidence_directory/frontend-admission-ready" ]] && break'
+    )
+    admission_router = runner.index(
+        'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
+        "  http://frontend:3000 401 false"
+    )
+    assert fixture_started < fixture_ready < admission_router
+    assert 'echo "Timed out waiting for the admission frontend." >&2' in runner
+    assert (
+        'e2e_podman logs "$frontend_name" >&2 || true'
+        in runner[fixture_ready:admission_router]
+    )
     assert (
         'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
         "  http://frontend:3000 401 false" in runner
@@ -352,6 +367,16 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.unit
+def test_admission_fixture_reports_only_listening_readiness() -> None:
+    source = ADMISSION_FIXTURE.read_text(encoding="utf-8")
+
+    listen = source.index('page.server.listen(3000, "0.0.0.0", () => {')
+    ready = source.index("frontend-admission-ready")
+    assert listen < ready
+    assert 'page.server.listen(3000, "0.0.0.0");' not in source
 
 
 @pytest.mark.parametrize(
