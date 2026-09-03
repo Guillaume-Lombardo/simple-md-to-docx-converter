@@ -410,6 +410,8 @@ def _require_ghcr_tag_publicly_absent(
         )
     else:
         _require_exact_anonymous_denial(anonymous)
+        if repository_path != FRONTEND_REGISTRY_PATH:
+            raise AlignmentError("GHCR backend anonymous access was denied")
         if credentials is None:
             raise AlignmentError("GHCR read-only fallback credentials are unavailable")
         response = _ghcr_manifest_response(
@@ -637,8 +639,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 head=options.head,
                 current_version=project_version,
             )
-        username = os.environ.get("GHCR_USERNAME")
-        token = os.environ.get("GHCR_TOKEN")
+        username = os.environ.get("GHCR_USERNAME") or None
+        token = os.environ.get("GHCR_TOKEN") or None
         registry_credentials = None
         if username is not None or token is not None:
             if username is None or token is None:

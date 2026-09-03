@@ -253,7 +253,6 @@ def test_skipped_container_transition_still_verifies_deployed_exact_bytes() -> N
     [
         ("backend-present", "not proven publicly absent"),
         ("frontend-present", "not proven publicly absent"),
-        ("backend-auth-token-denied", "invalid pull token response"),
         ("frontend-auth-token-denied", "invalid pull token response"),
         ("backend-malformed-404", "absence response is invalid"),
         ("frontend-unrelated-404", "absence response is invalid"),
@@ -277,12 +276,8 @@ def test_skipped_container_transition_rejects_any_inconsistent_public_surface(
         transport.responses[
             f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.0"
         ] = manifest
-    elif mutation in {"backend-auth-token-denied", "frontend-auth-token-denied"}:
-        repository_path = (
-            public_alignment.REGISTRY_PATH
-            if mutation == "backend-auth-token-denied"
-            else public_alignment.FRONTEND_REGISTRY_PATH
-        )
+    elif mutation == "frontend-auth-token-denied":
+        repository_path = public_alignment.FRONTEND_REGISTRY_PATH
         token_url = (
             "https://ghcr.io/token?service=ghcr.io&scope=repository:"
             f"{repository_path}:pull"
@@ -330,6 +325,37 @@ def test_skipped_container_transition_rejects_any_inconsistent_public_surface(
             ),
             registry_credentials=REGISTRY_CREDENTIALS,
         )
+
+
+@pytest.mark.unit
+def test_backend_anonymous_denial_never_requests_credentials() -> None:
+    transport = _skipped_container_transport()
+    token_url = public_alignment.GHCR_TOKEN_URL
+    transport.responses[token_url] = [
+        _json_response({"token": "deployed-backend-token"}),
+        HttpResponse(
+            403,
+            {"content-type": "application/json"},
+            b'{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}',
+        ),
+        _json_response({"token": "must-not-be-requested"}),
+    ]
+
+    with pytest.raises(AlignmentError, match="backend anonymous access was denied"):
+        check_alignment(
+            project_version="0.6.1",
+            compose=ComposeIdentity("0.5.2", REGISTRY_DIGEST),
+            event_name="pull_request",
+            transport=transport,
+            base=BaseIdentity("0.6.0", SOURCE_SHA),
+            registry_credentials=REGISTRY_CREDENTIALS,
+        )
+
+    backend_token_requests = [
+        headers for url, headers in transport.requests if url == token_url
+    ]
+    assert len(backend_token_requests) == 2
+    assert all("Authorization" not in headers for headers in backend_token_requests)
 
 
 @pytest.mark.unit

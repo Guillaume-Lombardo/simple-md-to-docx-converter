@@ -59,6 +59,7 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.base.sha",
         "github.event.pull_request.draft",
         "github.event.pull_request.head.sha",
+        "github.event.pull_request.head.repo.full_name",
         "github.event.pull_request.number",
         "github.event_name",
         "github.actor",
@@ -308,7 +309,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="be08c3201fdfba9928c848b6f4735464a6acfa9c964aa6521b577dc1e18c1bce",
+        canonical_digest="ffaa8700470db3c61d89cb939fcef6bb2f599b66c39888a65e975e1bb90c3266",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -726,8 +727,16 @@ def _validate_public_alignment_credentials(
             "github.event.merge_group.base_sha || github.event.before }}"
         ),
         "EVENT_NAME": "${{ github.event_name }}",
-        "GHCR_TOKEN": "${{ github.token }}",
-        "GHCR_USERNAME": "${{ github.actor }}",
+        "GHCR_TOKEN": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.token || '' }}"
+        ),
+        "GHCR_USERNAME": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.actor || '' }}"
+        ),
         "HEAD_SHA": (
             "${{ github.event.pull_request.head.sha || "
             "github.event.merge_group.head_sha || github.sha }}"

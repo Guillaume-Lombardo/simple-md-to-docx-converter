@@ -31,11 +31,15 @@ PyPI and the exact GitHub tag/Release exist at the reviewed `0.6.0` base source,
 the `0.5.2` digest verified against its publication receipt and anonymous GHCR manifest bytes, and
 no container staging artifact was created. Both backend and frontend repositories must return the
 exact bounded structured `MANIFEST_UNKNOWN` response for the requested `0.6.0` tag. The check uses
-anonymous pull first. Only an exact anonymous `DENIED` response may fall back to the ephemeral
-GitHub Actions identity with `packages: read`; a missing credential, authenticated denial, existing
-private tag, malformed, oversized, or unrelated response does not prove absence. Only the normal
-protected `0.6.1` pending transition may pass that state. It performs a new ordinary paired release;
-it does not rebuild or recover `0.6.0`.
+anonymous pull first. Only an exact anonymous `DENIED` response from the historical frontend
+repository may fall back to the ephemeral GitHub Actions identity with `packages: read`; backend
+denial never does. Credentials are populated only for a trusted push or a pull request whose head
+repository exactly matches this repository. Fork and merge-group validation therefore fail closed
+when this one-time exception is needed and require successful trusted same-repository pull-request
+validation. A missing credential, authenticated denial, existing private tag, malformed, oversized,
+or unrelated response does not prove absence. Only the normal protected `0.6.1` pending transition
+may pass that state. It performs a new ordinary paired release; it does not rebuild or recover
+`0.6.0`.
 
 ## GitHub and PyPI trust configuration
 

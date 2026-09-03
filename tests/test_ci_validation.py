@@ -266,12 +266,17 @@ def test_ci_uses_only_github_hosted_runners() -> None:
             "light job permissions must be exactly contents: read and packages: read",
         ),
         (
-            "          GHCR_TOKEN: ${{ github.token }}",
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.repository == github.repository",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_TOKEN: ${{ (github.event_name == 'push'",
             "          GHCR_TOKEN: attacker-controlled",
             "public alignment must receive only the ephemeral read-only GHCR credentials",
         ),
         (
-            "          GHCR_USERNAME: ${{ github.actor }}",
+            "          GHCR_USERNAME: ${{ (github.event_name == 'push'",
             "          GHCR_USERNAME: hard-coded",
             "public alignment must receive only the ephemeral read-only GHCR credentials",
         ),
