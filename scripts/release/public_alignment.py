@@ -326,7 +326,7 @@ def _ghcr_tag_is_publicly_absent(
     if token_response.status == HTTP_FORBIDDEN:
         try:
             denial = json.loads(token_response.body)
-        except UnicodeDecodeError, json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError) as _error:
             return False
         errors = denial.get("errors") if isinstance(denial, dict) else None
         return (
