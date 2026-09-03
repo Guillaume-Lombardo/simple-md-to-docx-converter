@@ -5,6 +5,7 @@ umask 0077
 repository="$(pwd)"
 readonly repository
 readonly compose_file="$repository/compose.yaml"
+readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
 readonly quickstart_script="$repository/scripts/quickstart.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-e2e-${suffix,,}"
@@ -12,7 +13,8 @@ readonly work_volume="${project}_markweave-work"
 readonly data_volume="${project}_markweave-data"
 readonly signatures_volume="${project}_clamav-signatures"
 
-if [[ ! -f "$compose_file" || ! -x "$quickstart_script" ]]; then
+if [[ ! -f "$compose_file" || ! -f "$nextjs_overlay_file" || \
+  ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -60,13 +62,14 @@ backing_file() {
 
 write_fault_env() {
   local device="$1"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$port" "$port" "$device" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$port" "$port" "$device" >"$fault_env"
 }
 
 compose() {
   docker compose --project-name "$project" --project-directory "$repository" \
-    --file "$compose_file" --env-file "$fault_env" "$@"
+    --file "$compose_file" --file "$nextjs_overlay_file" \
+    --env-file "$fault_env" "$@"
 }
 
 cleanup() {

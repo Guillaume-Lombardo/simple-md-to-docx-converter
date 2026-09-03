@@ -7,6 +7,7 @@ readonly repository
 readonly compose_file="$repository/compose.yaml"
 readonly overlay_file="$repository/compose.simple.yaml"
 readonly podman_overlay_file="$repository/compose.podman.yaml"
+readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
 readonly quickstart_script="$repository/scripts/quickstart-simple.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-simple-e2e-${suffix,,}"
@@ -35,7 +36,8 @@ case "$runtime" in
 esac
 
 if [[ ! -f "$compose_file" || ! -f "$overlay_file" || \
-  ! -f "$podman_overlay_file" || ! -x "$quickstart_script" ]]; then
+  ! -f "$podman_overlay_file" || ! -f "$nextjs_overlay_file" || \
+  ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -77,8 +79,8 @@ quickstart() {
 }
 
 write_fault_env() {
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
-    "$password" "$port" "$port" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
+    "$password" "$port" "$port" "$port" >"$fault_env"
 }
 
 compose() {
@@ -86,6 +88,7 @@ compose() {
   if [[ "$runtime" == podman ]]; then
     files+=(--file "$podman_overlay_file")
   fi
+  files+=(--file "$nextjs_overlay_file")
   "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$fault_env" "$@"
 }

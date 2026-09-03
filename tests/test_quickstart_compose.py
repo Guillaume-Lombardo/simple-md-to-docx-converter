@@ -126,6 +126,18 @@ def test_compose_runners_probe_the_canonical_host_and_retain_421_policy(
 ) -> None:
     script = runner.read_text(encoding="utf-8")
 
+    assert 'readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"' in script
+    assert '! -f "$nextjs_overlay_file"' in script
+    assert '--file "$nextjs_overlay_file"' in script
+    assert "MARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s" in script
+    compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
+    assert compose_function.index('"$compose_file"') < compose_function.index(
+        '"$nextjs_overlay_file"'
+    )
+    if runner == SIMPLE_RUNNER:
+        assert compose_function.index(
+            '"$podman_overlay_file"'
+        ) < compose_function.index('"$nextjs_overlay_file"')
     assert 'readonly public_endpoint="http://127.0.0.1:$port"' in script
     assert 'readonly public_host="localhost:$port"' in script
     assert 'readonly public_base_url="http://$public_host"' in script
