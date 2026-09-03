@@ -14,10 +14,15 @@ readonly frontend_lock="${4:-web/package-lock.json}"
 
 staging_root="$(mktemp -d "$RUNNER_TEMP/registry-pair.XXXXXX")"
 readonly staging_root
+readonly registry_auth_file="$staging_root/auth.json"
 cleanup() {
   rm -rf -- "$staging_root"
 }
 trap cleanup EXIT
+
+printf '%s' "$GHCR_TOKEN" | skopeo login --authfile "$registry_auth_file" \
+  --username "$GITHUB_ACTOR" --password-stdin ghcr.io >/dev/null
+chmod 0600 "$registry_auth_file"
 
 declare -A repositories=(
   [backend]="ghcr.io/guillaume-lombardo/md-converter"
@@ -48,7 +53,7 @@ inspect_remote_tag() {
 
 copy_staged_tag() {
   local role="$1" tag="$2" copy_status copied_digest inspect_status
-  if skopeo copy --preserve-digests --retry-times 3 \
+  if skopeo copy --authfile "$registry_auth_file" --preserve-digests --retry-times 3 \
     "dir:$staging_root/$role" "docker://${repositories[$role]}:$tag"; then
     copy_status=0
   else

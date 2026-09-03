@@ -133,6 +133,7 @@ function rejectMalformedRequest(socket, secure) {
  *   maxRequestBytes?: number,
  *   publicHosts: string[],
  *   tls?: import("node:https").ServerOptions,
+ *   upstreamTimeoutMs?: number,
  * }} options
  */
 export function createProductionRouter({
@@ -141,6 +142,7 @@ export function createProductionRouter({
   maxRequestBytes = Number.MAX_SAFE_INTEGER,
   publicHosts,
   tls = undefined,
+  upstreamTimeoutMs = 30_000,
 }) {
   const destinations = {
     backend: validatedOrigin(backend, "backend"),
@@ -148,6 +150,8 @@ export function createProductionRouter({
   };
   if (!Number.isSafeInteger(maxRequestBytes) || maxRequestBytes < 1)
     throw new Error("maxRequestBytes must be a positive safe integer");
+  if (!Number.isSafeInteger(upstreamTimeoutMs) || upstreamTimeoutMs < 1)
+    throw new Error("upstreamTimeoutMs must be a positive safe integer");
   if (!Array.isArray(publicHosts) || publicHosts.length === 0)
     throw new Error("at least one public host is required");
   const allowedHosts = new Set(
@@ -184,6 +188,40 @@ export function createProductionRouter({
       else empty(clientResponse, 502, secure);
     };
     let upstream;
+    let upstreamResponse;
+    let requestBodyAccepted = false;
+    let responseForwarded = false;
+    const forwardUpstreamResponse = () => {
+      if (
+        !requestBodyAccepted ||
+        !upstreamResponse ||
+        responseForwarded ||
+        clientResponse.destroyed ||
+        clientResponse.writableEnded
+      )
+        return;
+      responseForwarded = true;
+      for (
+        let index = 0;
+        index < upstreamResponse.rawHeaders.length;
+        index += 2
+      ) {
+        const name = upstreamResponse.rawHeaders[index];
+        const lowerName = name.toLowerCase();
+        const value = upstreamResponse.rawHeaders[index + 1];
+        if (
+          hopByHop.has(lowerName) ||
+          lowerName === "strict-transport-security" ||
+          lowerName === "permissions-policy" ||
+          (selected === "frontend" && lowerName === "set-cookie")
+        )
+          continue;
+        clientResponse.appendHeader(name, value);
+      }
+      securityHeaders(clientResponse, secure);
+      clientResponse.writeHead(upstreamResponse.statusCode ?? 502);
+      upstreamResponse.pipe(clientResponse);
+    };
     try {
       upstream = (destination.protocol === "https:" ? sendHttps : sendHttp)(
         {
@@ -194,31 +232,27 @@ export function createProductionRouter({
           port: destination.port,
           protocol: destination.protocol,
         },
-        (upstreamResponse) => {
+        (response) => {
+          upstreamResponse = response;
+          upstreamResponse.pause();
+          upstreamResponse.on("aborted", failUpstream);
           upstreamResponse.on("error", failUpstream);
-          for (
-            let index = 0;
-            index < upstreamResponse.rawHeaders.length;
-            index += 2
-          ) {
-            const name = upstreamResponse.rawHeaders[index];
-            const lowerName = name.toLowerCase();
-            const value = upstreamResponse.rawHeaders[index + 1];
-            if (
-              hopByHop.has(lowerName) ||
-              lowerName === "strict-transport-security" ||
-              lowerName === "permissions-policy" ||
-              (selected === "frontend" && lowerName === "set-cookie")
-            )
-              continue;
-            clientResponse.appendHeader(name, value);
-          }
-          securityHeaders(clientResponse, secure);
-          clientResponse.writeHead(upstreamResponse.statusCode ?? 502);
-          upstreamResponse.pipe(clientResponse);
+          upstreamResponse.setTimeout(upstreamTimeoutMs, () => {
+            upstreamResponse.destroy(new Error("upstream response timed out"));
+          });
+          forwardUpstreamResponse();
         },
       );
       clientRequest.on("aborted", () => upstream.destroy());
+      clientRequest.on("error", () => upstream.destroy());
+      clientResponse.on("close", () => {
+        if (clientResponse.writableEnded) return;
+        upstream.destroy();
+        upstreamResponse?.destroy();
+      });
+      upstream.setTimeout(upstreamTimeoutMs, () => {
+        upstream.destroy(new Error("upstream request timed out"));
+      });
       let receivedBytes = 0;
       let rejected = false;
       clientRequest.on("data", (chunk) => {
@@ -234,7 +268,11 @@ export function createProductionRouter({
       });
       upstream.on("drain", () => clientRequest.resume());
       clientRequest.on("end", () => {
-        if (!rejected) upstream.end();
+        if (!rejected) {
+          requestBodyAccepted = true;
+          upstream.end();
+          forwardUpstreamResponse();
+        }
       });
     } catch {
       failUpstream();

@@ -367,7 +367,7 @@ jobs:
             --connect-timeout 20 --max-time 180 --retry 3 --retry-all-errors \
             --output "$chrome_deb" "$CHROME_URL"
           echo "$CHROME_SHA256  $chrome_deb" | sha256sum --check --strict
-          sudo apt-get install --yes "$chrome_deb"
+          sudo apt-get install --yes --allow-downgrades "$chrome_deb"
           echo "$MERMAID_LOCK_SHA256  spikes/toolchain/package-lock.json" \
             | sha256sum --check --strict
           npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts

@@ -27,6 +27,16 @@ if { [[ -n "$published_image" ]] && [[ -z "$published_frontend_image" ]]; } ||
   echo "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together." >&2
   exit 2
 fi
+if [[ -n "$published_image" ]]; then
+  backend_version="${published_image%@*}"
+  backend_version="${backend_version##*:}"
+  frontend_version="${published_frontend_image%@*}"
+  frontend_version="${frontend_version##*:}"
+  if [[ "$backend_version" != "$frontend_version" ]]; then
+    echo "Published backend and frontend E2E image versions must match." >&2
+    exit 2
+  fi
+fi
 if { [[ -n "$local_image" ]] && [[ -z "$local_frontend_image" ]]; } ||
   { [[ -z "$local_image" ]] && [[ -n "$local_frontend_image" ]]; }; then
   echo "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together." >&2
@@ -42,6 +52,14 @@ if [[ -n "$local_image" ]] && {
 }; then
   echo "Local E2E images must use the isolated localhost Markweave package names." >&2
   exit 2
+fi
+if [[ -n "$local_image" ]]; then
+  backend_version="${local_image##*:}"
+  frontend_version="${local_frontend_image##*:}"
+  if [[ "$backend_version" != "$frontend_version" ]]; then
+    echo "Local backend and frontend E2E image versions must match." >&2
+    exit 2
+  fi
 fi
 readonly image="${published_image:-${local_image:-localhost/md-converter:t21-$profile}}"
 readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
@@ -339,6 +357,7 @@ start_production_router() {
     --env "FRONTEND_ORIGIN=$frontend_origin" \
     --env PUBLIC_HOSTS=localhost:3100 \
     --env ROUTER_REQUEST_MAX_BYTES=1100000 \
+    --env ROUTER_UPSTREAM_TIMEOUT_MS=30000 \
     "$frontend_image" node router.mjs >/dev/null
   for _ in $(seq 1 120); do
     if e2e_podman exec --env "EXPECTED_API_STATUS=$expected_api_status" \

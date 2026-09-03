@@ -440,6 +440,9 @@ def test_frontend_deployment_separates_pages_probes_router_and_credentials() -> 
     assert environment["ROUTER_TLS_CERT_FILE"] == "/run/tls/tls.crt"
     assert environment["ROUTER_TLS_KEY_FILE"] == "/run/tls/tls.key"
     assert environment["ROUTER_REQUEST_MAX_BYTES"] == "${MARKWEAVE_REQUEST_MAX_BYTES}"
+    assert environment["ROUTER_UPSTREAM_TIMEOUT_MS"] == (
+        "${MARKWEAVE_ROUTER_UPSTREAM_TIMEOUT_MS}"
+    )
     assert "includeSubDomains" not in Path("deploy/frontend.yaml.example").read_text(
         encoding="utf-8"
     )

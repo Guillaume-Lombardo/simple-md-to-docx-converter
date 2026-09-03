@@ -150,7 +150,7 @@ CONTAINER_RELEASE_CANONICAL_DIGEST = (
     "2816ab748eb97c222e478114c56d562600d08bf1d372e92abe999f65970aa781"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
-    "01b75fdc4bf07ce8ac3b744860b39854506b2f76ac2b46a68bfb3bb887892462"
+    "5b1966cda4facf8b7faf10fa643270dc525eb20355f5e545da14406f984f9588"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
@@ -304,7 +304,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="d85964d6b235ba4aeccbbb95907f8927e54995498ea39b22650d9a10cd82b8ca",
+        canonical_digest="6e1a23a4cd54ae8d0762c30e2d14385412e6c9ee94b5c8409324a3d3b27e2206",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -687,6 +687,22 @@ def _validate_no_legacy_browser_command(workflow: Mapping[str, Any]) -> list[str
     )
 
 
+def _validate_chrome_downgrade_install(workflow: Mapping[str, Any]) -> list[str]:
+    document_engine_install = [
+        step.get("run")
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name")
+        == "Install verified Mermaid and Chrome for document-engine tests"
+    ]
+    return (
+        ["pinned Chrome installation must permit an explicit downgrade"]
+        if len(document_engine_install) != 1
+        or 'apt-get install --yes --allow-downgrades "$chrome_deb"'
+        not in str(document_engine_install[0])
+        else []
+    )
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -751,6 +767,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
     errors.extend(_validate_no_legacy_browser_command(workflow))
+    errors.extend(_validate_chrome_downgrade_install(workflow))
 
     required_conditions = {
         ("light", "Enforce changed application line coverage"): (
@@ -1472,7 +1489,11 @@ def validate_container_publish_pair_text(text: str) -> list[str]:
         "skopeo copy --preserve-digests",
         'test "sha256:$(sha256sum "$staging_root/$role/manifest.json"',
         "ghcr.io/guillaume-lombardo/md-converter-web",
-        "skopeo copy --preserve-digests --retry-times 3",
+        'skopeo copy --authfile "$registry_auth_file" --preserve-digests --retry-times 3',
+        'skopeo login --authfile "$registry_auth_file"',
+        "--password-stdin ghcr.io",
+        'skopeo copy --authfile "$registry_auth_file"',
+        'chmod 0600 "$registry_auth_file"',
         '[[ "$copied_digest" = "${intended_digests[$role]}" ]]',
         'if remote_digest="$(inspect_remote_tag "$role" "$tag")"; then',
         'test "$remote_digest" = "${intended_digests[$role]}"',

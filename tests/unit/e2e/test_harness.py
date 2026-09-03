@@ -313,6 +313,8 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
         in runner
     )
     assert "Published and local E2E image pairs are mutually exclusive" in runner
+    assert "Published backend and frontend E2E image versions must match" in runner
+    assert "Local backend and frontend E2E image versions must match" in runner
     assert 'podman image exists "$image"' in runner
     assert 'podman image exists "$frontend_image"' in runner
     assert '"$frontend_image" node router.mjs' in runner
@@ -322,6 +324,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'local probe_page="${5:-true}"' in runner
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
+    assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
     assert runner.count('start_production_router "$application_name"') == 6
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
@@ -349,6 +352,43 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.parametrize(
+    ("backend", "frontend", "message"),
+    [
+        (
+            "ghcr.io/guillaume-lombardo/md-converter:0.6.0@sha256:" + "a" * 64,
+            "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "b" * 64,
+            "Published backend and frontend E2E image versions must match.",
+        ),
+        (
+            "localhost/md-converter:0.6.0",
+            "localhost/md-converter-web:0.6.1",
+            "Local backend and frontend E2E image versions must match.",
+        ),
+    ],
+)
+def test_e2e_runner_rejects_mismatched_pair_versions(
+    backend: str,
+    frontend: str,
+    message: str,
+) -> None:
+    prefix = "MARKWEAVE_E2E" if backend.startswith("ghcr.io") else "MARKWEAVE_E2E_LOCAL"
+    result = subprocess.run(
+        [str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            f"{prefix}_IMAGE": backend,
+            f"{prefix}_FRONTEND_IMAGE": frontend,
+        },
+    )
+
+    assert result.returncode == 2
+    assert message in result.stderr
 
 
 @pytest.mark.unit

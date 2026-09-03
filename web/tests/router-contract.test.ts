@@ -484,6 +484,15 @@ test("invalid production origins fail before the router listens", () => {
         publicHosts: ["converter.example"],
       }),
     ).toThrow("positive safe integer");
+  for (const upstreamTimeoutMs of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createRoutingFixture({
+        backend: "http://backend.example",
+        frontend: "http://frontend.example",
+        publicHosts: ["converter.example"],
+        upstreamTimeoutMs,
+      }),
+    ).toThrow("positive safe integer");
 });
 
 test("request transport ceiling rejects streamed bodies without an error body", async () => {
@@ -540,6 +549,123 @@ test("request transport ceiling rejects streamed bodies without an error body", 
     status: 413,
   });
   expect(completedBodies).toBe(1);
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
+});
+
+test("request ceiling wins when an upstream responds before the full body", async () => {
+  const upstream = createServer((incoming, response) => {
+    if (incoming.url === "/ok") {
+      response.writeHead(202, { "Content-Type": "text/plain" });
+      response.end("premature acceptance");
+      return;
+    }
+    incoming.once("data", () => {
+      response.writeHead(202, { "Content-Type": "text/plain" });
+      response.end("premature acceptance");
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    maxRequestBytes: 8,
+    publicHosts: ["converter.example"],
+  });
+  const routerOrigin = await listen(router);
+  const rejected = await new Promise<{ body: string; status: number }>(
+    (resolve, reject) => {
+      const destination = new URL(routerOrigin);
+      const outbound = request(
+        {
+          headers: {
+            host: "converter.example",
+            "transfer-encoding": "chunked",
+          },
+          host: destination.hostname,
+          method: "POST",
+          path: "/api/v1/conversions",
+          port: destination.port,
+        },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () =>
+            resolve({ body, status: response.statusCode! }),
+          );
+        },
+      );
+      outbound.on("error", reject);
+      outbound.write("1234");
+      setTimeout(() => outbound.end("56789"), 20);
+    },
+  );
+  expect(rejected).toEqual({ body: "", status: 413 });
+  await expect(call(routerOrigin, "GET", "/ok")).resolves.toEqual({
+    body: "premature acceptance",
+    cookies: [],
+    status: 202,
+  });
+  await Promise.all(
+    [router, upstream].map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
+});
+
+test("stalled upstreams time out and downstream disconnects abort upstream work", async () => {
+  let activeUpstreamRequests = 0;
+  let observeDisconnect: (() => void) | undefined;
+  const disconnected = new Promise<void>((resolve) => {
+    observeDisconnect = resolve;
+  });
+  const upstream = createServer((incoming) => {
+    activeUpstreamRequests += 1;
+    incoming.on("close", () => {
+      activeUpstreamRequests -= 1;
+      observeDisconnect?.();
+    });
+  });
+  const upstreamOrigin = await listen(upstream);
+  const router = createProductionRouter({
+    backend: upstreamOrigin,
+    frontend: upstreamOrigin,
+    publicHosts: ["converter.example"],
+    upstreamTimeoutMs: 30,
+  });
+  const routerOrigin = await listen(router);
+  await expect(call(routerOrigin, "GET", "/convert")).resolves.toEqual({
+    body: "",
+    cookies: [],
+    status: 502,
+  });
+  await disconnected;
+
+  const secondDisconnected = new Promise<void>((resolve) => {
+    observeDisconnect = resolve;
+  });
+  let observeSecondRequest: (() => void) | undefined;
+  const secondRequest = new Promise<void>((resolve) => {
+    observeSecondRequest = resolve;
+  });
+  upstream.once("request", () => observeSecondRequest?.());
+  const destination = new URL(routerOrigin);
+  const abandoned = request({
+    headers: { host: "converter.example" },
+    host: destination.hostname,
+    path: "/convert",
+    port: destination.port,
+  });
+  abandoned.on("error", () => undefined);
+  abandoned.end();
+  await secondRequest;
+  abandoned.destroy();
+  await secondDisconnected;
+  expect(activeUpstreamRequests).toBe(0);
   await Promise.all(
     [router, upstream].map(
       (server) => new Promise((resolve) => server.close(resolve)),

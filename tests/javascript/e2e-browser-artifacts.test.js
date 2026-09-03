@@ -7,8 +7,15 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  assertDownloadedResult,
   closeCompletedBrowserPhases,
+  configuration,
+  discardTrace,
+  login,
   retainFailureArtifacts,
+  sessionRequest,
+  startTrace,
+  waitForText,
 } from "../e2e/browser-helpers.mjs";
 import {
   collectResourceDiagnostics,
@@ -19,6 +26,135 @@ import {
 } from "../e2e/resource-diagnostics.mjs";
 
 const execFile = promisify(executeFile);
+
+test("browser configuration validates and normalizes the complete bounded contract", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "md-converter-browser-config-"));
+  const source = path.join(root, "source.md");
+  const template = path.join(root, "template.docx");
+  await Promise.all([writeFile(source, "# source"), writeFile(template, "template")]);
+  const environment = {
+    MARKWEAVE_E2E_BASE_URL: "https://converter.example/",
+    MARKWEAVE_E2E_PROFILE: "standalone",
+    MARKWEAVE_E2E_ARTIFACT_DIR: path.join(root, "artifacts"),
+    MARKWEAVE_E2E_SOURCE_FIXTURE: source,
+    MARKWEAVE_E2E_TEMPLATE_FIXTURE: template,
+    MARKWEAVE_E2E_ADMIN_USERNAME: "admin",
+    MARKWEAVE_E2E_ADMIN_PASSWORD: "password",
+    MARKWEAVE_E2E_PROVISIONED_USERNAME: "user",
+    MARKWEAVE_E2E_PROVISIONED_PASSWORD: "initial",
+    MARKWEAVE_E2E_PROVISIONED_RENEWED_PASSWORD: "renewed",
+    MARKWEAVE_E2E_TIMEOUT_SECONDS: "12",
+    MARKWEAVE_E2E_CHROMIUM: "/browser",
+  };
+  try {
+    const parsed = await configuration(environment);
+    assert.equal(parsed.baseUrl, "https://converter.example");
+    assert.equal(parsed.timeoutMilliseconds, 12_000);
+    assert.equal(parsed.chromiumExecutable, "/browser");
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "ftp://bad" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "https://user@converter.example" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "https://user:password@converter.example" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "https://converter.example/path" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "https://converter.example/?query" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_BASE_URL: "https://converter.example/#fragment" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_PROFILE: "bad" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_TIMEOUT_SECONDS: "0" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_SOURCE_FIXTURE: template }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_ARTIFACT_DIR: "/" }));
+    await assert.rejects(configuration({ ...environment, MARKWEAVE_E2E_ADMIN_USERNAME: "" }));
+    const archive = source.replace(/\.md$/, ".zip");
+    await writeFile(archive, "archive");
+    const defaults = await configuration({
+      ...environment,
+      MARKWEAVE_E2E_PROFILE: "distributed",
+      MARKWEAVE_E2E_SOURCE_FIXTURE: archive,
+      MARKWEAVE_E2E_TIMEOUT_SECONDS: undefined,
+      MARKWEAVE_E2E_CHROMIUM: undefined,
+    });
+    assert.equal(defaults.timeoutMilliseconds, 360_000);
+    assert.equal(defaults.chromiumExecutable, "/usr/bin/google-chrome-stable");
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test("browser helpers drive page actions, session requests, and trace disposal", async (t) => {
+  const originalDocument = globalThis.document;
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.document = originalDocument;
+    globalThis.fetch = originalFetch;
+  });
+  const actions = [];
+  const locator = {
+    fill: async (value) => actions.push(["fill", value]),
+    click: async () => actions.push(["click"]),
+    filter: ({ hasText }) => ({ waitFor: async ({ timeout }) => actions.push([hasText, timeout]) }),
+  };
+  const page = {
+    goto: async (url) => actions.push(["goto", url]),
+    locator: () => locator,
+    getByRole: () => locator,
+    waitForURL: async (url) => actions.push(["wait", url]),
+    url: () => "https://converter.example/convert",
+    evaluate: async (callback, argument) => {
+      globalThis.document = { cookie: "other=1; __Host-md_converter_csrf=token%20value" };
+      globalThis.fetch = async (_path, options) => ({
+        status: options.method === "POST" ? 201 : 200,
+        json: async () => ({ ok: true, csrf: options.headers["X-CSRF-Token"] }),
+      });
+      return callback(argument);
+    },
+  };
+  await login(page, "https://converter.example", "alice", "password");
+  await waitForText(page, "main", "Ready", 500);
+  assert.deepEqual(
+    await sessionRequest(page, "/api/v1/items", { method: "POST", mutate: true, json: true }),
+    { status: 201, body: { ok: true, csrf: "token value" } },
+  );
+  page.evaluate = async (callback, argument) => {
+    globalThis.document = { cookie: "unrelated=1" };
+    globalThis.fetch = async (_path, options) => ({ status: 200, json: async () => options });
+    return callback(argument);
+  };
+  assert.deepEqual(await sessionRequest(page, "/api/v1/session"), {
+    status: 200,
+    body: null,
+  });
+  const context = {
+    tracing: {
+      start: async (options) => actions.push(["start", options]),
+      stop: async () => actions.push(["stop"]),
+    },
+  };
+  const trace = await startTrace(context);
+  await discardTrace(trace);
+  await discardTrace(trace);
+  assert.equal(trace.started, false);
+  assert.ok(actions.some(([name]) => name === "click"));
+});
+
+test("download assertions accept exact PDF, DOCX, and combined archive contracts", () => {
+  const common = { "cache-control": "private, no-store", "x-content-type-options": "nosniff" };
+  assertDownloadedResult(
+    "pdf",
+    "résumé",
+    { ...common, "content-disposition": "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf" },
+    Buffer.from("%PDF-content"),
+  );
+  assertDownloadedResult(
+    "docx",
+    "source",
+    { ...common, "content-disposition": 'attachment; filename="source.docx"' },
+    Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  );
+  assertDownloadedResult(
+    "both",
+    "source",
+    { ...common, "content-disposition": 'attachment; filename="source.zip"' },
+    Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  );
+});
 
 test("controlled browser failure retains bounded redacted diagnostics", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "md-converter-e2e-artifacts-"));
@@ -59,6 +195,31 @@ test("controlled browser failure retains bounded redacted diagnostics", async ()
     assert.doesNotMatch(diagnostic, /private failure detail/);
     assert.equal(screenshotOptions.mask.length, 2);
     assert.equal(trace.started, false);
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test("failure retention skips absent and closed pages plus inactive traces", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "md-converter-e2e-skipped-"));
+  try {
+    await retainFailureArtifacts({
+      artifactRoot: root,
+      profile: "distributed",
+      step: "bounded failure",
+      pages: [
+        { name: "absent", page: null },
+        { name: "closed", page: { isClosed: () => true } },
+      ],
+      traces: [{ name: "inactive", trace: { started: false } }],
+      error: "unknown",
+    });
+    const [directoryName] = await readdir(root);
+    assert.deepEqual(await readdir(path.join(root, directoryName)), ["failure.json"]);
+    assert.match(
+      await readFile(path.join(root, directoryName, "failure.json"), "utf8"),
+      /"error_name": "UnknownError"/,
+    );
   } finally {
     await rm(root, { recursive: true });
   }

@@ -70,8 +70,8 @@ uv run ruff check .
 uv run ty check
 ```
 
-Verify the native browser module with the locked, dependency-free Node test package. Its command
-blocks below 90% line, branch, or function coverage:
+Verify the native final-image browser support module with the locked, dependency-free Node test
+package. Its command blocks below 90% line, branch, or function coverage:
 
 ```bash
 npm ci --ignore-scripts

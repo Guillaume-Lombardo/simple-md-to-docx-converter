@@ -257,6 +257,11 @@ def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
     assert overlay.count('user: "1001:0"') == 2
     assert overlay.count("pids_limit: 64") == 2
     assert "/_frontend/health/ready" in overlay
+    assert (
+        'PUBLIC_HOSTS: "${MARKWEAVE_ROUTER_PUBLIC_HOST:-localhost:'
+        '${MARKWEAVE_PORT:-8080},127.0.0.1:${MARKWEAVE_PORT:-8080}}"' in overlay
+    )
+    assert 'ROUTER_UPSTREAM_TIMEOUT_MS: "30000"' in overlay
 
 
 def test_nextjs_cni_free_overlay_shares_only_the_loopback_namespace() -> None:
@@ -268,6 +273,8 @@ def test_nextjs_cni_free_overlay_shares_only_the_loopback_namespace() -> None:
     assert "BACKEND_ORIGIN: http://127.0.0.1:8080" in overlay
     assert "FRONTEND_ORIGIN: http://127.0.0.1:3000" in overlay
     assert 'ROUTER_PORT: "3100"' in overlay
+    assert "fetch('http://127.0.0.1:3100/login'" in overlay
+    assert "process.env.PUBLIC_HOSTS.split(',')[0]" in overlay
 
 
 def test_podman_overlay_replaces_only_unsupported_clamav_tmpfs_options() -> None:
@@ -480,11 +487,43 @@ def test_quickstarts_reject_partial_or_mutable_cutover_pairs(
             "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": "ghcr.io/guillaume-lombardo/md-converter-web:0.6.0",
         },
     )
+    mismatched = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=common
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": (
+                "ghcr.io/guillaume-lombardo/md-converter:0.6.0@sha256:" + "a" * 64
+            ),
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": (
+                "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "b" * 64
+            ),
+        },
+    )
 
     assert partial.returncode != 0
     assert "must be supplied together" in partial.stderr
     assert mutable.returncode != 0
     assert "immutable digest" in mutable.stderr
+    assert mismatched.returncode != 0
+    assert "cutover image versions must match" in mismatched.stderr
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_compare_the_version_before_the_digest(
+    quickstart: Path,
+) -> None:
+    script = quickstart.read_text(encoding="utf-8")
+
+    assert 'backend_version="${cutover_backend_image%@*}"' in script
+    assert 'backend_version="${backend_version##*:}"' in script
+    assert 'frontend_version="${cutover_frontend_image%@*}"' in script
+    assert 'frontend_version="${frontend_version##*:}"' in script
+    assert script.index('backend_version="${cutover_backend_image%@*}"') < script.index(
+        'backend_version="${backend_version##*:}"'
+    )
 
 
 @pytest.mark.parametrize(

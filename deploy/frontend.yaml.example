@@ -111,6 +111,7 @@ spec:
             - {name: ROUTER_HOST, value: "0.0.0.0"}
             - {name: ROUTER_PORT, value: "8443"}
             - {name: ROUTER_REQUEST_MAX_BYTES, value: "${MARKWEAVE_REQUEST_MAX_BYTES}"}
+            - {name: ROUTER_UPSTREAM_TIMEOUT_MS, value: "${MARKWEAVE_ROUTER_UPSTREAM_TIMEOUT_MS}"}
             - {name: ROUTER_TLS_CERT_FILE, value: /run/tls/tls.crt}
             - {name: ROUTER_TLS_KEY_FILE, value: /run/tls/tls.key}
           ports:

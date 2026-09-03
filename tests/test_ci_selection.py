@@ -239,6 +239,7 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
     "path",
     [
         "package.json",
+        "scripts/run-web-tests.mjs",
         "tests/e2e/browser-next-conversion.test.mjs",
         "tests/e2e/browser-next-admin.test.mjs",
     ],

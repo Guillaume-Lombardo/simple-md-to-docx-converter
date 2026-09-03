@@ -8,6 +8,10 @@ const maxRequestBytes = Number.parseInt(
   process.env.ROUTER_REQUEST_MAX_BYTES || "",
   10,
 );
+const upstreamTimeoutMs = Number.parseInt(
+  process.env.ROUTER_UPSTREAM_TIMEOUT_MS || "",
+  10,
+);
 const publicHosts = (process.env.PUBLIC_HOSTS || "")
   .split(",")
   .map((value) => value.trim())
@@ -19,16 +23,19 @@ if (
   !backend ||
   !frontend ||
   !Number.isSafeInteger(maxRequestBytes) ||
-  maxRequestBytes < 1
+  maxRequestBytes < 1 ||
+  !Number.isSafeInteger(upstreamTimeoutMs) ||
+  upstreamTimeoutMs < 1
 )
   throw new Error(
-    "BACKEND_ORIGIN, FRONTEND_ORIGIN, PUBLIC_HOSTS, ROUTER_REQUEST_MAX_BYTES, and a valid ROUTER_PORT are required",
+    "BACKEND_ORIGIN, FRONTEND_ORIGIN, PUBLIC_HOSTS, ROUTER_REQUEST_MAX_BYTES, ROUTER_UPSTREAM_TIMEOUT_MS, and a valid ROUTER_PORT are required",
   );
 const server = createProductionRouter({
   backend,
   frontend,
   maxRequestBytes,
   publicHosts,
+  upstreamTimeoutMs,
   tls: loadTls(
     process.env.ROUTER_TLS_CERT_FILE,
     process.env.ROUTER_TLS_KEY_FILE,

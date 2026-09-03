@@ -18,3 +18,12 @@ services:
       FRONTEND_ORIGIN: http://127.0.0.1:3000
       ROUTER_HOST: 127.0.0.1
       ROUTER_PORT: "3100"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3100/login',
+          {headers: {Host: process.env.PUBLIC_HOSTS.split(',')[0]}})
+          .then(response => process.exit(response.status === 200 ? 0 : 1))

@@ -281,8 +281,36 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
     assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
     assert "mmdc --version" in workflow
     assert "google-chrome-stable --version" in workflow
+    assert 'apt-get install --yes --allow-downgrades "$chrome_deb"' in workflow
     assert "npm run test:web-browser" not in workflow
     assert "awk '{$1=$1; print}'" in workflow
+
+
+@pytest.mark.unit
+def test_native_browser_support_coverage_is_blocking() -> None:
+    package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    runner = Path("scripts/run-web-tests.mjs").read_text(encoding="utf-8")
+
+    assert package["scripts"]["test:web"] == "node scripts/run-web-tests.mjs"
+    for contract in (
+        "--experimental-test-coverage",
+        "--test-coverage-include=tests/e2e/browser-helpers.mjs",
+        "--test-coverage-lines=90",
+        "--test-coverage-branches=90",
+        "--test-coverage-functions=90",
+        "coverage does not meet threshold",
+    ):
+        assert contract in runner
+
+
+@pytest.mark.unit
+def test_validator_requires_pinned_chrome_downgrade_support() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(" --allow-downgrades", "")
+
+    assert "pinned Chrome installation must permit an explicit downgrade" in (
+        validate_workflow_text(weakened)
+    )
 
 
 @pytest.mark.unit
@@ -942,6 +970,24 @@ def test_container_release_rejects_unverified_skopeo_failure_tolerance() -> None
     )
     errors = validate_container_publish_pair_text(weakened)
     assert any("copied_digest" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_authenticates_skopeo_with_an_isolated_authfile() -> None:
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert validate_container_publish_pair_text(publisher) == []
+    assert publisher.index('readonly registry_auth_file="$staging_root/auth.json"') < (
+        publisher.index('skopeo login --authfile "$registry_auth_file"')
+    )
+    assert publisher.count('--authfile "$registry_auth_file"') == 2
+    weakened = publisher.replace('--authfile "$registry_auth_file"', "", 1)
+    assert any(
+        "skopeo login" in error
+        for error in validate_container_publish_pair_text(weakened)
+    )
 
 
 @pytest.mark.unit

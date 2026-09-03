@@ -208,6 +208,9 @@ The TLS router owns the response-wide minimum headers
 `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`. Do not add HSTS
 `includeSubDomains` or `preload` without a separate domain-ownership decision. T64 verifies exact,
 non-duplicated values across frontend, FastAPI, error, and download responses.
+It also applies the positive `ROUTER_UPSTREAM_TIMEOUT_MS` inactivity bound to backend and frontend
+relays and destroys upstream work when the downstream connection closes. The loopback Compose
+candidate uses 30 seconds; production manifests require the operator to supply the reviewed value.
 
 At release, deploy only a matched backend/frontend version pair pinned by both verified registry
 manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes

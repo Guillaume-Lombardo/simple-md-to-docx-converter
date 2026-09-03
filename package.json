@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:web": "node --test tests/javascript/*.test.js",
+    "test:web": "node scripts/run-web-tests.mjs",
     "test:e2e-browser": "node --test tests/e2e/browser*.test.mjs"
   },
   "devDependencies": {

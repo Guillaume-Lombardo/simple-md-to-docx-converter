@@ -48,5 +48,5 @@ cd web && npm run test:coverage
 ```
 
 Unit tests cover rendering, schema handling, request identity, races, polling, cancellation, and safe
-downloads. The dedicated real-browser final-image workflow runs through the test-only same-origin
-router for both SQLite and PostgreSQL profiles; this is now the production browser contract.
+downloads. The dedicated real-browser final-image workflow runs through the production same-origin
+router for both SQLite and PostgreSQL profiles.

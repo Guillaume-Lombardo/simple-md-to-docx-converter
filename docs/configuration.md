@@ -1,7 +1,8 @@
 # Configuration reference
 
 The `0.6.0` deployment has separate backend, frontend, and public-router processes. Frontend and
-router origins, host allowlists, TLS key/certificate paths, and router transport limits belong to
+router origins, host allowlists, TLS key/certificate paths, request limits, and the positive bounded
+upstream inactivity timeout (`ROUTER_UPSTREAM_TIMEOUT_MS`) belong to
 their process configuration; they do not grant the frontend database, object-store, scanner, or
 authentication credentials. Loopback quickstarts remain HTTP and require a matched immutable image
 pair when testing an unpublished candidate.

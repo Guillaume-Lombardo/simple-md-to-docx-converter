@@ -10,7 +10,7 @@ target. Internal ticket choreography is intentionally excluded.
 
 <a id="release-0-6-0"></a>
 
-## [0.6.0] - 2026-09-03
+## [0.6.0] - Unreleased
 
 ### Added
 
@@ -172,6 +172,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.0](#release-0-6-0)
 - [0.5.2](#release-0-5-2)
 - [0.5.1](#release-0-5-1)
 - [0.5.0](#release-0-5-0)

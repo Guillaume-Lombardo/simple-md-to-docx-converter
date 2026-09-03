@@ -50,10 +50,10 @@ validate_project_and_port() {
       fail "The backend cutover image must use the trusted package, final version, and immutable digest."
     [[ "$cutover_frontend_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter-web:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || \
       fail "The frontend cutover image must use the trusted package, final version, and immutable digest."
-    backend_version="${cutover_backend_image##*:}"
-    backend_version="${backend_version%@*}"
-    frontend_version="${cutover_frontend_image##*:}"
-    frontend_version="${frontend_version%@*}"
+    backend_version="${cutover_backend_image%@*}"
+    backend_version="${backend_version##*:}"
+    frontend_version="${cutover_frontend_image%@*}"
+    frontend_version="${frontend_version##*:}"
     [[ "$backend_version" == "$frontend_version" ]] || \
       fail "The backend and frontend cutover image versions must match."
   fi
