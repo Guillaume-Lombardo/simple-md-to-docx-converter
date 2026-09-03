@@ -82,20 +82,20 @@ def test_extension_alias_fixtures_are_deterministically_generated(
 
 
 @pytest.mark.unit
-def test_candidate_contract_is_exact_and_explicitly_blocked() -> None:
+def test_candidate_contract_records_approved_product_decisions() -> None:
     contract = _json("contract.json")
-    assert contract["decision_status"] == "blocked_pending_product_decision"
-    decisions = contract["blocking_decisions"]
+    assert contract["decision_status"] == "approved_for_t70_implementation"
+    decisions = contract["product_decisions"]
     assert set(decisions) == {"execution_isolation", "asset_serialization"}
-    assert all(decision["status"] == "unresolved" for decision in decisions.values())
-    assert decisions["execution_isolation"]["choices"] == [
-        "approve_disposable_supervised_per_attempt_isolation",
-        "defer_until_upstream_execution_controls",
-    ]
-    assert decisions["asset_serialization"]["choices"] == [
-        "defer_until_upstream_asset_aware_renderer_hook",
-        "approve_bounded_maintained_adapter_or_fork_after_security_and_maintenance_review",
-    ]
+    assert all(decision["status"] == "approved" for decision in decisions.values())
+    assert decisions["execution_isolation"]["selected"] == (
+        "disposable_supervised_per_attempt_process_or_container"
+    )
+    assert decisions["asset_serialization"]["selected"] == (
+        "bounded_maintained_internal_adapter_around_pinned_anydoc_internals"
+    )
+    assert len(decisions["execution_isolation"]["requirements"]) == 7
+    assert len(decisions["asset_serialization"]["requirements"]) == 6
     engine = contract["engine"]
     assert engine["version"] == "0.2.4"
     assert engine["source_commit"] == "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
@@ -128,8 +128,32 @@ def test_candidate_contract_is_exact_and_explicitly_blocked() -> None:
     assert execution["native_api_has_cancellation"] is False
     assert execution["native_api_has_deadline"] is False
     assert execution["native_api_has_memory_budget"] is False
+    assert execution["hard_control_decision"] == (
+        "disposable_supervised_per_attempt_isolation"
+    )
+    assert execution["supervisor_owns_heartbeat_and_publication"] is True
+    assert execution["terminate_and_verify_before_recovery"] is True
+    assert execution["kernel_enforced_per_attempt_memory_boundary"] is True
+    assert execution["child_has_network_or_persistence_credentials"] is False
     assert execution["production_budget"] is None
     assert execution["reverse_concurrency"] is None
+
+
+@pytest.mark.unit
+def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
+    root = SPIKE.parent.parent
+    product_spec = (root / "docs/product-specification.md").read_text()
+    t70 = (root / "tickets/T70-secure-asset-aware-anydoc.md").read_text()
+    for document in (product_spec, t70):
+        assert "disposable" in document
+        assert "kernel-enforced" in document
+        assert "termination" in document
+        assert "bounded internal" in document
+        assert "second parser" in document
+        assert "asset-aware hook" in document
+    assert "supervisor-owned heartbeat and publication fencing" in product_spec
+    assert "no child publication capability" in t70
+    assert "broad fork is not authorized" in t70
 
 
 @pytest.mark.unit

@@ -7,38 +7,31 @@ the requested local format families, exposes embedded bytes plus source-position
 for every tested non-PDF document model, and runs without document-engine executables, an ML
 runtime, or network access when OCR is explicitly `reject`.
 
-It is **not approved for production integration**. T70 is blocked on two independent PM decisions:
-execution isolation and asset serialization. Resolving either one alone does not unblock T70.
+The product manager approved both decisions required for T70 implementation.
 
-For execution isolation, the product manager must choose one of these contract changes:
+For execution, each attempt runs in one disposable, separately supervised process or container.
+The anydoc call remains in-process only inside that single-attempt isolation unit. Its external
+supervisor owns the lease heartbeat and attempt token, applies a kernel-enforced per-attempt memory
+boundary, and is the only component allowed to publish. The child receives and returns only bounded
+local data and has neither network access nor database/object-store credentials. On cancellation,
+deadline, lease loss, or a hard resource limit, the supervisor terminates the complete isolation
+unit, waits for it to exit, verifies it is absent, and only then permits recovery or another attempt.
+Successful completion is still fenced by a fresh lease and attempt-token check before publication.
 
-1. Permit one disposable, separately supervised reverse-conversion process or container per active
-   attempt. The anydoc call remains in-process inside that isolated worker, while its supervisor
-   applies a per-attempt cgroup, kills the whole worker on cancellation/deadline/lease loss, confirms
-   termination before recovery, and fences publication by attempt token. This relaxes the current
-   shared-worker interpretation of “in-process” and requires a standalone restart/availability
-   design.
-2. Keep the existing in-process shared-worker contract and defer T70 until upstream exposes
-   cooperative cancellation/deadline/resource-budget inputs.
-
-Separately, the public serializer cannot render an already parsed `Document` or resolve an
-embedded asset id to a relative image link. For asset serialization, the product manager must
-choose one of these paths:
-
-1. Defer T70 until upstream exposes a supported asset-aware renderer hook.
-2. Explicitly approve a narrowly bounded Markweave-maintained adapter or upstream fork. Approval
-   must define the exact upstream surface retained, prohibit a second independent document parser,
-   and require security review, serializer-parity tests, upstream-version compatibility tests,
-   dependency/SBOM/license review, named maintenance ownership, and a removal or rebase plan.
-
-Without that explicit second decision, duplicating or forking the serializer remains prohibited.
+For asset serialization, T70 may implement one narrowly bounded Markweave-maintained internal
+adapter around the exact pinned anydoc `Document` model and renderer behavior. It must consume the
+single parsed document and must not add a second parser. All private symbols or mirrored renderer
+logic stay behind one compatibility boundary that fails closed for unknown anydoc versions or model
+variants. Adoption requires security review, serializer-parity and asset-position tests,
+upstream-version compatibility tests, complete dependency/SBOM/license inventory, and explicit T70
+maintenance ownership. The adapter must be removed when upstream provides a supported asset-aware
+renderer hook; a broader fork remains prohibited.
 
 Silently relying on an asyncio timeout, `Future.cancel()`, a cancellation flag, lease-token
 publication fencing alone, or a process-wide memory ceiling is not an acceptable third option.
 
-`contract.json` records the validated candidate format, packaging, PDF, authorization, and safe
-error contract. It remains non-normative while either decision is blocked and while
-`docs/product-specification.md` is owned by T67.
+`contract.json` records the approved execution, serializer, format, packaging, PDF, authorization,
+and safe-error contract. `docs/product-specification.md` is the normative product source.
 
 ## Pinned artifact and provenance
 
@@ -135,9 +128,9 @@ The bounded 2,800,210-byte CSV stress input completed in 524.280 ms wall / 479.3
 peak RSS from the prior 44,900 KiB to 227,452 KiB. The upstream image-bomb fixture fails locally as
 `ResourceLimitError(max_entry_bytes)`. These results show that source bytes do not predict peak
 native memory and that 512 MiB is only a measured spike ceiling, not an approved production budget.
-No timeout, memory, upload, or result threshold can be approved until the isolation decision and a
-true proposed-limit corpus are reviewed. T71 therefore retains configurable limits, but it may not
-infer values from the forward workflow or treat this 512 MiB harness ceiling as a guarantee.
+No timeout, memory, upload, or result threshold is approved by this harness; T71 must review a true
+proposed-limit corpus and retain configurable limits. It may not infer values from the forward
+workflow or treat this 512 MiB harness ceiling as a guarantee.
 
 ## CPU-only and local-only evidence
 
@@ -171,13 +164,14 @@ For other formats, `Document` provides ordered blocks/inlines, each embedded ima
 an `asset_id`, and `Document.assets` carries its bytes and declared media type. The probe records
 the exact structural paths of those references. T70 can securely normalize the referenced bytes,
 but 0.2.4's public Markdown renderer turns embedded images into alt text and accepts no `Document`
-or asset resolver. A safe implementation therefore requires the upstream renderer hook described
-in the product decision; alt-text replacement is ambiguous and a Markweave renderer would duplicate
-upstream structure semantics.
+or asset resolver. The approved bounded internal adapter therefore traverses the single parsed
+`Document` and retains only the minimum pinned renderer behavior required to inject safe relative
+asset links. Alt-text replacement remains prohibited because it is ambiguous, and the adapter must
+not grow into a second parser or an unconstrained serializer fork.
 
-After both PM decisions are resolved, a result is plain UTF-8 Markdown only when the document model
-contains no embedded-asset or unavailable-image source position. A result with an exportable asset
-is a deterministic ZIP containing `document.md`, normalized PNGs in first-reference order under
+Under the approved decisions, a result is plain UTF-8 Markdown only when the document model contains
+no embedded-asset or unavailable-image source position. A result with an exportable asset is a
+deterministic ZIP containing `document.md`, normalized PNGs in first-reference order under
 `assets/`, then `manifest.json`. If every reported image is unavailable, the result is still a ZIP
 containing `document.md` then `manifest.json`; this preserves explicit traceability instead of
 making partial output indistinguishable from an asset-free document. Its mode is
@@ -188,7 +182,7 @@ Only referenced assets are emitted; same ids and byte-identical ids reuse the fi
 image sources are rejected and never downloaded; unavailable image sources degrade to escaped alt
 text. T70 owns the sole canonical manifest and archive serializer.
 
-## Why execution is blocked
+## Why disposable isolation is required
 
 The 0.2.4 Python signatures accept only bytes/path and optional format. PyO3 calls the Rust parser
 inside `py.detach`, releasing the GIL, but passes no cancellation token, deadline, allocator, or
@@ -204,8 +198,9 @@ process-wide cgroup bounds the whole API/worker container, not one call, and its
 the shared service without a deterministic job transition. Calling `os._exit()` from a watchdog
 has the same shared-service problem and still supplies no per-call memory boundary.
 
-Consequently, publication fencing is enforceable but the complete cancellation/timeout/memory/
-heartbeat/no-overlap set is not enforceable in the current shared process. T70 must remain blocked
-until the product manager resolves the execution-isolation decision. Independently, T70 remains
-blocked until the PM also selects the upstream renderer hook or explicitly approves the bounded
-maintained adapter/fork path and its required review obligations.
+Consequently, publication fencing alone is insufficient and the complete cancellation/timeout/
+memory/heartbeat/no-overlap set is not enforceable in a shared process. The approved design moves
+the native call into a disposable single-attempt isolation unit while the supervisor remains
+outside it. T70 owns the bounded runner and terminate-and-verify protocol; T71 integrates its
+attempt identity with durable leases, heartbeats, recovery, and publication fencing. Recovery must
+remain blocked whenever termination of the previous isolation identity cannot be proved.

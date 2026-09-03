@@ -22,9 +22,9 @@ normative product, security, packaging, and compatibility contract before implem
 * For the synchronous in-process native call, prove and choose enforceable cancellation, wall-time
   timeout, memory containment, lease-heartbeat, lost-lease fencing, and no-publication-after-loss
   semantics. A Python timeout or cancellation flag that leaves native work running is insufficient,
-  and lease expiry must not permit overlapping native execution. If the fixed in-process, no-engine-
-  subprocess contract cannot satisfy these properties, stop T70 and escalate the conflicting
-  product or isolation decision to the product manager instead of weakening it.
+  and lease expiry must not permit overlapping native execution. Because the shared-process
+  contract cannot satisfy these properties, record the approved disposable per-attempt isolation
+  design instead of weakening cancellation, containment, fencing, or no-overlap requirements.
 * Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
   count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
   the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
@@ -72,8 +72,8 @@ normative product, security, packaging, and compatibility contract before implem
 ## Quality requirements
 
 * Keep every document-controlled operation local and network-independent.
-* Prefer the in-process Python binding, bounded threads, and the smallest concurrency that meets the
-  measured service objective; any different integration surface requires explicit T69 evidence.
+* Keep the Python binding in-process only inside the approved disposable per-attempt isolation unit,
+  with bounded threads and the smallest concurrency that meets the measured service objective.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -96,29 +96,30 @@ normative product, security, packaging, and compatibility contract before implem
   document-engine child, GPU/ML runtime, or hosted fallback. Exact measurements, provenance, format
   matrix, candidate package schema, and authorization contract are retained under
   `spikes/anydoc/`.
-* 2026-09-03: T70 remains blocked pending a product-manager decision. The synchronous Python API
-  supplies no cancellation token, deadline, or memory budget; cancelling a running Future leaves
-  native work active, and a shared-process cgroup or forced exit cannot isolate one call. Lease
-  publication fencing is possible, but lease expiry cannot both prevent overlapping native work
-  and recover a crashed attempt. In addition, the public renderer strips embedded image references
-  and exposes no `Document` renderer or asset resolver, so T70 cannot preserve image positions
-  without duplicating the upstream serializer. T70 is blocked on two independent PM decisions.
-  For execution, the PM must either permit a disposable supervised per-attempt process/container
-  with hard termination and termination-before-recovery, or defer T70 until upstream provides
-  cooperative cancellation, deadline, and resource-budget controls. For asset serialization, the
-  PM must independently either wait for an upstream asset-aware renderer hook or explicitly approve
-  a narrowly bounded maintained adapter/fork with security, serializer-parity, compatibility,
-  supply-chain, maintenance-ownership, and removal/rebase review. Resolving only one decision does
-  not unblock T70. All-unavailable images are defined as a deterministic ZIP with Markdown plus the
+* 2026-09-03: Identified two independent feasibility blockers. The synchronous Python API supplies
+  no cancellation token, deadline, or memory budget; cancelling a running Future leaves native work
+  active, and a shared-process ceiling or forced exit cannot isolate one call. Lease publication
+  fencing is possible, but lease expiry cannot both prevent overlapping native work and recover a
+  crashed attempt. Separately, the public renderer strips embedded image references and exposes no
+  `Document` renderer or asset resolver, so preserving image positions requires a maintained
+  compatibility boundary. All-unavailable images are defined as a deterministic ZIP with Markdown plus the
   closed content-free manifest, zero emitted assets/bytes, and an unavailable-inline occurrence
   count; plain Markdown is reserved for documents with no embedded or unavailable image position.
   Refreshed host and exact-UBI reports measure whole-process CPU for every complete concurrency
   batch and sample peak live process threads during the batch, including the bounded Rayon thread.
   The bounded corpus now contains a probed fixture for every one of the 21 admitted extensions;
   generated alias fixtures record Apache-2.0 provenance and copied upstream fixtures remain MIT.
-  The normative product-specification edit is intentionally pending because T67 currently owns that
-  file; Linear synchronization is also pending because this task explicitly prohibits external
-  mutations.
+* 2026-09-03: The product manager resolved both blockers. Each attempt is authorized to run in one
+  disposable supervised process or container with a kernel-enforced memory boundary. The external
+  supervisor owns heartbeat and publication, hard-terminates the whole unit on cancellation,
+  deadline, lease loss, or resource failure, and proves termination before recovery or overlap.
+  T70 is also authorized to maintain one narrowly bounded internal adapter around the pinned anydoc
+  model and renderer behavior, with no second parser or broad fork. Security, serializer parity,
+  asset position, version compatibility, SBOM/license inventory, named T70 ownership, and removal
+  when upstream exposes an official asset-aware hook are mandatory. The normative product
+  specification, spike contract, and T70 implementation contract now record these decisions. T70
+  is no longer blocked on a product decision, but still depends on T69 landing. Linear synchronization
+  remains pending because this task explicitly prohibits external mutations.
 
 ## Synchronization
 

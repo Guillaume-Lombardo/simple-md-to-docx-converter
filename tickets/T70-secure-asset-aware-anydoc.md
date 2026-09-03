@@ -21,9 +21,27 @@ for reverse conversion.
   verification.
 * Parse only the format matrix approved by T69 from bounded in-memory or isolated-workspace inputs
   after the existing malware-scanning boundary.
-* Use the approved in-process native binding with bounded threads and memory. The production path
-  must be CPU-only and must not load GPU/accelerator or ML runtimes or invoke a browser, Pandoc,
-  LibreOffice, or another document-engine subprocess.
+* Implement one disposable process/container isolation unit per conversion attempt. The anydoc
+  binding runs in-process only inside that unit, with bounded threads and a kernel-enforced
+  per-attempt memory ceiling. The external supervisor owns heartbeat and the attempt token, passes
+  only bounded local input/output, gives the child no network or persistence credentials, and is
+  the only publisher. Cancellation, deadline, lease loss, or resource failure hard-terminates the
+  whole unit; the supervisor waits, reaps descendants, and proves the recorded isolation identity
+  absent before recovery or another attempt can start. Normal completion still revalidates the
+  active lease/token before publication.
+* Keep the production path CPU-only. It must not load GPU/accelerator or ML runtimes or invoke a
+  browser, Pandoc, LibreOffice, or another document engine. The approved per-attempt anydoc child is
+  an isolation boundary, not a second document engine.
+* Implement one narrowly bounded maintained internal compatibility adapter around the pinned
+  anydoc `Document` model and renderer behavior. Consume the single parsed document; never reparse
+  source bytes or add a second parser. Inventory every private symbol and minimally mirrored
+  upstream renderer behavior in one fail-closed module boundary, including applicable license
+  notices, and reject unknown anydoc versions or document-model variants.
+* Require security review, asset-free serializer parity against the pinned upstream renderer,
+  source-position asset-link goldens, and compatibility tests for every anydoc update. Include the
+  adapter and exact upstream surface in dependency, SBOM, license, and vulnerability evidence. T70
+  owns maintenance and removes the adapter once upstream supplies a supported asset-aware hook; a
+  broad fork is not authorized.
 * Convert structured content into deterministic UTF-8 GitHub-Flavored Markdown while preserving
   supported headings, lists, tables, links, notes, code, equations, and document order.
 * Emit a deterministic ZIP containing one root Markdown file plus referenced files under `assets/`;
@@ -48,7 +66,9 @@ for reverse conversion.
 * Add unit, corpus/golden, fuzz-or-mutation, security, and real-library integration coverage for
   success and relevant malformed, encrypted, decompression, nesting, signature/type mismatch,
   non-image, polyglot, animated/multi-frame, hostile-SVG, timeout, cancellation, and
-  resource-limit failures.
+  resource-limit failures. Prove hard termination and descendant reaping for every terminal signal,
+  no child publication capability, no late result acceptance, termination-before-recovery, no
+  overlapping attempt, bounded IPC, and fail-closed behavior when termination proof is unavailable.
 
 ## Dependencies
 
@@ -59,9 +79,11 @@ for reverse conversion.
 
 ## Implementation boundary
 
-* Own the anydoc adapter, asset-aware serializer/package builder, the single deterministic content-
-  free manifest generator, reverse-conversion domain errors, format corpus, dependency lock, and
-  directly affected backend-image contents.
+* Own the supervised disposable-attempt runner and termination protocol, anydoc adapter, bounded
+  internal renderer compatibility boundary, asset-aware serializer/package builder, the single
+  deterministic content-free manifest generator, reverse-conversion domain errors, format corpus,
+  dependency lock, and directly affected backend-image contents. Expose the runner and verified
+  termination result as ports for T71; do not add persistent lease or job orchestration here.
 * Do not add HTTP routes, persistent jobs, database migrations, or browser UI.
 * Do not implement OCR or any network-backed fallback.
 
@@ -77,9 +99,15 @@ for reverse conversion.
 
 ## Progress
 
-* 2026-09-03: Created from the approved feasibility decomposition; blocked by T69.
-* 2026-09-03: Scope now requires an exclusively CPU-only in-process path and the measured
-  low-compute envelope from T69.
+* 2026-09-03: Created from the approved feasibility decomposition; depends on T69.
+* 2026-09-03: Scope now requires an exclusively CPU-only native path and the measured low-compute
+  envelope from T69.
+* 2026-09-03: T69's product decisions authorize a disposable supervised process/container per
+  attempt and a bounded maintained internal renderer adapter. T70 owns the isolation runner,
+  terminate-and-verify protocol, compatibility boundary, required security/parity/version and
+  SBOM/license evidence, and removal when an official upstream asset-aware hook becomes available.
+  The native call remains in-process only within its disposable child; shared-worker native
+  execution and a broad serializer fork are prohibited.
 
 ## Synchronization
 

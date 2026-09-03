@@ -35,10 +35,12 @@ Actions workflows, and an autonomous Codex development workflow.
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
 | DOCX to PDF | LibreOffice headless |
-| Documents to Markdown | Local Firecrawl anydoc with no hosted fallback; T69 pins and validates the exact release and integration surface before production use |
-| Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links and a ZIP containing the Markdown and referenced local assets when assets are present |
+| Documents to Markdown | Local `firecrawl-anydoc==0.2.4` with no hosted fallback; the exact x86-64 ABI3 wheel, source commit, format matrix, and limitations are pinned by T69 |
+| Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
-| Reverse-conversion compute | CPU-only and low-compute: use anydoc as an in-process native library with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document-engine subprocess |
+| Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
+| Reverse-conversion execution isolation | Run each anydoc native call in-process only inside one disposable, separately supervised process or container dedicated to one attempt; use a kernel-enforced per-attempt memory boundary, hard whole-unit termination, termination proof before recovery, and supervisor-owned heartbeat and publication fencing |
+| Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
 | Python distribution | `markweave` on PyPI with public import `markweave`; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
@@ -262,9 +264,9 @@ and end-to-end integration snapshots.
 
 Reverse conversion is an authenticated asynchronous workflow separate from forward conversion. It
 uses a pinned local Firecrawl anydoc engine and never opts into Firecrawl Parse, hosted OCR, or any
-other network fallback. T69 must approve the exact supported format and content-detection matrix
-before production implementation. Scanned or image-only inputs that require OCR fail locally with a
-stable safe error.
+other network fallback. T69 approves the exact supported format and content-detection matrix recorded
+by its evidence contract. Scanned or image-only inputs that require OCR fail locally with a stable
+safe error.
 
 T71 exposes that approved matrix and its client-relevant configured constraints through the
 authenticated, versioned `GET /api/v1/reversions/capabilities` FastAPI contract. Its response has a
@@ -282,15 +284,23 @@ memory, retained asset bytes, and concurrency scaling on representative and conf
 Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
 no unmeasured numeric threshold is fixed in this specification.
 
-Because the approved binding is a synchronous in-process native call, T69 must also prove and
-specify enforceable cancellation, wall-time timeout, memory containment, lease-heartbeat, and lost-
-lease fencing semantics. A Python task timeout or cancellation flag is not sufficient if native
-execution can continue, retain memory, or publish after the lease is lost. The approved design must
-prevent publication after cancellation, timeout, or lease loss and must prevent an expired lease
-from causing overlapping native executions. If those properties cannot be enforced within the
-fixed in-process, no-engine-subprocess contract, T69 blocks T70 and escalates the conflicting
-product or isolation decision to the product manager; implementation must not silently weaken the
-contract.
+The synchronous native call runs in-process only inside one disposable process or container
+isolation unit dedicated to one attempt. A supervisor outside that unit owns the durable attempt
+token and lease heartbeat, gives the child only bounded local input, and receives only a bounded
+local result. The child has no network access, persistence credentials, or publication capability.
+The isolation unit has a kernel-enforced per-attempt memory boundary; userspace RSS sampling is
+observability, not containment. T70 owns the runner abstraction and its terminate-and-verify
+protocol. T71 binds the durable attempt and isolation identity to worker orchestration.
+
+On cancellation, wall-time deadline, lease loss, or a hard resource-limit event, the supervisor
+hard-terminates the whole isolation unit, waits for it to exit, and verifies that the recorded
+process/container identity and its descendants are absent. It must stop accepting child output at
+the first terminal signal. The lease cannot become recoverable and another attempt cannot start
+until that termination proof is durable; if proof is unavailable, recovery remains blocked and
+readiness/operations expose a content-free fault instead of risking overlap. After normal child
+exit, the supervisor revalidates the active lease and attempt token before it alone publishes the
+result. Python task timeouts, `Future.cancel()`, flags, sampled memory, and late-publication fencing
+without termination remain insufficient.
 
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
@@ -305,6 +315,19 @@ file, its referenced local assets, and content-free traceability metadata. T69 d
 metadata schema; T70 owns its deterministic canonical generation together with the package builder.
 T69 decides the asset-free download contract and the honest PDF contract because anydoc's current
 PDF path produces Markdown directly without exposing the shared document model or embedded assets.
+
+Because anydoc 0.2.4 exposes no supported renderer hook for an already parsed `Document`, T70 may
+maintain one bounded internal compatibility adapter around the exact pinned document-model and
+renderer behavior. The adapter consumes the single parsed `Document`; it never reparses source
+bytes or introduces a second document parser. One module boundary inventories every private symbol
+and any minimally mirrored upstream renderer logic, fails closed for an unknown anydoc version or
+model variant, retains applicable upstream license notices, and is included in dependency, SBOM,
+license, and vulnerability review. Asset-free structures must pass serializer-parity tests against
+the pinned upstream renderer, while asset fixtures prove source-position link injection, safe
+normalization, ordering, unavailable-asset behavior, and the closed manifest contract. Every anydoc
+upgrade reruns compatibility and parity coverage before adoption. T70 owns maintenance and must
+remove this adapter when upstream provides a supported asset-aware renderer hook; an independent
+parser or broader serializer fork is not approved.
 
 Reverse jobs preserve the existing scanner ordering, owner isolation, persistent queue states,
 idempotency, leases, recovery, cancellation, expiration, capacity, retention, content-free logging,
@@ -650,7 +673,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T66 | Expose authoritative role-specific idle-session policy bounds, defaults, and minute granularity for the administration frontend | T59, T65 |
 | T68 | Restore host routing for the CNI-free rootless Podman trusted-upstream and insecure Next.js quickstarts | T64 |
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
-| T70 | Implement the secure local anydoc adapter and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
+| T70 | Implement the disposable supervised anydoc runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
 | T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
@@ -661,9 +684,10 @@ T68 follows T64 as the focused correction for host forwarding into the shared ro
 network namespace. It does not change the router's public-host policy or the host's loopback-only
 publication boundary.
 
-For experimental reverse conversion, T69 is a blocking evidence and contract spike. T70 implements
-the local engine and package builder only after the asset-position strategy and PDF limitations are
-approved. T71 then adds the persistent backend workflow. T67 must finish the JavaScript workspace
+For experimental reverse conversion, T69 fixes the approved evidence and contract. T70 implements
+the disposable supervised engine runner, bounded internal renderer adapter, and package builder;
+T71 then binds that runner to persistent leases, recovery, publication, and the backend workflow.
+T67 must finish the JavaScript workspace
 migration and make its resulting package-manager, bootstrap, workspace, command, and lockfile
 contract normative before T72 starts. Until that T67 update is merged, the existing npm contract in
 section 3.3.1 remains authoritative; T69-T73 do not preselect pnpm, Corepack, or another replacement.
@@ -712,13 +736,15 @@ the ticket before touching any path owned by another active ticket.
   product scope. Adding either capability requires separately approved future scope.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
-  contract, and enforceable synchronous-native-call cancellation/timeout/memory/lease decision.
-  Until T69 is approved, no implementation may claim that every anydoc-supported extension or PDF-
-  embedded image is supported. If the fixed in-process contract cannot enforce those execution
-  controls, T69 requires a product-manager decision and T70 remains blocked.
+  contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
+  contract uses a disposable supervised isolation unit per attempt and the bounded internal adapter;
+  no implementation may broaden the validated format/PDF claims or fall back to shared-process
+  execution, a second parser, or an unconstrained serializer fork.
 - T70 owns deterministic canonical generation of the content-free traceability manifest, including
-  stable field and archive-entry ordering, together with the Markdown/assets package builder. T71
-  may persist and return the resulting package but must not introduce a second manifest serializer.
+  stable field and archive-entry ordering, together with the isolated runner, bounded internal
+  renderer compatibility boundary, and Markdown/assets package builder. T71 may persist and return
+  the resulting package but must not introduce a second runner, parser, renderer adapter, or manifest
+  serializer.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.
