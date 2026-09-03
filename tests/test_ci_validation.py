@@ -373,10 +373,8 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
         "matrix.domain == 'compose' || matrix.domain == 'container' || "
         "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
     )
-    assert (
-        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
-        in workflow
-    )
+    assert "matrix.domain == 'document-engines'" in workflow
+    assert "Set up pinned Node for rootless E2E" in workflow
     assert "failure() && startsWith(matrix.domain, 'e2e-')" in workflow
     assert (
         "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
@@ -390,7 +388,7 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "- name: Set up pinned Node for frontend smoke" in workflow
     assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
     assert "node-version: 24.19.0" in workflow
-    assert "cache-dependency-path: web/package-lock.json" in workflow
+    assert "pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}" in workflow
     weakened = workflow.replace(
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"

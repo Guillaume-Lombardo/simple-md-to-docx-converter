@@ -157,7 +157,8 @@ conditional update, and select the result in the same transaction; PostgreSQL ke
 `UPDATE ... RETURNING` and `SKIP LOCKED`. Tests install a SQLite 3.34 grammar guard so any emitted
 `UPDATE ... RETURNING` fails even on newer developer SQLite libraries.
 
-Build-only npm tooling and unused curl, OpenSSL, and Apache HTTPD command-line executables are
+Build-only Corepack/pnpm tooling and their store, plus unused curl, OpenSSL, and Apache HTTPD
+command-line executables, are
 absent from the runtime filesystem. Required shared libraries and the complete RPM inventory remain
 recorded. This reduces unused attack surface without altering the vulnerability threshold.
 

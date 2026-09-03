@@ -445,7 +445,7 @@ printf '%s\n%s,%s,user,true,true\n' \
 chmod 0444 "$provisioning_file"
 install -m 0444 "$repository/scripts/container/fake-clamav.py" "$clamav_script"
 cp -a "$repository/tests/e2e" "$browser_runtime_directory"
-PUPPETEER_SKIP_DOWNLOAD=true npm ci --ignore-scripts
+COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
 cp -a "$repository/node_modules" "$node_runtime_directory"
 chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
@@ -465,7 +465,7 @@ else
   podman pull --quiet "$base_image"
   test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
   bash scripts/container/build.sh "$image"
-  podman build --format oci --tag "$frontend_image" --file web/Containerfile web
+  podman build --format oci --tag "$frontend_image" --file web/Containerfile .
 fi
 
 podman network create "$network_name" >/dev/null

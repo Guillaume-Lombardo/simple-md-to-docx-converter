@@ -13,18 +13,19 @@ authoritative `401` clears stale browser state without replaying a mutation. Fix
 destinations prevent open redirects. The shell displays the effective role-specific inactivity
 duration returned by session inspection, including administrator changes.
 
-Use the reviewed Node.js 24.19.0 and npm 11.17.0 toolchain:
+Use the reviewed Node.js 24.19.0, Corepack 0.36.0, and pnpm 11.25.0 workspace
+toolchain from the repository root:
 
 ```bash
-npm ci --ignore-scripts
-npm run bindings:check
-npm run check
-npm run build
-npm run test:production
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @markweave/web run bindings:check
+pnpm --filter @markweave/web run check
+pnpm --filter @markweave/web run build
+pnpm --filter @markweave/web run test:production
 ```
 
 Regenerate both the production bindings and test fixture from the canonical contract with
-`npm run bindings:generate`. Never edit files under either `src/api/generated/` or
+`pnpm --filter @markweave/web run bindings:generate`. Never edit files under either `src/api/generated/` or
 `tests/fixtures/generated/` manually.
 
 The custom production server listens for pages on port 3000 and internal probes on port 3001. The

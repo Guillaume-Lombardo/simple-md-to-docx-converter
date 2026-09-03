@@ -44,7 +44,7 @@ Run the TypeScript component/controller tests and blocking 90% statement, line, 
 coverage gates with:
 
 ```bash
-cd web && npm run test:coverage
+pnpm --filter @markweave/web run test:coverage
 ```
 
 Unit tests cover rendering, schema handling, request identity, races, polling, cancellation, and safe

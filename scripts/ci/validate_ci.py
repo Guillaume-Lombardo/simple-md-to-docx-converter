@@ -150,10 +150,10 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "221d3b72b83664c1c28246f04f03fea71c06ab8123c83f28bb91adde9497fbfe"
+    "6040a82045b49f57ca16a6e2bf1fd0b109b4e173107b1f117c0260fde4808891"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
-    "5b1966cda4facf8b7faf10fa643270dc525eb20355f5e545da14406f984f9588"
+    "b180243d6fefbbbe9b4966e50cb5f42dea066cef48d419d0fb034e618758b3fe"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
@@ -233,6 +233,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "github.event_name == 'merge_group' }}"
             ),
             (
+                "light",
+                "Save the exact pnpm store cache from trusted main",
+            ): (
+                "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+                "&& github.repository == "
+                "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
+            ),
+            (
                 "heavy",
                 "Restore verified LibreOffice DEB archive",
             ): "${{ matrix.domain == 'document-engines' }}",
@@ -283,9 +291,24 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ matrix.domain == 'document-engines' }}",
             (
                 "heavy",
-                "Set up the pinned Node runtime for browser and Mermaid tests",
+                "Set up the pinned Node runtime for Mermaid tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Set up pinned Node for rootless E2E",
+            ): "${{ startsWith(matrix.domain, 'e2e-') }}",
+            (
+                "heavy",
+                "Bootstrap verified Corepack and pnpm for workspace domains",
             ): (
-                "${{ matrix.domain == 'document-engines' || "
+                "${{ matrix.domain == 'frontend' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Restore the exact pnpm store cache for workspace domains",
+            ): (
+                "${{ matrix.domain == 'frontend' || "
                 "startsWith(matrix.domain, 'e2e-') }}"
             ),
             (
@@ -309,7 +332,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="ffaa8700470db3c61d89cb939fcef6bb2f599b66c39888a65e975e1bb90c3266",
+        canonical_digest="fe2d3a1c76e49836d70ee1d52d1ac78be90c097492af597f318721c9c393c980",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -785,16 +808,18 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "uv run python -m scripts.release.public_alignment "
             '--event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"'
         ),
-        ("light", "Verify the isolated frontend"): (
-            "cd web\n"
+        ("light", "Verify the workspace frontend"): (
             'test "$(node --version)" = "v24.19.0"\n'
-            'test "$(npm --version)" = "11.17.0"\n'
-            "npm ci --ignore-scripts\n"
-            "npm run check\n"
-            "npm run build\n"
-            "npm run test:production\n"
+            'test "$(corepack --version)" = "0.36.0"\n'
+            'test "$(pnpm --version)" = "11.25.0"\n'
+            "pnpm --filter @markweave/web run check\n"
+            "pnpm --filter @markweave/web run build\n"
+            "pnpm --filter @markweave/web run test:production\n"
         ),
-        ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
+        ("heavy", "Install the locked E2E browser driver"): (
+            "pnpm install --frozen-lockfile --ignore-scripts "
+            "--filter md-converter-web-tests"
+        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -829,9 +854,11 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("heavy", "Set up pinned Node for frontend smoke"): (
             "${{ matrix.domain == 'frontend' }}"
         ),
-        ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
-            "${{ matrix.domain == 'document-engines' || "
-            "startsWith(matrix.domain, 'e2e-') }}"
+        ("heavy", "Set up the pinned Node runtime for Mermaid tests"): (
+            "${{ matrix.domain == 'document-engines' }}"
+        ),
+        ("heavy", "Set up pinned Node for rootless E2E"): (
+            "${{ startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
@@ -866,8 +893,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         != {
             "node-version": "24.19.0",
             "check-latest": False,
-            "cache": "npm",
-            "cache-dependency-path": "web/package-lock.json",
         }
     ):
         errors.append("frontend smoke must use the reviewed pinned Node setup")
@@ -904,7 +929,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         step.get("if")
         for job_name in jobs
         for step in _job_steps(workflow, job_name)
-        if isinstance(step.get("uses"), str)
+        if str(step.get("name", "")).startswith("Save verified LibreOffice")
+        and isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/cache/save@")
     ]
     if libreoffice_cache_writes != [

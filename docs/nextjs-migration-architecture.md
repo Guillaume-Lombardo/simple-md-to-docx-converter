@@ -26,8 +26,8 @@ The decision was reviewed against upstream support information on 2026-09-01:
 - Exact [Next.js 16.3.4](https://www.npmjs.com/package/next/v/16.3.4),
   [TypeScript 6.0.3](https://www.npmjs.com/package/typescript/v/6.0.3), and
   [Tailwind CSS 4.3.3](https://www.npmjs.com/package/tailwindcss/v/4.3.3) package metadata and
-  registry integrity values come from the public npm registry and are committed through
-  `web/package-lock.json`; tags such as `latest`, ranges, and unpinned Git URLs are not production
+  registry integrity values come from the public npm registry and are committed through the root
+  `pnpm-lock.yaml`; tags such as `latest`, ranges, and unpinned Git URLs are not production
   inputs.
 
 The initial implementation baseline is:
@@ -35,13 +35,14 @@ The initial implementation baseline is:
 | Component | Exact baseline | Policy |
 | --- | --- | --- |
 | Node.js | `24.19.0` | Supplied by both approved UBI images; the build fails if `node --version` differs. Remain on Node.js 24 LTS until a reviewed upgrade. |
-| npm | `11.17.0` | The only package manager. Record `packageManager: npm@11.17.0`; the build fails if `npm --version` differs. |
+| Corepack | `0.36.0` | Installed only from its exact registry tarball after SHA-512 verification; implicit package-manager download is disabled after bootstrap. |
+| pnpm | `11.25.0` | Selected by the root integrity-bound `packageManager` field; the build fails if the exact version is unavailable. |
 | Next.js | `16.3.4` | Exact Active-LTS patch, never `canary`, `rc`, or a range. |
 | TypeScript | `6.0.3` | Exact stable compatibility release; reassess TypeScript 7 only after its API/tooling boundary is compatible. |
 | Tailwind CSS | `4.3.3` | Exact stable patch; compile styles at build time with no runtime CDN. |
 
-Every direct dependency, including React and React DOM, uses an exact version. `npm ci
---ignore-scripts` consumes `web/package-lock.json` in CI and container builds; lockfile drift,
+Every direct dependency, including React and React DOM, uses an exact version. `pnpm install
+--frozen-lockfile --ignore-scripts` consumes the single root `pnpm-lock.yaml` in CI and container builds; lockfile drift,
 install-script requirements, or an unexpected resolved graph fails the build. Production contains
 the `.next` production build, public assets, the reviewed custom server, and the exact pruned
 production dependency graph. It does not use Next.js `output: "standalone"`, because the

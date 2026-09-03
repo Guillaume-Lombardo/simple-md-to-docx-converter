@@ -252,8 +252,11 @@ uv sync --all-groups
 uv run ruff format --check .
 uv run ruff check .
 uv run ty check
-npm ci --ignore-scripts
-npm run test:web
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run test:web
 uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
 uv run pytest
 ```

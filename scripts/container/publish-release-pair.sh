@@ -6,7 +6,7 @@ if [[ $# -lt 3 || $# -gt 4 ]]; then
   exit 2
 fi
 readonly artifacts="$1" version="$2" source_sha="$3"
-readonly frontend_lock="${4:-web/package-lock.json}"
+readonly frontend_lock="${4:-pnpm-lock.yaml}"
 [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ && "$source_sha" != 0000000000000000000000000000000000000000 ]]
 [[ -n "${GHCR_TOKEN:-}" && -n "${GITHUB_ACTOR:-}" && -n "${RUNNER_TEMP:-}" ]]

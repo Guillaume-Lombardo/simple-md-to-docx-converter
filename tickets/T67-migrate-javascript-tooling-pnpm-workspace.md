@@ -2,7 +2,7 @@
 ticket: T67
 linear_id: G1L-533
 linear_url: https://linear.app/g1lom/issue/G1L-533/t67-migrate-javascript-tooling-to-a-pnpm-workspace
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -46,6 +46,7 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
 ## Progress
 
 * 2026-09-03: Created in Backlog as an independent post-T64 migration. Inventory found separate root and `web/` npm installations plus an intentionally isolated npm-locked Mermaid production toolchain; implementation must preserve that boundary unless scope is explicitly expanded.
+* 2026-09-03: Implemented the root pnpm workspace candidate with integrity-bound Corepack 0.36.0 and pnpm 11.25.0 bootstrap, a single frozen lock retaining the exact npm-baseline package/version set, explicit `spikes/toolchain` exclusion, root-context frontend construction with a portable production deployment graph, trust-scoped caches, rootless E2E setup, and historical npm release-lock recovery. Local browser-module, frontend binding, structure, coverage, build, production-runtime, rootless image, dependency-audit, isolated Mermaid npm-lock, CI-policy, and targeted Python tests pass. The final local frontend image is 1,033,797,849 bytes versus 1,061,525,142 for npm; an earlier 2,705,797,855-byte cross-platform deployment experiment was rejected and removed. The host provides Node 24.18.1 rather than the required 24.19.0, and PostgreSQL/S3 services are not configured, so exact-host-runtime, complete canonical, hosted cold/warm benchmark, ready-PR/merge-queue, and rollback-rehearsal evidence remains pending. Normative specification reconciliation is deferred until the active T69 owner releases `docs/product-specification.md`.
 
 ## Synchronization
 

@@ -74,8 +74,12 @@ Verify the native final-image browser support module with the locked, dependency
 package. Its command blocks below 90% line, branch, or function coverage:
 
 ```bash
-npm ci --ignore-scripts
-npm run test:web
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run workspace:check
+pnpm run test:web
 ```
 
 Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or

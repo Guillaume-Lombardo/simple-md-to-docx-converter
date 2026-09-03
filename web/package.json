@@ -2,17 +2,13 @@
   "name": "@markweave/web",
   "version": "0.0.0-private",
   "private": true,
-  "packageManager": "npm@11.17.0",
   "engines": {
     "node": "24.19.0",
-    "npm": "11.17.0"
-  },
-  "overrides": {
-    "js-yaml": "4.3.1"
+    "pnpm": "11.25.0"
   },
   "scripts": {
     "build": "next build",
-    "check": "npm run format:check && npm run lint && npm run typegen && npm run typecheck && npm run bindings:check && npm run test:structure && npm run test:coverage",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typegen && pnpm run typecheck && pnpm run bindings:check && pnpm run test:structure && pnpm run test:coverage",
     "bindings:check": "node scripts/generate-openapi.mjs --check",
     "bindings:generate": "node scripts/generate-openapi.mjs",
     "format": "prettier --write .",
@@ -33,14 +29,19 @@
     "valibot": "1.4.2"
   },
   "devDependencies": {
+    "@emnapi/core": "1.11.1",
+    "@emnapi/runtime": "1.11.1",
+    "@emnapi/wasi-threads": "1.2.2",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
     "@hey-api/openapi-ts": "0.97.3",
+    "@napi-rs/wasm-runtime": "1.1.4",
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
+    "@tybys/wasm-util": "0.10.2",
     "@vitest/coverage-v8": "4.1.11",
     "eslint": "9.39.2",
     "eslint-config-next": "16.3.4",

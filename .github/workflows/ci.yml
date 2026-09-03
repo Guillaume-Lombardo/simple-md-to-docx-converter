@@ -93,10 +93,18 @@ jobs:
         with:
           node-version: 24.19.0
           check-latest: false
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
+      - name: Bootstrap verified Corepack and pnpm
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Restore the exact pnpm store cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -134,17 +142,17 @@ jobs:
           fi
       - name: Run native browser-module tests with coverage gates
         run: |
-          npm ci --ignore-scripts
-          npm run test:web
-      - name: Verify the isolated frontend
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run workspace:check
+          pnpm run test:web
+      - name: Verify the workspace frontend
         run: |
-          cd web
           test "$(node --version)" = "v24.19.0"
-          test "$(npm --version)" = "11.17.0"
-          npm ci --ignore-scripts
-          npm run check
-          npm run build
-          npm run test:production
+          test "$(corepack --version)" = "0.36.0"
+          test "$(pnpm --version)" = "11.25.0"
+          pnpm --filter @markweave/web run check
+          pnpm --filter @markweave/web run build
+          pnpm --filter @markweave/web run test:production
       - name: Run unit tests with branch coverage
         run: >-
           uv run pytest -m unit
@@ -166,6 +174,12 @@ jobs:
         run: |
           uv lock --check
           uv run python -m scripts.ci.validate_ci
+      - name: Save the exact pnpm store cache from trusted main
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
 
   domain-plan:
     name: CI / affected domains
@@ -251,8 +265,6 @@ jobs:
         with:
           node-version: 24.19.0
           check-latest: false
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -352,12 +364,32 @@ jobs:
             fc-list --format '%{file}\n' | wc -l)" -eq 32
           test "$(/opt/libreoffice26.2/program/soffice --version | awk '{$1=$1; print}')" \
             = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
-      - name: Set up the pinned Node runtime for browser and Mermaid tests
-        if: ${{ matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-') }}
+      - name: Set up the pinned Node runtime for Mermaid tests
+        if: ${{ matrix.domain == 'document-engines' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.1
           check-latest: false
+      - name: Set up pinned Node for rootless E2E
+        if: ${{ startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Bootstrap verified Corepack and pnpm for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Restore the exact pnpm store cache for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install verified Mermaid and Chrome for document-engine tests
         if: ${{ matrix.domain == 'document-engines' }}
         env:
@@ -386,7 +418,7 @@ jobs:
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
       - name: Install the locked E2E browser driver
         if: ${{ startsWith(matrix.domain, 'e2e-') }}
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
       - name: Run selected domain suite without a shell
         env:
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
