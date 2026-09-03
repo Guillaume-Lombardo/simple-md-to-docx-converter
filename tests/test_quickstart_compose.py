@@ -913,6 +913,21 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert '[[ "$security_options" != *unconfined* ]]' in runner
     assert "grep -Eq '^Seccomp:[[:space:]]+2$' /proc/1/status" in runner
     assert 'exec "$application_id" test -f /work/simple-rerun-marker' in runner
+    assert 'resolved="$(compose ps -q markweave)"' in runner
+    assert '[[ -z "$resolved" || "$resolved" == *$\'\\n\'* ]]' in runner
+    assert "Expected exactly one running Markweave container." in runner
+    assert runner.count('application_id="$(resolve_application_id)"') == 3
+    repeated_up = runner.split(
+        "# A repeated up against the healthy stack retains the active disposable workspace.",
+        1,
+    )[1].split("# A stopped restart", 1)[0]
+    assert repeated_up.index("quickstart up") < repeated_up.index("wait_for_services")
+    assert repeated_up.index("wait_for_services") < repeated_up.index(
+        'application_id="$(resolve_application_id)"'
+    )
+    assert repeated_up.index('application_id="$(resolve_application_id)"') < (
+        repeated_up.index('"${runtime_command[@]}" exec "$application_id" test -f')
+    )
     assert "stopped restart" in runner
     assert "expected-up-failure.log" in runner
     assert 'kill -0 "$port_blocker_pid"' in runner

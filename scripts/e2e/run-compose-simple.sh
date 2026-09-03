@@ -102,6 +102,16 @@ file_sha256() {
   sha256sum -- "$1" | awk '{print $1}'
 }
 
+resolve_application_id() {
+  local resolved
+  resolved="$(compose ps -q markweave)"
+  if [[ -z "$resolved" || "$resolved" == *$'\n'* ]]; then
+    echo "Expected exactly one running Markweave container." >&2
+    return 1
+  fi
+  printf '%s\n' "$resolved"
+}
+
 cleanup() {
   local exit_code=$?
   if [[ -n "$port_blocker_pid" ]] && kill -0 "$port_blocker_pid" 2>/dev/null; then
@@ -297,13 +307,14 @@ compose config --quiet
 wait_for_services
 verify_runtime_boundary
 verify_simple_work_volume
-application_id="$(compose ps -q markweave)"
+application_id="$(resolve_application_id)"
 "${runtime_command[@]}" exec "$application_id" sh -c 'printf preserved > /work/simple-rerun-marker'
 
 # A repeated up against the healthy stack retains the active disposable workspace.
 quickstart up
 verify_helper_service_stopped
 wait_for_services
+application_id="$(resolve_application_id)"
 "${runtime_command[@]}" exec "$application_id" test -f /work/simple-rerun-marker
 write_checkpoint
 verify_podman_mermaid
@@ -317,7 +328,7 @@ write_fault_env
 wait_for_services
 verify_runtime_boundary
 verify_simple_work_volume
-application_id="$(compose ps -q markweave)"
+application_id="$(resolve_application_id)"
 if "${runtime_command[@]}" exec "$application_id" test -e /work/simple-rerun-marker; then
   echo "The simple quickstart retained disposable work across a stopped restart." >&2
   exit 1
