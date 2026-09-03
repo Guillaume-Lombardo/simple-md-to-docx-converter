@@ -182,12 +182,16 @@ wait_for_services() {
 
 verify_runtime_boundary() {
   local application_id
+  local router_id
   local scanner_id
   local security_options
   application_id="$(compose ps -q markweave)"
+  router_id="$(compose ps -q router)"
   scanner_id="$(compose ps -q clamav)"
 
-  test "$("${runtime_command[@]}" port "$application_id" 8080/tcp)" = "127.0.0.1:$port"
+  [[ -n "$application_id" && -n "$router_id" && -n "$scanner_id" ]]
+  test -z "$("${runtime_command[@]}" port "$application_id")"
+  test "$("${runtime_command[@]}" port "$router_id" 8080/tcp)" = "127.0.0.1:$port"
   test -z "$("${runtime_command[@]}" port "$scanner_id")"
   test "$("${runtime_command[@]}" inspect --format '{{.Config.User}}' "$application_id")" = "1001:0"
   test "$("${runtime_command[@]}" inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$application_id")" = true

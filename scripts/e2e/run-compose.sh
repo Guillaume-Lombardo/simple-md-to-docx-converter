@@ -152,11 +152,15 @@ wait_for_services() {
 
 verify_runtime_boundary() {
   local application_id
+  local router_id
   local scanner_id
   application_id="$(compose ps -q markweave)"
+  router_id="$(compose ps -q router)"
   scanner_id="$(compose ps -q clamav)"
 
-  test "$(docker port "$application_id" 8080/tcp)" = "127.0.0.1:$port"
+  [[ -n "$application_id" && -n "$router_id" && -n "$scanner_id" ]]
+  test -z "$(docker port "$application_id")"
+  test "$(docker port "$router_id" 8080/tcp)" = "127.0.0.1:$port"
   test -z "$(docker port "$scanner_id")"
   docker exec "$application_id" python -c \
     'import socket; s=socket.create_connection(("clamav", 3310), 5); s.sendall(b"zPING\0"); assert s.recv(64)==b"PONG\0"; s.close()'

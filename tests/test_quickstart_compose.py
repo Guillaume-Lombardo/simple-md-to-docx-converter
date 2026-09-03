@@ -789,7 +789,9 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
-    assert 'docker port "$application_id" 8080/tcp' in runner
+    assert 'router_id="$(compose ps -q router)"' in runner
+    assert 'test -z "$(docker port "$application_id")"' in runner
+    assert 'docker port "$router_id" 8080/tcp' in runner
     assert 'docker port "$scanner_id"' in runner
     assert 'socket.create_connection(("clamav", 3310), 5)' in runner
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
@@ -852,7 +854,9 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert 'env "DOCKER_HOST=unix://$runtime_socket"' in runner
     assert 'if [[ "$succeeded" != true ]]; then' in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
-    assert 'port "$application_id" 8080/tcp' in runner
+    assert 'router_id="$(compose ps -q router)"' in runner
+    assert 'test -z "$("${runtime_command[@]}" port "$application_id")"' in runner
+    assert 'port "$router_id" 8080/tcp' in runner
     assert 'port "$scanner_id"' in runner
     assert 'socket.create_connection(("clamav", 3310), 5)' in runner
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
