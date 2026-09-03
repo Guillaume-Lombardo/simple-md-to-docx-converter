@@ -2,15 +2,15 @@
   "cancellation": {
     "call_completed_only_normally": true,
     "child_processes_observed": [],
-    "cpu_ms": 402.234,
+    "cpu_ms": 426.169,
     "future_cancel_returned": false,
     "input_bytes": 2800210,
     "native_work_running_after_cancel_attempt": true,
-    "peak_rss_kib": 225184,
+    "peak_rss_kib": 225076,
     "peak_threads": 3,
-    "rss_growth_kib": 177856,
+    "rss_growth_kib": 177732,
     "threads_after": 2,
-    "wall_ms": 380.269
+    "wall_ms": 389.306
   },
   "cases": [
     {
@@ -28,34 +28,34 @@
       "input_bytes": 20480,
       "measurements": [
         {
-          "cpu_ms": 0.287,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.262,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.285
+          "wall_ms": 0.261
         },
         {
           "cpu_ms": 0.167,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.166
         },
         {
+          "cpu_ms": 0.151,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.15
+        },
+        {
           "cpu_ms": 0.144,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.143
+          "wall_ms": 0.144
         },
         {
-          "cpu_ms": 0.132,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.146,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.131
-        },
-        {
-          "cpu_ms": 0.131,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.13
+          "wall_ms": 0.146
         }
       ],
       "name": "word-binary",
@@ -78,34 +78,34 @@
       "input_bytes": 10159,
       "measurements": [
         {
-          "cpu_ms": 0.845,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.884,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.844
+          "wall_ms": 0.883
         },
         {
-          "cpu_ms": 0.692,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.651,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.691
+          "wall_ms": 0.65
         },
         {
-          "cpu_ms": 0.709,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.67,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.715
+          "wall_ms": 0.669
         },
         {
-          "cpu_ms": 0.669,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.659,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.668
+          "wall_ms": 0.658
         },
         {
-          "cpu_ms": 0.637,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.619,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.636
+          "wall_ms": 0.618
         }
       ],
       "name": "word-openxml",
@@ -117,42 +117,174 @@
       "asset_count": 0,
       "asset_positions": [],
       "child_processes_observed": [],
+      "detected_format": "docx",
+      "fixture": "docm/generated.docm",
+      "input_bytes": 945,
+      "measurements": [
+        {
+          "cpu_ms": 0.053,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.052
+        },
+        {
+          "cpu_ms": 0.049,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.048
+        },
+        {
+          "cpu_ms": 0.046,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.046
+        },
+        {
+          "cpu_ms": 0.036,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.036
+        },
+        {
+          "cpu_ms": 0.031,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.031
+        }
+      ],
+      "name": "word-macro",
+      "output_units": 1,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
       "detected_format": "ppt",
       "fixture": "ppt/handmade-multimaster.ppt",
       "input_bytes": 9728,
       "measurements": [
         {
-          "cpu_ms": 0.029,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.025,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.028
-        },
-        {
-          "cpu_ms": 0.017,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.017
+          "wall_ms": 0.025
         },
         {
           "cpu_ms": 0.014,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.013
         },
         {
-          "cpu_ms": 0.014,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.014
+          "wall_ms": 0.012
         },
         {
-          "cpu_ms": 0.021,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.02
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.011
         }
       ],
       "name": "powerpoint-binary",
+      "output_units": 2,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "ppt",
+      "fixture": "pps/handmade-multimaster.pps",
+      "input_bytes": 9728,
+      "measurements": [
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.011
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        }
+      ],
+      "name": "powerpoint-show-binary",
+      "output_units": 2,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "ppt",
+      "fixture": "pot/handmade-multimaster.pot",
+      "input_bytes": 9728,
+      "measurements": [
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.011
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.012
+        },
+        {
+          "cpu_ms": 0.012,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.011
+        }
+      ],
+      "name": "powerpoint-template-binary",
       "output_units": 2,
       "retained_asset_bytes": 0,
       "threads_before_and_after_max": 1
@@ -166,38 +298,170 @@
       "input_bytes": 15734,
       "measurements": [
         {
-          "cpu_ms": 0.701,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.661,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.7
+          "wall_ms": 0.66
         },
         {
-          "cpu_ms": 0.681,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.631,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.68
+          "wall_ms": 0.63
         },
         {
-          "cpu_ms": 0.636,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.605,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.636
+          "wall_ms": 0.604
         },
         {
-          "cpu_ms": 0.643,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.655,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.642
+          "wall_ms": 0.654
         },
         {
-          "cpu_ms": 0.639,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.659,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.638
+          "wall_ms": 0.658
         }
       ],
       "name": "powerpoint-openxml",
       "output_units": 8,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "pptx",
+      "fixture": "pptm/generated.pptm",
+      "input_bytes": 1731,
+      "measurements": [
+        {
+          "cpu_ms": 0.073,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.072
+        },
+        {
+          "cpu_ms": 0.064,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.063
+        },
+        {
+          "cpu_ms": 0.06,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.059
+        },
+        {
+          "cpu_ms": 0.056,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.056
+        },
+        {
+          "cpu_ms": 0.059,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.058
+        }
+      ],
+      "name": "powerpoint-macro",
+      "output_units": 0,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "pptx",
+      "fixture": "ppsx/generated.ppsx",
+      "input_bytes": 1715,
+      "measurements": [
+        {
+          "cpu_ms": 0.056,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.055
+        },
+        {
+          "cpu_ms": 0.048,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.048
+        },
+        {
+          "cpu_ms": 0.046,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.046
+        },
+        {
+          "cpu_ms": 0.044,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.044
+        },
+        {
+          "cpu_ms": 0.044,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.043
+        }
+      ],
+      "name": "powerpoint-show",
+      "output_units": 0,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "pptx",
+      "fixture": "ppsm/generated.ppsm",
+      "input_bytes": 1735,
+      "measurements": [
+        {
+          "cpu_ms": 0.054,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.054
+        },
+        {
+          "cpu_ms": 0.055,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.055
+        },
+        {
+          "cpu_ms": 0.05,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.05
+        },
+        {
+          "cpu_ms": 0.048,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.047
+        },
+        {
+          "cpu_ms": 0.048,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.047
+        }
+      ],
+      "name": "powerpoint-show-macro",
+      "output_units": 0,
       "retained_asset_bytes": 0,
       "threads_before_and_after_max": 1
     },
@@ -210,34 +474,34 @@
       "input_bytes": 7168,
       "measurements": [
         {
-          "cpu_ms": 0.112,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.136,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.111
+          "wall_ms": 0.135
         },
         {
-          "cpu_ms": 0.086,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.119,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.086
+          "wall_ms": 0.119
         },
         {
           "cpu_ms": 0.078,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.078
-        },
-        {
-          "cpu_ms": 0.074,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.074
-        },
-        {
-          "cpu_ms": 0.077,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.077
+        },
+        {
+          "cpu_ms": 0.072,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.072
+        },
+        {
+          "cpu_ms": 0.071,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.071
         }
       ],
       "name": "excel-binary",
@@ -254,34 +518,34 @@
       "input_bytes": 7106,
       "measurements": [
         {
-          "cpu_ms": 0.444,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.423,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.443
+          "wall_ms": 0.422
         },
         {
-          "cpu_ms": 0.412,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.377,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.411
+          "wall_ms": 0.376
         },
         {
-          "cpu_ms": 0.386,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.402,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.385
+          "wall_ms": 0.401
         },
         {
-          "cpu_ms": 0.388,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.378,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.388
+          "wall_ms": 0.377
         },
         {
-          "cpu_ms": 0.389,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.384,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.388
+          "wall_ms": 0.383
         }
       ],
       "name": "excel-openxml",
@@ -294,38 +558,82 @@
       "asset_positions": [],
       "child_processes_observed": [],
       "detected_format": "xlsx",
+      "fixture": "xlsm/generated.xlsm",
+      "input_bytes": 1620,
+      "measurements": [
+        {
+          "cpu_ms": 0.065,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.064
+        },
+        {
+          "cpu_ms": 0.055,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.055
+        },
+        {
+          "cpu_ms": 0.05,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.049
+        },
+        {
+          "cpu_ms": 0.046,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.046
+        },
+        {
+          "cpu_ms": 0.052,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.051
+        }
+      ],
+      "name": "excel-macro",
+      "output_units": 1,
+      "retained_asset_bytes": 0,
+      "threads_before_and_after_max": 1
+    },
+    {
+      "asset_count": 0,
+      "asset_positions": [],
+      "child_processes_observed": [],
+      "detected_format": "xlsx",
       "fixture": "xlsb/handmade-sheet.xlsb",
       "input_bytes": 1602,
       "measurements": [
         {
-          "cpu_ms": 0.096,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.138,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.095
+          "wall_ms": 0.138
         },
         {
-          "cpu_ms": 0.078,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.079,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.078
+          "wall_ms": 0.079
         },
         {
-          "cpu_ms": 0.071,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.071
-        },
-        {
-          "cpu_ms": 0.076,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.075
-        },
-        {
-          "cpu_ms": 0.069,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.068,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.068
+        },
+        {
+          "cpu_ms": 0.064,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.063
+        },
+        {
+          "cpu_ms": 0.067,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.066
         }
       ],
       "name": "excel-binary-workbook",
@@ -348,34 +656,34 @@
       "input_bytes": 25489,
       "measurements": [
         {
-          "cpu_ms": 0.535,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.564,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.535
+          "wall_ms": 0.563
         },
         {
-          "cpu_ms": 0.526,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.544,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.525
+          "wall_ms": 0.543
         },
         {
-          "cpu_ms": 0.52,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.501,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.519
+          "wall_ms": 0.5
         },
         {
-          "cpu_ms": 0.511,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.495,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.51
+          "wall_ms": 0.494
         },
         {
-          "cpu_ms": 0.511,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.49,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.511
+          "wall_ms": 0.489
         }
       ],
       "name": "opendocument-text",
@@ -392,34 +700,34 @@
       "input_bytes": 16142,
       "measurements": [
         {
-          "cpu_ms": 0.353,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.345,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.352
+          "wall_ms": 0.344
         },
         {
-          "cpu_ms": 0.351,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.378,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.35
+          "wall_ms": 0.375
         },
         {
-          "cpu_ms": 0.374,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.356,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.373
+          "wall_ms": 0.355
         },
         {
-          "cpu_ms": 0.34,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.358,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.339
+          "wall_ms": 0.357
         },
         {
-          "cpu_ms": 0.338,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.33,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.338
+          "wall_ms": 0.329
         }
       ],
       "name": "opendocument-sheet",
@@ -442,34 +750,34 @@
       "input_bytes": 19065,
       "measurements": [
         {
-          "cpu_ms": 0.792,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.84,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.791
+          "wall_ms": 0.839
         },
         {
-          "cpu_ms": 0.81,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.796,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.81
+          "wall_ms": 0.795
         },
         {
-          "cpu_ms": 0.827,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.772,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.826
+          "wall_ms": 0.771
         },
         {
-          "cpu_ms": 0.811,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.759,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.81
+          "wall_ms": 0.759
         },
         {
-          "cpu_ms": 0.812,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.782,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.811
+          "wall_ms": 0.781
         }
       ],
       "name": "opendocument-presentation",
@@ -492,34 +800,34 @@
       "input_bytes": 20136,
       "measurements": [
         {
-          "cpu_ms": 0.672,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.648,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.671
+          "wall_ms": 0.647
         },
         {
-          "cpu_ms": 0.653,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.62,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.653
+          "wall_ms": 0.619
+        },
+        {
+          "cpu_ms": 0.628,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.627
+        },
+        {
+          "cpu_ms": 0.601,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.601
         },
         {
           "cpu_ms": 0.629,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.629
-        },
-        {
-          "cpu_ms": 0.632,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.631
-        },
-        {
-          "cpu_ms": 0.636,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.635
         }
       ],
       "name": "rtf",
@@ -542,34 +850,34 @@
       "input_bytes": 6167,
       "measurements": [
         {
-          "cpu_ms": 0.288,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.283,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.287
+          "wall_ms": 0.282
         },
         {
-          "cpu_ms": 0.249,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.25,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.248
+          "wall_ms": 0.249
         },
         {
-          "cpu_ms": 0.239,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.222,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.238
+          "wall_ms": 0.222
         },
         {
-          "cpu_ms": 0.265,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.257,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.264
+          "wall_ms": 0.256
         },
         {
-          "cpu_ms": 0.241,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.245,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.24
+          "wall_ms": 0.245
         }
       ],
       "name": "epub",
@@ -586,34 +894,34 @@
       "input_bytes": 210,
       "measurements": [
         {
-          "cpu_ms": 0.102,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.097,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.101
+          "wall_ms": 0.097
         },
         {
-          "cpu_ms": 0.088,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.086,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.088
-        },
-        {
-          "cpu_ms": 0.085,
-          "peak_rss_kib": 46200,
-          "rss_growth_kib": 0,
-          "wall_ms": 0.085
+          "wall_ms": 0.086
         },
         {
           "cpu_ms": 0.083,
-          "peak_rss_kib": 46200,
+          "peak_rss_kib": 45664,
+          "rss_growth_kib": 0,
+          "wall_ms": 0.083
+        },
+        {
+          "cpu_ms": 0.082,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
           "wall_ms": 0.082
         },
         {
-          "cpu_ms": 0.083,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 0.086,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 0.082
+          "wall_ms": 0.086
         }
       ],
       "name": "csv",
@@ -630,34 +938,34 @@
       "input_bytes": 90060,
       "measurements": [
         {
-          "cpu_ms": 6.776,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 6.935,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 7.018
+          "wall_ms": 7.053
         },
         {
-          "cpu_ms": 5.3,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 5.635,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 5.639
+          "wall_ms": 5.961
         },
         {
-          "cpu_ms": 5.315,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 5.719,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 5.75
+          "wall_ms": 6.064
         },
         {
-          "cpu_ms": 5.566,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 5.554,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 5.929
+          "wall_ms": 5.906
         },
         {
-          "cpu_ms": 5.562,
-          "peak_rss_kib": 46200,
+          "cpu_ms": 6.611,
+          "peak_rss_kib": 45664,
           "rss_growth_kib": 0,
-          "wall_ms": 5.924
+          "wall_ms": 6.869
         }
       ],
       "name": "text-pdf",
@@ -668,69 +976,69 @@
   ],
   "concurrency": [
     {
-      "batch_process_cpu_ms": 151.823,
-      "batch_wall_ms": 149.515,
+      "batch_process_cpu_ms": 155.38,
+      "batch_wall_ms": 153.323,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 106.722,
-          "wall_ms": 148.318
+          "thread_cpu_ms": 106.005,
+          "wall_ms": 151.562
         }
       ],
       "peak_live_process_threads": 3,
-      "process_peak_rss_kib": 46200,
+      "process_peak_rss_kib": 45664,
       "process_threads_after": 2,
       "workers": 1
     },
     {
-      "batch_process_cpu_ms": 332.033,
-      "batch_wall_ms": 173.943,
+      "batch_process_cpu_ms": 338.261,
+      "batch_wall_ms": 171.528,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 116.817,
-          "wall_ms": 172.724
+          "thread_cpu_ms": 117.097,
+          "wall_ms": 169.609
         },
         {
-          "thread_cpu_ms": 113.463,
-          "wall_ms": 170.468
+          "thread_cpu_ms": 118.931,
+          "wall_ms": 170.465
         }
       ],
       "peak_live_process_threads": 4,
-      "process_peak_rss_kib": 46200,
+      "process_peak_rss_kib": 45664,
       "process_threads_after": 2,
       "workers": 2
     },
     {
-      "batch_process_cpu_ms": 680.683,
-      "batch_wall_ms": 236.954,
+      "batch_process_cpu_ms": 744.689,
+      "batch_wall_ms": 259.436,
       "child_processes_observed": [],
       "conversions_per_worker": 25,
       "fixture": "pdf/text.pdf",
       "measurements": [
         {
-          "thread_cpu_ms": 119.708,
-          "wall_ms": 222.626
+          "thread_cpu_ms": 135.731,
+          "wall_ms": 252.768
         },
         {
-          "thread_cpu_ms": 120.714,
-          "wall_ms": 234.002
+          "thread_cpu_ms": 133.065,
+          "wall_ms": 258.528
         },
         {
-          "thread_cpu_ms": 122.988,
-          "wall_ms": 234.453
+          "thread_cpu_ms": 137.845,
+          "wall_ms": 253.73
         },
         {
-          "thread_cpu_ms": 119.988,
-          "wall_ms": 235.63
+          "thread_cpu_ms": 131.462,
+          "wall_ms": 250.128
         }
       ],
       "peak_live_process_threads": 6,
-      "process_peak_rss_kib": 46200,
+      "process_peak_rss_kib": 45664,
       "process_threads_after": 2,
       "workers": 4
     }
@@ -740,9 +1048,9 @@
     "extension": "_anydoc.abi3.so",
     "extension_sha256": "5bd7463287a54040d08e26130737a660f733028a2480b880069b6eedb2311041",
     "implementation": "CPython",
-    "import_cpu_ms": 11.539,
-    "import_wall_ms": 11.536,
-    "initial_peak_rss_kib": 46200,
+    "import_cpu_ms": 12.649,
+    "import_wall_ms": 12.651,
+    "initial_peak_rss_kib": 45664,
     "initial_threads": 1,
     "machine": "x86_64",
     "platform": "Linux-6.12.107+deb13-amd64-x86_64-with-glibc2.41",
@@ -802,7 +1110,7 @@
       "pandoc": null,
       "soffice": null
     },
-    "executable": "/home/g1lom/dev/github/simple-md-to-docx-converter-t69/spikes/anydoc/.venv/bin/python3",
+    "executable": "<home>/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/bin/python3.14",
     "loaded_module_names": []
   },
   "schema_version": 1

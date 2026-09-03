@@ -87,7 +87,7 @@ normative product, security, packaging, and compatibility contract before implem
 * 2026-09-03: Product scope was tightened to an exclusively CPU-only, low-compute workflow. T69 now
   owns measured CPU, wall-time, peak-memory, thread, asset, and concurrency evidence before any
   production budget is selected.
-* 2026-09-03: Added a hash-locked MIT corpus and reproducible host/exact-UBI probe for
+* 2026-09-03: Added a hash-locked redistributable corpus and reproducible host/exact-UBI probe for
   `firecrawl-anydoc 0.2.4`. The CPython ABI3 wheel loads on Python 3.14, all eight requested format
   families convert locally, embedded assets and their source-position ids are exposed for tested
   non-PDF models, PDF remains text-only, and scanned PDF, malformed, encrypted, unsupported, and
@@ -114,6 +114,8 @@ normative product, security, packaging, and compatibility contract before implem
   count; plain Markdown is reserved for documents with no embedded or unavailable image position.
   Refreshed host and exact-UBI reports measure whole-process CPU for every complete concurrency
   batch and sample peak live process threads during the batch, including the bounded Rayon thread.
+  The bounded corpus now contains a probed fixture for every one of the 21 admitted extensions;
+  generated alias fixtures record Apache-2.0 provenance and copied upstream fixtures remain MIT.
   The normative product-specification edit is intentionally pending because T67 currently owns that
   file; Linear synchronization is also pending because this task explicitly prohibits external
   mutations.

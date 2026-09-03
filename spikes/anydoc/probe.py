@@ -26,21 +26,34 @@ _IMPORT_CPU_MS = round((time.process_time_ns() - _IMPORT_CPU_START) / 1_000_000,
 
 PINNED_VERSION = "0.2.4"
 MINIMUM_ITERATIONS = 2
-CASES: tuple[tuple[str, str, anydoc.Format | None, str], ...] = (
-    ("word-binary", "doc/text.doc", None, "document"),
-    ("word-openxml", "docx/text.docx", None, "document"),
-    ("powerpoint-binary", "ppt/handmade-multimaster.ppt", None, "document"),
-    ("powerpoint-openxml", "pptx/pres.pptx", None, "document"),
-    ("excel-binary", "xls/sheet.xls", None, "document"),
-    ("excel-openxml", "xlsx/sheet.xlsx", None, "document"),
-    ("excel-binary-workbook", "xlsb/handmade-sheet.xlsb", None, "document"),
-    ("opendocument-text", "odt/text.odt", None, "document"),
-    ("opendocument-sheet", "ods/sheet.ods", None, "document"),
-    ("opendocument-presentation", "odp/pres.odp", None, "document"),
-    ("rtf", "rtf/text.rtf", None, "document"),
-    ("epub", "epub/book.epub", None, "document"),
-    ("csv", "csv/sheet.csv", "csv", "document"),
-    ("text-pdf", "pdf/text.pdf", None, "markdown"),
+CASES: tuple[tuple[str, str, anydoc.Format | None, str, str | None], ...] = (
+    ("word-binary", "doc/text.doc", None, "document", "doc"),
+    ("word-openxml", "docx/text.docx", None, "document", "docx"),
+    ("word-macro", "docm/generated.docm", None, "document", "docx"),
+    ("powerpoint-binary", "ppt/handmade-multimaster.ppt", None, "document", "ppt"),
+    ("powerpoint-show-binary", "pps/handmade-multimaster.pps", None, "document", "ppt"),
+    (
+        "powerpoint-template-binary",
+        "pot/handmade-multimaster.pot",
+        None,
+        "document",
+        "ppt",
+    ),
+    ("powerpoint-openxml", "pptx/pres.pptx", None, "document", "pptx"),
+    ("powerpoint-macro", "pptm/generated.pptm", None, "document", "pptx"),
+    ("powerpoint-show", "ppsx/generated.ppsx", None, "document", "pptx"),
+    ("powerpoint-show-macro", "ppsm/generated.ppsm", None, "document", "pptx"),
+    ("excel-binary", "xls/sheet.xls", None, "document", "xlsx"),
+    ("excel-openxml", "xlsx/sheet.xlsx", None, "document", "xlsx"),
+    ("excel-macro", "xlsm/generated.xlsm", None, "document", "xlsx"),
+    ("excel-binary-workbook", "xlsb/handmade-sheet.xlsb", None, "document", "xlsx"),
+    ("opendocument-text", "odt/text.odt", None, "document", "odt"),
+    ("opendocument-sheet", "ods/sheet.ods", None, "document", "ods"),
+    ("opendocument-presentation", "odp/pres.odp", None, "document", "odp"),
+    ("rtf", "rtf/text.rtf", None, "document", "rtf"),
+    ("epub", "epub/book.epub", None, "document", "epub"),
+    ("csv", "csv/sheet.csv", "csv", "document", None),
+    ("text-pdf", "pdf/text.pdf", None, "markdown", "pdf"),
 )
 
 
@@ -119,10 +132,10 @@ def _asset_positions(document: Any) -> list[dict[str, Any]]:
 
 def _measure_case(
     corpus: Path,
-    case: tuple[str, str, anydoc.Format | None, str],
+    case: tuple[str, str, anydoc.Format | None, str, str | None],
     iterations: int,
 ) -> dict[str, Any]:
-    name, relative_path, format_name, mode = case
+    name, relative_path, format_name, mode, expected_detected_format = case
     data = (corpus / relative_path).read_bytes()
     measurements: list[dict[str, Any]] = []
     process_children: set[int] = set()
@@ -152,11 +165,17 @@ def _measure_case(
         raise RuntimeError("measurement produced no result")
     if mode == "document":
         asset_positions = _asset_positions(anydoc.to_document(data, format_name))
+    detected_format = anydoc.format_from_bytes(data)
+    if detected_format != expected_detected_format:
+        raise RuntimeError(
+            f"{relative_path} detected as {detected_format!r}, expected "
+            f"{expected_detected_format!r}"
+        )
     return {
         "name": name,
         "fixture": relative_path,
         "input_bytes": len(data),
-        "detected_format": anydoc.format_from_bytes(data),
+        "detected_format": detected_format,
         "output_units": output_shape[0],
         "asset_count": output_shape[1],
         "retained_asset_bytes": output_shape[2],
@@ -335,6 +354,15 @@ def _environment() -> dict[str, Any]:
     }
 
 
+def _redact_home(path: str) -> str:
+    resolved = Path(path).resolve()
+    try:
+        relative = resolved.relative_to(Path.home().resolve())
+    except ValueError:
+        return str(resolved)
+    return f"<home>/{relative.as_posix()}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--corpus", type=Path, default=Path(__file__).parent / "corpus")
@@ -358,7 +386,7 @@ def main() -> None:
         "failures": _failure_probe(args.corpus),
         "cancellation": _cancellation_probe(args.corpus),
         "process_inventory": {
-            "executable": sys.executable,
+            "executable": _redact_home(sys.executable),
             "loaded_module_names": sorted(
                 name
                 for name in sys.modules

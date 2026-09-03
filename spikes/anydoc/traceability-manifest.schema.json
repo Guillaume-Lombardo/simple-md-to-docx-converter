@@ -23,7 +23,17 @@
       "properties": {
         "family": {"enum": ["word", "powerpoint", "excel", "opendocument", "rtf", "epub", "csv", "pdf"]},
         "detected_format": {"enum": ["doc", "docx", "ppt", "pptx", "xlsx", "odt", "ods", "odp", "rtf", "epub", "csv", "pdf"]}
-      }
+      },
+      "oneOf": [
+        {"properties": {"family": {"const": "word"}, "detected_format": {"enum": ["doc", "docx"]}}},
+        {"properties": {"family": {"const": "powerpoint"}, "detected_format": {"enum": ["ppt", "pptx"]}}},
+        {"properties": {"family": {"const": "excel"}, "detected_format": {"const": "xlsx"}}},
+        {"properties": {"family": {"const": "opendocument"}, "detected_format": {"enum": ["odt", "ods", "odp"]}}},
+        {"properties": {"family": {"const": "rtf"}, "detected_format": {"const": "rtf"}}},
+        {"properties": {"family": {"const": "epub"}, "detected_format": {"const": "epub"}}},
+        {"properties": {"family": {"const": "csv"}, "detected_format": {"const": "csv"}}},
+        {"properties": {"family": {"const": "pdf"}, "detected_format": {"const": "pdf"}}}
+      ]
     },
     "result": {
       "type": "object",

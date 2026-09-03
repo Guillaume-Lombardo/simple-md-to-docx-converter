@@ -12,6 +12,7 @@
   },
   "linux_x86_64_wheel": {
     "filename": "firecrawl_anydoc-0.2.4-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/fc/16/feeca9705bfdb237f1cb69ede0b373b144c0d51df4297e595a74b815557e/firecrawl_anydoc-0.2.4-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
     "size": 3506751,
     "sha256": "0e5aed01bf6d4e5c588d3363888293f2ceeb9feb00449a32e0ba993797cf0bd3",
     "requires_python": ">=3.10",
@@ -25,6 +26,7 @@
   },
   "source_distribution": {
     "filename": "firecrawl_anydoc-0.2.4.tar.gz",
+    "url": "https://files.pythonhosted.org/packages/35/54/ee43b1661a954e53eaed85878a7ccc37ed73e02e6577bb26437ec5f9de94/firecrawl_anydoc-0.2.4.tar.gz",
     "size": 270706,
     "sha256": "3e29460272fea81cde08fd5af11f6b0f1ff05919214ddc939867f72362c83032"
   },
