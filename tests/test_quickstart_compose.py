@@ -256,6 +256,7 @@ def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
     assert "ports: !reset []" in overlay
     assert "BACKEND_ORIGIN: http://markweave:8080" in overlay
     assert "FRONTEND_ORIGIN: http://frontend:3000" in overlay
+    assert "HOSTNAME: 0.0.0.0" in overlay
     assert "command: [node, router.mjs]" in overlay
     assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080" in overlay
     assert "MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in overlay
@@ -517,6 +518,34 @@ def test_quickstarts_reject_partial_or_mutable_cutover_pairs(
     assert "immutable digest" in mutable.stderr
     assert mismatched.returncode != 0
     assert "cutover image versions must match" in mismatched.stderr
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+@pytest.mark.parametrize(
+    "empty_variable",
+    ["MARKWEAVE_CUTOVER_BACKEND_IMAGE", "MARKWEAVE_CUTOVER_FRONTEND_IMAGE"],
+)
+def test_quickstarts_reject_explicitly_empty_cutover_overrides(
+    tmp_path: Path,
+    quickstart: Path,
+    empty_variable: str,
+) -> None:
+    rejected = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": MARKWEAVE_DIGEST,
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": FRONTEND_DIGEST,
+            empty_variable: "",
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+    )
+
+    assert rejected.returncode != 0
+    assert "Explicit cutover image overrides must not be empty." in rejected.stderr
 
 
 @pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])

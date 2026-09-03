@@ -24,6 +24,21 @@ RUNTIME_FAILURE_BROWSER = Path(
 
 
 @pytest.mark.unit
+def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostname() -> (
+    None
+):
+    runner = RUNNER.read_text(encoding="utf-8")
+    start_frontend = runner.split("start_frontend() {", 1)[1].split(
+        "restart_backend_and_router() {", 1
+    )[0]
+
+    assert "--env HOSTNAME=0.0.0.0" in start_frontend
+    assert 'fetch("http://127.0.0.1:3001/_frontend/health/ready"' in start_frontend
+    assert "node:os" not in start_frontend
+    assert 'e2e_podman logs "$frontend_name"' in start_frontend
+
+
+@pytest.mark.unit
 def test_admin_browser_disambiguates_concurrent_account_fields() -> None:
     source = ADMIN_BROWSER.read_text(encoding="utf-8")
 

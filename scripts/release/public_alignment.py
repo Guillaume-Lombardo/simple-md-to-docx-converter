@@ -63,7 +63,7 @@ HTTP_OK = 200
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
 OCI_SCHEMA_VERSION = 2
-FRONTEND_SERVICE_COUNT = 2
+CUTOVER_FRONTEND_ROLES = ("frontend", "router")
 
 
 class AlignmentError(ValueError):
@@ -215,13 +215,19 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
 
 def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
     """Parse the shared published frontend default from the cutover overlay."""
-    expression = re.compile(
-        r'^\s+image: "\$\{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-(?P<image>[^}]+)\}"$',
-        re.MULTILINE,
-    )
-    images = [match.group("image") for match in expression.finditer(document)]
+    expression = re.compile(r"\$\{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-(?P<image>[^}]+)\}")
+    try:
+        compose = yaml.load(document, Loader=yaml.BaseLoader)  # noqa: S506
+        services = compose["services"]
+        configured = [services[role]["image"] for role in CUTOVER_FRONTEND_ROLES]
+    except (yaml.YAMLError, KeyError, TypeError) as error:
+        raise AlignmentError(
+            "cutover overlay has no valid frontend and router image defaults"
+        ) from error
+    matches = [expression.fullmatch(image) for image in configured]
+    images = [match.group("image") for match in matches if match is not None]
     if (
-        len(images) != FRONTEND_SERVICE_COUNT
+        len(images) != len(CUTOVER_FRONTEND_ROLES)
         or images[0] != images[1]
         or (match := FRONTEND_IMAGE.fullmatch(images[0])) is None
     ):

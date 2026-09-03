@@ -605,6 +605,18 @@ def test_frontend_compose_parser_requires_one_exact_shared_public_default() -> N
     with pytest.raises(AlignmentError, match="share one trusted immutable"):
         parse_frontend_compose_identity(overlay.replace("md-converter-web", "other", 1))
 
+    unrelated = (
+        "services:\n"
+        f'  decoy:\n    image: "${{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-{image}}}"\n'
+        + overlay
+    )
+    assert parse_frontend_compose_identity(unrelated) == ComposeIdentity(
+        "0.6.1", f"sha256:{'d' * 64}"
+    )
+    divergent = overlay.replace(image, image.replace("d" * 64, "e" * 64), 1)
+    with pytest.raises(AlignmentError, match="share one trusted immutable"):
+        parse_frontend_compose_identity(divergent)
+
 
 @pytest.mark.unit
 def test_main_reads_exact_base_and_head_only_for_pending_transition(

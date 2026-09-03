@@ -179,7 +179,9 @@ def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> Non
     assert "ports" not in backend
     assert frontend["image"] == CANDIDATE_FRONTEND
     assert set(frontend["networks"]) == {"frontend"}
-    assert "environment" not in frontend
+    assert frontend["environment"] == {
+        "HOSTNAME": "0.0.0.0"  # noqa: S104 - rendered container binding
+    }
     assert "volumes" not in frontend
     assert router["image"] == CANDIDATE_FRONTEND
     assert router["command"] == ["node", "router.mjs"]

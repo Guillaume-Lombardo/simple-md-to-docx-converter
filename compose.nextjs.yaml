@@ -13,6 +13,8 @@ services:
         condition: service_healthy
     networks:
       - frontend
+    environment:
+      HOSTNAME: 0.0.0.0
     read_only: true
     user: "1001:0"
     cap_drop:

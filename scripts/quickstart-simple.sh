@@ -47,6 +47,10 @@ validate_project_and_port() {
   if [[ "$cutover_backend_supplied" != "$cutover_frontend_supplied" ]]; then
     fail "The backend and frontend cutover images must be supplied together."
   fi
+  if { [[ "$cutover_backend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_BACKEND_IMAGE}" ]]; } ||
+    { [[ "$cutover_frontend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE}" ]]; }; then
+    fail "Explicit cutover image overrides must not be empty."
+  fi
   if [[ -n "$cutover_backend_image" ]]; then
     [[ "$cutover_backend_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || \
       fail "The backend cutover image must use the trusted package, final version, and immutable digest."
