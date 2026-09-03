@@ -106,6 +106,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
         ("heavy", "Rehearse the exact npm rollback candidate"),
+        ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
@@ -115,6 +116,12 @@ READ_ONLY_ENV_STEPS = frozenset(
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
 T67_ROLLBACK_REHEARSAL_CONDITION = (
     "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository }}"
+)
+T67_BENCHMARK_ARTIFACT_CONDITION = (
+    "${{ always() && matrix.domain == 'frontend' && "
+    "github.event_name == 'pull_request' && "
     "github.head_ref == 'chore/T67-pnpm-workspace' && "
     "github.event.pull_request.head.repo.full_name == github.repository }}"
 )
@@ -324,6 +331,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): T67_ROLLBACK_REHEARSAL_CONDITION,
             (
                 "heavy",
+                "Collect the T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Retain the T67 package-manager benchmark",
+            ): T67_BENCHMARK_ARTIFACT_CONDITION,
+            (
+                "heavy",
                 "Install verified Mermaid and Chrome for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
@@ -343,7 +358,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="7d5ba2ebde81201c56e3015b39f95967aa69112aa826ad37296106cd5e97b8b5",
+        canonical_digest="2dd92feea571c0d86bcccd7a73431604c72a8fc6aa5e2fa6c891c039ca5fd26f",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -835,6 +850,11 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "bash scripts/javascript/rehearse-npm-rollback.sh "
             '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
         ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            "bash scripts/javascript/benchmark-package-managers.sh "
+            '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
+            "artifacts/package-manager-benchmark"
+        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -876,6 +896,9 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Rehearse the exact npm rollback candidate"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
             T67_ROLLBACK_REHEARSAL_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (

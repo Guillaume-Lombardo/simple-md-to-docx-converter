@@ -72,6 +72,10 @@ three cold and three warm samples, cache archive size, workspace `node_modules` 
 frontend build time, and final frontend image size for both the npm parent and pnpm candidate.
 Keep raw step logs with the pull request. A material regression stops delivery until a reviewer
 explicitly approves it; this project does not invent a threshold after observing results.
+The T67 pull request's frontend job runs `scripts/javascript/benchmark-package-managers.sh` against
+the immutable npm baseline and reviewed pnpm candidate, then retains its environment, timing, disk,
+compressed-cache, image-size, manifest/lock digest, and raw command output for 30 days. The step is
+restricted to the repository-owned T67 branch and cannot burden later frontend pull requests.
 
 A local rootless Podman diagnostic (not a substitute for hosted evidence) built the npm baseline
 at `1,061,525,142` bytes and the target-platform pnpm candidate at `1,033,797,849` bytes. The

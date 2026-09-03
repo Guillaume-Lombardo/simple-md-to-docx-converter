@@ -432,6 +432,22 @@ jobs:
         env:
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+      - name: Collect the T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
+          PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          bash scripts/javascript/benchmark-package-managers.sh
+          "$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
+      - name: Retain the T67 package-manager benchmark
+        if: ${{ always() && matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-manager-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/package-manager-benchmark
+          if-no-files-found: error
+          retention-days: 30
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -227,14 +227,14 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
 
 @pytest.mark.unit
 def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
-    """Both retained-evidence uploads use the reviewed v7 pin without direct mode."""
+    """Every retained-evidence upload uses the reviewed v7 pin."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     upload_lines = [
         line.strip()
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 2
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 3
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -392,6 +392,10 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "Rehearse the exact npm rollback candidate" in workflow
     assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
     assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
+    assert "Collect the T67 package-manager benchmark" in workflow
+    assert "Retain the T67 package-manager benchmark" in workflow
+    assert "PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "artifacts/package-manager-benchmark" in workflow
     rollback_condition = (
         "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
         "github.head_ref == 'chore/T67-pnpm-workspace' && "

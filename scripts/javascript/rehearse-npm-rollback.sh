@@ -68,6 +68,7 @@ allowed_path() {
     pnpm-lock.yaml|pnpm-workspace.yaml|scripts/ci/select_domains.py|\
     scripts/ci/validate_ci.py|scripts/container/publish-release-pair.sh|\
     scripts/container/run-ci.sh|scripts/e2e/run.sh|scripts/javascript/bootstrap-pnpm.sh|\
+    scripts/javascript/benchmark-package-managers.sh|\
     scripts/javascript/rehearse-npm-rollback.sh|scripts/javascript/validate-workspace.mjs|\
     tests/test_ci_selection.py|tests/test_ci_validation.py|tests/test_documentation.py|\
     tests/test_pnpm_workspace.py|tests/test_t22_maintenance.py|\

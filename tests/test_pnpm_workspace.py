@@ -210,3 +210,24 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "grep -RIE '(pnpm|corepack)'",
     ):
         assert contract in rehearsal
+
+
+@pytest.mark.unit
+def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
+    benchmark = Path("scripts/javascript/benchmark-package-managers.sh").read_text(
+        encoding="utf-8"
+    )
+    for contract in (
+        "for sample in 1 2 3",
+        "cold-install",
+        "warm-install",
+        "frontend-build",
+        "cache_archive_bytes",
+        "node_modules_bytes",
+        "runner_image=",
+        "node --version",
+        "raw.log",
+        "podman image inspect",
+        "manifest-lock-sha256.txt",
+    ):
+        assert contract in benchmark
