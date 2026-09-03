@@ -5,6 +5,7 @@ umask 0077
 repository="$(pwd)"
 readonly repository
 readonly compose_file="$repository/compose.yaml"
+readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
 readonly quickstart_script="$repository/scripts/quickstart.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-e2e-${suffix,,}"
@@ -12,7 +13,8 @@ readonly work_volume="${project}_markweave-work"
 readonly data_volume="${project}_markweave-data"
 readonly signatures_volume="${project}_clamav-signatures"
 
-if [[ ! -f "$compose_file" || ! -x "$quickstart_script" ]]; then
+if [[ ! -f "$compose_file" || ! -f "$nextjs_overlay_file" || \
+  ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -32,6 +34,9 @@ unrelated_down_device=""
 port_blocker_pid=""
 password=""
 port="$(uv run python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+readonly public_endpoint="http://127.0.0.1:$port"
+readonly public_host="localhost:$port"
+readonly public_base_url="http://$public_host"
 succeeded=false
 
 quickstart=(
@@ -57,13 +62,14 @@ backing_file() {
 
 write_fault_env() {
   local device="$1"
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
-    "$password" "$port" "$port" "$device" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s\nMARKWEAVE_WORK_DEVICE=%s\n' \
+    "$password" "$port" "$port" "$port" "$device" >"$fault_env"
 }
 
 compose() {
   docker compose --project-name "$project" --project-directory "$repository" \
-    --file "$compose_file" --env-file "$fault_env" "$@"
+    --file "$compose_file" --file "$nextjs_overlay_file" \
+    --env-file "$fault_env" "$@"
 }
 
 cleanup() {
@@ -113,15 +119,27 @@ trap cleanup EXIT
 
 wait_for_services() {
   local application_id
+  local canonical_status
+  local rejected_status
   local scanner_id
   for _ in $(seq 1 240); do
+    canonical_status=""
     application_id="$(compose ps -q markweave)"
     scanner_id="$(compose ps -q clamav)"
     if [[ -n "$application_id" && -n "$scanner_id" ]] && \
       [[ "$(docker inspect --format '{{.State.Health.Status}}' "$application_id" 2>/dev/null)" == healthy ]] && \
-      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]] && \
-      curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" >/dev/null; then
-      return 0
+      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]]; then
+      canonical_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --header "Host: $public_host" "$public_endpoint/health/ready" || true)"
+      if [[ "$canonical_status" == 200 ]]; then
+        rejected_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          "$public_endpoint/health/ready" || true)"
+        [[ "$rejected_status" == 421 ]] || {
+          echo "The production router did not reject the non-canonical Host with 421." >&2
+          return 1
+        }
+        return 0
+      fi
     fi
     for container in "$application_id" "$scanner_id"; do
       if [[ -n "$container" && "$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null)" == exited ]]; then
@@ -137,11 +155,15 @@ wait_for_services() {
 
 verify_runtime_boundary() {
   local application_id
+  local router_id
   local scanner_id
   application_id="$(compose ps -q markweave)"
+  router_id="$(compose ps -q router)"
   scanner_id="$(compose ps -q clamav)"
 
-  test "$(docker port "$application_id" 8080/tcp)" = "127.0.0.1:$port"
+  [[ -n "$application_id" && -n "$router_id" && -n "$scanner_id" ]]
+  test -z "$(docker port "$application_id")"
+  test "$(docker port "$router_id" 8080/tcp)" = "127.0.0.1:$port"
   test -z "$(docker port "$scanner_id")"
   docker exec "$application_id" python -c \
     'import socket; s=socket.create_connection(("clamav", 3310), 5); s.sendall(b"zPING\0"); assert s.recv(64)==b"PONG\0"; s.close()'
@@ -188,7 +210,7 @@ write_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --template "$template_file" \
       --state-file "$state_file" \
@@ -200,7 +222,7 @@ verify_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow verify-checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --state-file "$state_file" \
       --artifact-dir "$artifact_directory"

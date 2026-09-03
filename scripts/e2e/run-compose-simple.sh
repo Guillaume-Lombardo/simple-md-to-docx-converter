@@ -7,6 +7,8 @@ readonly repository
 readonly compose_file="$repository/compose.yaml"
 readonly overlay_file="$repository/compose.simple.yaml"
 readonly podman_overlay_file="$repository/compose.podman.yaml"
+readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"
+readonly nextjs_podman_overlay_file="$repository/compose.nextjs-podman.yaml"
 readonly quickstart_script="$repository/scripts/quickstart-simple.sh"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-simple-e2e-${suffix,,}"
@@ -35,7 +37,9 @@ case "$runtime" in
 esac
 
 if [[ ! -f "$compose_file" || ! -f "$overlay_file" || \
-  ! -f "$podman_overlay_file" || ! -x "$quickstart_script" ]]; then
+  ! -f "$podman_overlay_file" || ! -f "$nextjs_overlay_file" || \
+  ! -f "$nextjs_podman_overlay_file" || \
+  ! -x "$quickstart_script" ]]; then
   echo "Run this command from the repository root." >&2
   exit 2
 fi
@@ -58,6 +62,9 @@ port_ready="$temporary_directory/port-blocker.ready"
 port_blocker_pid=""
 password=""
 port="$(uv run python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+readonly public_endpoint="http://127.0.0.1:$port"
+readonly public_host="localhost:$port"
+readonly public_base_url="http://$public_host"
 succeeded=false
 
 quickstart_command=(
@@ -74,8 +81,8 @@ quickstart() {
 }
 
 write_fault_env() {
-  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
-    "$password" "$port" "$port" >"$fault_env"
+  printf 'MARKWEAVE_INITIAL_ADMIN_PASSWORD=%s\nMARKWEAVE_PORT=%s\nMARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s\nMARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s\nMARKWEAVE_WORK_DEVICE=/dev/null\n' \
+    "$password" "$port" "$port" "$port" >"$fault_env"
 }
 
 compose() {
@@ -83,12 +90,26 @@ compose() {
   if [[ "$runtime" == podman ]]; then
     files+=(--file "$podman_overlay_file")
   fi
+  files+=(--file "$nextjs_overlay_file")
+  if [[ "$runtime" == podman ]]; then
+    files+=(--file "$nextjs_podman_overlay_file")
+  fi
   "${compose_command[@]}" --project-name "$project" --project-directory "$repository" \
     "${files[@]}" --env-file "$fault_env" "$@"
 }
 
 file_sha256() {
   sha256sum -- "$1" | awk '{print $1}'
+}
+
+resolve_application_id() {
+  local resolved
+  resolved="$(compose ps -q markweave)"
+  if [[ -z "$resolved" || "$resolved" == *$'\n'* ]]; then
+    echo "Expected exactly one running Markweave container." >&2
+    return 1
+  fi
+  printf '%s\n' "$resolved"
 }
 
 cleanup() {
@@ -136,20 +157,32 @@ fi
 
 wait_for_services() {
   local application_id
+  local canonical_status
+  local rejected_status
   local scanner_id
   for _ in $(seq 1 240); do
+    canonical_status=""
     application_id="$(compose ps -q markweave)"
     scanner_id="$(compose ps -q clamav)"
     if [[ -n "$application_id" && -n "$scanner_id" ]]; then
       if [[ "$runtime" == podman ]] && \
         "${runtime_command[@]}" exec "$scanner_id" /usr/local/bin/clamdcheck.sh \
-          >/dev/null 2>&1 && \
-        curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" >/dev/null; then
-        return 0
+          >/dev/null 2>&1; then
+        canonical_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          --header "Host: $public_host" "$public_endpoint/health/ready" || true)"
       elif [[ "$runtime" == docker ]] && \
         [[ "$("${runtime_command[@]}" inspect --format '{{.State.Health.Status}}' "$application_id" 2>/dev/null)" == healthy ]] && \
-        [[ "$("${runtime_command[@]}" inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]] && \
-        curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" >/dev/null; then
+        [[ "$("${runtime_command[@]}" inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]]; then
+        canonical_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          --header "Host: $public_host" "$public_endpoint/health/ready" || true)"
+      fi
+      if [[ "$canonical_status" == 200 ]]; then
+        rejected_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          "$public_endpoint/health/ready" || true)"
+        [[ "$rejected_status" == 421 ]] || {
+          echo "The production router did not reject the non-canonical Host with 421." >&2
+          return 1
+        }
         return 0
       fi
     fi
@@ -167,12 +200,16 @@ wait_for_services() {
 
 verify_runtime_boundary() {
   local application_id
+  local router_id
   local scanner_id
   local security_options
   application_id="$(compose ps -q markweave)"
+  router_id="$(compose ps -q router)"
   scanner_id="$(compose ps -q clamav)"
 
-  test "$("${runtime_command[@]}" port "$application_id" 8080/tcp)" = "127.0.0.1:$port"
+  [[ -n "$application_id" && -n "$router_id" && -n "$scanner_id" ]]
+  test -z "$("${runtime_command[@]}" port "$application_id")"
+  test "$("${runtime_command[@]}" port "$router_id" 8080/tcp)" = "127.0.0.1:$port"
   test -z "$("${runtime_command[@]}" port "$scanner_id")"
   test "$("${runtime_command[@]}" inspect --format '{{.Config.User}}' "$application_id")" = "1001:0"
   test "$("${runtime_command[@]}" inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$application_id")" = true
@@ -222,7 +259,7 @@ write_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --template "$template_file" \
       --state-file "$state_file" \
@@ -235,7 +272,7 @@ verify_podman_mermaid() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow exercise-mermaid \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --template "$template_file" \
       --artifact-dir "$artifact_directory"
@@ -243,7 +280,7 @@ verify_podman_mermaid() {
 
 verify_login_origin() {
   uv run python -m tests.e2e.service_workflow verify-login-origin \
-    --base-url "http://127.0.0.1:$port" \
+    --base-url "$public_base_url" \
     --login-origin "http://localhost:$port" \
     --profile standalone \
     --artifact-dir "$artifact_directory"
@@ -253,7 +290,7 @@ verify_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow verify-checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --state-file "$state_file" \
       --artifact-dir "$artifact_directory"
@@ -270,13 +307,14 @@ compose config --quiet
 wait_for_services
 verify_runtime_boundary
 verify_simple_work_volume
-application_id="$(compose ps -q markweave)"
+application_id="$(resolve_application_id)"
 "${runtime_command[@]}" exec "$application_id" sh -c 'printf preserved > /work/simple-rerun-marker'
 
 # A repeated up against the healthy stack retains the active disposable workspace.
 quickstart up
 verify_helper_service_stopped
 wait_for_services
+application_id="$(resolve_application_id)"
 "${runtime_command[@]}" exec "$application_id" test -f /work/simple-rerun-marker
 write_checkpoint
 verify_podman_mermaid
@@ -290,7 +328,7 @@ write_fault_env
 wait_for_services
 verify_runtime_boundary
 verify_simple_work_volume
-application_id="$(compose ps -q markweave)"
+application_id="$(resolve_application_id)"
 if "${runtime_command[@]}" exec "$application_id" test -e /work/simple-rerun-marker; then
   echo "The simple quickstart retained disposable work across a stopped restart." >&2
   exit 1

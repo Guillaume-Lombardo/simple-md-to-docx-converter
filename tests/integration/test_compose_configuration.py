@@ -179,10 +179,15 @@ def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> Non
     assert "ports" not in backend
     assert frontend["image"] == CANDIDATE_FRONTEND
     assert set(frontend["networks"]) == {"frontend"}
-    assert "environment" not in frontend
+    assert frontend["environment"] == {
+        "HOSTNAME": "0.0.0.0"  # noqa: S104 - rendered container binding
+    }
+    assert frontend["depends_on"]["markweave"]["condition"] == "service_healthy"
     assert "volumes" not in frontend
     assert router["image"] == CANDIDATE_FRONTEND
     assert router["command"] == ["node", "router.mjs"]
+    assert router["depends_on"]["frontend"]["condition"] == "service_healthy"
+    assert router["depends_on"]["markweave"]["condition"] == "service_healthy"
     assert router["environment"] == {
         "BACKEND_ORIGIN": "http://markweave:8080",
         "FRONTEND_ORIGIN": "http://frontend:3000",
@@ -201,6 +206,57 @@ def test_nextjs_cutover_renders_one_public_router_and_isolated_frontend() -> Non
             "protocol": "tcp",
         }
     ]
+
+
+def test_nextjs_podman_uses_staged_backend_readiness_without_compose_health() -> None:
+    """The real Podman command must not require its disabled backend healthcheck."""
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "markweave-nextjs-podman-staged-contract",
+            "--file",
+            str(ROOT / "compose.yaml"),
+            "--file",
+            str(ROOT / "compose.simple.yaml"),
+            "--file",
+            str(ROOT / "compose.podman.yaml"),
+            "--file",
+            str(ROOT / "compose.nextjs.yaml"),
+            "--file",
+            str(ROOT / "compose.nextjs-podman.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": CANDIDATE_BACKEND,
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": CANDIDATE_FRONTEND,
+            "MARKWEAVE_INITIAL_ADMIN_PASSWORD": "compose-contract-password",
+            "MARKWEAVE_PORT": "11279",
+            "MARKWEAVE_PUBLIC_ORIGIN": "http://localhost:11279",
+            "MARKWEAVE_ROUTER_PUBLIC_HOST": "localhost:11279",
+            "MARKWEAVE_WORK_DEVICE": "/dev/null",
+        },
+    )
+    services: dict[str, Any] = json.loads(result.stdout)["services"]
+
+    assert services["markweave"]["healthcheck"]["disable"] is True
+    assert (
+        services["frontend"]["depends_on"]["markweave"]["condition"]
+        == "service_started"
+    )
+    assert (
+        services["router"]["depends_on"]["markweave"]["condition"] == "service_started"
+    )
+    assert (
+        services["router"]["depends_on"]["frontend"]["condition"] == "service_started"
+    )
 
 
 def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None:
@@ -223,6 +279,8 @@ def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None
             "--file",
             str(ROOT / "compose.nextjs.yaml"),
             "--file",
+            str(ROOT / "compose.nextjs-podman.yaml"),
+            "--file",
             str(ROOT / "compose.nextjs-podman-trusted-upstream.yaml"),
             "config",
             "--format",
@@ -242,8 +300,15 @@ def test_nextjs_podman_shared_namespace_healthcheck_targets_the_router() -> None
             "MARKWEAVE_WORK_DEVICE": "/dev/null",
         },
     )
-    router = json.loads(result.stdout)["services"]["router"]
+    services = json.loads(result.stdout)["services"]
+    backend = services["markweave"]
+    frontend = services["frontend"]
+    router = services["router"]
 
+    assert backend["healthcheck"]["disable"] is True
+    assert frontend["depends_on"]["markweave"]["condition"] == "service_started"
+    assert router["depends_on"]["markweave"]["condition"] == "service_started"
+    assert router["depends_on"]["frontend"]["condition"] == "service_started"
     assert router["environment"]["ROUTER_PORT"] == "3100"
     assert "http://127.0.0.1:3100/login" in router["healthcheck"]["test"][-1]
     assert "http://127.0.0.1:8080/login" not in router["healthcheck"]["test"][-1]

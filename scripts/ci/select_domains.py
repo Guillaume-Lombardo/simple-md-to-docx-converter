@@ -17,6 +17,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "README.md",
         "compose.simple.yaml",
         "compose.podman.yaml",
+        "compose.nextjs-podman.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/**",

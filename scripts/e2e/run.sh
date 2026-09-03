@@ -386,10 +386,11 @@ start_frontend() {
     podman run --detach --name "$frontend_name" --network "$network_name" \
     --network-alias frontend --user "$runtime_uid:0" --read-only --cap-drop=all \
     --security-opt=no-new-privileges --pids-limit=64 --memory=256m --cpus=0.5 \
-    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m "$frontend_image" >/dev/null
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m --env HOSTNAME=0.0.0.0 \
+    "$frontend_image" >/dev/null
   for _ in $(seq 1 120); do
     if e2e_podman exec "$frontend_name" node -e \
-      'const h=require("node:os").hostname(); fetch(`http://${h}:3001/_frontend/health/ready`,{signal:AbortSignal.timeout(1000)}).then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))' \
+      'fetch("http://127.0.0.1:3001/_frontend/health/ready",{signal:AbortSignal.timeout(1000)}).then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))' \
       >/dev/null 2>&1; then
       return 0
     fi
@@ -400,6 +401,7 @@ start_frontend() {
     sleep 0.25
   done
   echo "Timed out waiting for the frontend readiness probe." >&2
+  e2e_podman logs "$frontend_name" >&2 || true
   return 1
 }
 
@@ -568,6 +570,8 @@ fi
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" "$profile-network" "$application_name" e2e-clamav
 podman exec "$application_name" python -c '
 from pathlib import Path
 

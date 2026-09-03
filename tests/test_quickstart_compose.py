@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -26,6 +27,7 @@ PODMAN_OVERLAY = ROOT / "compose.podman.yaml"
 TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.trusted-upstream.yaml"
 PODMAN_TRUSTED_UPSTREAM_OVERLAY = ROOT / "compose.podman-trusted-upstream.yaml"
 NEXTJS_OVERLAY = ROOT / "compose.nextjs.yaml"
+NEXTJS_PODMAN_OVERLAY = ROOT / "compose.nextjs-podman.yaml"
 NEXTJS_PODMAN_TRUSTED_OVERLAY = ROOT / "compose.nextjs-podman-trusted-upstream.yaml"
 README = ROOT / "README.md"
 RUNNER = ROOT / "scripts/e2e/run-compose.sh"
@@ -47,8 +49,12 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.5.2@"
-    "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+    "ghcr.io/guillaume-lombardo/md-converter:0.6.1@"
+    "sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea"
+)
+FRONTEND_DIGEST = (
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@"
+    "sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
@@ -113,6 +119,42 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
     }
     assert set(application["networks"]) == {"scanner", "frontend"}
     assert set(scanner["networks"]) == {"scanner", "signature-updates"}
+
+
+@pytest.mark.parametrize("runner", [RUNNER, SIMPLE_RUNNER])
+def test_compose_runners_probe_the_canonical_host_and_retain_421_policy(
+    runner: Path,
+) -> None:
+    script = runner.read_text(encoding="utf-8")
+
+    assert 'readonly nextjs_overlay_file="$repository/compose.nextjs.yaml"' in script
+    assert '! -f "$nextjs_overlay_file"' in script
+    assert '--file "$nextjs_overlay_file"' in script
+    assert "MARKWEAVE_ROUTER_PUBLIC_HOST=localhost:%s" in script
+    compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
+    assert compose_function.index('"$compose_file"') < compose_function.index(
+        '"$nextjs_overlay_file"'
+    )
+    if runner == SIMPLE_RUNNER:
+        assert compose_function.index(
+            '"$podman_overlay_file"'
+        ) < compose_function.index('"$nextjs_overlay_file"')
+        assert (
+            'readonly nextjs_podman_overlay_file="$repository/compose.nextjs-podman.yaml"'
+            in script
+        )
+        assert '! -f "$nextjs_podman_overlay_file"' in script
+        assert '--file "$nextjs_podman_overlay_file"' in script
+        assert compose_function.index(
+            '"$nextjs_overlay_file"'
+        ) < compose_function.index('"$nextjs_podman_overlay_file"')
+    assert 'readonly public_endpoint="http://127.0.0.1:$port"' in script
+    assert 'readonly public_host="localhost:$port"' in script
+    assert 'readonly public_base_url="http://$public_host"' in script
+    assert '--header "Host: $public_host" "$public_endpoint/health/ready"' in script
+    assert '[[ "$canonical_status" == 200 ]]' in script
+    assert '[[ "$rejected_status" == 421 ]]' in script
+    assert '--base-url "$public_base_url"' in script
 
 
 def test_application_has_disk_workspace_and_memory_headroom() -> None:
@@ -246,9 +288,12 @@ def test_nextjs_cutover_overlay_is_a_two_image_rootless_boundary() -> None:
 
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in overlay
     assert overlay.count("MARKWEAVE_CUTOVER_FRONTEND_IMAGE") == 2
+    assert MARKWEAVE_DIGEST in overlay
+    assert overlay.count(FRONTEND_DIGEST) == 2
     assert "ports: !reset []" in overlay
     assert "BACKEND_ORIGIN: http://markweave:8080" in overlay
     assert "FRONTEND_ORIGIN: http://frontend:3000" in overlay
+    assert "HOSTNAME: 0.0.0.0" in overlay
     assert "command: [node, router.mjs]" in overlay
     assert "127.0.0.1:${MARKWEAVE_PORT:-8080}:8080" in overlay
     assert "MARKWEAVE_INITIAL_ADMIN_PASSWORD" not in overlay
@@ -355,10 +400,65 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert "no physical capacity cap" in script
     assert "Markweave is ready with $runtime_name" in script
     assert "compose.nextjs.yaml" in script
+    assert "compose.nextjs-podman.yaml" in script
     assert "compose.nextjs-podman-trusted-upstream.yaml" in script
+    compose_function = script.split("compose() {", 1)[1].split("\n}", 1)[0]
+    assert compose_function.index('"$repository/compose.nextjs.yaml"') < (
+        compose_function.index('"$repository/compose.nextjs-podman.yaml"')
+    )
+    assert compose_function.index('"$repository/compose.nextjs-podman.yaml"') < (
+        compose_function.index(
+            '"$repository/compose.nextjs-podman-trusted-upstream.yaml"'
+        )
+    )
+    assert "wait_for_podman_scanner" in script
+    assert "wait_for_application" in script
+    podman_start = script.split("start_podman_stack() {", 1)[1].split("\n}", 1)[0]
+    assert podman_start.index("wait_for_application") < podman_start.index(
+        "start_browser_tier"
+    )
     assert "wait_for_router" in script
     assert "MARKWEAVE_CUTOVER_BACKEND_IMAGE" in script
     assert "MARKWEAVE_CUTOVER_FRONTEND_IMAGE" in script
+
+
+def test_nextjs_podman_overlay_matches_the_staged_startup_contract() -> None:
+    document = yaml.safe_load(NEXTJS_PODMAN_OVERLAY.read_text(encoding="utf-8"))
+
+    assert document == {
+        "services": {
+            "frontend": {"depends_on": {"markweave": {"condition": "service_started"}}},
+            "router": {
+                "depends_on": {
+                    "frontend": {"condition": "service_started"},
+                    "markweave": {"condition": "service_started"},
+                }
+            },
+        }
+    }
+
+
+def test_simple_quickstart_stages_podman_browser_services_with_bounded_probes() -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+    frontend_wait = script.split("wait_for_frontend() {", 1)[1].split("\n}", 1)[0]
+    browser_start = script.split("start_browser_tier() {", 1)[1].split("\n}", 1)[0]
+
+    assert "for _ in $(seq 1 120)" in frontend_wait
+    assert "AbortSignal.timeout(2000)" in frontend_wait
+    assert "http://127.0.0.1:3001/_frontend/health/ready" in frontend_wait
+    assert "sleep 2" in frontend_wait
+    assert "exited before becoming ready" in frontend_wait
+    assert "Timed out waiting for the Markweave frontend." in frontend_wait
+    assert browser_start.index("compose up --detach --no-deps frontend") < (
+        browser_start.index("wait_for_frontend")
+    )
+    assert browser_start.index("wait_for_frontend") < browser_start.index(
+        "compose up --detach --no-deps router"
+    )
+    assert browser_start.index("compose up --detach --no-deps router") < (
+        browser_start.index("wait_for_router")
+    )
+    assert "compose up --detach frontend router" in browser_start
 
 
 def test_simple_quickstart_has_an_explicit_warned_insecure_mode() -> None:
@@ -513,6 +613,34 @@ def test_quickstarts_reject_partial_or_mutable_cutover_pairs(
 
 
 @pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+@pytest.mark.parametrize(
+    "empty_variable",
+    ["MARKWEAVE_CUTOVER_BACKEND_IMAGE", "MARKWEAVE_CUTOVER_FRONTEND_IMAGE"],
+)
+def test_quickstarts_reject_explicitly_empty_cutover_overrides(
+    tmp_path: Path,
+    quickstart: Path,
+    empty_variable: str,
+) -> None:
+    rejected = subprocess.run(
+        [str(quickstart), "up"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "MARKWEAVE_CUTOVER_BACKEND_IMAGE": MARKWEAVE_DIGEST,
+            "MARKWEAVE_CUTOVER_FRONTEND_IMAGE": FRONTEND_DIGEST,
+            empty_variable: "",
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+    )
+
+    assert rejected.returncode != 0
+    assert "Explicit cutover image overrides must not be empty." in rejected.stderr
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
 def test_quickstarts_compare_the_version_before_the_digest(
     quickstart: Path,
 ) -> None:
@@ -525,6 +653,75 @@ def test_quickstarts_compare_the_version_before_the_digest(
     assert script.index('backend_version="${cutover_backend_image%@*}"') < script.index(
         'backend_version="${backend_version##*:}"'
     )
+
+
+@pytest.mark.parametrize("quickstart", [QUICKSTART, SIMPLE_QUICKSTART])
+def test_quickstarts_default_to_the_published_cutover_pair(quickstart: Path) -> None:
+    script = quickstart.read_text(encoding="utf-8")
+
+    assert MARKWEAVE_DIGEST in script
+    assert FRONTEND_DIGEST in script
+    assert 'cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"' in (
+        script
+    )
+    assert 'cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"' in (
+        script
+    )
+
+
+def test_simple_quickstart_image_selection_consumes_producer_and_propagates_failure(
+    tmp_path: Path,
+) -> None:
+    script = SIMPLE_QUICKSTART.read_text(encoding="utf-8")
+    match = re.search(
+        r"application_image=\"\$\(compose config --images \| awk \\\n\s+'([^']+)'\)\"",
+        script,
+    )
+    assert match is not None
+    awk_program = match.group(1)
+    assert "exit" not in awk_program
+
+    producer = tmp_path / "compose-images"
+    producer.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "printf '%s\\n' 'ghcr.io/guillaume-lombardo/md-converter:0.6.1@sha256:"
+        + "f"
+        * 64
+        + "'\n"
+        "for index in $(seq 1 20000); do printf 'unrelated-%s\\n' \"$index\"; done\n"
+        'if [[ "${2:-}" == fail ]]; then exit 23; fi\n'
+        'printf complete >"$1"\n',
+        encoding="utf-8",
+    )
+    producer.chmod(0o755)
+    marker = tmp_path / "producer-complete"
+    command = (
+        'set -euo pipefail; image="$("$1" "$2" "${4:-}" | awk "$3")"; '
+        '[[ "$image" == ghcr.io/guillaume-lombardo/md-converter:* ]]'
+    )
+
+    completed = subprocess.run(
+        ["bash", "-c", command, "bash", str(producer), str(marker), awk_program],
+        check=False,
+    )
+    failed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            command,
+            "bash",
+            str(producer),
+            str(marker),
+            awk_program,
+            "fail",
+        ],
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert marker.read_text(encoding="utf-8") == "complete"
+    assert failed.returncode == 23
 
 
 @pytest.mark.parametrize(
@@ -669,7 +866,9 @@ def test_compose_e2e_is_isolated_and_exercises_real_restart_workflow() -> None:
     assert "MARKWEAVE_PUBLIC_ORIGIN=http://localhost:%s" in runner
     assert "tests.e2e.service_workflow checkpoint" in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
-    assert 'docker port "$application_id" 8080/tcp' in runner
+    assert 'router_id="$(compose ps -q router)"' in runner
+    assert 'test -z "$(docker port "$application_id")"' in runner
+    assert 'docker port "$router_id" 8080/tcp' in runner
     assert 'docker port "$scanner_id"' in runner
     assert 'socket.create_connection(("clamav", 3310), 5)' in runner
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
@@ -732,7 +931,9 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert 'env "DOCKER_HOST=unix://$runtime_socket"' in runner
     assert 'if [[ "$succeeded" != true ]]; then' in runner
     assert "tests.e2e.service_workflow verify-checkpoint" in runner
-    assert 'port "$application_id" 8080/tcp' in runner
+    assert 'router_id="$(compose ps -q router)"' in runner
+    assert 'test -z "$("${runtime_command[@]}" port "$application_id")"' in runner
+    assert 'port "$router_id" 8080/tcp' in runner
     assert 'port "$scanner_id"' in runner
     assert 'socket.create_connection(("clamav", 3310), 5)' in runner
     assert 'socket.create_connection(("1.1.1.1", 443), 2)' in runner
@@ -741,6 +942,21 @@ def test_simple_compose_e2e_exercises_unprivileged_lifecycle_and_rollback() -> N
     assert '[[ "$security_options" != *unconfined* ]]' in runner
     assert "grep -Eq '^Seccomp:[[:space:]]+2$' /proc/1/status" in runner
     assert 'exec "$application_id" test -f /work/simple-rerun-marker' in runner
+    assert 'resolved="$(compose ps -q markweave)"' in runner
+    assert '[[ -z "$resolved" || "$resolved" == *$\'\\n\'* ]]' in runner
+    assert "Expected exactly one running Markweave container." in runner
+    assert runner.count('application_id="$(resolve_application_id)"') == 3
+    repeated_up = runner.split(
+        "# A repeated up against the healthy stack retains the active disposable workspace.",
+        1,
+    )[1].split("# A stopped restart", 1)[0]
+    assert repeated_up.index("quickstart up") < repeated_up.index("wait_for_services")
+    assert repeated_up.index("wait_for_services") < repeated_up.index(
+        'application_id="$(resolve_application_id)"'
+    )
+    assert repeated_up.index('application_id="$(resolve_application_id)"') < (
+        repeated_up.index('"${runtime_command[@]}" exec "$application_id" test -f')
+    )
     assert "stopped restart" in runner
     assert "expected-up-failure.log" in runner
     assert 'kill -0 "$port_blocker_pid"' in runner

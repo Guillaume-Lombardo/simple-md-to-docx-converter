@@ -12,8 +12,10 @@ readonly podman_config_file="$state_directory/podman-containers.conf"
 readonly project="${MARKWEAVE_SIMPLE_PROJECT:-markweave-simple}"
 readonly port="${MARKWEAVE_SIMPLE_PORT:-8080}"
 readonly public_origin="${MARKWEAVE_PUBLIC_ORIGIN:-http://localhost:$port}"
-readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-}"
-readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-}"
+readonly cutover_backend_supplied="${MARKWEAVE_CUTOVER_BACKEND_IMAGE+true}"
+readonly cutover_frontend_supplied="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE+true}"
+readonly cutover_backend_image="${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.6.1@sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea}"
+readonly cutover_frontend_image="${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e}"
 readonly work_volume="${project}_markweave-work"
 readonly requested_runtime="${MARKWEAVE_SIMPLE_RUNTIME:-auto}"
 readonly -a original_arguments=("$@")
@@ -42,9 +44,12 @@ validate_project_and_port() {
     fail "The simple quickstart port must be an integer from 1 through 65535."
   [[ "$public_origin" != *$'\n'* && "$public_origin" != *$'\r'* ]] || \
     fail "The public origin must be a single-line HTTP origin."
-  if { [[ -n "$cutover_backend_image" ]] && [[ -z "$cutover_frontend_image" ]]; } ||
-    { [[ -z "$cutover_backend_image" ]] && [[ -n "$cutover_frontend_image" ]]; }; then
+  if [[ "$cutover_backend_supplied" != "$cutover_frontend_supplied" ]]; then
     fail "The backend and frontend cutover images must be supplied together."
+  fi
+  if { [[ "$cutover_backend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_BACKEND_IMAGE}" ]]; } ||
+    { [[ "$cutover_frontend_supplied" == true ]] && [[ -z "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE}" ]]; }; then
+    fail "Explicit cutover image overrides must not be empty."
   fi
   if [[ -n "$cutover_backend_image" ]]; then
     [[ "$cutover_backend_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || \
@@ -251,8 +256,11 @@ compose() {
   fi
   if [[ -n "$cutover_backend_image" ]]; then
     files+=(--file "$repository/compose.nextjs.yaml")
-    if [[ "$runtime_name" == podman && "$trusted_upstream_antivirus" == true ]]; then
-      files+=(--file "$repository/compose.nextjs-podman-trusted-upstream.yaml")
+    if [[ "$runtime_name" == podman ]]; then
+      files+=(--file "$repository/compose.nextjs-podman.yaml")
+      if [[ "$trusted_upstream_antivirus" == true ]]; then
+        files+=(--file "$repository/compose.nextjs-podman-trusted-upstream.yaml")
+      fi
     fi
   fi
   if [[ "$insecure" == true ]]; then
@@ -277,6 +285,12 @@ scanner_container() {
   "${runtime_command[@]}" container ls --all --quiet \
     --filter "label=com.docker.compose.project=$project" \
     --filter "label=com.docker.compose.service=clamav"
+}
+
+frontend_container() {
+  "${runtime_command[@]}" container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=frontend"
 }
 
 router_container() {
@@ -334,7 +348,7 @@ initialize_work_volume() {
     "$work_volume" >/dev/null
   validate_work_volume
   application_image="$(compose config --images | awk \
-    '/^ghcr\.io\/guillaume-lombardo\/md-converter:/ { print; exit }')"
+    '/^ghcr\.io\/guillaume-lombardo\/md-converter:/ && !found { print; found = 1 }')"
   [[ -n "$application_image" ]] || fail "Could not resolve the pinned Markweave image."
   "${runtime_command[@]}" run --rm --network none --read-only --user 0:0 \
     --cap-drop ALL --cap-add CHOWN --security-opt no-new-privileges \
@@ -380,6 +394,25 @@ wait_for_application() {
   fail "Timed out waiting for Markweave readiness."
 }
 
+wait_for_frontend() {
+  local container
+  for _ in $(seq 1 120); do
+    container="$(frontend_container)"
+    if [[ -n "$container" ]] && \
+      "${runtime_command[@]}" exec "$container" node -e \
+        "fetch('http://127.0.0.1:3001/_frontend/health/ready', {signal: AbortSignal.timeout(2000)}).then(response => process.exit(response.status === 200 ? 0 : 1))" \
+        >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ -n "$container" ]] && \
+      [[ "$("${runtime_command[@]}" inspect --format '{{.State.Status}}' "$container")" == exited ]]; then
+      fail "The Markweave frontend exited before becoming ready."
+    fi
+    sleep 2
+  done
+  fail "Timed out waiting for the Markweave frontend."
+}
+
 wait_for_router() {
   local container
   [[ -n "$cutover_backend_image" ]] || return 0
@@ -400,6 +433,20 @@ wait_for_router() {
     sleep 2
   done
   fail "Timed out waiting for the Markweave router."
+}
+
+start_browser_tier() {
+  [[ -n "$cutover_backend_image" ]] || return 0
+  if [[ "$runtime_name" == podman ]]; then
+    # Dependencies are already staged and probed. Avoid the Podman Compose
+    # provider's unbounded wait on health transitions through its Docker API.
+    compose up --detach --no-deps frontend
+    wait_for_frontend
+    compose up --detach --no-deps router
+  else
+    compose up --detach frontend router
+  fi
+  wait_for_router
 }
 
 verify_application_public_origin() {
@@ -449,10 +496,7 @@ start_podman_stack() {
   wait_for_podman_scanner
   compose up --detach markweave
   wait_for_application
-  if [[ -n "$cutover_backend_image" ]]; then
-    compose up --detach frontend router
-    wait_for_router
-  fi
+  start_browser_tier
 }
 
 start_trusted_upstream_stack() {
@@ -463,10 +507,7 @@ start_trusted_upstream_stack() {
   fi
   compose up --detach markweave
   wait_for_application
-  if [[ -n "$cutover_backend_image" ]]; then
-    compose up --detach frontend router
-    wait_for_router
-  fi
+  start_browser_tier
 }
 
 cleanup() {

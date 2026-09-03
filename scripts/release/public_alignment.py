@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 PROJECT = "markweave"
 REPOSITORY = "Guillaume-Lombardo/simple-md-to-docx-converter"
 IMAGE_REPOSITORY = "ghcr.io/guillaume-lombardo/md-converter"
+FRONTEND_IMAGE_REPOSITORY = "ghcr.io/guillaume-lombardo/md-converter-web"
 REGISTRY_PATH = "guillaume-lombardo/md-converter"
 FRONTEND_REGISTRY_PATH = "guillaume-lombardo/md-converter-web"
 PYPI_URL = f"https://pypi.org/pypi/{PROJECT}/json"
@@ -46,6 +47,11 @@ IMAGE = re.compile(
     rf"{re.escape(IMAGE_REPOSITORY)}:(?P<tag>[0-9A-Za-z][0-9A-Za-z._-]*)"
     r"@(?P<digest>sha256:[0-9a-f]{64})"
 )
+FRONTEND_IMAGE = re.compile(
+    rf"{re.escape(FRONTEND_IMAGE_REPOSITORY)}:(?P<tag>[0-9A-Za-z][0-9A-Za-z._-]*)"
+    r"@(?P<digest>sha256:[0-9a-f]{64})"
+)
+PAIRED_RELEASE_FIRST_VERSION = Version("0.6.1")
 ZERO_SHA = "0" * 40
 MAX_JSON_BYTES = 1_048_576
 MAX_RECEIPT_BYTES = 16_384
@@ -57,6 +63,7 @@ HTTP_OK = 200
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
 OCI_SCHEMA_VERSION = 2
+CUTOVER_FRONTEND_ROLES = ("frontend", "router")
 
 
 class AlignmentError(ValueError):
@@ -206,6 +213,37 @@ def parse_compose_identity(document: str) -> ComposeIdentity:
     return ComposeIdentity(version=version, digest=match.group("digest"))
 
 
+def parse_frontend_compose_identity(document: str) -> ComposeIdentity:
+    """Parse the shared published frontend default from the cutover overlay."""
+    expression = re.compile(r"\$\{MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-(?P<image>[^}]+)\}")
+    try:
+        compose = yaml.load(document, Loader=yaml.BaseLoader)  # noqa: S506
+        services = compose["services"]
+        configured = [services[role]["image"] for role in CUTOVER_FRONTEND_ROLES]
+    except (yaml.YAMLError, KeyError, TypeError) as error:
+        raise AlignmentError(
+            "cutover overlay has no valid frontend and router image defaults"
+        ) from error
+    if any(not isinstance(image, str) for image in configured):
+        raise AlignmentError(
+            "cutover frontend services must share one trusted immutable public default"
+        )
+    matches = [expression.fullmatch(image) for image in configured]
+    images = [match.group("image") for match in matches if match is not None]
+    if (
+        len(images) != len(CUTOVER_FRONTEND_ROLES)
+        or images[0] != images[1]
+        or (match := FRONTEND_IMAGE.fullmatch(images[0])) is None
+    ):
+        raise AlignmentError(
+            "cutover frontend services must share one trusted immutable public default"
+        )
+    version = _canonical_final_version(
+        match.group("tag"), label="frontend Compose image tag"
+    )
+    return ComposeIdentity(version=version, digest=match.group("digest"))
+
+
 def _json_response(
     transport: Transport,
     url: str,
@@ -268,15 +306,22 @@ def _release_identity(transport: Transport, *, version: str) -> tuple[str, list[
 
 
 def _release_receipt(
-    transport: Transport, *, version: str, expected_digest: str
+    transport: Transport,
+    *,
+    version: str,
+    expected_digest: str,
+    role: str | None = None,
 ) -> None:
     source_sha, assets = _release_identity(transport, version=version)
     tag = f"v{version}"
-    receipt_url = f"{GITHUB_RELEASES}/{tag}/registry-publication.json"
+    receipt_name = (
+        f"{role}-registry-publication.json" if role else "registry-publication.json"
+    )
+    receipt_url = f"{GITHUB_RELEASES}/{tag}/{receipt_name}"
     receipts = [
         asset
         for asset in assets
-        if isinstance(asset, dict) and asset.get("name") == "registry-publication.json"
+        if isinstance(asset, dict) and asset.get("name") == receipt_name
     ]
     if len(receipts) != 1 or receipts[0].get("browser_download_url") != receipt_url:
         raise AlignmentError("GitHub Release has no unique trusted publication receipt")
@@ -450,9 +495,11 @@ def _require_ghcr_tag_publicly_absent(
         )
 
 
-def _ghcr_digest(transport: Transport, *, version: str) -> str:
+def _ghcr_digest(
+    transport: Transport, *, version: str, repository_path: str = REGISTRY_PATH
+) -> str:
     response = _ghcr_manifest_response(
-        transport, repository_path=REGISTRY_PATH, version=version
+        transport, repository_path=repository_path, version=version
     )
     headers = {key.lower(): value for key, value in response.headers.items()}
     digest = headers.get("docker-content-digest")
@@ -569,6 +616,7 @@ def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
     transport: Transport,
     base: BaseIdentity | None = None,
     registry_credentials: RegistryCredentials | None = None,
+    frontend: ComposeIdentity | None = None,
 ) -> str:
     """Verify normal alignment or the sole exact pending-release transition."""
     if event_name not in KNOWN_EVENTS:
@@ -604,9 +652,33 @@ def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
         if base is not None:
             raise AlignmentError("base version is only valid for a pending transition")
         state = "aligned"
-    _release_receipt(transport, version=compose.version, expected_digest=compose.digest)
+    paired_release = Version(compose.version) >= PAIRED_RELEASE_FIRST_VERSION
+    if paired_release and (frontend is None or frontend.version != compose.version):
+        raise AlignmentError("published backend and frontend Compose versions differ")
+    _release_receipt(
+        transport,
+        version=compose.version,
+        expected_digest=compose.digest,
+        role="backend" if paired_release else None,
+    )
     if _ghcr_digest(transport, version=compose.version) != compose.digest:
         raise AlignmentError("public GHCR digest and Compose digest differ")
+    if paired_release and frontend is not None:
+        _release_receipt(
+            transport,
+            version=frontend.version,
+            expected_digest=frontend.digest,
+            role="frontend",
+        )
+        if (
+            _ghcr_digest(
+                transport,
+                version=frontend.version,
+                repository_path=FRONTEND_REGISTRY_PATH,
+            )
+            != frontend.digest
+        ):
+            raise AlignmentError("public frontend GHCR and Compose digests differ")
     return state
 
 
@@ -629,6 +701,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
         compose = parse_compose_identity(
             (options.repository / "compose.yaml").read_text(encoding="utf-8")
         )
+        frontend = None
+        if Version(compose.version) >= PAIRED_RELEASE_FIRST_VERSION:
+            frontend = parse_frontend_compose_identity(
+                (options.repository / "compose.nextjs.yaml").read_text(encoding="utf-8")
+            )
         base = None
         if project_version != compose.version:
             if options.event_name not in PENDING_EVENTS:
@@ -653,6 +730,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             transport=UrlLibTransport(),
             base=base,
             registry_credentials=registry_credentials,
+            frontend=frontend,
         )
     except (AlignmentError, OSError) as error:
         print(f"public release alignment failed: {error}", file=sys.stderr)
