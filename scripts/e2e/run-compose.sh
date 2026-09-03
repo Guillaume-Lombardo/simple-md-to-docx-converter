@@ -32,6 +32,9 @@ unrelated_down_device=""
 port_blocker_pid=""
 password=""
 port="$(uv run python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+readonly public_endpoint="http://127.0.0.1:$port"
+readonly public_host="localhost:$port"
+readonly public_base_url="http://$public_host"
 succeeded=false
 
 quickstart=(
@@ -113,15 +116,27 @@ trap cleanup EXIT
 
 wait_for_services() {
   local application_id
+  local canonical_status
+  local rejected_status
   local scanner_id
   for _ in $(seq 1 240); do
+    canonical_status=""
     application_id="$(compose ps -q markweave)"
     scanner_id="$(compose ps -q clamav)"
     if [[ -n "$application_id" && -n "$scanner_id" ]] && \
       [[ "$(docker inspect --format '{{.State.Health.Status}}' "$application_id" 2>/dev/null)" == healthy ]] && \
-      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]] && \
-      curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" >/dev/null; then
-      return 0
+      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null)" == healthy ]]; then
+      canonical_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --header "Host: $public_host" "$public_endpoint/health/ready" || true)"
+      if [[ "$canonical_status" == 200 ]]; then
+        rejected_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          "$public_endpoint/health/ready" || true)"
+        [[ "$rejected_status" == 421 ]] || {
+          echo "The production router did not reject the non-canonical Host with 421." >&2
+          return 1
+        }
+        return 0
+      fi
     fi
     for container in "$application_id" "$scanner_id"; do
       if [[ -n "$container" && "$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null)" == exited ]]; then
@@ -188,7 +203,7 @@ write_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --template "$template_file" \
       --state-file "$state_file" \
@@ -200,7 +215,7 @@ verify_checkpoint() {
   MARKWEAVE_E2E_ADMIN_USERNAME=admin \
   MARKWEAVE_E2E_ADMIN_PASSWORD="$password" \
     uv run python -m tests.e2e.service_workflow verify-checkpoint \
-      --base-url "http://127.0.0.1:$port" \
+      --base-url "$public_base_url" \
       --profile standalone \
       --state-file "$state_file" \
       --artifact-dir "$artifact_directory"

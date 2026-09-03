@@ -120,6 +120,21 @@ def test_quickstart_uses_immutable_real_services_and_persistent_data() -> None:
     assert set(scanner["networks"]) == {"scanner", "signature-updates"}
 
 
+@pytest.mark.parametrize("runner", [RUNNER, SIMPLE_RUNNER])
+def test_compose_runners_probe_the_canonical_host_and_retain_421_policy(
+    runner: Path,
+) -> None:
+    script = runner.read_text(encoding="utf-8")
+
+    assert 'readonly public_endpoint="http://127.0.0.1:$port"' in script
+    assert 'readonly public_host="localhost:$port"' in script
+    assert 'readonly public_base_url="http://$public_host"' in script
+    assert '--header "Host: $public_host" "$public_endpoint/health/ready"' in script
+    assert '[[ "$canonical_status" == 200 ]]' in script
+    assert '[[ "$rejected_status" == 421 ]]' in script
+    assert '--base-url "$public_base_url"' in script
+
+
 def test_application_has_disk_workspace_and_memory_headroom() -> None:
     application = _compose()["services"]["markweave"]
     environment = application["environment"]
