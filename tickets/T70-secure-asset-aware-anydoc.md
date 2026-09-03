@@ -23,13 +23,13 @@ for reverse conversion.
   after the existing malware-scanning boundary.
 * Implement one disposable process/container per conversion attempt, placed in a dedicated stable
   kernel isolation unit or cgroup. The anydoc binding runs in-process only inside that unit, with
-  bounded threads. T71 configures CPU, memory, PID/descendant, and bounded workspace/ephemeral-
-  storage budgets enforced at the kernel boundary. The external supervisor owns heartbeat and the attempt token, passes
-  only bounded local input/output, gives the child no network or persistence credentials, and is
-  the only publisher. Cancellation, deadline, lease loss, or resource failure hard-terminates the
-  whole stable unit rather than a PID; the supervisor proves the unit empty and terminated before
-  recovery or another attempt can start. PID exit alone is insufficient. Normal completion still revalidates the
-  active lease/token before publication.
+  bounded threads. T71 configures CPU, memory, PID/descendant, and bounded
+  workspace/ephemeral-storage budgets enforced at the kernel boundary. The external supervisor owns
+  heartbeat and the attempt token, passes only bounded local input/output, gives the child no
+  network or persistence credentials, and is the only publisher. Cancellation, deadline, lease
+  loss, or resource failure hard-terminates the whole stable unit rather than a PID; the supervisor
+  proves the unit empty and terminated before recovery or another attempt can start. PID exit alone
+  is insufficient. Normal completion still revalidates the active lease/token before publication.
 * Keep the production path CPU-only. It must not load GPU/accelerator or ML runtimes or invoke a
   browser, Pandoc, LibreOffice, or another document engine. The approved per-attempt anydoc child is
   an isolation boundary, not a second document engine.

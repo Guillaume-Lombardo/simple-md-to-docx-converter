@@ -175,18 +175,54 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
 @pytest.mark.unit
 def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
     root = SPIKE.parent.parent
-    product_spec = (root / "docs/product-specification.md").read_text()
-    t70 = (root / "tickets/T70-secure-asset-aware-anydoc.md").read_text()
-    for document in (product_spec, t70):
-        assert "disposable" in document
-        assert "kernel isolation unit" in document
-        assert "termination" in document
-        assert "bounded internal" in document
-        assert "second parser" in document
-        assert "asset-aware hook" in document
-    assert "keep heartbeat and publication in the supervisor" in product_spec
-    assert "no child publication capability" in t70
-    assert "broad fork is not authorized" in t70
+    product_spec = " ".join(
+        (root / "docs/product-specification.md").read_text().split()
+    )
+    t70 = " ".join(
+        (root / "tickets/T70-secure-asset-aware-anydoc.md").read_text().split()
+    )
+    expected_spec_decisions = (
+        "Run each anydoc native call in-process only inside one disposable, separately "
+        "supervised process or container placed in a dedicated stable kernel isolation "
+        "unit/cgroup for one attempt; enforce configurable CPU, memory, PID/descendant, "
+        "and workspace/ephemeral-storage budgets at that boundary, hard-kill the whole "
+        "unit, prove it empty and terminated before recovery, and keep heartbeat and "
+        "publication in the supervisor",
+        "Use one narrowly bounded maintained internal adapter around the pinned anydoc "
+        "document model and renderer behavior; prohibit a second parser or broad fork, "
+        "require security/parity/compatibility/SBOM/license ownership, and remove it when "
+        "upstream provides a supported asset-aware hook",
+    )
+    for decision in expected_spec_decisions:
+        assert decision in product_spec
+
+    expected_t70_requirements = (
+        "Implement one disposable process/container per conversion attempt, placed in a "
+        "dedicated stable kernel isolation unit or cgroup. The anydoc binding runs "
+        "in-process only inside that unit, with bounded threads. T71 configures CPU, "
+        "memory, PID/descendant, and bounded workspace/ephemeral-storage budgets enforced "
+        "at the kernel boundary. The external supervisor owns heartbeat and the attempt "
+        "token, passes only bounded local input/output, gives the child no network or "
+        "persistence credentials, and is the only publisher. Cancellation, deadline, "
+        "lease loss, or resource failure hard-terminates the whole stable unit rather "
+        "than a PID; the supervisor proves the unit empty and terminated before recovery "
+        "or another attempt can start. PID exit alone is insufficient. Normal completion "
+        "still revalidates the active lease/token before publication.",
+        "Implement one narrowly bounded maintained internal compatibility adapter around "
+        "the pinned anydoc `Document` model and renderer behavior. Consume the single "
+        "parsed document; never reparse source bytes or add a second parser. Inventory "
+        "every private symbol and minimally mirrored upstream renderer behavior in one "
+        "fail-closed module boundary, including applicable license notices, and reject "
+        "unknown anydoc versions or document-model variants.",
+        "Require security review, asset-free serializer parity against the pinned upstream "
+        "renderer, source-position asset-link goldens, and compatibility tests for every "
+        "anydoc update. Include the adapter and exact upstream surface in dependency, "
+        "SBOM, license, and vulnerability evidence. T70 owns maintenance and removes the "
+        "adapter once upstream supplies a supported asset-aware hook; a broad fork is not "
+        "authorized.",
+    )
+    for requirement in expected_t70_requirements:
+        assert requirement in t70
 
 
 @pytest.mark.unit
