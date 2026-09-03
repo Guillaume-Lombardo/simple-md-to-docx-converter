@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,6 +50,8 @@ ZERO_SHA = "0" * 40
 MAX_JSON_BYTES = 1_048_576
 MAX_RECEIPT_BYTES = 16_384
 MAX_TOKEN_BYTES = 16_384
+MAX_REGISTRY_ERROR_BYTES = 4_096
+MAX_REGISTRY_USERNAME_BYTES = 256
 HTTP_TIMEOUT_SECONDS = 10.0
 HTTP_OK = 200
 HTTP_FORBIDDEN = 403
@@ -147,6 +151,14 @@ class BaseIdentity:
 
     version: str
     source_sha: str
+
+
+@dataclass(frozen=True)
+class RegistryCredentials:
+    """Ephemeral GitHub Actions credentials for one read-only GHCR fallback."""
+
+    username: str
+    token: str
 
 
 def _canonical_final_version(value: object, *, label: str) -> str:
@@ -293,15 +305,59 @@ def _release_receipt(
 
 
 def _ghcr_manifest_response(
-    transport: Transport, *, repository_path: str, version: str
+    transport: Transport,
+    *,
+    repository_path: str,
+    version: str,
+    credentials: RegistryCredentials | None = None,
 ) -> HttpResponse:
     token_url = (
         f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository_path}:pull"
     )
-    token_document = _json_response(transport, token_url)
-    token = token_document.get("token", token_document.get("access_token"))
+    headers = {"Accept": "application/json"}
+    if credentials is not None:
+        if (
+            not credentials.username
+            or not credentials.token
+            or len(credentials.username) > MAX_REGISTRY_USERNAME_BYTES
+            or len(credentials.token) > MAX_TOKEN_BYTES
+            or any(
+                character in credentials.username or character in credentials.token
+                for character in "\r\n"
+            )
+        ):
+            raise AlignmentError("GHCR fallback credentials are invalid")
+        basic = base64.b64encode(
+            f"{credentials.username}:{credentials.token}".encode()
+        ).decode("ascii")
+        headers["Authorization"] = f"Basic {basic}"
+    token_response = transport.request(token_url, headers=headers)
+    token = _ghcr_pull_token(
+        token_response, label="GHCR returned an invalid pull token response"
+    )
+    return _ghcr_manifest_with_token(
+        transport, repository_path=repository_path, version=version, token=token
+    )
+
+
+def _ghcr_pull_token(response: HttpResponse, *, label: str) -> str:
+    if response.status != HTTP_OK or len(response.body) > MAX_TOKEN_BYTES:
+        raise AlignmentError(label)
+    try:
+        document = json.loads(response.body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AlignmentError(label) from error
+    if not isinstance(document, dict):
+        raise AlignmentError(label)
+    token = document.get("token", document.get("access_token"))
     if not isinstance(token, str) or not token or len(token) > MAX_TOKEN_BYTES:
-        raise AlignmentError("GHCR returned no bounded anonymous pull token")
+        raise AlignmentError(label)
+    return token
+
+
+def _ghcr_manifest_with_token(
+    transport: Transport, *, repository_path: str, version: str, token: str
+) -> HttpResponse:
     return transport.request(
         f"https://ghcr.io/v2/{repository_path}/manifests/{version}",
         headers={
@@ -314,51 +370,82 @@ def _ghcr_manifest_response(
     )
 
 
-def _ghcr_tag_is_publicly_absent(
-    transport: Transport, *, repository_path: str, version: str
-) -> bool:
+def _require_exact_anonymous_denial(response: HttpResponse) -> None:
+    if response.status != HTTP_FORBIDDEN or len(response.body) > (
+        MAX_REGISTRY_ERROR_BYTES
+    ):
+        raise AlignmentError("GHCR anonymous denial response is invalid")
+    try:
+        denial = json.loads(response.body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AlignmentError("GHCR anonymous denial response is invalid") from error
+    if denial != {
+        "errors": [
+            {
+                "code": "DENIED",
+                "message": "requested access to the resource is denied",
+            }
+        ]
+    }:
+        raise AlignmentError("GHCR anonymous denial response is invalid")
+
+
+def _require_ghcr_tag_publicly_absent(
+    transport: Transport,
+    *,
+    repository_path: str,
+    version: str,
+    credentials: RegistryCredentials | None,
+) -> None:
     token_url = (
         f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository_path}:pull"
     )
-    token_response = transport.request(
-        token_url, headers={"Accept": "application/json"}
-    )
-    if token_response.status == HTTP_FORBIDDEN:
-        try:
-            denial = json.loads(token_response.body)
-        except (UnicodeDecodeError, json.JSONDecodeError) as _error:
-            return False
-        errors = denial.get("errors") if isinstance(denial, dict) else None
-        return (
-            isinstance(errors, list)
-            and len(errors) == 1
-            and isinstance(errors[0], dict)
-            and errors[0].get("code") == "DENIED"
+    anonymous = transport.request(token_url, headers={"Accept": "application/json"})
+    if anonymous.status == HTTP_OK:
+        token = _ghcr_pull_token(
+            anonymous, label="GHCR returned an invalid anonymous token response"
         )
-    if token_response.status != HTTP_OK or len(token_response.body) > MAX_JSON_BYTES:
-        raise AlignmentError("GHCR returned an invalid anonymous token response")
+        response = _ghcr_manifest_with_token(
+            transport, repository_path=repository_path, version=version, token=token
+        )
+    else:
+        _require_exact_anonymous_denial(anonymous)
+        if credentials is None:
+            raise AlignmentError("GHCR read-only fallback credentials are unavailable")
+        response = _ghcr_manifest_response(
+            transport,
+            repository_path=repository_path,
+            version=version,
+            credentials=credentials,
+        )
+    if (
+        response.status != HTTP_NOT_FOUND
+        or len(response.body) > MAX_REGISTRY_ERROR_BYTES
+    ):
+        raise AlignmentError(
+            f"GHCR tag is not proven publicly absent: {repository_path}:{version}"
+        )
     try:
-        token_document = json.loads(token_response.body)
+        document = json.loads(response.body)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise AlignmentError(
-            "GHCR returned an invalid anonymous token response"
+            f"GHCR absence response is invalid: {repository_path}:{version}"
         ) from error
-    if not isinstance(token_document, dict):
-        raise AlignmentError("GHCR returned an invalid anonymous token response")
-    token = token_document.get("token", token_document.get("access_token"))
-    if not isinstance(token, str) or not token or len(token) > MAX_TOKEN_BYTES:
-        raise AlignmentError("GHCR returned no bounded anonymous pull token")
-    response = transport.request(
-        f"https://ghcr.io/v2/{repository_path}/manifests/{version}",
-        headers={
-            "Accept": (
-                "application/vnd.oci.image.manifest.v1+json, "
-                "application/vnd.docker.distribution.manifest.v2+json"
-            ),
-            "Authorization": f"Bearer {token}",
-        },
-    )
-    return response.status == HTTP_NOT_FOUND
+    errors = document.get("errors") if isinstance(document, dict) else None
+    if (
+        set(document) != {"errors"}
+        or not isinstance(errors, list)
+        or len(errors) != 1
+        or not isinstance(errors[0], dict)
+        or errors[0]
+        != {
+            "code": "MANIFEST_UNKNOWN",
+            "message": "manifest unknown",
+        }
+    ):
+        raise AlignmentError(
+            f"GHCR absence response is invalid: {repository_path}:{version}"
+        )
 
 
 def _ghcr_digest(transport: Transport, *, version: str) -> str:
@@ -391,15 +478,16 @@ def _require_skipped_container_release(
     transport: Transport,
     *,
     project_version: str,
-    compose_version: str,
+    compose: ComposeIdentity,
     base: BaseIdentity | None,
+    registry_credentials: RegistryCredentials | None,
 ) -> None:
     expected = (
         SKIPPED_CONTAINER_CONTINUATION_VERSION,
         SKIPPED_CONTAINER_DEPLOYMENT_VERSION,
         SKIPPED_CONTAINER_PUBLIC_VERSION,
     )
-    if (project_version, compose_version, base.version if base else None) != expected:
+    if (project_version, compose.version, base.version if base else None) != expected:
         raise AlignmentError(
             "repository state is not an exact pending version transition"
         )
@@ -407,6 +495,9 @@ def _require_skipped_container_release(
         raise AlignmentError(
             "skipped-container continuation requires its release source"
         )
+    _release_receipt(transport, version=compose.version, expected_digest=compose.digest)
+    if _ghcr_digest(transport, version=compose.version) != compose.digest:
+        raise AlignmentError("public GHCR digest and Compose digest differ")
     source_sha, assets = _release_identity(
         transport, version=SKIPPED_CONTAINER_PUBLIC_VERSION
     )
@@ -422,12 +513,12 @@ def _require_skipped_container_release(
             "skipped-container release already has a publication receipt"
         )
     for repository_path in (REGISTRY_PATH, FRONTEND_REGISTRY_PATH):
-        if not _ghcr_tag_is_publicly_absent(
+        _require_ghcr_tag_publicly_absent(
             transport,
             repository_path=repository_path,
             version=SKIPPED_CONTAINER_PUBLIC_VERSION,
-        ):
-            raise AlignmentError("skipped-container image tag is not publicly absent")
+            credentials=registry_credentials,
+        )
 
 
 def _git_output(arguments: Sequence[str]) -> bytes:
@@ -468,13 +559,14 @@ def _base_identity(
     )
 
 
-def check_alignment(
+def check_alignment(  # noqa: PLR0913 - explicit injectable release surfaces
     *,
     project_version: str,
     compose: ComposeIdentity,
     event_name: str,
     transport: Transport,
     base: BaseIdentity | None = None,
+    registry_credentials: RegistryCredentials | None = None,
 ) -> str:
     """Verify normal alignment or the sole exact pending-release transition."""
     if event_name not in KNOWN_EVENTS:
@@ -489,8 +581,9 @@ def check_alignment(
         _require_skipped_container_release(
             transport,
             project_version=project_version,
-            compose_version=compose.version,
+            compose=compose,
             base=base,
+            registry_credentials=registry_credentials,
         )
         return "pending-skipped-container"
     if project_version != compose.version:
@@ -544,12 +637,20 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 head=options.head,
                 current_version=project_version,
             )
+        username = os.environ.get("GHCR_USERNAME")
+        token = os.environ.get("GHCR_TOKEN")
+        registry_credentials = None
+        if username is not None or token is not None:
+            if username is None or token is None:
+                raise AlignmentError("GHCR fallback credentials are incomplete")
+            registry_credentials = RegistryCredentials(username=username, token=token)
         state = check_alignment(
             project_version=project_version,
             compose=compose,
             event_name=options.event_name,
             transport=UrlLibTransport(),
             base=base,
+            registry_credentials=registry_credentials,
         )
     except (AlignmentError, OSError) as error:
         print(f"public release alignment failed: {error}", file=sys.stderr)

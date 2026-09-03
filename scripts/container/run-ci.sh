@@ -4,6 +4,7 @@ set -euo pipefail
 readonly base_digest=sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
 readonly base_image="registry.access.redhat.com/ubi9/python-314@$base_digest"
 readonly final_image=localhost/md-converter:t20-ci
+readonly frontend_image=localhost/md-converter-web:t64-ci
 readonly evidence_directory=artifacts/container-diagnostics
 
 mkdir -p "$evidence_directory"
@@ -24,6 +25,18 @@ test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
 podman pull --quiet "$base_image"
 test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
 bash scripts/container/build.sh "$final_image"
+source_date_epoch="$(git show -s --format=%ct HEAD)"
+readonly source_date_epoch
+podman build --format oci --timestamp "$source_date_epoch" \
+  --tag "$frontend_image" --file web/Containerfile web
+frontend_image_id="$(podman image inspect "$frontend_image" --format '{{.Id}}')"
+readonly frontend_image_id
+[[ "$frontend_image_id" =~ ^[0-9a-f]{64}$ ]]
+readonly frontend_archive="$evidence_directory/frontend-image.oci.tar"
+podman save --format oci-archive --output "$frontend_archive" "$frontend_image_id"
+uv run python -m scripts.container.verify_oci_export \
+  --archive "$frontend_archive" --expected-image-id "sha256:$frontend_image_id" \
+  | tee "$evidence_directory/frontend-oci-identity.txt"
 bash scripts/container/smoke.sh "$final_image"
 bash tests/e2e/runtime-operations-final-image.sh "$final_image"
 bash scripts/container/api-smoke.sh "$final_image"

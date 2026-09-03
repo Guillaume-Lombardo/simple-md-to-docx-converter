@@ -257,6 +257,39 @@ def test_ci_uses_only_github_hosted_runners() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "      packages: read",
+            "      packages: write",
+            "light job permissions must be exactly contents: read and packages: read",
+        ),
+        (
+            "          GHCR_TOKEN: ${{ github.token }}",
+            "          GHCR_TOKEN: attacker-controlled",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_USERNAME: ${{ github.actor }}",
+            "          GHCR_USERNAME: hard-coded",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+    ],
+)
+def test_ci_limits_public_alignment_registry_fallback_credentials(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    errors = validate_workflow_text(
+        workflow.replace(needle, replacement, 1), workflow_name="ci.yml"
+    )
+
+    assert message in errors
+
+
+@pytest.mark.unit
 def test_document_engine_job_installs_checksum_locked_document_engines() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "if: ${{ matrix.domain == 'document-engines' }}" in workflow

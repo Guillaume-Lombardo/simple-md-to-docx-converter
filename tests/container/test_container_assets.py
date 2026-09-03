@@ -18,6 +18,7 @@ from scripts.container import (
     api_workflow_smoke,
     integrity,
     summarize_supply_chain,
+    verify_oci_export,
     verify_supply_chain,
 )
 from tests.e2e.recovery_cli_setup import _listed_object_count
@@ -496,6 +497,7 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
         "vulnerabilities.json",
         "image-metadata.json",
         "container-diagnostics/ci-status.txt",
+        "container-diagnostics/frontend-oci-identity.txt",
         "container-diagnostics/scanner-readiness.txt",
     ):
         assert artifact in upload["with"]["path"]
@@ -532,6 +534,64 @@ def test_every_frontend_image_build_command_requests_oci_format() -> None:
     for source in sources:
         assert "podman build --format oci" in source
         assert "podman build --format docker" not in source
+
+
+def test_container_ci_exports_and_verifies_real_frontend_oci_identity() -> None:
+    script = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+    build = 'podman build --format oci --timestamp "$source_date_epoch"'
+    resolve = "podman image inspect \"$frontend_image\" --format '{{.Id}}'"
+    export = (
+        'podman save --format oci-archive --output "$frontend_archive" '
+        '"$frontend_image_id"'
+    )
+    verify = "uv run python -m scripts.container.verify_oci_export"
+
+    assert script.count(build) == 1
+    assert script.count(resolve) == 1
+    assert script.count(export) == 1
+    assert script.count(verify) == 1
+    assert script.index(build) < script.index(resolve) < script.index(export)
+    assert script.index(export) < script.index(verify)
+    assert '| tee "$evidence_directory/frontend-oci-identity.txt"' in script
+
+
+def test_oci_export_verifier_accepts_only_the_expected_config_digest(
+    mocker, tmp_path: Path, capsys
+) -> None:
+    archive = tmp_path / "frontend.oci.tar"
+    expected = f"sha256:{'a' * 64}"
+    inspected = mocker.patch(
+        "scripts.container.verify_oci_export.oci_identity",
+        return_value=(f"sha256:{'b' * 64}", expected),
+    )
+
+    assert (
+        verify_oci_export.main(
+            ["--archive", str(archive), "--expected-image-id", expected]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == f"verified_oci_config_digest={expected}\n"
+    inspected.assert_called_once_with(archive)
+
+    inspected.return_value = (f"sha256:{'b' * 64}", f"sha256:{'c' * 64}")
+    assert (
+        verify_oci_export.main(
+            ["--archive", str(archive), "--expected-image-id", expected]
+        )
+        == 1
+    )
+    assert "does not match" in capsys.readouterr().out
+
+
+def test_oci_export_verifier_rejects_invalid_expected_identity(capsys) -> None:
+    assert (
+        verify_oci_export.main(
+            ["--archive", "unused.oci.tar", "--expected-image-id", "latest"]
+        )
+        == 1
+    )
+    assert "not a sha256 digest" in capsys.readouterr().out
 
 
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(

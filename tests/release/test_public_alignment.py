@@ -16,12 +16,14 @@ from scripts.release.public_alignment import (
     BaseIdentity,
     ComposeIdentity,
     HttpResponse,
+    RegistryCredentials,
     check_alignment,
     parse_compose_identity,
     parse_project_version,
 )
 
 SOURCE_SHA = "a" * 40
+REGISTRY_CREDENTIALS = RegistryCredentials("github-actions", "read-only-token")
 REGISTRY_MANIFEST = b'{"schemaVersion":2,"config":{}}'
 REGISTRY_DIGEST = f"sha256:{hashlib.sha256(REGISTRY_MANIFEST).hexdigest()}"
 
@@ -30,7 +32,7 @@ REGISTRY_DIGEST = f"sha256:{hashlib.sha256(REGISTRY_MANIFEST).hexdigest()}"
 class FakeTransport:
     """Return exact fixtures while recording the fixed endpoint contract."""
 
-    responses: dict[str, HttpResponse]
+    responses: dict[str, HttpResponse | list[HttpResponse]]
 
     def __post_init__(self) -> None:
         self.requests: list[tuple[str, dict[str, str]]] = []
@@ -38,7 +40,12 @@ class FakeTransport:
     def request(self, url: str, *, headers) -> HttpResponse:
         self.requests.append((url, dict(headers)))
         try:
-            return self.responses[url]
+            response = self.responses[url]
+            if isinstance(response, list):
+                if not response:
+                    raise AssertionError(f"exhausted responses for URL: {url}")
+                return response.pop(0)
+            return response
         except KeyError as error:
             raise AssertionError(f"unexpected URL: {url}") from error
 
@@ -99,7 +106,8 @@ def _skipped_container_transport() -> FakeTransport:
         "https://ghcr.io/token?service=ghcr.io&scope=repository:"
         f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
     )
-    return FakeTransport(
+    transport = _public_transport(version="0.5.2")
+    transport.responses.update(
         {
             public_alignment.PYPI_URL: _json_response({"info": {"version": version}}),
             f"{public_alignment.GITHUB_API}/releases/tags/{tag}": _json_response(
@@ -117,15 +125,26 @@ def _skipped_container_transport() -> FakeTransport:
             ),
             backend_token: _json_response({"token": "backend-pull-token"}),
             f"https://ghcr.io/v2/{public_alignment.REGISTRY_PATH}/manifests/{version}": HttpResponse(
-                404, {}, b'{"errors":[{"code":"MANIFEST_UNKNOWN"}]}'
-            ),
-            frontend_token: HttpResponse(
-                403,
+                404,
                 {"content-type": "application/json"},
-                b'{"errors":[{"code":"DENIED"}]}',
+                b'{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
+            ),
+            frontend_token: [
+                HttpResponse(
+                    403,
+                    {"content-type": "application/json"},
+                    b'{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}',
+                ),
+                _json_response({"token": "frontend-pull-token"}),
+            ],
+            f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/{version}": HttpResponse(
+                404,
+                {"content-type": "application/json"},
+                b'{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
             ),
         }
     )
+    return transport
 
 
 @pytest.mark.unit
@@ -177,11 +196,17 @@ def test_accepts_exact_061_transition_after_skipped_060_containers(
         event_name=event_name,
         transport=transport,
         base=BaseIdentity("0.6.0", SOURCE_SHA),
+        registry_credentials=REGISTRY_CREDENTIALS,
     )
 
     assert state == "pending-skipped-container"
     assert [url for url, _headers in transport.requests] == [
         public_alignment.PYPI_URL,
+        f"{public_alignment.GITHUB_API}/releases/tags/v0.5.2",
+        f"{public_alignment.GITHUB_API}/git/ref/tags/v0.5.2",
+        f"{public_alignment.GITHUB_RELEASES}/v0.5.2/registry-publication.json",
+        public_alignment.GHCR_TOKEN_URL,
+        f"https://ghcr.io/v2/{public_alignment.REGISTRY_PATH}/manifests/0.5.2",
         f"{public_alignment.GITHUB_API}/releases/tags/v0.6.0",
         f"{public_alignment.GITHUB_API}/git/ref/tags/v0.6.0",
         public_alignment.GHCR_TOKEN_URL,
@@ -190,16 +215,49 @@ def test_accepts_exact_061_transition_after_skipped_060_containers(
             "https://ghcr.io/token?service=ghcr.io&scope=repository:"
             f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
         ),
+        (
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:"
+            f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
+        ),
+        f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.0",
     ]
+    frontend_token_requests = [
+        headers
+        for url, headers in transport.requests
+        if url
+        == (
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:"
+            f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
+        )
+    ]
+    assert "Authorization" not in frontend_token_requests[0]
+    assert frontend_token_requests[1]["Authorization"].startswith("Basic ")
+
+
+@pytest.mark.unit
+def test_skipped_container_transition_still_verifies_deployed_exact_bytes() -> None:
+    with pytest.raises(AlignmentError, match="receipt does not match"):
+        check_alignment(
+            project_version="0.6.1",
+            compose=ComposeIdentity("0.5.2", f"sha256:{'c' * 64}"),
+            event_name="pull_request",
+            transport=_skipped_container_transport(),
+            base=BaseIdentity("0.6.0", SOURCE_SHA),
+            registry_credentials=REGISTRY_CREDENTIALS,
+        )
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        ("backend-present", "not publicly absent"),
-        ("frontend-present", "not publicly absent"),
-        ("frontend-invalid-denial", "not publicly absent"),
+        ("backend-present", "not proven publicly absent"),
+        ("frontend-present", "not proven publicly absent"),
+        ("backend-auth-token-denied", "invalid pull token response"),
+        ("frontend-auth-token-denied", "invalid pull token response"),
+        ("backend-malformed-404", "absence response is invalid"),
+        ("frontend-unrelated-404", "absence response is invalid"),
+        ("frontend-oversized-404", "not proven publicly absent"),
         ("receipt-present", "already has a publication receipt"),
         ("wrong-source", "does not match the exact base source"),
     ],
@@ -216,25 +274,48 @@ def test_skipped_container_transition_rejects_any_inconsistent_public_surface(
             f"https://ghcr.io/v2/{public_alignment.REGISTRY_PATH}/manifests/0.6.0"
         ] = manifest
     elif mutation == "frontend-present":
-        frontend_token = (
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:"
-            f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
-        )
-        transport.responses[frontend_token] = _json_response(
-            {"token": "frontend-pull-token"}
-        )
         transport.responses[
             f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.0"
         ] = manifest
-    elif mutation == "frontend-invalid-denial":
-        frontend_token = (
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:"
-            f"{public_alignment.FRONTEND_REGISTRY_PATH}:pull"
+    elif mutation in {"backend-auth-token-denied", "frontend-auth-token-denied"}:
+        repository_path = (
+            public_alignment.REGISTRY_PATH
+            if mutation == "backend-auth-token-denied"
+            else public_alignment.FRONTEND_REGISTRY_PATH
         )
-        transport.responses[frontend_token] = HttpResponse(403, {}, b"not-json")
+        token_url = (
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:"
+            f"{repository_path}:pull"
+        )
+        transport.responses[token_url] = [
+            HttpResponse(
+                403,
+                {"content-type": "application/json"},
+                b'{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}',
+            ),
+            HttpResponse(403, {}, b""),
+        ]
+    elif mutation == "backend-malformed-404":
+        transport.responses[
+            f"https://ghcr.io/v2/{public_alignment.REGISTRY_PATH}/manifests/0.6.0"
+        ] = HttpResponse(404, {}, b"not-json")
+    elif mutation == "frontend-unrelated-404":
+        transport.responses[
+            f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.0"
+        ] = HttpResponse(
+            404,
+            {},
+            b'{"errors":[{"code":"NAME_UNKNOWN","message":"repository name not known to registry"}]}',
+        )
+    elif mutation == "frontend-oversized-404":
+        transport.responses[
+            f"https://ghcr.io/v2/{public_alignment.FRONTEND_REGISTRY_PATH}/manifests/0.6.0"
+        ] = HttpResponse(404, {}, b"x" * 4_097)
     elif mutation == "receipt-present":
         release_url = f"{public_alignment.GITHUB_API}/releases/tags/v0.6.0"
-        release = json.loads(transport.responses[release_url].body)
+        release_response = transport.responses[release_url]
+        assert isinstance(release_response, HttpResponse)
+        release = json.loads(release_response.body)
         release["assets"] = [{"name": "registry-publication.json"}]
         transport.responses[release_url] = _json_response(release)
 
@@ -247,6 +328,19 @@ def test_skipped_container_transition_rejects_any_inconsistent_public_surface(
             base=BaseIdentity(
                 "0.6.0", "b" * 40 if mutation == "wrong-source" else SOURCE_SHA
             ),
+            registry_credentials=REGISTRY_CREDENTIALS,
+        )
+
+
+@pytest.mark.unit
+def test_skipped_container_transition_rejects_missing_fallback_credentials() -> None:
+    with pytest.raises(AlignmentError, match="credentials are unavailable"):
+        check_alignment(
+            project_version="0.6.1",
+            compose=ComposeIdentity("0.5.2", REGISTRY_DIGEST),
+            event_name="pull_request",
+            transport=_skipped_container_transport(),
+            base=BaseIdentity("0.6.0", SOURCE_SHA),
         )
 
 
@@ -269,6 +363,7 @@ def test_skipped_container_transition_is_limited_to_exact_versions(
             event_name="pull_request",
             transport=_skipped_container_transport(),
             base=BaseIdentity(base_version, SOURCE_SHA),
+            registry_credentials=REGISTRY_CREDENTIALS,
         )
 
 
@@ -432,7 +527,7 @@ def test_main_reads_exact_base_and_head_only_for_pending_transition(
 
 @pytest.mark.unit
 def test_main_binds_skipped_container_exception_to_the_exact_base_sha(
-    tmp_path: Path, mocker, capsys
+    tmp_path: Path, mocker, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nversion = "0.6.1"\n', encoding="utf-8"
@@ -452,6 +547,8 @@ def test_main_binds_skipped_container_exception_to_the_exact_base_sha(
         "scripts.release.public_alignment.UrlLibTransport",
         return_value=_skipped_container_transport(),
     )
+    monkeypatch.setenv("GHCR_USERNAME", REGISTRY_CREDENTIALS.username)
+    monkeypatch.setenv("GHCR_TOKEN", REGISTRY_CREDENTIALS.token)
 
     result = public_alignment.main(
         [

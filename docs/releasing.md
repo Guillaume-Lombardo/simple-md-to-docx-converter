@@ -28,9 +28,14 @@ has been adopted.
 
 The sole historical skipped-container exception covers the failed `0.6.0` cutover publication:
 PyPI and the exact GitHub tag/Release exist at the reviewed `0.6.0` base source, Compose remains on
-the verified `0.5.2` image, no container staging artifact was created, and both public backend and
-frontend `0.6.0` tags must be proven publicly absent. Only the normal protected `0.6.1` pending transition may pass
-that state. It performs a new ordinary paired release; it does not rebuild or recover `0.6.0`.
+the `0.5.2` digest verified against its publication receipt and anonymous GHCR manifest bytes, and
+no container staging artifact was created. Both backend and frontend repositories must return the
+exact bounded structured `MANIFEST_UNKNOWN` response for the requested `0.6.0` tag. The check uses
+anonymous pull first. Only an exact anonymous `DENIED` response may fall back to the ephemeral
+GitHub Actions identity with `packages: read`; a missing credential, authenticated denial, existing
+private tag, malformed, oversized, or unrelated response does not prove absence. Only the normal
+protected `0.6.1` pending transition may pass that state. It performs a new ordinary paired release;
+it does not rebuild or recover `0.6.0`.
 
 ## GitHub and PyPI trust configuration
 

@@ -74,6 +74,9 @@ jobs:
     name: CI / light
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,6 +111,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USERNAME: ${{ github.actor }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: >-
           uv run python -m scripts.release.public_alignment
@@ -405,6 +410,7 @@ jobs:
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
             artifacts/container-diagnostics/ci-status.txt
+            artifacts/container-diagnostics/frontend-oci-identity.txt
             artifacts/container-diagnostics/scanner-readiness.txt
           if-no-files-found: error
           retention-days: 30
