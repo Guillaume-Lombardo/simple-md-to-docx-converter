@@ -2,7 +2,7 @@
 ticket: T68
 linear_id: G1L-536
 linear_url: https://linear.app/g1lom/issue/G1L-536/t68-restore-podman-insecure-quickstart-host-routing
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -46,6 +46,7 @@ Restore host access to the published Next.js router in the rootless Podman trust
 * 2026-09-03: Independent review found that Podman versions may canonicalize container `ImageName` by dropping the tag. The E2E now separately proves the rendered tag-plus-digest references and compares each running container's inspected image digest. The 127 targeted tests and the complete real rootless Podman insecure E2E passed again after this correction.
 * 2026-09-03: A second review found that `podman port` reports the shared namespace owner's mapping even when queried with the router container. The check moved to the router's own `HostConfig.PortBindings`, while retaining the rendered-Compose no-port assertion and proving the effective loopback mapping on the namespace owner. A subsequent xtrace exposed the provider-specific empty serialization addressed below.
 * 2026-09-03: A third review proved the earlier port-binding check was still provider-specific (`{}` versus `null`) and that earlier E2E success reporting had not preserved the failing exit status. A tested helper now accepts only those two empty serializations and rejects non-empty mappings; the page assertion uses the real immutable title. An explicit run completed container removal and retention checks with `T68_REAL_E2E_EXIT_CODE=0` and `T68_REAL_E2E_COMPLETED=true`; 130 focused tests passed.
+* 2026-09-03: CodeRabbit's final finding added bounded connection and total timeouts to all three HTTP probes. Ready PR #182 passed all 14 hosted checks in run `33762091996`, CodeRabbit with no blocking threads, and independent review before squash merge as `632450d8add653526fa52892fb66a74b3d3dc871`. Exact-main run `33764590460` then passed all 14 jobs, including Compose, both final-image E2E suites, container, document engines, frontend, functional, storage, and the gate; Linear G1L-536 and this mirror are therefore Done.
 
 ## Synchronization
 
