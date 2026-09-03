@@ -382,6 +382,7 @@ test("TLS header overflow returns a bounded secured 431", async () => {
   const directory = mkdtempSync(join(tmpdir(), "markweave-router-overflow-"));
   const key = join(directory, "key.pem");
   const cert = join(directory, "cert.pem");
+  let router: ReturnType<typeof createProductionRouter> | undefined;
   try {
     execFileSync(
       "openssl",
@@ -402,15 +403,16 @@ test("TLS header overflow returns a bounded secured 431", async () => {
       ],
       { stdio: "ignore" },
     );
-    const router = createProductionRouter({
+    router = createProductionRouter({
       backend: "http://127.0.0.1:1",
       frontend: "http://127.0.0.1:1",
       publicHosts: ["converter.example"],
       tls: { cert: readFileSync(cert), key: readFileSync(key) },
     });
-    router.listen(0, "127.0.0.1");
-    await new Promise((resolve) => router.once("listening", resolve));
-    const port = (router.address() as { port: number }).port;
+    const activeRouter = router;
+    activeRouter.listen(0, "127.0.0.1");
+    await new Promise((resolve) => activeRouter.once("listening", resolve));
+    const port = (activeRouter.address() as { port: number }).port;
     const response = await new Promise<string>((resolve, reject) => {
       const socket = connectTls(
         { host: "127.0.0.1", port, rejectUnauthorized: false },
@@ -433,8 +435,11 @@ test("TLS header overflow returns a bounded secured 431", async () => {
         `Strict-Transport-Security: ${HSTS}\r\n` +
         `Permissions-Policy: ${PERMISSIONS_POLICY}\r\n\r\n`,
     );
-    await new Promise((resolve) => router.close(resolve));
   } finally {
+    if (router?.listening) {
+      const activeRouter = router;
+      await new Promise((resolve) => activeRouter.close(resolve));
+    }
     rmSync(directory, { force: true, recursive: true });
   }
 });

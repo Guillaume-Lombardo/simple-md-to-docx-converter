@@ -11,7 +11,14 @@ import socket
 with socket.create_connection(("127.0.0.1", 3310), timeout=1) as scanner:
     scanner.settimeout(1)
     scanner.sendall(b"zINSTREAM\0\0\0\0\0")
-    assert scanner.recv(64) == b"stream: OK\0"
+    expected = b"stream: OK\0"
+    response = b""
+    while len(response) < len(expected):
+        chunk = scanner.recv(len(expected) - len(response))
+        if not chunk:
+            break
+        response += chunk
+    assert response == expected
 ' >/dev/null 2>&1; then
     if [[ -n "${MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY:-}" ]]; then
       mkdir -p "$MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY"

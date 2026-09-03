@@ -217,7 +217,11 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
 
     assert 'socket.create_connection(("127.0.0.1", 3310), timeout=1)' in readiness
     assert 'scanner.sendall(b"zINSTREAM\\0\\0\\0\\0\\0")' in readiness
-    assert 'assert scanner.recv(64) == b"stream: OK\\0"' in readiness
+    assert 'expected = b"stream: OK\\0"' in readiness
+    assert "while len(response) < len(expected):" in readiness
+    assert "scanner.recv(len(expected) - len(response))" in readiness
+    assert "assert response == expected" in readiness
+    assert "scanner.recv(64)" not in readiness
     assert "for _ in $(seq 1 60)" in readiness
     assert "scanner did not become ready within 15 seconds" in readiness
     assert 'podman logs --tail 50 "$container_name"' in readiness
@@ -247,6 +251,7 @@ def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
     )
 
     assert 'bash scripts/e2e/rollback-rehearsal.sh "$profile"' in runner
+    assert "curl --connect-timeout 2 --max-time 5" in route_manifest
     assert "0.5.2@$released_digest" in rollback
     assert (
         "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"

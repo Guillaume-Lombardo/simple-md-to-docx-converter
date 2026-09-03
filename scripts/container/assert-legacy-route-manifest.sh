@@ -13,7 +13,8 @@ trap cleanup EXIT
 assert_route() {
   local path="$1" expected_status="$2" expected_location="${3:-}"
   local status
-  status="$(curl --silent --show-error --output "$response_body" \
+  status="$(curl --connect-timeout 2 --max-time 5 --silent --show-error \
+    --output "$response_body" \
     --dump-header "$response_headers" --write-out '%{http_code}' \
     "$base_url$path")"
   if [[ "$status" != "$expected_status" ]]; then
