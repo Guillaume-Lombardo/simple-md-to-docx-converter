@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
-
-NPM_BASELINE = "1594128bc84290df3699390643c729ef9d5d6d30"
 
 
 @pytest.mark.unit
@@ -91,60 +87,102 @@ def test_release_recovery_supports_pnpm_and_historical_npm_locks() -> None:
     assert "${4:-pnpm-lock.yaml}" in publisher
 
 
-def _write_rollback_tool_stubs(directory: Path) -> Path:
-    directory.mkdir()
-    node = directory / "node"
-    node.write_text("#!/bin/sh\nprintf '%s\\n' v24.19.0\n", encoding="utf-8")
-    npm = directory / "npm"
-    npm.write_text(
-        "#!/bin/sh\n"
-        'if [ "${1:-}" = --version ]; then\n'
-        "  printf '%s\\n' 11.17.0\n"
-        "else\n"
-        '  printf \'%s\\n\' "$*" >> "$ROLLBACK_NPM_LOG"\n'
-        "fi\n",
-        encoding="utf-8",
-    )
-    node.chmod(node.stat().st_mode | stat.S_IXUSR)
-    npm.chmod(npm.stat().st_mode | stat.S_IXUSR)
-    return directory
+def _git(repository: Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _commit(repository: Path, subject: str, content: str) -> str:
+    (repository / "state.txt").write_text(content, encoding="utf-8")
+    _git(repository, "add", "state.txt")
+    _git(repository, "commit", "-m", subject)
+    return _git(repository, "rev-parse", "HEAD")
+
+
+def _candidate_series(
+    repository: Path, candidate: str, baseline: str, reviewed_merge: str
+) -> tuple[str, ...]:
+    _git(repository, "merge-base", "--is-ancestor", baseline, candidate)
+    commits = _git(
+        repository,
+        "rev-list",
+        "--first-parent",
+        "--reverse",
+        f"{baseline}..{candidate}",
+    ).splitlines()
+    selected: list[str] = []
+    for commit in commits:
+        parents = _git(repository, "show", "-s", "--format=%P", commit).split()
+        if len(parents) > 1:
+            if commit != reviewed_merge:
+                raise ValueError("unrelated merge")
+            continue
+        subject = _git(repository, "show", "-s", "--format=%s", commit)
+        if "(T67): " not in subject:
+            raise ValueError("unrelated commit")
+        selected.append(commit)
+    if (
+        not selected
+        or _git(repository, "show", "-s", "--format=%P", selected[0]) != baseline
+    ):
+        raise ValueError("wrong baseline")
+    return tuple(selected)
+
+
+def _synthetic_candidate(repository: Path) -> tuple[str, str, str]:
+    _git(repository, "init", "--initial-branch=main")
+    _git(repository, "config", "user.name", "T67 Test")
+    _git(repository, "config", "user.email", "t67@example.invalid")
+    baseline = _commit(repository, "chore: npm baseline", "npm\n")
+    first = _commit(repository, "chore(T67): migrate workspace", "pnpm\n")
+    _git(repository, "checkout", "-b", "planning", baseline)
+    (repository / "planning.txt").write_text("planning\n", encoding="utf-8")
+    _git(repository, "add", "planning.txt")
+    _git(repository, "commit", "-m", "docs(T69): planning")
+    _git(repository, "checkout", "main")
+    _git(repository, "merge", "--no-ff", "planning", "-m", "Merge planning")
+    reviewed_merge = _git(repository, "rev-parse", "HEAD")
+    candidate = _commit(repository, "test(T67): validate workspace", "pnpm ready\n")
+    assert first != candidate
+    return baseline, candidate, reviewed_merge
 
 
 @pytest.mark.unit
-def test_rollback_rehearses_the_candidate_series_from_its_exact_npm_parent(
+def test_rollback_candidate_selection_uses_explicit_synthetic_history(
     tmp_path: Path,
 ) -> None:
-    tools = _write_rollback_tool_stubs(tmp_path / "bin")
-    log = tmp_path / "npm.log"
-    environment = {
-        **os.environ,
-        "PATH": f"{tools}:{os.environ['PATH']}",
-        "ROLLBACK_NPM_LOG": str(log),
-    }
+    baseline, candidate, reviewed_merge = _synthetic_candidate(tmp_path)
 
-    completed = subprocess.run(
-        [
-            "bash",
-            "scripts/javascript/rehearse-npm-rollback.sh",
-            "HEAD",
-            NPM_BASELINE,
-        ],
-        check=False,
-        capture_output=True,
-        env=environment,
-        text=True,
-    )
+    selected = _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
 
-    assert completed.returncode == 0, completed.stderr
-    assert log.read_text(encoding="utf-8").splitlines() == [
-        "ci --ignore-scripts",
-        "run test:web",
-        "ci --prefix web --ignore-scripts",
-        "run --prefix web bindings:check",
-        "run --prefix web build",
-        "run --prefix web test:production",
-    ]
-    assert "Rehearsed exact T67 candidate" in completed.stdout
+    assert len(selected) == 2
+
+
+@pytest.mark.unit
+def test_rollback_candidate_selection_ignores_checkout_merge_ref_and_future_history(
+    tmp_path: Path,
+) -> None:
+    baseline, candidate, reviewed_merge = _synthetic_candidate(tmp_path)
+    _git(tmp_path, "checkout", "-b", "future-base", baseline)
+    (tmp_path / "later.txt").write_text("later main\n", encoding="utf-8")
+    _git(tmp_path, "add", "later.txt")
+    _git(tmp_path, "commit", "-m", "docs: later main change")
+    _git(tmp_path, "merge", "--no-ff", candidate, "-m", "Synthetic pull request merge")
+    merge_ref = _git(tmp_path, "rev-parse", "HEAD")
+
+    assert _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
+    with pytest.raises(ValueError, match="unrelated"):
+        _candidate_series(tmp_path, merge_ref, baseline, reviewed_merge)
+
+    _git(tmp_path, "checkout", "-b", "future-pr", candidate)
+    future = _commit(tmp_path, "feat: future frontend work", "future pnpm\n")
+    assert _candidate_series(tmp_path, candidate, baseline, reviewed_merge)
+    with pytest.raises(ValueError, match="unrelated"):
+        _candidate_series(tmp_path, future, baseline, reviewed_merge)
 
 
 @pytest.mark.unit
@@ -172,36 +210,3 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "grep -RIE '(pnpm|corepack)'",
     ):
         assert contract in rehearsal
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("candidate", "baseline", "failure"),
-    [
-        (NPM_BASELINE, NPM_BASELINE, "candidate does not contain T67"),
-        ("HEAD", "HEAD^", "audited root npm lock"),
-    ],
-)
-def test_rollback_rejects_unrelated_candidate_or_baseline_refs(
-    tmp_path: Path, candidate: str, baseline: str, failure: str
-) -> None:
-    tools = _write_rollback_tool_stubs(tmp_path / "bin")
-    completed = subprocess.run(
-        [
-            "bash",
-            "scripts/javascript/rehearse-npm-rollback.sh",
-            candidate,
-            baseline,
-        ],
-        check=False,
-        capture_output=True,
-        env={
-            **os.environ,
-            "PATH": f"{tools}:{os.environ['PATH']}",
-            "ROLLBACK_NPM_LOG": str(tmp_path / "npm.log"),
-        },
-        text=True,
-    )
-
-    assert completed.returncode != 0
-    assert failure in completed.stderr
