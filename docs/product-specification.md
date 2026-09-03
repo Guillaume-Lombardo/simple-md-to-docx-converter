@@ -266,6 +266,15 @@ other network fallback. T69 must approve the exact supported format and content-
 before production implementation. Scanned or image-only inputs that require OCR fail locally with a
 stable safe error.
 
+T71 exposes that approved matrix and its client-relevant configured constraints through the
+authenticated, versioned `GET /api/v1/reversions/capabilities` FastAPI contract. Its response has a
+schema-version identifier and authoritative ordered format families, extensions, content-detection
+rules, maximum upload bytes, result-package modes, PDF limitations, and local/no-OCR flags. The
+Next.js workspace derives its format hint, file chooser, and bounded preflight validation from this
+response; it carries no duplicate format matrix or hardcoded fallback and disables submission with
+a safe backend-unavailable state when capabilities cannot be loaded. Server-side detection and
+validation remain authoritative regardless of client preflight.
+
 The production path is CPU-only and optimized for low compute. It must not discover, request, or
 use a GPU or accelerator, load an ML model, start a browser, invoke Pandoc or LibreOffice, or spawn
 another document-engine process. T69 measures cold and warm wall time, CPU time, peak resident
@@ -393,6 +402,8 @@ Use `/api/v1`. The contract must include:
 - job status, cancellation, and result download;
 - reverse-conversion submission under `/reversions` returning `202 Accepted`, `Location`, and
   `Retry-After`, plus owner-scoped listing, status, cancellation, and Markdown-package download;
+- authenticated reverse-conversion capabilities under `GET /reversions/capabilities`, exposing the
+  versioned T69-approved format/detection matrix and client-relevant configured constraints;
 - active-template search and listing;
 - template creation, metadata update, current/previous content download, replacement, version listing, copy-forward restoration, deletion/archive, and per-user default selection;
 - `/health/live`, `/health/ready`, metrics, and `/docs`.
@@ -653,13 +664,16 @@ publication boundary.
 For experimental reverse conversion, T69 is a blocking evidence and contract spike. T70 implements
 the local engine and package builder only after the asset-position strategy and PDF limitations are
 approved. T71 then adds the persistent backend workflow. T67 must finish the JavaScript workspace
-migration before T72 changes frontend dependencies, commands, tests, or lockfiles. T72 then builds
-the Revert workspace on that finalized toolchain. T46, T48, and T50 must finish their baseline
-security/support policies, mutation gate, and cross-surface documentation/acceptance ownership
-before T73 begins. T73 may then add only reverse-specific extensions to those established surfaces;
-it does not reopen their baseline scope or edit an exclusively owned path while another ticket is
-active. T73 owns the complete final-image, two-profile, cross-format, reverse-security, dedicated
-reverse-documentation, and release-readiness acceptance matrix. OCR remains outside this sequence.
+migration and make its resulting package-manager, bootstrap, workspace, command, and lockfile
+contract normative before T72 starts. Until that T67 update is merged, the existing npm contract in
+section 3.3.1 remains authoritative; T69-T73 do not preselect pnpm, Corepack, or another replacement.
+T72 then builds the Revert workspace on T67's finalized toolchain. T46, T48, and T50 must finish
+their baseline security/support policies, mutation gate, and cross-surface documentation/acceptance
+ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
+surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
+ticket is active. T73 owns the complete final-image, two-profile, cross-format, reverse-security,
+dedicated reverse-documentation, and release-readiness acceptance matrix. OCR remains outside this
+sequence.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test

@@ -28,6 +28,12 @@ backend/frontend images in both storage profiles.
   downloaded Markdown/package rather than accepting command success alone.
 * Cover at least one representative file from every format family approved by T69, including
   structure and deterministic ZIP/Markdown/assets inspection rather than download success alone.
+* Validate the versioned `GET /api/v1/reversions/capabilities` schema, OpenAPI representation,
+  authenticated private/no-store contract, deterministic parity across both storage profiles, and
+  exact agreement with configured server admission. Prove in browser E2E that the visible hint,
+  file chooser, and client preflight derive from the response without a duplicate format matrix,
+  update when configured constraints change, and disable submission safely for unavailable or
+  unsupported-version capability responses.
 * Verify owner isolation, scanner rejection, unsupported/encrypted/malformed input, resource
   limits, capacity responses, idempotency, cancellation, expiration, restart recovery, lease
   recovery, concurrency, absence of double execution, backend/frontend outages, and scanned/image-
@@ -78,10 +84,11 @@ backend/frontend images in both storage profiles.
   acceptance, and JavaScript-tooling ownership. Add narrowly scoped reverse-conversion extensions
   to the established surfaces without reopening those tickets' baseline decisions.
 * Do not edit `SECURITY.md`, `SUPPORT.md`, README, `docs/index.md`, shared cross-guide navigation,
-  the pnpm/Corepack bootstrap, root workspace topology, or T48's baseline mutation runner/gate unless
-  ownership is explicitly transferred. Put reverse documentation in dedicated guides, use T67's
-  finalized workspace, and extend only the approved reverse mutation targets through T48's
-  established extension mechanism.
+  T67's finalized package-manager/bootstrap/workspace contract, or T48's baseline mutation runner/
+  gate unless ownership is explicitly transferred. Put reverse documentation in dedicated guides,
+  use the toolchain made normative by T67, and extend only the approved reverse mutation targets
+  through T48's established extension mechanism. T73 does not independently select pnpm, Corepack,
+  or another package manager.
 * Do not expand the approved format matrix or add OCR.
 * Do not publish a release or change a public deployment digest without a separately approved
   release ticket.

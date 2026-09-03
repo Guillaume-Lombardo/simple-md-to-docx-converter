@@ -19,6 +19,11 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 * Add a versioned `/api/v1/reversions` contract for multipart submission, owner-scoped
   listing/status, cancellation, and result download; submission returns `202 Accepted`, `Location`,
   and `Retry-After`, and supports `Idempotency-Key`.
+* Add authenticated `GET /api/v1/reversions/capabilities` as the versioned authoritative runtime
+  contract for clients. Return a schema-version identifier and the T69-approved ordered format
+  families, extensions, content-detection rules, maximum configured upload bytes, result-package
+  modes, PDF limitations, and local/no-OCR flags. Keep the response content-free, deterministic,
+  private/no-store, represented in OpenAPI, and identical across storage profiles.
 * Extend the installed HTTP-only conversion/job CLI family with reverse submission, listing,
   status, cancellation, and result download while preserving its authentication, CSRF,
   idempotency, retry, output, and owner-only local-profile contracts.
@@ -51,6 +56,9 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   content-bearing fields.
 * Extend deterministic OpenAPI compatibility validation, observability, metrics, and safe
   structured logs for the new job family.
+* Add contract tests proving the capabilities response matches the actual server-side admission
+  policy after configuration changes; extensions remain a client hint and cannot bypass content
+  detection, scanner ordering, or server-side limits.
 * Add unit, functional, real SQLite/filesystem, real PostgreSQL/S3, restart, recovery, concurrency,
   cancellation, expiration, two-user-plus-administrator authorization, idempotency, scanner, lease-
   loss/no-late-publication, and failure coverage.

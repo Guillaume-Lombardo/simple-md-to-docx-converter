@@ -19,9 +19,13 @@ downloading their results.
 * Add `Revert` to the authenticated application navigation with a clearly visible stamp-style
   `Experimental` treatment associated with the tab label; the state is also conveyed in accessible
   text and never by shape, position, or color alone.
-* Build an accessible `/revert` workspace with file selection and drag-and-drop, an authoritative
-  supported-format hint, bounded client validation, submission, progressive polling/backoff,
-  status, cancellation, expiration, safe errors, and result download.
+* Build an accessible `/revert` workspace with file selection and drag-and-drop, submission,
+  progressive polling/backoff, status, cancellation, expiration, safe errors, and result download.
+  Fetch authenticated `GET /api/v1/reversions/capabilities` and derive the supported-format hint,
+  file chooser, and bounded client validation from its versioned response. Do not duplicate or
+  hardcode the T69 format matrix or fallback constraints; if capabilities are unavailable or an
+  unsupported schema version is returned, disable submission and render the safe backend-
+  unavailable state. Server validation remains authoritative.
 * Call the FastAPI `/api/v1/reversions` routes directly through same-origin relative URLs; do not
   add Next.js business routes, server actions, persistence, authorization, or credential forwarding.
 * Preserve stable idempotency reuse after ambiguous transport failures and never automatically
@@ -47,9 +51,10 @@ downloading their results.
 
 * Own the Revert navigation entry, experimental visual treatment, `/revert` presentation, typed
   client contract, and frontend tests.
-* Start only after T67 finalizes the pnpm workspace. Use its established commands and lockfile; do
-  not reintroduce npm application lockfiles, migrate the isolated Mermaid toolchain, or redesign the
-  JavaScript workspace.
+* T67 is a hard dependency. Start only after T67 has merged its own normative package-manager,
+  bootstrap, workspace, command, and lockfile decision, then use that established contract without
+  redesigning it or migrating the isolated Mermaid toolchain. This ticket does not select pnpm,
+  Corepack, or another replacement while the current npm contract remains authoritative.
 * Do not duplicate FastAPI validation or business behavior and do not add OCR.
 * Do not change the existing Convert workflow except for the shared navigation entry.
 
