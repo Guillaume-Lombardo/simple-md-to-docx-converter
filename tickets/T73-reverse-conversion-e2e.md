@@ -19,6 +19,13 @@ backend/frontend images in both storage profiles.
 * Build the exact final backend and frontend images once and run the complete authenticated Revert
   workflow with Playwright against standalone SQLite/filesystem and distributed PostgreSQL/S3
   profiles.
+* From the exact same final backend image, run the installed HTTP-only `markweave` reverse-job CLI
+  end to end against both storage profiles. Verify human and JSON output, stable exit codes, login
+  profile isolation, submission, listing, status/polling, cancellation, and result download with two
+  regular users and one administrator. Cover the primary successful lifecycle plus non-enumerating
+  cross-owner/admin access, scanner rejection, unsupported or `needs_ocr` input, capacity failure,
+  cancellation before publication, expiration, and backend-unavailable behavior; inspect the
+  downloaded Markdown/package rather than accepting command success alone.
 * Cover at least one representative file from every format family approved by T69, including
   structure and deterministic ZIP/Markdown/assets inspection rather than download success alone.
 * Verify owner isolation, scanner rejection, unsupported/encrypted/malformed input, resource
@@ -65,7 +72,7 @@ backend/frontend images in both storage profiles.
 
 ## Implementation boundary
 
-* Own final-image integration, two-profile browser/API acceptance, selective CI wiring, cross-
+* Own final-image integration, two-profile browser/API/CLI acceptance, selective CI wiring, cross-
   cutting documentation, and release-readiness evidence.
 * Begin only after T46, T48, T50, and T67 complete their baseline policy, mutation, documentation,
   acceptance, and JavaScript-tooling ownership. Add narrowly scoped reverse-conversion extensions
