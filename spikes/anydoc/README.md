@@ -99,32 +99,40 @@ The retained `measurements-host.json` and `measurements-ubi9.json` are observati
 goldens. The deterministic tests validate their schema and invariant conclusions rather than timing
 values. The UBI run used base digest
 `sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653`, image ID
-`64d293848d39d83ba86e2f49aee79886ddbe8382b32da1f5a63f883a0f96d039`, one CPU, 512 MiB,
-64 PIDs, no capabilities, a read-only root, and no network.
+`270ebd2749f0126a20199ef5bcc3084ecd9f14a4a12a37013435bf0ae3dc8b77`, one CPU, 512 MiB,
+64 PIDs, no capabilities, a read-only root, and no network. Its inventory records the invoked
+`/opt/anydoc-spike/.venv/bin/python` runtime rather than its `/usr/bin/python3.14` symlink target;
+the host report preserves the invoked virtual-environment path with its home prefix replaced by
+`<home>`.
 
 ## Results and low-compute envelope
 
-The UBI import took 14.118 ms wall / 14.122 ms CPU with initial peak RSS 37,300 KiB. Across one
-fixture for every admitted extension, first-call conversion ranged from 0.016 ms (generated
-PowerPoint template alias) to 6.908 ms (text PDF), and warm calls ranged from 0.013 ms to 5.974 ms. All
-21 extensions across the eight requested families converted and produced the contract's expected
-content-detected parser format. Embedded retained bytes were 70 bytes for the Word, OpenDocument
+The UBI import took 19.853 ms wall / 15.628 ms CPU with initial peak RSS 37,032 KiB. Across one
+fixture for every admitted extension, first-call conversion ranged from 0.015 ms (generated
+PowerPoint template alias) to 6.892 ms (text PDF), and warm calls ranged from 0.012 ms to 5.861 ms. All
+21 extensions across the eight requested families reached the expected content-detected parser.
+Embedded retained bytes were 70 bytes for the Word, OpenDocument
 Text, RTF, and EPUB representatives and 2,354 bytes for OpenDocument Presentation. No conversion
 child process was observed.
 
+The minimal `pptm/generated.pptm`, `ppsx/generated.ppsx`, and `ppsm/generated.ppsm` fixtures each
+produce `output_units: 0`. They prove extension admission and `pptx` content detection only; they do
+not prove slide-content extraction for those three variants. The ordinary `.pptx` representative
+produces eight output units and remains the extraction evidence for the shared OOXML parser.
+
 With `RAYON_NUM_THREADS=1`, non-PDF parsing stayed at one process thread and PDF initialized one
 bounded Rayon thread (two process threads total). On the one-CPU UBI run, 25 text-PDF conversions
-took 165.412, 309.325, and 700.003 ms wall at concurrency 1, 2, and 4; whole-process CPU for those
-complete batches was 165.501, 333.450, and 708.642 ms. Sampled peak live process threads, including
-the Rayon thread, were 3, 4, and 6, and peak RSS was 38,096, 40,272, and 44,496 KiB. The refreshed
-host run recorded wall/whole-process CPU pairs of 153.323/155.380, 171.528/338.261, and
-259.436/744.689 ms, with peak live thread counts 3, 4, and 6. More in-process concurrency did not
+took 155.819, 289.461, and 693.064 ms wall at concurrency 1, 2, and 4; whole-process CPU for those
+complete batches was 155.413, 332.901, and 698.707 ms. Sampled peak live process threads, including
+the Rayon thread, were 3, 4, and 6, and peak RSS was 38,244, 40,292, and 44,900 KiB. The refreshed
+host run recorded wall/whole-process CPU pairs of 164.008/169.094, 171.545/329.987, and
+245.623/687.769 ms, with peak live thread counts 3, 4, and 6. More in-process concurrency did not
 reduce CPU cost, so the only evidence-supported candidate is one active reverse conversion per
 worker with one Rayon thread. T71 must keep both configurable and must reserve capacity separately
 from forward work.
 
-The bounded 2,800,210-byte CSV stress input completed in 452.986 ms wall / 429.017 ms CPU but raised
-peak RSS from the prior 44,496 KiB to 227,232 KiB. The upstream image-bomb fixture fails locally as
+The bounded 2,800,210-byte CSV stress input completed in 524.280 ms wall / 479.325 ms CPU but raised
+peak RSS from the prior 44,900 KiB to 227,452 KiB. The upstream image-bomb fixture fails locally as
 `ResourceLimitError(max_entry_bytes)`. These results show that source bytes do not predict peak
 native memory and that 512 MiB is only a measured spike ceiling, not an approved production budget.
 No timeout, memory, upload, or result threshold can be approved until the isolation decision and a
@@ -185,7 +193,7 @@ text. T70 owns the sole canonical manifest and archive serializer.
 The 0.2.4 Python signatures accept only bytes/path and optional format. PyO3 calls the Rust parser
 inside `py.detach`, releasing the GIL, but passes no cancellation token, deadline, allocator, or
 memory budget. In the UBI cancellation probe, `Future.cancel()` returned false after the call began;
-native work continued beyond the attempted cancellation and returned only after 452.986 ms. Python
+native work continued beyond the attempted cancellation and returned only after 524.280 ms. Python
 task cancellation and signal handlers cannot unwind this native frame.
 
 A separate heartbeat thread can renew a lease because the GIL is released. It can also notice

@@ -355,11 +355,11 @@ def _environment() -> dict[str, Any]:
 
 
 def _redact_home(path: str) -> str:
-    resolved = Path(path).resolve()
+    invoked = Path(path)
     try:
-        relative = resolved.relative_to(Path.home().resolve())
+        relative = invoked.relative_to(Path.home())
     except ValueError:
-        return str(resolved)
+        return str(invoked)
     return f"<home>/{relative.as_posix()}"
 
 

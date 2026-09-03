@@ -198,6 +198,18 @@ def test_measurements_cover_formats_failures_assets_and_execution(name: str) -> 
     assert "/home/" not in serialized
     if name == "measurements-host.json":
         assert report["process_inventory"]["executable"].startswith("<home>/")
+    else:
+        assert report["process_inventory"]["executable"] == (
+            "/opt/anydoc-spike/.venv/bin/python"
+        )
+    cases_by_fixture = {case["fixture"]: case for case in cases}
+    for fixture in (
+        "pptm/generated.pptm",
+        "ppsx/generated.ppsx",
+        "ppsm/generated.ppsm",
+    ):
+        assert cases_by_fixture[fixture]["detected_format"] == "pptx"
+        assert cases_by_fixture[fixture]["output_units"] == 0
     assert all(sample["batch_process_cpu_ms"] > 0 for sample in report["concurrency"])
     assert all(
         sample["peak_live_process_threads"] >= sample["workers"] + 1
