@@ -363,6 +363,16 @@ def test_empty_duplicate_note_does_not_hide_later_nonempty_body() -> None:
     assert rendered.markdown.count("assets/image-0002.png") == 1
 
 
+def test_unavailable_empty_alt_image_is_not_retained() -> None:
+    document = compat.parse_document(_source("doc/text.doc"))
+    occurrences = compat.extract_asset_sources(document)
+
+    rendered = compat.render_document_result(document, (None,))
+
+    assert len(occurrences) == 1
+    assert rendered.retained_occurrences == ()
+
+
 def test_inventory_and_license_bind_the_exact_upstream_surface() -> None:
     license_path = Path(compat.__file__).with_name("ANYDOC_COMPAT_LICENSE.txt")
 

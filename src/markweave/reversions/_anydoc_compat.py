@@ -19,6 +19,7 @@ import re
 import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import PurePosixPath
 from typing import Any, Literal, Never, cast
 from urllib.parse import unquote, urlsplit
@@ -154,6 +155,7 @@ class _RenderContext:
     html_ids: dict[str, str]
     image_paths: tuple[PurePosixPath | None, ...]
     image_index: list[int]
+    retained_occurrences: list[int] = dataclass_field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -642,7 +644,6 @@ def render_document_result(
         for block in document.blocks
         if (rendered := _render_block(block, context)) is not None
     ]
-    retained_occurrences = list(range(context.image_index[0]))
     rendered_notes: set[int] = set()
     ordered_notes = sorted(
         (
@@ -653,12 +654,12 @@ def render_document_result(
         key=lambda item: item[0],
     )
     for number, note in ordered_notes:
-        first_occurrence = context.image_index[0]
+        first_retained = len(context.retained_occurrences)
         body = _render_blocks(note.blocks, context)
         if not body or number in rendered_notes:
+            del context.retained_occurrences[first_retained:]
             continue
         rendered_notes.add(number)
-        retained_occurrences.extend(range(first_occurrence, context.image_index[0]))
         lines = body.splitlines()
         definition = f"[^{number}]: {lines[0]}"
         definition += "".join(f"\n{'    ' if line else ''}{line}" for line in lines[1:])
@@ -667,7 +668,7 @@ def render_document_result(
         _compatibility_error()
     output = "\n\n".join(parts)
     markdown = output + "\n" if output else ""
-    return RenderedDocument(markdown, tuple(retained_occurrences))
+    return RenderedDocument(markdown, tuple(context.retained_occurrences))
 
 
 def _inlines_are_empty(inlines: Sequence[Any]) -> bool:
@@ -1075,12 +1076,14 @@ def _render_inlines(  # noqa: PLR0912
                     _EscapeOptions(in_label=True),
                 )
                 output += f"![{alt}]({path.as_posix()})"
+                context.retained_occurrences.append(occurrence)
             elif inline.alt.strip():
                 output += _escape_text(
                     inline.alt.strip(),
                     inline_context,
                     _EscapeOptions(in_label=in_label),
                 )
+                context.retained_occurrences.append(occurrence)
         elif inline.kind == "anchor":
             output += f'<a id="{context.html_ids[inline.anchor]}"></a>'
         elif inline.kind == "line_break":
