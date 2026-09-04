@@ -39,6 +39,7 @@ EXIT = EvidenceDigest("sha256:" + "1" * 64)
 EMPTY = EvidenceDigest("sha256:" + "2" * 64)
 REMOVAL = EvidenceDigest("sha256:" + "3" * 64)
 SPECIFICATION = EvidenceDigest("sha256:" + "4" * 64)
+POLICY_SPECIFICATION = SPECIFICATION
 INCARNATION = RuntimeIncarnation(INCARNATION_ID, SPECIFICATION)
 
 
@@ -61,6 +62,7 @@ def _reserved(
         principal=principal,
         create_sequence=sequence,
         policy_revision="policy-v1",
+        policy_specification=POLICY_SPECIFICATION,
         state=ManagedUnitState.RESERVED,
         revision=0,
     )
@@ -136,7 +138,7 @@ def test_initialization_uses_wal_full_sync_closed_schema_and_never_stores_key(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
-        assert tables == {"principals", "units"}
+        assert tables == {"inventory_manifest", "principals", "units"}
         columns = {row[1] for row in connection.execute("PRAGMA table_info(units)")}
         assert not columns.intersection(
             {"source", "result", "filename", "path", "secret", "content_digest"}
@@ -248,6 +250,23 @@ def test_capacity_is_bounded_and_sweep_limit_is_validated(tmp_path: Path) -> Non
     _assert_category(captured, BrokerErrorCategory.INVENTORY_FULL)
     with pytest.raises(BrokerError, match="invalid"):
         inventory.unacknowledged(limit=2)
+
+
+def test_sweep_rejects_overflow_instead_of_silently_truncating(tmp_path: Path) -> None:
+    inventory = _inventory(tmp_path / "inventory.sqlite3", capacity=2)
+    inventory.reserve(_reserved(), _replay())
+    inventory.reserve(
+        _reserved(
+            attempt_id=UUID("20000000-0000-0000-0000-000000000002"),
+            unit_id=UUID("30000000-0000-0000-0000-000000000002"),
+            sequence=2,
+        ),
+        _replay(2),
+    )
+
+    with pytest.raises(BrokerError) as captured:
+        inventory.unacknowledged(limit=1)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FULL)
 
 
 def test_principal_replay_ledger_remains_bounded_after_unit_discard(
@@ -409,9 +428,16 @@ def test_acknowledgement_requires_exact_four_way_binding_and_retains_high_water(
     )
     assert inventory.get_proof(UNIT_ID) == _proof()
     assert inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
-    assert not inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
-    assert inventory.get(UNIT_ID) is None
-    assert _inventory(path).create_sequence_high_watermark(PRINCIPAL_ID) == 1
+    reopened = _inventory(path)
+    assert reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
+    assert not reopened.acknowledge(
+        PRINCIPAL_ID,
+        ATTEMPT_ID,
+        UNIT_ID,
+        UUID("50000000-0000-0000-0000-000000000099"),
+    )
+    assert reopened.get(UNIT_ID) is None
+    assert reopened.create_sequence_high_watermark(PRINCIPAL_ID) == 1
     with pytest.raises(BrokerError) as captured:
         inventory.reserve(_reserved(), _replay())
     _assert_category(captured, BrokerErrorCategory.REPLAY_REJECTED)
@@ -436,7 +462,7 @@ def test_forged_unit_mac_is_detected_even_when_getting_an_unrelated_unit(
     )
     with pytest.raises(BrokerError) as captured:
         inventory.get(other.unit_id)
-    _assert_category(captured, BrokerErrorCategory.PROTOCOL_ERROR)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
     with pytest.raises(BrokerError):
         _inventory(path)
 
@@ -452,12 +478,102 @@ def test_forged_principal_mac_and_wrong_key_fail_closed(tmp_path: Path) -> None:
         inventory.unacknowledged(limit=8)
 
 
+def test_manifest_detects_deleted_unit_principal_and_removed_tombstone(
+    tmp_path: Path,
+) -> None:
+    unit_path = tmp_path / "deleted-unit.sqlite3"
+    unit_inventory = _inventory(unit_path)
+    unit_inventory.reserve(_reserved(), _replay())
+    _raw(unit_path, "DELETE FROM units")
+    with pytest.raises(BrokerError) as captured:
+        _inventory(unit_path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
+
+    principal_path = tmp_path / "deleted-principal.sqlite3"
+    principal_inventory = _inventory(principal_path)
+    principal_inventory.reserve(_reserved(), _replay())
+    assert principal_inventory.discard_reserved(UNIT_ID, expected_revision=0)
+    _raw(principal_path, "DELETE FROM principals")
+    with pytest.raises(BrokerError) as captured:
+        _inventory(principal_path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
+
+    removed_path = tmp_path / "deleted-tombstone.sqlite3"
+    removed_inventory = _inventory(removed_path)
+    _advance_to_empty(removed_inventory)
+    removed_inventory.mark_removed(
+        UNIT_ID, expected_revision=4, removal_evidence=REMOVAL, proof=_proof()
+    )
+    _raw(removed_path, "DELETE FROM units")
+    with pytest.raises(BrokerError) as captured:
+        _inventory(removed_path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
+
+
+def test_manifest_detects_valid_authenticated_unit_substitution(tmp_path: Path) -> None:
+    target_path = tmp_path / "target.sqlite3"
+    donor_path = tmp_path / "donor.sqlite3"
+    _inventory(target_path).reserve(_reserved(), _replay())
+    donor_unit = _reserved(
+        attempt_id=UUID("20000000-0000-0000-0000-000000000002"),
+        unit_id=UUID("30000000-0000-0000-0000-000000000002"),
+    )
+    _inventory(donor_path).reserve(donor_unit, _replay())
+    with closing(sqlite3.connect(donor_path)) as donor:
+        row = donor.execute("SELECT * FROM units").fetchone()
+    assert row is not None
+    with closing(sqlite3.connect(target_path)) as target, target:
+        target.execute("DELETE FROM units")
+        target.execute(
+            "INSERT INTO units VALUES ("  # noqa: S608 - fixed test schema
+            + ",".join("?" for _ in row)
+            + ")",
+            row,
+        )
+
+    with pytest.raises(BrokerError) as captured:
+        _inventory(target_path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
+
+
+def test_manifest_detects_valid_authenticated_principal_substitution(
+    tmp_path: Path,
+) -> None:
+    target_path = tmp_path / "target.sqlite3"
+    donor_path = tmp_path / "donor.sqlite3"
+    target = _inventory(target_path)
+    target.reserve(_reserved(), _replay())
+    assert target.discard_reserved(UNIT_ID, expected_revision=0)
+    other_principal = AuthenticatedPrincipal(OTHER_PRINCIPAL_ID)
+    donor = _inventory(donor_path)
+    donor.reserve(
+        _reserved(principal=other_principal), _replay(principal=other_principal)
+    )
+    assert donor.discard_reserved(UNIT_ID, expected_revision=0)
+    with closing(sqlite3.connect(donor_path)) as donor_connection:
+        row = donor_connection.execute("SELECT * FROM principals").fetchone()
+    assert row is not None
+    with closing(sqlite3.connect(target_path)) as target_connection, target_connection:
+        target_connection.execute("DELETE FROM principals")
+        target_connection.execute(
+            "INSERT INTO principals VALUES ("  # noqa: S608 - fixed test schema
+            + ",".join("?" for _ in row)
+            + ")",
+            row,
+        )
+
+    with pytest.raises(BrokerError) as captured:
+        _inventory(target_path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
+
+
 @pytest.mark.parametrize(
     "statement",
     [
         "PRAGMA user_version = 99",
         "PRAGMA application_id = 0",
         "CREATE TABLE extra (value TEXT)",
+        "CREATE VIEW extra AS SELECT principal_id FROM principals",
     ],
 )
 def test_unknown_schema_version_application_or_table_fails_closed(
@@ -468,7 +584,7 @@ def test_unknown_schema_version_application_or_table_fails_closed(
     _raw(path, statement)
     with pytest.raises(BrokerError) as captured:
         _inventory(path)
-    _assert_category(captured, BrokerErrorCategory.PROTOCOL_ERROR)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
 
 
 def test_concurrent_conflicting_reservations_create_exactly_one_unit(

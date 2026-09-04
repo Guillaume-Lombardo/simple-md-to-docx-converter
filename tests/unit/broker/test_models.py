@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+import markweave.broker.models as broker_models
 from markweave.broker.models import (
     MAX_SEQUENCE,
     AuthenticatedPrincipal,
@@ -107,6 +108,17 @@ def test_policy_specification_evidence_binds_fixed_runtime_contract() -> None:
         policy_specification_evidence(cast(Any, object()))
 
 
+def test_policy_specification_evidence_has_no_mutable_module_security_mapping() -> None:
+    policy = BrokerPolicy("t71-v1", DIGEST, limits())
+    expected = EvidenceDigest(
+        "sha256:d162a075aea2c90d2d6398693521ef9adde22b47fcd3e3b729beb6c969627117"
+    )
+
+    assert not hasattr(broker_models, "_FIXED_RUNTIME_SECURITY")
+    assert policy_specification_evidence(policy) == expected
+    assert policy_specification_evidence(policy) == expected
+
+
 def test_state_machine_has_one_exact_monotonic_path() -> None:
     path = list(ManagedUnitState)
     assert path == [
@@ -172,6 +184,7 @@ def test_managed_unit_requires_incarnation_exactly_after_runtime_create(
         principal(),
         1,
         "t71-v1",
+        EvidenceDigest(DIGEST),
         state,
         0,
         value,
@@ -186,10 +199,28 @@ def test_managed_unit_requires_incarnation_exactly_after_runtime_create(
             principal(),
             1,
             "t71-v1",
+            EvidenceDigest(DIGEST),
             state,
             0,
             None if expected else incarnation(),
             *evidence,
+        )
+
+
+def test_managed_unit_binds_runtime_incarnation_to_reserved_policy_specification() -> (
+    None
+):
+    with pytest.raises(ValueError, match="runtime specification evidence"):
+        ManagedUnit(
+            ATTEMPT_ID,
+            UNIT_ID,
+            principal(),
+            1,
+            "t71-v1",
+            EvidenceDigest("sha256:" + "b" * 64),
+            ManagedUnitState.CREATED,
+            0,
+            incarnation(),
         )
 
 
@@ -210,6 +241,7 @@ def test_managed_unit_requires_exact_state_evidence_prefix(
         principal(),
         1,
         "t71-v1",
+        EvidenceDigest(DIGEST),
         state,
         0,
         value,
@@ -226,6 +258,7 @@ def test_managed_unit_requires_exact_state_evidence_prefix(
             principal(),
             1,
             "t71-v1",
+            EvidenceDigest(DIGEST),
             state,
             0,
             value,
@@ -242,6 +275,7 @@ def test_managed_unit_rejects_invalid_create_sequence(sequence: object) -> None:
             principal(),
             cast(Any, sequence),
             "t71-v1",
+            EvidenceDigest(DIGEST),
             ManagedUnitState.RESERVED,
             0,
         )
@@ -256,6 +290,7 @@ def test_managed_unit_rejects_invalid_record_revision(revision: object) -> None:
             principal(),
             1,
             "t71-v1",
+            EvidenceDigest(DIGEST),
             ManagedUnitState.RESERVED,
             cast(Any, revision),
         )
@@ -268,6 +303,7 @@ def test_managed_unit_rejects_invalid_record_revision(revision: object) -> None:
         ("unit_id", "id", "UUID"),
         ("principal", PRINCIPAL_ID, "principal"),
         ("policy_revision", "UPPER", "policy revision"),
+        ("policy_specification", DIGEST, "policy specification evidence"),
         ("state", "reserved", "state"),
     ],
 )
@@ -280,6 +316,7 @@ def test_managed_unit_rejects_identity_and_enum_lookalikes(
         "principal": principal(),
         "create_sequence": 1,
         "policy_revision": "t71-v1",
+        "policy_specification": EvidenceDigest(DIGEST),
         "state": ManagedUnitState.RESERVED,
         "revision": 0,
     }

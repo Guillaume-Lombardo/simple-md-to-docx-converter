@@ -10,6 +10,7 @@ class BrokerErrorCategory(StrEnum):
     PROTOCOL_ERROR = "protocol_error"
     REPLAY_REJECTED = "replay_rejected"
     INVENTORY_FULL = "inventory_full"
+    INVENTORY_FAILURE = "inventory_failure"
     RECONCILIATION_INCOMPLETE = "reconciliation_incomplete"
     TERMINATION_UNPROVEN = "termination_unproven"
     RUNTIME_FAILURE = "runtime_failure"
@@ -20,6 +21,7 @@ _MESSAGES: dict[BrokerErrorCategory, str] = {
     BrokerErrorCategory.PROTOCOL_ERROR: "The broker protocol request is invalid.",
     BrokerErrorCategory.REPLAY_REJECTED: "The broker request was already observed.",
     BrokerErrorCategory.INVENTORY_FULL: "The broker inventory is at capacity.",
+    BrokerErrorCategory.INVENTORY_FAILURE: "The broker inventory operation failed.",
     BrokerErrorCategory.RECONCILIATION_INCOMPLETE: (
         "Broker reconciliation is incomplete."
     ),

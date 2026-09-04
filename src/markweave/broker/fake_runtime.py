@@ -130,6 +130,7 @@ class FakeIsolationRuntime:
         if (
             unit.state is not ManagedUnitState.CREATE_INTENT
             or unit.policy_revision != policy.revision
+            or unit.policy_specification != policy_specification_evidence(policy)
             or unit.unit_id in self._records
         ):
             raise FakeRuntimeError("Isolation runtime create contract failed")

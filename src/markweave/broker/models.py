@@ -18,16 +18,10 @@ _FIXED_ATTEMPT_ENTRYPOINT = (
     "-m",
     "markweave.reversions.attempt_main",
 )
-_FIXED_RUNTIME_SECURITY = {
-    "capabilities": [],
-    "network": "none",
-    "no_new_privileges": True,
-    "read_only_root": True,
-    "run_as": "arbitrary_non_root",
-    "service_account_automount": False,
-    "service_links": False,
-    "workspace": "/work",
-}
+_FIXED_RUNTIME_CAPABILITIES: tuple[str, ...] = ()
+_FIXED_RUNTIME_NETWORK = "none"
+_FIXED_RUNTIME_RUN_AS = "arbitrary_non_root"
+_FIXED_RUNTIME_WORKSPACE = "/work"
 
 
 def _require_uuid(value: object, description: str) -> None:
@@ -125,7 +119,16 @@ def policy_specification_evidence(policy: BrokerPolicy) -> EvidenceDigest:
                 for field in RuntimeLimits.__dataclass_fields__
             },
             "policy_revision": policy.revision,
-            "security": _FIXED_RUNTIME_SECURITY,
+            "security": {
+                "capabilities": list(_FIXED_RUNTIME_CAPABILITIES),
+                "network": _FIXED_RUNTIME_NETWORK,
+                "no_new_privileges": True,
+                "read_only_root": True,
+                "run_as": _FIXED_RUNTIME_RUN_AS,
+                "service_account_automount": False,
+                "service_links": False,
+                "workspace": _FIXED_RUNTIME_WORKSPACE,
+            },
             "schema_version": 1,
         },
         ensure_ascii=True,
@@ -196,6 +199,7 @@ class ManagedUnit:
     principal: AuthenticatedPrincipal
     create_sequence: int
     policy_revision: str
+    policy_specification: EvidenceDigest
     state: ManagedUnitState
     revision: int
     runtime_incarnation: RuntimeIncarnation | None = None
@@ -218,6 +222,8 @@ class ManagedUnit:
             or _POLICY_REVISION_PATTERN.fullmatch(self.policy_revision) is None
         ):
             raise ValueError("Managed unit policy revision is invalid")
+        if type(self.policy_specification) is not EvidenceDigest:
+            raise ValueError("Managed unit policy specification evidence is invalid")
         if type(self.state) is not ManagedUnitState:
             raise ValueError("Managed unit state is invalid")
         if type(self.revision) is not int or self.revision < 0:
@@ -233,6 +239,13 @@ class ManagedUnit:
             and type(self.runtime_incarnation) is not RuntimeIncarnation
         ) or (not requires_incarnation and self.runtime_incarnation is not None):
             raise ValueError("Managed unit runtime incarnation is inconsistent")
+        if (
+            self.runtime_incarnation is not None
+            and self.runtime_incarnation.specification != self.policy_specification
+        ):
+            raise ValueError(
+                "Managed unit runtime specification evidence is inconsistent"
+            )
         evidence_fields = (
             self.exit_evidence,
             self.empty_evidence,

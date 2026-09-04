@@ -25,17 +25,53 @@ from markweave.broker.models import (
 )
 
 _APPLICATION_ID = 0x4D574249  # MWBI
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAC_VERSION = 1
 _MINIMUM_HMAC_KEY_BYTES = 32
 _SQLITE_FULL_SYNCHRONOUS = 2
-_PRINCIPAL_COLUMNS = ("principal_id", "high_water", "mac_version", "mac")
+_PRINCIPAL_COLUMNS = (
+    "principal_id",
+    "high_water",
+    "ack_attempt_id",
+    "ack_unit_id",
+    "ack_proof_id",
+    "mac_version",
+    "mac",
+)
+_MANIFEST_COLUMNS = (
+    "singleton_id",
+    "generation",
+    "principal_count",
+    "unit_count",
+    "principals_digest",
+    "units_digest",
+    "mac_version",
+    "mac",
+)
+_SELECT_PRINCIPALS = (
+    "SELECT "  # noqa: S608 - identifiers are fixed module constants
+    + ", ".join(_PRINCIPAL_COLUMNS)
+    + " FROM principals"
+)
+_SELECT_MANIFEST = (
+    "SELECT "  # noqa: S608 - identifiers are fixed module constants
+    + ", ".join(_MANIFEST_COLUMNS)
+    + " FROM inventory_manifest"
+)
+_INSERT_MANIFEST = (
+    "INSERT INTO inventory_manifest ("  # noqa: S608 - fixed identifiers
+    + ", ".join(_MANIFEST_COLUMNS)
+    + ") VALUES ("
+    + ", ".join("?" for _ in _MANIFEST_COLUMNS)
+    + ")"
+)
 _UNIT_COLUMNS = (
     "unit_id",
     "attempt_id",
     "principal_id",
     "create_sequence",
     "policy_revision",
+    "policy_specification",
     "runtime_name",
     "state",
     "revision",
@@ -72,8 +108,14 @@ _CREATE_PRINCIPALS = (
     "CREATE TABLE principals ("
     "principal_id TEXT PRIMARY KEY NOT NULL,"
     "high_water INTEGER NOT NULL CHECK (high_water > 0),"
+    "ack_attempt_id TEXT,"
+    "ack_unit_id TEXT,"
+    "ack_proof_id TEXT,"
     "mac_version INTEGER NOT NULL,"
-    "mac BLOB NOT NULL"
+    "mac BLOB NOT NULL,"
+    "CHECK ((ack_attempt_id IS NULL AND ack_unit_id IS NULL AND ack_proof_id IS NULL) "
+    "OR (ack_attempt_id IS NOT NULL AND ack_unit_id IS NOT NULL "
+    "AND ack_proof_id IS NOT NULL))"
     ") STRICT"
 )
 _CREATE_UNITS = (
@@ -83,6 +125,7 @@ _CREATE_UNITS = (
     "principal_id TEXT NOT NULL REFERENCES principals(principal_id),"
     "create_sequence INTEGER NOT NULL CHECK (create_sequence > 0),"
     "policy_revision TEXT NOT NULL,"
+    "policy_specification TEXT NOT NULL,"
     "runtime_name TEXT UNIQUE NOT NULL,"
     "state TEXT NOT NULL,"
     "revision INTEGER NOT NULL CHECK (revision >= 0),"
@@ -97,10 +140,26 @@ _CREATE_UNITS = (
     "UNIQUE (principal_id, create_sequence)"
     ") STRICT"
 )
+_CREATE_MANIFEST = (
+    "CREATE TABLE inventory_manifest ("
+    "singleton_id INTEGER PRIMARY KEY NOT NULL CHECK (singleton_id = 1),"
+    "generation INTEGER NOT NULL CHECK (generation >= 0),"
+    "principal_count INTEGER NOT NULL CHECK (principal_count >= 0),"
+    "unit_count INTEGER NOT NULL CHECK (unit_count >= 0),"
+    "principals_digest TEXT NOT NULL,"
+    "units_digest TEXT NOT NULL,"
+    "mac_version INTEGER NOT NULL,"
+    "mac BLOB NOT NULL"
+    ") STRICT"
+)
 
 
 def _fail(category: BrokerErrorCategory = BrokerErrorCategory.PROTOCOL_ERROR) -> Never:
     raise BrokerError(category)
+
+
+def _inventory_fail() -> Never:
+    _fail(BrokerErrorCategory.INVENTORY_FAILURE)
 
 
 class SQLiteBrokerInventory:
@@ -131,7 +190,7 @@ class SQLiteBrokerInventory:
                 self._initialize_or_verify_schema(connection)
                 self._verify_all(connection)
         except OSError, sqlite3.DatabaseError, ValueError:
-            _fail()
+            _inventory_fail()
 
     def reserve(self, unit: ManagedUnit, replay: ReplayPosition) -> ManagedUnit:
         """Reserve before runtime mutation, with exact-attempt replay idempotency."""
@@ -187,6 +246,7 @@ class SQLiteBrokerInventory:
                 principal_id,
                 unit.create_sequence,
                 unit.policy_revision,
+                unit.policy_specification.value,
                 self._runtime_name(unit.unit_id),
                 unit.state.value,
                 unit.revision,
@@ -199,9 +259,10 @@ class SQLiteBrokerInventory:
                 _MAC_VERSION,
             )
             connection.execute(_INSERT_UNIT, (*values, self._mac("unit", values)))
+            self._refresh_manifest(connection)
             row = self._select_unit(connection, "unit_id", str(unit.unit_id))
             if row is None:
-                _fail()
+                _inventory_fail()
             return self._unit_from_row(row)
 
     def create_sequence_high_watermark(self, principal_id: UUID) -> int:
@@ -229,6 +290,8 @@ class SQLiteBrokerInventory:
                     expected_revision,
                 ),
             )
+            if cursor.rowcount == 1:
+                self._refresh_manifest(connection)
             return cursor.rowcount == 1
 
     def get(self, unit_id: UUID) -> ManagedUnit | None:
@@ -257,8 +320,10 @@ class SQLiteBrokerInventory:
             rows = connection.execute(
                 _SELECT_UNITS
                 + " ORDER BY principal_id, create_sequence, unit_id LIMIT ?",
-                (limit,),
+                (limit + 1,),
             ).fetchall()
+            if len(rows) > limit:
+                _fail(BrokerErrorCategory.INVENTORY_FULL)
             return tuple(self._unit_from_row(row) for row in rows)
 
     def transition(
@@ -378,6 +443,17 @@ class SQLiteBrokerInventory:
             _fail()
         with self._transaction() as connection:
             self._verify_all(connection)
+            principal_row = connection.execute(
+                _SELECT_PRINCIPALS + " WHERE principal_id = ?", (str(principal_id),)
+            ).fetchone()
+            if principal_row is not None:
+                self._verified_principal(principal_row)
+                if self._ack_receipt(principal_row) == (
+                    str(attempt_id),
+                    str(unit_id),
+                    str(proof_id),
+                ):
+                    return True
             row = self._select_unit(connection, "unit_id", str(unit_id))
             if row is None:
                 return False
@@ -389,6 +465,14 @@ class SQLiteBrokerInventory:
             ):
                 return False
             connection.execute("DELETE FROM units WHERE unit_id = ?", (str(unit_id),))
+            self._store_ack_receipt(
+                connection,
+                str(principal_id),
+                str(attempt_id),
+                str(unit_id),
+                str(proof_id),
+            )
+            self._refresh_manifest(connection)
             return True
 
     @contextmanager
@@ -401,7 +485,7 @@ class SQLiteBrokerInventory:
             connection.execute("PRAGMA synchronous = FULL")
             synchronous = connection.execute("PRAGMA synchronous").fetchone()[0]
             if journal_mode != "wal" or synchronous != _SQLITE_FULL_SYNCHRONOUS:
-                _fail()
+                _inventory_fail()
             yield connection
         finally:
             connection.close()
@@ -419,7 +503,7 @@ class SQLiteBrokerInventory:
                 else:
                     connection.commit()
         except sqlite3.DatabaseError:
-            _fail()
+            _inventory_fail()
 
     @contextmanager
     def _verified_connection(self) -> Iterator[sqlite3.Connection]:
@@ -428,7 +512,7 @@ class SQLiteBrokerInventory:
                 self._verify_all(connection)
                 yield connection
         except sqlite3.DatabaseError, ValueError:
-            _fail()
+            _inventory_fail()
 
     def _initialize_or_verify_schema(self, connection: sqlite3.Connection) -> None:
         if not self._table_names(connection):
@@ -436,6 +520,8 @@ class SQLiteBrokerInventory:
             try:
                 connection.execute(_CREATE_PRINCIPALS)
                 connection.execute(_CREATE_UNITS)
+                connection.execute(_CREATE_MANIFEST)
+                self._insert_empty_manifest(connection)
                 connection.execute(f"PRAGMA application_id = {_APPLICATION_ID}")
                 connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
                 connection.commit()
@@ -449,25 +535,45 @@ class SQLiteBrokerInventory:
             connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID
             or connection.execute("PRAGMA user_version").fetchone()[0]
             != _SCHEMA_VERSION
-            or self._table_names(connection) != {"principals", "units"}
+            or self._table_names(connection)
+            != {"inventory_manifest", "principals", "units"}
+            or self._schema_objects(connection)
+            != {
+                ("table", "inventory_manifest"),
+                ("table", "principals"),
+                ("table", "units"),
+            }
         ):
-            _fail()
+            _inventory_fail()
         principal_columns = tuple(
             row[1] for row in connection.execute("PRAGMA table_info(principals)")
         )
         unit_columns = tuple(
             row[1] for row in connection.execute("PRAGMA table_info(units)")
         )
-        if principal_columns != _PRINCIPAL_COLUMNS or unit_columns != _UNIT_COLUMNS:
-            _fail()
+        manifest_columns = tuple(
+            row[1]
+            for row in connection.execute("PRAGMA table_info(inventory_manifest)")
+        )
+        if (
+            principal_columns != _PRINCIPAL_COLUMNS
+            or unit_columns != _UNIT_COLUMNS
+            or manifest_columns != _MANIFEST_COLUMNS
+        ):
+            _inventory_fail()
         schemas = dict(
             connection.execute(
                 "SELECT name, sql FROM sqlite_master "
-                "WHERE type = 'table' AND name IN ('principals', 'units')"
+                "WHERE type = 'table' "
+                "AND name IN ('inventory_manifest', 'principals', 'units')"
             ).fetchall()
         )
-        if schemas != {"principals": _CREATE_PRINCIPALS, "units": _CREATE_UNITS}:
-            _fail()
+        if schemas != {
+            "inventory_manifest": _CREATE_MANIFEST,
+            "principals": _CREATE_PRINCIPALS,
+            "units": _CREATE_UNITS,
+        }:
+            _inventory_fail()
 
     def _verify_all(self, connection: sqlite3.Connection) -> None:
         self._verify_schema(connection)
@@ -475,24 +581,24 @@ class SQLiteBrokerInventory:
         if [row[0] for row in integrity] != ["ok"] or connection.execute(
             "PRAGMA foreign_key_check"
         ).fetchone() is not None:
-            _fail()
+            _inventory_fail()
         principals = connection.execute(
-            "SELECT principal_id, high_water, mac_version, mac FROM principals"
+            _SELECT_PRINCIPALS + " ORDER BY principal_id"
         ).fetchall()
-        units = connection.execute(_SELECT_UNITS).fetchall()
+        units = connection.execute(_SELECT_UNITS + " ORDER BY unit_id").fetchall()
         if len(principals) > self._max_records or len(units) > self._max_records:
             _fail(BrokerErrorCategory.INVENTORY_FULL)
         for row in principals:
             self._verified_principal(row)
         for row in units:
             self._unit_from_row(row)
+        self._verify_manifest(connection, principals, units)
 
     def _principal_high_water(
         self, connection: sqlite3.Connection, principal_id: str
     ) -> int:
         row = connection.execute(
-            "SELECT principal_id, high_water, mac_version, mac "
-            "FROM principals WHERE principal_id = ?",
+            _SELECT_PRINCIPALS + " WHERE principal_id = ?",
             (principal_id,),
         ).fetchone()
         return 0 if row is None else self._verified_principal(row)
@@ -504,15 +610,19 @@ class SQLiteBrokerInventory:
             or type(row[0]) is not str
             or type(row[1]) is not int
             or row[1] <= 0
-            or row[2] != _MAC_VERSION
-            or type(row[3]) is not bytes
-            or not hmac.compare_digest(row[3], self._mac("principal", values))
+            or row[_PRINCIPAL_COLUMNS.index("mac_version")] != _MAC_VERSION
+            or type(row[-1]) is not bytes
+            or not hmac.compare_digest(row[-1], self._mac("principal", values))
         ):
-            _fail()
+            _inventory_fail()
         try:
             UUID(row[0])
+            receipt = self._ack_receipt(row)
+            if receipt is not None:
+                for value in receipt:
+                    UUID(value)
         except ValueError:
-            _fail()
+            _inventory_fail()
         return row[1]
 
     def _unit_from_row(self, row: Sequence[Any]) -> ManagedUnit:
@@ -523,11 +633,11 @@ class SQLiteBrokerInventory:
             or type(row[-1]) is not bytes
             or not hmac.compare_digest(row[-1], self._mac("unit", values))
         ):
-            _fail()
+            _inventory_fail()
         try:
             unit_id = UUID(row[_UNIT_COLUMNS.index("unit_id")])
             if row[_UNIT_COLUMNS.index("runtime_name")] != self._runtime_name(unit_id):
-                _fail()
+                _inventory_fail()
             incarnation_id = row[_UNIT_COLUMNS.index("incarnation_id")]
             specification = row[_UNIT_COLUMNS.index("specification")]
             incarnation = (
@@ -545,6 +655,9 @@ class SQLiteBrokerInventory:
                 ),
                 create_sequence=row[_UNIT_COLUMNS.index("create_sequence")],
                 policy_revision=row[_UNIT_COLUMNS.index("policy_revision")],
+                policy_specification=EvidenceDigest(
+                    row[_UNIT_COLUMNS.index("policy_specification")]
+                ),
                 state=ManagedUnitState(row[_UNIT_COLUMNS.index("state")]),
                 revision=row[_UNIT_COLUMNS.index("revision")],
                 runtime_incarnation=incarnation,
@@ -555,21 +668,21 @@ class SQLiteBrokerInventory:
             self._validate_proof_shape(row, unit.state)
             return unit
         except TypeError, ValueError:
-            _fail()
+            _inventory_fail()
 
     def _proof_from_row(self, row: Sequence[Any]) -> TerminationProof:
         unit = self._unit_from_row(row)
         if unit.state is not ManagedUnitState.REMOVED:
-            _fail()
+            _inventory_fail()
         exit_evidence = unit.exit_evidence
         empty_evidence = unit.empty_evidence
         removal_evidence = unit.removal_evidence
         if not isinstance(exit_evidence, EvidenceDigest):
-            _fail()
+            _inventory_fail()
         if not isinstance(empty_evidence, EvidenceDigest):
-            _fail()
+            _inventory_fail()
         if not isinstance(removal_evidence, EvidenceDigest):
-            _fail()
+            _inventory_fail()
         try:
             return TerminationProof(
                 proof_id=UUID(row[_UNIT_COLUMNS.index("proof_id")]),
@@ -582,13 +695,13 @@ class SQLiteBrokerInventory:
                 removal_evidence=removal_evidence,
             )
         except TypeError, ValueError:
-            _fail()
+            _inventory_fail()
 
     @staticmethod
     def _validate_proof_shape(row: Sequence[Any], state: ManagedUnitState) -> None:
         proof_id = row[_UNIT_COLUMNS.index("proof_id")]
         if (state is ManagedUnitState.REMOVED) != (proof_id is not None):
-            _fail()
+            _inventory_fail()
         if proof_id is not None:
             UUID(proof_id)
 
@@ -618,14 +731,56 @@ class SQLiteBrokerInventory:
     def _store_principal(
         self, connection: sqlite3.Connection, principal_id: str, high_water: int
     ) -> None:
-        values = (principal_id, high_water, _MAC_VERSION)
+        current = connection.execute(
+            _SELECT_PRINCIPALS + " WHERE principal_id = ?", (principal_id,)
+        ).fetchone()
+        receipt = (None, None, None)
+        if current is not None:
+            self._verified_principal(current)
+            receipt = tuple(current[2:5])
+        values = (principal_id, high_water, *receipt, _MAC_VERSION)
         connection.execute(
-            "INSERT INTO principals (principal_id, high_water, mac_version, mac) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(principal_id) DO UPDATE SET "
-            "high_water = excluded.high_water, mac_version = excluded.mac_version, "
-            "mac = excluded.mac",
+            "INSERT INTO principals ("
+            "principal_id, high_water, ack_attempt_id, ack_unit_id, ack_proof_id, "
+            "mac_version, mac) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(principal_id) DO UPDATE SET "
+            "high_water = excluded.high_water, "
+            "ack_attempt_id = excluded.ack_attempt_id, "
+            "ack_unit_id = excluded.ack_unit_id, ack_proof_id = excluded.ack_proof_id, "
+            "mac_version = excluded.mac_version, mac = excluded.mac",
             (*values, self._mac("principal", values)),
         )
+
+    def _store_ack_receipt(
+        self,
+        connection: sqlite3.Connection,
+        principal_id: str,
+        attempt_id: str,
+        unit_id: str,
+        proof_id: str,
+    ) -> None:
+        row = connection.execute(
+            _SELECT_PRINCIPALS + " WHERE principal_id = ?", (principal_id,)
+        ).fetchone()
+        if row is None:
+            _inventory_fail()
+        high_water = self._verified_principal(row)
+        values = (
+            principal_id,
+            high_water,
+            attempt_id,
+            unit_id,
+            proof_id,
+            _MAC_VERSION,
+        )
+        cursor = connection.execute(
+            "UPDATE principals SET high_water = ?, ack_attempt_id = ?, "
+            "ack_unit_id = ?, ack_proof_id = ?, mac_version = ?, mac = ? "
+            "WHERE principal_id = ?",
+            (*values[1:], self._mac("principal", values), principal_id),
+        )
+        if cursor.rowcount != 1:
+            _inventory_fail()
 
     def _write_updated_unit(
         self,
@@ -641,10 +796,118 @@ class SQLiteBrokerInventory:
         )
         if cursor.rowcount != 1:
             _fail(BrokerErrorCategory.REPLAY_REJECTED)
+        self._refresh_manifest(connection)
         row = self._select_unit(connection, "unit_id", str(unit_id))
         if row is None:
-            _fail()
+            _inventory_fail()
         return self._unit_from_row(row)
+
+    @staticmethod
+    def _ack_receipt(row: Sequence[Any]) -> tuple[str, str, str] | None:
+        receipt = tuple(row[2:5])
+        if receipt == (None, None, None):
+            return None
+        if not all(type(value) is str for value in receipt):
+            _inventory_fail()
+        return receipt[0], receipt[1], receipt[2]
+
+    def _insert_empty_manifest(self, connection: sqlite3.Connection) -> None:
+        values = (
+            1,
+            0,
+            0,
+            0,
+            self._aggregate_digest("principals", ()),
+            self._aggregate_digest("units", ()),
+            _MAC_VERSION,
+        )
+        connection.execute(
+            _INSERT_MANIFEST,
+            (*values, self._mac("manifest", values)),
+        )
+
+    def _refresh_manifest(self, connection: sqlite3.Connection) -> None:
+        current = connection.execute(_SELECT_MANIFEST).fetchall()
+        if len(current) != 1:
+            _inventory_fail()
+        self._verified_manifest_row(current[0])
+        principals = connection.execute(
+            _SELECT_PRINCIPALS + " ORDER BY principal_id"
+        ).fetchall()
+        units = connection.execute(_SELECT_UNITS + " ORDER BY unit_id").fetchall()
+        values = (
+            1,
+            current[0][_MANIFEST_COLUMNS.index("generation")] + 1,
+            len(principals),
+            len(units),
+            self._aggregate_digest("principals", principals),
+            self._aggregate_digest("units", units),
+            _MAC_VERSION,
+        )
+        cursor = connection.execute(
+            "UPDATE inventory_manifest SET generation = ?, principal_count = ?, "
+            "unit_count = ?, principals_digest = ?, units_digest = ?, "
+            "mac_version = ?, mac = ? WHERE singleton_id = 1",
+            (*values[1:], self._mac("manifest", values)),
+        )
+        if cursor.rowcount != 1:
+            _inventory_fail()
+
+    def _verify_manifest(
+        self,
+        connection: sqlite3.Connection,
+        principals: Sequence[Sequence[Any]],
+        units: Sequence[Sequence[Any]],
+    ) -> None:
+        rows = connection.execute(_SELECT_MANIFEST).fetchall()
+        if len(rows) != 1:
+            _inventory_fail()
+        row = rows[0]
+        self._verified_manifest_row(row)
+        if (
+            row[_MANIFEST_COLUMNS.index("principal_count")] != len(principals)
+            or row[_MANIFEST_COLUMNS.index("unit_count")] != len(units)
+            or row[_MANIFEST_COLUMNS.index("principals_digest")]
+            != self._aggregate_digest("principals", principals)
+            or row[_MANIFEST_COLUMNS.index("units_digest")]
+            != self._aggregate_digest("units", units)
+        ):
+            _inventory_fail()
+
+    def _verified_manifest_row(self, row: Sequence[Any]) -> None:
+        values = tuple(row[:-1])
+        if (
+            len(row) != len(_MANIFEST_COLUMNS)
+            or row[0] != 1
+            or type(row[1]) is not int
+            or row[1] < 0
+            or type(row[2]) is not int
+            or row[2] < 0
+            or type(row[3]) is not int
+            or row[3] < 0
+            or not all(type(value) is str for value in row[4:6])
+            or row[6] != _MAC_VERSION
+            or type(row[7]) is not bytes
+            or not hmac.compare_digest(row[7], self._mac("manifest", values))
+        ):
+            _inventory_fail()
+
+    @staticmethod
+    def _aggregate_digest(record_type: str, rows: Sequence[Sequence[Any]]) -> str:
+        digest = hashlib.sha256()
+        for row in rows:
+            serializable = [
+                {"bytes": value.hex()} if type(value) is bytes else value
+                for value in row
+            ]
+            canonical = json.dumps(
+                [record_type, *serializable],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+            digest.update(len(canonical).to_bytes(8, "big"))
+            digest.update(canonical)
+        return "sha256:" + digest.hexdigest()
 
     def _select_unit(
         self, connection: sqlite3.Connection, column: str, value: str
@@ -678,6 +941,16 @@ class SQLiteBrokerInventory:
             for row in connection.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+
+    @staticmethod
+    def _schema_objects(connection: sqlite3.Connection) -> set[tuple[str, str]]:
+        return {
+            (row[0], row[1])
+            for row in connection.execute(
+                "SELECT type, name FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_autoindex_%'"
             )
         }
 

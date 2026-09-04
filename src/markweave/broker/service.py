@@ -52,6 +52,7 @@ class IsolationBrokerService:
         self._inventory = inventory
         self._runtime = runtime
         self._policy = policy
+        self._policy_specification = policy_specification_evidence(policy)
         self._max_discovered_units = max_discovered_units
         self._unit_id_factory = unit_id_factory
         self._gate = RLock()
@@ -104,10 +105,13 @@ class IsolationBrokerService:
                     replay.principal,
                     replay.sequence,
                     self._policy.revision,
+                    self._policy_specification,
                     ManagedUnitState.RESERVED,
                     0,
                 )
-                reserved = self._inventory.reserve(unit, replay)
+                reserved = self._inventory_call(
+                    lambda: self._inventory.reserve(unit, replay)
+                )
             except BrokerError:
                 raise
             except Exception as error:
@@ -115,19 +119,27 @@ class IsolationBrokerService:
             if reserved.state is not ManagedUnitState.RESERVED:
                 return reserved
             try:
-                intent = self._inventory.transition(
-                    reserved.unit_id,
-                    expected_revision=reserved.revision,
-                    target=ManagedUnitState.CREATE_INTENT,
+                intent = self._inventory_call(
+                    lambda: self._inventory.transition(
+                        reserved.unit_id,
+                        expected_revision=reserved.revision,
+                        target=ManagedUnitState.CREATE_INTENT,
+                    )
                 )
                 runtime_unit = self._runtime.create(intent, self._policy)
                 self._validate_runtime_unit(intent, runtime_unit)
-                return self._inventory.transition(
-                    reserved.unit_id,
-                    expected_revision=intent.revision,
-                    target=ManagedUnitState.CREATED,
-                    runtime_incarnation=runtime_unit.incarnation,
+                return self._inventory_call(
+                    lambda: self._inventory.transition(
+                        reserved.unit_id,
+                        expected_revision=intent.revision,
+                        target=ManagedUnitState.CREATED,
+                        runtime_incarnation=runtime_unit.incarnation,
+                    )
                 )
+            except BrokerError as error:
+                if error.category is BrokerErrorCategory.INVENTORY_FAILURE:
+                    raise
+                self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
             except Exception as error:
                 self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
 
@@ -159,6 +171,10 @@ class IsolationBrokerService:
                     return self._retained_proof(unit)
                 runtime_unit = self._runtime_for(unit)
                 return self._terminate_and_prove(unit, runtime_unit)
+            except BrokerError as error:
+                if error.category is BrokerErrorCategory.INVENTORY_FAILURE:
+                    raise
+                self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN, cause=error)
             except Exception as error:
                 self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN, cause=error)
 
@@ -189,17 +205,21 @@ class IsolationBrokerService:
         with self._gate:
             self._require_ready()
             self._validate_request(principal, attempt_id, unit_id, proof_id)
-            unit = self._inventory.get(unit_id)
+            unit = self._inventory_call(lambda: self._inventory.get(unit_id))
             if unit is None:
-                return self._inventory.acknowledge(
-                    principal.principal_id, attempt_id, unit_id, proof_id
+                return self._inventory_call(
+                    lambda: self._inventory.acknowledge(
+                        principal.principal_id, attempt_id, unit_id, proof_id
+                    )
                 )
             self._require_owner(unit, principal, attempt_id, unit_id)
-            proof = self._inventory.get_proof(unit_id)
+            proof = self._inventory_call(lambda: self._inventory.get_proof(unit_id))
             if proof is None or proof.proof_id != proof_id:
                 return False
-            return self._inventory.acknowledge(
-                principal.principal_id, attempt_id, unit_id, proof_id
+            return self._inventory_call(
+                lambda: self._inventory.acknowledge(
+                    principal.principal_id, attempt_id, unit_id, proof_id
+                )
             )
 
     def _request_unit(
@@ -209,7 +229,7 @@ class IsolationBrokerService:
         unit_id: UUID,
     ) -> ManagedUnit:
         self._validate_request(principal, attempt_id, unit_id)
-        unit = self._inventory.get(unit_id)
+        unit = self._inventory_call(lambda: self._inventory.get(unit_id))
         if unit is None:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         self._require_owner(unit, principal, attempt_id, unit_id)
@@ -239,12 +259,14 @@ class IsolationBrokerService:
         return discovered
 
     def _reconcile(self) -> None:
-        units = self._inventory.unacknowledged(limit=self._max_discovered_units)
+        units = self._inventory_call(
+            lambda: self._inventory.unacknowledged(limit=self._max_discovered_units)
+        )
         if len(units) > self._max_discovered_units:
             self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
         by_id: dict[UUID, ManagedUnit] = {}
         for unit in units:
-            if unit.unit_id in by_id or unit.policy_revision != self._policy.revision:
+            if unit.unit_id in by_id:
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
             by_id[unit.unit_id] = unit
 
@@ -269,20 +291,24 @@ class IsolationBrokerService:
         self, unit: ManagedUnit, runtime_unit: RuntimeUnit | None
     ) -> None:
         if unit.state is ManagedUnitState.RESERVED:
-            if runtime_unit is not None or not self._inventory.discard_reserved(
-                unit.unit_id,
-                expected_revision=unit.revision,
+            if runtime_unit is not None or not self._inventory_call(
+                lambda: self._inventory.discard_reserved(
+                    unit.unit_id,
+                    expected_revision=unit.revision,
+                )
             ):
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
             return
         if unit.state is ManagedUnitState.CREATE_INTENT:
             if runtime_unit is None:
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
-            created = self._inventory.transition(
-                unit.unit_id,
-                expected_revision=unit.revision,
-                target=ManagedUnitState.CREATED,
-                runtime_incarnation=runtime_unit.incarnation,
+            created = self._inventory_call(
+                lambda: self._inventory.transition(
+                    unit.unit_id,
+                    expected_revision=unit.revision,
+                    target=ManagedUnitState.CREATED,
+                    runtime_incarnation=runtime_unit.incarnation,
+                )
             )
             self._terminate_and_prove(created, runtime_unit)
             return
@@ -306,29 +332,35 @@ class IsolationBrokerService:
         if current.state is ManagedUnitState.CREATED:
             self._runtime.hard_terminate(runtime_unit)
             exit_evidence = self._runtime.confirm_exit(runtime_unit)
-            current = self._inventory.transition(
-                current.unit_id,
-                expected_revision=current.revision,
-                target=ManagedUnitState.EXIT_CONFIRMED,
-                evidence=exit_evidence,
+            current = self._inventory_call(
+                lambda: self._inventory.transition(
+                    current.unit_id,
+                    expected_revision=current.revision,
+                    target=ManagedUnitState.EXIT_CONFIRMED,
+                    evidence=exit_evidence,
+                )
             )
         if current.state is ManagedUnitState.EXIT_CONFIRMED:
             empty_evidence = self._runtime.confirm_empty(runtime_unit)
-            current = self._inventory.transition(
-                current.unit_id,
-                expected_revision=current.revision,
-                target=ManagedUnitState.EMPTY_CONFIRMED,
-                evidence=empty_evidence,
+            current = self._inventory_call(
+                lambda: self._inventory.transition(
+                    current.unit_id,
+                    expected_revision=current.revision,
+                    target=ManagedUnitState.EMPTY_CONFIRMED,
+                    evidence=empty_evidence,
+                )
             )
         if current.state is ManagedUnitState.EMPTY_CONFIRMED:
             self._runtime.remove(runtime_unit)
             removal_evidence = self._runtime.confirm_removed(runtime_unit)
             proof = self._proof_for(current, removal_evidence)
-            current = self._inventory.mark_removed(
-                current.unit_id,
-                expected_revision=current.revision,
-                removal_evidence=removal_evidence,
-                proof=proof,
+            current = self._inventory_call(
+                lambda: self._inventory.mark_removed(
+                    current.unit_id,
+                    expected_revision=current.revision,
+                    removal_evidence=removal_evidence,
+                    proof=proof,
+                )
             )
         if current.state is not ManagedUnitState.REMOVED:
             self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN)
@@ -363,7 +395,7 @@ class IsolationBrokerService:
         )
 
     def _retained_proof(self, unit: ManagedUnit) -> TerminationProof:
-        proof = self._inventory.get_proof(unit.unit_id)
+        proof = self._inventory_call(lambda: self._inventory.get_proof(unit.unit_id))
         if (
             proof is None
             or proof.attempt_id != unit.attempt_id
@@ -386,9 +418,7 @@ class IsolationBrokerService:
     ) -> None:
         if runtime_unit.unit_id != unit.unit_id:
             self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
-        if runtime_unit.incarnation.specification != policy_specification_evidence(
-            self._policy
-        ):
+        if runtime_unit.incarnation.specification != unit.policy_specification:
             category = (
                 BrokerErrorCategory.RECONCILIATION_INCOMPLETE
                 if require_persisted
@@ -401,6 +431,16 @@ class IsolationBrokerService:
             and runtime_unit.incarnation != unit.runtime_incarnation
         ):
             self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+
+    def _inventory_call[T](self, operation: Callable[[], T]) -> T:
+        try:
+            return operation()
+        except BrokerError as error:
+            if error.category is BrokerErrorCategory.INVENTORY_FAILURE:
+                self._ready = False
+            raise
+        except Exception as error:
+            self._fail(BrokerErrorCategory.INVENTORY_FAILURE, cause=error)
 
     @staticmethod
     def _validate_request(*values: object) -> None:

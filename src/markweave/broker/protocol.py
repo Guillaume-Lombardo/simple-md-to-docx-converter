@@ -109,9 +109,7 @@ class StatusResponse:
 @dataclass(frozen=True, slots=True)
 class TerminateResponse:
     request_id: UUID
-    attempt_id: UUID
-    unit_id: UUID
-    state: ManagedUnitState
+    proof: TerminationProof
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +124,7 @@ class AcknowledgeResponse:
     attempt_id: UUID
     unit_id: UUID
     proof_id: UUID
+    acknowledged: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +172,12 @@ _PROOF_RESPONSE_KEYS = _RESPONSE_COMMON_KEYS | {
     "principal_id",
     "proof_id",
     "removal_evidence",
+    "unit_id",
+}
+_ACK_RESPONSE_KEYS = _RESPONSE_COMMON_KEYS | {
+    "acknowledged",
+    "attempt_id",
+    "proof_id",
     "unit_id",
 }
 
@@ -421,17 +426,23 @@ def _response_mapping(response: BrokerResponse) -> dict[str, object]:
         case StatusResponse(attempt_id=attempt_id, unit_id=unit_id, state=state):
             operation = BrokerOperation.STATUS
             _add_unit_response(base, attempt_id, unit_id, state)
-        case TerminateResponse(attempt_id=attempt_id, unit_id=unit_id, state=state):
+        case TerminateResponse(proof=proof):
             operation = BrokerOperation.TERMINATE
-            _add_unit_response(base, attempt_id, unit_id, state)
+            _add_proof_response(base, proof)
         case ProofResponse(proof=proof):
             operation = BrokerOperation.PROOF
             _add_proof_response(base, proof)
         case AcknowledgeResponse(
-            attempt_id=attempt_id, unit_id=unit_id, proof_id=proof_id
+            attempt_id=attempt_id,
+            unit_id=unit_id,
+            proof_id=proof_id,
+            acknowledged=acknowledged,
         ):
             operation = BrokerOperation.ACK
+            if acknowledged is not True:
+                _fail()
             base.update(
+                acknowledged=True,
                 attempt_id=str(_checked_uuid(attempt_id)),
                 unit_id=str(_checked_uuid(unit_id)),
                 proof_id=str(_checked_uuid(proof_id)),
@@ -551,7 +562,6 @@ def _decode_success_response(
     if operation in {
         BrokerOperation.CREATE,
         BrokerOperation.STATUS,
-        BrokerOperation.TERMINATE,
     }:
         if value.keys() != _UNIT_RESPONSE_KEYS:
             _fail()
@@ -564,38 +574,26 @@ def _decode_success_response(
         constructors = {
             BrokerOperation.CREATE: CreateResponse,
             BrokerOperation.STATUS: StatusResponse,
-            BrokerOperation.TERMINATE: TerminateResponse,
         }
         return constructors[operation](*arguments)
-    if operation is BrokerOperation.PROOF:
+    if operation in {BrokerOperation.TERMINATE, BrokerOperation.PROOF}:
         if value.keys() != _PROOF_RESPONSE_KEYS:
             _fail()
-        try:
-            proof = TerminationProof(
-                _uuid(value.get("proof_id")),
-                _uuid(value.get("attempt_id")),
-                _uuid(value.get("unit_id")),
-                AuthenticatedPrincipal(_uuid(value.get("principal_id"))),
-                _policy_revision(value.get("policy_revision")),
-                EvidenceDigest(_evidence(value.get("exit_evidence"))),
-                EvidenceDigest(_evidence(value.get("empty_evidence"))),
-                EvidenceDigest(_evidence(value.get("removal_evidence"))),
-            )
-        except ValueError:
-            _fail()
+        proof = _termination_proof(value)
+        if operation is BrokerOperation.TERMINATE:
+            return TerminateResponse(request_id, proof)
         return ProofResponse(request_id, proof)
     if operation is BrokerOperation.ACK:
-        if value.keys() != _RESPONSE_COMMON_KEYS | {
-            "attempt_id",
-            "proof_id",
-            "unit_id",
-        }:
+        if value.keys() != _ACK_RESPONSE_KEYS:
+            _fail()
+        if value.get("acknowledged") is not True:
             _fail()
         return AcknowledgeResponse(
             request_id,
             _uuid(value.get("attempt_id")),
             _uuid(value.get("unit_id")),
             _uuid(value.get("proof_id")),
+            True,
         )
     if operation is BrokerOperation.READY:
         if value.keys() != _RESPONSE_COMMON_KEYS | {"ready"}:
@@ -605,6 +603,22 @@ def _decode_success_response(
             _fail()
         return ReadyResponse(request_id, ready)
     return _fail()
+
+
+def _termination_proof(value: dict[str, object]) -> TerminationProof:
+    try:
+        return TerminationProof(
+            _uuid(value.get("proof_id")),
+            _uuid(value.get("attempt_id")),
+            _uuid(value.get("unit_id")),
+            AuthenticatedPrincipal(_uuid(value.get("principal_id"))),
+            _policy_revision(value.get("policy_revision")),
+            EvidenceDigest(_evidence(value.get("exit_evidence"))),
+            EvidenceDigest(_evidence(value.get("empty_evidence"))),
+            EvidenceDigest(_evidence(value.get("removal_evidence"))),
+        )
+    except ValueError:
+        _fail()
 
 
 def _state(value: object) -> ManagedUnitState:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -42,6 +43,11 @@ POLICY = BrokerPolicy(
     "sha256:" + "b" * 64,
     RuntimeLimits(100_000, 100_000, 512_000_000, 32, 16_000_000, 30_000),
 )
+ROLLED_POLICY = BrokerPolicy(
+    "t71-v2",
+    "sha256:" + "d" * 64,
+    RuntimeLimits(90_000, 100_000, 384_000_000, 24, 12_000_000, 25_000),
+)
 
 
 def _inventory(tmp_path: Path) -> SQLiteBrokerInventory:
@@ -55,11 +61,12 @@ def _inventory(tmp_path: Path) -> SQLiteBrokerInventory:
 def _service(
     inventory: SQLiteBrokerInventory,
     runtime: FakeIsolationRuntime,
+    policy: BrokerPolicy = POLICY,
 ) -> IsolationBrokerService:
     return IsolationBrokerService(
         inventory,
         runtime,
-        POLICY,
+        policy,
         max_discovered_units=32,
         unit_id_factory=lambda: UNIT_ID,
     )
@@ -72,6 +79,7 @@ def _reserve(inventory: SQLiteBrokerInventory) -> ManagedUnit:
         PRINCIPAL,
         1,
         POLICY.revision,
+        policy_specification_evidence(POLICY),
         ManagedUnitState.RESERVED,
         0,
     )
@@ -323,6 +331,166 @@ def test_runtime_fault_during_reconciliation_keeps_readiness_closed(
     assert not broker.ready
 
 
+@pytest.mark.parametrize(
+    ("operation", "point", "interrupted_state"),
+    (
+        ("hard_terminate", "before", ManagedUnitState.CREATED),
+        ("hard_terminate", "after", ManagedUnitState.CREATED),
+        ("confirm_exit", "before", ManagedUnitState.CREATED),
+        ("confirm_exit", "after", ManagedUnitState.CREATED),
+        ("confirm_empty", "before", ManagedUnitState.EXIT_CONFIRMED),
+        ("confirm_empty", "after", ManagedUnitState.EXIT_CONFIRMED),
+        ("remove", "before", ManagedUnitState.EMPTY_CONFIRMED),
+        ("remove", "after", ManagedUnitState.EMPTY_CONFIRMED),
+        ("confirm_removed", "before", ManagedUnitState.EMPTY_CONFIRMED),
+        ("confirm_removed", "after", ManagedUnitState.EMPTY_CONFIRMED),
+    ),
+)
+def test_every_runtime_fault_resumes_exactly_on_restart(
+    tmp_path: Path,
+    operation: str,
+    point: FaultPoint,
+    interrupted_state: ManagedUnitState,
+) -> None:
+    inventory = _inventory(tmp_path)
+    runtime = FakeIsolationRuntime()
+    broker = _service(inventory, runtime)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    runtime.inject_fault(operation, point=point)
+
+    with pytest.raises(BrokerError) as caught:
+        broker.terminate(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+
+    assert caught.value.category is BrokerErrorCategory.TERMINATION_UNPROVEN
+    assert not broker.ready
+    interrupted = inventory.get(created.unit_id)
+    assert interrupted is not None
+    assert interrupted.state is interrupted_state
+    assert inventory.get_proof(created.unit_id) is None
+
+    restarted = _service(inventory, runtime)
+    restarted.start()
+    removed = inventory.get(created.unit_id)
+    assert restarted.ready
+    assert removed is not None
+    assert removed.state is ManagedUnitState.REMOVED
+    assert restarted.proof(PRINCIPAL, ATTEMPT_ID, created.unit_id) is not None
+
+
+@pytest.mark.parametrize(
+    ("commit", "target", "interrupted_state"),
+    (
+        (
+            "transition",
+            ManagedUnitState.EXIT_CONFIRMED,
+            ManagedUnitState.EXIT_CONFIRMED,
+        ),
+        (
+            "transition",
+            ManagedUnitState.EMPTY_CONFIRMED,
+            ManagedUnitState.EMPTY_CONFIRMED,
+        ),
+        ("mark_removed", ManagedUnitState.REMOVED, ManagedUnitState.REMOVED),
+    ),
+)
+def test_persistence_failure_after_commit_resumes_exactly_on_restart(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    commit: str,
+    target: ManagedUnitState,
+    interrupted_state: ManagedUnitState,
+) -> None:
+    inventory = _inventory(tmp_path)
+    runtime = FakeIsolationRuntime()
+    broker = _service(inventory, runtime)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    original = getattr(inventory, commit)
+
+    def commit_then_fail(*args, **kwargs):
+        result = original(*args, **kwargs)
+        observed_target = kwargs.get("target", ManagedUnitState.REMOVED)
+        if observed_target is target:
+            raise BrokerError(BrokerErrorCategory.INVENTORY_FAILURE)
+        return result
+
+    patch = mocker.patch.object(inventory, commit, side_effect=commit_then_fail)
+    with pytest.raises(BrokerError) as caught:
+        broker.terminate(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+    interrupted = inventory.get(created.unit_id)
+    assert interrupted is not None
+    assert interrupted.state is interrupted_state
+    retained = inventory.get_proof(created.unit_id)
+    assert (retained is not None) is (target is ManagedUnitState.REMOVED)
+
+    patch.stop()
+    restarted = _service(inventory, runtime)
+    restarted.start()
+    proof = restarted.proof(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+    assert restarted.ready
+    assert proof is not None
+
+
+def test_policy_rollover_reconciles_old_created_unit(tmp_path: Path) -> None:
+    inventory = _inventory(tmp_path)
+    runtime = FakeIsolationRuntime()
+    old_broker = _service(inventory, runtime)
+    old_broker.start()
+    created = old_broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    assert created.policy_specification == policy_specification_evidence(POLICY)
+
+    rolled_broker = _service(inventory, runtime, ROLLED_POLICY)
+    rolled_broker.start()
+
+    removed = inventory.get(created.unit_id)
+    assert rolled_broker.ready
+    assert removed is not None
+    assert removed.state is ManagedUnitState.REMOVED
+    assert removed.policy_revision == POLICY.revision
+    assert removed.policy_specification == policy_specification_evidence(POLICY)
+
+
+def test_policy_rollover_reconciles_old_create_intent_by_persisted_specification(
+    tmp_path: Path,
+) -> None:
+    inventory = _inventory(tmp_path)
+    intent = _intent(inventory)
+    runtime = FakeIsolationRuntime()
+    runtime.create(intent, POLICY)
+
+    rolled_broker = _service(inventory, runtime, ROLLED_POLICY)
+    rolled_broker.start()
+
+    removed = inventory.get(intent.unit_id)
+    assert rolled_broker.ready
+    assert removed is not None
+    assert removed.state is ManagedUnitState.REMOVED
+    assert removed.policy_specification == policy_specification_evidence(POLICY)
+
+
+def test_policy_rollover_keeps_old_tombstone_provable_and_acknowledgeable(
+    tmp_path: Path,
+) -> None:
+    inventory = _inventory(tmp_path)
+    runtime = FakeIsolationRuntime()
+    old_broker = _service(inventory, runtime)
+    old_broker.start()
+    created = old_broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    proof = old_broker.terminate(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+
+    rolled_broker = _service(inventory, runtime, ROLLED_POLICY)
+    rolled_broker.start()
+
+    assert rolled_broker.proof(PRINCIPAL, ATTEMPT_ID, created.unit_id) == proof
+    assert rolled_broker.acknowledge(
+        PRINCIPAL, ATTEMPT_ID, created.unit_id, proof.proof_id
+    )
+
+
 def test_reserved_discard_failure_keeps_readiness_closed(
     tmp_path: Path,
     mocker: MockerFixture,
@@ -454,6 +622,14 @@ def test_fake_runtime_enforces_lifecycle_and_discovery_limits(
 
     with pytest.raises(FakeRuntimeError):
         runtime.create(_reserve_for_other_attempt(), POLICY)
+    with pytest.raises(FakeRuntimeError):
+        runtime.create(
+            replace(
+                intent,
+                policy_specification=EvidenceDigest("sha256:" + "e" * 64),
+            ),
+            POLICY,
+        )
     runtime_unit = runtime.create(intent, POLICY)
     with pytest.raises(FakeRuntimeError):
         runtime.create(intent, POLICY)
@@ -499,6 +675,7 @@ def _reserve_for_other_attempt() -> ManagedUnit:
         PRINCIPAL,
         2,
         POLICY.revision,
+        policy_specification_evidence(POLICY),
         ManagedUnitState.RESERVED,
         0,
     )

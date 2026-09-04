@@ -136,9 +136,7 @@ def test_termination_returns_only_the_complete_retained_proof(tmp_path) -> None:
     assert broker.terminate(PRINCIPAL, ATTEMPT_ID, created.unit_id) == proof
 
     assert broker.acknowledge(PRINCIPAL, ATTEMPT_ID, created.unit_id, proof.proof_id)
-    assert not broker.acknowledge(
-        PRINCIPAL, ATTEMPT_ID, created.unit_id, proof.proof_id
-    )
+    assert broker.acknowledge(PRINCIPAL, ATTEMPT_ID, created.unit_id, proof.proof_id)
     assert broker_inventory.get(created.unit_id) is None
     assert broker_inventory.create_sequence_high_watermark(PRINCIPAL.principal_id) == 1
 
@@ -186,7 +184,7 @@ def test_ambiguous_inventory_failure_after_create_intent_clears_readiness(
     def commit_then_fail(*args, **kwargs):
         result = transition(*args, **kwargs)
         if kwargs["target"] is ManagedUnitState.CREATE_INTENT:
-            raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+            raise BrokerError(BrokerErrorCategory.INVENTORY_FAILURE)
         return result
 
     mocker.patch.object(broker_inventory, "transition", side_effect=commit_then_fail)
@@ -194,7 +192,7 @@ def test_ambiguous_inventory_failure_after_create_intent_clears_readiness(
     with pytest.raises(BrokerError) as caught:
         broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
 
-    assert caught.value.category is BrokerErrorCategory.RUNTIME_FAILURE
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
     assert not broker.ready
     retained = broker_inventory.find_attempt(PRINCIPAL.principal_id, ATTEMPT_ID)
     assert retained is not None
@@ -292,6 +290,121 @@ def test_protocol_values_are_type_checked(tmp_path: Path) -> None:
     with pytest.raises(BrokerError) as caught:
         broker.status(PRINCIPAL, ATTEMPT_ID, cast(UUID, "not-a-uuid"))
     assert caught.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+
+@pytest.mark.parametrize("method", ("status", "terminate", "proof", "acknowledge"))
+def test_post_start_inventory_faults_revoke_readiness(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    method: str,
+) -> None:
+    broker, broker_inventory, _ = service(tmp_path)
+    broker.start()
+    mocker.patch.object(
+        broker_inventory,
+        "get",
+        side_effect=BrokerError(BrokerErrorCategory.INVENTORY_FAILURE),
+    )
+
+    arguments = (PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0])
+    operation = getattr(broker, method)
+    if method == "acknowledge":
+        arguments += (UNIT_IDS[1],)
+    with pytest.raises(BrokerError) as caught:
+        operation(*arguments)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+
+
+def test_reservation_inventory_fault_revokes_readiness(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    broker, broker_inventory, _ = service(tmp_path)
+    broker.start()
+    mocker.patch.object(
+        broker_inventory,
+        "reserve",
+        side_effect=BrokerError(BrokerErrorCategory.INVENTORY_FAILURE),
+    )
+
+    with pytest.raises(BrokerError) as caught:
+        broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+
+
+@pytest.mark.parametrize(
+    ("boundary", "method"), (("get_proof", "proof"), ("acknowledge", "acknowledge"))
+)
+def test_proof_storage_faults_revoke_readiness(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    boundary: str,
+    method: str,
+) -> None:
+    broker, broker_inventory, _ = service(tmp_path)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    proof = broker.terminate(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+    mocker.patch.object(
+        broker_inventory,
+        boundary,
+        side_effect=BrokerError(BrokerErrorCategory.INVENTORY_FAILURE),
+    )
+
+    with pytest.raises(BrokerError) as caught:
+        if method == "proof":
+            broker.proof(PRINCIPAL, ATTEMPT_ID, created.unit_id)
+        else:
+            broker.acknowledge(PRINCIPAL, ATTEMPT_ID, created.unit_id, proof.proof_id)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+
+
+def test_caller_replay_and_protocol_errors_do_not_revoke_readiness(
+    tmp_path: Path,
+) -> None:
+    broker, _, _ = service(tmp_path)
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 2), ATTEMPT_ID)
+
+    with pytest.raises(BrokerError) as replay:
+        broker.create(ReplayPosition(PRINCIPAL, 1), OTHER_ATTEMPT_ID)
+    assert replay.value.category is BrokerErrorCategory.REPLAY_REJECTED
+    assert broker.ready
+
+    with pytest.raises(BrokerError) as protocol:
+        broker.status(OTHER_PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0])
+    assert protocol.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+    assert broker.ready
+
+
+def test_capacity_error_does_not_revoke_readiness(tmp_path: Path) -> None:
+    broker_inventory = SQLiteBrokerInventory(
+        tmp_path / "bounded.sqlite3",
+        b"bounded-inventory-auth-key-32bytes",
+        max_records=1,
+    )
+    runtime = FakeIsolationRuntime()
+    identities = iter(UNIT_IDS)
+    broker = IsolationBrokerService(
+        broker_inventory,
+        runtime,
+        POLICY,
+        max_discovered_units=1,
+        unit_id_factory=lambda: next(identities),
+    )
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+
+    with pytest.raises(BrokerError) as caught:
+        broker.create(ReplayPosition(PRINCIPAL, 2), OTHER_ATTEMPT_ID)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FULL
+    assert broker.ready
 
 
 def test_in_process_gate_prevents_overlapping_create(tmp_path) -> None:

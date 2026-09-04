@@ -276,11 +276,9 @@ def _proof() -> TerminationProof:
     [
         CreateResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, ManagedUnitState.CREATE_INTENT),
         StatusResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, ManagedUnitState.CREATED),
-        TerminateResponse(
-            REQUEST_ID, ATTEMPT_ID, UNIT_ID, ManagedUnitState.EXIT_CONFIRMED
-        ),
+        TerminateResponse(REQUEST_ID, _proof()),
         ProofResponse(REQUEST_ID, _proof()),
-        AcknowledgeResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID),
+        AcknowledgeResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID, True),
         ReadyResponse(REQUEST_ID, True),
         ErrorResponse(
             REQUEST_ID,
@@ -312,6 +310,48 @@ def test_proof_response_contains_only_content_free_stable_evidence() -> None:
         "proof_id": str(PROOF_ID),
         "protocol": PROTOCOL_NAME,
         "removal_evidence": DIGEST,
+        "request_id": str(REQUEST_ID),
+        "unit_id": str(UNIT_ID),
+        "version": PROTOCOL_VERSION,
+    }
+
+
+def test_terminate_response_returns_the_exact_content_free_proof() -> None:
+    proof = _proof()
+    encoded = encode_response(TerminateResponse(REQUEST_ID, proof))
+    metadata = json.loads(encoded[4:])
+
+    assert metadata == {
+        "attempt_id": str(ATTEMPT_ID),
+        "empty_evidence": DIGEST,
+        "exit_evidence": DIGEST,
+        "operation": "terminate",
+        "outcome": "ok",
+        "policy_revision": "t71-v1",
+        "principal_id": str(PRINCIPAL_ID),
+        "proof_id": str(PROOF_ID),
+        "protocol": PROTOCOL_NAME,
+        "removal_evidence": DIGEST,
+        "request_id": str(REQUEST_ID),
+        "unit_id": str(UNIT_ID),
+        "version": PROTOCOL_VERSION,
+    }
+    decoded = decode_response(encoded)
+    assert decoded == TerminateResponse(REQUEST_ID, proof)
+
+
+def test_ack_response_binds_ids_and_explicit_success() -> None:
+    encoded = encode_response(
+        AcknowledgeResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID, True)
+    )
+
+    assert json.loads(encoded[4:]) == {
+        "acknowledged": True,
+        "attempt_id": str(ATTEMPT_ID),
+        "operation": "ack",
+        "outcome": "ok",
+        "proof_id": str(PROOF_ID),
+        "protocol": PROTOCOL_NAME,
         "request_id": str(REQUEST_ID),
         "unit_id": str(UNIT_ID),
         "version": PROTOCOL_VERSION,
@@ -414,6 +454,18 @@ def test_error_response_rejects_non_string_category() -> None:
         decode_response(_frame(mapping))
 
 
+def test_inventory_failure_has_fixed_content_free_wire_error() -> None:
+    error = BrokerError(BrokerErrorCategory.INVENTORY_FAILURE)
+    response = ErrorResponse(
+        REQUEST_ID,
+        BrokerOperation.CREATE,
+        BrokerErrorCategory.INVENTORY_FAILURE,
+    )
+
+    assert str(error) == "The broker inventory operation failed."
+    assert decode_response(encode_response(response)) == response
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -441,10 +493,34 @@ def test_unit_response_requires_exact_valid_state_schema(mutate) -> None:
         ("principal_id", "not-a-uuid"),
     ],
 )
-def test_proof_response_rejects_invalid_proof_fields(field: str, value: object) -> None:
-    encoded = encode_response(ProofResponse(REQUEST_ID, _proof()))
+@pytest.mark.parametrize("response_type", [ProofResponse, TerminateResponse])
+def test_proof_response_rejects_invalid_proof_fields(
+    field: str, value: object, response_type: type[ProofResponse | TerminateResponse]
+) -> None:
+    encoded = encode_response(response_type(REQUEST_ID, _proof()))
     mapping = json.loads(encoded[4:])
     mapping[field] = value
+    with pytest.raises(BrokerError, match="protocol request"):
+        decode_response(_frame(mapping))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value.pop("acknowledged"),
+        lambda value: value.update(acknowledged=False),
+        lambda value: value.update(acknowledged=1),
+        lambda value: value.update(idempotent=True),
+        lambda value: value.update(proof_id=True),
+        lambda value: value.pop("unit_id"),
+    ],
+)
+def test_ack_response_requires_exact_bound_success_schema(mutate) -> None:
+    encoded = encode_response(
+        AcknowledgeResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID, True)
+    )
+    mapping = json.loads(encoded[4:])
+    mutate(mapping)
     with pytest.raises(BrokerError, match="protocol request"):
         decode_response(_frame(mapping))
 
@@ -461,6 +537,8 @@ def test_response_encoder_rejects_invalid_error_proof_and_unknown_models() -> No
     with pytest.raises(BrokerError, match="protocol request"):
         encode_response(ProofResponse(REQUEST_ID, cast(Any, object())))
     with pytest.raises(BrokerError, match="protocol request"):
+        encode_response(TerminateResponse(REQUEST_ID, cast(Any, object())))
+    with pytest.raises(BrokerError, match="protocol request"):
         encode_response(cast(Any, object()))
 
 
@@ -470,4 +548,14 @@ def test_response_encoder_rejects_bool_lookalike_and_invalid_state() -> None:
     with pytest.raises(BrokerError, match="protocol request"):
         encode_response(
             StatusResponse(REQUEST_ID, ATTEMPT_ID, UNIT_ID, cast(Any, "created"))
+        )
+    with pytest.raises(BrokerError, match="protocol request"):
+        encode_response(
+            AcknowledgeResponse(
+                REQUEST_ID,
+                ATTEMPT_ID,
+                UNIT_ID,
+                PROOF_ID,
+                cast(Any, False),
+            )
         )
