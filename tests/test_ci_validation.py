@@ -393,6 +393,7 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
     assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
     assert "Collect the T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 benchmark metadata" in workflow
     assert "Download the accepted T67 package-manager benchmark" in workflow
     assert "Verify the accepted T67 package-manager benchmark" in workflow
     assert "Retain the T67 package-manager benchmark" in workflow
@@ -404,7 +405,10 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
     )
     assert "run-id: 33799673333" in workflow
-    assert "name: package-manager-benchmark-33799673333-1" in workflow
+    assert "artifact-ids: 9911803951" in workflow
+    assert "repository: Guillaume-Lombardo/simple-md-to-docx-converter" in workflow
+    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow
+    assert '"$RUNNER_TEMP/t67-benchmark-metadata.txt"' in workflow
     assert "rerun_t67_benchmark:" in workflow
     assert "artifacts/package-manager-benchmark" in workflow
     rollback_condition = (
@@ -413,6 +417,13 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
         "github.event.pull_request.head.repo.full_name == github.repository }}"
     )
     assert f"if: {rollback_condition}" in workflow
+    wrong_artifact = workflow.replace(
+        "artifact-ids: 9911803951", "artifact-ids: 9911803952"
+    )
+    assert (
+        "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        in validate_workflow_text(wrong_artifact)
+    )
     manual_condition = (
         "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
         "&& inputs.rerun_t67_benchmark && "

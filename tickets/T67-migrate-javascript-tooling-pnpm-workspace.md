@@ -90,6 +90,12 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   reuse attestation. An explicit `workflow_dispatch` boolean on the exact T67 branch retains the
   bounded fresh-benchmark path when inputs change or new performance evidence is required; it is
   not part of ordinary pull-request reruns.
+* 2026-09-04: Reuse provenance is now fail-closed before download. The frontend job uses its
+  scoped `actions: read` token to require artifact `9911803951` to retain the reviewed name and
+  digest, remain unexpired, and belong to successful attempt 1 of run `33799673333` at head
+  `da26ad7` in this repository. It downloads that exact artifact ID, then requires the resulting
+  content-free metadata receipt alongside the seven evidence-file hashes and byte-equivalence
+  proof. Any metadata, repository identity, run status, or expiration divergence prevents reuse.
 
 ## Synchronization
 

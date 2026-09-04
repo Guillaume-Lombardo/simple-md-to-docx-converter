@@ -443,11 +443,18 @@ jobs:
         env:
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+      - name: Verify the accepted T67 benchmark metadata
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/javascript/verify_benchmark_artifact_metadata.py
+          "$RUNNER_TEMP/t67-benchmark-metadata.txt"
       - name: Download the accepted T67 package-manager benchmark
         if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: package-manager-benchmark-33799673333-1
+          artifact-ids: 9911803951
           path: artifacts/package-manager-benchmark
           github-token: ${{ github.token }}
           repository: Guillaume-Lombardo/simple-md-to-docx-converter
@@ -459,6 +466,7 @@ jobs:
         run: >-
           bash scripts/javascript/reuse-package-benchmark.sh
           "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
+          "$RUNNER_TEMP/t67-benchmark-metadata.txt"
       - name: Collect the T67 package-manager benchmark
         if: ${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}
         env:

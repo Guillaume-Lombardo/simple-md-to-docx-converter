@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pytest_mock import MockerFixture
+
+from scripts.javascript import verify_benchmark_artifact_metadata as metadata_verifier
 
 
 @pytest.mark.unit
@@ -203,6 +206,7 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "scripts/javascript/select-t67-rollback-commits.sh",
         "scripts/javascript/run-bounded-benchmark-command.sh",
         "scripts/javascript/reuse-package-benchmark.sh",
+        "scripts/javascript/verify_benchmark_artifact_metadata.py",
         "tests/integration/test_benchmark_timeout.py",
         "cache: npm",
         "COPY package.json package-lock.json ./",
@@ -292,5 +296,86 @@ def test_hosted_benchmark_reuse_is_immutable_and_fail_closed() -> None:
         "unexpected regular-file set",
         "sha256sum --check --strict",
         "reuse-attestation.txt",
+        'readonly metadata_receipt="$3"',
+        "Accepted T67 benchmark metadata receipt does not match.",
     ):
         assert contract in reuse
+
+
+def _accepted_artifact_metadata() -> tuple[dict[str, object], dict[str, object]]:
+    artifact = {
+        "id": metadata_verifier.ARTIFACT_ID,
+        "name": metadata_verifier.ARTIFACT_NAME,
+        "digest": metadata_verifier.ARTIFACT_DIGEST,
+        "expired": False,
+        "workflow_run": {
+            "id": metadata_verifier.RUN_ID,
+            "repository_id": metadata_verifier.REPOSITORY_ID,
+            "head_repository_id": metadata_verifier.REPOSITORY_ID,
+            "head_sha": metadata_verifier.HEAD_SHA,
+        },
+    }
+    repository = {
+        "id": metadata_verifier.REPOSITORY_ID,
+        "full_name": metadata_verifier.REPOSITORY,
+    }
+    run = {
+        "id": metadata_verifier.RUN_ID,
+        "run_attempt": metadata_verifier.RUN_ATTEMPT,
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": metadata_verifier.HEAD_SHA,
+        "repository": repository,
+        "head_repository": repository.copy(),
+    }
+    return artifact, run
+
+
+@pytest.mark.unit
+def test_benchmark_metadata_verifier_writes_only_verified_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    artifact, run = _accepted_artifact_metadata()
+    fetch = mocker.patch.object(
+        metadata_verifier, "_fetch_json", side_effect=(artifact, run)
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "ephemeral-test-token")
+    receipt = tmp_path / "metadata.txt"
+
+    assert metadata_verifier.main([str(receipt)]) == 0
+    assert receipt.read_text(encoding="utf-8") == (
+        "\n".join(metadata_verifier.RECEIPT_LINES) + "\n"
+    )
+    assert [call.args[0] for call in fetch.call_args_list] == [
+        f"{metadata_verifier.API_ROOT}/actions/artifacts/{metadata_verifier.ARTIFACT_ID}",
+        f"{metadata_verifier.API_ROOT}/actions/runs/{metadata_verifier.RUN_ID}",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        ("artifact", "digest", "sha256:wrong"),
+        ("artifact", "expired", True),
+        ("run", "run_attempt", 2),
+        ("run", "conclusion", "failure"),
+        ("run", "head_sha", "0" * 40),
+    ),
+)
+def test_benchmark_metadata_verifier_fails_closed_without_a_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    mutation: tuple[str, str, object],
+) -> None:
+    artifact, run = _accepted_artifact_metadata()
+    target, field, value = mutation
+    (artifact if target == "artifact" else run)[field] = value
+    mocker.patch.object(metadata_verifier, "_fetch_json", side_effect=(artifact, run))
+    monkeypatch.setenv("GITHUB_TOKEN", "ephemeral-test-token")
+    receipt = tmp_path / "metadata.txt"
+    receipt.write_text("stale\n", encoding="utf-8")
+
+    assert metadata_verifier.main([str(receipt)]) == 1
+    assert not receipt.exists()

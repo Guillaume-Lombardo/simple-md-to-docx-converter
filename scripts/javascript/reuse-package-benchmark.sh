@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 || "$1" == -* || "$2" == -* ]]; then
-  echo "Usage: reuse-package-benchmark.sh CANDIDATE_REF ARTIFACT_DIRECTORY" >&2
+if [[ $# -ne 3 || "$1" == -* || "$2" == -* || "$3" == -* ]]; then
+  echo "Usage: reuse-package-benchmark.sh CANDIDATE_REF ARTIFACT_DIRECTORY METADATA_RECEIPT" >&2
   exit 2
 fi
 
 readonly candidate_ref="$1"
 readonly artifact_directory="$2"
+readonly metadata_receipt="$3"
 readonly accepted_ref="da26ad780ac11d099e764aa82a0430e684bbf4c3"
 readonly accepted_run="33799673333"
 readonly accepted_artifact_id="9911803951"
@@ -77,10 +78,29 @@ test "$(node --version)" = v24.19.0
 test "$(npm --version)" = 11.17.0
 test "$(pnpm --version)" = 11.25.0
 
+expected_metadata="$({
+  printf '%s\n' \
+    "artifact_id=$accepted_artifact_id" \
+    "artifact_name=package-manager-benchmark-33799673333-1" \
+    "artifact_digest=$accepted_artifact_digest" \
+    "run_id=$accepted_run" \
+    "run_attempt=1" \
+    "run_status=completed" \
+    "run_conclusion=success" \
+    "run_head_sha=$accepted_ref" \
+    "repository_id=1343515292" \
+    "repository=Guillaume-Lombardo/simple-md-to-docx-converter" \
+    "head_repository_id=1343515292" \
+    "head_repository=Guillaume-Lombardo/simple-md-to-docx-converter"
+})"
+readonly expected_metadata
+if [[ "$(cat "$metadata_receipt")" != "$expected_metadata" ]]; then
+  echo "Accepted T67 benchmark metadata receipt does not match." >&2
+  exit 1
+fi
+
 cat > "$artifact_directory/reuse-attestation.txt" <<EOF
-accepted_run=$accepted_run
-accepted_artifact_id=$accepted_artifact_id
-accepted_artifact_digest=$accepted_artifact_digest
+$(cat "$metadata_receipt")
 accepted_head=$accepted_ref
 candidate_head=$candidate_commit
 performance_surface_digest=$surface_digest

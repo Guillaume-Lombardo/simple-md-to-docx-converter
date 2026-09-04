@@ -106,6 +106,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
         ("heavy", "Rehearse the exact npm rollback candidate"),
+        ("heavy", "Verify the accepted T67 benchmark metadata"),
         ("heavy", "Verify the accepted T67 package-manager benchmark"),
         ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
@@ -341,6 +342,10 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): T67_ROLLBACK_REHEARSAL_CONDITION,
             (
                 "heavy",
+                "Verify the accepted T67 benchmark metadata",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
                 "Download the accepted T67 package-manager benchmark",
             ): T67_ROLLBACK_REHEARSAL_CONDITION,
             (
@@ -376,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="f98a212b8d625af9bc74171b8af6111d621947e147c6ef0d2b60997357cb9ba4",
+        canonical_digest="ee636d5304076a12b265ef393ba11383fc03106d39a8ad7de6da971053090110",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -826,6 +831,26 @@ def _validate_public_alignment_credentials(
     return []
 
 
+def _validate_t67_benchmark_download(workflow: Mapping[str, Any]) -> list[str]:
+    downloads = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Download the accepted T67 package-manager benchmark"
+    ]
+    expected = {
+        "artifact-ids": 9_911_803_951,
+        "path": "artifacts/package-manager-benchmark",
+        "github-token": "${{ github.token }}",
+        "repository": "Guillaume-Lombardo/simple-md-to-docx-converter",
+        "run-id": 33_799_673_333,
+    }
+    if len(downloads) != 1 or downloads[0].get("with") != expected:
+        return [
+            "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        ]
+    return []
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -881,7 +906,12 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Verify the accepted T67 package-manager benchmark"): (
             "bash scripts/javascript/reuse-package-benchmark.sh "
-            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark'
+            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark '
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
+            "uv run python scripts/javascript/verify_benchmark_artifact_metadata.py "
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
         ),
         ("heavy", "Collect the T67 package-manager benchmark"): (
             "scripts/javascript/run_bounded_benchmark_command.py "
@@ -908,6 +938,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
+    errors.extend(_validate_t67_benchmark_download(workflow))
+
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
     errors.extend(_validate_public_alignment_credentials(workflow))
@@ -931,6 +963,9 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "${{ startsWith(matrix.domain, 'e2e-') }}"
         ),
         ("heavy", "Rehearse the exact npm rollback candidate"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
             T67_ROLLBACK_REHEARSAL_CONDITION
         ),
         ("heavy", "Download the accepted T67 package-manager benchmark"): (
