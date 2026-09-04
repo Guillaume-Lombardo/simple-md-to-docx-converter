@@ -199,6 +199,18 @@ for reverse conversion.
   parseable ZIP polyglots in every image format without rejecting benign magic bytes in valid PNG,
   JPEG, GIF, SVG, or WebP payloads. The exact light gate passes 2,427 tests at 94.13% total and
   90.13% branch-only coverage.
+* 2026-09-04: Implemented the runtime-neutral broker core on verified `main` after the ClamAV
+  rootless-network correction merged. The slice adds a strict 4 KiB canonical control protocol,
+  immutable image/entrypoint/security-policy evidence, per-principal create replay fencing, an
+  authenticated bounded SQLite WAL inventory, monotonic crash-consistent lifecycle transitions,
+  atomic removed proof tombstones, startup/reconnect reconciliation, readiness gating, and a
+  deterministic fault-injecting runtime. Reserved records are discarded without runtime mutation;
+  ambiguous create intent, missing exit evidence, unknown label-only units, specification or
+  incarnation mismatch, and incomplete termination all fail closed. The tombstone is deleted only
+  after its exact principal/attempt/unit/proof acknowledgement while the create high-water mark is
+  retained. This remains an internal core slice: Unix/mTLS transports, Podman/Kubernetes backends,
+  bounded workspace data flow, and production assembly remain to be delivered before T70 can be
+  completed.
 * 2026-09-04: Hardened the container test scanner after three exact-head CI runs exposed a
   readiness race in the test double. The bounded fake ClamAV endpoint now answers the same exact
   `zPING` health protocol used by runtime diagnostics before accepting `INSTREAM`, retains
