@@ -393,10 +393,19 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
     assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
     assert "Collect the T67 package-manager benchmark" in workflow
+    assert "Download the accepted T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 package-manager benchmark" in workflow
     assert "Retain the T67 package-manager benchmark" in workflow
     assert "300 10 /dev/stderr t67/rollback --" in workflow
     assert "1620 20 /dev/stderr t67/benchmark --" in workflow
     assert "PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "actions: read" in workflow
+    assert (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
+    )
+    assert "run-id: 33799673333" in workflow
+    assert "name: package-manager-benchmark-33799673333-1" in workflow
+    assert "rerun_t67_benchmark:" in workflow
     assert "artifacts/package-manager-benchmark" in workflow
     rollback_condition = (
         "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
@@ -404,6 +413,20 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
         "github.event.pull_request.head.repo.full_name == github.repository }}"
     )
     assert f"if: {rollback_condition}" in workflow
+    manual_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+        "&& inputs.rerun_t67_benchmark && "
+        "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+    )
+    assert f"if: {manual_condition}" in workflow
+    weakened_manual = workflow.replace(
+        manual_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(weakened_manual)
+    )
     future_frontend_pr = workflow.replace(
         rollback_condition,
         "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}",

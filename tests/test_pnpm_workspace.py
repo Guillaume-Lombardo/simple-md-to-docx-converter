@@ -202,6 +202,7 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "scripts/javascript/bootstrap-pnpm.sh",
         "scripts/javascript/select-t67-rollback-commits.sh",
         "scripts/javascript/run-bounded-benchmark-command.sh",
+        "scripts/javascript/reuse-package-benchmark.sh",
         "tests/integration/test_benchmark_timeout.py",
         "cache: npm",
         "COPY package.json package-lock.json ./",
@@ -268,3 +269,28 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
     assert supervisor.index("signal.signal(signum, remember_first_signal)") < (
         supervisor.index("process = subprocess.Popen")
     )
+
+
+@pytest.mark.unit
+def test_hosted_benchmark_reuse_is_immutable_and_fail_closed() -> None:
+    reuse = Path("scripts/javascript/reuse-package-benchmark.sh").read_text(
+        encoding="utf-8"
+    )
+    for contract in (
+        'accepted_ref="da26ad780ac11d099e764aa82a0430e684bbf4c3"',
+        'accepted_run="33799673333"',
+        'accepted_artifact_id="9911803951"',
+        "sha256:90311dccb8db14a017050120f84379ba61b96ba69a6dccf5a379c2a2a4e48a0c",
+        'accepted_surface_digest="f8368503367543660e8f3e75db9652b92379c524e0dc56562f0a7a00cc2bc3f6"',
+        ".containerignore",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts/javascript/bootstrap-pnpm.sh",
+        "web",
+        'diff --quiet "$accepted_ref..$candidate_commit"',
+        "unexpected regular-file set",
+        "sha256sum --check --strict",
+        "reuse-attestation.txt",
+    ):
+        assert contract in reuse

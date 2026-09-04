@@ -10,6 +10,12 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      rerun_t67_benchmark:
+        description: Rerun the network-sensitive T67 package-manager benchmark
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "17 3 * * 0"
 
@@ -210,6 +216,9 @@ jobs:
     needs: detect
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -434,18 +443,34 @@ jobs:
         env:
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
-      - name: Collect the T67 package-manager benchmark
+      - name: Download the accepted T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-manager-benchmark-33799673333-1
+          path: artifacts/package-manager-benchmark
+          github-token: ${{ github.token }}
+          repository: Guillaume-Lombardo/simple-md-to-docx-converter
+          run-id: 33799673333
+      - name: Verify the accepted T67 package-manager benchmark
         if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
         env:
-          NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
           PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          bash scripts/javascript/reuse-package-benchmark.sh
+          "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
+      - name: Collect the T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}
+        env:
+          NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
+          PNPM_CANDIDATE_SHA: ${{ github.sha }}
         run: >-
           scripts/javascript/run_bounded_benchmark_command.py
           1620 20 /dev/stderr t67/benchmark --
           bash scripts/javascript/benchmark-package-managers.sh
           "$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
       - name: Retain the T67 package-manager benchmark
-        if: ${{ always() && matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ always() && matrix.domain == 'frontend' && ((github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-manager-benchmark-${{ github.run_id }}-${{ github.run_attempt }}

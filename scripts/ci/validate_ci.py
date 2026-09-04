@@ -106,6 +106,7 @@ READ_ONLY_ENV_STEPS = frozenset(
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
         ("heavy", "Rehearse the exact npm rollback candidate"),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"),
         ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
@@ -119,11 +120,18 @@ T67_ROLLBACK_REHEARSAL_CONDITION = (
     "github.head_ref == 'chore/T67-pnpm-workspace' && "
     "github.event.pull_request.head.repo.full_name == github.repository }}"
 )
+T67_MANUAL_BENCHMARK_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+    "&& inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+)
 T67_BENCHMARK_ARTIFACT_CONDITION = (
     "${{ always() && matrix.domain == 'frontend' && "
-    "github.event_name == 'pull_request' && "
+    "((github.event_name == 'pull_request' && "
     "github.head_ref == 'chore/T67-pnpm-workspace' && "
-    "github.event.pull_request.head.repo.full_name == github.repository }}"
+    "github.event.pull_request.head.repo.full_name == github.repository) || "
+    "(github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}"
 )
 
 
@@ -193,6 +201,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "actions/checkout",
                 "actions/cache/restore",
                 "actions/cache/save",
+                "actions/download-artifact",
                 "actions/setup-node",
                 "actions/setup-python",
                 "actions/upload-artifact",
@@ -223,6 +232,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                     "if",
                     "name",
                     "needs",
+                    "permissions",
                     "runs-on",
                     "services",
                     "steps",
@@ -331,8 +341,16 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): T67_ROLLBACK_REHEARSAL_CONDITION,
             (
                 "heavy",
-                "Collect the T67 package-manager benchmark",
+                "Download the accepted T67 package-manager benchmark",
             ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Verify the accepted T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Collect the T67 package-manager benchmark",
+            ): T67_MANUAL_BENCHMARK_CONDITION,
             (
                 "heavy",
                 "Retain the T67 package-manager benchmark",
@@ -358,7 +376,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="91f646a0b08248f822e240990031428e95869d8236a313cd7bd0ca14186efbe1",
+        canonical_digest="f98a212b8d625af9bc74171b8af6111d621947e147c6ef0d2b60997357cb9ba4",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -583,6 +601,23 @@ def _validate_read_only_step(
     return errors
 
 
+def _validate_read_only_job_permissions(
+    job_name: str, job: Mapping[str, Any]
+) -> list[str]:
+    expected = {
+        "light": {"contents": "read", "packages": "read"},
+        "heavy": {"actions": "read", "contents": "read"},
+    }.get(job_name)
+    if expected is not None and job.get("permissions") != expected:
+        return [
+            f"{job_name} job permissions must be exactly "
+            + " and ".join(f"{key}: {value}" for key, value in expected.items())
+        ]
+    if expected is None and "permissions" in job:
+        return [f"read-only job {job_name!r} must not override workflow permissions"]
+    return []
+
+
 def _validate_read_only_job(
     job_name: str, job: Mapping[str, Any], *, policy: WorkflowPolicy
 ) -> list[str]:
@@ -606,15 +641,7 @@ def _validate_read_only_job(
         or timeout > maximum
     ):
         errors.append(f"job {job_name!r} must define an allowlisted bounded timeout")
-    if job_name == "light":
-        if job.get("permissions") != {"contents": "read", "packages": "read"}:
-            errors.append(
-                "light job permissions must be exactly contents: read and packages: read"
-            )
-    elif "permissions" in job:
-        errors.append(
-            f"read-only job {job_name!r} must not override workflow permissions"
-        )
+    errors.extend(_validate_read_only_job_permissions(job_name, job))
     if job.get("runs-on") != "ubuntu-24.04":
         errors.append(f"job {job_name!r} must use the allowlisted hosted runner")
     steps = job.get("steps")
@@ -852,6 +879,10 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "bash scripts/javascript/rehearse-npm-rollback.sh "
             '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
         ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            "bash scripts/javascript/reuse-package-benchmark.sh "
+            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark'
+        ),
         ("heavy", "Collect the T67 package-manager benchmark"): (
             "scripts/javascript/run_bounded_benchmark_command.py "
             "1620 20 /dev/stderr t67/benchmark -- "
@@ -902,8 +933,14 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("heavy", "Rehearse the exact npm rollback candidate"): (
             T67_ROLLBACK_REHEARSAL_CONDITION
         ),
-        ("heavy", "Collect the T67 package-manager benchmark"): (
+        ("heavy", "Download the accepted T67 package-manager benchmark"): (
             T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            T67_MANUAL_BENCHMARK_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"

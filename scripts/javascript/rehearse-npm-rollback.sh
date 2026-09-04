@@ -53,6 +53,7 @@ allowed_path() {
     scripts/javascript/benchmark-package-managers.sh|\
     scripts/javascript/run-bounded-benchmark-command.sh|\
     scripts/javascript/run_bounded_benchmark_command.py|\
+    scripts/javascript/reuse-package-benchmark.sh|\
     scripts/javascript/rehearse-npm-rollback.sh|\
     scripts/javascript/select-t67-rollback-commits.sh|\
     scripts/javascript/validate-workspace.mjs|\

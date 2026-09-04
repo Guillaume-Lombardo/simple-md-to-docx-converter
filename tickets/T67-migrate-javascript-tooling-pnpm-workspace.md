@@ -80,6 +80,16 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   inner command's 10-second grace plus its bounded two-second group-absence verification window,
   so nested cleanup completes before the outer supervisor may send KILL.
   A fresh exact-head hosted matrix remains required before integration.
+* 2026-09-04: Exact-head run `33849694860` passed rollback, the frontend suite, and every other
+  domain, then failed the benchmark deterministically when npm's first cold Web install exceeded
+  its four-minute boundary despite the root install completing in 16 seconds. Normal pull-request
+  validation now reuses the product-manager-accepted immutable benchmark from green run
+  `33799673333`, artifact `9911803951`, only after SHA-256 validation of every evidence file and a
+  fail-closed byte-equivalence proof from accepted head `da26ad7` across the complete pnpm
+  resolution, frontend build, and final-image input surfaces. The verified copy gains a content-free
+  reuse attestation. An explicit `workflow_dispatch` boolean on the exact T67 branch retains the
+  bounded fresh-benchmark path when inputs change or new performance evidence is required; it is
+  not part of ordinary pull-request reruns.
 
 ## Synchronization
 
