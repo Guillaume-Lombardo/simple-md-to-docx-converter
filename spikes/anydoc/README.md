@@ -25,6 +25,15 @@ unit, proves it empty, removes it, and only then permits recovery or another att
 retains lease heartbeat, attempt-token validation, bounded-output validation, and sole publication
 authority.
 
+At creation the broker applies the reviewed T71-configured wall-time deadline through the runtime,
+independently of worker and broker liveness. It discovers managed units through a bounded
+persistent content-free inventory or immutable broker-authored runtime labels plus the stable unit
+identity presented by an authenticated worker on reconnect. User/document input cannot choose
+those identities or labels. Startup and reconnect remain not-ready and reject new creates until a
+sweep has hard-killed every orphan and proved it empty and removed. If the broker crashes between
+kill or removal and proof, reconciliation resumes from authenticated managed identity and runtime
+state; worker recovery remains blocked until T71 durably records the reconstructed proof.
+
 For asset serialization, T70 may implement one narrowly bounded Markweave-maintained internal
 adapter around the exact pinned anydoc `Document` model and renderer behavior. It must consume the
 single parsed document and must not add a second parser. All private symbols or mirrored renderer
@@ -216,3 +225,7 @@ runner; T71 configures reviewed budgets and durably binds stable unit identity a
 to leases, recovery, and publication fencing. Recovery remains blocked whenever the prior unit
 cannot be proved empty, terminated, and removed; PID exit or delete acknowledgement alone is never
 sufficient.
+The runtime-enforced deadline survives broker loss. Broker restart/reconnect performs managed-unit
+reconciliation before readiness or creation, including proof reconstruction when a crash occurred
+after kill/removal but before acknowledgement; unknown or unauthenticated absence is never accepted
+as proof.

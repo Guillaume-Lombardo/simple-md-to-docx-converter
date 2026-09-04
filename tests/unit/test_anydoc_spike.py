@@ -98,6 +98,9 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
                 "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced by the broker at the runtime and kernel boundary",
                 "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
                 "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
+                "the runtime autonomously enforces the reviewed T71-configured wall-time deadline applied at unit creation even if the worker or broker process crashes",
+                "broker startup and reconnect discover and sweep every managed orphan and refuse readiness and creation until reconciliation and termination proof complete",
+                "a crash between kill or removal and proof resumes from authenticated managed identity and runtime state while worker recovery remains blocked until proof is durably recorded",
                 "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher",
             ],
         },
@@ -163,6 +166,21 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         "application_has_raw_runtime_authority": False,
         "attempt_image_selection": "immutable_digest_fixed_by_broker",
         "attempt_argv_selection": "fixed_by_broker",
+        "runtime_deadline_enforcement": (
+            "applied_at_creation_and_independent_of_worker_or_broker_liveness"
+        ),
+        "managed_unit_discovery": [
+            "bounded_persistent_content_free_broker_inventory",
+            "immutable_broker_authored_runtime_labels_plus_authenticated_worker_identity",
+        ],
+        "managed_unit_metadata_user_controlled": False,
+        "startup_and_reconnect_action": (
+            "reconcile_sweep_hard_kill_and_prove_every_managed_orphan"
+        ),
+        "readiness_and_create_during_incomplete_sweep": "refused",
+        "crash_between_kill_or_removal_and_proof": (
+            "resume_reconciliation_and_reconstruct_proof_from_authenticated_managed_identity_and_runtime_state"
+        ),
         "child_forbidden_resources": [
             "network",
             "service_account_token",
@@ -242,6 +260,9 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         "no raw OCI socket or workload-mutating service account",
         "no network, service-account token, Secret, ConfigMap, PVC",
         "prove it empty, remove it, and return a content-free proof before recovery",
+        "runtime at creation, so",
+        "refuses readiness and every create request until reconciliation completes",
+        "crash between kill/removal and proof",
     ):
         assert invariant in t70
 

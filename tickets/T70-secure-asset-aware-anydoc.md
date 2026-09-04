@@ -32,7 +32,15 @@ for reverse conversion.
   token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication
   capability. T71 supplies reviewed configurable CPU, memory, PID/descendant, and
   workspace/ephemeral budgets, which the broker enforces at the runtime/kernel boundary. The
-  worker-side supervisor owns heartbeat, attempt token, bounded output validation, and publication.
+  reviewed T71-configured wall-time deadline is applied autonomously by the runtime at creation, so
+  it remains effective across worker or broker process failure. The broker maintains a bounded
+  persistent content-free inventory or enumerates immutable broker-authored runtime labels; neither
+  labels nor managed identities are controllable by user/document input. At startup and reconnect
+  it sweeps every managed orphan, hard-terminates it, and proves it empty and removed. The broker
+  refuses readiness and every create request until reconciliation completes successfully. A crash
+  between kill/removal and proof must resume from authenticated managed identity and runtime state;
+  absence of an unknown or unauthenticated identity is not proof. The worker-side supervisor owns
+  heartbeat, attempt token, bounded output validation, and publication.
   Cancellation, deadline, lease loss, broker disconnect, or resource failure stops output
   acceptance and makes the broker hard-terminate the whole stable unit, prove it empty, remove it,
   and return a content-free proof before recovery or another attempt. PID exit or delete
@@ -77,7 +85,10 @@ for reverse conversion.
   non-image, polyglot, animated/multi-frame, hostile-SVG, timeout, cancellation, and
   resource-limit failures. Prove stable whole-unit hard termination and descendant reaping for every terminal signal,
   no child publication capability, no late result acceptance, termination-before-recovery, no
-  overlapping attempt, bounded IPC, and fail-closed behavior when termination proof is unavailable.
+  overlapping attempt, bounded IPC, autonomous deadline enforcement across broker failure,
+  startup/reconnect orphan sweeping, creation/readiness refusal during incomplete reconciliation,
+  proof reconstruction after a crash between kill and proof, and fail-closed behavior when
+  termination proof is unavailable.
 
 ## Dependencies
 
@@ -90,7 +101,8 @@ for reverse conversion.
 
 * Own the external broker service and authenticated bounded protocol, Podman and Kubernetes
   isolation backends, immutable image/argv and child-security policy, supervised disposable-attempt
-  runner and terminate-and-prove protocol, anydoc adapter, bounded internal renderer compatibility
+  runner, managed-unit discovery/reconciliation, and terminate-and-prove protocol, anydoc adapter,
+  bounded internal renderer compatibility
   boundary, asset-aware serializer/package builder, the single deterministic content-free manifest
   generator, reverse-conversion domain errors, format corpus, dependency lock, and directly affected
   backend/broker image and deployment contents. Expose the runner, content-free stable unit identity,
@@ -109,7 +121,9 @@ for reverse conversion.
 * Test both broker transports and both runtime backends. Authenticate peers, reject replay,
   oversized/truncated/extra protocol frames and every caller-selected image/argv/mount/network/
   credential/resource override, fail closed on broker disconnect or unavailable termination proof,
-  and prove that runtime authority is absent from the application and child.
+  and prove that runtime authority is absent from the application and child. Cover restart with a
+  live orphan, runtime expiry while the broker is down, incomplete sweep readiness/create refusal,
+  forged or user-controlled labels, and crashes both before and after removal but before proof.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
 * Keep repository artifacts and user-facing errors in English.
@@ -129,6 +143,11 @@ for reverse conversion.
   account; and T71 owns reviewed configurable budget values plus durable lease/recovery binding.
   Shared-worker native execution, PID-only proof, publication before unit termination, and a broad
   serializer fork remain prohibited.
+* 2026-09-04: Independent review added the broker crash/restart contract. T70 must apply the
+  T71-configured deadline through the runtime at creation, discover managed units through bounded
+  persistent content-free inventory or immutable broker-authored labels, sweep orphans before
+  readiness or creation, and resume proof after a crash between kill/removal and acknowledgement.
+  Worker recovery remains blocked until the proof is durably recorded.
 
 ## Synchronization
 

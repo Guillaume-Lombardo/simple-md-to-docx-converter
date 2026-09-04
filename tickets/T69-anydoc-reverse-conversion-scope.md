@@ -28,7 +28,9 @@ normative product, security, packaging, and compatibility contract before implem
   authenticated Unix/mTLS protocol and receives no raw runtime socket or workload-mutating service
   account; each immutable-image, fixed-argument disposable attempt runs without network, secrets,
   persistent volumes, or publication capability; and broker-proven whole-unit termination precedes
-  recovery.
+  recovery. The runtime applies an autonomous deadline at creation, and broker restart/reconnect
+  remains fail closed until authenticated managed-unit discovery has swept every orphan and
+  reconstructed any proof interrupted between kill/removal and acknowledgement.
 * Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
   count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
   the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
@@ -80,7 +82,9 @@ normative product, security, packaging, and compatibility contract before implem
   kernel isolation unit, with bounded threads and the smallest concurrency that meets the measured
   service objective. Keep Podman/Kubernetes authority exclusively in the broker, never the
   application or child, and leave CPU, memory, PID/descendant, and workspace/ephemeral budget values
-  configurable for T71.
+  configurable for T71. Require an independently enforced runtime deadline plus fail-closed broker
+  startup/reconnect reconciliation; user or document input cannot control managed-unit identities,
+  inventory fields, or runtime labels.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -131,6 +135,13 @@ normative product, security, packaging, and compatibility contract before implem
   behavior, with no second parser or broad fork; security, serializer parity, asset position,
   version compatibility, SBOM/license inventory, named T70 ownership, and removal when upstream
   exposes an official asset-aware hook remain mandatory.
+* 2026-09-04: Independent review identified broker crash/restart after unit creation as a missing
+  failure contract. The approved contract now applies a T71-configured autonomous runtime deadline
+  at creation, discovers managed units through a bounded persistent content-free inventory or
+  immutable broker-authored runtime labels, and requires a startup/reconnect orphan sweep before
+  readiness or creation. A crash between kill/removal and proof is reconciled from authenticated
+  managed identity and runtime state; worker recovery remains blocked until T71 durably records
+  proof.
 
 ## Synchronization
 
