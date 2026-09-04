@@ -262,6 +262,31 @@ for reverse conversion.
   total branch coverage for the two new modules; the complete 374-test broker selection, Ruff,
   `ty`, and diff validation also pass. The exact light gate passes 2,801 tests at 94.07% total,
   90.21% application branch coverage, and 91.41% changed application-line coverage.
+* 2026-09-04: Implemented the lifecycle-only rootless Podman backend behind the shared isolation
+  runtime contract. The broker now creates or recovers one deterministic labelled container from
+  the configured repository and immutable digest with pulls disabled, a fixed reverse-attempt
+  entrypoint and empty argument vector, no network, no inherited environment or health command,
+  no runtime logging, a read-only root without implicit writable root tmpfs mounts, no
+  capabilities, no-new-privileges, a fixed non-root UID, private PID/UTS and no IPC namespace,
+  no restart, and exact T71-supplied CPU, memory/swap, PID, workspace-tmpfs, and whole-second
+  runtime deadline limits. Every shell-free Podman command has an absolute deadline, bounded
+  output, process-group cleanup, and content-free errors. Exact create-command and immutable-label
+  evidence makes a lost create response idempotently recoverable while rejecting image, policy,
+  identity, or incarnation substitution. Rootless cgroup-v2, seccomp, and a durable allowlisted
+  event logger are mandatory. Termination sends whole-container SIGKILL and separately requires
+  canonical runtime-confirmed exit, zero init/conmon/exec membership, and a matching durable
+  removal event; absence or a kill/remove acknowledgement is never proof. Bounded label discovery
+  rejects malformed, duplicate, unknown, and substituted units, and retained incarnation evidence
+  reconstructs proof after removal-response loss. The 57 focused unit/shared-conformance tests and
+  four real rootless Podman integrations cover a signal-resistant descendant, autonomous expiry
+  while the broker is down, startup sweep/readiness refusal, and crash recovery after removal.
+  The container CI domain builds a controlled derivative of the reviewed attempt image and runs
+  this real lifecycle suite. Workspace data transfer/result extraction, T71 supervisor and reverse
+  channel ceilings, mTLS, Kubernetes, production composition, and application/job integration
+  remain explicitly outside this slice. The complete 435-test broker selection passes, the new
+  backend reaches 93% branch coverage, and the exact light gate passes 2,860 tests at 94.04% total
+  and 90.11% application branch coverage; Ruff, `ty`, CI-selector validation, and diff validation
+  also pass.
 
 ## Synchronization
 

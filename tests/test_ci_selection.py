@@ -123,6 +123,8 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
         "src/markweave/conversion/__init__.py",
         "src/markweave/conversion/errors.py",
         "src/markweave/conversion/images.py",
+        "src/markweave/broker/podman_runtime.py",
+        "tests/integration/broker/test_podman_runtime_integration.py",
         "spikes/anydoc/LICENSE.anydoc",
         "spikes/anydoc/corpus/docx/text.docx",
         "LICENSE",

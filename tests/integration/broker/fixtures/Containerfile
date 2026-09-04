@@ -1,0 +1,9 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER 0
+COPY attempt_main.py \
+  /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions/attempt_main.py
+RUN chmod 0444 \
+  /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions/attempt_main.py
+USER 1001:0

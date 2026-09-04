@@ -135,6 +135,8 @@ def test_reverse_attempt_smoke_enforces_runtime_separation() -> None:
     run_ci = (ROOT / "scripts/container/run-ci.sh").read_text(encoding="utf-8")
     assert 'build-reverse-attempt.sh "$reverse_attempt_image"' in run_ci
     assert 'smoke-reverse-attempt.sh "$reverse_attempt_image"' in run_ci
+    assert "tests/integration/broker/test_podman_runtime_integration.py" in run_ci
+    assert 'MARKWEAVE_T70_PODMAN_TEST_IMAGE="$reverse_attempt_image"' in run_ci
     assert '"$reverse_attempt_image" artifacts/reverse-attempt' in run_ci
     assert "ci reverse-attempt" in run_ci
 
