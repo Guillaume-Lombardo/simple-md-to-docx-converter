@@ -69,6 +69,12 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   passed every domain except one transient container smoke where ClamAV was unavailable, so that
   failed job must pass on rerun before integration. Post-merge exact-main verification remains
   pending.
+* 2026-09-04: Exact-head run `33840856017` passed every domain except frontend after npm installs
+  degraded from seconds to four-to-five minutes per invocation and the benchmark reached the
+  45-minute job limit during its second sample. Every measured install, frontend build, and image
+  build is now process-group bounded with deterministic raw timeout evidence, TERM-to-KILL cleanup,
+  and a shared 25-minute benchmark budget; the workflow adds a 27-minute outer fail-safe around the
+  complete collector. A fresh exact-head hosted matrix remains required before integration.
 
 ## Synchronization
 

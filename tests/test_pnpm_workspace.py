@@ -201,6 +201,7 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "docs/package-management.md",
         "scripts/javascript/bootstrap-pnpm.sh",
         "scripts/javascript/select-t67-rollback-commits.sh",
+        "tests/integration/test_benchmark_timeout.py",
         "cache: npm",
         "COPY package.json package-lock.json ./",
         "npm run build && npm prune --omit=dev --ignore-scripts",
@@ -226,11 +227,23 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
         "runner_image=",
         "node --version",
         "raw.log",
+        "run-bounded-benchmark-command.sh",
+        "total_timeout_seconds=1500",
+        "termination_grace_seconds=10",
         "podman image inspect",
         "manifest-lock-sha256.txt",
     ):
         assert contract in benchmark
-    assert (
-        benchmark.count("final-image 1 podman build --no-cache --format oci --tag") == 2
-    )
+    assert benchmark.count('final-image 1 bounded_workload "') == 2
+    assert benchmark.count("podman build --no-cache --format oci --tag") == 2
     assert benchmark.count("image: podman build --no-cache --format oci") == 2
+    for label in (
+        "npm/frontend-build/$sample",
+        "pnpm/cold-install/$sample",
+        "pnpm/warm-install/$sample",
+        "pnpm/frontend-build/$sample",
+        "npm/final-image/1",
+        "pnpm/final-image/1",
+    ):
+        assert label in benchmark
+    assert benchmark.count('bounded_workload "$label/') == 2

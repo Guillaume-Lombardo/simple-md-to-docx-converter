@@ -51,10 +51,12 @@ allowed_path() {
     scripts/ci/validate_ci.py|scripts/container/publish-release-pair.sh|\
     scripts/container/run-ci.sh|scripts/e2e/run.sh|scripts/javascript/bootstrap-pnpm.sh|\
     scripts/javascript/benchmark-package-managers.sh|\
+    scripts/javascript/run-bounded-benchmark-command.sh|\
     scripts/javascript/rehearse-npm-rollback.sh|\
     scripts/javascript/select-t67-rollback-commits.sh|\
     scripts/javascript/validate-workspace.mjs|\
-    tests/test_ci_selection.py|tests/test_ci_validation.py|tests/test_documentation.py|\
+    tests/integration/test_benchmark_timeout.py|tests/test_ci_selection.py|\
+    tests/test_ci_validation.py|tests/test_documentation.py|\
     tests/test_pnpm_workspace.py|tests/test_t22_maintenance.py|\
     tickets/T67-migrate-javascript-tooling-pnpm-workspace.md|web/Containerfile|\
     web/README.md|web/next.config.ts|web/package.json|web/package-lock.json|\

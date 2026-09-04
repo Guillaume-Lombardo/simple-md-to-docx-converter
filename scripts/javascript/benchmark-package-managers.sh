@@ -22,6 +22,13 @@ readonly npm_cache="$workspace/npm-cache"
 readonly pnpm_store="$workspace/pnpm-store"
 readonly npm_image="localhost/markweave-benchmark-npm:temporary"
 readonly pnpm_image="localhost/markweave-benchmark-pnpm:temporary"
+readonly command_runner="$repository/scripts/javascript/run-bounded-benchmark-command.sh"
+readonly total_timeout_seconds=1500
+readonly install_timeout_seconds=240
+readonly build_timeout_seconds=180
+readonly image_timeout_seconds=600
+readonly termination_grace_seconds=10
+readonly benchmark_started_seconds="$SECONDS"
 
 cleanup() {
   podman image rm --force "$npm_image" "$pnpm_image" >/dev/null 2>&1 || true
@@ -63,7 +70,27 @@ printf '%s\n' \
   'npm image: podman build --no-cache --format oci --file <npm-root>/web/Containerfile <npm-root>/web' \
   'pnpm image: podman build --no-cache --format oci --file <pnpm-root>/web/Containerfile <pnpm-root>' \
   'cache archive: tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - <cache> | gzip --no-name | wc --bytes' \
+  'boundary: every install, frontend build, and image build has a per-command timeout and shares a 1500-second total benchmark budget; TERM is followed by KILL after 10 seconds' \
   > "$output_directory/commands.txt"
+
+bounded_workload() {
+  local label="$1" requested_timeout_seconds="$2"
+  shift 2
+  local elapsed_seconds remaining_seconds effective_timeout_seconds
+  elapsed_seconds=$((SECONDS - benchmark_started_seconds))
+  remaining_seconds=$((total_timeout_seconds - elapsed_seconds))
+  if ((remaining_seconds <= 0)); then
+    printf 'boundary_budget_exhausted label=%q total_timeout_seconds=%s elapsed_seconds=%s\n' \
+      "$label" "$total_timeout_seconds" "$elapsed_seconds" >> "$raw_log"
+    return 124
+  fi
+  effective_timeout_seconds="$requested_timeout_seconds"
+  if ((effective_timeout_seconds > remaining_seconds)); then
+    effective_timeout_seconds="$remaining_seconds"
+  fi
+  "$command_runner" "$effective_timeout_seconds" "$termination_grace_seconds" \
+    "$raw_log" "$label" -- "$@"
+}
 
 run_timed() {
   local manager="$1" phase="$2" sample="$3"
@@ -83,13 +110,15 @@ run_timed() {
 }
 
 npm_install_graph() {
-  local tree="$1" cache="$2"
+  local label="$1" tree="$2" cache="$3"
   printf 'executing: npm_config_cache=%q npm ci --ignore-scripts --prefix %q\n' \
     "$cache" "$tree" >> "$raw_log"
-  npm_config_cache="$cache" npm ci --ignore-scripts --prefix "$tree"
+  bounded_workload "$label/root" "$install_timeout_seconds" env \
+    npm_config_cache="$cache" npm ci --ignore-scripts --prefix "$tree"
   printf 'executing: npm_config_cache=%q npm ci --ignore-scripts --prefix %q\n' \
     "$cache" "$tree/web" >> "$raw_log"
-  npm_config_cache="$cache" npm ci --ignore-scripts --prefix "$tree/web"
+  bounded_workload "$label/web" "$install_timeout_seconds" env \
+    npm_config_cache="$cache" npm ci --ignore-scripts --prefix "$tree/web"
 }
 
 tree_bytes() {
@@ -107,11 +136,15 @@ for sample in 1 2 3; do
   rm -rf -- "$npm_tree/node_modules" "$npm_tree/web/node_modules" \
     "$npm_tree/web/.next" "$npm_cache"
   mkdir -p "$npm_cache"
-  run_timed npm cold-install "$sample" npm_install_graph "$npm_tree" "$npm_cache"
+  run_timed npm cold-install "$sample" npm_install_graph \
+    "npm/cold-install/$sample" "$npm_tree" "$npm_cache"
   rm -rf -- "$npm_tree/node_modules" "$npm_tree/web/node_modules"
-  run_timed npm warm-install "$sample" npm_install_graph "$npm_tree" "$npm_cache"
+  run_timed npm warm-install "$sample" npm_install_graph \
+    "npm/warm-install/$sample" "$npm_tree" "$npm_cache"
   rm -rf -- "$npm_tree/web/.next"
-  run_timed npm frontend-build "$sample" npm run --prefix "$npm_tree/web" build
+  run_timed npm frontend-build "$sample" bounded_workload \
+    "npm/frontend-build/$sample" "$build_timeout_seconds" \
+    npm run --prefix "$npm_tree/web" build
   printf 'npm\t%s\t%s\t%s\t%s\n' "$sample" \
     "$(tree_bytes "$npm_tree/node_modules" "$npm_tree/web/node_modules")" \
     "$(tree_bytes "$npm_cache")" "$(archive_bytes "$npm_cache")" >> "$sizes"
@@ -119,13 +152,19 @@ for sample in 1 2 3; do
   rm -rf -- "$pnpm_tree/node_modules" "$pnpm_tree/web/node_modules" \
     "$pnpm_tree/web/.next" "$pnpm_store"
   mkdir -p "$pnpm_store"
-  run_timed pnpm cold-install "$sample" pnpm --dir "$pnpm_tree" install \
+  run_timed pnpm cold-install "$sample" bounded_workload \
+    "pnpm/cold-install/$sample" "$install_timeout_seconds" \
+    pnpm --dir "$pnpm_tree" install \
     --frozen-lockfile --ignore-scripts --store-dir "$pnpm_store"
   rm -rf -- "$pnpm_tree/node_modules" "$pnpm_tree/web/node_modules"
-  run_timed pnpm warm-install "$sample" pnpm --dir "$pnpm_tree" install \
+  run_timed pnpm warm-install "$sample" bounded_workload \
+    "pnpm/warm-install/$sample" "$install_timeout_seconds" \
+    pnpm --dir "$pnpm_tree" install \
     --frozen-lockfile --ignore-scripts --store-dir "$pnpm_store"
   rm -rf -- "$pnpm_tree/web/.next"
-  run_timed pnpm frontend-build "$sample" pnpm --dir "$pnpm_tree" \
+  run_timed pnpm frontend-build "$sample" bounded_workload \
+    "pnpm/frontend-build/$sample" "$build_timeout_seconds" \
+    pnpm --dir "$pnpm_tree" \
     --filter @markweave/web run build
   printf 'pnpm\t%s\t%s\t%s\t%s\n' "$sample" \
     "$(tree_bytes "$pnpm_tree/node_modules" "$pnpm_tree/web/node_modules")" \
@@ -134,9 +173,11 @@ done
 
 rm -rf -- "$npm_tree/node_modules" "$npm_tree/web/node_modules" "$npm_tree/web/.next" \
   "$pnpm_tree/node_modules" "$pnpm_tree/web/node_modules" "$pnpm_tree/web/.next"
-run_timed npm final-image 1 podman build --no-cache --format oci --tag "$npm_image" \
+run_timed npm final-image 1 bounded_workload "npm/final-image/1" \
+  "$image_timeout_seconds" podman build --no-cache --format oci --tag "$npm_image" \
   --file "$npm_tree/web/Containerfile" "$npm_tree/web"
-run_timed pnpm final-image 1 podman build --no-cache --format oci --tag "$pnpm_image" \
+run_timed pnpm final-image 1 bounded_workload "pnpm/final-image/1" \
+  "$image_timeout_seconds" podman build --no-cache --format oci --tag "$pnpm_image" \
   --file "$pnpm_tree/web/Containerfile" "$pnpm_tree"
 {
   printf 'manager\timage_bytes\n'

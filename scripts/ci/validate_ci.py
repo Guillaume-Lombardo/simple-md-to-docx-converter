@@ -358,7 +358,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="2dd92feea571c0d86bcccd7a73431604c72a8fc6aa5e2fa6c891c039ca5fd26f",
+        canonical_digest="e9365c840de16b5591a2d2c976beb4754c1cb78730b074b9d75422568bb0d931",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -851,6 +851,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
         ),
         ("heavy", "Collect the T67 package-manager benchmark"): (
+            "timeout --signal=TERM --kill-after=10s 1620s "
             "bash scripts/javascript/benchmark-package-managers.sh "
             '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
             "artifacts/package-manager-benchmark"
