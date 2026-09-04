@@ -254,8 +254,10 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
     for contract in (
         "PR_SET_CHILD_SUBREAPER",
         "start_new_session=True",
-        "os.killpg",
-        "os.waitpid(-1, os.WNOHANG)",
+        'Path(f"/proc/{process_id}/task")',
+        "os.waitpid(child, os.WNOHANG)",
+        "if child == direct_process_id",
+        "_signal_processes(descendants",
         "deadline_reached",
         "boundary_cleanup_failed",
     ):

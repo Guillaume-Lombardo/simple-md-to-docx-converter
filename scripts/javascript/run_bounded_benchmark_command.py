@@ -14,9 +14,12 @@ from contextlib import suppress
 from pathlib import Path
 
 PR_SET_CHILD_SUBREAPER = 36
-GROUP_VERIFICATION_SECONDS = 2.0
+TREE_VERIFICATION_SECONDS = 2.0
 POLL_SECONDS = 0.05
 MIN_ARGUMENTS = 6
+ARGUMENT_ERRORS = (TypeError, ValueError)
+PROC_DIRECTORY_ERRORS = (FileNotFoundError, PermissionError)
+PROC_CHILDREN_ERRORS = (FileNotFoundError, PermissionError, ProcessLookupError)
 
 
 class _ForwardedSignal(Exception):
@@ -38,54 +41,68 @@ def _enable_subreaper() -> None:
         raise OSError(error_number, os.strerror(error_number))
 
 
-def _group_exists(process_group: int) -> bool:
+def _direct_children(process_id: int) -> set[int]:
+    children: set[int] = set()
     try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _signal_group(process_group: int, signum: signal.Signals) -> None:
-    with suppress(ProcessLookupError):
-        os.killpg(process_group, signum)
-
-
-def _reap_adopted_children() -> None:
-    while True:
+        task_directories = tuple(Path(f"/proc/{process_id}/task").iterdir())
+    except PROC_DIRECTORY_ERRORS:
+        return children
+    for task_directory in task_directories:
         try:
-            child, _ = os.waitpid(-1, os.WNOHANG)
-        except ChildProcessError:
-            return
-        if child == 0:
-            return
+            text = (task_directory / "children").read_text(encoding="ascii")
+        except PROC_CHILDREN_ERRORS:
+            continue
+        children.update(int(value) for value in text.split())
+    return children
 
 
-def _wait_for_group_absence(process_group: int, seconds: float) -> bool:
+def _descendants(process_id: int) -> set[int]:
+    descendants: set[int] = set()
+    pending = list(_direct_children(process_id))
+    while pending:
+        child = pending.pop()
+        if child in descendants:
+            continue
+        descendants.add(child)
+        pending.extend(_direct_children(child))
+    return descendants
+
+
+def _reap_adopted_children(direct_process_id: int) -> None:
+    for child in _direct_children(os.getpid()):
+        if child == direct_process_id:
+            continue
+        with suppress(ChildProcessError):
+            os.waitpid(child, os.WNOHANG)
+
+
+def _signal_processes(process_ids: set[int], signum: signal.Signals) -> None:
+    for process_id in process_ids:
+        with suppress(ProcessLookupError):
+            os.kill(process_id, signum)
+
+
+def _wait_for_tree(
+    process: subprocess.Popen[bytes], signum: signal.Signals, seconds: float
+) -> bool:
     deadline = time.monotonic() + seconds
     while True:
-        _reap_adopted_children()
-        if not _group_exists(process_group):
+        process.poll()
+        _reap_adopted_children(process.pid)
+        descendants = _descendants(os.getpid())
+        if not descendants:
             return True
+        _signal_processes(descendants, signum)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return False
         time.sleep(min(POLL_SECONDS, remaining))
 
 
-def _terminate_group(process: subprocess.Popen[bytes], grace_seconds: int) -> bool:
-    process_group = process.pid
-    if _group_exists(process_group):
-        _signal_group(process_group, signal.SIGTERM)
-        if not _wait_for_group_absence(process_group, float(grace_seconds)):
-            _signal_group(process_group, signal.SIGKILL)
-    try:
-        process.wait(timeout=GROUP_VERIFICATION_SECONDS)
-    except subprocess.TimeoutExpired:
-        _signal_group(process_group, signal.SIGKILL)
-    return _wait_for_group_absence(process_group, GROUP_VERIFICATION_SECONDS)
+def _terminate_tree(process: subprocess.Popen[bytes], grace_seconds: int) -> bool:
+    if _wait_for_tree(process, signal.SIGTERM, float(grace_seconds)):
+        return True
+    return _wait_for_tree(process, signal.SIGKILL, TREE_VERIFICATION_SECONDS)
 
 
 def _shell_status(return_code: int) -> int:
@@ -117,7 +134,7 @@ def main(arguments: list[str] | None = None) -> int:
         timeout_seconds, grace_seconds, log_path, label, command = _parse_arguments(
             list(sys.argv[1:] if arguments is None else arguments)
         )
-    except TypeError, ValueError:
+    except ARGUMENT_ERRORS:
         print(
             "Usage: run_bounded_benchmark_command.py TIMEOUT_SECONDS "
             "GRACE_SECONDS LOG LABEL -- COMMAND [ARGUMENT ...]",
@@ -145,10 +162,15 @@ def main(arguments: list[str] | None = None) -> int:
         def forward(signum: int, _frame: object) -> None:
             raise _ForwardedSignal(signum)
 
-        previous_handlers = {
-            signum: signal.signal(signum, forward)
-            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
-        }
+        cleanup_in_progress = False
+
+        def forward_once(signum: int, _frame: object) -> None:
+            if cleanup_in_progress:
+                return
+            forward(signum, _frame)
+
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(signum, forward_once)
         deadline_reached = False
         forwarded_signal: int | None = None
         try:
@@ -158,16 +180,15 @@ def main(arguments: list[str] | None = None) -> int:
         except _ForwardedSignal as caught:
             forwarded_signal = caught.signum
         finally:
-            for signum, previous in previous_handlers.items():
-                signal.signal(signum, previous)
+            cleanup_in_progress = True
 
-        cleanup_complete = _terminate_group(process, grace_seconds)
+        cleanup_complete = _terminate_tree(process, grace_seconds)
         if not cleanup_complete:
             _record_failure(
                 log,
                 log_path,
                 f"boundary_cleanup_failed label={shlex.quote(label)} "
-                f"process_group={process.pid} status=125",
+                f"direct_process={process.pid} status=125",
             )
             return 125
         if forwarded_signal is not None:
