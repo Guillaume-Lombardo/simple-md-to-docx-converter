@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.javascript import run_bounded_benchmark_command as supervisor
+
 RUNNER = "scripts/javascript/run_bounded_benchmark_command.py"
 
 
@@ -213,3 +215,48 @@ def test_second_term_does_not_interrupt_tree_cleanup(tmp_path: Path) -> None:
     assert stdout == ""
     assert "boundary_signal label=test/double-term" in stderr
     _assert_process_gone(int(descendant_pid_file.read_text(encoding="utf-8")))
+
+
+@pytest.mark.integration
+def test_proc_root_inspection_failure_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "proc-failure.log"
+    original = supervisor._direct_children
+
+    def deny_supervisor_tree(process_id: int, *, required: bool = False) -> set[int]:
+        if process_id == os.getpid() and required:
+            raise supervisor._ProcInspectionError("simulated proc denial")
+        return original(process_id, required=required)
+
+    monkeypatch.setattr(supervisor, "_direct_children", deny_supervisor_tree)
+
+    status = supervisor.main(["5", "1", str(log), "test/proc-failure", "--", "true"])
+
+    assert status == 125
+    assert "boundary_cleanup_failed" in log.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_pidfd_identity_change_fails_before_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_times = iter((10, 11))
+    sent: list[tuple[int, signal.Signals]] = []
+    process_fd = os.open("/dev/null", os.O_RDONLY)
+    monkeypatch.setattr(
+        supervisor, "_process_start_time", lambda _process_id: next(start_times)
+    )
+    monkeypatch.setattr(os, "pidfd_open", lambda _process_id: process_fd)
+    monkeypatch.setattr(
+        signal,
+        "pidfd_send_signal",
+        lambda process_fd, signum: sent.append((process_fd, signum)),
+    )
+
+    with pytest.raises(supervisor._ProcInspectionError, match="identity changed"):
+        supervisor._signal_process(os.getpid(), 10, signal.SIGTERM)
+
+    assert sent == []
+    with pytest.raises(OSError):
+        os.fstat(process_fd)

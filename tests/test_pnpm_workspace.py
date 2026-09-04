@@ -255,6 +255,8 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
         "PR_SET_CHILD_SUBREAPER",
         "start_new_session=True",
         'Path(f"/proc/{process_id}/task")',
+        "os.pidfd_open",
+        "signal.pidfd_send_signal",
         "os.waitpid(child, os.WNOHANG)",
         "if child == direct_process_id",
         "_signal_processes(descendants",
@@ -262,3 +264,7 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
         "boundary_cleanup_failed",
     ):
         assert contract in supervisor
+    assert "os.kill(process_id" not in supervisor
+    assert supervisor.index("signal.signal(signum, remember_first_signal)") < (
+        supervisor.index("process = subprocess.Popen")
+    )

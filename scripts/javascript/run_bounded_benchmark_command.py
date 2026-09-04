@@ -18,13 +18,11 @@ TREE_VERIFICATION_SECONDS = 2.0
 POLL_SECONDS = 0.05
 MIN_ARGUMENTS = 6
 ARGUMENT_ERRORS = (TypeError, ValueError)
-PROC_DIRECTORY_ERRORS = (FileNotFoundError, PermissionError)
-PROC_CHILDREN_ERRORS = (FileNotFoundError, PermissionError, ProcessLookupError)
+PROC_STAT_START_TIME_INDEX = 19
 
 
-class _ForwardedSignal(Exception):
-    def __init__(self, signum: int) -> None:
-        self.signum = signum
+class _ProcInspectionError(RuntimeError):
+    """The supervisor cannot prove the identity or ancestry of a process."""
 
 
 def _positive_integer(value: str) -> int:
@@ -41,45 +39,106 @@ def _enable_subreaper() -> None:
         raise OSError(error_number, os.strerror(error_number))
 
 
-def _direct_children(process_id: int) -> set[int]:
+def _direct_children(process_id: int, *, required: bool = False) -> set[int]:
     children: set[int] = set()
     try:
         task_directories = tuple(Path(f"/proc/{process_id}/task").iterdir())
-    except PROC_DIRECTORY_ERRORS:
+    except FileNotFoundError as error:
+        if required:
+            raise _ProcInspectionError("required process tree disappeared") from error
         return children
+    except PermissionError as error:
+        raise _ProcInspectionError("process tree is not readable") from error
+    readable_tasks = 0
     for task_directory in task_directories:
         try:
             text = (task_directory / "children").read_text(encoding="ascii")
-        except PROC_CHILDREN_ERRORS:
+        except FileNotFoundError:
             continue
+        except (PermissionError, ProcessLookupError) as error:
+            raise _ProcInspectionError("process children are not readable") from error
+        readable_tasks += 1
         children.update(int(value) for value in text.split())
+    if required and readable_tasks == 0:
+        raise _ProcInspectionError("required process tree has no readable task")
     return children
 
 
-def _descendants(process_id: int) -> set[int]:
-    descendants: set[int] = set()
-    pending = list(_direct_children(process_id))
+def _descendants(process_id: int) -> dict[int, int]:
+    descendants: dict[int, int] = {}
+    pending = list(_direct_children(process_id, required=True))
     while pending:
         child = pending.pop()
         if child in descendants:
             continue
-        descendants.add(child)
+        start_time = _process_start_time(child)
+        if start_time is None:
+            continue
+        descendants[child] = start_time
         pending.extend(_direct_children(child))
     return descendants
 
 
 def _reap_adopted_children(direct_process_id: int) -> None:
-    for child in _direct_children(os.getpid()):
+    for child in _direct_children(os.getpid(), required=True):
         if child == direct_process_id:
             continue
         with suppress(ChildProcessError):
             os.waitpid(child, os.WNOHANG)
 
 
-def _signal_processes(process_ids: set[int], signum: signal.Signals) -> None:
-    for process_id in process_ids:
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signum)
+def _process_start_time(process_id: int) -> int | None:
+    try:
+        stat = Path(f"/proc/{process_id}/stat").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return None
+    except (PermissionError, ProcessLookupError) as error:
+        raise _ProcInspectionError("process identity is not readable") from error
+    closing_parenthesis = stat.rfind(")")
+    if closing_parenthesis < 0:
+        raise _ProcInspectionError("process identity is malformed")
+    fields_after_name = stat[closing_parenthesis + 2 :].split()
+    if len(fields_after_name) <= PROC_STAT_START_TIME_INDEX:
+        raise _ProcInspectionError("process identity is malformed")
+    try:
+        return int(fields_after_name[PROC_STAT_START_TIME_INDEX])
+    except ValueError as error:
+        raise _ProcInspectionError("process identity is malformed") from error
+
+
+def _signal_process(
+    process_id: int, expected_start_time: int, signum: signal.Signals
+) -> None:
+    before = _process_start_time(process_id)
+    if before is None:
+        return
+    if before != expected_start_time:
+        return
+    try:
+        process_fd = os.pidfd_open(process_id)
+    except ProcessLookupError:
+        return
+    except OSError as error:
+        raise _ProcInspectionError("process identity cannot be opened") from error
+    try:
+        after = _process_start_time(process_id)
+        if after is None:
+            return
+        if expected_start_time != after:
+            raise _ProcInspectionError("process identity changed while opening pidfd")
+        try:
+            signal.pidfd_send_signal(process_fd, signum)
+        except ProcessLookupError:
+            pass
+        except OSError as error:
+            raise _ProcInspectionError("process cannot be signalled") from error
+    finally:
+        os.close(process_fd)
+
+
+def _signal_processes(processes: dict[int, int], signum: signal.Signals) -> None:
+    for process_id, start_time in processes.items():
+        _signal_process(process_id, start_time, signum)
 
 
 def _wait_for_tree(
@@ -100,9 +159,18 @@ def _wait_for_tree(
 
 
 def _terminate_tree(process: subprocess.Popen[bytes], grace_seconds: int) -> bool:
-    if _wait_for_tree(process, signal.SIGTERM, float(grace_seconds)):
-        return True
-    return _wait_for_tree(process, signal.SIGKILL, TREE_VERIFICATION_SECONDS)
+    try:
+        if _wait_for_tree(process, signal.SIGTERM, float(grace_seconds)):
+            return True
+        return _wait_for_tree(process, signal.SIGKILL, TREE_VERIFICATION_SECONDS)
+    except _ProcInspectionError:
+        with suppress(_ProcInspectionError):
+            start_time = _process_start_time(process.pid)
+            if start_time is not None:
+                _signal_process(process.pid, start_time, signal.SIGKILL)
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=TREE_VERIFICATION_SECONDS)
+        return False
 
 
 def _shell_status(return_code: int) -> int:
@@ -152,37 +220,41 @@ def main(arguments: list[str] | None = None) -> int:
             file=log,
             flush=True,
         )
-        process = subprocess.Popen(  # noqa: S603 - exact reviewed CI command
-            command,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        received_signal: int | None = None
 
-        def forward(signum: int, _frame: object) -> None:
-            raise _ForwardedSignal(signum)
+        def remember_first_signal(signum: int, _frame: object) -> None:
+            nonlocal received_signal
+            if received_signal is None:
+                received_signal = signum
 
-        cleanup_in_progress = False
+        previous_handlers = {
+            signum: signal.signal(signum, remember_first_signal)
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+        }
 
-        def forward_once(signum: int, _frame: object) -> None:
-            if cleanup_in_progress:
-                return
-            forward(signum, _frame)
-
-        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-            signal.signal(signum, forward_once)
-        deadline_reached = False
-        forwarded_signal: int | None = None
         try:
-            process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            deadline_reached = True
-        except _ForwardedSignal as caught:
-            forwarded_signal = caught.signum
-        finally:
-            cleanup_in_progress = True
+            process = subprocess.Popen(  # noqa: S603 - exact reviewed CI command
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except BaseException:
+            for signum, previous in previous_handlers.items():
+                signal.signal(signum, previous)
+            raise
+        deadline_reached = False
+        deadline = time.monotonic() + timeout_seconds
+        while process.poll() is None and received_signal is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                deadline_reached = True
+                break
+            time.sleep(min(POLL_SECONDS, remaining))
 
         cleanup_complete = _terminate_tree(process, grace_seconds)
+        for signum, previous in previous_handlers.items():
+            signal.signal(signum, previous)
         if not cleanup_complete:
             _record_failure(
                 log,
@@ -191,13 +263,13 @@ def main(arguments: list[str] | None = None) -> int:
                 f"direct_process={process.pid} status=125",
             )
             return 125
-        if forwarded_signal is not None:
-            status = 128 + forwarded_signal
+        if received_signal is not None:
+            status = 128 + received_signal
             _record_failure(
                 log,
                 log_path,
                 f"boundary_signal label={shlex.quote(label)} "
-                f"deadline_reached=false signal={forwarded_signal} status={status}",
+                f"deadline_reached=false signal={received_signal} status={status}",
             )
             return status
         status = _shell_status(process.returncode)
