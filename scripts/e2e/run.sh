@@ -73,6 +73,7 @@ readonly frontend_name="$prefix-frontend"
 readonly router_name="$prefix-router"
 readonly frontend_image="${published_frontend_image:-${local_frontend_image:-localhost/markweave-web:t64-$profile}}"
 readonly clamav_name="$prefix-clamav"
+readonly clamav_probe_name="$prefix-clamav-probe"
 readonly postgres_name="$prefix-postgres"
 readonly rustfs_name="$prefix-rustfs"
 readonly worker_one_name="$prefix-worker-1"
@@ -225,7 +226,8 @@ trap cleanup EXIT
 
 refuse_existing_resources() {
   local name
-  for name in "$application_name" "$clamav_name" "$postgres_name" "$rustfs_name" \
+  for name in "$application_name" "$clamav_name" "$clamav_probe_name" \
+    "$postgres_name" "$rustfs_name" \
     "$expiry_application_name" "$insecure_application_name" "$worker_one_name" \
     "$worker_two_name" "$frontend_name" "$router_name"; do
     if podman container exists "$name"; then
@@ -482,6 +484,29 @@ e2e_run_in_harness_directory \
   --entrypoint /opt/md-converter/venv/bin/python \
   "$image" /fake-clamav.py >/dev/null
 
+created=("$clamav_probe_name" "${created[@]}")
+e2e_run_in_harness_directory \
+  "$temporary_directory" "$temporary_directory_identity" \
+  podman run --detach --name "$clamav_probe_name" --network "$network_name" \
+  --read-only --cap-drop=all --security-opt=no-new-privileges \
+  --pids-limit=16 --memory=64m --tmpfs /tmp:rw,nosuid,nodev,noexec,size=4m \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" -c 'import time; time.sleep(30)' >/dev/null
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" "$profile-alias" "$clamav_probe_name" e2e-clamav
+podman kill --signal KILL "$clamav_probe_name" >/dev/null
+podman rm "$clamav_probe_name" >/dev/null
+
+clamav_address="$(podman inspect "$clamav_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ -z "$clamav_address" ]]; then
+  echo "Fake ClamAV has no address on the E2E network." >&2
+  exit 1
+fi
+# The unmapped peer above proves the network alias. Application and worker
+# containers use this mapping to avoid later transient Netavark DNS failures.
+scanner_host_mapping=(--add-host "e2e-clamav:$clamav_address")
+
 e2e_runtime_settings
 if [[ "$profile" == standalone ]]; then
   E2E_SETTINGS+=(
@@ -553,6 +578,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${scanner_host_mapping[@]}" \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   "$image" "$application_mode" >/dev/null
 
@@ -562,6 +588,7 @@ if [[ "$profile" == distributed ]]; then
     e2e_run_in_harness_directory \
       "$temporary_directory" "$temporary_directory_identity" \
       podman run --detach --name "$worker" --network "$network_name" \
+      "${scanner_host_mapping[@]}" \
       --publish 127.0.0.1::9464 "${hardened_runtime[@]}" "${E2E_SETTINGS[@]}" \
       "$image" worker >/dev/null
   done
@@ -571,7 +598,7 @@ application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
 base_url="http://127.0.0.1:$application_port"
 wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
-  "$clamav_name" "$profile-network" "$application_name" e2e-clamav
+  "$clamav_name" "$profile-mapped" "$application_name" e2e-clamav
 podman exec "$application_name" python -c '
 from pathlib import Path
 
@@ -823,6 +850,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${scanner_host_mapping[@]}" \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
   "$image" "$application_mode" >/dev/null
@@ -879,6 +907,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${scanner_host_mapping[@]}" \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
   --env MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2 \
@@ -903,6 +932,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${scanner_host_mapping[@]}" \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
   "$image" "$application_mode" >/dev/null
@@ -1005,6 +1035,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$expiry_application_name" --network "$network_name" \
   --network-alias application --publish 127.0.0.1::8080 \
+  "${scanner_host_mapping[@]}" \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_SESSION_ABSOLUTE_SECONDS=2 \
   --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \

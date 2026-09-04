@@ -236,13 +236,23 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
         'podman run --detach --name "$postgres_name"'
     )
     assert '"$clamav_name" standalone-network "$container_name" clamav' in standalone
-    assert (
-        '"$clamav_name" distributed-network "$application_name" clamav' in distributed
+    alias_probe = '"$clamav_name" distributed-alias "$clamav_probe_name" clamav'
+    mapped_probe = '"$clamav_name" distributed-mapped "$application_name" clamav'
+    assert alias_probe in distributed
+    assert mapped_probe in distributed
+    assert distributed.index(alias_probe) < distributed.index(
+        'scanner_host_mapping=(--add-host "clamav:$clamav_address")'
     )
+    assert (
+        "--format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'"
+        in distributed
+    )
+    assert 'scanner_host_mapping=(--add-host "clamav:$clamav_address")' in distributed
+    assert distributed.count('"${scanner_host_mapping[@]}"') == 4
     assert standalone.index("standalone-network") < standalone.index(
         "scripts.container.api_workflow_smoke"
     )
-    assert distributed.index("distributed-network") < distributed.index(
+    assert distributed.index("distributed-mapped") < distributed.index(
         "scripts.container.api_workflow_smoke"
     )
 
@@ -250,9 +260,24 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
 def test_final_e2e_proves_scanner_network_path_before_user_workflows() -> None:
     runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
 
-    network_probe = '"$clamav_name" "$profile-network" "$application_name" e2e-clamav'
-    assert network_probe in runner
-    assert runner.index(network_probe) < runner.index(
+    alias_probe = '"$clamav_name" "$profile-alias" "$clamav_probe_name" e2e-clamav'
+    mapped_probe = '"$clamav_name" "$profile-mapped" "$application_name" e2e-clamav'
+    assert alias_probe in runner
+    assert mapped_probe in runner
+    assert (
+        "--format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'" in runner
+    )
+    mapping = 'scanner_host_mapping=(--add-host "e2e-clamav:$clamav_address")'
+    assert mapping in runner
+    hardened_runtime = runner[
+        runner.index("hardened_runtime=(") : runner.index("start_production_router()")
+    ]
+    assert "--add-host" not in hardened_runtime
+    assert (
+        runner.index(alias_probe) < runner.index(mapping) < runner.index(mapped_probe)
+    )
+    assert '"${scanner_host_mapping[@]}"' in runner
+    assert runner.index(mapped_probe) < runner.index(
         "tests.e2e.service_workflow exercise-security-boundaries"
     )
 

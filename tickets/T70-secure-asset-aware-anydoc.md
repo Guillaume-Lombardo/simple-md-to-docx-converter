@@ -212,6 +212,17 @@ for reverse conversion.
   validation, and diff validation pass. CodeRabbit's exact-head review identified one valid
   test-lifecycle finding; the integration server now shuts down and joins in a `finally` block so a
   failed protocol assertion cannot leave a non-daemon test thread running.
+* 2026-09-04: Two later exact-head runs showed that the fake scanner protocol fix was sound but
+  rootless Podman network-name resolution remained transient on hosted runners: the application
+  passed an exact `INSTREAM` probe through the scanner alias, then intermittently reported
+  `UPLOAD_SCANNER_UNAVAILABLE` during the following workflow while every scanner process remained
+  healthy. The distributed smoke and final-image E2E harnesses now derive the scanner address from
+  Podman's trusted network inventory and install a deterministic container-local host mapping. They
+  still execute the exact alias-based network probe before user workflows, so network wiring and
+  scanner protocol coverage are preserved without adding application retries or weakening
+  fail-closed behavior. The current product configuration and Compose topology are unchanged. The
+  affected 83 harness tests, Ruff, `ty`, CI validation, the complete local distributed image smoke,
+  and the immutable 0.5.2 distributed rollback rehearsal pass.
 
 ## Synchronization
 
