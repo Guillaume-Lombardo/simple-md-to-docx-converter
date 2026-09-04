@@ -214,6 +214,7 @@ class UnixBrokerServer:
         self._lock_fd: int | None = None
         self._stopping = Event()
         self._handlers = BoundedSemaphore(limits.max_handlers)
+        self._dispatch_gate = Lock()
         self._threads: set[Thread] = set()
         self._connections: set[socket.socket] = set()
         self._threads_lock = Lock()
@@ -366,6 +367,36 @@ class UnixBrokerServer:
             request = decode_request(_receive_frame(connection, deadline))
         except BrokerError, OSError, TimeoutError:
             return
+        try:
+            dispatch_timeout = _remaining(deadline)
+        except TimeoutError as error:
+            self._record_fatal(error)
+            return
+        if not self._dispatch_gate.acquire(timeout=dispatch_timeout):
+            self._record_fatal(TimeoutError("Broker dispatch gate deadline expired"))
+            return
+        try:
+            response = self._dispatch_before_deadline(request, deadline)
+        finally:
+            self._dispatch_gate.release()
+        if response is None:
+            return
+        frame = encode_response(response)
+        try:
+            _send_all(connection, frame, deadline)
+        except OSError, TimeoutError:
+            return
+
+    def _dispatch_before_deadline(
+        self, request: BrokerRequest, deadline: float
+    ) -> BrokerResponse | None:
+        if self._stopping.is_set():
+            return None
+        try:
+            _remaining(deadline)
+        except TimeoutError as error:
+            self._record_fatal(error)
+            return None
         completed = Event()
         watchdog = Thread(
             target=self._watch_dispatch,
@@ -380,12 +411,8 @@ class UnixBrokerServer:
             watchdog.join()
         with self._threads_lock:
             if self._fatal_error is not None:
-                return
-        frame = encode_response(response)
-        try:
-            _send_all(connection, frame, deadline)
-        except OSError, TimeoutError:
-            return
+                return None
+        return response
 
     def _watch_dispatch(self, completed: Event, deadline: float) -> None:
         try:

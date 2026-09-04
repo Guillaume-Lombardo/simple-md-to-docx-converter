@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+from contextlib import suppress
 from pathlib import Path
 from threading import Event, Thread, current_thread, main_thread
 from time import monotonic, sleep
@@ -230,6 +231,53 @@ def test_dispatch_deadline_stops_admission_and_blocks_restart_until_drained(
     with pytest.raises(RuntimeError, match="server failed") as stopped:
         server.stop()
     assert isinstance(stopped.value.__cause__, TimeoutError)
+
+
+def test_expired_queued_dispatch_never_enters_service_after_active_request(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker)
+    server._limits = UnixTransportLimits(0.1, 1, 2, 2)
+    entered = Event()
+    release = Event()
+    sequences: list[int] = []
+
+    def serial_dispatch(
+        _principal: AuthenticatedPrincipal, request: ReadyRequest
+    ) -> ReadyResponse:
+        sequences.append(request.sequence)
+        if request.sequence == 1:
+            entered.set()
+            assert release.wait(1)
+        return ReadyResponse(request.request_id, True)
+
+    dispatcher.dispatch.side_effect = serial_dispatch
+    server.start()
+
+    def request(sequence: int) -> None:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=0.3,
+        )
+        with suppress(BrokerError):
+            client.request(ReadyRequest(UUID(int=sequence), sequence))
+
+    active = Thread(target=request, args=(1,))
+    queued = Thread(target=request, args=(2,))
+    active.start()
+    assert entered.wait(1)
+    queued.start()
+    assert server._stopping.wait(1)
+    release.set()
+    active.join(1)
+    queued.join(1)
+    assert not active.is_alive()
+    assert not queued.is_alive()
+    assert sequences == [1]
+    with pytest.raises(RuntimeError, match="server failed"):
+        server.stop()
 
 
 @pytest.mark.parametrize(
