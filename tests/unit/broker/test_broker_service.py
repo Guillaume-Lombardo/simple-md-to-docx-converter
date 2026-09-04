@@ -238,6 +238,24 @@ def test_runtime_reconnection_repeats_reconciliation(tmp_path: Path) -> None:
     )
 
 
+def test_reconciliation_rejects_duplicate_runtime_discovery(
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    broker, _, runtime = service(tmp_path)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    discovered = runtime.discover(limit=32)
+    assert discovered[0].unit_id == created.unit_id
+    mocker.patch.object(runtime, "discover", return_value=(discovered[0],) * 2)
+
+    with pytest.raises(BrokerError) as caught:
+        broker.runtime_reconnected()
+
+    assert caught.value.category is BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+    assert not broker.ready
+
+
 def test_create_rejects_invalid_or_failing_identity_factory(tmp_path: Path) -> None:
     broker_inventory = inventory(tmp_path)
     runtime = FakeIsolationRuntime()
@@ -277,7 +295,7 @@ def test_missing_unit_and_wrong_acknowledgement_are_idempotent(tmp_path: Path) -
     with pytest.raises(BrokerError) as caught:
         broker.status(PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0])
     assert caught.value.category is BrokerErrorCategory.PROTOCOL_ERROR
-    assert not broker.acknowledge(PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0], UNIT_IDS[1])
+    assert broker.acknowledge(PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0], UNIT_IDS[1])
 
     created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
     assert not broker.acknowledge(PRINCIPAL, ATTEMPT_ID, created.unit_id, UNIT_IDS[1])

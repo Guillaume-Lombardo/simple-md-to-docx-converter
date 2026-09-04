@@ -25,7 +25,7 @@ from markweave.broker.models import (
 )
 
 _APPLICATION_ID = 0x4D574249  # MWBI
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 2
 _MAC_VERSION = 1
 _MINIMUM_HMAC_KEY_BYTES = 32
 _SQLITE_FULL_SYNCHRONOUS = 2
@@ -35,24 +35,13 @@ _PRINCIPAL_COLUMNS = (
     "mac_version",
     "mac",
 )
-_ACKNOWLEDGEMENT_COLUMNS = (
-    "proof_id",
-    "principal_id",
-    "attempt_id",
-    "unit_id",
-    "create_sequence",
-    "mac_version",
-    "mac",
-)
 _MANIFEST_COLUMNS = (
     "singleton_id",
     "generation",
     "principal_count",
     "unit_count",
-    "acknowledgement_count",
     "principals_digest",
     "units_digest",
-    "acknowledgements_digest",
     "mac_version",
     "mac",
 )
@@ -60,18 +49,6 @@ _SELECT_PRINCIPALS = (
     "SELECT "  # noqa: S608 - identifiers are fixed module constants
     + ", ".join(_PRINCIPAL_COLUMNS)
     + " FROM principals"
-)
-_SELECT_ACKNOWLEDGEMENTS = (
-    "SELECT "  # noqa: S608 - identifiers are fixed module constants
-    + ", ".join(_ACKNOWLEDGEMENT_COLUMNS)
-    + " FROM acknowledgements"
-)
-_INSERT_ACKNOWLEDGEMENT = (
-    "INSERT INTO acknowledgements ("  # noqa: S608 - fixed identifiers
-    + ", ".join(_ACKNOWLEDGEMENT_COLUMNS)
-    + ") VALUES ("
-    + ", ".join("?" for _ in _ACKNOWLEDGEMENT_COLUMNS)
-    + ")"
 )
 _SELECT_MANIFEST = (
     "SELECT "  # noqa: S608 - identifiers are fixed module constants
@@ -132,18 +109,6 @@ _CREATE_PRINCIPALS = (
     "mac BLOB NOT NULL"
     ") STRICT"
 )
-_CREATE_ACKNOWLEDGEMENTS = (
-    "CREATE TABLE acknowledgements ("
-    "proof_id TEXT PRIMARY KEY NOT NULL,"
-    "principal_id TEXT NOT NULL REFERENCES principals(principal_id),"
-    "attempt_id TEXT UNIQUE NOT NULL,"
-    "unit_id TEXT UNIQUE NOT NULL,"
-    "create_sequence INTEGER NOT NULL CHECK (create_sequence > 0),"
-    "mac_version INTEGER NOT NULL,"
-    "mac BLOB NOT NULL,"
-    "UNIQUE (principal_id, create_sequence)"
-    ") STRICT"
-)
 _CREATE_UNITS = (
     "CREATE TABLE units ("
     "unit_id TEXT PRIMARY KEY NOT NULL,"
@@ -172,10 +137,8 @@ _CREATE_MANIFEST = (
     "generation INTEGER NOT NULL CHECK (generation >= 0),"
     "principal_count INTEGER NOT NULL CHECK (principal_count >= 0),"
     "unit_count INTEGER NOT NULL CHECK (unit_count >= 0),"
-    "acknowledgement_count INTEGER NOT NULL CHECK (acknowledgement_count >= 0),"
     "principals_digest TEXT NOT NULL,"
     "units_digest TEXT NOT NULL,"
-    "acknowledgements_digest TEXT NOT NULL,"
     "mac_version INTEGER NOT NULL,"
     "mac BLOB NOT NULL"
     ") STRICT"
@@ -471,19 +434,11 @@ class SQLiteBrokerInventory:
             _fail()
         with self._transaction() as connection:
             self._verify_all(connection)
-            receipt = connection.execute(
-                _SELECT_ACKNOWLEDGEMENTS + " WHERE proof_id = ?", (str(proof_id),)
-            ).fetchone()
-            if receipt is not None:
-                self._verified_acknowledgement(receipt)
-                return self._acknowledgement_identity(receipt) == (
-                    str(principal_id),
-                    str(attempt_id),
-                    str(unit_id),
-                    str(proof_id),
-                )
             row = self._select_unit(connection, "unit_id", str(unit_id))
             if row is None:
+                return True
+            unit = self._unit_from_row(row)
+            if unit.state is not ManagedUnitState.REMOVED:
                 return False
             proof = self._proof_from_row(row)
             if (
@@ -492,24 +447,6 @@ class SQLiteBrokerInventory:
                 or proof.proof_id != proof_id
             ):
                 return False
-            if (
-                self._scalar(connection, "SELECT COUNT(*) FROM acknowledgements")
-                >= self._max_records
-            ):
-                _fail(BrokerErrorCategory.INVENTORY_FULL)
-            unit = self._unit_from_row(row)
-            values = (
-                str(proof_id),
-                str(principal_id),
-                str(attempt_id),
-                str(unit_id),
-                unit.create_sequence,
-                _MAC_VERSION,
-            )
-            connection.execute(
-                _INSERT_ACKNOWLEDGEMENT,
-                (*values, self._mac("acknowledgement", values)),
-            )
             connection.execute("DELETE FROM units WHERE unit_id = ?", (str(unit_id),))
             self._refresh_manifest(connection)
             return True
@@ -558,7 +495,6 @@ class SQLiteBrokerInventory:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 connection.execute(_CREATE_PRINCIPALS)
-                connection.execute(_CREATE_ACKNOWLEDGEMENTS)
                 connection.execute(_CREATE_UNITS)
                 connection.execute(_CREATE_MANIFEST)
                 self._insert_empty_manifest(connection)
@@ -576,11 +512,10 @@ class SQLiteBrokerInventory:
             or connection.execute("PRAGMA user_version").fetchone()[0]
             != _SCHEMA_VERSION
             or self._table_names(connection)
-            != {"acknowledgements", "inventory_manifest", "principals", "units"}
+            != {"inventory_manifest", "principals", "units"}
             or self._schema_objects(connection)
             != {
                 ("table", "inventory_manifest"),
-                ("table", "acknowledgements"),
                 ("table", "principals"),
                 ("table", "units"),
             }
@@ -596,26 +531,20 @@ class SQLiteBrokerInventory:
             row[1]
             for row in connection.execute("PRAGMA table_info(inventory_manifest)")
         )
-        acknowledgement_columns = tuple(
-            row[1] for row in connection.execute("PRAGMA table_info(acknowledgements)")
-        )
         if (
             principal_columns != _PRINCIPAL_COLUMNS
             or unit_columns != _UNIT_COLUMNS
             or manifest_columns != _MANIFEST_COLUMNS
-            or acknowledgement_columns != _ACKNOWLEDGEMENT_COLUMNS
         ):
             _inventory_fail()
         schemas = dict(
             connection.execute(
                 "SELECT name, sql FROM sqlite_master "
                 "WHERE type = 'table' "
-                "AND name IN ("
-                "'acknowledgements', 'inventory_manifest', 'principals', 'units')"
+                "AND name IN ('inventory_manifest', 'principals', 'units')"
             ).fetchall()
         )
         if schemas != {
-            "acknowledgements": _CREATE_ACKNOWLEDGEMENTS,
             "inventory_manifest": _CREATE_MANIFEST,
             "principals": _CREATE_PRINCIPALS,
             "units": _CREATE_UNITS,
@@ -633,22 +562,13 @@ class SQLiteBrokerInventory:
             _SELECT_PRINCIPALS + " ORDER BY principal_id"
         ).fetchall()
         units = connection.execute(_SELECT_UNITS + " ORDER BY unit_id").fetchall()
-        acknowledgements = connection.execute(
-            _SELECT_ACKNOWLEDGEMENTS + " ORDER BY proof_id"
-        ).fetchall()
-        if (
-            len(principals) > self._max_records
-            or len(units) > self._max_records
-            or len(acknowledgements) > self._max_records
-        ):
+        if len(principals) > self._max_records or len(units) > self._max_records:
             _fail(BrokerErrorCategory.INVENTORY_FULL)
         for row in principals:
             self._verified_principal(row)
         for row in units:
             self._unit_from_row(row)
-        for row in acknowledgements:
-            self._verified_acknowledgement(row)
-        self._verify_manifest(connection, principals, units, acknowledgements)
+        self._verify_manifest(connection, principals, units)
 
     def _principal_high_water(
         self, connection: sqlite3.Connection, principal_id: str
@@ -793,40 +713,6 @@ class SQLiteBrokerInventory:
             (*values, self._mac("principal", values)),
         )
 
-    def _verified_acknowledgement(self, row: Sequence[Any]) -> None:
-        values = tuple(row[:-1])
-        if (
-            len(row) != len(_ACKNOWLEDGEMENT_COLUMNS)
-            or row[_ACKNOWLEDGEMENT_COLUMNS.index("mac_version")] != _MAC_VERSION
-            or type(row[-1]) is not bytes
-            or not hmac.compare_digest(row[-1], self._mac("acknowledgement", values))
-            or type(row[_ACKNOWLEDGEMENT_COLUMNS.index("create_sequence")]) is not int
-            or row[_ACKNOWLEDGEMENT_COLUMNS.index("create_sequence")] <= 0
-        ):
-            _inventory_fail()
-        try:
-            UUID(row[_ACKNOWLEDGEMENT_COLUMNS.index("proof_id")])
-            UUID(row[_ACKNOWLEDGEMENT_COLUMNS.index("principal_id")])
-            UUID(row[_ACKNOWLEDGEMENT_COLUMNS.index("attempt_id")])
-            UUID(row[_ACKNOWLEDGEMENT_COLUMNS.index("unit_id")])
-        except TypeError, ValueError:
-            _inventory_fail()
-
-    @staticmethod
-    def _acknowledgement_identity(
-        row: Sequence[Any],
-    ) -> tuple[str, str, str, str]:
-        principal_id = row[_ACKNOWLEDGEMENT_COLUMNS.index("principal_id")]
-        attempt_id = row[_ACKNOWLEDGEMENT_COLUMNS.index("attempt_id")]
-        unit_id = row[_ACKNOWLEDGEMENT_COLUMNS.index("unit_id")]
-        proof_id = row[_ACKNOWLEDGEMENT_COLUMNS.index("proof_id")]
-        if not all(
-            type(value) is str
-            for value in (principal_id, attempt_id, unit_id, proof_id)
-        ):
-            _inventory_fail()
-        return principal_id, attempt_id, unit_id, proof_id
-
     def _write_updated_unit(
         self,
         connection: sqlite3.Connection,
@@ -853,10 +739,8 @@ class SQLiteBrokerInventory:
             0,
             0,
             0,
-            0,
             self._aggregate_digest("principals", ()),
             self._aggregate_digest("units", ()),
-            self._aggregate_digest("acknowledgements", ()),
             _MAC_VERSION,
         )
         connection.execute(
@@ -873,25 +757,19 @@ class SQLiteBrokerInventory:
             _SELECT_PRINCIPALS + " ORDER BY principal_id"
         ).fetchall()
         units = connection.execute(_SELECT_UNITS + " ORDER BY unit_id").fetchall()
-        acknowledgements = connection.execute(
-            _SELECT_ACKNOWLEDGEMENTS + " ORDER BY proof_id"
-        ).fetchall()
         values = (
             1,
             current[0][_MANIFEST_COLUMNS.index("generation")] + 1,
             len(principals),
             len(units),
-            len(acknowledgements),
             self._aggregate_digest("principals", principals),
             self._aggregate_digest("units", units),
-            self._aggregate_digest("acknowledgements", acknowledgements),
             _MAC_VERSION,
         )
         cursor = connection.execute(
             "UPDATE inventory_manifest SET generation = ?, principal_count = ?, "
-            "unit_count = ?, acknowledgement_count = ?, principals_digest = ?, "
-            "units_digest = ?, acknowledgements_digest = ?, mac_version = ?, "
-            "mac = ? WHERE singleton_id = 1",
+            "unit_count = ?, principals_digest = ?, units_digest = ?, "
+            "mac_version = ?, mac = ? WHERE singleton_id = 1",
             (*values[1:], self._mac("manifest", values)),
         )
         if cursor.rowcount != 1:
@@ -902,7 +780,6 @@ class SQLiteBrokerInventory:
         connection: sqlite3.Connection,
         principals: Sequence[Sequence[Any]],
         units: Sequence[Sequence[Any]],
-        acknowledgements: Sequence[Sequence[Any]],
     ) -> None:
         rows = connection.execute(_SELECT_MANIFEST).fetchall()
         if len(rows) != 1:
@@ -912,14 +789,10 @@ class SQLiteBrokerInventory:
         if (
             row[_MANIFEST_COLUMNS.index("principal_count")] != len(principals)
             or row[_MANIFEST_COLUMNS.index("unit_count")] != len(units)
-            or row[_MANIFEST_COLUMNS.index("acknowledgement_count")]
-            != len(acknowledgements)
             or row[_MANIFEST_COLUMNS.index("principals_digest")]
             != self._aggregate_digest("principals", principals)
             or row[_MANIFEST_COLUMNS.index("units_digest")]
             != self._aggregate_digest("units", units)
-            or row[_MANIFEST_COLUMNS.index("acknowledgements_digest")]
-            != self._aggregate_digest("acknowledgements", acknowledgements)
         ):
             _inventory_fail()
 
@@ -930,11 +803,11 @@ class SQLiteBrokerInventory:
             or row[0] != 1
             or type(row[1]) is not int
             or row[1] < 0
-            or any(type(value) is not int or value < 0 for value in row[2:5])
-            or not all(type(value) is str for value in row[5:8])
-            or row[8] != _MAC_VERSION
-            or type(row[9]) is not bytes
-            or not hmac.compare_digest(row[9], self._mac("manifest", values))
+            or any(type(value) is not int or value < 0 for value in row[2:4])
+            or not all(type(value) is str for value in row[4:6])
+            or row[6] != _MAC_VERSION
+            or type(row[7]) is not bytes
+            or not hmac.compare_digest(row[7], self._mac("manifest", values))
         ):
             _inventory_fail()
 

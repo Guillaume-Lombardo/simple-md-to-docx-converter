@@ -153,7 +153,6 @@ def test_initialization_uses_wal_full_sync_closed_schema_and_never_stores_key(
             )
         }
         assert tables == {
-            "acknowledgements",
             "inventory_manifest",
             "principals",
             "units",
@@ -449,7 +448,7 @@ def test_acknowledgement_requires_exact_four_way_binding_and_retains_high_water(
     assert inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
     reopened = _inventory(path)
     assert reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
-    assert not reopened.acknowledge(
+    assert reopened.acknowledge(
         PRINCIPAL_ID,
         ATTEMPT_ID,
         UNIT_ID,
@@ -460,6 +459,42 @@ def test_acknowledgement_requires_exact_four_way_binding_and_retains_high_water(
     with pytest.raises(BrokerError) as captured:
         inventory.reserve(_reserved(), _replay())
     _assert_category(captured, BrokerErrorCategory.REPLAY_REJECTED)
+
+
+def test_missing_arbitrary_acknowledgement_is_a_state_free_success(
+    tmp_path: Path,
+) -> None:
+    inventory = _inventory(tmp_path / "inventory.sqlite3")
+    existing = inventory.reserve(_reserved(), _replay())
+
+    assert inventory.acknowledge(
+        OTHER_PRINCIPAL_ID,
+        SECOND_ATTEMPT_ID,
+        SECOND_UNIT_ID,
+        SECOND_PROOF_ID,
+    )
+    assert inventory.get(UNIT_ID) == existing
+    assert inventory.create_sequence_high_watermark(PRINCIPAL_ID) == 1
+
+
+def test_old_acknowledgement_cannot_delete_reused_active_unit_id(
+    tmp_path: Path,
+) -> None:
+    inventory = _inventory(tmp_path / "inventory.sqlite3")
+    _advance_to_empty(inventory)
+    inventory.mark_removed(
+        UNIT_ID, expected_revision=4, removal_evidence=REMOVAL, proof=_proof()
+    )
+    assert inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
+    replacement = _reserved(
+        attempt_id=SECOND_ATTEMPT_ID,
+        unit_id=UNIT_ID,
+        sequence=2,
+    )
+    inventory.reserve(replacement, _replay(2))
+
+    assert not inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
+    assert inventory.get(UNIT_ID) == replacement
 
 
 def test_all_acknowledgements_survive_interleaving_restart_and_later_activity(
@@ -503,7 +538,7 @@ def test_all_acknowledgements_survive_interleaving_restart_and_later_activity(
     assert reopened.acknowledge(
         PRINCIPAL_ID, SECOND_ATTEMPT_ID, SECOND_UNIT_ID, SECOND_PROOF_ID
     )
-    assert not reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, SECOND_UNIT_ID, PROOF_ID)
+    assert reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, SECOND_UNIT_ID, PROOF_ID)
     later = _reserved(
         attempt_id=UUID("20000000-0000-0000-0000-000000000003"),
         unit_id=UUID("30000000-0000-0000-0000-000000000003"),
@@ -512,47 +547,6 @@ def test_all_acknowledgements_survive_interleaving_restart_and_later_activity(
     reopened.reserve(later, _replay(3))
     assert reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
     assert reopened.create_sequence_high_watermark(PRINCIPAL_ID) == 3
-
-
-def test_full_acknowledgement_ledger_retains_tombstone_atomically(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "inventory.sqlite3"
-    inventory = _inventory(path, capacity=1)
-    _advance_to_empty(inventory)
-    inventory.mark_removed(
-        UNIT_ID, expected_revision=4, removal_evidence=REMOVAL, proof=_proof()
-    )
-    assert inventory.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
-
-    second = _reserved(
-        attempt_id=SECOND_ATTEMPT_ID,
-        unit_id=SECOND_UNIT_ID,
-        sequence=2,
-    )
-    second_proof = _proof(
-        proof_id=SECOND_PROOF_ID,
-        attempt_id=SECOND_ATTEMPT_ID,
-        unit_id=SECOND_UNIT_ID,
-    )
-    _advance_reserved_to_empty(inventory, second)
-    removed = inventory.mark_removed(
-        SECOND_UNIT_ID,
-        expected_revision=4,
-        removal_evidence=REMOVAL,
-        proof=second_proof,
-    )
-    with pytest.raises(BrokerError) as captured:
-        inventory.acknowledge(
-            PRINCIPAL_ID, SECOND_ATTEMPT_ID, SECOND_UNIT_ID, SECOND_PROOF_ID
-        )
-    _assert_category(captured, BrokerErrorCategory.INVENTORY_FULL)
-
-    reopened = _inventory(path, capacity=1)
-    assert reopened.get(SECOND_UNIT_ID) == removed
-    assert reopened.get_proof(SECOND_UNIT_ID) == second_proof
-    assert reopened.create_sequence_high_watermark(PRINCIPAL_ID) == 2
-    assert reopened.acknowledge(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
 
 
 def test_forged_unit_mac_is_detected_even_when_getting_an_unrelated_unit(
@@ -619,20 +613,6 @@ def test_manifest_detects_deleted_unit_principal_and_removed_tombstone(
     _raw(removed_path, "DELETE FROM units")
     with pytest.raises(BrokerError) as captured:
         _inventory(removed_path)
-    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
-
-    acknowledgement_path = tmp_path / "deleted-acknowledgement.sqlite3"
-    acknowledgement_inventory = _inventory(acknowledgement_path)
-    _advance_to_empty(acknowledgement_inventory)
-    acknowledgement_inventory.mark_removed(
-        UNIT_ID, expected_revision=4, removal_evidence=REMOVAL, proof=_proof()
-    )
-    assert acknowledgement_inventory.acknowledge(
-        PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID
-    )
-    _raw(acknowledgement_path, "DELETE FROM acknowledgements")
-    with pytest.raises(BrokerError) as captured:
-        _inventory(acknowledgement_path)
     _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
 
 
