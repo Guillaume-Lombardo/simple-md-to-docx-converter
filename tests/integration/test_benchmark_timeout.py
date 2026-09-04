@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+RUNNER = "scripts/javascript/run_bounded_benchmark_command.py"
+
 
 @pytest.mark.integration
 def test_benchmark_timeout_kills_descendant_process_group(tmp_path: Path) -> None:
@@ -22,7 +24,7 @@ def test_benchmark_timeout_kills_descendant_process_group(tmp_path: Path) -> Non
 
     completed = subprocess.run(
         [
-            "scripts/javascript/run-bounded-benchmark-command.sh",
+            RUNNER,
             "1",
             "1",
             str(log),
@@ -72,7 +74,7 @@ def test_benchmark_boundary_preserves_native_command_status(
 
     completed = subprocess.run(
         [
-            "scripts/javascript/run-bounded-benchmark-command.sh",
+            RUNNER,
             "5",
             "1",
             str(log),
@@ -95,3 +97,47 @@ def test_benchmark_boundary_preserves_native_command_status(
         f"status={expected_status}"
     ) in evidence
     assert "boundary_timeout" not in evidence
+
+
+@pytest.mark.integration
+def test_nested_benchmark_boundaries_finish_inner_group_cleanup(tmp_path: Path) -> None:
+    for attempt in range(3):
+        outer_log = tmp_path / f"outer-{attempt}.log"
+        inner_log = tmp_path / f"inner-{attempt}.log"
+        descendant_pid_file = tmp_path / f"descendant-{attempt}.pid"
+        program = (
+            "trap 'exit 0' TERM; "
+            f'sh -c \'trap "" TERM; echo $$ > {descendant_pid_file!s}; '
+            "while :; do sleep 30; done' & "
+            "wait"
+        )
+
+        completed = subprocess.run(
+            [
+                RUNNER,
+                "1",
+                "5",
+                str(outer_log),
+                f"test/outer/{attempt}",
+                "--",
+                RUNNER,
+                "30",
+                "1",
+                str(inner_log),
+                f"test/inner/{attempt}",
+                "--",
+                "sh",
+                "-c",
+                program,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+
+        assert completed.returncode == 124
+        assert "boundary_timeout" in outer_log.read_text(encoding="utf-8")
+        descendant_pid = int(descendant_pid_file.read_text(encoding="utf-8"))
+        with pytest.raises(ProcessLookupError):
+            os.kill(descendant_pid, 0)

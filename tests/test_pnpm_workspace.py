@@ -217,6 +217,9 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
     benchmark = Path("scripts/javascript/benchmark-package-managers.sh").read_text(
         encoding="utf-8"
     )
+    supervisor = Path("scripts/javascript/run_bounded_benchmark_command.py").read_text(
+        encoding="utf-8"
+    )
     for contract in (
         "for sample in 1 2 3",
         "cold-install",
@@ -227,7 +230,7 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
         "runner_image=",
         "node --version",
         "raw.log",
-        "run-bounded-benchmark-command.sh",
+        "run_bounded_benchmark_command.py",
         "total_timeout_seconds=1500",
         "termination_grace_seconds=10",
         "podman image inspect",
@@ -247,3 +250,12 @@ def test_hosted_benchmark_collects_comparable_raw_evidence() -> None:
     ):
         assert label in benchmark
     assert benchmark.count('bounded_workload "$label/') == 2
+    for contract in (
+        "PR_SET_CHILD_SUBREAPER",
+        "start_new_session=True",
+        "os.killpg",
+        "os.waitpid(-1, os.WNOHANG)",
+        "deadline_reached",
+        "boundary_cleanup_failed",
+    ):
+        assert contract in supervisor

@@ -397,7 +397,7 @@ jobs:
           NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
           T67_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
         run: >-
-          scripts/javascript/run-bounded-benchmark-command.sh
+          scripts/javascript/run_bounded_benchmark_command.py
           300 10 /dev/stderr t67/rollback --
           bash scripts/javascript/rehearse-npm-rollback.sh
           "$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"
@@ -440,8 +440,8 @@ jobs:
           NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
           PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
         run: >-
-          scripts/javascript/run-bounded-benchmark-command.sh
-          1620 10 /dev/stderr t67/benchmark --
+          scripts/javascript/run_bounded_benchmark_command.py
+          1620 20 /dev/stderr t67/benchmark --
           bash scripts/javascript/benchmark-package-managers.sh
           "$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
       - name: Retain the T67 package-manager benchmark

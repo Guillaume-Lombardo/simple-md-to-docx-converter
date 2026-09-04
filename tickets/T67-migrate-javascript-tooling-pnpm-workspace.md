@@ -76,6 +76,9 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   and a shared 25-minute benchmark budget; the workflow adds a process-group-verified 27-minute
   outer fail-safe around the complete collector and a 5-minute bound around the preceding rollback
   rehearsal. Native command exits, including 124 and 137, remain distinct from an observed deadline.
+  The outer benchmark supervisor grants a 20-second termination window, strictly exceeding each
+  inner command's 10-second grace plus its bounded two-second group-absence verification window,
+  so nested cleanup completes before the outer supervisor may send KILL.
   A fresh exact-head hosted matrix remains required before integration.
 
 ## Synchronization

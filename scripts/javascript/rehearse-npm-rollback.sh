@@ -51,7 +51,7 @@ allowed_path() {
     scripts/ci/validate_ci.py|scripts/container/publish-release-pair.sh|\
     scripts/container/run-ci.sh|scripts/e2e/run.sh|scripts/javascript/bootstrap-pnpm.sh|\
     scripts/javascript/benchmark-package-managers.sh|\
-    scripts/javascript/run-bounded-benchmark-command.sh|\
+    scripts/javascript/run_bounded_benchmark_command.py|\
     scripts/javascript/rehearse-npm-rollback.sh|\
     scripts/javascript/select-t67-rollback-commits.sh|\
     scripts/javascript/validate-workspace.mjs|\
