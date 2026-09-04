@@ -241,6 +241,51 @@ def test_server_reconciles_before_exposing_socket(
     dispatcher.start.assert_called_once_with()
 
 
+def test_server_start_thread_failure_releases_socket_and_lifecycle_lock(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path = _private_parent(tmp_path) / "broker.sock"
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    thread_type = mocker.patch("markweave.broker.unix_transport.Thread")
+    thread_type.return_value.start.side_effect = RuntimeError("thread unavailable")
+    server = UnixBrokerServer(
+        path,
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=dispatcher,
+        limits=_limits(),
+    )
+
+    with pytest.raises(RuntimeError, match="thread unavailable"):
+        server.start()
+
+    assert not path.exists()
+    assert server._lock_fd is None
+
+
+def test_accept_failure_marks_server_fatal(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path = _private_parent(tmp_path) / "broker.sock"
+    listener = mocker.Mock(spec=socket.socket)
+    failure = OSError("accept unavailable")
+    listener.accept.side_effect = failure
+    server = UnixBrokerServer(
+        path,
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+    server._listener = listener
+
+    server._accept_loop()
+
+    assert server._fatal_error is failure
+    assert server._stopping.is_set()
+    listener.close.assert_called()
+
+
 def assert_bound_not_listening(path: Path) -> None:
     assert stat.S_ISSOCK(path.lstat().st_mode)
     with (

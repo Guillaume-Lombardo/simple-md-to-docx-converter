@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import fcntl
 import math
 import os
 import socket
@@ -46,6 +47,7 @@ _PEER_CREDENTIALS: Final = struct.Struct("3i")
 _PARENT_MODE: Final = 0o700
 _SOCKET_MODE: Final = 0o600
 _MAX_SOCKET_PATH_BYTES: Final = 107
+_LOCK_SUFFIX: Final = ".lock"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,21 +138,34 @@ def _remaining(deadline: float) -> float:
     return remaining
 
 
-def _receive_exact(connection: socket.socket, size: int, deadline: float) -> bytes:
+def _receive_exact(
+    connection: socket.socket,
+    size: int,
+    deadline: float,
+    *,
+    eof_category: BrokerErrorCategory = BrokerErrorCategory.PROTOCOL_ERROR,
+) -> bytes:
     received = bytearray()
     while len(received) < size:
         connection.settimeout(_remaining(deadline))
         chunk = connection.recv(size - len(received))
         if not chunk:
-            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            raise BrokerError(eof_category)
         received.extend(chunk)
     return bytes(received)
 
 
-def _receive_frame(connection: socket.socket, deadline: float) -> bytes:
-    prefix = _receive_exact(connection, LENGTH_PREFIX_BYTES, deadline)
+def _receive_frame(
+    connection: socket.socket,
+    deadline: float,
+    *,
+    eof_category: BrokerErrorCategory = BrokerErrorCategory.PROTOCOL_ERROR,
+) -> bytes:
+    prefix = _receive_exact(
+        connection, LENGTH_PREFIX_BYTES, deadline, eof_category=eof_category
+    )
     length = decode_length_prefix(prefix)
-    payload = _receive_exact(connection, length, deadline)
+    payload = _receive_exact(connection, length, deadline, eof_category=eof_category)
     connection.settimeout(_remaining(deadline))
     if connection.recv(1) != b"":
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -196,6 +211,7 @@ class UnixBrokerServer:
         self._limits = limits
         self._listener: socket.socket | None = None
         self._socket_identity: tuple[int, int] | None = None
+        self._lock_fd: int | None = None
         self._stopping = Event()
         self._handlers = BoundedSemaphore(limits.max_handlers)
         self._threads: set[Thread] = set()
@@ -209,10 +225,11 @@ class UnixBrokerServer:
 
         if self._listener is not None:
             raise RuntimeError("Broker Unix server is already running")
-        self._remove_stale_socket()
+        self._acquire_lifecycle_lock()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         identity: tuple[int, int] | None = None
         try:
+            self._remove_stale_socket()
             listener.bind(str(self._path))
             os.chmod(self._path, _SOCKET_MODE)
             identity = self._socket_stat()
@@ -222,13 +239,23 @@ class UnixBrokerServer:
         except BaseException:
             listener.close()
             self._remove_path_if_identity(identity)
+            self._release_lifecycle_lock()
             raise
         self._stopping.clear()
         self._listener = listener
         self._socket_identity = identity
         thread = Thread(target=self._accept_loop, name="broker-unix-accept")
         self._accept_thread = thread
-        thread.start()
+        try:
+            thread.start()
+        except BaseException:
+            listener.close()
+            self._remove_path_if_identity(identity)
+            self._listener = None
+            self._accept_thread = None
+            self._socket_identity = None
+            self._release_lifecycle_lock()
+            raise
 
     def stop(self) -> None:
         """Stop accepting, drain bounded handlers, and unlink only our inode."""
@@ -258,15 +285,19 @@ class UnixBrokerServer:
                 break
             threads[0].join(remaining)
         with self._threads_lock:
-            undrained = bool(self._threads)
+            undrained = bool(self._threads) or bool(
+                accept_thread is not None and accept_thread.is_alive()
+            )
+        if undrained:
+            raise RuntimeError("Broker Unix handlers did not drain")
         self._remove_path_if_identity(self._socket_identity)
         self._listener = None
         self._accept_thread = None
         self._socket_identity = None
-        fatal_error = self._fatal_error
-        self._fatal_error = None
-        if undrained:
-            raise RuntimeError("Broker Unix handlers did not drain")
+        self._release_lifecycle_lock()
+        with self._threads_lock:
+            fatal_error = self._fatal_error
+            self._fatal_error = None
         if fatal_error is not None:
             raise RuntimeError("Broker Unix server failed") from fatal_error
 
@@ -286,10 +317,11 @@ class UnixBrokerServer:
                 connection, _ = listener.accept()
             except TimeoutError:
                 continue
-            except OSError:
+            except OSError as error:
                 if self._stopping.is_set():
                     return
-                continue
+                self._record_fatal(error)
+                return
             if not self._handlers.acquire(blocking=False):
                 connection.close()
                 continue
@@ -301,18 +333,23 @@ class UnixBrokerServer:
             with self._threads_lock:
                 self._threads.add(thread)
                 self._connections.add(connection)
-            thread.start()
+            try:
+                thread.start()
+            except BaseException as error:
+                with self._threads_lock:
+                    self._threads.discard(thread)
+                    self._connections.discard(connection)
+                connection.close()
+                self._handlers.release()
+                self._record_fatal(error)
+                return
 
     def _handle_and_release(self, connection: socket.socket) -> None:
         current = current_thread()
         try:
             self._handle(connection)
         except BaseException as error:
-            self._fatal_error = error
-            self._stopping.set()
-            listener = self._listener
-            if listener is not None:
-                listener.close()
+            self._record_fatal(error)
         finally:
             connection.close()
             self._handlers.release()
@@ -329,12 +366,44 @@ class UnixBrokerServer:
             request = decode_request(_receive_frame(connection, deadline))
         except BrokerError, OSError, TimeoutError:
             return
-        response = self._dispatcher.dispatch(self._principal, request)
+        completed = Event()
+        watchdog = Thread(
+            target=self._watch_dispatch,
+            args=(completed, deadline),
+            name="broker-unix-watchdog",
+        )
+        watchdog.start()
+        try:
+            response = self._dispatcher.dispatch(self._principal, request)
+        finally:
+            completed.set()
+            watchdog.join()
+        with self._threads_lock:
+            if self._fatal_error is not None:
+                return
         frame = encode_response(response)
         try:
             _send_all(connection, frame, deadline)
         except OSError, TimeoutError:
             return
+
+    def _watch_dispatch(self, completed: Event, deadline: float) -> None:
+        try:
+            remaining = _remaining(deadline)
+        except TimeoutError as error:
+            self._record_fatal(error)
+            return
+        if not completed.wait(remaining):
+            self._record_fatal(TimeoutError("Broker dispatch deadline expired"))
+
+    def _record_fatal(self, error: BaseException) -> None:
+        with self._threads_lock:
+            if self._fatal_error is None:
+                self._fatal_error = error
+        self._stopping.set()
+        listener = self._listener
+        if listener is not None:
+            listener.close()
 
     def _socket_stat(self) -> tuple[int, int]:
         socket_stat = self._path.lstat()
@@ -385,6 +454,42 @@ class UnixBrokerServer:
             return
         self._path.unlink()
 
+    def _acquire_lifecycle_lock(self) -> None:
+        lock_path = Path(f"{self._path}{_LOCK_SUFFIX}")
+        flags = os.O_CLOEXEC | os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR
+        try:
+            lock_fd = os.open(lock_path, flags, _SOCKET_MODE)
+        except OSError as error:
+            raise RuntimeError("Broker Unix lifecycle lock is invalid") from error
+        try:
+            lock_stat = os.fstat(lock_fd)
+            path_stat = lock_path.lstat()
+            if (
+                not stat.S_ISREG(lock_stat.st_mode)
+                or lock_stat.st_uid != os.geteuid()
+                or stat.S_IMODE(lock_stat.st_mode) != _SOCKET_MODE
+                or lock_stat.st_nlink != 1
+                or (lock_stat.st_dev, lock_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise RuntimeError("Broker Unix lifecycle lock is invalid")
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            os.close(lock_fd)
+            raise RuntimeError("Broker Unix server is already active") from error
+        except BaseException:
+            os.close(lock_fd)
+            raise
+        self._lock_fd = lock_fd
+
+    def _release_lifecycle_lock(self) -> None:
+        lock_fd = self._lock_fd
+        if lock_fd is None:
+            return
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+        self._lock_fd = None
+
 
 class UnixBrokerClient:
     """Send one bounded request after authenticating the Unix server peer."""
@@ -428,13 +533,17 @@ class UnixBrokerClient:
                 raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
             _send_all(connection, encode_request(request), deadline)
             connection.shutdown(socket.SHUT_WR)
-            response = decode_response(_receive_frame(connection, deadline))
+            response = decode_response(
+                _receive_frame(
+                    connection,
+                    deadline,
+                    eof_category=BrokerErrorCategory.TRANSPORT_FAILURE,
+                )
+            )
             _validate_response_binding(request, response, self._expected_principal)
             return response
-        except BrokerError as error:
-            if error.category is BrokerErrorCategory.AUTHENTICATION_FAILED:
-                raise
-            raise _transport_failure(error) from error
+        except BrokerError:
+            raise
         except (OSError, TimeoutError) as error:
             raise _transport_failure(error) from error
         finally:
