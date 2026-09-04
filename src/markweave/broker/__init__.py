@@ -20,6 +20,7 @@ from markweave.broker.podman_runtime import (
     PodmanIsolationRuntime,
     PodmanRuntimeError,
     PodmanRuntimeUnit,
+    SystemdCgroupRemover,
 )
 from markweave.broker.unix_transport import (
     UnixBrokerClient,
@@ -43,6 +44,7 @@ __all__ = [
     "ReplayPosition",
     "RuntimeIncarnation",
     "RuntimeLimits",
+    "SystemdCgroupRemover",
     "TerminationProof",
     "UnixBrokerClient",
     "UnixBrokerServer",

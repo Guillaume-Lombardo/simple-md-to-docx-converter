@@ -25,11 +25,13 @@ from markweave.broker.podman_runtime import (
     PodmanCommandLimits,
     PodmanIsolationRuntime,
     PodmanRuntimeError,
+    SystemdCgroupRemover,
 )
 from markweave.broker.service import IsolationBrokerService
 
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
+SYSTEMCTL = Path("/usr/bin/systemctl")
 TEST_IMAGE = "localhost/markweave-t70-runtime-integration:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("33333333-3333-4333-8333-333333333333"))
@@ -44,9 +46,13 @@ UNIT_IDS = (
 def _cgroup_path(unit_id: UUID) -> Path:
     return Path(
         f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
-        f"user@{os.geteuid()}.service/markweave.slice/"
-        f"markweave-reverse-{unit_id.hex}.slice"
+        f"user@{os.geteuid()}.service/markweavet70.slice/"
+        f"markweavet70-{unit_id.hex}.slice"
     )
+
+
+def _cgroup_parent_path() -> Path:
+    return _cgroup_path(UNIT_IDS[0]).parent
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -62,8 +68,25 @@ def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
     )
 
 
+def _systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("CONTAINER_HOST", None)
+    return subprocess.run(
+        (str(SYSTEMCTL), *arguments),
+        check=check,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=environment,
+    )
+
+
 @pytest.fixture(scope="module")
 def controlled_image() -> Iterator[tuple[str, str]]:
+    with suppress(FileNotFoundError):
+        _systemctl("--user", "stop", "markweavet70.slice", check=False)
+        assert not _cgroup_parent_path().exists()
+    assert not _cgroup_parent_path().exists()
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
     if built_base:
@@ -102,6 +125,7 @@ def controlled_image() -> Iterator[tuple[str, str]]:
             )
             with suppress(FileNotFoundError):
                 _cgroup_path(unit_id).rmdir()
+        _cgroup_parent_path().rmdir()
         _podman("image", "rm", "--force", TEST_IMAGE)
         if built_base:
             _podman("image", "rm", "--force", base)
@@ -126,6 +150,9 @@ def _runtime(
         if key in os.environ
     }
     environment.update({"CONTAINERS_CONF": "/dev/null", "PATH": "/usr/bin:/bin"})
+    systemd_environment = {
+        key: value for key, value in environment.items() if key != "CONTAINERS_CONF"
+    }
     return PodmanIsolationRuntime(
         image_repository=repository,
         run_as_uid=1001,
@@ -138,6 +165,13 @@ def _runtime(
             f"user@{os.geteuid()}.service"
         ),
         hooks_directory=hooks_directory,
+        cgroup_remove=SystemdCgroupRemover(
+            BoundedCommandRunner(
+                SYSTEMCTL,
+                PodmanCommandLimits(20),
+                environment=systemd_environment,
+            )
+        ),
     )
 
 
@@ -178,12 +212,13 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
     )
     attempt_id = UUID("11111111-1111-4111-8111-111111111111")
     created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    runtime_unit = runtime.discover(limit=1)[0]
 
     inspected = json.loads(
         _podman(
             "container",
             "inspect",
-            runtime.discover(limit=1)[0].container_id,
+            runtime_unit.container_id,
             "--format",
             "json",
         ).stdout
@@ -207,6 +242,20 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
         == "1001:0"
     )
     assert len(_podman("top", inspected["Id"], "hpid").stdout.splitlines()) == 3
+    process_cgroup = Path(f"/proc/{inspected['State']['Pid']}/cgroup").read_text(
+        encoding="ascii"
+    )
+    assert process_cgroup == f"0::{inspected['State']['CgroupPath']}\n"
+    actual_scope = Path("/sys/fs/cgroup") / inspected["State"]["CgroupPath"].lstrip("/")
+    assert actual_scope.parent == _cgroup_path(created.unit_id)
+    assert (_cgroup_path(created.unit_id) / "cgroup.events").read_text(
+        encoding="ascii"
+    ) == "populated 1\nfrozen 0\n"
+
+    runtime.hard_terminate(runtime_unit)
+    assert (_cgroup_path(created.unit_id) / "cgroup.events").read_text(
+        encoding="ascii"
+    ) == "populated 0\nfrozen 0\n"
 
     proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
 

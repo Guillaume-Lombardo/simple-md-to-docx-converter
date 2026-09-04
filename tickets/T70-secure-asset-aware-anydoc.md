@@ -308,6 +308,23 @@ for reverse conversion.
   PostgreSQL setup errors and three S3 failures are the documented unavailable local services, and
   the unrelated release process-reaping timing test remains the only other failure. Ruff and `ty`
   pass. No Kubernetes acceptance is claimed.
+* 2026-09-05: Corrected the rootless systemd cgroup binding after exact-head review found that
+  dash-expanded slice hierarchy could leave the broker reading an empty sibling cgroup. The
+  backend now requires Podman's local rootless systemd cgroup manager and the exact delegated
+  cgroup-v2 root, creates and verifies a dedicated deterministic parent and unit slice, and binds
+  the realized Podman `CgroupPath` to both the live init process's `/proc` membership and
+  `populated=1` in the exact unit slice before accepting a running container. Empty evidence still
+  requires that same slice to reach `populated=0`, and cleanup stops the exact bounded systemd unit
+  and positively verifies its disappearance. A real rootless test begins without the parent,
+  independently follows Podman's inspected process cgroup, observes the populated transition
+  while a signal-resistant descendant is alive and after whole-container termination, and leaves
+  no dedicated slice behind. Wrong managers, roots, runtime paths, process memberships, and
+  unconfirmed systemd cleanup fail closed. The 66 backend unit tests, complete 427-test broker
+  unit selection, and four real Podman integrations pass; Ruff and `ty` pass. The canonical
+  non-engine run completed 3,121 passing tests at 94.84% total and 90.85% application branch
+  coverage; its 30 PostgreSQL setup errors, three unavailable-S3 failures, and the unrelated known
+  release reaping timing failure remain documented local-environment limitations. No Kubernetes
+  acceptance is claimed.
 
 ## Synchronization
 

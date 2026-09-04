@@ -27,6 +27,7 @@ from markweave.broker.podman_runtime import (
     PodmanIsolationRuntime,
     PodmanRuntimeError,
     PodmanRuntimeUnit,
+    SystemdCgroupRemover,
 )
 from tests.unit.broker.runtime_conformance import assert_lifecycle_conformance
 
@@ -52,6 +53,11 @@ CAPABILITIES = (
     "CAP_SYS_CHROOT",
 )
 INCARNATION_NAMESPACE = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
+CGROUP_ROOT = Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
+CGROUP_RUNTIME_PATH = (
+    "/user.slice/user-1000.slice/user@1000.service/markweavet70.slice/"
+    f"markweavet70-{UNIT_ID.hex}.slice/libpod-{CONTAINER_ID}.scope"
+)
 
 
 @pytest.fixture
@@ -106,7 +112,9 @@ class PodmanDouble:
                 json.dumps(
                     {
                         "host": {
+                            "cgroupManager": "systemd",
                             "cgroupVersion": "v2",
+                            "serviceIsRemote": False,
                             "security": {
                                 "capabilities": ",".join(CAPABILITIES),
                                 "rootless": True,
@@ -151,6 +159,7 @@ class PodmanDouble:
                 key, label = value.split("=", 1)
                 labels[key] = label
         state = {
+            "CgroupPath": ("" if self.status == "created" else CGROUP_RUNTIME_PATH),
             "ExitCode": 137,
             "FinishedAt": "2026-09-04T20:00:00.123456789Z",
             "OOMKilled": False,
@@ -177,7 +186,7 @@ class PodmanDouble:
                 "Binds": [],
                 "CapAdd": [],
                 "CapDrop": list(CAPABILITIES),
-                "CgroupParent": f"{NAME}.slice",
+                "CgroupParent": f"markweavet70-{UNIT_ID.hex}.slice",
                 "Cgroups": "default",
                 "CpuPeriod": 100_000,
                 "CpuQuota": 100_001,
@@ -240,12 +249,18 @@ def runtime(command: PodmanDouble) -> PodmanIsolationRuntime:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=command,
-        cgroup_root=Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
-        hooks_directory_validate=lambda path: None,
-        cgroup_create=lambda path: None,
-        cgroup_read=lambda path: b"populated 0\nfrozen 0\n",
         cgroup_remove=lambda path: None,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: (
+            b"populated 1\nfrozen 0\n"
+            if command.status == "running"
+            else b"populated 0\nfrozen 0\n"
+        ),
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
     )
 
 
@@ -281,7 +296,7 @@ def test_create_uses_exact_broker_owned_policy_argv(
         "1001:0",
         "--cgroups=enabled",
         "--cgroup-parent",
-        f"{NAME}.slice",
+        f"markweavet70-{UNIT_ID.hex}.slice",
         "--ipc=none",
         "--pid=private",
     )
@@ -349,6 +364,7 @@ def test_successful_create_requires_exact_returned_container_identity(
         ("Config.Env", [f"HOSTNAME={NAME}", "INJECTED=1"]),
         ("HostConfig.Binds", ["/srv/injected:/work"]),
         ("HostConfig.SecurityOpt", []),
+        ("State.CgroupPath", "/wrong/cgroup.scope"),
     ],
 )
 def test_create_rejects_substituted_runtime_specification(
@@ -427,11 +443,13 @@ def test_kill_acknowledgement_without_stopped_state_is_insufficient(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=ignored_kill,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
-        hooks_directory_validate=lambda path: None,
-        cgroup_read=lambda path: b"populated 0\nfrozen 0\n",
         cgroup_remove=lambda path: None,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
     )
     with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
         backend.hard_terminate(runtime_unit)
@@ -531,9 +549,11 @@ def test_empty_proof_requires_top_level_exec_ids_and_positive_cgroup_evidence(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=command,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
         hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
         cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
     )
     with pytest.raises(PodmanRuntimeError, match="cgroup"):
@@ -569,9 +589,13 @@ def test_discovery_is_bounded_sorted_and_rejects_duplicates(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=duplicated,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
         hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
     )
     with pytest.raises(PodmanRuntimeError, match="exceeds"):
         duplicate_backend.discover(limit=1)
@@ -589,9 +613,11 @@ def test_discovery_rejects_malformed_cli_json(output: bytes) -> None:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=malformed,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
         hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError):
         backend.discover(limit=1)
@@ -601,6 +627,18 @@ def test_discovery_rejects_malformed_cli_json(output: bytes) -> None:
 @pytest.mark.parametrize(
     "information",
     [
+        {
+            "host": {
+                "cgroupManager": "cgroupfs",
+                "cgroupVersion": "v2",
+                "serviceIsRemote": False,
+                "security": {
+                    "capabilities": ",".join(CAPABILITIES),
+                    "rootless": True,
+                    "seccompEnabled": True,
+                },
+            }
+        },
         {
             "host": {
                 "cgroupVersion": "v1",
@@ -641,9 +679,11 @@ def test_runtime_rejects_non_rootless_or_non_durable_environment(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=invalid,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
         hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError, match="environment"):
         backend.discover(limit=1)
@@ -759,6 +799,64 @@ def test_hooks_directory_must_be_empty_owner_only_and_not_a_symlink(
 
 
 @pytest.mark.unit
+def test_cgroup_root_and_live_process_binding_fail_closed(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    with pytest.raises(PodmanRuntimeError, match="root"):
+        podman_runtime._validate_cgroup_root(Path("/sys/fs/cgroup"))
+
+    command = PodmanDouble()
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service"),
+        hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: b"0::/substituted.scope\n",
+        cgroup_create=lambda path: None,
+    )
+    with pytest.raises(PodmanRuntimeError, match="binding"):
+        backend.create(unit, policy)
+
+
+@pytest.mark.unit
+def test_systemd_cgroup_remover_requires_exact_identity_and_disappearance(
+    tmp_path: Path,
+) -> None:
+    unit_name = f"markweavet70-{UNIT_ID.hex}.slice"
+    path = tmp_path / unit_name
+    path.mkdir()
+    calls: list[tuple[Sequence[str], int | None]] = []
+
+    def remove(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        del accepted_exit_codes
+        calls.append((arguments, max_output_bytes))
+        path.rmdir()
+        return 0, b""
+
+    remover = SystemdCgroupRemover(remove)
+    remover(path)
+    assert calls == [(("--user", "stop", unit_name), 0)]
+
+    with pytest.raises(PodmanRuntimeError, match="identity"):
+        remover(tmp_path / "markweavet70.slice")
+
+    path.mkdir()
+    retained = SystemdCgroupRemover(lambda *args, **kwargs: (0, b""))
+    with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
+        retained(path)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -775,6 +873,7 @@ def test_runtime_rejects_unsafe_configuration(kwargs: dict[str, object]) -> None
         "command": PodmanDouble(),
         "cgroup_root": Path("/sys/fs/cgroup"),
         "hooks_directory": HOOKS,
+        "cgroup_remove": lambda path: None,
     }
     values.update(kwargs)
     with pytest.raises(ValueError):
@@ -888,9 +987,11 @@ def test_discovery_rejects_malformed_summary(summary: object) -> None:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=malformed,
-        cgroup_root=Path("/sys/fs/cgroup"),
+        cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
+        cgroup_remove=lambda path: None,
         hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError):
         backend.discover(limit=1)

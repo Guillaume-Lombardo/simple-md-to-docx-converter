@@ -32,6 +32,7 @@ from markweave.broker.ports import RuntimeUnit
 
 _INCARNATION_NAMESPACE: Final = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
 _NAME_PREFIX: Final = "markweave-reverse-"
+_CGROUP_SLICE: Final = "markweavet70.slice"
 _LABEL_PREFIX: Final = "io.markweave.reverse-broker."
 _MANAGED_LABEL: Final = f"{_LABEL_PREFIX}managed"
 _UNIT_LABEL: Final = f"{_LABEL_PREFIX}unit-id"
@@ -269,6 +270,31 @@ class BoundedCommandRunner:
 type Command = Callable[..., tuple[int, bytes]]
 
 
+class SystemdCgroupRemover:
+    """Stop one exact rootless systemd slice through a bounded local command."""
+
+    def __init__(self, command: Command) -> None:
+        if not callable(command):
+            raise ValueError("Systemd cgroup remover configuration is invalid")
+        self._command = command
+
+    def __call__(self, path: Path) -> None:
+        if (
+            not isinstance(path, Path)
+            or not path.is_absolute()
+            or re.fullmatch(r"markweavet70-[0-9a-f]{32}\.slice", path.name) is None
+        ):
+            raise PodmanRuntimeError("Podman cgroup cleanup identity is invalid")
+        self._command(("--user", "stop", path.name), max_output_bytes=0)
+        try:
+            path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
+        raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
+
+
 class PodmanIsolationRuntime:
     """Rootless Podman backend implementing the shared isolation-runtime port."""
 
@@ -280,10 +306,12 @@ class PodmanIsolationRuntime:
         command: Command,
         cgroup_root: Path,
         hooks_directory: Path,
+        cgroup_remove: Callable[[Path], None],
         hooks_directory_validate: Callable[[Path], None] | None = None,
+        cgroup_root_validate: Callable[[Path], None] | None = None,
         cgroup_create: Callable[[Path], None] | None = None,
         cgroup_read: Callable[[Path], bytes] | None = None,
-        cgroup_remove: Callable[[Path], None] | None = None,
+        process_cgroup_read: Callable[[int], bytes] | None = None,
     ) -> None:
         if (
             type(image_repository) is not str
@@ -299,7 +327,9 @@ class PodmanIsolationRuntime:
             or not hooks_directory.is_absolute()
             or (cgroup_read is not None and not callable(cgroup_read))
             or (cgroup_create is not None and not callable(cgroup_create))
-            or (cgroup_remove is not None and not callable(cgroup_remove))
+            or not callable(cgroup_remove)
+            or (process_cgroup_read is not None and not callable(process_cgroup_read))
+            or (cgroup_root_validate is not None and not callable(cgroup_root_validate))
             or (
                 hooks_directory_validate is not None
                 and not callable(hooks_directory_validate)
@@ -316,7 +346,9 @@ class PodmanIsolationRuntime:
         )
         self._cgroup_create = cgroup_create or _create_cgroup
         self._cgroup_read = cgroup_read or _read_cgroup_events
-        self._cgroup_remove = cgroup_remove or _remove_cgroup
+        self._process_cgroup_read = process_cgroup_read or _read_process_cgroup
+        self._cgroup_remove = cgroup_remove
+        self._cgroup_root_validate = cgroup_root_validate or _validate_cgroup_root
         self._environment_verified = False
         self._runtime_capabilities: tuple[str, ...] = ()
 
@@ -593,7 +625,7 @@ class PodmanIsolationRuntime:
 
     def _cgroup_path(self, unit_id: UUID) -> Path:
         parent = _cgroup_parent(_container_name(unit_id))
-        return self._cgroup_root / "markweave.slice" / parent
+        return self._cgroup_root / _CGROUP_SLICE / parent
 
     def _require_rootless_environment(self) -> None:
         if self._environment_verified:
@@ -612,10 +644,13 @@ class PodmanIsolationRuntime:
             security.get("rootless") is not True
             or security.get("seccompEnabled") is not True
             or host.get("cgroupVersion") != "v2"
+            or host.get("cgroupManager") != "systemd"
+            or host.get("serviceIsRemote") is not False
             or type(capabilities) is not str
             or not capabilities
         ):
             raise PodmanRuntimeError("Podman isolation environment is invalid")
+        self._cgroup_root_validate(self._cgroup_root)
         parsed = tuple(capabilities.split(","))
         if len(set(parsed)) != len(parsed) or any(
             not item.startswith("CAP_") or not item.isascii() for item in parsed
@@ -710,6 +745,7 @@ class PodmanIsolationRuntime:
         ):
             raise PodmanRuntimeError("Podman container labels are invalid")
         self._verify_realized_specification(inspected, policy)
+        self._verify_cgroup_binding(inspected, runtime_unit)
         return runtime_unit
 
     def _unit_from_labels(self, inspected: Mapping[str, Any]) -> PodmanRuntimeUnit:
@@ -760,7 +796,7 @@ class PodmanIsolationRuntime:
         ):
             raise PodmanRuntimeError("Podman container specification is invalid")
         self._verify_realized_specification(inspected, policy)
-        return PodmanRuntimeUnit(
+        runtime_unit = PodmanRuntimeUnit(
             unit_id,
             RuntimeIncarnation(
                 uuid5(_INCARNATION_NAMESPACE, container_id), specification
@@ -768,6 +804,45 @@ class PodmanIsolationRuntime:
             container_id,
             _container_name(unit_id),
         )
+        self._verify_cgroup_binding(inspected, runtime_unit)
+        return runtime_unit
+
+    def _verify_cgroup_binding(
+        self, inspected: Mapping[str, Any], runtime_unit: PodmanRuntimeUnit
+    ) -> None:
+        state = _mapping(inspected, "State")
+        status = _string(state, "Status")
+        if status == "created":
+            if state.get("CgroupPath") not in {None, ""}:
+                raise PodmanRuntimeError("Podman cgroup binding is invalid")
+            return
+        expected = self._runtime_cgroup_path(runtime_unit)
+        running = _boolean(state, "Running")
+        if running and state.get("CgroupPath") != expected:
+            raise PodmanRuntimeError("Podman cgroup binding is invalid")
+        if not running and state.get("CgroupPath") not in {None, "", expected}:
+            raise PodmanRuntimeError("Podman cgroup binding is invalid")
+        if running:
+            pid = _integer(state, "Pid")
+            if (
+                pid <= 0
+                or self._process_cgroup_read(pid) != f"0::{expected}\n".encode()
+            ):
+                raise PodmanRuntimeError("Podman cgroup binding is invalid")
+            events = _parse_cgroup_events(
+                self._cgroup_read(self._cgroup_path(runtime_unit.unit_id))
+            )
+            if events.get("populated") != 1:
+                raise PodmanRuntimeError("Podman cgroup binding is invalid")
+
+    def _runtime_cgroup_path(self, runtime_unit: PodmanRuntimeUnit) -> str:
+        try:
+            relative = self._cgroup_path(runtime_unit.unit_id).relative_to(
+                Path("/sys/fs/cgroup")
+            )
+        except ValueError as error:
+            raise PodmanRuntimeError("Podman cgroup root is invalid") from error
+        return f"/{relative}/libpod-{runtime_unit.container_id}.scope"
 
     def _verify_realized_specification(
         self, inspected: Mapping[str, Any], policy: BrokerPolicy
@@ -895,7 +970,9 @@ def _container_name(unit_id: UUID) -> str:
 
 
 def _cgroup_parent(container_name: str) -> str:
-    return f"{container_name}.slice"
+    if not container_name.startswith(_NAME_PREFIX):
+        raise PodmanRuntimeError("Podman cgroup identity is invalid")
+    return f"markweavet70-{container_name.removeprefix(_NAME_PREFIX)}.slice"
 
 
 def _read_cgroup_events(path: Path) -> bytes:
@@ -915,14 +992,54 @@ def _read_cgroup_events(path: Path) -> bytes:
 
 
 def _create_cgroup(path: Path) -> None:
-    with suppress(FileExistsError):
-        path.mkdir(mode=_OWNER_ONLY_MODE)
+    for directory in (path.parent, path):
+        with suppress(FileExistsError):
+            directory.mkdir(mode=_OWNER_ONLY_MODE)
+        try:
+            metadata = directory.stat(follow_symlinks=False)
+            (directory / "cgroup.events").stat(follow_symlinks=False)
+        except OSError as error:
+            raise PodmanRuntimeError("Podman cgroup preparation failed") from error
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+            raise PodmanRuntimeError("Podman cgroup preparation failed")
+
+
+def _validate_cgroup_root(path: Path) -> None:
+    expected = Path(
+        f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
+        f"user@{os.geteuid()}.service"
+    )
     try:
+        resolved = path.resolve(strict=True)
         metadata = path.stat(follow_symlinks=False)
+        (path / "cgroup.controllers").stat(follow_symlinks=False)
+        (path / "cgroup.events").stat(follow_symlinks=False)
     except OSError as error:
-        raise PodmanRuntimeError("Podman cgroup preparation failed") from error
-    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
-        raise PodmanRuntimeError("Podman cgroup preparation failed")
+        raise PodmanRuntimeError("Podman cgroup root is invalid") from error
+    if (
+        path != expected
+        or resolved != expected
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+    ):
+        raise PodmanRuntimeError("Podman cgroup root is invalid")
+
+
+def _read_process_cgroup(pid: int) -> bytes:
+    if type(pid) is not int or pid <= 0:
+        raise PodmanRuntimeError("Podman cgroup binding is invalid")
+    path = Path("/proc") / str(pid) / "cgroup"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            value = os.read(descriptor, _CGROUP_EVENTS_MAX_BYTES + 1)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise PodmanRuntimeError("Podman cgroup binding is unavailable") from error
+    if len(value) > _CGROUP_EVENTS_MAX_BYTES:
+        raise PodmanRuntimeError("Podman cgroup binding exceeded its bound")
+    return value
 
 
 def _validate_hooks_directory(path: Path) -> None:
@@ -942,10 +1059,6 @@ def _validate_hooks_directory(path: Path) -> None:
         or entries
     ):
         raise PodmanRuntimeError("Podman hooks directory is invalid")
-
-
-def _remove_cgroup(path: Path) -> None:
-    path.rmdir()
 
 
 def _parse_cgroup_events(value: bytes) -> dict[str, int]:
