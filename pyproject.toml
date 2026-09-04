@@ -53,6 +53,13 @@ distributed = [
     "psycopg[binary]>=3.3.4,<4",
 ]
 all = ["markweave[standalone,distributed]"]
+reverse-attempt = [
+    "cairosvg>=2.8,<3",
+    "defusedxml>=0.7,<1",
+    "firecrawl-anydoc==0.2.4",
+    "pillow>=12,<13",
+    "tinycss2>=1.5,<2",
+]
 
 [project.scripts]
 markweave = "markweave.cli.main:main"
@@ -68,7 +75,7 @@ Support = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/dis
 build = ["hatchling==1.32.0"]
 dev = [
     "httpx>=0.28,<1",
-    "markweave[all]",
+    "markweave[all,reverse-attempt]",
     "mutmut==3.7.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",

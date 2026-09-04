@@ -503,6 +503,14 @@ jobs:
             artifacts/container/sbom.spdx.json
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
+            artifacts/reverse-attempt/sbom.cdx.json
+            artifacts/reverse-attempt/sbom.spdx.json
+            artifacts/reverse-attempt/vulnerabilities.json
+            artifacts/reverse-attempt/image-metadata.json
+            artifacts/reverse-attempt/image.oci.tar
+            artifacts/reverse-attempt/anydoc-cargo.cdx.json
+            artifacts/reverse-attempt/anydoc-cargo-vulnerabilities.json
+            artifacts/reverse-attempt/release-bundle.sha256
             artifacts/container-diagnostics/ci-status.txt
             artifacts/container-diagnostics/frontend-oci-identity.txt
             artifacts/container-diagnostics/scanner-readiness.txt

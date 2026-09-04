@@ -2,7 +2,7 @@
 ticket: T70
 linear_id: G1L-538
 linear_url: https://linear.app/g1lom/issue/G1L-538/t70-implement-secure-asset-aware-anydoc-conversion
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -164,6 +164,28 @@ for reverse conversion.
   tombstone remains until durable worker/T71 acknowledgement. Runtime labels only supplement the
   idempotent sweep. Absence, delete acknowledgement, and Kubernetes force-delete are insufficient
   proof.
+* 2026-09-04: Started from verified main
+  `e7c872ee70980eea11a112678856a62886a336a2` after T69 and its repository mirror passed exact-main
+  gates. The first cohesive delivery slice is the inert reverse-attempt core: exact optional anydoc
+  dependency and supply-chain ownership, fail-closed compatibility adapter, bounded asset
+  normalization, canonical manifest and deterministic Markdown/ZIP packaging, fixed child
+  protocol, minimal attempt image, and unit/golden/real-library/container coverage. It adds no
+  HTTP, persistence, job orchestration, broker authority, or production assembly.
+* 2026-09-04: Implemented and independently approved the inert reverse-attempt core slice. The
+  child now owns format detection, a fail-closed pinned anydoc adapter, safe HTTP(S)-only hyperlink
+  admission, bounded asset normalization with strict container/polyglot checks, structured
+  source-position asset references, a canonical content-free manifest, and pre-sized deterministic
+  Markdown/ZIP output. The fixed workspace protocol binds every response to its expected attempt
+  identity and exposes no runtime authority. The dedicated minimal image passed real DOCX/PNG and
+  SVG/CairoSVG smoke tests under an arbitrary UID with a read-only root and no network. Its closed
+  evidence bundle includes the exact OCI archive, image SBOMs, the embedded 113-component anydoc
+  Cargo SBOM, license validation, and separate vulnerability reports. Independent security and
+  integration reviews reported no remaining findings. Ruff formatting/linting, `ty`, 250 focused
+  reverse/anydoc tests, 392 CI/container/release tests, and 2,654 of 2,655 broad local tests passed;
+  the sole process-reaping timing failure passed immediately in isolation. PostgreSQL, S3, and the
+  three excluded document engines were unavailable or intentionally excluded from that broad local
+  command. T70 remains In Progress because the external broker, runtime backends, termination proof,
+  and production integration belong to later slices.
 
 ## Synchronization
 

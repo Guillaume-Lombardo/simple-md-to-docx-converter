@@ -46,3 +46,8 @@ contents and integrity, installs the wheel in clean Python 3.14 environments for
 and every supported extra, checks the public import and console command, and verifies that the
 final-image installation selects the `all` union. See [the release process](releasing.md) for the
 publication and evidence requirements.
+
+The experimental reverse-conversion attempt is intentionally outside that union. Its disposable
+image installs the `reverse-attempt` extra, which pins `firecrawl-anydoc==0.2.4` and the bounded T08
+image-normalization dependencies. The ordinary server, standalone, distributed, and `all` extras
+do not install anydoc. See [the reverse-attempt image contract](reverse-attempt-image.md).

@@ -35,6 +35,6 @@
     "PyPI publish provenance binds the x86-64 wheel digest to firecrawl/anydoc release.yml at the v0.2.4 source commit.",
     "The upstream repository and Python package declare MIT; the copied corpus remains under that license.",
     "pip-audit 2.10.0 reported no known Python-package vulnerabilities on 2026-09-03.",
-    "The wheel does not carry a component SBOM, so the Rust transitive dependency inventory and vulnerability result must be regenerated from upstream Cargo.lock before production adoption."
+    "The wheel carries sboms/anydoc-python.cyclonedx.json (SHA-256 ccc492d3014d12a0b5e5cb0a256e130444e6ca910f6c696d53886971ee56f747), containing the reviewed 113-component Cargo inventory with a license claim for every component; T70 extracts, validates, scans, and retains this exact embedded inventory separately from the outer image SBOM."
   ]
 }

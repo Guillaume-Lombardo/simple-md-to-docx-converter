@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-09-04",
+  "image": {
+    "definition": "containers/reverse-attempt/Containerfile",
+    "base": "registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653",
+    "installation_extra": "reverse-attempt",
+    "fixed_entrypoint": [
+      "python",
+      "-m",
+      "markweave.reversions.attempt_main"
+    ],
+    "sbom_formats": [
+      "CycloneDX JSON",
+      "SPDX JSON"
+    ],
+    "vulnerability_scanner": "grype==0.116.1",
+    "evidence_command": "bash scripts/container/supply-chain.sh IMAGE OUTPUT_DIRECTORY ci reverse-attempt"
+  },
+  "anydoc": {
+    "distribution": "firecrawl-anydoc",
+    "version": "0.2.4",
+    "purl": "pkg:pypi/firecrawl-anydoc@0.2.4",
+    "license_expression": "MIT",
+    "license_path": "spikes/anydoc/LICENSE.anydoc",
+    "license_sha256": "03a9e7657aac6536fb6458bd220347c4e7f85bd0a51d8d9e8528530b7a682ade",
+    "linux_x86_64_wheel_sha256": "0e5aed01bf6d4e5c588d3363888293f2ceeb9feb00449a32e0ba993797cf0bd3",
+    "source_commit": "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c",
+    "provenance_evidence": "spikes/anydoc/supply-chain.json",
+    "embedded_cargo_sbom": {
+      "wheel_path": "firecrawl_anydoc-0.2.4.dist-info/sboms/anydoc-python.cyclonedx.json",
+      "image_path": "/opt/markweave/sbom/anydoc-cargo.cdx.json",
+      "sha256": "ccc492d3014d12a0b5e5cb0a256e130444e6ca910f6c696d53886971ee56f747",
+      "component_count": 113,
+      "dependency_node_count": 114,
+      "components_without_license_claim": 0,
+      "retained_inventory": "anydoc-cargo.cdx.json",
+      "retained_vulnerability_report": "anydoc-cargo-vulnerabilities.json",
+      "validation_module": "scripts.container.verify_anydoc_cargo_sbom"
+    }
+  },
+  "compatibility_adapter": {
+    "module": "markweave.reversions._anydoc_compat",
+    "license_expression": "MIT",
+    "license_path": "src/markweave/reversions/ANYDOC_COMPAT_LICENSE.txt",
+    "license_sha256": "03a9e7657aac6536fb6458bd220347c4e7f85bd0a51d8d9e8528530b7a682ade",
+    "public_python_surface": [
+      "anydoc.format_from_bytes",
+      "anydoc.to_document",
+      "anydoc.to_markdown_bytes",
+      "anydoc.Document",
+      "anydoc.Block",
+      "anydoc.Inline",
+      "anydoc.Style",
+      "anydoc.LinkTarget",
+      "anydoc.ImageSource",
+      "anydoc.List",
+      "anydoc.ListItem",
+      "anydoc.Table",
+      "anydoc.CellSlot",
+      "anydoc.Cell",
+      "anydoc.Note",
+      "anydoc.Asset",
+      "anydoc.Format",
+      "anydoc.UnsupportedError",
+      "anydoc.MalformedError",
+      "anydoc.MissingPartError",
+      "anydoc.EncryptedError",
+      "anydoc.ResourceLimitError",
+      "anydoc.NeedsOcrError",
+      "anydoc.ConvertError"
+    ],
+    "mirrored_upstream_renderer_behaviors": [
+      "src/render/markdown/mod.rs:document_to_markdown",
+      "src/render/markdown/mod.rs:number_notes",
+      "src/render/markdown/mod.rs:collect_note_refs",
+      "src/render/markdown/mod.rs:render_block",
+      "src/render/markdown/mod.rs:render_list",
+      "src/render/markdown/mod.rs:trim_paragraph",
+      "src/render/markdown/anchors.rs:resolve_anchors",
+      "src/render/markdown/anchors.rs:gfm_slug",
+      "src/render/markdown/anchors.rs:sanitize_id",
+      "src/render/markdown/escape.rs:escape_text",
+      "src/render/markdown/escape.rs:format_url",
+      "src/render/markdown/escape.rs:backtick_fence",
+      "src/render/markdown/inline.rs:normalize",
+      "src/render/markdown/inline.rs:render_inlines",
+      "src/render/markdown/inline.rs:render_link",
+      "src/render/markdown/inline.rs:render_image",
+      "src/render/markdown/inline.rs:render_text_run",
+      "src/render/markdown/inline.rs:push_math_span",
+      "src/render/markdown/inline.rs:push_code_span",
+      "src/render/markdown/table.rs:render_table",
+      "src/render/markdown/table.rs:render_cell"
+    ],
+    "removal_condition": "Remove when upstream exposes a supported asset-aware renderer hook."
+  },
+  "release_requirements": [
+    "Verify the reverse-attempt wheel extra in a clean Python 3.14 environment.",
+    "Generate both SBOM formats from the exact built OCI image.",
+    "Scan both the exact image CycloneDX SBOM and the exact embedded anydoc Cargo CycloneDX SBOM; fail on fixable Critical vulnerabilities in either report.",
+    "Retain the OCI archive, both image SBOMs, the Cargo SBOM, both vulnerability reports, image metadata and manifest-bound evidence for the reviewed image digest.",
+    "Require a new exact embedded Cargo SBOM digest, component/license validation, and vulnerability review for every anydoc upgrade."
+  ]
+}

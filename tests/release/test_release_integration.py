@@ -66,12 +66,14 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         assert metadata.get_all("Provides-Extra") == [
             "all",
             "distributed",
+            "reverse-attempt",
             "server",
             "standalone",
         ]
         requirements = metadata.get_all("Requires-Dist", [])
         assert "boto3<2,>=1.43.82; extra == 'distributed'" in requirements
         assert "psycopg[binary]<4,>=3.3.4; extra == 'distributed'" in requirements
+        assert "firecrawl-anydoc==0.2.4; extra == 'reverse-attempt'" in requirements
         assert not any(
             "boto3" in requirement and "extra == 'server'" in requirement
             for requirement in requirements

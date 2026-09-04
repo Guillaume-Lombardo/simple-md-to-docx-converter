@@ -781,6 +781,83 @@ def test_release_summary_rejects_unfixed_critical_and_archive_identity_mismatch(
     assert summarize_supply_chain.main() == 1
 
 
+def test_summary_binds_and_gates_an_additional_cargo_report(
+    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in (
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "anydoc-cargo.cdx.json",
+    ):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    (tmp_path / "vulnerabilities.json").write_text(
+        json.dumps({"matches": []}), encoding="utf-8"
+    )
+    cargo_report = "anydoc-cargo-vulnerabilities.json"
+    (tmp_path / cargo_report).write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "artifact": {"name": "cargo-component"},
+                        "vulnerability": {
+                            "id": "CVE-CARGO-FIXED",
+                            "severity": "Critical",
+                            "fix": {"versions": ["2"]},
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    inspect = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
+    inspect.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
+    mocker.patch(
+        "scripts.container.summarize_supply_chain.oci_identity",
+        return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "summary",
+            "--image",
+            "image:test",
+            "--artifacts",
+            str(tmp_path),
+            "--expected-image-id",
+            f"sha256:{'2' * 64}",
+            "--additional-artifact",
+            "anydoc-cargo.cdx.json",
+            "--additional-artifact",
+            cargo_report,
+            "--additional-vulnerability-report",
+            cargo_report,
+        ],
+    )
+
+    assert summarize_supply_chain.main() == 1
+    evidence = json.loads((tmp_path / "image-metadata.json").read_text())
+    assert set(evidence["artifacts"]) == {
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+        "anydoc-cargo.cdx.json",
+        cargo_report,
+    }
+    assert evidence["vulnerabilities"]["critical_with_fix"] == [
+        {
+            "fix_versions": ["2"],
+            "id": "CVE-CARGO-FIXED",
+            "package": "cargo-component",
+            "report": cargo_report,
+        }
+    ]
+
+
 def _write_release_bundle(path: Path) -> str:
     source_names = (
         "image.oci.tar",
