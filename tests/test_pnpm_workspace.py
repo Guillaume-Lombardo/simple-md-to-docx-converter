@@ -201,6 +201,7 @@ def test_rollback_contract_covers_every_migration_surface() -> None:
         "docs/package-management.md",
         "scripts/javascript/bootstrap-pnpm.sh",
         "scripts/javascript/select-t67-rollback-commits.sh",
+        "scripts/javascript/run-bounded-benchmark-command.sh",
         "tests/integration/test_benchmark_timeout.py",
         "cache: npm",
         "COPY package.json package-lock.json ./",
