@@ -24,7 +24,12 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
 * Treat Corepack and pnpm bootstrap artifacts as supply-chain inputs: pin and verify their exact source and integrity, fail closed on version mismatch or unavailable verified bytes, prohibit mutable tags and implicit network activation, and retain dependency audit, license, SBOM, and provenance evidence.
 * Key GitHub caches by operating system, Node version, exact pnpm version, and lockfile content; prevent cache writes from untrusted contexts and prove clean cold-cache execution.
 * Record comparable GitHub-hosted cold install, warm-cache install, cache size, workspace `node_modules`/store disk use, frontend build time, and final frontend image size for the npm baseline and pnpm candidate, with runner image, Node version, commands, sample count, and raw evidence. Any material regression requires explicit approval rather than an invented threshold.
-* Run the complete ready-PR and merge-queue branch gate in GitHub, including frontend, functional, document-engine, both storage-profile, and both rootless final-image E2E jobs; run a clean exact-main verification after merge before completion.
+* Run the complete ready-PR gate in GitHub, including frontend, functional, document-engine, both
+  storage-profile, and both rootless final-image E2E jobs. Retain `merge_group` workflow support;
+  while GitHub does not offer merge queues for this personal-account repository, use the product-
+  manager-approved substitute of a strict up-to-date required gate, the complete exact-head matrix,
+  independent review, and serialized integration. Run a clean exact-main verification after merge
+  before completion.
 * Update the normative package-manager decision and affected architecture, local-development, CI, container, deployment, maintenance, and rollback documentation only after T64 releases ownership of those files.
 * Rehearse a rollback that removes `pnpm-workspace.yaml`, `pnpm-lock.yaml`, pnpm/Corepack manager-selection and configuration state, pnpm cache configuration, and every pnpm CI, container, script, and documentation command while restoring both npm application/tooling lockfiles, npm package-manager metadata, npm caches, and the frontend build from one coherent reviewed commit. Prove clean `npm ci --ignore-scripts` at the root and clean `npm ci --prefix web --ignore-scripts` with no mixed npm/pnpm state, lockfile drift, implicit lock update, dynamically selected package-manager version, or runtime network installation.
 
@@ -41,7 +46,9 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
 
 * Preserve exact dependency and security policy parity before deleting either npm application/tooling lockfile.
 * Keep all repository artifacts and user-facing text in English.
-* Require independent review and full hosted GitHub evidence because local execution cannot establish cache service, merge-queue, image publication, or both-profile E2E parity.
+* Require independent review and full hosted GitHub evidence because local execution cannot
+  establish cache service, serialized-integration safety, image publication, or both-profile E2E
+  parity.
 
 ## Progress
 
@@ -55,6 +62,13 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
 * 2026-09-03: Independent follow-up review removed two evidence weaknesses before hosted execution. Both npm and pnpm image timings now force equivalent cache-cold Podman builds, and synthetic rollback histories invoke the same fail-closed production commit selector as the hosted rehearsal instead of duplicating its logic in a test helper. Shell, CI-policy, focused test, real-history selector, and independent reviews pass; hosted benchmark results, the final ready-PR matrix, merge-queue evidence, and post-merge exact-main verification remain pending.
 * 2026-09-03: Exact-head hosted run `33799673333` passed the complete ready-pull-request matrix and retained benchmark artifact `package-manager-benchmark-33799673333-1` on Ubuntu 24.04 runner image `ubuntu24-20260823.283.1` with Node 24.19.0, npm 11.17.0, and pnpm 11.25.0. Across three samples, median cold installation improved from 10.165 s to 3.987 s and warm installation from 7.865 s to 1.263 s; the frontend image decreased from 1,061,509,088 to 1,033,844,125 bytes. The product manager explicitly accepted the measured trade-off: frontend build time increased 3.4%, compressed cache size increased 7.53%, the uncompressed pnpm store was 3.83 times the npm cache, and the cache-cold image build increased 52.5%.
 * 2026-09-03: The product manager authorized enabling the merge queue, but GitHub rejected a `merge_queue` ruleset with HTTP 422 because this public repository is owned by a personal account. The existing strict required-check and serialized-integration controls cannot be claimed as the ticket's explicitly required merge-queue evidence without a product-manager acceptance-criterion decision. Post-merge exact-main verification also remains pending.
+* 2026-09-04: The product manager explicitly approved the existing strict up-to-date required gate,
+  complete exact-head matrix, independent review, and serialized integration as the T67 merge-queue
+  substitute. The workflow retains `merge_group` support for an eligible future repository. The
+  prior implementation head passed the full hosted matrix; a documentation-only exact-head rerun
+  passed every domain except one transient container smoke where ClamAV was unavailable, so that
+  failed job must pass on rerun before integration. Post-merge exact-main verification remains
+  pending.
 
 ## Synchronization
 
