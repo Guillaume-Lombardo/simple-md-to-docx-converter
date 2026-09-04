@@ -381,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="ee636d5304076a12b265ef393ba11383fc03106d39a8ad7de6da971053090110",
+        canonical_digest="bfef4d5a871dacf6ae35b23e56e98a9e57d78d43b8233f06f913f567114fd90c",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -900,7 +900,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Rehearse the exact npm rollback candidate"): (
             "scripts/javascript/run_bounded_benchmark_command.py "
-            "300 10 /dev/stderr t67/rollback -- "
+            "900 10 /dev/stderr t67/rollback -- "
             "bash scripts/javascript/rehearse-npm-rollback.sh "
             '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
         ),

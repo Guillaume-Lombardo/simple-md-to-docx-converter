@@ -43,17 +43,22 @@ surface_digest="$({
 readonly surface_digest
 test "$surface_digest" = "$accepted_surface_digest"
 
-expected_files="$({
+expected_evidence_files="$({
   printf '%s:f\n' commands.txt environment.txt images.tsv manifest-lock-sha256.txt \
     raw.log sizes.tsv timings.tsv
 } | LC_ALL=C sort)"
 actual_files="$({
   find "$artifact_directory" -mindepth 1 -maxdepth 1 -printf '%f:%y\n'
 } | LC_ALL=C sort)"
-readonly expected_files actual_files
-if [[ "$actual_files" != "$expected_files" ]]; then
+expected_reused_files="$({
+  printf '%s\n' "$expected_evidence_files" reuse-attestation.txt:f
+} | LC_ALL=C sort)"
+readonly expected_evidence_files expected_reused_files actual_files
+if [[ "$actual_files" != "$expected_evidence_files" \
+  && "$actual_files" != "$expected_reused_files" ]]; then
   echo "Accepted T67 benchmark artifact has an unexpected regular-file set." >&2
-  diff -u <(printf '%s\n' "$expected_files") <(printf '%s\n' "$actual_files") >&2 || true
+  diff -u <(printf '%s\n' "$expected_evidence_files") \
+    <(printf '%s\n' "$actual_files") >&2 || true
   exit 1
 fi
 (

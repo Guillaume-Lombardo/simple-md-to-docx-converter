@@ -74,7 +74,7 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   45-minute job limit during its second sample. Every measured install, frontend build, and image
   build is now process-group bounded with deterministic raw timeout evidence, TERM-to-KILL cleanup,
   and a shared 25-minute benchmark budget; the workflow adds a process-group-verified 27-minute
-  outer fail-safe around the complete collector and a 5-minute bound around the preceding rollback
+  outer fail-safe around the complete collector and a 15-minute bound around the preceding rollback
   rehearsal. Native command exits, including 124 and 137, remain distinct from an observed deadline.
   The outer benchmark supervisor grants a 20-second termination window, strictly exceeding each
   inner command's 10-second grace plus its bounded two-second group-absence verification window,
@@ -96,6 +96,12 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   `da26ad7` in this repository. It downloads that exact artifact ID, then requires the resulting
   content-free metadata receipt alongside the seven evidence-file hashes and byte-equivalence
   proof. Any metadata, repository identity, run status, or expiration divergence prevents reuse.
+* 2026-09-04: Exact-head run `33854851665` passed every domain except frontend when the rollback's
+  root npm install consumed 176 seconds and the frontend install exceeded the remaining five-minute
+  envelope. The rollback is still fully process-tree supervised but now has a 15-minute deadline,
+  leaving almost 30 minutes of the heavy-job limit for setup, frontend checks, and immutable
+  benchmark verification. Reuse validation is idempotent while still accepting only the seven
+  hashed evidence files and its single generated attestation.
 
 ## Synchronization
 

@@ -397,7 +397,8 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "Download the accepted T67 package-manager benchmark" in workflow
     assert "Verify the accepted T67 package-manager benchmark" in workflow
     assert "Retain the T67 package-manager benchmark" in workflow
-    assert "300 10 /dev/stderr t67/rollback --" in workflow
+    assert "900 10 /dev/stderr t67/rollback --" in workflow
+    assert 900 + 10 < 45 * 60 / 2
     assert "1620 20 /dev/stderr t67/benchmark --" in workflow
     assert "PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
     assert "actions: read" in workflow

@@ -407,7 +407,7 @@ jobs:
           T67_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
         run: >-
           scripts/javascript/run_bounded_benchmark_command.py
-          300 10 /dev/stderr t67/rollback --
+          900 10 /dev/stderr t67/rollback --
           bash scripts/javascript/rehearse-npm-rollback.sh
           "$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"
       - name: Install verified Mermaid and Chrome for document-engine tests

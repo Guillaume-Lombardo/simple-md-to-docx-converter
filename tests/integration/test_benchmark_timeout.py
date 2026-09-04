@@ -10,7 +10,7 @@ import pytest
 
 from scripts.javascript import run_bounded_benchmark_command as supervisor
 
-RUNNER = "scripts/javascript/run_bounded_benchmark_command.py"
+RUNNER = str(Path(supervisor.__file__).resolve())
 
 
 def _assert_process_gone(process_id: int) -> None:

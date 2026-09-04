@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -294,12 +295,105 @@ def test_hosted_benchmark_reuse_is_immutable_and_fail_closed() -> None:
         "web",
         'diff --quiet "$accepted_ref..$candidate_commit"',
         "unexpected regular-file set",
+        "expected_reused_files",
         "sha256sum --check --strict",
         "reuse-attestation.txt",
         'readonly metadata_receipt="$3"',
         "Accepted T67 benchmark metadata receipt does not match.",
     ):
         assert contract in reuse
+
+
+@pytest.mark.unit
+def test_hosted_benchmark_reuse_is_idempotent_but_keeps_a_closed_file_set(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "artifact"
+    artifact.mkdir()
+    for name in (
+        "commands.txt",
+        "images.tsv",
+        "manifest-lock-sha256.txt",
+        "raw.log",
+        "sizes.tsv",
+        "timings.tsv",
+    ):
+        (artifact / name).write_text("test evidence\n", encoding="utf-8")
+    (artifact / "environment.txt").write_text(
+        "npm_ref=1594128bc84290df3699390643c729ef9d5d6d30\n"
+        f"pnpm_ref={metadata_verifier.HEAD_SHA}\n"
+        "node=v24.19.0\n"
+        "npm=11.17.0\n"
+        "pnpm=11.25.0\n",
+        encoding="utf-8",
+    )
+    receipt = tmp_path / "metadata.txt"
+    receipt.write_text(
+        "\n".join(metadata_verifier.RECEIPT_LINES) + "\n", encoding="utf-8"
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    git_stub = fake_bin / "git"
+    git_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == "rev-parse --show-toplevel" ]]; then\n'
+        "  printf '%s\\n' \"$FAKE_REPOSITORY\"\n"
+        'elif [[ "$*" == *"rev-parse --verify"* ]]; then\n'
+        "  printf '%s\\n' \"$FAKE_CANDIDATE\"\n"
+        'elif [[ "$*" == *"ls-tree"* ]]; then\n'
+        "  printf 'reviewed surface\\n'\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    sha_stub = fake_bin / "sha256sum"
+    sha_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "cat >/dev/null\n"
+        'if [[ "${1:-}" != "--check" ]]; then\n'
+        "  printf 'f8368503367543660e8f3e75db9652b92379c524e0dc56562f0a7a00cc2bc3f6  -\\n'\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    for executable, version in (
+        (git_stub, None),
+        (sha_stub, None),
+        (fake_bin / "node", "v24.19.0"),
+        (fake_bin / "npm", "11.17.0"),
+        (fake_bin / "pnpm", "11.25.0"),
+    ):
+        if version is not None:
+            executable.write_text(
+                f"#!/usr/bin/env bash\nprintf '%s\\n' '{version}'\n",
+                encoding="utf-8",
+            )
+        executable.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "FAKE_REPOSITORY": str(tmp_path),
+        "FAKE_CANDIDATE": "c" * 40,
+    }
+    command = [
+        "bash",
+        str(Path("scripts/javascript/reuse-package-benchmark.sh").resolve()),
+        "candidate",
+        str(artifact),
+        str(receipt),
+    ]
+
+    for _ in range(2):
+        completed = subprocess.run(
+            command, check=False, capture_output=True, text=True, env=environment
+        )
+        assert completed.returncode == 0, completed.stderr
+    assert (artifact / "reuse-attestation.txt").is_file()
+
+    (artifact / "unexpected.txt").write_text("unreviewed\n", encoding="utf-8")
+    rejected = subprocess.run(
+        command, check=False, capture_output=True, text=True, env=environment
+    )
+    assert rejected.returncode == 1
+    assert "unexpected regular-file set" in rejected.stderr
 
 
 def _accepted_artifact_metadata() -> tuple[dict[str, object], dict[str, object]]:
