@@ -209,7 +209,9 @@ for reverse conversion.
   tests at 95.21% total coverage; its 30 PostgreSQL setup errors and three S3 failures reflect the
   intentionally absent service endpoints, while the known process-reaping timing test was the only
   unrelated local failure. The 64 directly affected container/protocol tests, Ruff, `ty`, CI
-  validation, and diff validation pass.
+  validation, and diff validation pass. CodeRabbit's exact-head review identified one valid
+  test-lifecycle finding; the integration server now shuts down and joins in a `finally` block so a
+  failed protocol assertion cannot leave a non-daemon test thread running.
 
 ## Synchronization
 
