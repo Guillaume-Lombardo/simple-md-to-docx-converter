@@ -5,7 +5,6 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import suppress
 from pathlib import Path
 from uuid import UUID
 
@@ -46,13 +45,12 @@ UNIT_IDS = (
 def _cgroup_path(unit_id: UUID) -> Path:
     return Path(
         f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
-        f"user@{os.geteuid()}.service/markweavet70.slice/"
-        f"markweavet70-{unit_id.hex}.slice"
+        f"user@{os.geteuid()}.service/markweavet70{unit_id.hex}.slice"
     )
 
 
-def _cgroup_parent_path() -> Path:
-    return _cgroup_path(UNIT_IDS[0]).parent
+def _systemd_slice_name(unit_id: UUID) -> str:
+    return f"markweavet70{unit_id.hex}.slice"
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -81,12 +79,34 @@ def _systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+def _assert_systemd_slice_clean(unit_id: UUID) -> None:
+    name = _systemd_slice_name(unit_id)
+    _systemctl("--user", "stop", name)
+    properties = dict(
+        line.split("=", 1)
+        for line in _systemctl(
+            "--user",
+            "show",
+            name,
+            "--property=LoadState",
+            "--property=ActiveState",
+            "--property=SubState",
+            "--property=ControlGroup",
+        ).stdout.splitlines()
+    )
+    assert properties == {
+        "ActiveState": "inactive",
+        "ControlGroup": "",
+        "LoadState": "loaded",
+        "SubState": "dead",
+    }
+    assert not _cgroup_path(unit_id).exists()
+
+
 @pytest.fixture(scope="module")
 def controlled_image() -> Iterator[tuple[str, str]]:
-    with suppress(FileNotFoundError):
-        _systemctl("--user", "stop", "markweavet70.slice", check=False)
-        assert not _cgroup_parent_path().exists()
-    assert not _cgroup_parent_path().exists()
+    for unit_id in UNIT_IDS:
+        _assert_systemd_slice_clean(unit_id)
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
     if built_base:
@@ -123,9 +143,7 @@ def controlled_image() -> Iterator[tuple[str, str]]:
                 f"markweave-reverse-{unit_id.hex}",
                 check=False,
             )
-            with suppress(FileNotFoundError):
-                _cgroup_path(unit_id).rmdir()
-        _cgroup_parent_path().rmdir()
+            _assert_systemd_slice_clean(unit_id)
         _podman("image", "rm", "--force", TEST_IMAGE)
         if built_base:
             _podman("image", "rm", "--force", base)
@@ -263,6 +281,7 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
     assert stored is not None and stored.state is ManagedUnitState.REMOVED
     assert proof.unit_id == created.unit_id
     assert runtime.discover(limit=1) == ()
+    _assert_systemd_slice_clean(created.unit_id)
 
 
 @pytest.mark.integration
@@ -305,6 +324,7 @@ def test_runtime_deadline_survives_broker_and_inventory_shutdown(
     assert restarted.ready is True
     retained = restarted_inventory.get(created.unit_id)
     assert retained is not None and retained.state is ManagedUnitState.REMOVED
+    _assert_systemd_slice_clean(created.unit_id)
 
 
 @pytest.mark.integration
@@ -344,6 +364,7 @@ def test_orphan_restart_sweep_refuses_readiness_on_identity_mismatch(
         restarted.start()
     assert restarted.ready is False
     _podman("rm", "--force", runtime_unit.name)
+    _assert_systemd_slice_clean(UNIT_IDS[2])
 
 
 @pytest.mark.integration
@@ -413,3 +434,4 @@ def test_persisted_empty_proof_reconstructs_removal_without_event_history(
     restarted.start()
     reconstructed = inventory.get(created.unit_id)
     assert reconstructed is not None and reconstructed.state is ManagedUnitState.REMOVED
+    _assert_systemd_slice_clean(created.unit_id)

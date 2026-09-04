@@ -58,9 +58,10 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "src/markweave/cli/commands/recovery.py",
         "src/markweave/recovery*.py",
         "src/markweave/reversions/**",
-        "src/markweave/broker/podman_runtime.py",
+        "src/markweave/broker/**",
         "scripts/container/**",
         "tests/container/**",
+        "tests/integration/broker/fixtures/**",
         "tests/integration/broker/test_podman_runtime_integration.py",
     ),
     "document-engines": (

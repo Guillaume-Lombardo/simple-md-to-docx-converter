@@ -32,7 +32,6 @@ from markweave.broker.ports import RuntimeUnit
 
 _INCARNATION_NAMESPACE: Final = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
 _NAME_PREFIX: Final = "markweave-reverse-"
-_CGROUP_SLICE: Final = "markweavet70.slice"
 _LABEL_PREFIX: Final = "io.markweave.reverse-broker."
 _MANAGED_LABEL: Final = f"{_LABEL_PREFIX}managed"
 _UNIT_LABEL: Final = f"{_LABEL_PREFIX}unit-id"
@@ -100,6 +99,7 @@ _MAX_COMMAND_OUTPUT_BYTES: Final = 128 * 1024
 _MIN_OUTPUT_BYTES: Final = 1024
 _MAX_LABEL_BYTES: Final = 128
 _CGROUP_EVENTS_MAX_BYTES: Final = 4096
+_SYSTEMD_PROPERTIES_MAX_BYTES: Final = 512
 _OWNER_ONLY_MODE: Final = 0o700
 
 
@@ -282,10 +282,30 @@ class SystemdCgroupRemover:
         if (
             not isinstance(path, Path)
             or not path.is_absolute()
-            or re.fullmatch(r"markweavet70-[0-9a-f]{32}\.slice", path.name) is None
+            or re.fullmatch(r"markweavet70[0-9a-f]{32}\.slice", path.name) is None
         ):
             raise PodmanRuntimeError("Podman cgroup cleanup identity is invalid")
         self._command(("--user", "stop", path.name), max_output_bytes=0)
+        _, output = self._command(
+            (
+                "--user",
+                "show",
+                path.name,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=ControlGroup",
+            ),
+            max_output_bytes=_SYSTEMD_PROPERTIES_MAX_BYTES,
+        )
+        properties = _parse_systemd_properties(output)
+        if properties != {
+            "ActiveState": "inactive",
+            "ControlGroup": "",
+            "LoadState": "loaded",
+            "SubState": "dead",
+        }:
+            raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
         try:
             path.stat(follow_symlinks=False)
         except FileNotFoundError:
@@ -625,7 +645,7 @@ class PodmanIsolationRuntime:
 
     def _cgroup_path(self, unit_id: UUID) -> Path:
         parent = _cgroup_parent(_container_name(unit_id))
-        return self._cgroup_root / _CGROUP_SLICE / parent
+        return self._cgroup_root / parent
 
     def _require_rootless_environment(self) -> None:
         if self._environment_verified:
@@ -972,7 +992,7 @@ def _container_name(unit_id: UUID) -> str:
 def _cgroup_parent(container_name: str) -> str:
     if not container_name.startswith(_NAME_PREFIX):
         raise PodmanRuntimeError("Podman cgroup identity is invalid")
-    return f"markweavet70-{container_name.removeprefix(_NAME_PREFIX)}.slice"
+    return f"markweavet70{container_name.removeprefix(_NAME_PREFIX)}.slice"
 
 
 def _read_cgroup_events(path: Path) -> bytes:
@@ -992,16 +1012,15 @@ def _read_cgroup_events(path: Path) -> bytes:
 
 
 def _create_cgroup(path: Path) -> None:
-    for directory in (path.parent, path):
-        with suppress(FileExistsError):
-            directory.mkdir(mode=_OWNER_ONLY_MODE)
-        try:
-            metadata = directory.stat(follow_symlinks=False)
-            (directory / "cgroup.events").stat(follow_symlinks=False)
-        except OSError as error:
-            raise PodmanRuntimeError("Podman cgroup preparation failed") from error
-        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
-            raise PodmanRuntimeError("Podman cgroup preparation failed")
+    with suppress(FileExistsError):
+        path.mkdir(mode=_OWNER_ONLY_MODE)
+    try:
+        metadata = path.stat(follow_symlinks=False)
+        (path / "cgroup.events").stat(follow_symlinks=False)
+    except OSError as error:
+        raise PodmanRuntimeError("Podman cgroup preparation failed") from error
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+        raise PodmanRuntimeError("Podman cgroup preparation failed")
 
 
 def _validate_cgroup_root(path: Path) -> None:
@@ -1078,6 +1097,31 @@ def _parse_cgroup_events(value: bytes) -> dict[str, int]:
         item not in {0, 1} for item in parsed.values()
     ):
         raise PodmanRuntimeError("Podman cgroup evidence is invalid")
+    return parsed
+
+
+def _parse_systemd_properties(value: bytes) -> dict[str, str]:
+    if (
+        type(value) is not bytes
+        or not value
+        or len(value) > _SYSTEMD_PROPERTIES_MAX_BYTES
+    ):
+        raise PodmanRuntimeError("Podman systemd evidence is invalid")
+    parsed: dict[str, str] = {}
+    allowed = {"ActiveState", "ControlGroup", "LoadState", "SubState"}
+    try:
+        text = value.decode("ascii")
+        if not text.endswith("\n"):
+            raise ValueError
+        for line in text.splitlines():
+            key, raw = line.split("=", 1)
+            if key not in allowed or key in parsed or not raw.isascii():
+                raise ValueError
+            parsed[key] = raw
+    except (UnicodeDecodeError, ValueError) as error:
+        raise PodmanRuntimeError("Podman systemd evidence is invalid") from error
+    if set(parsed) != allowed:
+        raise PodmanRuntimeError("Podman systemd evidence is invalid")
     return parsed
 
 

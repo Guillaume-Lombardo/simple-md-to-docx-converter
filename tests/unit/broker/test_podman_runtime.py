@@ -55,8 +55,8 @@ CAPABILITIES = (
 INCARNATION_NAMESPACE = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
 CGROUP_ROOT = Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
 CGROUP_RUNTIME_PATH = (
-    "/user.slice/user-1000.slice/user@1000.service/markweavet70.slice/"
-    f"markweavet70-{UNIT_ID.hex}.slice/libpod-{CONTAINER_ID}.scope"
+    "/user.slice/user-1000.slice/user@1000.service/"
+    f"markweavet70{UNIT_ID.hex}.slice/libpod-{CONTAINER_ID}.scope"
 )
 
 
@@ -186,7 +186,7 @@ class PodmanDouble:
                 "Binds": [],
                 "CapAdd": [],
                 "CapDrop": list(CAPABILITIES),
-                "CgroupParent": f"markweavet70-{UNIT_ID.hex}.slice",
+                "CgroupParent": f"markweavet70{UNIT_ID.hex}.slice",
                 "Cgroups": "default",
                 "CpuPeriod": 100_000,
                 "CpuQuota": 100_001,
@@ -296,7 +296,7 @@ def test_create_uses_exact_broker_owned_policy_argv(
         "1001:0",
         "--cgroups=enabled",
         "--cgroup-parent",
-        f"markweavet70-{UNIT_ID.hex}.slice",
+        f"markweavet70{UNIT_ID.hex}.slice",
         "--ipc=none",
         "--pid=private",
     )
@@ -827,7 +827,7 @@ def test_cgroup_root_and_live_process_binding_fail_closed(
 def test_systemd_cgroup_remover_requires_exact_identity_and_disappearance(
     tmp_path: Path,
 ) -> None:
-    unit_name = f"markweavet70-{UNIT_ID.hex}.slice"
+    unit_name = f"markweavet70{UNIT_ID.hex}.slice"
     path = tmp_path / unit_name
     path.mkdir()
     calls: list[tuple[Sequence[str], int | None]] = []
@@ -840,18 +840,42 @@ def test_systemd_cgroup_remover_requires_exact_identity_and_disappearance(
     ) -> tuple[int, bytes]:
         del accepted_exit_codes
         calls.append((arguments, max_output_bytes))
-        path.rmdir()
-        return 0, b""
+        if arguments[1] == "stop":
+            path.rmdir()
+            return 0, b""
+        return (
+            0,
+            b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n",
+        )
 
     remover = SystemdCgroupRemover(remove)
     remover(path)
-    assert calls == [(("--user", "stop", unit_name), 0)]
+    assert calls == [
+        (("--user", "stop", unit_name), 0),
+        (
+            (
+                "--user",
+                "show",
+                unit_name,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=ControlGroup",
+            ),
+            512,
+        ),
+    ]
 
     with pytest.raises(PodmanRuntimeError, match="identity"):
         remover(tmp_path / "markweavet70.slice")
 
     path.mkdir()
-    retained = SystemdCgroupRemover(lambda *args, **kwargs: (0, b""))
+    retained = SystemdCgroupRemover(
+        lambda *args, **kwargs: (
+            0,
+            b"ControlGroup=/live\nLoadState=loaded\nActiveState=active\nSubState=running\n",
+        )
+    )
     with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
         retained(path)
 

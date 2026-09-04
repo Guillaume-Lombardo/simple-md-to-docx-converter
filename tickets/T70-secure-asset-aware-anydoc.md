@@ -325,6 +325,19 @@ for reverse conversion.
   coverage; its 30 PostgreSQL setup errors, three unavailable-S3 failures, and the unrelated known
   release reaping timing failure remain documented local-environment limitations. No Kubernetes
   acceptance is claimed.
+* 2026-09-05: Finished the lifecycle review by removing the shared systemd slice hierarchy. Each
+  unit now receives one non-hierarchical deterministic slice directly under the verified rootless
+  user-service cgroup, so removing one unit cannot race with sibling cleanup or retain a
+  broker-created parent. Cleanup uses bounded `systemctl --user` commands and requires exact
+  `loaded/inactive/dead` manager state, an empty manager `ControlGroup`, and filesystem absence;
+  integration setup and teardown no longer remove managed cgroups directly. All four real Podman
+  scenarios assert this manager and path state after cleanup. The container CI selector now covers
+  every broker module and the complete real-Podman fixture directory, preventing lifecycle
+  dependency or fixture changes from bypassing the boundary suite. The 427 broker tests, 390
+  selector/CI/container tests, four real Podman integrations, Ruff, and `ty` pass. The canonical
+  non-engine selection completed 3,129 passing tests at 94.80% total and 90.80% application branch
+  coverage, with the same 30 unavailable-PostgreSQL errors, three unavailable-S3 failures, and
+  unrelated known release reaping timing failure. No Kubernetes acceptance is claimed.
 
 ## Synchronization
 
