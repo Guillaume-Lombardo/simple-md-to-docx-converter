@@ -331,9 +331,12 @@ for reverse conversion.
   broker-created parent. Cleanup uses bounded `systemctl --user` commands and requires exact
   `loaded/inactive/dead` manager state, an empty manager `ControlGroup`, and filesystem absence;
   integration setup and teardown no longer remove managed cgroups directly. All four real Podman
-  scenarios assert this manager and path state after cleanup. The container CI selector now covers
-  every broker module and the complete real-Podman fixture directory, preventing lifecycle
-  dependency or fixture changes from bypassing the boundary suite. The 427 broker tests, 390
+  scenarios verify this manager and path state. The three successful broker lifecycle scenarios
+  do so read-only and also require absence from active and all-unit listings; only the deliberate
+  identity-substitution scenario uses explicit fixture recovery after the broker correctly refuses
+  cleanup. The container CI selector now covers every broker module and the complete real-Podman
+  fixture directory, preventing lifecycle dependency or fixture changes from bypassing the
+  boundary suite. The 427 broker tests, 390
   selector/CI/container tests, four real Podman integrations, Ruff, and `ty` pass. The canonical
   non-engine selection completed 3,129 passing tests at 94.80% total and 90.80% application branch
   coverage, with the same 30 unavailable-PostgreSQL errors, three unavailable-S3 failures, and

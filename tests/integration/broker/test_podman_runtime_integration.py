@@ -81,7 +81,6 @@ def _systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProce
 
 def _assert_systemd_slice_clean(unit_id: UUID) -> None:
     name = _systemd_slice_name(unit_id)
-    _systemctl("--user", "stop", name)
     properties = dict(
         line.split("=", 1)
         for line in _systemctl(
@@ -101,12 +100,30 @@ def _assert_systemd_slice_clean(unit_id: UUID) -> None:
         "SubState": "dead",
     }
     assert not _cgroup_path(unit_id).exists()
+    for arguments in (
+        ("--type=slice", "--state=active"),
+        ("--type=slice", "--all"),
+    ):
+        listing = _systemctl(
+            "--user",
+            "list-units",
+            *arguments,
+            "--plain",
+            "--no-legend",
+            "--no-pager",
+        ).stdout.splitlines()
+        assert all(line.split(maxsplit=1)[0] != name for line in listing if line)
+
+
+def _cleanup_systemd_slice(unit_id: UUID) -> None:
+    _systemctl("--user", "stop", _systemd_slice_name(unit_id))
+    _assert_systemd_slice_clean(unit_id)
 
 
 @pytest.fixture(scope="module")
 def controlled_image() -> Iterator[tuple[str, str]]:
     for unit_id in UNIT_IDS:
-        _assert_systemd_slice_clean(unit_id)
+        _cleanup_systemd_slice(unit_id)
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
     if built_base:
@@ -143,7 +160,7 @@ def controlled_image() -> Iterator[tuple[str, str]]:
                 f"markweave-reverse-{unit_id.hex}",
                 check=False,
             )
-            _assert_systemd_slice_clean(unit_id)
+            _cleanup_systemd_slice(unit_id)
         _podman("image", "rm", "--force", TEST_IMAGE)
         if built_base:
             _podman("image", "rm", "--force", base)
@@ -364,7 +381,8 @@ def test_orphan_restart_sweep_refuses_readiness_on_identity_mismatch(
         restarted.start()
     assert restarted.ready is False
     _podman("rm", "--force", runtime_unit.name)
-    _assert_systemd_slice_clean(UNIT_IDS[2])
+    # This scenario deliberately bypasses broker cleanup after identity substitution.
+    _cleanup_systemd_slice(UNIT_IDS[2])
 
 
 @pytest.mark.integration
