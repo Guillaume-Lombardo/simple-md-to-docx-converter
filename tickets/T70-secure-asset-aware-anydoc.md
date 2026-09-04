@@ -220,7 +220,7 @@ for reverse conversion.
   only an exact principal/attempt/unit/proof binding deletes a removed tombstone atomically while
   retaining the replay high-water mark. The exact light selection passed 2,723 tests at 94.15%
   total and 90.14% branch-only application coverage; changed application lines reached 95.62%, and
-  the 296 broker tests reached 90.19% branch coverage. Ruff formatting/linting, `ty`, and diff
+  the 298 broker tests reached 90.19% branch coverage. Ruff formatting/linting, `ty`, and diff
   validation also passed. Inventory, lifecycle, and protocol reviewers approved the exact revision
   without remaining findings.
 * 2026-09-04: Hardened the container test scanner after three exact-head CI runs exposed a
