@@ -20,6 +20,6 @@ def assert_lifecycle_conformance(
     empty_evidence = runtime.confirm_empty(runtime_unit)
     assert exit_evidence != empty_evidence
     runtime.remove(runtime_unit)
-    removal_evidence = runtime.confirm_removed(runtime_unit)
+    removal_evidence = runtime.confirm_removed(runtime_unit, empty_evidence)
     assert removal_evidence not in {exit_evidence, empty_evidence}
     assert runtime.discover(limit=1) == ()

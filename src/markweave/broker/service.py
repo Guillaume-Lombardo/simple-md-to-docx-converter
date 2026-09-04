@@ -341,7 +341,11 @@ class IsolationBrokerService:
             )
         if current.state is ManagedUnitState.EMPTY_CONFIRMED:
             self._runtime.remove(runtime_unit)
-            removal_evidence = self._runtime.confirm_removed(runtime_unit)
+            if current.empty_evidence is None:
+                self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN)
+            removal_evidence = self._runtime.confirm_removed(
+                runtime_unit, current.empty_evidence
+            )
             proof = self._proof_for(current, removal_evidence)
             current = self._inventory_call(
                 lambda: self._inventory.mark_removed(

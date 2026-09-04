@@ -191,15 +191,23 @@ class FakeIsolationRuntime:
         record.removed = True
         self._checkpoint("remove", "after")
 
-    def confirm_removed(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
+    def confirm_removed(
+        self, runtime_unit: RuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
         """Return evidence stronger than a removal request acknowledgement."""
 
         self._checkpoint("confirm_removed", "before")
         record = self._record(runtime_unit)
-        if not record.removed:
+        expected_empty = _digest(
+            "empty", record.unit.unit_id, record.unit.incarnation.incarnation_id
+        )
+        if not record.removed or empty_evidence != expected_empty:
             raise FakeRuntimeError("Isolation runtime removal is unconfirmed")
         evidence = _digest(
-            "removed", record.unit.unit_id, record.unit.incarnation.incarnation_id
+            "removed",
+            record.unit.unit_id,
+            record.unit.incarnation.incarnation_id,
+            empty_evidence.value,
         )
         self._checkpoint("confirm_removed", "after")
         return evidence

@@ -270,23 +270,44 @@ for reverse conversion.
   capabilities, no-new-privileges, a fixed non-root UID, private PID/UTS and no IPC namespace,
   no restart, and exact T71-supplied CPU, memory/swap, PID, workspace-tmpfs, and whole-second
   runtime deadline limits. Every shell-free Podman command has an absolute deadline, bounded
-  output, process-group cleanup, and content-free errors. Exact create-command and immutable-label
+  output, process-group cleanup on every post-spawn exceptional exit, and content-free errors.
+  Podman runs locally with an explicit hermetic environment and an empty owner-only hooks
+  directory; the broker validates the realized mounts, environment, identity, namespaces,
+  capabilities, security options, logging, cgroup placement, and resource limits before start.
+  Exact create-command and immutable-label
   evidence makes a lost create response idempotently recoverable while rejecting image, policy,
-  identity, or incarnation substitution. Rootless cgroup-v2, seccomp, and a durable allowlisted
-  event logger are mandatory. Termination sends whole-container SIGKILL and separately requires
-  canonical runtime-confirmed exit, zero init/conmon/exec membership, and a matching durable
-  removal event; absence or a kill/remove acknowledgement is never proof. Bounded label discovery
+  identity, or incarnation substitution. Rootless cgroup-v2 and seccomp are mandatory.
+  Termination sends whole-container SIGKILL and separately requires canonical runtime-confirmed
+  exit, an exact retained cgroup-v2 `populated=0` result, and no active exec sessions. The
+  authenticated inventory persists that empty evidence before deletion; removal proof binds it to
+  bounded exact-name and label-scoped post-delete absence, so crash recovery does not depend on
+  finite runtime event retention. Absence or a kill/remove acknowledgement without the prior
+  durable empty transition is never proof. Bounded label discovery
   rejects malformed, duplicate, unknown, and substituted units, and retained incarnation evidence
   reconstructs proof after removal-response loss. The 57 focused unit/shared-conformance tests and
   four real rootless Podman integrations cover a signal-resistant descendant, autonomous expiry
   while the broker is down, startup sweep/readiness refusal, and crash recovery after removal.
   The container CI domain builds a controlled derivative of the reviewed attempt image and runs
-  this real lifecycle suite. Workspace data transfer/result extraction, T71 supervisor and reverse
+  this real lifecycle suite. The real fixture also proves that fixed UID/GID `1001:0` can traverse
+  and write the bounded `/work` tmpfs without making it world-accessible. Workspace data
+  transfer/result extraction, T71 supervisor and reverse
   channel ceilings, mTLS, Kubernetes, production composition, and application/job integration
   remain explicitly outside this slice. The complete 435-test broker selection passes, the new
   backend reaches 93% branch coverage, and the exact light gate passes 2,860 tests at 94.04% total
   and 90.11% application branch coverage; Ruff, `ty`, CI-selector validation, and diff validation
   also pass.
+* 2026-09-05: Closed the independent lifecycle review findings. Whole-unit emptiness is now a
+  positive exact cgroup-v2 `populated=0` proof retained across container exit, removal recovery is
+  bound to the authenticated pre-delete empty transition instead of finite event logs, and the
+  group-writable but not world-accessible workspace is usable by fixed UID/GID `1001:0`. Podman
+  commands use a hermetic environment, force the local engine, disable hooks through a verified
+  empty owner-only directory, and validate the complete realized isolation and resource spec before
+  start. Unexpected post-spawn command-runner failures now kill and reap the process group. The 423
+  broker unit tests and four real rootless Podman integrations pass. The canonical non-engine run
+  completed 3,117 passing tests at 94.91% total and 90.95% application branch coverage; its 30
+  PostgreSQL setup errors and three S3 failures are the documented unavailable local services, and
+  the unrelated release process-reaping timing test remains the only other failure. Ruff and `ty`
+  pass. No Kubernetes acceptance is claimed.
 
 ## Synchronization
 

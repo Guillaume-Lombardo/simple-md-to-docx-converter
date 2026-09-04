@@ -9,6 +9,7 @@ import os
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -94,9 +95,11 @@ _FIXED_ENVIRONMENT: Final = (
     "XDG_RUNTIME_DIR=/work/xdg/runtime",
 )
 _INSPECT_MAX_BYTES: Final = 64 * 1024
-_EVENTS_MAX_BYTES: Final = 128 * 1024
+_MAX_COMMAND_OUTPUT_BYTES: Final = 128 * 1024
 _MIN_OUTPUT_BYTES: Final = 1024
 _MAX_LABEL_BYTES: Final = 128
+_CGROUP_EVENTS_MAX_BYTES: Final = 4096
+_OWNER_ONLY_MODE: Final = 0o700
 
 
 class PodmanRuntimeError(RuntimeError):
@@ -136,7 +139,7 @@ class PodmanCommandLimits:
             or not math.isfinite(self.operation_seconds)
             or self.operation_seconds <= 0
             or type(self.output_bytes) is not int
-            or not _MIN_OUTPUT_BYTES <= self.output_bytes <= _EVENTS_MAX_BYTES
+            or not _MIN_OUTPUT_BYTES <= self.output_bytes <= _MAX_COMMAND_OUTPUT_BYTES
         ):
             raise ValueError("Podman command limits are invalid")
 
@@ -149,19 +152,32 @@ class BoundedCommandRunner:
         executable: Path,
         limits: PodmanCommandLimits,
         *,
+        environment: Mapping[str, str],
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if (
             not isinstance(executable, Path)
             or not executable.is_absolute()
             or type(limits) is not PodmanCommandLimits
+            or not isinstance(environment, Mapping)
+            or any(
+                type(key) is not str
+                or type(value) is not str
+                or not key
+                or "=" in key
+                or "\x00" in key
+                or "\x00" in value
+                for key, value in environment.items()
+            )
+            or "CONTAINER_HOST" in environment
         ):
             raise ValueError("Podman command runner configuration is invalid")
         self._executable = executable
         self._limits = limits
+        self._environment = dict(environment)
         self._monotonic = monotonic
 
-    def __call__(  # noqa: PLR0912 - cleanup branches enforce process bounds
+    def __call__(  # noqa: PLR0912,PLR0915 - cleanup branches enforce process bounds
         self,
         arguments: Sequence[str],
         *,
@@ -178,7 +194,7 @@ class BoundedCommandRunner:
         ceiling = (
             self._limits.output_bytes if max_output_bytes is None else max_output_bytes
         )
-        if type(ceiling) is not int or not 0 <= ceiling <= _EVENTS_MAX_BYTES:
+        if type(ceiling) is not int or not 0 <= ceiling <= _MAX_COMMAND_OUTPUT_BYTES:
             raise PodmanRuntimeError("Podman command contract failed")
         deadline = self._monotonic() + self._limits.operation_seconds
         try:
@@ -188,6 +204,7 @@ class BoundedCommandRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
+                env=self._environment,
             )
         except OSError as error:
             raise PodmanRuntimeError("Podman command failed") from error
@@ -195,10 +212,11 @@ class BoundedCommandRunner:
             self._terminate(process)
             raise PodmanRuntimeError("Podman command failed")
         output = bytearray()
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ, True)
-        selector.register(process.stderr, selectors.EVENT_READ, False)
+        selector: selectors.BaseSelector | None = None
         try:
+            selector = selectors.DefaultSelector()
+            selector.register(process.stdout, selectors.EVENT_READ, True)
+            selector.register(process.stderr, selectors.EVENT_READ, False)
             while selector.get_map():
                 remaining = deadline - self._monotonic()
                 if remaining <= 0:
@@ -218,11 +236,20 @@ class BoundedCommandRunner:
             if remaining <= 0:
                 raise TimeoutError
             return_code = process.wait(timeout=remaining)
-        except (OverflowError, subprocess.TimeoutExpired, TimeoutError) as error:
+        except BaseException as error:
             self._terminate(process)
-            raise PodmanRuntimeError("Podman command exceeded its bounds") from error
+            if isinstance(
+                error, (OverflowError, subprocess.TimeoutExpired, TimeoutError)
+            ):
+                raise PodmanRuntimeError(
+                    "Podman command exceeded its bounds"
+                ) from error
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise PodmanRuntimeError("Podman command failed") from error
         finally:
-            selector.close()
+            if selector is not None:
+                selector.close()
             process.stdout.close()
             process.stderr.close()
         if return_code not in accepted_exit_codes:
@@ -245,13 +272,18 @@ type Command = Callable[..., tuple[int, bytes]]
 class PodmanIsolationRuntime:
     """Rootless Podman backend implementing the shared isolation-runtime port."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - security dependencies are explicit
         self,
         *,
         image_repository: str,
         run_as_uid: int,
         command: Command,
-        event_lookback_seconds: int,
+        cgroup_root: Path,
+        hooks_directory: Path,
+        hooks_directory_validate: Callable[[Path], None] | None = None,
+        cgroup_create: Callable[[Path], None] | None = None,
+        cgroup_read: Callable[[Path], bytes] | None = None,
+        cgroup_remove: Callable[[Path], None] | None = None,
     ) -> None:
         if (
             type(image_repository) is not str
@@ -261,15 +293,32 @@ class PodmanIsolationRuntime:
             or type(run_as_uid) is not int
             or run_as_uid <= 0
             or not callable(command)
-            or type(event_lookback_seconds) is not int
-            or event_lookback_seconds <= 0
+            or not isinstance(cgroup_root, Path)
+            or not cgroup_root.is_absolute()
+            or not isinstance(hooks_directory, Path)
+            or not hooks_directory.is_absolute()
+            or (cgroup_read is not None and not callable(cgroup_read))
+            or (cgroup_create is not None and not callable(cgroup_create))
+            or (cgroup_remove is not None and not callable(cgroup_remove))
+            or (
+                hooks_directory_validate is not None
+                and not callable(hooks_directory_validate)
+            )
         ):
             raise ValueError("Podman runtime configuration is invalid")
         self._image_repository = image_repository
         self._run_as_uid = run_as_uid
         self._command = command
-        self._event_lookback_seconds = event_lookback_seconds
+        self._cgroup_root = cgroup_root
+        self._hooks_directory = hooks_directory
+        self._hooks_directory_validate = (
+            hooks_directory_validate or _validate_hooks_directory
+        )
+        self._cgroup_create = cgroup_create or _create_cgroup
+        self._cgroup_read = cgroup_read or _read_cgroup_events
+        self._cgroup_remove = cgroup_remove or _remove_cgroup
         self._environment_verified = False
+        self._runtime_capabilities: tuple[str, ...] = ()
 
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> PodmanRuntimeUnit:
         """Create or recover and start one exact immutable-policy container."""
@@ -278,7 +327,8 @@ class PodmanIsolationRuntime:
         self._require_rootless_environment()
         labels = _labels(unit, policy, self._image_repository, self._run_as_uid)
         name = _container_name(unit.unit_id)
-        create_code, output = self._command(
+        self._cgroup_create(self._cgroup_path(unit.unit_id))
+        create_code, output = self._call(
             self._create_arguments(name, labels, policy),
             max_output_bytes=1024,
             accepted_exit_codes=frozenset({0, 125}),
@@ -296,7 +346,7 @@ class PodmanIsolationRuntime:
         state = _mapping(inspected, "State")
         status = _string(state, "Status")
         if status == "created":
-            self._command(("start", runtime_unit.container_id), max_output_bytes=1024)
+            self._call(("start", runtime_unit.container_id), max_output_bytes=1024)
             runtime_unit = self._verified_unit(
                 self._inspect(runtime_unit.container_id), expected=unit, policy=policy
             )
@@ -317,7 +367,7 @@ class PodmanIsolationRuntime:
         if _boolean(_mapping(inspected, "State"), "Running"):
             self._kill_and_verify(verified)
         elif _string(_mapping(inspected, "State"), "Status") == "created":
-            self._command(("start", verified.container_id), max_output_bytes=1024)
+            self._call(("start", verified.container_id), max_output_bytes=1024)
             inspected = self._inspect(verified.container_id)
             self._verify_incarnation(inspected, verified)
             if _boolean(_mapping(inspected, "State"), "Running"):
@@ -349,31 +399,32 @@ class PodmanIsolationRuntime:
         )
 
     def confirm_empty(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
-        """Digest positive runtime state proving no init, conmon, or exec member."""
+        """Digest positive runtime and cgroup-v2 whole-unit emptiness evidence."""
 
         self._require_rootless_environment()
         verified = self._coerce_unit(runtime_unit)
         inspected = self._inspect(verified.container_id)
         self._verify_incarnation(inspected, verified)
         state = _mapping(inspected, "State")
-        exec_ids = state.get("ExecIDs")
-        if exec_ids is None:
-            exec_ids = []
-        conmon_pid = state.get("ConmonPid", 0)
+        exec_ids = inspected.get("ExecIDs")
         if (
             _boolean(state, "Running")
             or _integer(state, "Pid") != 0
-            or type(conmon_pid) is not int
-            or conmon_pid != 0
             or type(exec_ids) is not list
             or exec_ids
             or _string(state, "Status") not in {"exited", "stopped"}
         ):
             raise PodmanRuntimeError("Podman stable unit is not empty")
+        cgroup_events = _parse_cgroup_events(
+            self._cgroup_read(self._cgroup_path(verified.unit_id))
+        )
+        if cgroup_events.get("populated") != 0:
+            raise PodmanRuntimeError("Podman stable unit cgroup is not empty")
         return _evidence(
             "empty",
             {
-                "conmon_pid": 0,
+                "cgroup_frozen": cgroup_events.get("frozen", 0),
+                "cgroup_populated": 0,
                 "container_id": verified.container_id,
                 "exec_count": 0,
                 "init_pid": 0,
@@ -386,7 +437,7 @@ class PodmanIsolationRuntime:
 
         self._require_rootless_environment()
         verified = self._coerce_unit(runtime_unit, allow_stored=True)
-        code, _ = self._command(
+        code, _ = self._call(
             ("container", "exists", verified.name),
             max_output_bytes=0,
             accepted_exit_codes=frozenset({0, 1}),
@@ -395,58 +446,55 @@ class PodmanIsolationRuntime:
             inspected = self._inspect(verified.name)
             self._verify_incarnation(inspected, verified)
             actual = self._unit_from_labels(inspected)
-            self._command(("rm", actual.container_id), max_output_bytes=1024)
+            self._call(("rm", actual.container_id), max_output_bytes=1024)
 
-    def confirm_removed(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
-        """Require a durable matching Podman removal event, not mere absence."""
+    def confirm_removed(
+        self, runtime_unit: RuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        """Bind persisted emptiness to two bounded post-delete absence queries."""
 
         self._require_rootless_environment()
         verified = self._coerce_unit(runtime_unit, allow_stored=True)
-        code, _ = self._command(
+        if type(empty_evidence) is not EvidenceDigest:
+            raise PodmanRuntimeError("Podman empty evidence is invalid")
+        code, _ = self._call(
             ("container", "exists", verified.name),
             max_output_bytes=0,
             accepted_exit_codes=frozenset({0, 1}),
         )
         if code == 0:
             raise PodmanRuntimeError("Podman removal is unconfirmed")
-        _, output = self._command(
+        _, output = self._call(
             (
-                "events",
-                "--stream=false",
-                "--since",
-                f"{self._event_lookback_seconds}s",
+                "ps",
+                "--all",
+                "--no-trunc",
                 "--filter",
-                f"container={verified.name}",
-                "--filter",
-                "event=remove",
+                f"label={_UNIT_LABEL}={verified.unit_id}",
                 "--format",
                 "json",
             ),
-            max_output_bytes=_EVENTS_MAX_BYTES,
+            max_output_bytes=_INSPECT_MAX_BYTES,
         )
-        events = _json_lines(output)
-        matched = []
-        for event in events:
-            container_id = event.get("ID")
-            if (
-                event.get("Status") == "remove"
-                and event.get("Name") == verified.name
-                and type(container_id) is str
-                and _CONTAINER_ID_PATTERN.fullmatch(container_id) is not None
-                and uuid5(_INCARNATION_NAMESPACE, container_id)
-                == verified.incarnation.incarnation_id
-            ):
-                matched.append(event)
-        if len(matched) != 1:
-            raise PodmanRuntimeError("Podman removal evidence is invalid")
-        event = matched[0]
+        discovered = _json(output)
+        if type(discovered) is not list or discovered:
+            raise PodmanRuntimeError("Podman removal is unconfirmed")
+        cgroup = self._cgroup_path(verified.unit_id)
+        try:
+            self._cgroup_remove(cgroup)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
         return _evidence(
             "removed",
             {
-                "container_id": matched[0]["ID"],
+                "empty_evidence": empty_evidence.value,
+                "incarnation_id": str(verified.incarnation.incarnation_id),
                 "name": verified.name,
-                "status": "remove",
-                "time": _event_time(event),
+                "runtime_discovery_count": 0,
+                "runtime_name_exists": False,
+                "unit_id": str(verified.unit_id),
             },
         )
 
@@ -456,7 +504,7 @@ class PodmanIsolationRuntime:
         self._require_rootless_environment()
         if type(limit) is not int or limit <= 0:
             raise PodmanRuntimeError("Podman discovery limit is invalid")
-        _, output = self._command(
+        _, output = self._call(
             (
                 "ps",
                 "--all",
@@ -496,6 +544,8 @@ class PodmanIsolationRuntime:
             "--pull=never",
             "--name",
             name,
+            "--hostname",
+            name,
             "--network=none",
             "--read-only",
             "--read-only-tmpfs=false",
@@ -504,6 +554,8 @@ class PodmanIsolationRuntime:
             "--user",
             f"{self._run_as_uid}:0",
             "--cgroups=enabled",
+            "--cgroup-parent",
+            _cgroup_parent(name),
             "--ipc=none",
             "--pid=private",
             "--uts=private",
@@ -526,7 +578,7 @@ class PodmanIsolationRuntime:
             "0",
             "--unsetenv-all",
             "--mount",
-            "type=tmpfs,destination=/work,tmpfs-mode=0700,"
+            "type=tmpfs,destination=/work,tmpfs-mode=0770,"
             f"tmpfs-size={policy.limits.workspace_bytes}",
             "--workdir=/work",
             "--entrypoint",
@@ -539,10 +591,15 @@ class PodmanIsolationRuntime:
         arguments.append(f"{self._image_repository}@{policy.image_digest}")
         return tuple(arguments)
 
+    def _cgroup_path(self, unit_id: UUID) -> Path:
+        parent = _cgroup_parent(_container_name(unit_id))
+        return self._cgroup_root / "markweave.slice" / parent
+
     def _require_rootless_environment(self) -> None:
         if self._environment_verified:
             return
-        _, output = self._command(
+        self._hooks_directory_validate(self._hooks_directory)
+        _, output = self._call(
             ("info", "--format", "json"), max_output_bytes=_INSPECT_MAX_BYTES
         )
         information = _json(output)
@@ -550,17 +607,25 @@ class PodmanIsolationRuntime:
             raise PodmanRuntimeError("Podman environment evidence is invalid")
         host = _mapping(information, "host")
         security = _mapping(host, "security")
+        capabilities = security.get("capabilities")
         if (
             security.get("rootless") is not True
             or security.get("seccompEnabled") is not True
             or host.get("cgroupVersion") != "v2"
-            or host.get("eventLogger") not in {"file", "journald"}
+            or type(capabilities) is not str
+            or not capabilities
         ):
             raise PodmanRuntimeError("Podman isolation environment is invalid")
+        parsed = tuple(capabilities.split(","))
+        if len(set(parsed)) != len(parsed) or any(
+            not item.startswith("CAP_") or not item.isascii() for item in parsed
+        ):
+            raise PodmanRuntimeError("Podman isolation environment is invalid")
+        self._runtime_capabilities = parsed
         self._environment_verified = True
 
     def _kill_and_verify(self, runtime_unit: PodmanRuntimeUnit) -> None:
-        self._command(
+        self._call(
             ("kill", "--signal", "KILL", runtime_unit.container_id),
             max_output_bytes=1024,
             accepted_exit_codes=frozenset({0, 125}),
@@ -575,7 +640,7 @@ class PodmanIsolationRuntime:
             raise PodmanRuntimeError("Podman whole-unit termination is unconfirmed")
 
     def _inspect(self, identity: str) -> Mapping[str, Any]:
-        _, output = self._command(
+        _, output = self._call(
             ("container", "inspect", identity, "--format", "json"),
             max_output_bytes=_INSPECT_MAX_BYTES,
         )
@@ -583,6 +648,27 @@ class PodmanIsolationRuntime:
         if type(raw) is not list or len(raw) != 1 or not isinstance(raw[0], Mapping):
             raise PodmanRuntimeError("Podman inspection evidence is invalid")
         return raw[0]
+
+    def _call(
+        self,
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        return self._command(
+            self._podman_arguments(arguments),
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    def _podman_arguments(self, arguments: Sequence[str]) -> tuple[str, ...]:
+        return (
+            "--remote=false",
+            "--hooks-dir",
+            str(self._hooks_directory),
+            *arguments,
+        )
 
     def _verified_unit(
         self,
@@ -600,10 +686,17 @@ class PodmanIsolationRuntime:
             != f"{self._image_repository}@{policy.image_digest}"
             or not _matches_create_command(
                 _mapping(inspected, "Config").get("CreateCommand"),
-                self._create_arguments(
-                    runtime_unit.name,
-                    _labels(expected, policy, self._image_repository, self._run_as_uid),
-                    policy,
+                self._podman_arguments(
+                    self._create_arguments(
+                        runtime_unit.name,
+                        _labels(
+                            expected,
+                            policy,
+                            self._image_repository,
+                            self._run_as_uid,
+                        ),
+                        policy,
+                    )
                 ),
             )
         ):
@@ -616,6 +709,7 @@ class PodmanIsolationRuntime:
             actual_labels.get(key) != value for key, value in expected_labels.items()
         ):
             raise PodmanRuntimeError("Podman container labels are invalid")
+        self._verify_realized_specification(inspected, policy)
         return runtime_unit
 
     def _unit_from_labels(self, inspected: Mapping[str, Any]) -> PodmanRuntimeUnit:
@@ -655,14 +749,17 @@ class PodmanIsolationRuntime:
             != f"{self._image_repository}@{policy.image_digest}"
             or not _matches_create_command(
                 _mapping(inspected, "Config").get("CreateCommand"),
-                self._create_arguments(
-                    _container_name(unit_id),
-                    {key: _label(labels, key) for key in _MANAGED_LABEL_KEYS},
-                    policy,
+                self._podman_arguments(
+                    self._create_arguments(
+                        _container_name(unit_id),
+                        {key: _label(labels, key) for key in _MANAGED_LABEL_KEYS},
+                        policy,
+                    )
                 ),
             )
         ):
             raise PodmanRuntimeError("Podman container specification is invalid")
+        self._verify_realized_specification(inspected, policy)
         return PodmanRuntimeUnit(
             unit_id,
             RuntimeIncarnation(
@@ -671,6 +768,77 @@ class PodmanIsolationRuntime:
             container_id,
             _container_name(unit_id),
         )
+
+    def _verify_realized_specification(
+        self, inspected: Mapping[str, Any], policy: BrokerPolicy
+    ) -> None:
+        config = _mapping(inspected, "Config")
+        host = _mapping(inspected, "HostConfig")
+        expected_config: Mapping[str, object] = {
+            "Cmd": None,
+            "Entrypoint": list(_FIXED_ENTRYPOINT),
+            "StopTimeout": 0,
+            "Timeout": math.ceil(policy.limits.wall_time_millis / 1000),
+            "User": f"{self._run_as_uid}:0",
+            "WorkingDir": "/work",
+        }
+        expected_host: Mapping[str, object] = {
+            "AutoRemove": False,
+            "Binds": [],
+            "CapAdd": [],
+            "CapDrop": list(self._runtime_capabilities),
+            "CgroupParent": _cgroup_parent(_string(inspected, "Name").lstrip("/")),
+            "Cgroups": "default",
+            "CpuPeriod": policy.limits.cpu_period_micros,
+            "CpuQuota": policy.limits.cpu_quota_micros,
+            "Devices": [],
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": [],
+            "GroupAdd": [],
+            "IpcMode": "none",
+            "LogConfig": {
+                "Config": None,
+                "Path": "",
+                "Size": "0B",
+                "Tag": "",
+                "Type": "none",
+            },
+            "Memory": policy.limits.memory_bytes,
+            "MemorySwap": policy.limits.memory_bytes,
+            "NetworkMode": "none",
+            "PidMode": "private",
+            "PidsLimit": policy.limits.pid_limit,
+            "PortBindings": {},
+            "Privileged": False,
+            "PublishAllPorts": False,
+            "ReadonlyRootfs": True,
+            "RestartPolicy": {"MaximumRetryCount": 0, "Name": "no"},
+            "SecurityOpt": ["no-new-privileges"],
+            "Tmpfs": {
+                "/work": (
+                    f"mode=0770,size={policy.limits.workspace_bytes},"
+                    "rw,rprivate,nosuid,nodev,tmpcopyup"
+                )
+            },
+            "UTSMode": "private",
+            "VolumesFrom": None,
+        }
+        if (
+            type(config.get("Env")) is not list
+            or sorted(config["Env"])
+            != sorted(
+                (
+                    *_FIXED_ENVIRONMENT,
+                    f"HOSTNAME={_string(inspected, 'Name').lstrip('/')}",
+                )
+            )
+            or any(config.get(key) != value for key, value in expected_config.items())
+            or any(host.get(key) != value for key, value in expected_host.items())
+            or inspected.get("Mounts") != []
+        ):
+            raise PodmanRuntimeError("Podman realized specification is invalid")
 
     def _verify_incarnation(
         self, inspected: Mapping[str, Any], expected: PodmanRuntimeUnit
@@ -726,6 +894,80 @@ def _container_name(unit_id: UUID) -> str:
     return f"{_NAME_PREFIX}{unit_id.hex}"
 
 
+def _cgroup_parent(container_name: str) -> str:
+    return f"{container_name}.slice"
+
+
+def _read_cgroup_events(path: Path) -> bytes:
+    try:
+        descriptor = os.open(
+            path / "cgroup.events", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+        )
+        try:
+            value = os.read(descriptor, _CGROUP_EVENTS_MAX_BYTES + 1)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise PodmanRuntimeError("Podman cgroup evidence is unavailable") from error
+    if len(value) > _CGROUP_EVENTS_MAX_BYTES:
+        raise PodmanRuntimeError("Podman cgroup evidence exceeded its bound")
+    return value
+
+
+def _create_cgroup(path: Path) -> None:
+    with suppress(FileExistsError):
+        path.mkdir(mode=_OWNER_ONLY_MODE)
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except OSError as error:
+        raise PodmanRuntimeError("Podman cgroup preparation failed") from error
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+        raise PodmanRuntimeError("Podman cgroup preparation failed")
+
+
+def _validate_hooks_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            metadata = os.fstat(descriptor)
+            entries = os.listdir(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise PodmanRuntimeError("Podman hooks directory is invalid") from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != _OWNER_ONLY_MODE
+        or entries
+    ):
+        raise PodmanRuntimeError("Podman hooks directory is invalid")
+
+
+def _remove_cgroup(path: Path) -> None:
+    path.rmdir()
+
+
+def _parse_cgroup_events(value: bytes) -> dict[str, int]:
+    if type(value) is not bytes or not value or len(value) > _CGROUP_EVENTS_MAX_BYTES:
+        raise PodmanRuntimeError("Podman cgroup evidence is invalid")
+    parsed: dict[str, int] = {}
+    try:
+        text = value.decode("ascii")
+        for line in text.splitlines():
+            key, raw = line.split(" ", 1)
+            if key not in {"frozen", "populated"} or key in parsed:
+                raise ValueError
+            parsed[key] = int(raw)
+    except (UnicodeDecodeError, ValueError) as error:
+        raise PodmanRuntimeError("Podman cgroup evidence is invalid") from error
+    if set(parsed) != {"frozen", "populated"} or any(
+        item not in {0, 1} for item in parsed.values()
+    ):
+        raise PodmanRuntimeError("Podman cgroup evidence is invalid")
+    return parsed
+
+
 def _labels(
     unit: ManagedUnit,
     policy: BrokerPolicy,
@@ -776,20 +1018,6 @@ def _json(output: bytes) -> Any:
         return json.loads(output.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise PodmanRuntimeError("Podman JSON evidence is invalid") from error
-
-
-def _json_lines(output: bytes) -> tuple[Mapping[str, Any], ...]:
-    events: list[Mapping[str, Any]] = []
-    try:
-        text = output.decode("utf-8")
-        for line in text.splitlines():
-            value = json.loads(line)
-            if not isinstance(value, Mapping):
-                raise TypeError
-            events.append(value)
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as error:
-        raise PodmanRuntimeError("Podman event evidence is invalid") from error
-    return tuple(events)
 
 
 def _matches_create_command(value: Any, arguments: tuple[str, ...]) -> bool:
@@ -849,13 +1077,6 @@ def _positive_integer_label(labels: Mapping[str, Any], key: str) -> int:
     if not value.isascii() or not value.isdigit() or int(value) <= 0:
         raise PodmanRuntimeError("Podman numeric label evidence is invalid")
     return int(value)
-
-
-def _event_time(event: Mapping[str, Any]) -> int:
-    value = event.get("TimeNano", event.get("timeNano"))
-    if type(value) is not int or value <= 0:
-        raise PodmanRuntimeError("Podman event time is invalid")
-    return value
 
 
 def _evidence(kind: str, fields: Mapping[str, object]) -> EvidenceDigest:

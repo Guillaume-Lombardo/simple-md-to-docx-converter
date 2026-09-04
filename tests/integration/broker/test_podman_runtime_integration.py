@@ -41,12 +41,15 @@ UNIT_IDS = (
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("CONTAINER_HOST", None)
     return subprocess.run(
         (str(PODMAN), *arguments),
         check=check,
         capture_output=True,
         text=True,
         timeout=120,
+        env=environment,
     )
 
 
@@ -103,13 +106,27 @@ def _policy(image_digest: str, wall_time_millis: int = 10_000) -> BrokerPolicy:
 
 def _runtime(
     repository: str,
+    hooks_directory: Path,
     command: Callable[..., tuple[int, bytes]] | None = None,
 ) -> PodmanIsolationRuntime:
+    environment = {
+        key: os.environ[key]
+        for key in ("DBUS_SESSION_BUS_ADDRESS", "HOME", "XDG_RUNTIME_DIR")
+        if key in os.environ
+    }
+    environment.update({"CONTAINERS_CONF": "/dev/null", "PATH": "/usr/bin:/bin"})
     return PodmanIsolationRuntime(
         image_repository=repository,
         run_as_uid=1001,
-        command=command or BoundedCommandRunner(PODMAN, PodmanCommandLimits(20)),
-        event_lookback_seconds=600,
+        command=command
+        or BoundedCommandRunner(
+            PODMAN, PodmanCommandLimits(20), environment=environment
+        ),
+        cgroup_root=Path(
+            f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
+            f"user@{os.geteuid()}.service"
+        ),
+        hooks_directory=hooks_directory,
     )
 
 
@@ -119,7 +136,9 @@ def _service(
     inventory = SQLiteBrokerInventory(
         tmp_path / "inventory.sqlite3", b"i" * 32, max_records=8
     )
-    runtime = _runtime(repository)
+    hooks = tmp_path / "hooks"
+    hooks.mkdir(mode=0o700, exist_ok=True)
+    runtime = _runtime(repository, hooks)
     service = IsolationBrokerService(
         inventory,
         runtime,
@@ -133,12 +152,15 @@ def _service(
 
 @pytest.mark.integration
 def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
-    tmp_path: Path, controlled_image: tuple[str, str]
+    tmp_path: Path,
+    controlled_image: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert (
         _podman("info", "--format", "{{.Host.Security.Rootless}}").stdout.strip()
         == "true"
     )
+    monkeypatch.setenv("CONTAINER_HOST", "tcp://127.0.0.1:1")
     repository, digest = controlled_image
     service, inventory, runtime = _service(
         tmp_path, repository, _policy(digest), UNIT_IDS[0]
@@ -165,8 +187,14 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
     assert inspected["HostConfig"]["Memory"] == 268_435_456
     assert inspected["HostConfig"]["MemorySwap"] == 268_435_456
     assert inspected["HostConfig"]["Tmpfs"] == {
-        "/work": "mode=0700,size=8388608,rw,rprivate,nosuid,nodev,tmpcopyup"
+        "/work": "mode=0770,size=8388608,rw,rprivate,nosuid,nodev,tmpcopyup"
     }
+    assert (
+        _podman(
+            "exec", inspected["Id"], "/usr/bin/stat", "-c", "%u:%g", "/work/ready"
+        ).stdout.strip()
+        == "1001:0"
+    )
     assert len(_podman("top", inspected["Id"], "hpid").stdout.splitlines()) == 3
 
     proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
@@ -209,7 +237,7 @@ def test_runtime_deadline_survives_broker_and_inventory_shutdown(
     )
     restarted = IsolationBrokerService(
         restarted_inventory,
-        _runtime(repository),
+        _runtime(repository, tmp_path / "hooks"),
         _policy(digest, 1_001),
         max_discovered_units=8,
     )
@@ -248,7 +276,7 @@ def test_orphan_restart_sweep_refuses_readiness_on_identity_mismatch(
     )
     restarted = IsolationBrokerService(
         restarted_inventory,
-        _runtime(repository),
+        _runtime(repository, tmp_path / "hooks"),
         _policy(digest),
         max_discovered_units=8,
     )
@@ -259,12 +287,23 @@ def test_orphan_restart_sweep_refuses_readiness_on_identity_mismatch(
 
 
 @pytest.mark.integration
-def test_removal_event_reconstructs_proof_after_lost_response(
+def test_persisted_empty_proof_reconstructs_removal_without_event_history(
     tmp_path: Path, controlled_image: tuple[str, str]
 ) -> None:
     repository, digest = controlled_image
-    command = BoundedCommandRunner(PODMAN, PodmanCommandLimits(20))
-    fail_events = False
+    hooks = tmp_path / "hooks"
+    hooks.mkdir(mode=0o700, exist_ok=True)
+    environment = {
+        key: os.environ[key]
+        for key in ("DBUS_SESSION_BUS_ADDRESS", "HOME", "XDG_RUNTIME_DIR")
+        if key in os.environ
+    }
+    environment.update({"CONTAINERS_CONF": "/dev/null", "PATH": "/usr/bin:/bin"})
+    command = BoundedCommandRunner(
+        PODMAN, PodmanCommandLimits(20), environment=environment
+    )
+    fail_absence_query = False
+    removed = False
 
     def interrupted(
         arguments: Sequence[str],
@@ -272,13 +311,17 @@ def test_removal_event_reconstructs_proof_after_lost_response(
         max_output_bytes: int | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
-        if fail_events and arguments[0] == "events":
+        nonlocal removed
+        if fail_absence_query and removed and arguments[3] == "ps":
             raise PodmanRuntimeError("Injected lost Podman response")
-        return command(
+        result = command(
             arguments,
             max_output_bytes=max_output_bytes,
             accepted_exit_codes=accepted_exit_codes,
         )
+        if arguments[3] == "rm":
+            removed = True
+        return result
 
     policy = _policy(digest)
     inventory = SQLiteBrokerInventory(
@@ -286,7 +329,7 @@ def test_removal_event_reconstructs_proof_after_lost_response(
     )
     service = IsolationBrokerService(
         inventory,
-        _runtime(repository, interrupted),
+        _runtime(repository, hooks, interrupted),
         policy,
         max_discovered_units=8,
         unit_id_factory=lambda: UNIT_IDS[3],
@@ -294,7 +337,7 @@ def test_removal_event_reconstructs_proof_after_lost_response(
     service.start()
     attempt_id = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
-    fail_events = True
+    fail_absence_query = True
 
     with pytest.raises(BrokerError):
         service.terminate(PRINCIPAL, attempt_id, created.unit_id)
@@ -305,7 +348,7 @@ def test_removal_event_reconstructs_proof_after_lost_response(
         and interrupted_unit.state is ManagedUnitState.EMPTY_CONFIRMED
     )
     restarted = IsolationBrokerService(
-        inventory, _runtime(repository), policy, max_discovered_units=8
+        inventory, _runtime(repository, hooks), policy, max_discovered_units=8
     )
     restarted.start()
     reconstructed = inventory.get(created.unit_id)

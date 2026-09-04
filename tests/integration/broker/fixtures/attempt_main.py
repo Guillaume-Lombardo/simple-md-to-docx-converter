@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import time
+from pathlib import Path
 
 
 def _wait() -> None:
@@ -14,6 +15,7 @@ def _wait() -> None:
         time.sleep(1)
 
 
+Path("/work/ready").write_text("ready", encoding="ascii")
 if os.fork() == 0:
     _wait()
 _wait()

@@ -8,11 +8,13 @@ from typing import Any, cast
 from uuid import UUID, uuid5
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker import podman_runtime
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
+    EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
     RuntimeIncarnation,
@@ -35,6 +37,20 @@ CONTAINER_ID = "4" * 64
 IMAGE_DIGEST = f"sha256:{'5' * 64}"
 IMAGE_REPOSITORY = "localhost/markweave-reverse-attempt"
 NAME = "markweave-reverse-22222222222242228222222222222222"
+HOOKS = Path("/var/empty/markweave-hooks")
+CAPABILITIES = (
+    "CAP_CHOWN",
+    "CAP_DAC_OVERRIDE",
+    "CAP_FOWNER",
+    "CAP_FSETID",
+    "CAP_KILL",
+    "CAP_NET_BIND_SERVICE",
+    "CAP_SETFCAP",
+    "CAP_SETGID",
+    "CAP_SETPCAP",
+    "CAP_SETUID",
+    "CAP_SYS_CHROOT",
+)
 INCARNATION_NAMESPACE = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
 
 
@@ -68,8 +84,9 @@ class PodmanDouble:
         self.status = "created"
         self.container_id = CONTAINER_ID
         self.create_arguments: tuple[str, ...] = ()
+        self.full_create_arguments: tuple[str, ...] = ()
         self.overrides: dict[str, Any] = {}
-        self.events: list[Mapping[str, Any]] = []
+        self.removed_paths: set[str] = set()
         self.create_code = 0
         self.create_output = CONTAINER_ID.encode()
 
@@ -80,15 +97,28 @@ class PodmanDouble:
         max_output_bytes: int | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
-        argv = tuple(arguments)
+        raw = tuple(arguments)
+        assert raw[:3] == ("--remote=false", "--hooks-dir", str(HOOKS))
+        argv = raw[3:]
         self.calls.append((argv, max_output_bytes, accepted_exit_codes))
         if argv[0] == "info":
             return 0, (
-                b'{"host":{"cgroupVersion":"v2","eventLogger":"journald",'
-                b'"security":{"rootless":true,"seccompEnabled":true}}}'
+                json.dumps(
+                    {
+                        "host": {
+                            "cgroupVersion": "v2",
+                            "security": {
+                                "capabilities": ",".join(CAPABILITIES),
+                                "rootless": True,
+                                "seccompEnabled": True,
+                            },
+                        }
+                    }
+                ).encode()
             )
         if argv[0] == "create":
             self.create_arguments = argv
+            self.full_create_arguments = raw
             if self.create_code == 0:
                 self.exists = True
             return self.create_code, self.create_output
@@ -106,21 +136,7 @@ class PodmanDouble:
             return (0 if self.exists else 1), b""
         if argv[0] == "rm":
             self.exists = False
-            self.events.append(
-                {
-                    "ID": self.container_id,
-                    "Name": NAME,
-                    "Status": "remove",
-                    "TimeNano": 123456789,
-                }
-            )
             return 0, (self.container_id + "\n").encode()
-        if argv[0] == "events":
-            output = b"".join(
-                json.dumps(event, separators=(",", ":")).encode() + b"\n"
-                for event in self.events
-            )
-            return 0, output
         if argv[0] == "ps":
             summaries = [{"Names": [NAME]}] if self.exists else []
             return 0, json.dumps(summaries).encode()
@@ -135,8 +151,6 @@ class PodmanDouble:
                 key, label = value.split("=", 1)
                 labels[key] = label
         state = {
-            "ConmonPid": 0,
-            "ExecIDs": [],
             "ExitCode": 137,
             "FinishedAt": "2026-09-04T20:00:00.123456789Z",
             "OOMKilled": False,
@@ -148,13 +162,62 @@ class PodmanDouble:
         }
         value: dict[str, Any] = {
             "Config": {
-                "CreateCommand": ["/usr/bin/podman", *self.create_arguments],
+                "Cmd": None,
+                "CreateCommand": ["/usr/bin/podman", *self.full_create_arguments],
+                "Entrypoint": list(podman_runtime._FIXED_ENTRYPOINT),
+                "Env": [*podman_runtime._FIXED_ENVIRONMENT, f"HOSTNAME={NAME}"],
                 "Labels": labels,
+                "StopTimeout": 0,
+                "Timeout": 3,
+                "User": "1001:0",
+                "WorkingDir": "/work",
+            },
+            "HostConfig": {
+                "AutoRemove": False,
+                "Binds": [],
+                "CapAdd": [],
+                "CapDrop": list(CAPABILITIES),
+                "CgroupParent": f"{NAME}.slice",
+                "Cgroups": "default",
+                "CpuPeriod": 100_000,
+                "CpuQuota": 100_001,
+                "Devices": [],
+                "Dns": [],
+                "DnsOptions": [],
+                "DnsSearch": [],
+                "ExtraHosts": [],
+                "GroupAdd": [],
+                "IpcMode": "none",
+                "LogConfig": {
+                    "Config": None,
+                    "Path": "",
+                    "Size": "0B",
+                    "Tag": "",
+                    "Type": "none",
+                },
+                "Memory": 268_435_456,
+                "MemorySwap": 268_435_456,
+                "NetworkMode": "none",
+                "PidMode": "private",
+                "PidsLimit": 31,
+                "PortBindings": {},
+                "Privileged": False,
+                "PublishAllPorts": False,
+                "ReadonlyRootfs": True,
+                "RestartPolicy": {"MaximumRetryCount": 0, "Name": "no"},
+                "SecurityOpt": ["no-new-privileges"],
+                "Tmpfs": {
+                    "/work": "mode=0770,size=16777216,rw,rprivate,nosuid,nodev,tmpcopyup"
+                },
+                "UTSMode": "private",
+                "VolumesFrom": None,
             },
             "Id": self.container_id,
             "ImageDigest": IMAGE_DIGEST,
             "ImageName": f"{IMAGE_REPOSITORY}@{IMAGE_DIGEST}",
             "Name": NAME,
+            "Mounts": [],
+            "ExecIDs": [],
             "State": state,
         }
         for path, override in self.overrides.items():
@@ -163,6 +226,12 @@ class PodmanDouble:
             for part in parts[:-1]:
                 target = target[part]
             target[parts[-1]] = override
+        for path in self.removed_paths:
+            target = value
+            parts = path.split(".")
+            for part in parts[:-1]:
+                target = target[part]
+            del target[parts[-1]]
         return value
 
 
@@ -171,7 +240,12 @@ def runtime(command: PodmanDouble) -> PodmanIsolationRuntime:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=command,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: b"populated 0\nfrozen 0\n",
+        cgroup_remove=lambda path: None,
     )
 
 
@@ -191,10 +265,12 @@ def test_create_uses_exact_broker_owned_policy_argv(
 
     create = next(call[0] for call in command.calls if call[0][0] == "create")
     assert result.unit_id == UNIT_ID
-    assert create[:14] == (
+    assert create[:18] == (
         "create",
         "--pull=never",
         "--name",
+        NAME,
+        "--hostname",
         NAME,
         "--network=none",
         "--read-only",
@@ -204,6 +280,8 @@ def test_create_uses_exact_broker_owned_policy_argv(
         "--user",
         "1001:0",
         "--cgroups=enabled",
+        "--cgroup-parent",
+        f"{NAME}.slice",
         "--ipc=none",
         "--pid=private",
     )
@@ -216,7 +294,7 @@ def test_create_uses_exact_broker_owned_policy_argv(
     assert create[create.index("--timeout") + 1] == "3"
     assert create[create.index("--stop-timeout") + 1] == "0"
     assert create[create.index("--mount") + 1] == (
-        "type=tmpfs,destination=/work,tmpfs-mode=0700,tmpfs-size=16777216"
+        "type=tmpfs,destination=/work,tmpfs-mode=0770,tmpfs-size=16777216"
     )
     assert create[create.index("--entrypoint") + 1] == (
         '["python","-m","markweave.reversions.attempt_main"]'
@@ -268,6 +346,9 @@ def test_successful_create_requires_exact_returned_container_identity(
         ("ImageName", "localhost/substituted@" + IMAGE_DIGEST),
         ("Name", "substituted"),
         ("Config.CreateCommand", ["podman", "create", "--privileged"]),
+        ("Config.Env", [f"HOSTNAME={NAME}", "INJECTED=1"]),
+        ("HostConfig.Binds", ["/srv/injected:/work"]),
+        ("HostConfig.SecurityOpt", []),
     ],
 )
 def test_create_rejects_substituted_runtime_specification(
@@ -334,7 +415,7 @@ def test_kill_acknowledgement_without_stopped_state_is_insufficient(
         max_output_bytes: int | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
-        if arguments[0] == "kill":
+        if arguments[3] == "kill":
             return 125, b""
         return command(
             arguments,
@@ -346,7 +427,11 @@ def test_kill_acknowledgement_without_stopped_state_is_insufficient(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=ignored_kill,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
+        cgroup_read=lambda path: b"populated 0\nfrozen 0\n",
+        cgroup_remove=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
         backend.hard_terminate(runtime_unit)
@@ -368,10 +453,10 @@ def test_exit_empty_and_removal_require_independent_positive_evidence(
     empty_evidence = backend.confirm_empty(runtime_unit)
     backend.remove(runtime_unit)
     backend.remove(runtime_unit)
-    removal_evidence = backend.confirm_removed(runtime_unit)
+    removal_evidence = backend.confirm_removed(runtime_unit, empty_evidence)
 
     assert len({exit_evidence, empty_evidence, removal_evidence}) == 3
-    assert command.calls[-1][0][0] == "events"
+    assert command.calls[-1][0][0] == "ps"
 
 
 @pytest.mark.unit
@@ -384,7 +469,7 @@ def test_absence_and_remove_acknowledgement_are_not_removal_proof(
     command.exists = False
 
     with pytest.raises(PodmanRuntimeError, match="evidence"):
-        backend.confirm_removed(runtime_unit)
+        backend.confirm_removed(runtime_unit, cast(Any, object()))
 
 
 @pytest.mark.unit
@@ -395,13 +480,16 @@ def test_removed_proof_reconstructs_from_persisted_incarnation(
     backend = runtime(command)
     runtime_unit = backend.create(unit, policy)
     backend.hard_terminate(runtime_unit)
+    empty_evidence = backend.confirm_empty(runtime_unit)
     backend.remove(runtime_unit)
 
     class StoredUnit:
         unit_id = UNIT_ID
         incarnation = runtime_unit.incarnation
 
-    assert backend.confirm_removed(StoredUnit()).value.startswith("sha256:")
+    assert backend.confirm_removed(StoredUnit(), empty_evidence).value.startswith(
+        "sha256:"
+    )
 
 
 @pytest.mark.unit
@@ -409,8 +497,7 @@ def test_removed_proof_reconstructs_from_persisted_incarnation(
     "override",
     [
         {"State.Pid": 1},
-        {"State.ConmonPid": 1},
-        {"State.ExecIDs": ["exec"]},
+        {"ExecIDs": ["exec"]},
         {"State.Status": "running"},
     ],
 )
@@ -424,6 +511,32 @@ def test_empty_proof_rejects_any_reported_container_member(
     command.overrides.update(override)
 
     with pytest.raises(PodmanRuntimeError, match="not empty"):
+        backend.confirm_empty(runtime_unit)
+
+
+@pytest.mark.unit
+def test_empty_proof_requires_top_level_exec_ids_and_positive_cgroup_evidence(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    runtime_unit = created_runtime(command, unit, policy)
+    command.status = "exited"
+    command.removed_paths.add("ExecIDs")
+    command.overrides["State.ExecIDs"] = []
+    with pytest.raises(PodmanRuntimeError, match="not empty"):
+        runtime(command).confirm_empty(runtime_unit)
+
+    command.removed_paths.clear()
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+    )
+    with pytest.raises(PodmanRuntimeError, match="cgroup"):
         backend.confirm_empty(runtime_unit)
 
 
@@ -444,7 +557,7 @@ def test_discovery_is_bounded_sorted_and_rejects_duplicates(
         max_output_bytes: int | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
-        if arguments[0] == "ps":
+        if arguments[3] == "ps":
             return 0, json.dumps([{"Names": [NAME]}, {"Names": [NAME]}]).encode()
         return original(
             arguments,
@@ -456,7 +569,9 @@ def test_discovery_is_bounded_sorted_and_rejects_duplicates(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=duplicated,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError, match="exceeds"):
         duplicate_backend.discover(limit=1)
@@ -474,7 +589,9 @@ def test_discovery_rejects_malformed_cli_json(output: bytes) -> None:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=malformed,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError):
         backend.discover(limit=1)
@@ -524,7 +641,9 @@ def test_runtime_rejects_non_rootless_or_non_durable_environment(
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=invalid,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError, match="environment"):
         backend.discover(limit=1)
@@ -537,7 +656,9 @@ def test_command_runner_kills_timed_out_process_group(tmp_path: Path) -> None:
         "#!/bin/sh\ntrap '' TERM\nsleep 30 &\nwait\n", encoding="utf-8"
     )
     executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-    runner = BoundedCommandRunner(executable, PodmanCommandLimits(0.05))
+    runner = BoundedCommandRunner(
+        executable, PodmanCommandLimits(0.05), environment={"PATH": "/usr/bin:/bin"}
+    )
 
     with pytest.raises(PodmanRuntimeError, match="bounds"):
         runner(("fixed",))
@@ -551,7 +672,11 @@ def test_command_runner_bounds_output_and_hides_stderr(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-    runner = BoundedCommandRunner(executable, PodmanCommandLimits(1, 1024))
+    runner = BoundedCommandRunner(
+        executable,
+        PodmanCommandLimits(1, 1024),
+        environment={"PATH": "/usr/bin:/bin"},
+    )
 
     with pytest.raises(PodmanRuntimeError, match="bounds") as raised:
         runner(("fixed",))
@@ -560,12 +685,87 @@ def test_command_runner_bounds_output_and_hides_stderr(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_command_runner_is_hermetic_and_reaps_after_unexpected_read_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    executable = tmp_path / "environment"
+    executable.write_text(
+        "#!/bin/sh\nprintf '%s' \"${CONTAINER_HOST-unset}\"\nsleep 30\n",
+        encoding="utf-8",
+    )
+    executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    monkeypatch.setenv("CONTAINER_HOST", "tcp://attacker.invalid")
+    _, environment_output = BoundedCommandRunner(
+        Path("/usr/bin/env"),
+        PodmanCommandLimits(1),
+        environment={"PATH": "/usr/bin:/bin"},
+    )(("--null",))
+    assert b"CONTAINER_HOST" not in environment_output
+    original_popen = podman_runtime.subprocess.Popen
+    spawned: list[Any] = []
+
+    def capture(*args: Any, **kwargs: Any) -> Any:
+        process = original_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    mocker.patch.object(podman_runtime.subprocess, "Popen", side_effect=capture)
+    mocker.patch.object(
+        podman_runtime.selectors.EpollSelector,
+        "select",
+        side_effect=OSError("secret"),
+    )
+    runner = BoundedCommandRunner(
+        executable,
+        PodmanCommandLimits(1),
+        environment={"PATH": "/usr/bin:/bin"},
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="failed") as raised:
+        runner(("fixed",))
+
+    assert "secret" not in str(raised.value)
+    assert spawned and spawned[0].poll() is not None
+
+
+@pytest.mark.unit
+def test_command_runner_rejects_remote_authority_environment() -> None:
+    with pytest.raises(ValueError):
+        BoundedCommandRunner(
+            Path("/bin/true"),
+            PodmanCommandLimits(1),
+            environment={"CONTAINER_HOST": "tcp://attacker.invalid"},
+        )
+
+
+@pytest.mark.unit
+def test_hooks_directory_must_be_empty_owner_only_and_not_a_symlink(
+    tmp_path: Path,
+) -> None:
+    hooks = tmp_path / "hooks"
+    hooks.mkdir(mode=0o700)
+    podman_runtime._validate_hooks_directory(hooks)
+    (hooks / "injected.json").write_text("{}", encoding="ascii")
+    with pytest.raises(PodmanRuntimeError, match="hooks"):
+        podman_runtime._validate_hooks_directory(hooks)
+    (hooks / "injected.json").unlink()
+    hooks.chmod(0o755)
+    with pytest.raises(PodmanRuntimeError, match="hooks"):
+        podman_runtime._validate_hooks_directory(hooks)
+    link = tmp_path / "link"
+    link.symlink_to(hooks, target_is_directory=True)
+    with pytest.raises(PodmanRuntimeError, match="hooks"):
+        podman_runtime._validate_hooks_directory(link)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "kwargs",
     [
         {"image_repository": "not-pinned"},
         {"run_as_uid": 0},
-        {"event_lookback_seconds": 0},
+        {"cgroup_root": Path("relative")},
+        {"hooks_directory": Path("relative")},
     ],
 )
 def test_runtime_rejects_unsafe_configuration(kwargs: dict[str, object]) -> None:
@@ -573,11 +773,12 @@ def test_runtime_rejects_unsafe_configuration(kwargs: dict[str, object]) -> None
         "image_repository": IMAGE_REPOSITORY,
         "run_as_uid": 1001,
         "command": PodmanDouble(),
-        "event_lookback_seconds": 600,
+        "cgroup_root": Path("/sys/fs/cgroup"),
+        "hooks_directory": HOOKS,
     }
     values.update(kwargs)
     with pytest.raises(ValueError):
-        PodmanIsolationRuntime(**values)  # type: ignore[arg-type]
+        PodmanIsolationRuntime(**cast(Any, values))
 
 
 @pytest.mark.unit
@@ -612,11 +813,15 @@ def test_command_runner_rejects_invalid_contract_and_failed_exec(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(ValueError):
-        BoundedCommandRunner(Path("relative"), PodmanCommandLimits(1))
-    missing = BoundedCommandRunner(tmp_path / "missing", PodmanCommandLimits(1))
+        BoundedCommandRunner(Path("relative"), PodmanCommandLimits(1), environment={})
+    missing = BoundedCommandRunner(
+        tmp_path / "missing", PodmanCommandLimits(1), environment={}
+    )
     with pytest.raises(PodmanRuntimeError, match="failed"):
         missing(("fixed",))
-    failed = BoundedCommandRunner(Path("/bin/false"), PodmanCommandLimits(1))
+    failed = BoundedCommandRunner(
+        Path("/bin/false"), PodmanCommandLimits(1), environment={}
+    )
     with pytest.raises(PodmanRuntimeError, match="failed"):
         failed(("fixed",))
     with pytest.raises(PodmanRuntimeError, match="contract"):
@@ -641,19 +846,20 @@ def test_create_rejects_non_ascii_identity_and_unknown_state(
 
 
 @pytest.mark.unit
-def test_removal_rejects_live_unit_and_duplicate_event(
+def test_removal_rejects_live_unit_and_label_scoped_discovery(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
     command = PodmanDouble()
     backend = runtime(command)
     runtime_unit = backend.create(unit, policy)
     with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
-        backend.confirm_removed(runtime_unit)
+        backend.confirm_removed(runtime_unit, EvidenceDigest(f"sha256:{'a' * 64}"))
     backend.hard_terminate(runtime_unit)
+    empty_evidence = backend.confirm_empty(runtime_unit)
     backend.remove(runtime_unit)
-    command.events.append(dict(command.events[0]))
-    with pytest.raises(PodmanRuntimeError, match="evidence"):
-        backend.confirm_removed(runtime_unit)
+    command.exists = True
+    with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
+        backend.confirm_removed(runtime_unit, empty_evidence)
 
 
 @pytest.mark.unit
@@ -670,7 +876,7 @@ def test_discovery_rejects_malformed_summary(summary: object) -> None:
         max_output_bytes: int | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
-        if arguments[0] == "ps":
+        if arguments[3] == "ps":
             return 0, json.dumps([summary]).encode()
         return command(
             arguments,
@@ -682,7 +888,9 @@ def test_discovery_rejects_malformed_summary(summary: object) -> None:
         image_repository=IMAGE_REPOSITORY,
         run_as_uid=1001,
         command=malformed,
-        event_lookback_seconds=600,
+        cgroup_root=Path("/sys/fs/cgroup"),
+        hooks_directory=HOOKS,
+        hooks_directory_validate=lambda path: None,
     )
     with pytest.raises(PodmanRuntimeError):
         backend.discover(limit=1)
@@ -713,18 +921,7 @@ def test_podman_evidence_field_parsers_fail_closed(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "output",
-    [b"not-json\n", b"[]\n", b"\xff"],
-)
-def test_event_parser_rejects_noncanonical_json_lines(output: bytes) -> None:
+@pytest.mark.parametrize("output", [b"", b"populated 0\n", b"bad 0\nfrozen 0\n"])
+def test_cgroup_parser_rejects_noncanonical_evidence(output: bytes) -> None:
     with pytest.raises(PodmanRuntimeError):
-        podman_runtime._json_lines(output)
-
-
-@pytest.mark.unit
-def test_event_time_rejects_missing_or_nonpositive_value() -> None:
-    with pytest.raises(PodmanRuntimeError):
-        podman_runtime._event_time({})
-    with pytest.raises(PodmanRuntimeError):
-        podman_runtime._event_time({"TimeNano": 0})
+        podman_runtime._parse_cgroup_events(output)
