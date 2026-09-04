@@ -159,9 +159,9 @@ jobs:
           pnpm --filter @markweave/web run check
           pnpm --filter @markweave/web run build
           pnpm --filter @markweave/web run test:production
-      - name: Run unit tests with branch coverage
+      - name: Run light tests with branch coverage
         run: >-
-          uv run pytest -m unit
+          uv run pytest -m "unit or light_coverage"
           --cov-report=json:coverage.json
       - name: Enforce application branch-only coverage
         run: >-

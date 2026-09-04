@@ -14,7 +14,7 @@ from markweave.reversions import _anydoc_compat as compat
 from markweave.reversions.assets import ReverseAssetLimits, normalize_assets
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 CORPUS = Path(__file__).parents[3] / "spikes" / "anydoc" / "corpus"
 _UNSAFE_DOCX_TARGET = b'Target="../../fixture-src/sibling.odt"'

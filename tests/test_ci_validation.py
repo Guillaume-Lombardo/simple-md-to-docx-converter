@@ -566,11 +566,17 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 @pytest.mark.parametrize(
     ("command", "replacement"),
     [
-        ("uv run pytest -m unit", "echo uv run pytest -m unit"),
-        ("uv run pytest -m unit", "true # uv run pytest -m unit"),
         (
-            "uv run pytest -m unit",
-            "COMMAND='uv run pytest -m unit'; $COMMAND",
+            'uv run pytest -m "unit or light_coverage"',
+            'echo uv run pytest -m "unit or light_coverage"',
+        ),
+        (
+            'uv run pytest -m "unit or light_coverage"',
+            'true # uv run pytest -m "unit or light_coverage"',
+        ),
+        (
+            'uv run pytest -m "unit or light_coverage"',
+            "COMMAND='uv run pytest -m \"unit or light_coverage\"'; $COMMAND",
         ),
         (
             "python -m scripts.ci.check_changed_coverage",

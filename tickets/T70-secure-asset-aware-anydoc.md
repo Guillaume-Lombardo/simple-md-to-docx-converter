@@ -186,6 +186,11 @@ for reverse conversion.
   three excluded document engines were unavailable or intentionally excluded from that broad local
   command. T70 remains In Progress because the external broker, runtime backends, termination proof,
   and production integration belong to later slices.
+* 2026-09-04: Closed the two first-run CI gaps before merge. The rootless container smoke now maps
+  only its temporary bind workspace to the fixed arbitrary child UID, and the light coverage gate
+  explicitly selects the real-anydoc integration suite through the `light_coverage` marker. The
+  exact light selection passes 2,408 tests at 94.09% total and 90.02% branch-only application
+  coverage; the corrected container job also passes on GitHub Actions.
 
 ## Synchronization
 

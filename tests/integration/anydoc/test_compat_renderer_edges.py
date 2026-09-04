@@ -10,7 +10,7 @@ import pytest
 from markweave.reversions import _anydoc_compat as compat
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 
 def _style(

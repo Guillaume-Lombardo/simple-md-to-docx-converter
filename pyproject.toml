@@ -123,6 +123,7 @@ markers = [
     "unit: deterministic tests without external dependencies",
     "functional: application behavior through public interfaces",
     "integration: integration with a real component",
+    "light_coverage: integration tests included in the light coverage gate",
     "e2e: complete flow against the built container",
     "slow: excluded from explicitly fast checks",
     "requires_pandoc: requires Pandoc",
