@@ -247,6 +247,19 @@ for reverse conversion.
   fail-closed behavior. The current product configuration and Compose topology are unchanged. The
   affected 83 harness tests, Ruff, `ty`, CI validation, the complete local distributed image smoke,
   and the immutable 0.5.2 distributed rollback rehearsal pass.
+* 2026-09-04: Implemented the owner-only Linux Unix-socket boundary for the external isolation
+  broker from verified `main` at `2119adb`. The transport derives its stable configured principal
+  only after kernel `SO_PEERCRED` authentication, accepts exactly one canonical 4 KiB-bounded frame
+  after client write EOF, applies one absolute operation deadline, and bounds its listen backlog,
+  active handlers, and shutdown drain. Startup reserves and verifies an exact owner-mode socket
+  inode before completing broker reconciliation and begins listening only afterward; active,
+  insecure, replaced, or unprovably stale nodes fail closed. The client reciprocally verifies the
+  filesystem node, server peer, response operation, request identity, attempt/unit/proof identities,
+  and proof principal. No workspace data or raw runtime authority crosses this boundary. The 66
+  focused dispatcher/transport tests, including six real AF_UNIX integrations, pass at 92.97% total
+  branch coverage for the two new modules; the complete 364-test broker selection, Ruff, `ty`, and
+  diff validation also pass. The broader local gate passed 3,008 tests at 94.81% total coverage and
+  reported only the unavailable PostgreSQL/S3 endpoints plus the known process-reaping timing flake.
 
 ## Synchronization
 

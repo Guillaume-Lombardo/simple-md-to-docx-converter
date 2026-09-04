@@ -7,6 +7,7 @@ class BrokerErrorCategory(StrEnum):
     """Machine-readable failures that never contain runtime or document details."""
 
     AUTHENTICATION_FAILED = "authentication_failed"
+    TRANSPORT_FAILURE = "transport_failure"
     PROTOCOL_ERROR = "protocol_error"
     REPLAY_REJECTED = "replay_rejected"
     INVENTORY_FULL = "inventory_full"
@@ -18,6 +19,7 @@ class BrokerErrorCategory(StrEnum):
 
 _MESSAGES: dict[BrokerErrorCategory, str] = {
     BrokerErrorCategory.AUTHENTICATION_FAILED: "Broker authentication failed.",
+    BrokerErrorCategory.TRANSPORT_FAILURE: "The broker transport failed.",
     BrokerErrorCategory.PROTOCOL_ERROR: "The broker protocol request is invalid.",
     BrokerErrorCategory.REPLAY_REJECTED: "The broker request was already observed.",
     BrokerErrorCategory.INVENTORY_FULL: "The broker inventory is at capacity.",

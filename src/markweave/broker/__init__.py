@@ -14,6 +14,11 @@ from markweave.broker.models import (
     is_next_unit_state,
     policy_specification_evidence,
 )
+from markweave.broker.unix_transport import (
+    UnixBrokerClient,
+    UnixBrokerServer,
+    UnixTransportLimits,
+)
 
 __all__ = [
     "AuthenticatedPrincipal",
@@ -27,6 +32,9 @@ __all__ = [
     "RuntimeIncarnation",
     "RuntimeLimits",
     "TerminationProof",
+    "UnixBrokerClient",
+    "UnixBrokerServer",
+    "UnixTransportLimits",
     "is_next_unit_state",
     "policy_specification_evidence",
 ]
