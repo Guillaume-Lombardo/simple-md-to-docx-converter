@@ -5,6 +5,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import (
@@ -162,6 +163,23 @@ def test_decoder_rejects_duplicate_keys() -> None:
 def test_decoder_rejects_noncanonical_json() -> None:
     with pytest.raises(BrokerError, match="protocol request"):
         decode_request(_frame(_mapping(), canonical=False))
+
+
+@pytest.mark.parametrize("json_boundary", ("loads", "dumps"))
+def test_decoders_map_json_recursion_failures_to_protocol_errors(
+    mocker: MockerFixture,
+    json_boundary: str,
+) -> None:
+    frames = (
+        (decode_request, encode_request(ReadyRequest(REQUEST_ID, 1))),
+        (decode_response, encode_response(ReadyResponse(REQUEST_ID, True))),
+    )
+
+    for decoder, frame in frames:
+        patched = mocker.patch.object(json, json_boundary, side_effect=RecursionError)
+        with pytest.raises(BrokerError, match="protocol request"):
+            decoder(frame)
+        mocker.stop(patched)
 
 
 @pytest.mark.parametrize(

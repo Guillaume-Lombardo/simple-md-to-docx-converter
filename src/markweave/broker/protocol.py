@@ -195,7 +195,7 @@ def _canonical_json(value: dict[str, object]) -> bytes:
             separators=(",", ":"),
             sort_keys=True,
         ).encode("ascii")
-    except TypeError, ValueError, UnicodeEncodeError:
+    except TypeError, ValueError, UnicodeEncodeError, RecursionError:
         _fail()
     if not encoded or len(encoded) > MAX_FRAME_BYTES:
         _fail()
@@ -330,7 +330,7 @@ def decode_request(frame: bytes) -> BrokerRequest:
             object_pairs_hook=_unique_object,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-    except UnicodeDecodeError, ValueError:
+    except UnicodeDecodeError, ValueError, RecursionError:
         _fail()
     if not isinstance(value, dict) or _canonical_json(value) != payload:
         _fail()
@@ -514,7 +514,7 @@ def _decode_json_frame(frame: bytes) -> dict[str, object]:
             object_pairs_hook=_unique_object,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-    except UnicodeDecodeError, ValueError:
+    except UnicodeDecodeError, ValueError, RecursionError:
         _fail()
     if not isinstance(value, dict) or _canonical_json(value) != payload:
         _fail()
