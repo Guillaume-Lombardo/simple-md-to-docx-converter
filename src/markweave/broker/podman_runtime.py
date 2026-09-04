@@ -312,6 +312,15 @@ class SystemdCgroupRemover:
             return
         except OSError as error:
             raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
+        if _parse_cgroup_events(_read_cgroup_events(path)).get("populated") != 0:
+            raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
+        try:
+            path.rmdir()
+            path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
         raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
 
 
@@ -385,29 +394,75 @@ class PodmanIsolationRuntime:
             max_output_bytes=1024,
             accepted_exit_codes=frozenset({0, 125}),
         )
+        created_id: str | None = None
+        inspected_id: str | None = None
+        runtime_unit: PodmanRuntimeUnit | None = None
         try:
-            created_id = output.strip().decode("ascii", errors="strict")
-        except UnicodeDecodeError as error:
-            raise PodmanRuntimeError("Podman create identity is invalid") from error
-        inspected = self._inspect(name)
-        runtime_unit = self._verified_unit(inspected, expected=unit, policy=policy)
-        if (create_code == 0 and created_id != runtime_unit.container_id) or (
-            create_code != 0 and created_id
-        ):
-            raise PodmanRuntimeError("Podman create identity is invalid")
-        state = _mapping(inspected, "State")
-        status = _string(state, "Status")
-        if status == "created":
-            self._call(("start", runtime_unit.container_id), max_output_bytes=1024)
-            runtime_unit = self._verified_unit(
-                self._inspect(runtime_unit.container_id), expected=unit, policy=policy
+            with suppress(UnicodeDecodeError):
+                created_id = output.strip().decode("ascii", errors="strict")
+            inspected = self._inspect(name)
+            raw_inspected_id = inspected.get("Id")
+            if (
+                type(raw_inspected_id) is str
+                and _CONTAINER_ID_PATTERN.fullmatch(raw_inspected_id) is not None
+            ):
+                inspected_id = raw_inspected_id
+            runtime_unit = self._verified_unit(inspected, expected=unit, policy=policy)
+            if (
+                created_id is None
+                or (create_code == 0 and created_id != runtime_unit.container_id)
+                or (create_code != 0 and created_id)
+            ):
+                raise PodmanRuntimeError("Podman create identity is invalid")
+            state = _mapping(inspected, "State")
+            status = _string(state, "Status")
+            if status == "created":
+                self._call(("start", runtime_unit.container_id), max_output_bytes=1024)
+                runtime_unit = self._verified_unit(
+                    self._inspect(runtime_unit.container_id),
+                    expected=unit,
+                    policy=policy,
+                )
+                status = _string(
+                    _mapping(self._inspect(runtime_unit.container_id), "State"),
+                    "Status",
+                )
+            if status not in {"running", "exited", "stopped"}:
+                raise PodmanRuntimeError("Podman container state is invalid")
+            return runtime_unit
+        except Exception as create_error:
+            if create_code == 0:
+                cleanup_identity = (
+                    runtime_unit.container_id
+                    if runtime_unit is not None
+                    else inspected_id or created_id
+                )
+                if (
+                    cleanup_identity is None
+                    or _CONTAINER_ID_PATTERN.fullmatch(cleanup_identity) is None
+                ):
+                    raise PodmanRuntimeError(
+                        "Podman failed creation cleanup is unconfirmed"
+                    ) from create_error
+                self._cleanup_failed_create(unit.unit_id, cleanup_identity)
+            raise
+
+    def _cleanup_failed_create(self, unit_id: UUID, container_id: str) -> None:
+        failed = False
+        try:
+            self._call(
+                ("rm", "--force", container_id),
+                max_output_bytes=1024,
+                accepted_exit_codes=frozenset({0, 1}),
             )
-            status = _string(
-                _mapping(self._inspect(runtime_unit.container_id), "State"), "Status"
-            )
-        if status not in {"running", "exited", "stopped"}:
-            raise PodmanRuntimeError("Podman container state is invalid")
-        return runtime_unit
+        except PodmanRuntimeError:
+            failed = True
+        try:
+            self._cgroup_remove(self._cgroup_path(unit_id))
+        except OSError, PodmanRuntimeError:
+            failed = True
+        if failed:
+            raise PodmanRuntimeError("Podman failed creation cleanup is unconfirmed")
 
     def hard_terminate(self, runtime_unit: RuntimeUnit) -> None:
         """Send SIGKILL to the verified complete container unit, idempotently."""
@@ -871,7 +926,6 @@ class PodmanIsolationRuntime:
         host = _mapping(inspected, "HostConfig")
         expected_config: Mapping[str, object] = {
             "Cmd": None,
-            "Entrypoint": list(_FIXED_ENTRYPOINT),
             "StopTimeout": 0,
             "Timeout": math.ceil(policy.limits.wall_time_millis / 1000),
             "User": f"{self._run_as_uid}:0",
@@ -929,6 +983,7 @@ class PodmanIsolationRuntime:
                     f"HOSTNAME={_string(inspected, 'Name').lstrip('/')}",
                 )
             )
+            or not _matches_entrypoint(config.get("Entrypoint"))
             or any(config.get(key) != value for key, value in expected_config.items())
             or any(host.get(key) != value for key, value in expected_host.items())
             or inspected.get("Mounts") != []
@@ -1115,7 +1170,7 @@ def _parse_systemd_properties(value: bytes) -> dict[str, str]:
             raise ValueError
         for line in text.splitlines():
             key, raw = line.split("=", 1)
-            if key not in allowed or key in parsed or not raw.isascii():
+            if key not in allowed or key in parsed:
                 raise ValueError
             parsed[key] = raw
     except (UnicodeDecodeError, ValueError) as error:
@@ -1184,6 +1239,14 @@ def _matches_create_command(value: Any, arguments: tuple[str, ...]) -> bool:
         and all(type(item) is str for item in value)
         and Path(value[0]).name == "podman"
         and value[1:] == list(arguments)
+    )
+
+
+def _matches_entrypoint(value: Any) -> bool:
+    """Accept the exact Podman 4.9 string or 5.x argument-vector projection."""
+
+    return value == list(_FIXED_ENTRYPOINT) or (
+        type(value) is str and value == " ".join(_FIXED_ENTRYPOINT)
     )
 
 

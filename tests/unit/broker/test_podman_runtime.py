@@ -95,6 +95,10 @@ class PodmanDouble:
         self.removed_paths: set[str] = set()
         self.create_code = 0
         self.create_output = CONTAINER_ID.encode()
+        self.cgroup_removals: list[Path] = []
+
+    def remove_cgroup(self, path: Path) -> None:
+        self.cgroup_removals.append(path)
 
     def __call__(  # noqa: PLR0911 - one bounded response per emulated subcommand
         self,
@@ -251,7 +255,7 @@ def runtime(command: PodmanDouble) -> PodmanIsolationRuntime:
         command=command,
         cgroup_root=CGROUP_ROOT,
         hooks_directory=HOOKS,
-        cgroup_remove=lambda path: None,
+        cgroup_remove=command.remove_cgroup,
         hooks_directory_validate=lambda path: None,
         cgroup_root_validate=lambda path: None,
         cgroup_create=lambda path: None,
@@ -361,6 +365,7 @@ def test_successful_create_requires_exact_returned_container_identity(
         ("ImageName", "localhost/substituted@" + IMAGE_DIGEST),
         ("Name", "substituted"),
         ("Config.CreateCommand", ["podman", "create", "--privileged"]),
+        ("Config.Entrypoint", "python -m substituted"),
         ("Config.Env", [f"HOSTNAME={NAME}", "INJECTED=1"]),
         ("HostConfig.Binds", ["/srv/injected:/work"]),
         ("HostConfig.SecurityOpt", []),
@@ -375,6 +380,128 @@ def test_create_rejects_substituted_runtime_specification(
 
     with pytest.raises(PodmanRuntimeError):
         created_runtime(command, unit, policy)
+    assert command.exists is False
+    assert any(call[0][:2] == ("rm", "--force") for call in command.calls)
+    assert command.cgroup_removals == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+
+
+@pytest.mark.unit
+def test_create_accepts_only_exact_legacy_podman_entrypoint_projection(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.overrides["Config.Entrypoint"] = " ".join(podman_runtime._FIXED_ENTRYPOINT)
+
+    created = runtime(command).create(unit, policy)
+
+    assert created.container_id == CONTAINER_ID
+    assert command.status == "running"
+
+
+@pytest.mark.unit
+def test_failed_create_cleanup_attempts_both_boundaries_and_fails_closed(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.overrides["Config.Entrypoint"] = "substituted"
+    original = command.__call__
+    removed_cgroups: list[Path] = []
+
+    def failing_remove(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        if arguments[3] == "rm":
+            raise PodmanRuntimeError("Podman command failed")
+        return original(
+            arguments,
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=failing_remove,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=removed_cgroups.append,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
+        backend.create(unit, policy)
+
+    assert removed_cgroups == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+
+
+@pytest.mark.unit
+def test_failed_create_cleanup_rejects_unconfirmed_cgroup_removal(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.overrides["Config.Entrypoint"] = "substituted"
+
+    def unavailable(path: Path) -> None:
+        del path
+        raise OSError("secret")
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=unavailable,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup") as raised:
+        backend.create(unit, policy)
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.unit
+def test_recovered_container_validation_failure_is_not_removed(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    backend.create(unit, policy)
+    command.create_code = 125
+    command.create_output = b""
+    command.overrides["Config.Entrypoint"] = "substituted"
+
+    with pytest.raises(PodmanRuntimeError, match="realized"):
+        backend.create(unit, policy)
+
+    assert command.exists is True
+    assert command.cgroup_removals == []
+
+
+@pytest.mark.unit
+def test_failed_create_without_exact_container_id_reports_cleanup_failure(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.create_output = b"\xff"
+    command.overrides["Id"] = "invalid"
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
+        runtime(command).create(unit, policy)
+
+    assert command.exists is True
+    assert command.cgroup_removals == []
 
 
 @pytest.mark.unit
@@ -824,6 +951,19 @@ def test_cgroup_root_and_live_process_binding_fail_closed(
 
 
 @pytest.mark.unit
+def test_exact_owned_cgroup_root_validation_contract(mocker: MockerFixture) -> None:
+    expected = Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
+    metadata = mocker.Mock(st_mode=stat.S_IFDIR | 0o700, st_uid=1000)
+    mocker.patch.object(podman_runtime.os, "geteuid", return_value=1000)
+    mocker.patch.object(
+        Path, "resolve", autospec=True, side_effect=lambda path, strict: path
+    )
+    mocker.patch.object(Path, "stat", autospec=True, return_value=metadata)
+
+    podman_runtime._validate_cgroup_root(expected)
+
+
+@pytest.mark.unit
 def test_systemd_cgroup_remover_requires_exact_identity_and_disappearance(
     tmp_path: Path,
 ) -> None:
@@ -878,6 +1018,176 @@ def test_systemd_cgroup_remover_requires_exact_identity_and_disappearance(
     )
     with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
         retained(path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path", [object(), Path("relative.slice"), Path("/var/empty/wrong.slice")]
+)
+def test_systemd_cgroup_remover_rejects_every_invalid_identity(path: object) -> None:
+    with pytest.raises(PodmanRuntimeError, match="identity"):
+        SystemdCgroupRemover(lambda *args, **kwargs: (0, b""))(cast(Any, path))
+
+
+@pytest.mark.unit
+def test_systemd_cgroup_remover_rejects_invalid_configuration() -> None:
+    with pytest.raises(ValueError, match="configuration"):
+        SystemdCgroupRemover(cast(Any, None))
+
+
+@pytest.mark.unit
+def test_systemd_cgroup_remover_removes_inactive_empty_precreated_leaf(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path = tmp_path / f"markweavet70{UNIT_ID.hex}.slice"
+    path.mkdir()
+    mocker.patch.object(
+        podman_runtime,
+        "_read_cgroup_events",
+        return_value=b"populated 0\nfrozen 0\n",
+    )
+
+    def inactive(*args: object, **kwargs: object) -> tuple[int, bytes]:
+        del args, kwargs
+        return (
+            0,
+            b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n",
+        )
+
+    SystemdCgroupRemover(inactive)(path)
+
+    assert not path.exists()
+
+    path.mkdir()
+    mocker.patch.object(
+        podman_runtime,
+        "_read_cgroup_events",
+        return_value=b"populated 1\nfrozen 0\n",
+    )
+    with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
+        SystemdCgroupRemover(inactive)(path)
+
+    mocker.patch.object(
+        podman_runtime,
+        "_read_cgroup_events",
+        return_value=b"populated 0\nfrozen 0\n",
+    )
+    mocked_rmdir = mocker.patch.object(Path, "rmdir", return_value=None)
+    with pytest.raises(PodmanRuntimeError, match="unconfirmed"):
+        SystemdCgroupRemover(inactive)(path)
+    mocked_rmdir.assert_called_once()
+
+
+@pytest.mark.unit
+def test_systemd_cgroup_remover_hides_filesystem_failures(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path = tmp_path / f"markweavet70{UNIT_ID.hex}.slice"
+    path.mkdir()
+    mocker.patch.object(Path, "stat", side_effect=PermissionError("secret"))
+
+    def inactive(*args: object, **kwargs: object) -> tuple[int, bytes]:
+        del args, kwargs
+        return (
+            0,
+            b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n",
+        )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup failed") as raised:
+        SystemdCgroupRemover(inactive)(path)
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.unit
+def test_systemd_cgroup_remover_hides_rmdir_failure(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path = tmp_path / f"markweavet70{UNIT_ID.hex}.slice"
+    path.mkdir()
+    mocker.patch.object(
+        podman_runtime,
+        "_read_cgroup_events",
+        return_value=b"populated 0\nfrozen 0\n",
+    )
+    mocker.patch.object(Path, "rmdir", side_effect=PermissionError("secret"))
+
+    def inactive(*args: object, **kwargs: object) -> tuple[int, bytes]:
+        del args, kwargs
+        return (
+            0,
+            b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n",
+        )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup failed") as raised:
+        SystemdCgroupRemover(inactive)(path)
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pid", [cast(Any, "1"), 0])
+def test_process_cgroup_reader_rejects_invalid_pid(pid: int) -> None:
+    with pytest.raises(PodmanRuntimeError, match="binding"):
+        podman_runtime._read_process_cgroup(pid)
+
+
+@pytest.mark.unit
+def test_cgroup_and_entrypoint_canonicalizers_reject_substitution() -> None:
+    with pytest.raises(PodmanRuntimeError, match="identity"):
+        podman_runtime._cgroup_parent("substituted")
+    assert (
+        podman_runtime._matches_entrypoint(tuple(podman_runtime._FIXED_ENTRYPOINT))
+        is False
+    )
+
+
+@pytest.mark.unit
+def test_cgroup_event_reader_is_bounded_and_requires_available_evidence(
+    tmp_path: Path,
+) -> None:
+    cgroup = tmp_path / "unit.slice"
+    cgroup.mkdir()
+    events = cgroup / "cgroup.events"
+    events.write_bytes(b"populated 0\nfrozen 0\n")
+    assert podman_runtime._read_cgroup_events(cgroup) == b"populated 0\nfrozen 0\n"
+
+    events.write_bytes(b"x" * (podman_runtime._CGROUP_EVENTS_MAX_BYTES + 1))
+    with pytest.raises(PodmanRuntimeError, match="bound"):
+        podman_runtime._read_cgroup_events(cgroup)
+
+    events.unlink()
+    with pytest.raises(PodmanRuntimeError, match="unavailable"):
+        podman_runtime._read_cgroup_events(cgroup)
+
+
+@pytest.mark.unit
+def test_cgroup_preparation_accepts_an_existing_owned_leaf(tmp_path: Path) -> None:
+    cgroup = tmp_path / "unit.slice"
+    cgroup.mkdir()
+    (cgroup / "cgroup.events").write_bytes(b"populated 0\nfrozen 0\n")
+
+    podman_runtime._create_cgroup(cgroup)
+
+    missing_events = tmp_path / "missing-events.slice"
+    with pytest.raises(PodmanRuntimeError, match="preparation"):
+        podman_runtime._create_cgroup(missing_events)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        b"",
+        b"x" * 513,
+        b"\xff",
+        b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\nSubState=dead",
+        b"Unknown=value\n",
+        b"ActiveState=inactive\nActiveState=inactive\n",
+        b"ControlGroup=\nLoadState=loaded\nActiveState=inactive\n",
+    ],
+)
+def test_systemd_manager_evidence_is_bounded_and_exact(evidence: bytes) -> None:
+    with pytest.raises(PodmanRuntimeError, match="systemd evidence"):
+        podman_runtime._parse_systemd_properties(evidence)
 
 
 @pytest.mark.unit
@@ -961,6 +1271,8 @@ def test_create_rejects_non_ascii_identity_and_unknown_state(
     command.create_output = b"\xff"
     with pytest.raises(PodmanRuntimeError, match="identity"):
         created_runtime(command, unit, policy)
+    assert command.exists is False
+    assert command.cgroup_removals == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
 
     command = PodmanDouble()
     command.status = "unknown"

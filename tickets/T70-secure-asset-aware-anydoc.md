@@ -341,6 +341,19 @@ for reverse conversion.
   non-engine selection completed 3,129 passing tests at 94.80% total and 90.80% application branch
   coverage, with the same 30 unavailable-PostgreSQL errors, three unavailable-S3 failures, and
   unrelated known release reaping timing failure. No Kubernetes acceptance is claimed.
+* 2026-09-05: Restored compatibility with the hosted Ubuntu runner's Podman 4.9.3 after its first
+  container-domain run exposed the older exact inspect projection. Podman 4.9 joins the configured
+  entrypoint vector into one string, while Podman 5.4 returns the vector; the broker now accepts
+  only those two exact representations while still requiring the exact broker-authored create
+  command, labels, image digest, policy, and complete realized isolation spec. A successful create
+  that fails validation is rolled back by exact container ID and cgroup identity; both cleanup
+  boundaries are attempted, an inactive empty precreated cgroup leaf is removed safely, and any
+  unconfirmed cleanup remains a content-free failure. Unit tests cover both Podman projections,
+  near substitutions, recovered-container non-removal, malformed identity output, systemd and
+  filesystem failures, and bounded cgroup evidence. The local Podman 5.4.2 lifecycle suite remains
+  four-for-four. The 92 backend tests and 2,904-test light selection pass at 90.07% application
+  branch coverage, correcting the hosted run's 89.77% result. Hosted Podman 4.9.3 remains to be
+  reconfirmed by CI after independent review. No Kubernetes acceptance is claimed.
 
 ## Synchronization
 
