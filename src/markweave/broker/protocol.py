@@ -330,7 +330,7 @@ def decode_request(frame: bytes) -> BrokerRequest:
             object_pairs_hook=_unique_object,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-    except UnicodeDecodeError, ValueError, json.JSONDecodeError:
+    except UnicodeDecodeError, ValueError:
         _fail()
     if not isinstance(value, dict) or _canonical_json(value) != payload:
         _fail()
@@ -514,7 +514,7 @@ def _decode_json_frame(frame: bytes) -> dict[str, object]:
             object_pairs_hook=_unique_object,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
         )
-    except UnicodeDecodeError, ValueError, json.JSONDecodeError:
+    except UnicodeDecodeError, ValueError:
         _fail()
     if not isinstance(value, dict) or _canonical_json(value) != payload:
         _fail()

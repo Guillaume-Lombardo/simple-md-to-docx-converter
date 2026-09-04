@@ -427,7 +427,7 @@ def test_persistence_failure_after_commit_resumes_exactly_on_restart(
     retained = inventory.get_proof(created.unit_id)
     assert (retained is not None) is (target is ManagedUnitState.REMOVED)
 
-    patch.stop()
+    mocker.stop(patch)
     restarted = _service(inventory, runtime)
     restarted.start()
     proof = restarted.proof(PRINCIPAL, ATTEMPT_ID, created.unit_id)
