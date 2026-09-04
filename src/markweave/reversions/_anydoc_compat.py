@@ -182,6 +182,14 @@ class ParsedSource:
             _compatibility_error()
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedDocument:
+    """Rendered Markdown plus source occurrences retained in the output."""
+
+    markdown: str
+    retained_occurrences: tuple[int, ...]
+
+
 def _compatibility_error() -> None:
     reject(ReverseErrorCategory.MALFORMED)
 
@@ -549,7 +557,6 @@ def _walk_inlines(inlines: Sequence[Any]) -> Iterable[Any]:
 
 def _image_nodes(document: Any) -> Iterable[Any]:
     note_numbers = _number_notes(document)
-    rendered_note_numbers: set[int] = set()
     ordered_notes = sorted(
         (
             (note_numbers[note.id], note)
@@ -559,10 +566,7 @@ def _image_nodes(document: Any) -> Iterable[Any]:
         key=lambda item: item[0],
     )
     rendered_blocks: list[Sequence[Any]] = [document.blocks]
-    for number, note in ordered_notes:
-        if number not in rendered_note_numbers:
-            rendered_note_numbers.add(number)
-            rendered_blocks.append(note.blocks)
+    rendered_blocks.extend(note.blocks for _, note in ordered_notes)
     for blocks in rendered_blocks:
         for block in _walk_blocks(blocks):
             if block.kind in {"heading", "paragraph"}:
@@ -606,6 +610,14 @@ def render_document(
 ) -> str:
     """Render one validated parsed document, injecting one path per image occurrence."""
 
+    return render_document_result(document, image_paths).markdown
+
+
+def render_document_result(
+    document: Any, image_paths: Sequence[PurePosixPath | None] = ()
+) -> RenderedDocument:
+    """Render and identify the image occurrences retained in emitted Markdown."""
+
     validate_document(document)
     paths = tuple(image_paths)
     occurrences = tuple(_image_nodes(document))
@@ -630,6 +642,7 @@ def render_document(
         for block in document.blocks
         if (rendered := _render_block(block, context)) is not None
     ]
+    retained_occurrences = list(range(context.image_index[0]))
     rendered_notes: set[int] = set()
     ordered_notes = sorted(
         (
@@ -640,10 +653,12 @@ def render_document(
         key=lambda item: item[0],
     )
     for number, note in ordered_notes:
+        first_occurrence = context.image_index[0]
         body = _render_blocks(note.blocks, context)
         if not body or number in rendered_notes:
             continue
         rendered_notes.add(number)
+        retained_occurrences.extend(range(first_occurrence, context.image_index[0]))
         lines = body.splitlines()
         definition = f"[^{number}]: {lines[0]}"
         definition += "".join(f"\n{'    ' if line else ''}{line}" for line in lines[1:])
@@ -651,7 +666,8 @@ def render_document(
     if context.image_index[0] != len(paths):
         _compatibility_error()
     output = "\n\n".join(parts)
-    return output + "\n" if output else ""
+    markdown = output + "\n" if output else ""
+    return RenderedDocument(markdown, tuple(retained_occurrences))
 
 
 def _inlines_are_empty(inlines: Sequence[Any]) -> bool:
@@ -1109,7 +1125,6 @@ def _render_link(
     inline_context: Literal["block", "heading", "table"],
     context: _RenderContext,
 ) -> str:
-    label = _render_inlines(inline.content, inline_context, context, in_label=True)
     target = inline.target
     if target.kind == "anchor":
         fragment = context.fragments.get(target.value)
@@ -1120,6 +1135,7 @@ def _render_link(
         if not _is_safe_hyperlink(target.value):
             reject(ReverseErrorCategory.MALFORMED)
         url = target.value
+    label = _render_inlines(inline.content, inline_context, context, in_label=True)
     if not label.strip():
         if target.kind == "anchor":
             return ""
@@ -1639,9 +1655,11 @@ __all__ = [
     "UPSTREAM_ANYDOC_COMMIT",
     "UPSTREAM_RENDERER_SURFACES",
     "ParsedSource",
+    "RenderedDocument",
     "extract_asset_sources",
     "parse_document",
     "parse_source",
     "render_document",
+    "render_document_result",
     "validate_document",
 ]

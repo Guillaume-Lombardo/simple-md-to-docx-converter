@@ -51,6 +51,53 @@ def _png_with_embedded_payload(payload: bytes) -> bytes:
     return png[:-12] + chunk + png[-12:]
 
 
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", zlib.crc32(kind + payload))
+    )
+
+
+def _palette_png(palette: bytes) -> bytes:
+    padded_palette = palette + b"\x00" * (-len(palette) % 3)
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 3, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"PLTE", padded_palette)
+        + _png_chunk(b"IDAT", zlib.compress(b"\x00\x00"))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _with_comment_payload(format_name: str, payload: bytes) -> bytes:
+    image = _image(format_name)
+    if format_name == "JPEG":
+        return (
+            image[:2]
+            + b"\xff\xfe"
+            + struct.pack(">H", len(payload) + 2)
+            + payload
+            + image[2:]
+        )
+    return image[:-1] + b"\x21\xfe" + bytes([len(payload)]) + payload + b"\x00\x3b"
+
+
+def _webp_with_metadata(payload: bytes) -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (1, 1), "red").save(output, "WEBP", xmp=payload)
+    return output.getvalue()
+
+
+def _zip_payload() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("payload.txt", b"payload")
+    return output.getvalue()
+
+
 def _png_zip_polyglot() -> bytes:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
@@ -112,6 +159,51 @@ def test_each_supported_raster_signature_is_identified_before_normalization(
         (AssetSource("image", _image(format_name), media_type),), LIMITS
     )
     assert len(result.assets) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "media_type"),
+    [
+        (_palette_png(b"\x1f\x8b\x08"), "image/png"),
+        (_with_comment_payload("JPEG", b"benign \x1f\x8b\x08"), "image/jpeg"),
+        (_with_comment_payload("GIF", b"benign \x1f\x8b\x08"), "image/gif"),
+        (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3">'
+            b'<text x="0" y="2">%PDF- notes</text></svg>',
+            "image/svg+xml",
+        ),
+        (_webp_with_metadata(b"benign \x1f\x8b\x08"), "image/webp"),
+    ],
+)
+def test_benign_secondary_magic_inside_valid_image_is_not_a_polyglot(
+    source: bytes, media_type: str
+) -> None:
+    result = normalize_assets(
+        (AssetSource("image", source, media_type),),
+        LIMITS,
+        svg_renderer=_svg_renderer,
+    )
+
+    assert len(result.assets) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "media_type"),
+    [
+        (_palette_png(_zip_payload()), "image/png"),
+        (_with_comment_payload("JPEG", _zip_payload()), "image/jpeg"),
+        (_with_comment_payload("GIF", _zip_payload()), "image/gif"),
+        (_webp_with_metadata(_zip_payload()), "image/webp"),
+    ],
+)
+def test_parseable_zip_inside_valid_image_is_rejected(
+    source: bytes, media_type: str
+) -> None:
+    assert zipfile.is_zipfile(io.BytesIO(source))
+    with pytest.raises(ReverseConversionError) as captured:
+        normalize_assets((AssetSource("polyglot", source, media_type),), LIMITS)
+
+    assert captured.value.category is ReverseErrorCategory.ASSET_INVALID
 
 
 @pytest.mark.parametrize(

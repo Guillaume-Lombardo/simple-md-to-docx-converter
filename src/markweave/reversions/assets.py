@@ -32,19 +32,6 @@ _GIF_IMAGE = 0x2C
 _GIF_TRAILER = 0x3B
 _SVG_START = re.compile(rb"^\s*(?:<\?xml\b[^>]*>\s*)?<svg(?:\s|>)", re.IGNORECASE)
 _WEBP_HEADER_BYTES = 12
-_SECONDARY_CONTAINER_SIGNATURES = (
-    b"%PDF-",
-    b"startxref",
-    b"%%EOF",
-    b"PK\x03\x04",
-    b"PK\x05\x06",
-    b"PK\x07\x08",
-    b"\x7fELF",
-    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
-    b"Rar!\x1a\x07",
-    b"7z\xbc\xaf\x27\x1c",
-    b"\x1f\x8b\x08",
-)
 _MEDIA_SUFFIXES = {
     "image/gif": ".gif",
     "image/jpeg": ".jpg",
@@ -272,13 +259,11 @@ def _inspect_source(reference: AssetSource) -> tuple[bytes, str, str]:
     source = reference.source
     if type(source) is not bytes or not source:
         reject(ReverseErrorCategory.ASSET_INVALID)
-    if zipfile.is_zipfile(io.BytesIO(source)) or any(
-        source.find(signature, 1) >= 0 for signature in _SECONDARY_CONTAINER_SIGNATURES
-    ):
-        reject(ReverseErrorCategory.ASSET_INVALID)
     media_type = _normalized_declared_media_type(reference.declared_media_type)
     suffix = _detected_suffix(source)
     if _MEDIA_SUFFIXES[media_type] != suffix:
+        reject(ReverseErrorCategory.ASSET_INVALID)
+    if zipfile.is_zipfile(io.BytesIO(source)):
         reject(ReverseErrorCategory.ASSET_INVALID)
     return hashlib.sha256(source).digest(), media_type, suffix
 

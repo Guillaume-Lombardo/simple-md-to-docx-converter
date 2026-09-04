@@ -191,6 +191,13 @@ for reverse conversion.
   explicitly selects the real-anydoc integration suite through the `light_coverage` marker. The
   exact light selection passes 2,408 tests at 94.09% total and 90.02% branch-only application
   coverage; the corrected container job also passes on GitHub Actions.
+* 2026-09-04: Addressed CodeRabbit's two valid functional findings without accepting its unsafe
+  blanket signature-scan suggestion. Unresolved anchors now consume nested image occurrences once;
+  speculative/duplicate note bodies preserve pinned rendering semantics while a retained-occurrence
+  mask removes orphan references and normalized assets before packaging. Asset admission now rejects
+  structurally parseable ZIP polyglots in every image format without rejecting benign magic bytes in
+  valid PNG, JPEG, GIF, SVG, or WebP payloads. The exact light gate passes 2,426 tests at 94.13%
+  total and 90.13% branch-only coverage.
 
 ## Synchronization
 

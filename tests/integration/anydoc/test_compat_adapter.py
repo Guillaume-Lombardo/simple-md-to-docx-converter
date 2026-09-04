@@ -319,6 +319,50 @@ def test_rejects_missing_extra_or_unsafe_image_hooks(
     assert caught.value.category is ReverseErrorCategory.MALFORMED
 
 
+def test_duplicate_note_id_does_not_consume_image_path_twice() -> None:
+    document = compat.parse_document(_source("docx/text.docx"))
+    image = next(inline for inline in compat._image_nodes(document))
+    note_content = document.notes[0].blocks[0].content
+    assert isinstance(note_content, list)
+    note_content.append(image)
+    document.notes.append(document.notes[0])
+
+    rendered = compat.render_document_result(
+        document,
+        (
+            PurePosixPath("assets/image-0001.png"),
+            PurePosixPath("assets/image-0002.png"),
+            PurePosixPath("assets/image-0003.png"),
+        ),
+    )
+
+    assert rendered.retained_occurrences == (0, 1)
+    assert rendered.markdown.count("assets/image-0002.png") == 1
+    assert "assets/image-0003.png" not in rendered.markdown
+
+
+def test_empty_duplicate_note_does_not_hide_later_nonempty_body() -> None:
+    document = compat.parse_document(_source("docx/text.docx"))
+    duplicate_source = compat.parse_document(_source("docx/text.docx"))
+    image = next(inline for inline in compat._image_nodes(document))
+    document.notes[0].blocks.clear()
+    duplicate_content = duplicate_source.notes[0].blocks[0].content
+    assert isinstance(duplicate_content, list)
+    duplicate_content.append(image)
+    document.notes.append(duplicate_source.notes[0])
+
+    rendered = compat.render_document_result(
+        document,
+        (
+            PurePosixPath("assets/image-0001.png"),
+            PurePosixPath("assets/image-0002.png"),
+        ),
+    )
+
+    assert rendered.retained_occurrences == (0, 1)
+    assert rendered.markdown.count("assets/image-0002.png") == 1
+
+
 def test_inventory_and_license_bind_the_exact_upstream_surface() -> None:
     license_path = Path(compat.__file__).with_name("ANYDOC_COMPAT_LICENSE.txt")
 

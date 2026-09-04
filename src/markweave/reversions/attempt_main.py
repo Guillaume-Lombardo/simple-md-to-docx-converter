@@ -9,9 +9,9 @@ from typing import cast
 from markweave.reversions._anydoc_compat import (
     extract_asset_sources,
     parse_source,
-    render_document,
+    render_document_result,
 )
-from markweave.reversions.assets import normalize_assets
+from markweave.reversions.assets import AssetNormalizationResult, normalize_assets
 from markweave.reversions.attempt_channel import (
     AttemptChannelLimits,
     read_request,
@@ -55,6 +55,28 @@ def channel_limits_from_environment() -> AttemptChannelLimits:
     )
 
 
+def _retain_rendered_assets(
+    normalized: AssetNormalizationResult, retained_occurrences: tuple[int, ...]
+) -> AssetNormalizationResult:
+    if (
+        any(
+            type(index) is not int or not 0 <= index < len(normalized.references)
+            for index in retained_occurrences
+        )
+        or tuple(sorted(set(retained_occurrences))) != retained_occurrences
+    ):
+        raise RuntimeError("Invalid internal reverse-conversion state")
+    references = tuple(normalized.references[index] for index in retained_occurrences)
+    retained_paths = {
+        reference.path for reference in references if reference.path is not None
+    }
+    return AssetNormalizationResult(
+        references,
+        tuple(asset for asset in normalized.assets if asset.path in retained_paths),
+        sum(reference.path is None for reference in references),
+    )
+
+
 def convert_request(request: ReverseAttemptRequest) -> ReverseAttemptSuccess:
     """Convert one admitted source into an unpublished bounded result."""
 
@@ -69,10 +91,12 @@ def convert_request(request: ReverseAttemptRequest) -> ReverseAttemptSuccess:
     else:
         sources = extract_asset_sources(parsed.document)
         normalized = normalize_assets(sources, request.limits.asset_limits)
-        markdown = render_document(
+        rendered = render_document_result(
             parsed.document,
             tuple(reference.path for reference in normalized.references),
         )
+        normalized = _retain_rendered_assets(normalized, rendered.retained_occurrences)
+        markdown = rendered.markdown
         normalized_assets = normalized.assets
         asset_references = tuple(reference.path for reference in normalized.references)
         unavailable_asset_count = normalized.unavailable_asset_count

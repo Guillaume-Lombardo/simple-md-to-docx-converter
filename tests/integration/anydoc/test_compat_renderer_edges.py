@@ -171,6 +171,26 @@ def test_mirrors_unresolved_empty_and_nested_links() -> None:
     ) == ("plainkept[https://example.test/x](https://example.test/x)")
 
 
+def test_unresolved_anchor_renders_nested_image_once() -> None:
+    context = _context(PurePosixPath("assets/image-0001.png"))
+    unresolved = _inline(
+        "link",
+        content=[
+            _inline(
+                "image",
+                alt="diagram",
+                source=SimpleNamespace(kind="asset", asset_id=0, url=None),
+            )
+        ],
+        target=SimpleNamespace(kind="anchor", value="missing"),
+    )
+
+    assert compat._render_link(unresolved, "block", context) == (
+        "![diagram](assets/image-0001.png)"
+    )
+    assert context.image_index == [1]
+
+
 def test_mirrors_unavailable_and_linked_image_rendering() -> None:
     embedded = _inline(
         "image",

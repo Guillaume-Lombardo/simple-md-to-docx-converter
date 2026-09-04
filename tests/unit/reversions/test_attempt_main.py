@@ -10,7 +10,7 @@ import anydoc
 import pytest
 
 from markweave.reversions import attempt_main
-from markweave.reversions._anydoc_compat import ParsedSource
+from markweave.reversions._anydoc_compat import ParsedSource, RenderedDocument
 from markweave.reversions.assets import (
     AssetNormalizationResult,
     NormalizedAsset,
@@ -115,8 +115,8 @@ def test_document_conversion_normalizes_and_injects_assets(mocker: Any) -> None:
     )
     render = mocker.patch.object(
         attempt_main,
-        "render_document",
-        return_value="![](assets/image-0001.png)\n",
+        "render_document_result",
+        return_value=RenderedDocument("![](assets/image-0001.png)\n", (0,)),
     )
 
     response = attempt_main.convert_request(_request())
@@ -147,12 +147,56 @@ def test_document_with_only_unavailable_images_returns_closed_zip(mocker: Any) -
             (NormalizedAssetReference("anydoc:unavailable:0", None),), (), 1
         ),
     )
-    mocker.patch.object(attempt_main, "render_document", return_value="Unavailable\n")
+    mocker.patch.object(
+        attempt_main,
+        "render_document_result",
+        return_value=RenderedDocument("Unavailable\n", (0,)),
+    )
 
     response = attempt_main.convert_request(_request())
 
     assert response.mode is ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS
     assert response.result.startswith(b"PK")
+
+
+def test_discarded_render_occurrences_remove_orphan_assets() -> None:
+    first_path = PurePosixPath("assets/image-0001.png")
+    discarded_path = PurePosixPath("assets/image-0002.png")
+    normalized = AssetNormalizationResult(
+        (
+            NormalizedAssetReference("anydoc:0", first_path),
+            NormalizedAssetReference("anydoc:1", discarded_path),
+            NormalizedAssetReference("anydoc:unavailable:2", None),
+        ),
+        (
+            NormalizedAsset(first_path, b"first"),
+            NormalizedAsset(discarded_path, b"discarded"),
+        ),
+        1,
+    )
+
+    retained = attempt_main._retain_rendered_assets(normalized, (0, 2))
+
+    assert retained == AssetNormalizationResult(
+        (
+            NormalizedAssetReference("anydoc:0", first_path),
+            NormalizedAssetReference("anydoc:unavailable:2", None),
+        ),
+        (NormalizedAsset(first_path, b"first"),),
+        1,
+    )
+
+
+@pytest.mark.parametrize("indices", [(1, 0), (0, 0), (-1,), (3,), (True,)])
+def test_invalid_retained_occurrences_fail_closed(indices: tuple[int, ...]) -> None:
+    normalized = AssetNormalizationResult(
+        (NormalizedAssetReference("anydoc:0", None),) * 3,
+        (),
+        3,
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid internal"):
+        attempt_main._retain_rendered_assets(normalized, indices)
 
 
 def test_invalid_internal_parse_state_fails_closed(mocker: Any) -> None:
