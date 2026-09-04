@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "decision_status": "approved_for_t70_implementation",
+  "product_decisions": {
+    "execution_isolation": {
+      "status": "approved",
+      "selected": "external_isolation_broker_managed_disposable_runtime_unit",
+      "requirements": [
+        "the anydoc native call runs in-process only inside one immutable-image fixed-argument disposable Podman container or Kubernetes workload placed in a dedicated kernel isolation unit for one attempt",
+        "a trusted external isolation broker exclusively holds Podman or Kubernetes workload authority and the application receives no raw OCI socket or workload-mutating service account",
+        "the worker-side supervisor reaches the broker only through a narrow authenticated owner-restricted Unix socket or mutually authenticated TLS protocol",
+        "the child has no network, service-account token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication capability and receives and returns only bounded local data",
+        "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced by the broker at the runtime and kernel boundary",
+        "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
+        "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
+        "the runtime autonomously enforces the reviewed T71-configured wall-time deadline applied at unit creation even if the worker or broker process crashes",
+        "broker startup and reconnect use a mandatory bounded crash-consistent content-free inventory to idempotently sweep every managed orphan and refuse readiness and creation until reconciliation and termination proof complete",
+        "broker identity is durable before runtime create, exit and empty are durable before removal, removed is durable before proof return, and the tombstone remains until durable worker or T71 acknowledgement",
+        "runtime labels are supplementary only and absence, delete acknowledgement, or Kubernetes force-delete alone is never termination proof",
+        "a crash between kill or removal and proof resumes from inventory and runtime state while worker recovery remains blocked until proof is durably recorded",
+        "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher"
+      ]
+    },
+    "asset_serialization": {
+      "status": "approved",
+      "selected": "bounded_maintained_internal_adapter_around_pinned_anydoc_internals",
+      "requirements": [
+        "consume the single parsed anydoc Document and never introduce a second document parser",
+        "confine all private or mirrored upstream renderer behavior to one owned compatibility boundary",
+        "fail closed on an unknown anydoc version or document-model variant",
+        "pass security review and serializer-parity, asset-position, and upstream-version compatibility tests",
+        "inventory the exact private surface and copied upstream code in SBOM and license evidence",
+        "assign maintenance ownership to T70 and remove the adapter when upstream provides an official asset-aware hook"
+      ]
+    }
+  },
+  "engine": {
+    "distribution": "firecrawl-anydoc",
+    "version": "0.2.4",
+    "python_import": "anydoc",
+    "binding": "CPython abi3 in-process native extension",
+    "source_commit": "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
+  },
+  "format_families": [
+    {"family": "word", "extensions": [".doc", ".docx", ".docm"], "detected_formats": ["doc", "docx"], "content_detection": "OLE WordDocument stream, or OPC officeDocument relationship/content type/root/main-part fallback"},
+    {"family": "powerpoint", "extensions": [".ppt", ".pps", ".pot", ".pptx", ".pptm", ".ppsx", ".ppsm"], "detected_formats": ["ppt", "pptx"], "content_detection": "OLE PowerPoint Document stream, or OPC officeDocument relationship/content type/root/main-part fallback"},
+    {"family": "excel", "extensions": [".xls", ".xlsx", ".xlsm", ".xlsb"], "detected_formats": ["xlsx"], "content_detection": "OLE Workbook/Book stream, or OPC officeDocument relationship/content type/root/main-part fallback; the binding reports the shared parser as xlsx"},
+    {"family": "opendocument", "extensions": [".odt", ".ods", ".odp"], "detected_formats": ["odt", "ods", "odp"], "content_detection": "ZIP mimetype entry or root manifest media type; template MIME variants map to their base parser"},
+    {"family": "rtf", "extensions": [".rtf"], "detected_formats": ["rtf"], "content_detection": "bytes start with the RTF opening group {\\rtf"},
+    {"family": "epub", "extensions": [".epub"], "detected_formats": ["epub"], "content_detection": "ZIP mimetype application/epub+zip or OCF META-INF/container.xml"},
+    {"family": "csv", "extensions": [".csv"], "detected_formats": [], "selected_parser_format": "csv", "content_detection": "no content signature; .csv is only an admission hint and the server must explicitly select the CSV parser after bounded text validation"},
+    {"family": "pdf", "extensions": [".pdf"], "detected_formats": ["pdf"], "content_detection": "%PDF- within the first 1024 bytes, after higher-priority RTF/OLE/ZIP checks"}
+  ],
+  "admission": {
+    "extension_is_authoritative": false,
+    "mismatch_policy": "reject when the content-detected family differs from the extension family",
+    "undetected_policy": "reject except CSV after bounded text validation",
+    "scanner_order": "malware scan before format parsing or durable persistence",
+    "stable_failure_categories": ["unsupported", "malformed", "encrypted", "resource_limit", "needs_ocr", "asset_invalid", "cancelled", "timed_out", "lease_lost"]
+  },
+  "pdf": {
+    "contract": "text extraction only",
+    "document_model_available": false,
+    "embedded_assets_available": false,
+    "image_preservation": false,
+    "mixed_or_image_only_pages": "reject the complete input as needs_ocr when any page yields no text",
+    "warning": "PDF images, layout, and source-position image links are not preserved"
+  },
+  "output": {
+    "asset_free": {"condition": "no embedded-asset or unavailable-image source position exists", "media_type": "text/markdown; charset=utf-8", "extension": ".md"},
+    "with_assets": {
+      "media_type": "application/zip",
+      "root_markdown": "document.md",
+      "asset_pattern": "assets/image-{first_reference_ordinal:04d}.png",
+      "manifest": "manifest.json (schema: traceability-manifest.schema.json)",
+      "entry_order": ["document.md", "assets in first-reference order", "manifest.json"]
+    },
+    "all_assets_unavailable": {
+      "condition": "one or more unavailable-image source positions exist and no exportable embedded asset exists",
+      "media_type": "application/zip",
+      "mode": "markdown_with_unavailable_assets",
+      "entries": ["document.md", "manifest.json"],
+      "asset_count": 0,
+      "asset_bytes": 0,
+      "unavailable_asset_count": "number of unavailable image-inline occurrences in source-position traversal order"
+    },
+    "assets": {
+      "selection": "only embedded image assets referenced by an image inline in the shared Document model",
+      "duplicates": "the same asset id reuses one filename; byte-identical different ids deduplicate to the first-reference filename",
+      "normalization": "reuse the T08 signature-checked, single-frame, bounded deterministic PNG normalization and network-disabled SVG rasterization boundary",
+      "external": "reject document-controlled external image sources; never fetch them",
+      "unavailable": "retain escaped alt text without an image link; emit a ZIP whenever at least one unavailable image-inline occurrence exists, including when every asset is unavailable"
+    },
+    "manifest_schema": {
+      "schema_version": 1,
+      "engine": {"name": "firecrawl-anydoc", "version": "0.2.4"},
+      "source": {"family": "ordered capability-family identifier", "detected_format": "normalized parser identifier"},
+      "result": {"mode": "markdown_with_assets or markdown_with_unavailable_assets", "asset_count": "number of emitted normalized assets", "asset_bytes": "total emitted normalized asset bytes", "unavailable_asset_count": "number of unavailable image-inline occurrences"},
+      "execution": {"local": true, "ocr": false, "hosted_fallback": false}
+    }
+  },
+  "authorization": {
+    "lifecycle_and_content": "owner_only",
+    "administrator_content_access": false,
+    "administrator_operational_fields": ["opaque_job_id", "owner_id", "state", "safe_failure_category", "attempt", "lease_state", "timing", "byte_counts"],
+    "administrator_forbidden_fields": ["source_bytes", "result_bytes", "original_filename", "markdown", "asset_names", "asset_bytes", "content_digest", "download_capability"]
+  },
+  "execution": {
+    "cpu_only": true,
+    "ocr": false,
+    "hosted_fallback": false,
+    "native_api_has_cancellation": false,
+    "native_api_has_deadline": false,
+    "native_api_has_memory_budget": false,
+    "hard_control_decision": "external_isolation_broker_managed_disposable_runtime_unit",
+    "isolation_unit_sharing": "one attempt only",
+    "isolation_unit_identity": "stable kernel isolation unit or cgroup identity, never PID identity alone",
+    "native_call_scope": "in-process inside the disposable isolation unit only",
+    "runtime_authority_owner": "external_isolation_broker",
+    "broker_transports": ["authenticated_unix_socket", "mutual_tls"],
+    "application_has_raw_runtime_authority": false,
+    "attempt_image_selection": "immutable_digest_fixed_by_broker",
+    "attempt_argv_selection": "fixed_by_broker",
+    "runtime_deadline_enforcement": "applied_at_creation_and_independent_of_worker_or_broker_liveness",
+    "managed_unit_discovery": "mandatory_bounded_crash_consistent_content_free_inventory_with_runtime_labels_as_supplement_only",
+    "inventory_security": "authenticated_integrity_protected_and_contains_no_document_data_or_secret",
+    "identity_write_order": "durable_before_runtime_create",
+    "termination_transition_order": ["runtime_confirmed_exit_durable", "stable_unit_empty_durable", "runtime_remove", "stable_unit_removed_durable", "proof_return"],
+    "termination_tombstone_retention": "until_durable_worker_or_T71_proof_acknowledgement",
+    "reconciliation_is_idempotent": true,
+    "runtime_absence_or_delete_acknowledgement_is_proof": false,
+    "kubernetes_force_delete_is_proof": false,
+    "managed_unit_metadata_user_controlled": false,
+    "startup_and_reconnect_action": "reconcile_sweep_hard_kill_and_prove_every_managed_orphan",
+    "readiness_and_create_during_incomplete_sweep": "refused",
+    "crash_between_kill_or_removal_and_proof": "resume_reconciliation_and_reconstruct_proof_from_authenticated_managed_identity_and_runtime_state",
+    "child_forbidden_resources": ["network", "service_account_token", "secrets", "config_maps", "persistent_volumes", "persistence_credentials", "broker_credentials", "runtime_socket", "publication_capability"],
+    "supervisor_owns_heartbeat_and_publication": true,
+    "supervisor_role": "worker_side_attempt_supervisor",
+    "hard_kill_target": "complete stable isolation unit including every descendant",
+    "broker_termination_proof_requires": ["runtime_confirmed_exit", "stable_unit_empty", "stable_unit_removed"],
+    "recovery_precondition": "broker termination proof for stable isolation unit is durably recorded",
+    "pid_only_termination_proof_allowed": false,
+    "kernel_enforced_configurable_budgets": ["cpu", "memory", "pids_and_descendants", "workspace_or_ephemeral_storage"],
+    "budget_configuration_owner": "T71",
+    "child_has_network_or_persistence_credentials": false,
+    "production_budget": null,
+    "reverse_concurrency": null
+  }
+}

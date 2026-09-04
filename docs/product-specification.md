@@ -35,10 +35,12 @@ Actions workflows, and an autonomous Codex development workflow.
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
 | DOCX to PDF | LibreOffice headless |
-| Documents to Markdown | Local Firecrawl anydoc with no hosted fallback; T69 pins and validates the exact release and integration surface before production use |
-| Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links and a ZIP containing the Markdown and referenced local assets when assets are present |
+| Documents to Markdown | Local `firecrawl-anydoc==0.2.4` with no hosted fallback; the exact x86-64 ABI3 wheel, source commit, format matrix, and limitations are pinned by T69 |
+| Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
-| Reverse-conversion compute | CPU-only and low-compute: use anydoc as an in-process native library with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document-engine subprocess |
+| Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
+| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns Podman or Kubernetes workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, service-account token, secret, ConfigMap, PVC, persistence credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, workspace/ephemeral, and autonomous runtime-deadline limits. A mandatory bounded crash-consistent content-free broker inventory records identity before creation and retains a termination tombstone until durable worker/T71 acknowledgement; runtime labels are supplementary only. The broker refuses readiness and creation until its idempotent sweep completes, and worker recovery remains blocked until proof is durably recorded. |
+| Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
 | Python distribution | `markweave` on PyPI with public import `markweave`; availability must be rechecked immediately before the first publication attempt, and a pending Trusted Publisher does not reserve the name |
@@ -64,7 +66,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Upload malware scanning | Local ClamAV before processing or durable persistence by default; an explicit trusted-upstream mode is permitted only behind a non-bypassable proxy that scans every upload before forwarding; the explicit insecure evaluation exception may omit scanning only while loopback-bound behind a temporary SSH tunnel; fail closed in ClamAV mode; no durable quarantine |
 | Recovery targets | Standalone RPO 24h/RTO 4h; distributed RPO 1h/RTO 2h; automated quarterly proof |
 
-Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
+Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra queue or message broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue. The reverse-conversion isolation broker defined below is an execution-control boundary only; it never stores, claims, schedules, or publishes durable jobs.
 
 ## 3. Functional requirements
 
@@ -283,9 +285,9 @@ and end-to-end integration snapshots.
 
 Reverse conversion is an authenticated asynchronous workflow separate from forward conversion. It
 uses a pinned local Firecrawl anydoc engine and never opts into Firecrawl Parse, hosted OCR, or any
-other network fallback. T69 must approve the exact supported format and content-detection matrix
-before production implementation. Scanned or image-only inputs that require OCR fail locally with a
-stable safe error.
+other network fallback. T69 approves the exact supported format and content-detection matrix recorded
+by its evidence contract. Scanned or image-only inputs that require OCR fail locally with a stable
+safe error.
 
 T71 exposes that approved matrix and its client-relevant configured constraints through the
 authenticated, versioned `GET /api/v1/reversions/capabilities` FastAPI contract. Its response has a
@@ -303,15 +305,60 @@ memory, retained asset bytes, and concurrency scaling on representative and conf
 Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
 no unmeasured numeric threshold is fixed in this specification.
 
-Because the approved binding is a synchronous in-process native call, T69 must also prove and
-specify enforceable cancellation, wall-time timeout, memory containment, lease-heartbeat, and lost-
-lease fencing semantics. A Python task timeout or cancellation flag is not sufficient if native
-execution can continue, retain memory, or publish after the lease is lost. The approved design must
-prevent publication after cancellation, timeout, or lease loss and must prevent an expired lease
-from causing overlapping native executions. If those properties cannot be enforced within the
-fixed in-process, no-engine-subprocess contract, T69 blocks T70 and escalates the conflicting
-product or isolation decision to the product manager; implementation must not silently weaken the
-contract.
+The synchronous native call runs in-process only inside one disposable Podman container or
+Kubernetes workload placed in a dedicated stable kernel isolation unit for one attempt. A trusted
+isolation broker outside both the application worker and the attempt unit exclusively holds the
+Podman or Kubernetes workload authority needed to create, constrain, inspect, terminate, and
+remove that unit. The application and child never receive a raw OCI socket or workload-mutating
+Kubernetes service account.
+
+The worker-side attempt supervisor owns the durable attempt token and lease heartbeat, sends one
+bounded request to the broker, accepts one bounded result, revalidates both before publication,
+and remains the only publisher. Co-located deployments use an owner-restricted Unix socket with
+peer authentication; separated deployments use mutually authenticated TLS with pinned service
+identities. The protocol exposes only fixed operations and content-free stable attempt/unit
+identifiers. User or document input cannot select an image, executable, argument, mount, network,
+credential, namespace, security profile, or resource ceiling.
+
+The broker launches only the reviewed image pinned by immutable digest and its fixed
+reverse-attempt argument vector. The child receives bounded local input and output only; it has no
+network access, service-account token, Secret, ConfigMap, PVC, database or object-store credential,
+broker credential, runtime socket, or publication capability. Podman runs it with no network and a
+fresh bounded workspace. Kubernetes runs it with service-account automount disabled, service links
+disabled, no secret-bearing or persistent volume, and enforced default-deny egress. Both backends
+apply the same capability-free, no-new-privileges, read-only-root, arbitrary-UID contract. T71
+supplies reviewed configurable CPU, memory, PID/descendant, and workspace or ephemeral-storage
+budgets, and the broker enforces them at the runtime/kernel boundary. Userspace sampling is
+observability, not containment.
+
+At creation, the broker applies the reviewed T71-configured wall-time deadline through the runtime
+itself, so an attempt is terminated even if the worker or broker process crashes. The broker keeps
+a mandatory bounded crash-consistent content-free managed-unit inventory. It durably records the
+broker-authored stable identity before asking the runtime to create a unit. Immutable
+broker-authored runtime labels supplement inventory-based discovery and verification but never
+replace it. Inventory identities, labels, and lifecycle fields are authenticated and integrity-
+protected broker output, contain no document data or secret, and cannot be supplied or modified by
+user or document input. On startup and reconnect, the broker idempotently reconciles and sweeps
+every inventoried unit, hard-kills any orphan, and proves it empty and removed. It reports not ready
+and refuses every new create request until this sweep completes successfully.
+
+On cancellation, wall-time deadline, lease loss, broker disconnect, or a hard resource-limit event,
+the worker stops accepting child output and requests termination. The broker hard-kills the whole
+stable unit, waits for runtime-confirmed exit, proves the unit empty, removes it, and returns a
+content-free termination proof bound to the stable unit identity. Observing a recorded PID exit or
+a successful delete request is insufficient. The lease cannot become recoverable and another
+attempt cannot start until T71 durably records that proof. If proof is unavailable, recovery remains
+blocked and readiness/operations expose a content-free fault. After normal completion, the broker
+proves unit termination before the worker validates the bounded output and revalidates the active
+lease and attempt token for publication. Python timeouts, cancellation flags, userspace resource
+sampling, or publication fencing alone remain insufficient.
+
+The broker durably records runtime-confirmed exit and empty transitions before removal, then records
+the removed transition before returning proof. A missing runtime object, delete acknowledgement, or
+Kubernetes force-delete response alone is never proof. If the broker crashes after kill or removal
+but before returning proof, idempotent restart reconciliation resumes from the inventory and runtime
+state. The content-free termination tombstone is retained until the worker/T71 durably acknowledges
+the proof. The worker keeps recovery blocked until T71 has durably recorded it.
 
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
@@ -326,6 +373,19 @@ file, its referenced local assets, and content-free traceability metadata. T69 d
 metadata schema; T70 owns its deterministic canonical generation together with the package builder.
 T69 decides the asset-free download contract and the honest PDF contract because anydoc's current
 PDF path produces Markdown directly without exposing the shared document model or embedded assets.
+
+Because anydoc 0.2.4 exposes no supported renderer hook for an already parsed `Document`, T70 may
+maintain one bounded internal compatibility adapter around the exact pinned document-model and
+renderer behavior. The adapter consumes the single parsed `Document`; it never reparses source
+bytes or introduces a second document parser. One module boundary inventories every private symbol
+and any minimally mirrored upstream renderer logic, fails closed for an unknown anydoc version or
+model variant, retains applicable upstream license notices, and is included in dependency, SBOM,
+license, and vulnerability review. Asset-free structures must pass serializer-parity tests against
+the pinned upstream renderer, while asset fixtures prove source-position link injection, safe
+normalization, ordering, unavailable-asset behavior, and the closed manifest contract. Every anydoc
+upgrade reruns compatibility and parity coverage before adoption. T70 owns maintenance and must
+remove this adapter when upstream provides a supported asset-aware renderer hook; an independent
+parser or broader serializer fork is not approved.
 
 Reverse jobs preserve the existing scanner ordering, owner isolation, persistent queue states,
 idempotency, leases, recovery, cancellation, expiration, capacity, retention, content-free logging,
@@ -672,7 +732,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T68 | Restore host routing for the CNI-free rootless Podman trusted-upstream and insecure Next.js quickstarts | T64 |
 | T67 | Migrate root browser-test and Next.js tooling to one deterministic pnpm workspace while preserving the isolated npm Mermaid graph, release evidence, and rollback | T64 |
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
-| T70 | Implement the secure local anydoc adapter and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
+| T70 | Implement the external Podman/Kubernetes isolation broker and authenticated bounded protocol, disposable anydoc attempt runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
 | T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
@@ -683,11 +743,13 @@ T68 follows T64 as the focused correction for host forwarding into the shared ro
 network namespace. It does not change the router's public-host policy or the host's loopback-only
 publication boundary.
 
-For experimental reverse conversion, T69 is a blocking evidence and contract spike. T70 implements
-the local engine and package builder only after the asset-position strategy and PDF limitations are
-approved. T71 then adds the persistent backend workflow. T67 follows T64 and establishes the
-normative package-manager, bootstrap, workspace, command, and lockfile contract before T72 starts.
-T72 then builds the Revert workspace on that finalized pnpm toolchain. T46, T48, and T50 must finish
+For experimental reverse conversion, T69 fixes the approved evidence and contract. T70 implements
+the trusted external isolation broker and its Podman/Kubernetes backends, authenticated bounded
+protocol, disposable attempt runner, bounded internal renderer adapter, and package builder. T71
+binds that runner and its content-free stable-unit termination proof to persistent leases, recovery,
+publication, and the backend workflow. T67 follows T64 and establishes the normative
+package-manager, bootstrap, workspace, command, and lockfile contract before T72 starts. T72 then
+builds the Revert workspace on that finalized pnpm toolchain. T46, T48, and T50 must finish
 their baseline security/support policies, mutation gate, and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
 surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
@@ -732,13 +794,25 @@ the ticket before touching any path owned by another active ticket.
   product scope. Adding either capability requires separately approved future scope.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
-  contract, and enforceable synchronous-native-call cancellation/timeout/memory/lease decision.
-  Until T69 is approved, no implementation may claim that every anydoc-supported extension or PDF-
-  embedded image is supported. If the fixed in-process contract cannot enforce those execution
-  controls, T69 requires a product-manager decision and T70 remains blocked.
-- T70 owns deterministic canonical generation of the content-free traceability manifest, including
-  stable field and archive-entry ordering, together with the Markdown/assets package builder. T71
-  may persist and return the resulting package but must not introduce a second manifest serializer.
+  contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
+  contract uses a trusted external broker as the sole holder of Podman/Kubernetes workload
+  authority, a narrow authenticated Unix/mTLS control protocol, one immutable-image/fixed-argument
+  disposable kernel-isolated unit per attempt, configurable T71-owned CPU/memory/PID/workspace
+  budgets and autonomous runtime deadline, mandatory crash-consistent content-free inventory and
+  termination tombstones, fail-closed startup/reconnect orphan reconciliation,
+  termination proof before recovery, and the bounded internal adapter; no implementation
+  may expose a raw runtime socket or workload-mutating service account to the application, broaden
+  the validated format/PDF claims, or fall back to shared-process execution, a second parser, or an
+  unconstrained serializer fork.
+- T70 owns the broker service and protocol, Podman/Kubernetes isolation backends, immutable
+  attempt-image/argument policy, mandatory crash-consistent managed-unit inventory/tombstones,
+  supplementary runtime-label discovery, startup/reconnect orphan sweep, stable-unit
+  terminate-and-prove protocol, and
+  deterministic canonical generation of the content-free traceability manifest, including stable
+  field and archive-entry ordering, together with the bounded renderer compatibility boundary and
+  Markdown/assets package builder. T71 may configure reviewed budgets and persist the stable unit
+  identity/proof and resulting package, but must not introduce a second broker, runner, parser,
+  renderer adapter, or manifest serializer.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.

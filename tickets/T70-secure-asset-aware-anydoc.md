@@ -21,9 +21,48 @@ for reverse conversion.
   verification.
 * Parse only the format matrix approved by T69 from bounded in-memory or isolated-workspace inputs
   after the existing malware-scanning boundary.
-* Use the approved in-process native binding with bounded threads and memory. The production path
-  must be CPU-only and must not load GPU/accelerator or ML runtimes or invoke a browser, Pandoc,
-  LibreOffice, or another document-engine subprocess.
+* Implement a trusted external isolation broker as the only holder of Podman/Kubernetes workload
+  authority. The application worker reaches it only through a narrow authenticated owner-restricted
+  Unix socket or mutually authenticated TLS protocol and receives no raw OCI socket or workload-
+  mutating service account. The broker accepts only bounded requests, content-free stable attempt
+  identities, the reviewed image pinned by immutable digest, and a fixed reverse-attempt argv;
+  user/document data cannot select runtime policy. It creates one disposable process/container
+  workload per attempt in a dedicated stable kernel isolation unit. The anydoc binding runs in-
+  process only inside that unit with bounded threads. The child has no network, service-account
+  token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication
+  capability. T71 supplies reviewed configurable CPU, memory, PID/descendant, and
+  workspace/ephemeral budgets, which the broker enforces at the runtime/kernel boundary. The
+  reviewed T71-configured wall-time deadline is applied autonomously by the runtime at creation, so
+  it remains effective across worker or broker process failure. The broker maintains a mandatory
+  bounded crash-consistent content-free inventory/tombstone; it is authenticated and integrity-
+  protected and contains no document data or secret. It records the broker-authored stable identity
+  before runtime create. Immutable broker-authored runtime labels supplement discovery but never
+  replace inventory, and neither labels nor managed identities are controllable by user/document
+  input. At startup and reconnect it idempotently sweeps every inventoried orphan, hard-terminates
+  it, and proves it empty and removed. The broker refuses readiness and every create request until
+  reconciliation completes successfully. It durably records runtime-confirmed exit and empty before
+  removal, records removed before proof return, and retains the tombstone until durable worker/T71
+  proof acknowledgement. A crash between kill/removal and proof resumes from inventory and runtime
+  state; absence, delete acknowledgement, or Kubernetes force-delete alone is not proof. The
+  worker-side supervisor owns heartbeat, attempt token, bounded output validation, and publication.
+  Cancellation, deadline, lease loss, broker disconnect, or resource failure stops output
+  acceptance and makes the broker hard-terminate the whole stable unit, prove it empty, remove it,
+  and return a content-free proof before recovery or another attempt. PID exit or delete
+  acknowledgement alone is insufficient. Normal completion also requires termination proof and
+  active lease/token revalidation before publication.
+* Keep the production path CPU-only. It must not load GPU/accelerator or ML runtimes or invoke a
+  browser, Pandoc, LibreOffice, or another document engine. The approved per-attempt anydoc child is
+  an isolation boundary, not a second document engine.
+* Implement one narrowly bounded maintained internal compatibility adapter around the pinned
+  anydoc `Document` model and renderer behavior. Consume the single parsed document; never reparse
+  source bytes or add a second parser. Inventory every private symbol and minimally mirrored
+  upstream renderer behavior in one fail-closed module boundary, including applicable license
+  notices, and reject unknown anydoc versions or document-model variants.
+* Require security review, asset-free serializer parity against the pinned upstream renderer,
+  source-position asset-link goldens, and compatibility tests for every anydoc update. Include the
+  adapter and exact upstream surface in dependency, SBOM, license, and vulnerability evidence. T70
+  owns maintenance and removes the adapter once upstream supplies a supported asset-aware hook; a
+  broad fork is not authorized.
 * Convert structured content into deterministic UTF-8 GitHub-Flavored Markdown while preserving
   supported headings, lists, tables, links, notes, code, equations, and document order.
 * Emit a deterministic ZIP containing one root Markdown file plus referenced files under `assets/`;
@@ -48,7 +87,14 @@ for reverse conversion.
 * Add unit, corpus/golden, fuzz-or-mutation, security, and real-library integration coverage for
   success and relevant malformed, encrypted, decompression, nesting, signature/type mismatch,
   non-image, polyglot, animated/multi-frame, hostile-SVG, timeout, cancellation, and
-  resource-limit failures.
+  resource-limit failures. Prove stable whole-unit hard termination and descendant reaping for every terminal signal,
+  no child publication capability, no late result acceptance, termination-before-recovery, no
+  overlapping attempt, bounded IPC, autonomous deadline enforcement across broker failure,
+  startup/reconnect orphan sweeping, creation/readiness refusal during incomplete reconciliation,
+  write-ahead identity, crash-consistent transition ordering, tombstone acknowledgement, idempotent
+  proof reconstruction after a crash between kill and proof, and fail-closed behavior when
+  termination proof is unavailable. Explicitly reject absence, delete acknowledgement, and
+  Kubernetes force-delete as standalone proof.
 
 ## Dependencies
 
@@ -59,9 +105,17 @@ for reverse conversion.
 
 ## Implementation boundary
 
-* Own the anydoc adapter, asset-aware serializer/package builder, the single deterministic content-
-  free manifest generator, reverse-conversion domain errors, format corpus, dependency lock, and
-  directly affected backend-image contents.
+* Own the external broker service and authenticated bounded protocol, Podman and Kubernetes
+  isolation backends, immutable image/argv and child-security policy, supervised disposable-attempt
+  runner, mandatory crash-consistent managed-unit inventory/tombstones, supplementary runtime-label
+  discovery, reconciliation, and terminate-and-prove protocol, anydoc adapter, bounded internal
+  renderer compatibility
+  boundary, asset-aware serializer/package builder, the single deterministic content-free manifest
+  generator, reverse-conversion domain errors, format corpus, dependency lock, and directly affected
+  backend/broker image and deployment contents. Expose the runner, content-free stable unit identity,
+  and verified termination proof as ports for T71; do not add persistent lease or job orchestration
+  here. Never expose a raw OCI socket or workload-mutating service account to the application or
+  child.
 * Do not add HTTP routes, persistent jobs, database migrations, or browser UI.
 * Do not implement OCR or any network-backed fallback.
 
@@ -71,15 +125,45 @@ for reverse conversion.
   scanning invariants.
 * Meet the measured low-compute envelope approved by T69 and expose no unbounded internal
   parallelism.
+* Test both broker transports and both runtime backends. Authenticate peers, reject replay,
+  oversized/truncated/extra protocol frames and every caller-selected image/argv/mount/network/
+  credential/resource override, fail closed on broker disconnect or unavailable termination proof,
+  and prove that runtime authority is absent from the application and child. Cover restart with a
+  live orphan, runtime expiry while the broker is down, incomplete sweep readiness/create refusal,
+  forged or user-controlled inventory/labels, write-ahead failure, transition persistence failure,
+  tombstone retention/acknowledgement, Kubernetes force-delete, and crashes both before and after
+  removal but before proof.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
 * Keep repository artifacts and user-facing errors in English.
 
 ## Progress
 
-* 2026-09-03: Created from the approved feasibility decomposition; blocked by T69.
-* 2026-09-03: Scope now requires an exclusively CPU-only in-process path and the measured
-  low-compute envelope from T69.
+* 2026-09-03: Created from the approved feasibility decomposition; depends on T69.
+* 2026-09-03: Scope now requires an exclusively CPU-only native path and the measured low-compute
+  envelope from T69.
+* 2026-09-04: Deployment preflight proved that the current arbitrary-UID, capability-free worker
+  cannot safely create delegated per-attempt cgroups or workloads. The product manager selected a
+  trusted external isolation broker as the sole holder of Podman/Kubernetes authority, reached
+  through a narrow authenticated Unix/mTLS protocol. T70 now owns that broker, its two runtime
+  backends, immutable image/argv policy, attempt runner, and terminate-and-prove protocol in addition
+  to the approved bounded renderer adapter and package/security work. The child remains networkless
+  and credentialless; the application receives no raw OCI socket or workload-mutating service
+  account; and T71 owns reviewed configurable budget values plus durable lease/recovery binding.
+  Shared-worker native execution, PID-only proof, publication before unit termination, and a broad
+  serializer fork remain prohibited.
+* 2026-09-04: Independent review added the broker crash/restart contract. T70 must apply the
+  T71-configured deadline through the runtime at creation, discover managed units through bounded
+  persistent content-free inventory with immutable broker-authored labels as supplementary
+  evidence, sweep orphans before readiness or creation, and resume proof after a crash between
+  kill/removal and acknowledgement. Worker recovery remains blocked until the proof is durably
+  recorded.
+* 2026-09-04: Follow-up review made the bounded crash-consistent content-free inventory/tombstone
+  mandatory because labels disappear with a removed unit. Identity must be durable before create;
+  exit/empty must be durable before removal; removed must be durable before proof return; and the
+  tombstone remains until durable worker/T71 acknowledgement. Runtime labels only supplement the
+  idempotent sweep. Absence, delete acknowledgement, and Kubernetes force-delete are insufficient
+  proof.
 
 ## Synchronization
 
