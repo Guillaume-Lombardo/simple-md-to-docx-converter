@@ -211,6 +211,18 @@ for reverse conversion.
   retained. This remains an internal core slice: Unix/mTLS transports, Podman/Kubernetes backends,
   bounded workspace data flow, and production assembly remain to be delivered before T70 can be
   completed.
+* 2026-09-04: Finalized the broker core after three independent reviews of the exact revision. The
+  authenticated inventory now detects membership deletion and substitution, rejects over-limit
+  reconciliation without truncation, preserves policy evidence across configuration rollover, and
+  revokes readiness on every internal storage fault. Termination returns the exact durable proof.
+  Proof acknowledgement is indefinitely idempotent without an append-only receipt ledger: a
+  missing unit is a state-free success, an active or mismatched unit is retained and rejected, and
+  only an exact principal/attempt/unit/proof binding deletes a removed tombstone atomically while
+  retaining the replay high-water mark. The exact light selection passed 2,723 tests at 94.15%
+  total and 90.14% branch-only application coverage; changed application lines reached 95.62%, and
+  the 296 broker tests reached 90.19% branch coverage. Ruff formatting/linting, `ty`, and diff
+  validation also passed. Inventory, lifecycle, and protocol reviewers approved the exact revision
+  without remaining findings.
 * 2026-09-04: Hardened the container test scanner after three exact-head CI runs exposed a
   readiness race in the test double. The bounded fake ClamAV endpoint now answers the same exact
   `zPING` health protocol used by runtime diagnostics before accepting `INSTREAM`, retains
