@@ -23,7 +23,7 @@ from markweave.broker.unix_transport import (
     _peer_credentials,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 REQUEST_ID = UUID("00000000-0000-4000-8000-000000000001")
 PRINCIPAL = AuthenticatedPrincipal(UUID("00000000-0000-4000-8000-000000000005"))
