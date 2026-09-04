@@ -5,6 +5,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import suppress
 from pathlib import Path
 from uuid import UUID
 
@@ -38,6 +39,14 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444443"),
     UUID("44444444-4444-4444-8444-444444444444"),
 )
+
+
+def _cgroup_path(unit_id: UUID) -> Path:
+    return Path(
+        f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
+        f"user@{os.geteuid()}.service/markweave.slice/"
+        f"markweave-reverse-{unit_id.hex}.slice"
+    )
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -91,6 +100,8 @@ def controlled_image() -> Iterator[tuple[str, str]]:
                 f"markweave-reverse-{unit_id.hex}",
                 check=False,
             )
+            with suppress(FileNotFoundError):
+                _cgroup_path(unit_id).rmdir()
         _podman("image", "rm", "--force", TEST_IMAGE)
         if built_base:
             _podman("image", "rm", "--force", base)
