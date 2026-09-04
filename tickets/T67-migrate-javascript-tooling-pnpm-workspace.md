@@ -73,8 +73,10 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   degraded from seconds to four-to-five minutes per invocation and the benchmark reached the
   45-minute job limit during its second sample. Every measured install, frontend build, and image
   build is now process-group bounded with deterministic raw timeout evidence, TERM-to-KILL cleanup,
-  and a shared 25-minute benchmark budget; the workflow adds a 27-minute outer fail-safe around the
-  complete collector. A fresh exact-head hosted matrix remains required before integration.
+  and a shared 25-minute benchmark budget; the workflow adds a process-group-verified 27-minute
+  outer fail-safe around the complete collector and a 5-minute bound around the preceding rollback
+  rehearsal. Native command exits, including 124 and 137, remain distinct from an observed deadline.
+  A fresh exact-head hosted matrix remains required before integration.
 
 ## Synchronization
 

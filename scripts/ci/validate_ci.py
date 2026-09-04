@@ -358,7 +358,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="e9365c840de16b5591a2d2c976beb4754c1cb78730b074b9d75422568bb0d931",
+        canonical_digest="2f48e7612eecd15787f8f91bc8c06c7f8773a2f52f5364b28f5ebe5d06a4a3f4",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -847,11 +847,14 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "--filter md-converter-web-tests"
         ),
         ("heavy", "Rehearse the exact npm rollback candidate"): (
+            "scripts/javascript/run-bounded-benchmark-command.sh "
+            "300 10 /dev/stderr t67/rollback -- "
             "bash scripts/javascript/rehearse-npm-rollback.sh "
             '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
         ),
         ("heavy", "Collect the T67 package-manager benchmark"): (
-            "timeout --signal=TERM --kill-after=10s 1620s "
+            "scripts/javascript/run-bounded-benchmark-command.sh "
+            "1620 10 /dev/stderr t67/benchmark -- "
             "bash scripts/javascript/benchmark-package-managers.sh "
             '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
             "artifacts/package-manager-benchmark"
