@@ -99,6 +99,10 @@ request = ReverseAttemptRequest(
 (workspace / "request.json").write_bytes(encode_request_metadata(request))
 PY
 
+# Rootless Podman maps the arbitrary container UID through its subordinate-ID
+# namespace. Make the bind-mounted broker workspace writable by that mapped UID.
+podman unshare chown -R 12345:0 -- "$workspace"
+
 podman run --rm \
   --network none \
   --read-only \
