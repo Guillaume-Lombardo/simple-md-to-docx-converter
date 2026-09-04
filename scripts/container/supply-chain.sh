@@ -4,12 +4,17 @@ set -euo pipefail
 readonly image="${1:-localhost/md-converter:t20}"
 readonly output_directory="${2:-artifacts/container}"
 readonly purpose="${3:-ci}"
+readonly evidence_profile="${4:-standard}"
 readonly syft_version=1.50.0
 readonly syft_sha256=bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788
 readonly grype_version=0.116.1
 readonly grype_sha256=0122df7b655981abe547ad3d2190d65551dac6a2bfc80b4dc2a989b5d0587458
 if [[ "$purpose" != "ci" && "$purpose" != "release" ]]; then
-  echo "Usage: scripts/container/supply-chain.sh IMAGE OUTPUT_DIRECTORY {ci|release}" >&2
+  echo "Usage: scripts/container/supply-chain.sh IMAGE OUTPUT_DIRECTORY {ci|release} {standard|reverse-attempt}" >&2
+  exit 2
+fi
+if [[ "$evidence_profile" != "standard" && "$evidence_profile" != "reverse-attempt" ]]; then
+  echo "Unsupported evidence profile: $evidence_profile" >&2
   exit 2
 fi
 if [[ -e "$output_directory" || -L "$output_directory" ]]; then
@@ -26,7 +31,11 @@ if [[ -L "$output_parent" ]]; then
 fi
 tool_directory="$(mktemp -d)"
 staging_directory="$(mktemp -d "$output_parent/.supply-chain.XXXXXX")"
+extraction_container=""
 cleanup() {
+  if [[ -n "$extraction_container" ]]; then
+    podman rm --force "$extraction_container" >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$tool_directory"
   if [[ -n "${staging_directory:-}" && -d "$staging_directory" ]]; then
     rm -rf -- "$staging_directory"
@@ -64,18 +73,39 @@ summary_arguments=(
   --artifacts "$staging_directory"
   --expected-image-id "$canonical_image_id"
 )
+if [[ "$evidence_profile" == "reverse-attempt" ]]; then
+  extraction_container="$(podman create --entrypoint /bin/true "$image_id")"
+  podman cp \
+    "$extraction_container:/opt/markweave/sbom/anydoc-cargo.cdx.json" \
+    "$staging_directory/anydoc-cargo.cdx.json"
+  podman rm "$extraction_container" >/dev/null
+  extraction_container=""
+  uv run python -m scripts.container.verify_anydoc_cargo_sbom \
+    "$staging_directory/anydoc-cargo.cdx.json"
+  GRYPE_DB_AUTO_UPDATE=true "$tool_directory/grype" \
+    "sbom:$staging_directory/anydoc-cargo.cdx.json" \
+    --output json > \
+    "$staging_directory/anydoc-cargo-vulnerabilities.json"
+  summary_arguments+=(
+    --additional-artifact anydoc-cargo.cdx.json
+    --additional-artifact anydoc-cargo-vulnerabilities.json
+    --additional-vulnerability-report anydoc-cargo-vulnerabilities.json
+  )
+fi
 if [[ "$purpose" == "release" ]]; then
   summary_arguments+=(--release)
 fi
 uv run python -m scripts.container.summarize_supply_chain "${summary_arguments[@]}"
 manifest_digest="$(
   uv run python -m scripts.container.verify_supply_chain create \
-    --artifacts "$staging_directory"
+    --artifacts "$staging_directory" \
+    --profile "$evidence_profile"
 )"
 readonly manifest_digest
 uv run python -m scripts.container.verify_supply_chain \
   verify \
   --artifacts "$staging_directory" \
+  --profile "$evidence_profile" \
   --expected-manifest-sha256 "$manifest_digest"
 mv --no-target-directory -- "$staging_directory" "$output_directory"
 staging_directory=""

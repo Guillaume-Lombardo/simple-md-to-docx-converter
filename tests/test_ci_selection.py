@@ -116,6 +116,36 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
+        "src/markweave/reversions/attempt_main.py",
+        "src/markweave/reversions/package.py",
+        "src/markweave/__init__.py",
+        "src/markweave/version.py",
+        "src/markweave/conversion/__init__.py",
+        "src/markweave/conversion/errors.py",
+        "src/markweave/conversion/images.py",
+        "spikes/anydoc/LICENSE.anydoc",
+        "spikes/anydoc/corpus/docx/text.docx",
+        "LICENSE",
+        "README.md",
+    ],
+)
+def test_reverse_attempt_inputs_select_container_validation(path: str) -> None:
+    """Every input baked into or exercised against the attempt image rebuilds it."""
+
+    assert "container" in select_domains([path])
+
+
+@pytest.mark.unit
+def test_anydoc_corpus_selects_real_library_integration() -> None:
+    """Changes to real anydoc inputs rerun the document-engine integration domain."""
+
+    assert "document-engines" in select_domains(["spikes/anydoc/corpus/docx/text.docx"])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
         "src/markweave/recovery.py",
         "src/markweave/recovery_service.py",
         "src/markweave/recovery_manifest.py",
@@ -225,6 +255,7 @@ def test_auth_integration_change_selects_functional_domain() -> None:
         "tests/golden/openxml.py",
         "tests/unit/test_golden_raster.py",
         "tests/integration/document_engines/test_reference_corpus.py",
+        "tests/integration/anydoc/test_compat_adapter.py",
     ],
 )
 def test_golden_infrastructure_selects_active_document_engine_domain(
@@ -268,6 +299,7 @@ def test_t04_document_engine_domain_runs_current_integration_boundaries() -> Non
             "uv",
             "run",
             "pytest",
+            "tests/integration/anydoc",
             "tests/integration/document_engines",
             "-m",
             "integration",

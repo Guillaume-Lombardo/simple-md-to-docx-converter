@@ -8,6 +8,7 @@ readonly rustfs_name=md-converter-t20-rustfs-smoke
 readonly application_name=md-converter-t20-distributed-api-smoke
 readonly worker_name=md-converter-t20-distributed-worker-smoke
 readonly clamav_name=md-converter-t20-distributed-clamav-smoke
+readonly clamav_probe_name=md-converter-t20-distributed-clamav-probe-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
 seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
@@ -31,7 +32,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name" "$clamav_name"; do
+for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name" \
+  "$clamav_name" "$clamav_probe_name"; do
   if podman container exists "$name"; then
     echo "Refusing to replace pre-existing container $name." >&2
     exit 1
@@ -54,6 +56,23 @@ podman run --detach --name "$clamav_name" --network "$network_name" \
 created=("$clamav_name" "${created[@]}")
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" distributed
+podman run --detach --name "$clamav_probe_name" --network "$network_name" \
+  --read-only --cap-drop=all --security-opt=no-new-privileges \
+  --pids-limit=16 --memory=64m --tmpfs /tmp:rw,nosuid,nodev,noexec,size=4m \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" -c 'import time; time.sleep(30)' >/dev/null
+created=("$clamav_probe_name" "${created[@]}")
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed-alias "$clamav_probe_name" clamav
+podman kill --signal KILL "$clamav_probe_name" >/dev/null
+podman rm "$clamav_probe_name" >/dev/null
+clamav_address="$(podman inspect "$clamav_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ -z "$clamav_address" ]]; then
+  echo "Fake ClamAV has no address on the smoke-test network." >&2
+  exit 1
+fi
+scanner_host_mapping=(--add-host "clamav:$clamav_address")
 podman run --detach --name "$postgres_name" --network "$network_name" \
   --network-alias postgres \
   --env POSTGRES_DB=md_converter_test \
@@ -170,6 +189,7 @@ settings=(
 )
 
 podman run --detach --name "$application_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
@@ -179,6 +199,7 @@ podman run --detach --name "$application_name" --network "$network_name" \
   "${settings[@]}" "$image" serve >/dev/null
 created=("$application_name" "${created[@]}")
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
@@ -204,7 +225,7 @@ done
 curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
   | grep -Fq '"status":"ready"'
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
-  "$clamav_name" distributed-network "$application_name" clamav
+  "$clamav_name" distributed-mapped "$application_name" clamav
 if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
   bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
     "http://127.0.0.1:$application_port"
@@ -226,6 +247,7 @@ test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
 podman rm "$worker_name" >/dev/null
 
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
@@ -266,6 +288,7 @@ uv run python -m scripts.container.api_workflow_smoke \
 podman rm "$worker_name" >/dev/null
 
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \

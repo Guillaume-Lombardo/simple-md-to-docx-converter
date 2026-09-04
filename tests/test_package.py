@@ -51,9 +51,16 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
         "psycopg[binary]>=3.3.4,<4",
     ]
     assert extras["all"] == ["markweave[standalone,distributed]"]
+    assert extras["reverse-attempt"] == [
+        "cairosvg>=2.8,<3",
+        "defusedxml>=0.7,<1",
+        "firecrawl-anydoc==0.2.4",
+        "pillow>=12,<13",
+        "tinycss2>=1.5,<2",
+    ]
     assert "boto3>=1.43.82,<2" not in extras["server"]
     assert "psycopg[binary]>=3.3.4,<4" not in extras["server"]
-    assert "markweave[all]" in metadata["dependency-groups"]["dev"]
+    assert "markweave[all,reverse-attempt]" in metadata["dependency-groups"]["dev"]
 
 
 @pytest.mark.unit

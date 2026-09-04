@@ -1,0 +1,86 @@
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+FROM ${BASE_IMAGE} AS build
+
+USER 0
+
+ARG UV_VERSION=0.12.1
+ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
+ARG CAIRO_NEVRA=cairo-1.17.4-7.el9.x86_64
+ARG ANYDOC_CARGO_SBOM_SHA256=ccc492d3014d12a0b5e5cb0a256e130444e6ca910f6c696d53886971ee56f747
+
+RUN test "$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' cairo)" = \
+        "${CAIRO_NEVRA}" \
+    && curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+        --output /tmp/uv.tar.gz \
+    && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \
+    && tar --extract --gzip --file /tmp/uv.tar.gz --strip-components=1 \
+        --directory /usr/local/bin \
+        uv-x86_64-unknown-linux-gnu/uv uv-x86_64-unknown-linux-gnu/uvx \
+    && rm /tmp/uv.tar.gz \
+    && test "$(uv --version)" = "uv ${UV_VERSION} (x86_64-unknown-linux-gnu)"
+
+WORKDIR /opt/markweave/app
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src/markweave/__init__.py src/markweave/version.py ./src/markweave/
+COPY src/markweave/conversion/__init__.py src/markweave/conversion/errors.py \
+    src/markweave/conversion/images.py ./src/markweave/conversion/
+COPY src/markweave/reversions ./src/markweave/reversions
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/markweave/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+RUN uv sync --locked --no-dev --no-editable --extra reverse-attempt \
+    && /opt/markweave/venv/bin/python -c \
+        'from importlib.metadata import version; import anydoc, markweave; from markweave.conversion.images import normalize_image; assert version("firecrawl-anydoc") == "0.2.4"; assert callable(normalize_image)' \
+    && anydoc_sbom="$(find /opt/markweave/venv -type f -path \
+        '*/firecrawl_anydoc-0.2.4.dist-info/sboms/anydoc-python.cyclonedx.json' \
+        -print -quit)" \
+    && test -n "${anydoc_sbom}" \
+    && echo "${ANYDOC_CARGO_SBOM_SHA256}  ${anydoc_sbom}" \
+        | sha256sum --check --strict \
+    && mkdir -p /opt/markweave/sbom \
+    && cp "${anydoc_sbom}" /opt/markweave/sbom/anydoc-cargo.cdx.json \
+    && rm -rf /root/.cache/uv /opt/markweave/app/src \
+    && rm -f /opt/markweave/app/pyproject.toml /opt/markweave/app/uv.lock \
+        /opt/markweave/app/README.md /opt/markweave/app/LICENSE \
+        /usr/local/bin/uv /usr/local/bin/uvx
+
+COPY --chmod=0444 LICENSE /opt/markweave/licenses/markweave/LICENSE
+
+COPY --chmod=0444 spikes/anydoc/LICENSE.anydoc \
+    /opt/markweave/licenses/firecrawl-anydoc/LICENSE
+COPY --chmod=0444 src/markweave/reversions/ANYDOC_COMPAT_LICENSE.txt \
+    /opt/markweave/licenses/markweave-anydoc-compat/LICENSE
+
+RUN mkdir -p /work \
+    && chgrp -R 0 /opt/markweave /work \
+    && chmod -R g=u /opt/markweave /work \
+    && rm -rf /usr/lib/node_modules/npm \
+    && rm -f /usr/bin/curl /usr/bin/node /usr/bin/npm /usr/bin/npx \
+        /usr/bin/openssl /usr/sbin/httpd
+
+FROM scratch
+COPY --from=build / /
+
+ENV PATH=/opt/markweave/venv/bin:/usr/local/bin:/usr/bin \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    RAYON_NUM_THREADS=1 \
+    HOME=/work/home \
+    TMPDIR=/work/tmp \
+    XDG_CACHE_HOME=/work/xdg/cache \
+    XDG_CONFIG_HOME=/work/xdg/config \
+    XDG_DATA_HOME=/work/xdg/data \
+    XDG_RUNTIME_DIR=/work/xdg/runtime
+
+ARG BASE_IMAGE
+LABEL org.opencontainers.image.title="Markweave reverse-conversion attempt" \
+      org.opencontainers.image.source="https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT"
+
+WORKDIR /work
+USER 1001:0
+ENTRYPOINT ["python", "-m", "markweave.reversions.attempt_main"]

@@ -2,7 +2,7 @@
 ticket: T70
 linear_id: G1L-538
 linear_url: https://linear.app/g1lom/issue/G1L-538/t70-implement-secure-asset-aware-anydoc-conversion
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -164,6 +164,65 @@ for reverse conversion.
   tombstone remains until durable worker/T71 acknowledgement. Runtime labels only supplement the
   idempotent sweep. Absence, delete acknowledgement, and Kubernetes force-delete are insufficient
   proof.
+* 2026-09-04: Started from verified main
+  `e7c872ee70980eea11a112678856a62886a336a2` after T69 and its repository mirror passed exact-main
+  gates. The first cohesive delivery slice is the inert reverse-attempt core: exact optional anydoc
+  dependency and supply-chain ownership, fail-closed compatibility adapter, bounded asset
+  normalization, canonical manifest and deterministic Markdown/ZIP packaging, fixed child
+  protocol, minimal attempt image, and unit/golden/real-library/container coverage. It adds no
+  HTTP, persistence, job orchestration, broker authority, or production assembly.
+* 2026-09-04: Implemented and independently approved the inert reverse-attempt core slice. The
+  child now owns format detection, a fail-closed pinned anydoc adapter, safe HTTP(S)-only hyperlink
+  admission, bounded asset normalization with strict container/polyglot checks, structured
+  source-position asset references, a canonical content-free manifest, and pre-sized deterministic
+  Markdown/ZIP output. The fixed workspace protocol binds every response to its expected attempt
+  identity and exposes no runtime authority. The dedicated minimal image passed real DOCX/PNG and
+  SVG/CairoSVG smoke tests under an arbitrary UID with a read-only root and no network. Its closed
+  evidence bundle includes the exact OCI archive, image SBOMs, the embedded 113-component anydoc
+  Cargo SBOM, license validation, and separate vulnerability reports. Independent security and
+  integration reviews reported no remaining findings. Ruff formatting/linting, `ty`, 250 focused
+  reverse/anydoc tests, 392 CI/container/release tests, and 2,654 of 2,655 broad local tests passed;
+  the sole process-reaping timing failure passed immediately in isolation. PostgreSQL, S3, and the
+  three excluded document engines were unavailable or intentionally excluded from that broad local
+  command. T70 remains In Progress because the external broker, runtime backends, termination proof,
+  and production integration belong to later slices.
+* 2026-09-04: Closed the two first-run CI gaps before merge. The rootless container smoke now maps
+  only its temporary bind workspace to the fixed arbitrary child UID, and the light coverage gate
+  explicitly selects the real-anydoc integration suite through the `light_coverage` marker. The
+  exact light selection passes 2,408 tests at 94.09% total and 90.02% branch-only application
+  coverage; the corrected container job also passes on GitHub Actions.
+* 2026-09-04: Addressed CodeRabbit's three valid functional findings without accepting its unsafe
+  blanket signature-scan suggestion. Unresolved anchors now consume nested image occurrences once;
+  speculative/duplicate note bodies preserve pinned rendering semantics while a retained-occurrence
+  mask removes orphan references and normalized assets before packaging; unavailable empty-alt
+  images are not retained when they emit no Markdown. Asset admission now rejects structurally
+  parseable ZIP polyglots in every image format without rejecting benign magic bytes in valid PNG,
+  JPEG, GIF, SVG, or WebP payloads. The exact light gate passes 2,427 tests at 94.13% total and
+  90.13% branch-only coverage.
+* 2026-09-04: Hardened the container test scanner after three exact-head CI runs exposed a
+  readiness race in the test double. The bounded fake ClamAV endpoint now answers the same exact
+  `zPING` health protocol used by runtime diagnostics before accepting `INSTREAM`, retains
+  fail-closed behavior for unknown and malformed commands, and uses a bounded 64-connection listen
+  backlog for concurrent application and worker startup. Real TCP integration coverage proves
+  `PING`, unknown-command rejection, and a complete scan on separate connections. Independent
+  review approved the fix without findings. The canonical local non-engine selection passed 2,674
+  tests at 95.21% total coverage; its 30 PostgreSQL setup errors and three S3 failures reflect the
+  intentionally absent service endpoints, while the known process-reaping timing test was the only
+  unrelated local failure. The 64 directly affected container/protocol tests, Ruff, `ty`, CI
+  validation, and diff validation pass. CodeRabbit's exact-head review identified one valid
+  test-lifecycle finding; the integration server now shuts down and joins in a `finally` block so a
+  failed protocol assertion cannot leave a non-daemon test thread running.
+* 2026-09-04: Two later exact-head runs showed that the fake scanner protocol fix was sound but
+  rootless Podman network-name resolution remained transient on hosted runners: the application
+  passed an exact `INSTREAM` probe through the scanner alias, then intermittently reported
+  `UPLOAD_SCANNER_UNAVAILABLE` during the following workflow while every scanner process remained
+  healthy. The distributed smoke and final-image E2E harnesses now derive the scanner address from
+  Podman's trusted network inventory and install a deterministic container-local host mapping. They
+  still execute the exact alias-based network probe before user workflows, so network wiring and
+  scanner protocol coverage are preserved without adding application retries or weakening
+  fail-closed behavior. The current product configuration and Compose topology are unchanged. The
+  affected 83 harness tests, Ruff, `ty`, CI validation, the complete local distributed image smoke,
+  and the immutable 0.5.2 distributed rollback rehearsal pass.
 
 ## Synchronization
 

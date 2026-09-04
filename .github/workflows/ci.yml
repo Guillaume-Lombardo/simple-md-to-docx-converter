@@ -159,9 +159,9 @@ jobs:
           pnpm --filter @markweave/web run check
           pnpm --filter @markweave/web run build
           pnpm --filter @markweave/web run test:production
-      - name: Run unit tests with branch coverage
+      - name: Run light tests with branch coverage
         run: >-
-          uv run pytest -m unit
+          uv run pytest -m "unit or light_coverage"
           --cov-report=json:coverage.json
       - name: Enforce application branch-only coverage
         run: >-
@@ -503,6 +503,14 @@ jobs:
             artifacts/container/sbom.spdx.json
             artifacts/container/vulnerabilities.json
             artifacts/container/image-metadata.json
+            artifacts/reverse-attempt/sbom.cdx.json
+            artifacts/reverse-attempt/sbom.spdx.json
+            artifacts/reverse-attempt/vulnerabilities.json
+            artifacts/reverse-attempt/image-metadata.json
+            artifacts/reverse-attempt/image.oci.tar
+            artifacts/reverse-attempt/anydoc-cargo.cdx.json
+            artifacts/reverse-attempt/anydoc-cargo-vulnerabilities.json
+            artifacts/reverse-attempt/release-bundle.sha256
             artifacts/container-diagnostics/ci-status.txt
             artifacts/container-diagnostics/frontend-oci-identity.txt
             artifacts/container-diagnostics/scanner-readiness.txt

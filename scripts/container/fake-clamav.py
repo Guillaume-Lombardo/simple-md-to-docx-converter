@@ -9,10 +9,13 @@ MAX_STREAM_BYTES = 2_000_000
 
 
 class Handler(socketserver.BaseRequestHandler):
-    """Consume one bounded INSTREAM request and return a clean verdict."""
+    """Answer health probes or consume one bounded INSTREAM request."""
 
     def handle(self) -> None:
-        command = self._read_exact(10)
+        command = self._read_command()
+        if command == b"zPING\0":
+            self.request.sendall(b"PONG\0")
+            return
         if command != b"zINSTREAM\0":
             return
         total = 0
@@ -28,6 +31,17 @@ class Handler(socketserver.BaseRequestHandler):
                 return
         self.request.sendall(b"stream: OK\0")
 
+    def _read_command(self) -> bytes | None:
+        command = bytearray()
+        while len(command) < len(b"zINSTREAM\0"):
+            byte = self._read_exact(1)
+            if byte is None:
+                return None
+            command.extend(byte)
+            if byte == b"\0":
+                return bytes(command)
+        return bytes(command)
+
     def _read_exact(self, size: int) -> bytes | None:
         chunks = bytearray()
         while len(chunks) < size:
@@ -41,6 +55,7 @@ class Handler(socketserver.BaseRequestHandler):
 class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+    request_queue_size = 64
 
 
 if __name__ == "__main__":

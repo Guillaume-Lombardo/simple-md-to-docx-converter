@@ -35,6 +35,7 @@
       "uv",
       "run",
       "pytest",
+      "tests/integration/anydoc",
       "tests/integration/document_engines",
       "-m",
       "integration",

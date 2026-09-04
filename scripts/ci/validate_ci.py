@@ -381,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="bfef4d5a871dacf6ae35b23e56e98a9e57d78d43b8233f06f913f567114fd90c",
+        canonical_digest="0cf7654a913be385308b473b00414c12c49b28bd7155128b54a33b85da2bb8ab",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -861,8 +861,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         errors.append("workflow must define exactly one CI / gate check")
 
     required_commands = {
-        ("light", "Run unit tests with branch coverage"): (
-            "uv run pytest -m unit --cov-report=json:coverage.json"
+        ("light", "Run light tests with branch coverage"): (
+            'uv run pytest -m "unit or light_coverage" --cov-report=json:coverage.json'
         ),
         ("light", "Enforce application branch-only coverage"): (
             "uv run python -m scripts.ci.check_branch_coverage "

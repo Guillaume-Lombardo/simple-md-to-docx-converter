@@ -327,7 +327,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     run.assert_not_called()
 
 
-@pytest.mark.parametrize("failing_call", range(1, 35))
+@pytest.mark.parametrize("failing_call", range(1, 41))
 def test_subprocess_failure_stops_later_steps_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture, failing_call: int
 ) -> None:
