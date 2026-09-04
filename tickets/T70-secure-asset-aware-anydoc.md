@@ -199,6 +199,17 @@ for reverse conversion.
   parseable ZIP polyglots in every image format without rejecting benign magic bytes in valid PNG,
   JPEG, GIF, SVG, or WebP payloads. The exact light gate passes 2,427 tests at 94.13% total and
   90.13% branch-only coverage.
+* 2026-09-04: Hardened the container test scanner after three exact-head CI runs exposed a
+  readiness race in the test double. The bounded fake ClamAV endpoint now answers the same exact
+  `zPING` health protocol used by runtime diagnostics before accepting `INSTREAM`, retains
+  fail-closed behavior for unknown and malformed commands, and uses a bounded 64-connection listen
+  backlog for concurrent application and worker startup. Real TCP integration coverage proves
+  `PING`, unknown-command rejection, and a complete scan on separate connections. Independent
+  review approved the fix without findings. The canonical local non-engine selection passed 2,674
+  tests at 95.21% total coverage; its 30 PostgreSQL setup errors and three S3 failures reflect the
+  intentionally absent service endpoints, while the known process-reaping timing test was the only
+  unrelated local failure. The 64 directly affected container/protocol tests, Ruff, `ty`, CI
+  validation, and diff validation pass.
 
 ## Synchronization
 

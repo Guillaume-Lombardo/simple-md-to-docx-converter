@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import runpy
+import socket
 import socketserver
 from threading import Thread
+from typing import cast
 
 import pytest
 
@@ -49,3 +52,25 @@ def test_clamav_adapter_speaks_real_framed_instream_protocol() -> None:
         assert not thread.is_alive()
         assert server.command == b"zINSTREAM\0"
         assert server.content == b"abcdefg"
+
+
+@pytest.mark.integration
+def test_container_fake_clamav_answers_health_and_scan_protocols() -> None:
+    namespace = runpy.run_path("scripts/container/fake-clamav.py")
+    server_type = cast(type[socketserver.ThreadingTCPServer], namespace["Server"])
+    handler_type = cast(type[socketserver.BaseRequestHandler], namespace["Handler"])
+
+    with server_type(("127.0.0.1", 0), handler_type) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        address = cast(tuple[str, int], server.server_address)
+        with socket.create_connection(address, timeout=2) as connection:
+            connection.sendall(b"zPING\0")
+            assert connection.recv(64) == b"PONG\0"
+        with socket.create_connection(address, timeout=2) as connection:
+            connection.sendall(b"zUNKNOWN\0")
+            assert connection.recv(64) == b""
+        ClamAVUploadScanner(*address, 2, chunk_bytes=3).scan(b"abcdefg")
+        server.shutdown()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
