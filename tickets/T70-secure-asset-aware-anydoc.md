@@ -21,15 +21,23 @@ for reverse conversion.
   verification.
 * Parse only the format matrix approved by T69 from bounded in-memory or isolated-workspace inputs
   after the existing malware-scanning boundary.
-* Implement one disposable process/container per conversion attempt, placed in a dedicated stable
-  kernel isolation unit or cgroup. The anydoc binding runs in-process only inside that unit, with
-  bounded threads. T71 configures CPU, memory, PID/descendant, and bounded
-  workspace/ephemeral-storage budgets enforced at the kernel boundary. The external supervisor owns
-  heartbeat and the attempt token, passes only bounded local input/output, gives the child no
-  network or persistence credentials, and is the only publisher. Cancellation, deadline, lease
-  loss, or resource failure hard-terminates the whole stable unit rather than a PID; the supervisor
-  proves the unit empty and terminated before recovery or another attempt can start. PID exit alone
-  is insufficient. Normal completion still revalidates the active lease/token before publication.
+* Implement a trusted external isolation broker as the only holder of Podman/Kubernetes workload
+  authority. The application worker reaches it only through a narrow authenticated owner-restricted
+  Unix socket or mutually authenticated TLS protocol and receives no raw OCI socket or workload-
+  mutating service account. The broker accepts only bounded requests, content-free stable attempt
+  identities, the reviewed image pinned by immutable digest, and a fixed reverse-attempt argv;
+  user/document data cannot select runtime policy. It creates one disposable process/container
+  workload per attempt in a dedicated stable kernel isolation unit. The anydoc binding runs in-
+  process only inside that unit with bounded threads. The child has no network, service-account
+  token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication
+  capability. T71 supplies reviewed configurable CPU, memory, PID/descendant, and
+  workspace/ephemeral budgets, which the broker enforces at the runtime/kernel boundary. The
+  worker-side supervisor owns heartbeat, attempt token, bounded output validation, and publication.
+  Cancellation, deadline, lease loss, broker disconnect, or resource failure stops output
+  acceptance and makes the broker hard-terminate the whole stable unit, prove it empty, remove it,
+  and return a content-free proof before recovery or another attempt. PID exit or delete
+  acknowledgement alone is insufficient. Normal completion also requires termination proof and
+  active lease/token revalidation before publication.
 * Keep the production path CPU-only. It must not load GPU/accelerator or ML runtimes or invoke a
   browser, Pandoc, LibreOffice, or another document engine. The approved per-attempt anydoc child is
   an isolation boundary, not a second document engine.
@@ -80,11 +88,15 @@ for reverse conversion.
 
 ## Implementation boundary
 
-* Own the supervised disposable-attempt runner and termination protocol, anydoc adapter, bounded
-  internal renderer compatibility boundary, asset-aware serializer/package builder, the single
-  deterministic content-free manifest generator, reverse-conversion domain errors, format corpus,
-  dependency lock, and directly affected backend-image contents. Expose the runner and verified
-  termination result as ports for T71; do not add persistent lease or job orchestration here.
+* Own the external broker service and authenticated bounded protocol, Podman and Kubernetes
+  isolation backends, immutable image/argv and child-security policy, supervised disposable-attempt
+  runner and terminate-and-prove protocol, anydoc adapter, bounded internal renderer compatibility
+  boundary, asset-aware serializer/package builder, the single deterministic content-free manifest
+  generator, reverse-conversion domain errors, format corpus, dependency lock, and directly affected
+  backend/broker image and deployment contents. Expose the runner, content-free stable unit identity,
+  and verified termination proof as ports for T71; do not add persistent lease or job orchestration
+  here. Never expose a raw OCI socket or workload-mutating service account to the application or
+  child.
 * Do not add HTTP routes, persistent jobs, database migrations, or browser UI.
 * Do not implement OCR or any network-backed fallback.
 
@@ -94,6 +106,10 @@ for reverse conversion.
   scanning invariants.
 * Meet the measured low-compute envelope approved by T69 and expose no unbounded internal
   parallelism.
+* Test both broker transports and both runtime backends. Authenticate peers, reject replay,
+  oversized/truncated/extra protocol frames and every caller-selected image/argv/mount/network/
+  credential/resource override, fail closed on broker disconnect or unavailable termination proof,
+  and prove that runtime authority is absent from the application and child.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
 * Keep repository artifacts and user-facing errors in English.
@@ -103,13 +119,16 @@ for reverse conversion.
 * 2026-09-03: Created from the approved feasibility decomposition; depends on T69.
 * 2026-09-03: Scope now requires an exclusively CPU-only native path and the measured low-compute
   envelope from T69.
-* 2026-09-03: T69's product decisions authorize a disposable supervised process/container in a
-  dedicated per-attempt kernel isolation unit/cgroup and a bounded maintained internal renderer adapter. T70 owns the isolation runner,
-  terminate-and-verify protocol, compatibility boundary, required security/parity/version and
-  SBOM/license evidence, and removal when an official upstream asset-aware hook becomes available.
-  The native call remains in-process only within its disposable child; shared-worker native
-  execution, PID-only termination proof, and a broad serializer fork are prohibited. T71 owns the
-  configurable CPU, memory, PID/descendant, and workspace/ephemeral budget values.
+* 2026-09-04: Deployment preflight proved that the current arbitrary-UID, capability-free worker
+  cannot safely create delegated per-attempt cgroups or workloads. The product manager selected a
+  trusted external isolation broker as the sole holder of Podman/Kubernetes authority, reached
+  through a narrow authenticated Unix/mTLS protocol. T70 now owns that broker, its two runtime
+  backends, immutable image/argv policy, attempt runner, and terminate-and-prove protocol in addition
+  to the approved bounded renderer adapter and package/security work. The child remains networkless
+  and credentialless; the application receives no raw OCI socket or workload-mutating service
+  account; and T71 owns reviewed configurable budget values plus durable lease/recovery binding.
+  Shared-worker native execution, PID-only proof, publication before unit termination, and a broad
+  serializer fork remain prohibited.
 
 ## Synchronization
 

@@ -66,6 +66,13 @@ jobs:
         with:
           node-version: 24.19.0
           check-latest: false
+      - name: Bootstrap verified Corepack and pnpm
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
       - name: Validate the reviewed release identity
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,7 +115,7 @@ jobs:
           source_date_epoch="$(git show -s --format=%ct HEAD)"
           SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"
           podman build --format oci --timestamp "$source_date_epoch" \
-            --tag "$frontend_image" --file web/Containerfile web
+            --tag "$frontend_image" --file web/Containerfile .
           bash scripts/container/smoke.sh "$backend_image"
           bash scripts/container/api-smoke.sh "$backend_image"
           bash scripts/container/distributed-api-smoke.sh "$backend_image"
@@ -277,10 +284,14 @@ jobs:
           SOURCE_SHA: ${{ inputs.source-sha }}
         run: |
           set -euo pipefail
-          git show "$SOURCE_SHA:web/package-lock.json" > "$RUNNER_TEMP/release-package-lock.json"
+          if git cat-file -e "$SOURCE_SHA:pnpm-lock.yaml" 2>/dev/null; then
+            git show "$SOURCE_SHA:pnpm-lock.yaml" > "$RUNNER_TEMP/release-frontend-lock.yaml"
+          else
+            git show "$SOURCE_SHA:web/package-lock.json" > "$RUNNER_TEMP/release-frontend-lock.yaml"
+          fi
           bash scripts/container/publish-release-pair.sh \
             artifacts/container "$RELEASE_VERSION" "$SOURCE_SHA" \
-            "$RUNNER_TEMP/release-package-lock.json"
+            "$RUNNER_TEMP/release-frontend-lock.yaml"
       - name: Verify retained bundle integrity and release identity
         env:
           BACKEND_DIGEST: ${{ steps.push.outputs.backend-digest }}
@@ -294,7 +305,7 @@ jobs:
           --version "$RELEASE_VERSION"
           --tag "$RELEASE_TAG"
           --source-sha "$SOURCE_SHA"
-          --frontend-lock-sha256 "$(git show "$SOURCE_SHA:web/package-lock.json" | sha256sum | cut -d' ' -f1)"
+          --frontend-lock-sha256 "$(sha256sum "$RUNNER_TEMP/release-frontend-lock.yaml" | cut -d' ' -f1)"
           --backend-registry-digest "$BACKEND_DIGEST"
           --frontend-registry-digest "$FRONTEND_DIGEST"
       - name: Transfer the exact verified evidence to this recovery run

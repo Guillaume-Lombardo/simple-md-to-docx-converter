@@ -14,7 +14,14 @@ test("Next.js 16 uses only the reviewed proxy interception hook", async () => {
 
 test("direct dependencies and package manager use exact reviewed versions", async () => {
   const manifest = JSON.parse(await readFile("package.json", "utf8"));
-  assert.equal(manifest.packageManager, "npm@11.17.0");
+  const workspaceManifest = JSON.parse(
+    await readFile("../package.json", "utf8"),
+  );
+  assert.equal(manifest.packageManager, undefined);
+  assert.equal(
+    workspaceManifest.packageManager,
+    "pnpm@11.25.0+sha224.c69bc375107d8eef668fbe1ebab8b3a34253dc594dff6a0a36d8a16c",
+  );
   assert.equal(manifest.engines.node, "24.19.0");
   assert.equal(manifest.dependencies.next, "16.3.4");
   assert.equal(manifest.devDependencies.typescript, "6.0.3");
@@ -39,13 +46,16 @@ test("generated production bindings and fixture are byte-identical", async () =>
 
 test("tooling and runtime preserve the reviewed production configuration", async () => {
   const manifest = JSON.parse(await readFile("package.json", "utf8"));
-  assert.match(manifest.scripts.check, /npm run typegen.*npm run typecheck/);
+  assert.match(manifest.scripts.check, /pnpm run typegen.*pnpm run typecheck/);
   const eslint = await readFile("eslint.config.mjs", "utf8");
   for (const ignored of ["build/**", "next-env.d.ts", "out/**"])
     assert.ok(eslint.includes(JSON.stringify(ignored)));
   const container = await readFile("Containerfile", "utf8");
   assert.match(container, /COPY --from=build[^\n]+next\.config\.ts/);
-  assert.match(container, /COPY --chown=1001:0 router\.mjs \.\/router\.mjs/);
+  assert.match(
+    container,
+    /COPY --chown=1001:0 web\/router\.mjs \.\/router\.mjs/,
+  );
   const generator = await readFile("scripts/generate-openapi.mjs", "utf8");
   assert.doesNotMatch(generator, /process\.exit\s*\(/);
   assert.match(generator, /result\.error/);

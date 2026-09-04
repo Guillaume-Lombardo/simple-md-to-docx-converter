@@ -9,16 +9,21 @@ runtime, or network access when OCR is explicitly `reject`.
 
 The product manager approved both decisions required for T70 implementation.
 
-For execution, each attempt runs in one disposable, separately supervised process or container
-placed in its own stable kernel isolation unit or cgroup. The anydoc call remains in-process only
-inside that single-attempt unit. Its external supervisor owns the lease heartbeat and attempt token
-and is the only component allowed to publish. T71 supplies configurable CPU, memory, PID/descendant,
-and bounded workspace or ephemeral-storage budgets enforced at that kernel boundary; the T69
-harness does not select their numeric values. The child receives and returns only bounded local data
-and has neither network access nor database/object-store credentials. On cancellation, deadline,
-lease loss, or a hard resource limit, the supervisor hard-kills the complete stable unit rather than
-a PID, proves the unit empty and terminated, and only then permits recovery or another attempt.
-Successful completion is still fenced by a fresh lease and attempt-token check before publication.
+For execution, a trusted external isolation broker is the sole holder of Podman/Kubernetes workload
+authority. The worker-side supervisor reaches it only through a narrow authenticated owner-
+restricted Unix socket or mutually authenticated TLS protocol; neither the application nor the
+child receives a raw runtime socket or workload-mutating service account. For each attempt the
+broker launches only the reviewed image pinned by immutable digest and a fixed reverse-attempt argv
+inside one disposable stable kernel isolation unit. The anydoc call remains in-process only inside
+that unit. T71 supplies reviewed configurable CPU, memory, PID/descendant, and bounded workspace or
+ephemeral-storage budgets enforced by the broker at the runtime/kernel boundary; the T69 harness
+does not select their numeric values. The child receives and returns only bounded local data and has
+no network, service-account token, Secret, ConfigMap, PVC, persistence or broker credential, runtime
+socket, or publication capability. On cancellation, deadline, lease loss, broker disconnect, or a
+hard resource limit, the worker stops accepting output and the broker hard-kills the complete stable
+unit, proves it empty, removes it, and only then permits recovery or another attempt. The worker
+retains lease heartbeat, attempt-token validation, bounded-output validation, and sole publication
+authority.
 
 For asset serialization, T70 may implement one narrowly bounded Markweave-maintained internal
 adapter around the exact pinned anydoc `Document` model and renderer behavior. It must consume the
@@ -201,10 +206,13 @@ the shared service without a deterministic job transition. Calling `os._exit()` 
 has the same shared-service problem and still supplies no per-call memory boundary.
 
 Consequently, publication fencing alone is insufficient and the complete cancellation/timeout/
-memory/heartbeat/no-overlap set is not enforceable in a shared process. The approved design moves
-the native call into a disposable single-attempt kernel isolation unit while the supervisor remains
-outside it. T70 owns the bounded runner and whole-unit terminate-and-verify protocol; T71 configures
-the CPU, memory, PID/descendant, and workspace/ephemeral budgets and integrates the stable unit
-identity with durable leases, heartbeats, recovery, and publication fencing. Recovery must remain
-blocked whenever the prior unit cannot be proved empty and terminated; observing the recorded PID
-exit is never sufficient.
+memory/heartbeat/no-overlap set is not enforceable in a shared process. The approved design sends
+the bounded attempt through a trusted external isolation broker, the sole holder of Podman/
+Kubernetes workload authority. The broker creates one immutable-image, fixed-argument disposable
+kernel-isolated unit, hard-terminates and proves it empty and removed, and returns only bounded
+output plus content-free lifecycle evidence. The application and child receive no raw runtime
+authority. T70 owns the authenticated broker protocol/service/backends and terminate-and-verify
+runner; T71 configures reviewed budgets and durably binds stable unit identity and termination proof
+to leases, recovery, and publication fencing. Recovery remains blocked whenever the prior unit
+cannot be proved empty, terminated, and removed; PID exit or delete acknowledgement alone is never
+sufficient.

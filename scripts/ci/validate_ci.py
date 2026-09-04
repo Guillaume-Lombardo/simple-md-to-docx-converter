@@ -63,6 +63,7 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.number",
         "github.event_name",
         "github.actor",
+        "github.head_ref",
         "github.ref",
         "github.repository",
         "github.run_attempt",
@@ -104,6 +105,10 @@ READ_ONLY_ENV_STEPS = frozenset(
             "Install verified fonts and LibreOffice for document-engine tests",
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
+        ("heavy", "Rehearse the exact npm rollback candidate"),
+        ("heavy", "Verify the accepted T67 benchmark metadata"),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"),
+        ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
@@ -111,6 +116,24 @@ READ_ONLY_ENV_STEPS = frozenset(
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
+T67_ROLLBACK_REHEARSAL_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository }}"
+)
+T67_MANUAL_BENCHMARK_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+    "&& inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+)
+T67_BENCHMARK_ARTIFACT_CONDITION = (
+    "${{ always() && matrix.domain == 'frontend' && "
+    "((github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository) || "
+    "(github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}"
+)
 
 
 @dataclass(frozen=True)
@@ -150,10 +173,10 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "221d3b72b83664c1c28246f04f03fea71c06ab8123c83f28bb91adde9497fbfe"
+    "6040a82045b49f57ca16a6e2bf1fd0b109b4e173107b1f117c0260fde4808891"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
-    "5b1966cda4facf8b7faf10fa643270dc525eb20355f5e545da14406f984f9588"
+    "b180243d6fefbbbe9b4966e50cb5f42dea066cef48d419d0fb034e618758b3fe"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
@@ -179,6 +202,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "actions/checkout",
                 "actions/cache/restore",
                 "actions/cache/save",
+                "actions/download-artifact",
                 "actions/setup-node",
                 "actions/setup-python",
                 "actions/upload-artifact",
@@ -209,6 +233,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                     "if",
                     "name",
                     "needs",
+                    "permissions",
                     "runs-on",
                     "services",
                     "steps",
@@ -231,6 +256,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): (
                 "${{ github.event_name == 'pull_request' || "
                 "github.event_name == 'merge_group' }}"
+            ),
+            (
+                "light",
+                "Save the exact pnpm store cache from trusted main",
+            ): (
+                "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+                "&& github.repository == "
+                "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
             ),
             (
                 "heavy",
@@ -283,11 +316,50 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ matrix.domain == 'document-engines' }}",
             (
                 "heavy",
-                "Set up the pinned Node runtime for browser and Mermaid tests",
+                "Set up the pinned Node runtime for Mermaid tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Set up pinned Node for rootless E2E",
+            ): "${{ startsWith(matrix.domain, 'e2e-') }}",
+            (
+                "heavy",
+                "Bootstrap verified Corepack and pnpm for workspace domains",
             ): (
-                "${{ matrix.domain == 'document-engines' || "
+                "${{ matrix.domain == 'frontend' || "
                 "startsWith(matrix.domain, 'e2e-') }}"
             ),
+            (
+                "heavy",
+                "Restore the exact pnpm store cache for workspace domains",
+            ): (
+                "${{ matrix.domain == 'frontend' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
+            (
+                "heavy",
+                "Rehearse the exact npm rollback candidate",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Verify the accepted T67 benchmark metadata",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Download the accepted T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Verify the accepted T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Collect the T67 package-manager benchmark",
+            ): T67_MANUAL_BENCHMARK_CONDITION,
+            (
+                "heavy",
+                "Retain the T67 package-manager benchmark",
+            ): T67_BENCHMARK_ARTIFACT_CONDITION,
             (
                 "heavy",
                 "Install verified Mermaid and Chrome for document-engine tests",
@@ -309,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="ffaa8700470db3c61d89cb939fcef6bb2f599b66c39888a65e975e1bb90c3266",
+        canonical_digest="bfef4d5a871dacf6ae35b23e56e98a9e57d78d43b8233f06f913f567114fd90c",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -534,6 +606,23 @@ def _validate_read_only_step(
     return errors
 
 
+def _validate_read_only_job_permissions(
+    job_name: str, job: Mapping[str, Any]
+) -> list[str]:
+    expected = {
+        "light": {"contents": "read", "packages": "read"},
+        "heavy": {"actions": "read", "contents": "read"},
+    }.get(job_name)
+    if expected is not None and job.get("permissions") != expected:
+        return [
+            f"{job_name} job permissions must be exactly "
+            + " and ".join(f"{key}: {value}" for key, value in expected.items())
+        ]
+    if expected is None and "permissions" in job:
+        return [f"read-only job {job_name!r} must not override workflow permissions"]
+    return []
+
+
 def _validate_read_only_job(
     job_name: str, job: Mapping[str, Any], *, policy: WorkflowPolicy
 ) -> list[str]:
@@ -557,15 +646,7 @@ def _validate_read_only_job(
         or timeout > maximum
     ):
         errors.append(f"job {job_name!r} must define an allowlisted bounded timeout")
-    if job_name == "light":
-        if job.get("permissions") != {"contents": "read", "packages": "read"}:
-            errors.append(
-                "light job permissions must be exactly contents: read and packages: read"
-            )
-    elif "permissions" in job:
-        errors.append(
-            f"read-only job {job_name!r} must not override workflow permissions"
-        )
+    errors.extend(_validate_read_only_job_permissions(job_name, job))
     if job.get("runs-on") != "ubuntu-24.04":
         errors.append(f"job {job_name!r} must use the allowlisted hosted runner")
     steps = job.get("steps")
@@ -750,6 +831,26 @@ def _validate_public_alignment_credentials(
     return []
 
 
+def _validate_t67_benchmark_download(workflow: Mapping[str, Any]) -> list[str]:
+    downloads = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Download the accepted T67 package-manager benchmark"
+    ]
+    expected = {
+        "artifact-ids": 9_911_803_951,
+        "path": "artifacts/package-manager-benchmark",
+        "github-token": "${{ github.token }}",
+        "repository": "Guillaume-Lombardo/simple-md-to-docx-converter",
+        "run-id": 33_799_673_333,
+    }
+    if len(downloads) != 1 or downloads[0].get("with") != expected:
+        return [
+            "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        ]
+    return []
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -785,16 +886,40 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "uv run python -m scripts.release.public_alignment "
             '--event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"'
         ),
-        ("light", "Verify the isolated frontend"): (
-            "cd web\n"
+        ("light", "Verify the workspace frontend"): (
             'test "$(node --version)" = "v24.19.0"\n'
-            'test "$(npm --version)" = "11.17.0"\n'
-            "npm ci --ignore-scripts\n"
-            "npm run check\n"
-            "npm run build\n"
-            "npm run test:production\n"
+            'test "$(corepack --version)" = "0.36.0"\n'
+            'test "$(pnpm --version)" = "11.25.0"\n'
+            "pnpm --filter @markweave/web run check\n"
+            "pnpm --filter @markweave/web run build\n"
+            "pnpm --filter @markweave/web run test:production\n"
         ),
-        ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
+        ("heavy", "Install the locked E2E browser driver"): (
+            "pnpm install --frozen-lockfile --ignore-scripts "
+            "--filter md-converter-web-tests"
+        ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            "scripts/javascript/run_bounded_benchmark_command.py "
+            "900 10 /dev/stderr t67/rollback -- "
+            "bash scripts/javascript/rehearse-npm-rollback.sh "
+            '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
+        ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            "bash scripts/javascript/reuse-package-benchmark.sh "
+            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark '
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
+            "uv run python scripts/javascript/verify_benchmark_artifact_metadata.py "
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            "scripts/javascript/run_bounded_benchmark_command.py "
+            "1620 20 /dev/stderr t67/benchmark -- "
+            "bash scripts/javascript/benchmark-package-managers.sh "
+            '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
+            "artifacts/package-manager-benchmark"
+        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -813,6 +938,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
+    errors.extend(_validate_t67_benchmark_download(workflow))
+
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
     errors.extend(_validate_public_alignment_credentials(workflow))
@@ -829,9 +956,26 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ("heavy", "Set up pinned Node for frontend smoke"): (
             "${{ matrix.domain == 'frontend' }}"
         ),
-        ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
-            "${{ matrix.domain == 'document-engines' || "
-            "startsWith(matrix.domain, 'e2e-') }}"
+        ("heavy", "Set up the pinned Node runtime for Mermaid tests"): (
+            "${{ matrix.domain == 'document-engines' }}"
+        ),
+        ("heavy", "Set up pinned Node for rootless E2E"): (
+            "${{ startsWith(matrix.domain, 'e2e-') }}"
+        ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Download the accepted T67 package-manager benchmark"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            T67_MANUAL_BENCHMARK_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
@@ -866,8 +1010,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         != {
             "node-version": "24.19.0",
             "check-latest": False,
-            "cache": "npm",
-            "cache-dependency-path": "web/package-lock.json",
         }
     ):
         errors.append("frontend smoke must use the reviewed pinned Node setup")
@@ -904,7 +1046,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         step.get("if")
         for job_name in jobs
         for step in _job_steps(workflow, job_name)
-        if isinstance(step.get("uses"), str)
+        if str(step.get("name", "")).startswith("Save verified LibreOffice")
+        and isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/cache/save@")
     ]
     if libreoffice_cache_writes != [

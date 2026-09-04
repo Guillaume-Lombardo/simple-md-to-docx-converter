@@ -58,7 +58,7 @@ try {
           readFileSync(join(candidate, file), "utf8")
         ) {
           console.error(
-            `${output}/${file} is stale; run npm run bindings:generate`,
+            `${output}/${file} is stale; run pnpm --filter @markweave/web run bindings:generate`,
           );
           process.exitCode = 1;
         }

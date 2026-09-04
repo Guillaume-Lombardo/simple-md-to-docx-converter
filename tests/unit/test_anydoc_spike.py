@@ -89,15 +89,16 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
     assert decisions == {
         "execution_isolation": {
             "status": "approved",
-            "selected": "disposable_supervised_per_attempt_kernel_isolation_unit",
+            "selected": "external_isolation_broker_managed_disposable_runtime_unit",
             "requirements": [
-                "the anydoc native call runs in-process only inside one disposable process or container placed in a dedicated kernel isolation unit for one attempt",
-                "an external supervisor owns heartbeat and the attempt token and is the only component allowed to publish",
-                "the isolation unit has no persistence credentials or network access and receives and returns only bounded local data",
-                "T71 configures per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced at the kernel isolation boundary",
-                "cancellation, deadline, lease loss, or a hard resource limit hard-kills the stable isolation unit rather than a recorded PID",
-                "the supervisor proves the stable isolation unit empty and terminated before recovery or another attempt may start",
-                "publication revalidates the active lease and attempt token after successful child exit",
+                "the anydoc native call runs in-process only inside one immutable-image fixed-argument disposable Podman container or Kubernetes workload placed in a dedicated kernel isolation unit for one attempt",
+                "a trusted external isolation broker exclusively holds Podman or Kubernetes workload authority and the application receives no raw OCI socket or workload-mutating service account",
+                "the worker-side supervisor reaches the broker only through a narrow authenticated owner-restricted Unix socket or mutually authenticated TLS protocol",
+                "the child has no network, service-account token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication capability and receives and returns only bounded local data",
+                "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced by the broker at the runtime and kernel boundary",
+                "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
+                "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
+                "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher",
             ],
         },
         "asset_serialization": {
@@ -149,15 +150,41 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         "native_api_has_cancellation": False,
         "native_api_has_deadline": False,
         "native_api_has_memory_budget": False,
-        "hard_control_decision": "disposable_supervised_per_attempt_kernel_isolation_unit",
+        "hard_control_decision": (
+            "external_isolation_broker_managed_disposable_runtime_unit"
+        ),
         "isolation_unit_sharing": "one attempt only",
         "isolation_unit_identity": (
             "stable kernel isolation unit or cgroup identity, never PID identity alone"
         ),
         "native_call_scope": "in-process inside the disposable isolation unit only",
+        "runtime_authority_owner": "external_isolation_broker",
+        "broker_transports": ["authenticated_unix_socket", "mutual_tls"],
+        "application_has_raw_runtime_authority": False,
+        "attempt_image_selection": "immutable_digest_fixed_by_broker",
+        "attempt_argv_selection": "fixed_by_broker",
+        "child_forbidden_resources": [
+            "network",
+            "service_account_token",
+            "secrets",
+            "config_maps",
+            "persistent_volumes",
+            "persistence_credentials",
+            "broker_credentials",
+            "runtime_socket",
+            "publication_capability",
+        ],
         "supervisor_owns_heartbeat_and_publication": True,
+        "supervisor_role": "worker_side_attempt_supervisor",
         "hard_kill_target": "complete stable isolation unit including every descendant",
-        "recovery_precondition": "stable isolation unit proved empty and terminated",
+        "broker_termination_proof_requires": [
+            "runtime_confirmed_exit",
+            "stable_unit_empty",
+            "stable_unit_removed",
+        ],
+        "recovery_precondition": (
+            "broker termination proof for stable isolation unit is durably recorded"
+        ),
         "pid_only_termination_proof_allowed": False,
         "kernel_enforced_configurable_budgets": [
             "cpu",
@@ -182,12 +209,8 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         (root / "tickets/T70-secure-asset-aware-anydoc.md").read_text().split()
     )
     expected_spec_decisions = (
-        "Run each anydoc native call in-process only inside one disposable, separately "
-        "supervised process or container placed in a dedicated stable kernel isolation "
-        "unit/cgroup for one attempt; enforce configurable CPU, memory, PID/descendant, "
-        "and workspace/ephemeral-storage budgets at that boundary, hard-kill the whole "
-        "unit, prove it empty and terminated before recovery, and keep heartbeat and "
-        "publication in the supervisor",
+        "A trusted external isolation broker, separate from the application worker and "
+        "any attempt unit, exclusively owns Podman or Kubernetes workload authority.",
         "Use one narrowly bounded maintained internal adapter around the pinned anydoc "
         "document model and renderer behavior; prohibit a second parser or broad fork, "
         "require security/parity/compatibility/SBOM/license ownership, and remove it when "
@@ -197,17 +220,8 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         assert decision in product_spec
 
     expected_t70_requirements = (
-        "Implement one disposable process/container per conversion attempt, placed in a "
-        "dedicated stable kernel isolation unit or cgroup. The anydoc binding runs "
-        "in-process only inside that unit, with bounded threads. T71 configures CPU, "
-        "memory, PID/descendant, and bounded workspace/ephemeral-storage budgets enforced "
-        "at the kernel boundary. The external supervisor owns heartbeat and the attempt "
-        "token, passes only bounded local input/output, gives the child no network or "
-        "persistence credentials, and is the only publisher. Cancellation, deadline, "
-        "lease loss, or resource failure hard-terminates the whole stable unit rather "
-        "than a PID; the supervisor proves the unit empty and terminated before recovery "
-        "or another attempt can start. PID exit alone is insufficient. Normal completion "
-        "still revalidates the active lease/token before publication.",
+        "Implement a trusted external isolation broker as the only holder of Podman/"
+        "Kubernetes workload authority.",
         "Implement one narrowly bounded maintained internal compatibility adapter around "
         "the pinned anydoc `Document` model and renderer behavior. Consume the single "
         "parsed document; never reparse source bytes or add a second parser. Inventory "
@@ -223,6 +237,13 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
     )
     for requirement in expected_t70_requirements:
         assert requirement in t70
+    for invariant in (
+        "authenticated owner-restricted Unix socket or mutually authenticated TLS",
+        "no raw OCI socket or workload-mutating service account",
+        "no network, service-account token, Secret, ConfigMap, PVC",
+        "prove it empty, remove it, and return a content-free proof before recovery",
+    ):
+        assert invariant in t70
 
 
 @pytest.mark.unit

@@ -4,15 +4,16 @@
   "product_decisions": {
     "execution_isolation": {
       "status": "approved",
-      "selected": "disposable_supervised_per_attempt_kernel_isolation_unit",
+      "selected": "external_isolation_broker_managed_disposable_runtime_unit",
       "requirements": [
-        "the anydoc native call runs in-process only inside one disposable process or container placed in a dedicated kernel isolation unit for one attempt",
-        "an external supervisor owns heartbeat and the attempt token and is the only component allowed to publish",
-        "the isolation unit has no persistence credentials or network access and receives and returns only bounded local data",
-        "T71 configures per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced at the kernel isolation boundary",
-        "cancellation, deadline, lease loss, or a hard resource limit hard-kills the stable isolation unit rather than a recorded PID",
-        "the supervisor proves the stable isolation unit empty and terminated before recovery or another attempt may start",
-        "publication revalidates the active lease and attempt token after successful child exit"
+        "the anydoc native call runs in-process only inside one immutable-image fixed-argument disposable Podman container or Kubernetes workload placed in a dedicated kernel isolation unit for one attempt",
+        "a trusted external isolation broker exclusively holds Podman or Kubernetes workload authority and the application receives no raw OCI socket or workload-mutating service account",
+        "the worker-side supervisor reaches the broker only through a narrow authenticated owner-restricted Unix socket or mutually authenticated TLS protocol",
+        "the child has no network, service-account token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication capability and receives and returns only bounded local data",
+        "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced by the broker at the runtime and kernel boundary",
+        "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
+        "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
+        "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher"
       ]
     },
     "asset_serialization": {
@@ -106,13 +107,21 @@
     "native_api_has_cancellation": false,
     "native_api_has_deadline": false,
     "native_api_has_memory_budget": false,
-    "hard_control_decision": "disposable_supervised_per_attempt_kernel_isolation_unit",
+    "hard_control_decision": "external_isolation_broker_managed_disposable_runtime_unit",
     "isolation_unit_sharing": "one attempt only",
     "isolation_unit_identity": "stable kernel isolation unit or cgroup identity, never PID identity alone",
     "native_call_scope": "in-process inside the disposable isolation unit only",
+    "runtime_authority_owner": "external_isolation_broker",
+    "broker_transports": ["authenticated_unix_socket", "mutual_tls"],
+    "application_has_raw_runtime_authority": false,
+    "attempt_image_selection": "immutable_digest_fixed_by_broker",
+    "attempt_argv_selection": "fixed_by_broker",
+    "child_forbidden_resources": ["network", "service_account_token", "secrets", "config_maps", "persistent_volumes", "persistence_credentials", "broker_credentials", "runtime_socket", "publication_capability"],
     "supervisor_owns_heartbeat_and_publication": true,
+    "supervisor_role": "worker_side_attempt_supervisor",
     "hard_kill_target": "complete stable isolation unit including every descendant",
-    "recovery_precondition": "stable isolation unit proved empty and terminated",
+    "broker_termination_proof_requires": ["runtime_confirmed_exit", "stable_unit_empty", "stable_unit_removed"],
+    "recovery_precondition": "broker termination proof for stable isolation unit is durably recorded",
     "pid_only_termination_proof_allowed": false,
     "kernel_enforced_configurable_budgets": ["cpu", "memory", "pids_and_descendants", "workspace_or_ephemeral_storage"],
     "budget_configuration_owner": "T71",

@@ -30,7 +30,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
 | Browser boundary | Browser pages and both exact `/api/v1` and `/api/v1/**` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
 | Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
-| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0` and npm `11.17.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3`, all exact and lockfile-integrity pinned as reviewed on 2026-09-01 |
+| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
@@ -39,7 +39,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
 | Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
-| Reverse-conversion execution isolation | Run each anydoc native call in-process only inside one disposable, separately supervised process or container placed in a dedicated stable kernel isolation unit/cgroup for one attempt; enforce configurable CPU, memory, PID/descendant, and workspace/ephemeral-storage budgets at that boundary, hard-kill the whole unit, prove it empty and terminated before recovery, and keep heartbeat and publication in the supervisor |
+| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns Podman or Kubernetes workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, service-account token, secret, ConfigMap, PVC, persistence credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, and workspace/ephemeral limits. The broker hard-kills the complete stable unit and proves it empty, terminated, and removed before recovery; the worker retains lease heartbeat, attempt-token validation, and sole publication authority. |
 | Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
@@ -66,7 +66,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Upload malware scanning | Local ClamAV before processing or durable persistence by default; an explicit trusted-upstream mode is permitted only behind a non-bypassable proxy that scans every upload before forwarding; the explicit insecure evaluation exception may omit scanning only while loopback-bound behind a temporary SSH tunnel; fail closed in ClamAV mode; no durable quarantine |
 | Recovery targets | Standalone RPO 24h/RTO 4h; distributed RPO 1h/RTO 2h; automated quarterly proof |
 
-Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue.
+Asynchronous processing avoids coupling job duration to browser, OpenShift Route, and application request timeouts. It provides bounded concurrency, restart recovery, state tracking, and one contract for both storage profiles. No extra queue or message broker is used: SQLite carries the standalone queue and PostgreSQL carries the distributed queue. The reverse-conversion isolation broker defined below is an execution-control boundary only; it never stores, claims, schedules, or publishes durable jobs.
 
 ## 3. Functional requirements
 
@@ -204,12 +204,33 @@ field. It preserves both header directions unchanged on direct FastAPI routes.
 Uploads and downloads pass router-to-FastAPI without traversing Next.js, and retain FastAPI's
 scanner, authorization, filename, digest, content-type, `nosniff`, and private no-store contracts.
 
-The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. npm is the
-only package manager; `packageManager` and every direct dependency are exact, `web/package-lock.json`
-pins the complete integrity-checked graph, and deterministic installation uses `npm ci
---ignore-scripts`. Updates occur only through reviewed pull requests with support, license,
-vulnerability, build, browser, rootless, and rollback evidence. No production build or startup
-resolves a tag, range, Git URL, CDN, or dynamically downloaded asset.
+The root browser-test package and `web/` use one pnpm workspace and one root `pnpm-lock.yaml`.
+Workspace membership explicitly includes only the repository root and `web/` and explicitly
+excludes `spikes/toolchain`; an automated negative-membership test enforces that boundary. The
+isolated Mermaid production graph remains npm-based, retains its independent lock and exact Mermaid
+version, and is installed only with `npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts`.
+
+The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. Node.js
+`24.19.0`, Corepack `0.36.0`, pnpm `11.25.0`, the integrity-bound root `packageManager` selection,
+and every direct dependency are exact. Bootstrap downloads Corepack only from its immutable exact
+npm-registry tarball URL, verifies the reviewed SHA-512 before installing it, and asks that verified
+Corepack to acquire pnpm only under the reviewed package-manager integrity hash. Every later command
+sets `COREPACK_ENABLE_NETWORK=0`; a mismatch or unavailable verified byte fails closed instead of
+activating a package manager implicitly.
+
+Deterministic installation uses `pnpm install --frozen-lockfile --ignore-scripts`. The root lock
+pins the complete integrity-checked application and browser-test graph and preserves the reviewed
+npm-baseline package/version set, peer resolution, and overrides. CI caches only pnpm's
+content-addressable store under a key containing the operating system, exact Node.js version, exact
+pnpm version, and lock digest; untrusted contexts may restore but never write caches. Frontend image
+construction uses the repository root context, builds from the frozen workspace graph, and copies
+only a target-platform `pnpm deploy --prod --legacy` graph into the runtime. Corepack, pnpm, their
+caches, development dependencies, and package-manager network access are absent at runtime.
+Updates occur only through reviewed pull requests with support, license, vulnerability, build,
+browser, rootless, cold-cache, benchmark, and rollback evidence. No production build or startup
+resolves a tag, range, Git URL, CDN, or dynamically downloaded asset. Historical release-evidence
+recovery binds the root pnpm lock when the release source contains one and otherwise binds the
+legacy frontend npm lock, so old exact bytes remain recoverable without rebuilding.
 
 Final releases bind one source SHA and version to the PyPI package plus distinct backend and
 frontend GHCR manifest digests. Each image is built and serialized once and receives CycloneDX and
@@ -284,25 +305,42 @@ memory, retained asset bytes, and concurrency scaling on representative and conf
 Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
 no unmeasured numeric threshold is fixed in this specification.
 
-The synchronous native call runs in-process only inside one disposable process or container
-placed in a dedicated stable kernel isolation unit or cgroup for one attempt. A supervisor outside that unit owns the durable attempt
-token and lease heartbeat, gives the child only bounded local input, and receives only a bounded
-local result. The child has no network access, persistence credentials, or publication capability.
-T71 configures per-attempt CPU, memory, PID/descendant, and bounded workspace or ephemeral-storage
-budgets enforced at the kernel isolation boundary; T69 does not select their numeric values.
-Userspace sampling is observability, not containment. T70 owns the runner abstraction and its
-whole-unit terminate-and-verify protocol. T71 binds the durable attempt and stable isolation-unit
-identity to worker orchestration.
+The synchronous native call runs in-process only inside one disposable Podman container or
+Kubernetes workload placed in a dedicated stable kernel isolation unit for one attempt. A trusted
+isolation broker outside both the application worker and the attempt unit exclusively holds the
+Podman or Kubernetes workload authority needed to create, constrain, inspect, terminate, and
+remove that unit. The application and child never receive a raw OCI socket or workload-mutating
+Kubernetes service account.
 
-On cancellation, wall-time deadline, lease loss, or a hard resource-limit event, the supervisor
-hard-kills the whole stable isolation unit, waits for it to exit, and proves the unit empty and
-terminated; observing a recorded PID exit is not sufficient. It must stop accepting child output at
-the first terminal signal. The lease cannot become recoverable and another attempt cannot start
-until that termination proof is durable; if proof is unavailable, recovery remains blocked and
-readiness/operations expose a content-free fault instead of risking overlap. After normal child
-exit, the supervisor revalidates the active lease and attempt token before it alone publishes the
-result. Python task timeouts, `Future.cancel()`, flags, sampled memory, and late-publication fencing
-without termination remain insufficient.
+The worker-side attempt supervisor owns the durable attempt token and lease heartbeat, sends one
+bounded request to the broker, accepts one bounded result, revalidates both before publication,
+and remains the only publisher. Co-located deployments use an owner-restricted Unix socket with
+peer authentication; separated deployments use mutually authenticated TLS with pinned service
+identities. The protocol exposes only fixed operations and content-free stable attempt/unit
+identifiers. User or document input cannot select an image, executable, argument, mount, network,
+credential, namespace, security profile, or resource ceiling.
+
+The broker launches only the reviewed image pinned by immutable digest and its fixed
+reverse-attempt argument vector. The child receives bounded local input and output only; it has no
+network access, service-account token, Secret, ConfigMap, PVC, database or object-store credential,
+broker credential, runtime socket, or publication capability. Podman runs it with no network and a
+fresh bounded workspace. Kubernetes runs it with service-account automount disabled, service links
+disabled, no secret-bearing or persistent volume, and enforced default-deny egress. Both backends
+apply the same capability-free, no-new-privileges, read-only-root, arbitrary-UID contract. T71
+supplies reviewed configurable CPU, memory, PID/descendant, and workspace or ephemeral-storage
+budgets, and the broker enforces them at the runtime/kernel boundary. Userspace sampling is
+observability, not containment.
+
+On cancellation, wall-time deadline, lease loss, broker disconnect, or a hard resource-limit event,
+the worker stops accepting child output and requests termination. The broker hard-kills the whole
+stable unit, waits for runtime-confirmed exit, proves the unit empty, removes it, and returns a
+content-free termination proof bound to the stable unit identity. Observing a recorded PID exit or
+a successful delete request is insufficient. The lease cannot become recoverable and another
+attempt cannot start until T71 durably records that proof. If proof is unavailable, recovery remains
+blocked and readiness/operations expose a content-free fault. After normal completion, the broker
+proves unit termination before the worker validates the bounded output and revalidates the active
+lease and attempt token for publication. Python timeouts, cancellation flags, userspace resource
+sampling, or publication fencing alone remain insufficient.
 
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
@@ -674,8 +712,9 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T65 | Expose authenticated domain-specific conversion options, template context, and the administrator absolute-session ceiling for authoritative frontend runtime metadata | T45, T57, T59, T61 |
 | T66 | Expose authoritative role-specific idle-session policy bounds, defaults, and minute granularity for the administration frontend | T59, T65 |
 | T68 | Restore host routing for the CNI-free rootless Podman trusted-upstream and insecure Next.js quickstarts | T64 |
+| T67 | Migrate root browser-test and Next.js tooling to one deterministic pnpm workspace while preserving the isolated npm Mermaid graph, release evidence, and rollback | T64 |
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
-| T70 | Implement the disposable supervised anydoc runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
+| T70 | Implement the external Podman/Kubernetes isolation broker and authenticated bounded protocol, disposable anydoc attempt runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
 | T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
@@ -687,13 +726,12 @@ network namespace. It does not change the router's public-host policy or the hos
 publication boundary.
 
 For experimental reverse conversion, T69 fixes the approved evidence and contract. T70 implements
-the disposable supervised engine runner, bounded internal renderer adapter, and package builder;
-T71 then binds that runner to persistent leases, recovery, publication, and the backend workflow.
-T67 must finish the JavaScript workspace
-migration and make its resulting package-manager, bootstrap, workspace, command, and lockfile
-contract normative before T72 starts. Until that T67 update is merged, the existing npm contract in
-section 3.3.1 remains authoritative; T69-T73 do not preselect pnpm, Corepack, or another replacement.
-T72 then builds the Revert workspace on T67's finalized toolchain. T46, T48, and T50 must finish
+the trusted external isolation broker and its Podman/Kubernetes backends, authenticated bounded
+protocol, disposable attempt runner, bounded internal renderer adapter, and package builder. T71
+binds that runner and its content-free stable-unit termination proof to persistent leases, recovery,
+publication, and the backend workflow. T67 follows T64 and establishes the normative
+package-manager, bootstrap, workspace, command, and lockfile contract before T72 starts. T72 then
+builds the Revert workspace on that finalized pnpm toolchain. T46, T48, and T50 must finish
 their baseline security/support policies, mutation gate, and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
 surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
@@ -739,15 +777,20 @@ the ticket before touching any path owned by another active ticket.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
   contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
-  contract uses a disposable supervised process/container in a dedicated stable kernel isolation
-  unit per attempt, configurable T71-owned CPU/memory/PID/workspace budgets, and the bounded internal adapter;
-  no implementation may broaden the validated format/PDF claims or fall back to shared-process
-  execution, a second parser, or an unconstrained serializer fork.
-- T70 owns deterministic canonical generation of the content-free traceability manifest, including
-  stable field and archive-entry ordering, together with the isolated runner, bounded internal
-  renderer compatibility boundary, and Markdown/assets package builder. T71 may persist and return
-  the resulting package but must not introduce a second runner, parser, renderer adapter, or manifest
-  serializer.
+  contract uses a trusted external broker as the sole holder of Podman/Kubernetes workload
+  authority, a narrow authenticated Unix/mTLS control protocol, one immutable-image/fixed-argument
+  disposable kernel-isolated unit per attempt, configurable T71-owned CPU/memory/PID/workspace
+  budgets, termination proof before recovery, and the bounded internal adapter; no implementation
+  may expose a raw runtime socket or workload-mutating service account to the application, broaden
+  the validated format/PDF claims, or fall back to shared-process execution, a second parser, or an
+  unconstrained serializer fork.
+- T70 owns the broker service and protocol, Podman/Kubernetes isolation backends, immutable
+  attempt-image/argument policy, stable-unit terminate-and-prove protocol, and deterministic
+  canonical generation of the content-free traceability manifest, including stable field and
+  archive-entry ordering, together with the bounded renderer compatibility boundary and
+  Markdown/assets package builder. T71 may configure reviewed budgets and persist the stable unit
+  identity/proof and resulting package, but must not introduce a second broker, runner, parser,
+  renderer adapter, or manifest serializer.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.

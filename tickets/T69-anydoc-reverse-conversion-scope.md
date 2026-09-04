@@ -23,8 +23,12 @@ normative product, security, packaging, and compatibility contract before implem
   timeout, memory containment, lease-heartbeat, lost-lease fencing, and no-publication-after-loss
   semantics. A Python timeout or cancellation flag that leaves native work running is insufficient,
   and lease expiry must not permit overlapping native execution. Because the shared-process
-  contract cannot satisfy these properties, record the approved disposable per-attempt isolation
-  design instead of weakening cancellation, containment, fencing, or no-overlap requirements.
+  contract cannot satisfy these properties, record the approved external-isolation-broker design:
+  only the broker holds Podman/Kubernetes workload authority; the application uses a narrow
+  authenticated Unix/mTLS protocol and receives no raw runtime socket or workload-mutating service
+  account; each immutable-image, fixed-argument disposable attempt runs without network, secrets,
+  persistent volumes, or publication capability; and broker-proven whole-unit termination precedes
+  recovery.
 * Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
   count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
   the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
@@ -72,10 +76,11 @@ normative product, security, packaging, and compatibility contract before implem
 ## Quality requirements
 
 * Keep every document-controlled operation local and network-independent.
-* Keep the Python binding in-process only inside the approved disposable per-attempt kernel
-  isolation unit, with bounded threads and the smallest concurrency that meets the measured service
-  objective. Leave CPU, memory, PID/descendant, and workspace/ephemeral budget values configurable
-  for T71.
+* Keep the Python binding in-process only inside the approved broker-created disposable per-attempt
+  kernel isolation unit, with bounded threads and the smallest concurrency that meets the measured
+  service objective. Keep Podman/Kubernetes authority exclusively in the broker, never the
+  application or child, and leave CPU, memory, PID/descendant, and workspace/ephemeral budget values
+  configurable for T71.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -111,19 +116,21 @@ normative product, security, packaging, and compatibility contract before implem
   batch and sample peak live process threads during the batch, including the bounded Rayon thread.
   The bounded corpus now contains a probed fixture for every one of the 21 admitted extensions;
   generated alias fixtures record Apache-2.0 provenance and copied upstream fixtures remain MIT.
-* 2026-09-03: The product manager resolved both blockers. Each attempt is authorized to run in one
-  disposable supervised process or container placed in a dedicated stable kernel isolation unit or
-  cgroup. T71 configures CPU, memory, PID/descendant, and bounded workspace/ephemeral budgets at
-  that boundary. The external supervisor owns heartbeat and publication, hard-kills the whole unit
-  on cancellation, deadline, lease loss, or resource failure, and proves the stable unit empty and
-  terminated before recovery or overlap; PID exit alone is insufficient.
-  T70 is also authorized to maintain one narrowly bounded internal adapter around the pinned anydoc
-  model and renderer behavior, with no second parser or broad fork. Security, serializer parity,
-  asset position, version compatibility, SBOM/license inventory, named T70 ownership, and removal
-  when upstream exposes an official asset-aware hook are mandatory. The normative product
-  specification, spike contract, and T70 implementation contract now record these decisions. T70
-  is no longer blocked on a product decision, but still depends on T69 landing. Linear synchronization
-  remains pending because this task explicitly prohibits external mutations.
+* 2026-09-04: The product manager resolved both feasibility blockers and selected the external
+  isolation-broker refinement after deployment preflight proved that the current arbitrary-UID,
+  capability-free worker cannot create delegated cgroups or disposable workloads itself. The broker
+  alone holds Podman/Kubernetes workload authority and exposes only a narrow authenticated Unix-
+  socket or mTLS protocol. It pins the reviewed attempt image by digest and fixed argv, creates one
+  disposable kernel-isolated unit with no network, secrets, service-account token, ConfigMap, PVC,
+  persistence credential, raw OCI socket, or publication capability, and hard-kills and proves the
+  stable unit empty and removed before recovery. The worker-side supervisor retains heartbeat,
+  attempt-token validation, bounded-output acceptance, and sole publication authority. T71 supplies
+  reviewed configurable budgets and durably binds the stable unit identity and termination proof to
+  recovery. T70 owns the broker protocol/service/backends and attempt runner. The manager also
+  authorized one narrowly bounded internal adapter around the pinned anydoc model and renderer
+  behavior, with no second parser or broad fork; security, serializer parity, asset position,
+  version compatibility, SBOM/license inventory, named T70 ownership, and removal when upstream
+  exposes an official asset-aware hook remain mandatory.
 
 ## Synchronization
 

@@ -300,7 +300,7 @@ def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
         ".containerignore",
         "Containerfile",
         "package.json",
-        "package-lock.json",
+        "pnpm-lock.yaml",
         "playwright.config.mjs",
         "container/entrypoint.sh",
         "scripts/container/build.sh",

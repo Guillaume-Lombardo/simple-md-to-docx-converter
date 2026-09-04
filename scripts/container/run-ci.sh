@@ -28,7 +28,7 @@ bash scripts/container/build.sh "$final_image"
 source_date_epoch="$(git show -s --format=%ct HEAD)"
 readonly source_date_epoch
 podman build --format oci --timestamp "$source_date_epoch" \
-  --tag "$frontend_image" --file web/Containerfile web
+  --tag "$frontend_image" --file web/Containerfile .
 frontend_image_id="$(podman image inspect "$frontend_image" --format '{{.Id}}')"
 readonly frontend_image_id
 [[ "$frontend_image_id" =~ ^[0-9a-f]{64}$ ]]
