@@ -30,6 +30,7 @@ from markweave.broker.service import IsolationBrokerService
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
 TEST_IMAGE = "localhost/markweave-t70-runtime-integration:current"
+DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("33333333-3333-4333-8333-333333333333"))
 UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444441"),
@@ -51,7 +52,15 @@ def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
 
 @pytest.fixture(scope="module")
 def controlled_image() -> Iterator[tuple[str, str]]:
-    base = os.environ["MARKWEAVE_T70_PODMAN_TEST_IMAGE"]
+    base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
+    built_base = base == DEFAULT_BASE_IMAGE
+    if built_base:
+        subprocess.run(
+            ("bash", "scripts/container/build-reverse-attempt.sh", base),
+            check=True,
+            cwd=ROOT,
+            timeout=600,
+        )
     _podman(
         "build",
         "--format",
@@ -80,6 +89,8 @@ def controlled_image() -> Iterator[tuple[str, str]]:
                 check=False,
             )
         _podman("image", "rm", "--force", TEST_IMAGE)
+        if built_base:
+            _podman("image", "rm", "--force", base)
 
 
 def _policy(image_digest: str, wall_time_millis: int = 10_000) -> BrokerPolicy:
