@@ -255,11 +255,13 @@ for reverse conversion.
   inode before completing broker reconciliation and begins listening only afterward; active,
   insecure, replaced, or unprovably stale nodes fail closed. The client reciprocally verifies the
   filesystem node, server peer, response operation, request identity, attempt/unit/proof identities,
-  and proof principal. No workspace data or raw runtime authority crosses this boundary. The 66
-  focused dispatcher/transport tests, including six real AF_UNIX integrations, pass at 92.97% total
-  branch coverage for the two new modules; the complete 364-test broker selection, Ruff, `ty`, and
-  diff validation also pass. The broader local gate passed 3,008 tests at 94.81% total coverage and
-  reported only the unavailable PostgreSQL/S3 endpoints plus the known process-reaping timing flake.
+  and proof principal. A lifecycle `flock`, serialized deadline-aware dispatch gate, watchdog, and
+  fatal drain state prevent stale-socket replacement, post-deadline admission, or restart over a
+  blocked prior generation. No workspace data or raw runtime authority crosses this boundary. The
+  76 focused dispatcher/transport tests, including 14 real AF_UNIX integrations, pass at 91.55%
+  total branch coverage for the two new modules; the complete 374-test broker selection, Ruff,
+  `ty`, and diff validation also pass. The exact light gate passes 2,801 tests at 94.07% total,
+  90.21% application branch coverage, and 91.41% changed application-line coverage.
 
 ## Synchronization
 
