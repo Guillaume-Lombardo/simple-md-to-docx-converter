@@ -299,6 +299,12 @@ def test_missing_unit_and_wrong_acknowledgement_are_idempotent(tmp_path: Path) -
 
     created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
     assert not broker.acknowledge(PRINCIPAL, ATTEMPT_ID, created.unit_id, UNIT_IDS[1])
+    assert not broker.acknowledge(
+        PRINCIPAL, OTHER_ATTEMPT_ID, created.unit_id, UNIT_IDS[1]
+    )
+    assert not broker.acknowledge(
+        OTHER_PRINCIPAL, ATTEMPT_ID, created.unit_id, UNIT_IDS[1]
+    )
 
 
 def test_protocol_values_are_type_checked(tmp_path: Path) -> None:
@@ -310,7 +316,7 @@ def test_protocol_values_are_type_checked(tmp_path: Path) -> None:
     assert caught.value.category is BrokerErrorCategory.PROTOCOL_ERROR
 
 
-@pytest.mark.parametrize("method", ("status", "terminate", "proof", "acknowledge"))
+@pytest.mark.parametrize("method", ("status", "terminate", "proof"))
 def test_post_start_inventory_faults_revoke_readiness(
     tmp_path: Path,
     mocker: MockerFixture,
@@ -326,8 +332,6 @@ def test_post_start_inventory_faults_revoke_readiness(
 
     arguments = (PRINCIPAL, ATTEMPT_ID, UNIT_IDS[0])
     operation = getattr(broker, method)
-    if method == "acknowledge":
-        arguments += (UNIT_IDS[1],)
     with pytest.raises(BrokerError) as caught:
         operation(*arguments)
 

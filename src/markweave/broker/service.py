@@ -205,17 +205,6 @@ class IsolationBrokerService:
         with self._gate:
             self._require_ready()
             self._validate_request(principal, attempt_id, unit_id, proof_id)
-            unit = self._inventory_call(lambda: self._inventory.get(unit_id))
-            if unit is None:
-                return self._inventory_call(
-                    lambda: self._inventory.acknowledge(
-                        principal.principal_id, attempt_id, unit_id, proof_id
-                    )
-                )
-            self._require_owner(unit, principal, attempt_id, unit_id)
-            proof = self._inventory_call(lambda: self._inventory.get_proof(unit_id))
-            if proof is None or proof.proof_id != proof_id:
-                return False
             return self._inventory_call(
                 lambda: self._inventory.acknowledge(
                     principal.principal_id, attempt_id, unit_id, proof_id
