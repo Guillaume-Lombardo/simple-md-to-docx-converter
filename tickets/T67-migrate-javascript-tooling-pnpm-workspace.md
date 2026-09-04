@@ -2,7 +2,7 @@
 ticket: T67
 linear_id: G1L-533
 linear_url: https://linear.app/g1lom/issue/G1L-533/t67-migrate-javascript-tooling-to-a-pnpm-workspace
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -102,6 +102,12 @@ Migrate the repository's browser-test and Next.js JavaScript tooling from two in
   leaving almost 30 minutes of the heavy-job limit for setup, frontend checks, and immutable
   benchmark verification. Reuse validation is idempotent while still accepting only the seven
   hashed evidence files and its single generated attestation.
+* 2026-09-04: Independently approved head `1d67b688` passed complete exact-head run `33858129392`,
+  CodeRabbit, and every review-thread gate, then squash-merged through PR #185 as exact main
+  `a07209fae9008cd12606f1cdda5879d4ad15e15d`. Exact-main run `33861320098` passed every domain and
+  the final gate after an isolated retry cleared two distinct transient E2E environment failures.
+  The remote feature branch was removed, the main worktree is clean, and the accepted migration,
+  rollback, benchmark, security, container, storage, and rootless E2E evidence is verified on main.
 
 ## Synchronization
 
