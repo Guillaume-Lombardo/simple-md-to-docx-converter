@@ -39,7 +39,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
 | Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
-| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns Podman or Kubernetes workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, service-account token, secret, ConfigMap, PVC, persistence credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, workspace/ephemeral, and autonomous runtime-deadline limits. Broker-authored identity metadata supports a fail-closed startup/reconnect sweep; the broker refuses readiness and creation until every managed orphan is terminated and proved empty and removed. Worker recovery remains blocked until that proof is durably recorded. |
+| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns Podman or Kubernetes workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, service-account token, secret, ConfigMap, PVC, persistence credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, workspace/ephemeral, and autonomous runtime-deadline limits. A mandatory bounded crash-consistent content-free broker inventory records identity before creation and retains a termination tombstone until durable worker/T71 acknowledgement; runtime labels are supplementary only. The broker refuses readiness and creation until its idempotent sweep completes, and worker recovery remains blocked until proof is durably recorded. |
 | Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
@@ -333,12 +333,14 @@ observability, not containment.
 
 At creation, the broker applies the reviewed T71-configured wall-time deadline through the runtime
 itself, so an attempt is terminated even if the worker or broker process crashes. The broker keeps
-a bounded persistent content-free managed-unit inventory, or can enumerate units through immutable
-broker-authored runtime labels combined with the worker's stable unit identity on reconnect. These
-identifiers, labels, and lifecycle fields are authenticated broker output and cannot be supplied or
-modified by user or document input. On startup and reconnect, the broker reconciles and sweeps every
-managed unit, hard-kills any orphan, and proves it empty and removed. It reports not ready and
-refuses every new create request until this sweep completes successfully.
+a mandatory bounded crash-consistent content-free managed-unit inventory. It durably records the
+broker-authored stable identity before asking the runtime to create a unit. Immutable
+broker-authored runtime labels supplement inventory-based discovery and verification but never
+replace it. Inventory identities, labels, and lifecycle fields are authenticated and integrity-
+protected broker output, contain no document data or secret, and cannot be supplied or modified by
+user or document input. On startup and reconnect, the broker idempotently reconciles and sweeps
+every inventoried unit, hard-kills any orphan, and proves it empty and removed. It reports not ready
+and refuses every new create request until this sweep completes successfully.
 
 On cancellation, wall-time deadline, lease loss, broker disconnect, or a hard resource-limit event,
 the worker stops accepting child output and requests termination. The broker hard-kills the whole
@@ -350,10 +352,13 @@ blocked and readiness/operations expose a content-free fault. After normal compl
 proves unit termination before the worker validates the bounded output and revalidates the active
 lease and attempt token for publication. Python timeouts, cancellation flags, userspace resource
 sampling, or publication fencing alone remain insufficient.
-If the broker crashes after kill or removal but before returning proof, restart reconciliation must
-reconstruct the content-free proof from the managed identity and runtime state; absence alone is not
-proof for an unauthenticated or unknown identity. The worker keeps recovery blocked until T71 has
-durably recorded the reconstructed proof.
+
+The broker durably records runtime-confirmed exit and empty transitions before removal, then records
+the removed transition before returning proof. A missing runtime object, delete acknowledgement, or
+Kubernetes force-delete response alone is never proof. If the broker crashes after kill or removal
+but before returning proof, idempotent restart reconciliation resumes from the inventory and runtime
+state. The content-free termination tombstone is retained until the worker/T71 durably acknowledges
+the proof. The worker keeps recovery blocked until T71 has durably recorded it.
 
 For formats whose approved parser exposes a structured document model, preserve supported
 headings, lists, tables, links, notes, code, equations, and document order. Export every supported
@@ -793,14 +798,16 @@ the ticket before touching any path owned by another active ticket.
   contract uses a trusted external broker as the sole holder of Podman/Kubernetes workload
   authority, a narrow authenticated Unix/mTLS control protocol, one immutable-image/fixed-argument
   disposable kernel-isolated unit per attempt, configurable T71-owned CPU/memory/PID/workspace
-  budgets and autonomous runtime deadline, fail-closed startup/reconnect orphan reconciliation,
+  budgets and autonomous runtime deadline, mandatory crash-consistent content-free inventory and
+  termination tombstones, fail-closed startup/reconnect orphan reconciliation,
   termination proof before recovery, and the bounded internal adapter; no implementation
   may expose a raw runtime socket or workload-mutating service account to the application, broaden
   the validated format/PDF claims, or fall back to shared-process execution, a second parser, or an
   unconstrained serializer fork.
 - T70 owns the broker service and protocol, Podman/Kubernetes isolation backends, immutable
-  attempt-image/argument policy, broker-authored managed-unit identity/inventory or runtime-label
-  discovery, startup/reconnect orphan sweep, stable-unit terminate-and-prove protocol, and
+  attempt-image/argument policy, mandatory crash-consistent managed-unit inventory/tombstones,
+  supplementary runtime-label discovery, startup/reconnect orphan sweep, stable-unit
+  terminate-and-prove protocol, and
   deterministic canonical generation of the content-free traceability manifest, including stable
   field and archive-entry ordering, together with the bounded renderer compatibility boundary and
   Markdown/assets package builder. T71 may configure reviewed budgets and persist the stable unit

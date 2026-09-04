@@ -29,8 +29,9 @@ normative product, security, packaging, and compatibility contract before implem
   account; each immutable-image, fixed-argument disposable attempt runs without network, secrets,
   persistent volumes, or publication capability; and broker-proven whole-unit termination precedes
   recovery. The runtime applies an autonomous deadline at creation, and broker restart/reconnect
-  remains fail closed until authenticated managed-unit discovery has swept every orphan and
-  reconstructed any proof interrupted between kill/removal and acknowledgement.
+  remains fail closed until its mandatory crash-consistent content-free inventory has swept every
+  orphan and reconstructed any proof interrupted between kill/removal and acknowledgement. Runtime
+  labels are supplementary and never replace the inventory/tombstone.
 * Measure cold and warm wall time, CPU time, peak resident memory, retained asset bytes, thread
   count, and concurrency scaling across small, representative, and configured-limit fixtures. Use
   the evidence to propose a reviewed configurable low-compute operating envelope; do not invent an
@@ -83,8 +84,9 @@ normative product, security, packaging, and compatibility contract before implem
   service objective. Keep Podman/Kubernetes authority exclusively in the broker, never the
   application or child, and leave CPU, memory, PID/descendant, and workspace/ephemeral budget values
   configurable for T71. Require an independently enforced runtime deadline plus fail-closed broker
-  startup/reconnect reconciliation; user or document input cannot control managed-unit identities,
-  inventory fields, or runtime labels.
+  startup/reconnect reconciliation, write-ahead identity before create, durable lifecycle
+  transitions, and tombstone retention until durable proof acknowledgement; user or document input
+  cannot control managed-unit identities, inventory fields, or runtime labels.
 * Use bounded, redistributable fixtures and record exact upstream versions and known limitations.
 * Keep repository artifacts in English.
 
@@ -137,11 +139,17 @@ normative product, security, packaging, and compatibility contract before implem
   exposes an official asset-aware hook remain mandatory.
 * 2026-09-04: Independent review identified broker crash/restart after unit creation as a missing
   failure contract. The approved contract now applies a T71-configured autonomous runtime deadline
-  at creation, discovers managed units through a bounded persistent content-free inventory or
-  immutable broker-authored runtime labels, and requires a startup/reconnect orphan sweep before
-  readiness or creation. A crash between kill/removal and proof is reconciled from authenticated
-  managed identity and runtime state; worker recovery remains blocked until T71 durably records
-  proof.
+  at creation, discovers managed units through a bounded persistent content-free inventory with
+  immutable broker-authored runtime labels as supplementary evidence, and requires a startup/
+  reconnect orphan sweep before readiness or creation. A crash between kill/removal and proof is
+  reconciled from authenticated managed identity and runtime state; worker recovery remains blocked
+  until T71 durably records proof.
+* 2026-09-04: Follow-up review proved runtime labels alone cannot reconstruct proof after removal.
+  The broker inventory/tombstone is now mandatory, bounded, content-free, authenticated, integrity-
+  protected, and crash-consistent. Identity is written before create; exit and empty are persisted
+  before removal; removed is persisted before proof return; and the tombstone remains until durable
+  worker/T71 acknowledgement. Reconciliation is idempotent, labels are supplementary only, and
+  absence, delete acknowledgement, and Kubernetes force-delete never constitute proof alone.
 
 ## Synchronization
 

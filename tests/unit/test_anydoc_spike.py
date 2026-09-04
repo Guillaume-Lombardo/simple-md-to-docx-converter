@@ -99,8 +99,10 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
                 "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
                 "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
                 "the runtime autonomously enforces the reviewed T71-configured wall-time deadline applied at unit creation even if the worker or broker process crashes",
-                "broker startup and reconnect discover and sweep every managed orphan and refuse readiness and creation until reconciliation and termination proof complete",
-                "a crash between kill or removal and proof resumes from authenticated managed identity and runtime state while worker recovery remains blocked until proof is durably recorded",
+                "broker startup and reconnect use a mandatory bounded crash-consistent content-free inventory to idempotently sweep every managed orphan and refuse readiness and creation until reconciliation and termination proof complete",
+                "broker identity is durable before runtime create, exit and empty are durable before removal, removed is durable before proof return, and the tombstone remains until durable worker or T71 acknowledgement",
+                "runtime labels are supplementary only and absence, delete acknowledgement, or Kubernetes force-delete alone is never termination proof",
+                "a crash between kill or removal and proof resumes from inventory and runtime state while worker recovery remains blocked until proof is durably recorded",
                 "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher",
             ],
         },
@@ -169,10 +171,26 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         "runtime_deadline_enforcement": (
             "applied_at_creation_and_independent_of_worker_or_broker_liveness"
         ),
-        "managed_unit_discovery": [
-            "bounded_persistent_content_free_broker_inventory",
-            "immutable_broker_authored_runtime_labels_plus_authenticated_worker_identity",
+        "managed_unit_discovery": (
+            "mandatory_bounded_crash_consistent_content_free_inventory_with_runtime_labels_as_supplement_only"
+        ),
+        "inventory_security": (
+            "authenticated_integrity_protected_and_contains_no_document_data_or_secret"
+        ),
+        "identity_write_order": "durable_before_runtime_create",
+        "termination_transition_order": [
+            "runtime_confirmed_exit_durable",
+            "stable_unit_empty_durable",
+            "runtime_remove",
+            "stable_unit_removed_durable",
+            "proof_return",
         ],
+        "termination_tombstone_retention": (
+            "until_durable_worker_or_T71_proof_acknowledgement"
+        ),
+        "reconciliation_is_idempotent": True,
+        "runtime_absence_or_delete_acknowledgement_is_proof": False,
+        "kubernetes_force_delete_is_proof": False,
         "managed_unit_metadata_user_controlled": False,
         "startup_and_reconnect_action": (
             "reconcile_sweep_hard_kill_and_prove_every_managed_orphan"
@@ -263,6 +281,9 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         "runtime at creation, so",
         "refuses readiness and every create request until reconciliation completes",
         "crash between kill/removal and proof",
+        "mandatory bounded crash-consistent content-free inventory/tombstone",
+        "records the broker-authored stable identity before runtime create",
+        "Kubernetes force-delete alone is not proof",
     ):
         assert invariant in t70
 

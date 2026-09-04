@@ -27,12 +27,16 @@ authority.
 
 At creation the broker applies the reviewed T71-configured wall-time deadline through the runtime,
 independently of worker and broker liveness. It discovers managed units through a bounded
-persistent content-free inventory or immutable broker-authored runtime labels plus the stable unit
-identity presented by an authenticated worker on reconnect. User/document input cannot choose
-those identities or labels. Startup and reconnect remain not-ready and reject new creates until a
-sweep has hard-killed every orphan and proved it empty and removed. If the broker crashes between
-kill or removal and proof, reconciliation resumes from authenticated managed identity and runtime
-state; worker recovery remains blocked until T71 durably records the reconstructed proof.
+crash-consistent content-free inventory/tombstone that is mandatory, authenticated, integrity-
+protected, and contains no document data or secret. The broker writes its stable identity before
+runtime create. Immutable broker-authored runtime labels supplement discovery but never replace the
+inventory. User/document input cannot choose identities, lifecycle fields, or labels. Startup and
+reconnect remain not-ready and reject new creates until an idempotent sweep has hard-killed every
+inventoried orphan and proved it empty and removed. Runtime-confirmed exit and empty are persisted
+before removal; removed is persisted before proof return; and the tombstone remains until durable
+worker/T71 acknowledgement. If the broker crashes between kill/removal and proof, reconciliation
+resumes from inventory and runtime state. Absence, delete acknowledgement, and Kubernetes force-
+delete alone are never proof; worker recovery remains blocked until T71 durably records proof.
 
 For asset serialization, T70 may implement one narrowly bounded Markweave-maintained internal
 adapter around the exact pinned anydoc `Document` model and renderer behavior. It must consume the
@@ -225,7 +229,8 @@ runner; T71 configures reviewed budgets and durably binds stable unit identity a
 to leases, recovery, and publication fencing. Recovery remains blocked whenever the prior unit
 cannot be proved empty, terminated, and removed; PID exit or delete acknowledgement alone is never
 sufficient.
-The runtime-enforced deadline survives broker loss. Broker restart/reconnect performs managed-unit
-reconciliation before readiness or creation, including proof reconstruction when a crash occurred
-after kill/removal but before acknowledgement; unknown or unauthenticated absence is never accepted
-as proof.
+The runtime-enforced deadline survives broker loss. Broker restart/reconnect performs idempotent
+inventory-based reconciliation before readiness or creation, including proof reconstruction when a
+crash occurred after kill/removal but before acknowledgement. Runtime labels only supplement this
+crash-consistent inventory/tombstone; runtime absence or any delete response is never accepted as
+proof by itself.

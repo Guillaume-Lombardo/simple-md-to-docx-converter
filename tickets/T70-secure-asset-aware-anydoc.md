@@ -33,14 +33,18 @@ for reverse conversion.
   capability. T71 supplies reviewed configurable CPU, memory, PID/descendant, and
   workspace/ephemeral budgets, which the broker enforces at the runtime/kernel boundary. The
   reviewed T71-configured wall-time deadline is applied autonomously by the runtime at creation, so
-  it remains effective across worker or broker process failure. The broker maintains a bounded
-  persistent content-free inventory or enumerates immutable broker-authored runtime labels; neither
-  labels nor managed identities are controllable by user/document input. At startup and reconnect
-  it sweeps every managed orphan, hard-terminates it, and proves it empty and removed. The broker
-  refuses readiness and every create request until reconciliation completes successfully. A crash
-  between kill/removal and proof must resume from authenticated managed identity and runtime state;
-  absence of an unknown or unauthenticated identity is not proof. The worker-side supervisor owns
-  heartbeat, attempt token, bounded output validation, and publication.
+  it remains effective across worker or broker process failure. The broker maintains a mandatory
+  bounded crash-consistent content-free inventory/tombstone; it is authenticated and integrity-
+  protected and contains no document data or secret. It records the broker-authored stable identity
+  before runtime create. Immutable broker-authored runtime labels supplement discovery but never
+  replace inventory, and neither labels nor managed identities are controllable by user/document
+  input. At startup and reconnect it idempotently sweeps every inventoried orphan, hard-terminates
+  it, and proves it empty and removed. The broker refuses readiness and every create request until
+  reconciliation completes successfully. It durably records runtime-confirmed exit and empty before
+  removal, records removed before proof return, and retains the tombstone until durable worker/T71
+  proof acknowledgement. A crash between kill/removal and proof resumes from inventory and runtime
+  state; absence, delete acknowledgement, or Kubernetes force-delete alone is not proof. The
+  worker-side supervisor owns heartbeat, attempt token, bounded output validation, and publication.
   Cancellation, deadline, lease loss, broker disconnect, or resource failure stops output
   acceptance and makes the broker hard-terminate the whole stable unit, prove it empty, remove it,
   and return a content-free proof before recovery or another attempt. PID exit or delete
@@ -87,8 +91,10 @@ for reverse conversion.
   no child publication capability, no late result acceptance, termination-before-recovery, no
   overlapping attempt, bounded IPC, autonomous deadline enforcement across broker failure,
   startup/reconnect orphan sweeping, creation/readiness refusal during incomplete reconciliation,
+  write-ahead identity, crash-consistent transition ordering, tombstone acknowledgement, idempotent
   proof reconstruction after a crash between kill and proof, and fail-closed behavior when
-  termination proof is unavailable.
+  termination proof is unavailable. Explicitly reject absence, delete acknowledgement, and
+  Kubernetes force-delete as standalone proof.
 
 ## Dependencies
 
@@ -101,8 +107,9 @@ for reverse conversion.
 
 * Own the external broker service and authenticated bounded protocol, Podman and Kubernetes
   isolation backends, immutable image/argv and child-security policy, supervised disposable-attempt
-  runner, managed-unit discovery/reconciliation, and terminate-and-prove protocol, anydoc adapter,
-  bounded internal renderer compatibility
+  runner, mandatory crash-consistent managed-unit inventory/tombstones, supplementary runtime-label
+  discovery, reconciliation, and terminate-and-prove protocol, anydoc adapter, bounded internal
+  renderer compatibility
   boundary, asset-aware serializer/package builder, the single deterministic content-free manifest
   generator, reverse-conversion domain errors, format corpus, dependency lock, and directly affected
   backend/broker image and deployment contents. Expose the runner, content-free stable unit identity,
@@ -123,7 +130,9 @@ for reverse conversion.
   credential/resource override, fail closed on broker disconnect or unavailable termination proof,
   and prove that runtime authority is absent from the application and child. Cover restart with a
   live orphan, runtime expiry while the broker is down, incomplete sweep readiness/create refusal,
-  forged or user-controlled labels, and crashes both before and after removal but before proof.
+  forged or user-controlled inventory/labels, write-ahead failure, transition persistence failure,
+  tombstone retention/acknowledgement, Kubernetes force-delete, and crashes both before and after
+  removal but before proof.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
 * Keep repository artifacts and user-facing errors in English.
@@ -145,9 +154,16 @@ for reverse conversion.
   serializer fork remain prohibited.
 * 2026-09-04: Independent review added the broker crash/restart contract. T70 must apply the
   T71-configured deadline through the runtime at creation, discover managed units through bounded
-  persistent content-free inventory or immutable broker-authored labels, sweep orphans before
-  readiness or creation, and resume proof after a crash between kill/removal and acknowledgement.
-  Worker recovery remains blocked until the proof is durably recorded.
+  persistent content-free inventory with immutable broker-authored labels as supplementary
+  evidence, sweep orphans before readiness or creation, and resume proof after a crash between
+  kill/removal and acknowledgement. Worker recovery remains blocked until the proof is durably
+  recorded.
+* 2026-09-04: Follow-up review made the bounded crash-consistent content-free inventory/tombstone
+  mandatory because labels disappear with a removed unit. Identity must be durable before create;
+  exit/empty must be durable before removal; removed must be durable before proof return; and the
+  tombstone remains until durable worker/T71 acknowledgement. Runtime labels only supplement the
+  idempotent sweep. Absence, delete acknowledgement, and Kubernetes force-delete are insufficient
+  proof.
 
 ## Synchronization
 
