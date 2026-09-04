@@ -10,6 +10,12 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      rerun_t67_benchmark:
+        description: Rerun the network-sensitive T67 package-manager benchmark
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "17 3 * * 0"
 
@@ -93,10 +99,18 @@ jobs:
         with:
           node-version: 24.19.0
           check-latest: false
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
+      - name: Bootstrap verified Corepack and pnpm
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Restore the exact pnpm store cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -134,17 +148,17 @@ jobs:
           fi
       - name: Run native browser-module tests with coverage gates
         run: |
-          npm ci --ignore-scripts
-          npm run test:web
-      - name: Verify the isolated frontend
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run workspace:check
+          pnpm run test:web
+      - name: Verify the workspace frontend
         run: |
-          cd web
           test "$(node --version)" = "v24.19.0"
-          test "$(npm --version)" = "11.17.0"
-          npm ci --ignore-scripts
-          npm run check
-          npm run build
-          npm run test:production
+          test "$(corepack --version)" = "0.36.0"
+          test "$(pnpm --version)" = "11.25.0"
+          pnpm --filter @markweave/web run check
+          pnpm --filter @markweave/web run build
+          pnpm --filter @markweave/web run test:production
       - name: Run unit tests with branch coverage
         run: >-
           uv run pytest -m unit
@@ -166,6 +180,12 @@ jobs:
         run: |
           uv lock --check
           uv run python -m scripts.ci.validate_ci
+      - name: Save the exact pnpm store cache from trusted main
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
 
   domain-plan:
     name: CI / affected domains
@@ -196,6 +216,9 @@ jobs:
     needs: detect
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -239,6 +262,7 @@ jobs:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -251,8 +275,6 @@ jobs:
         with:
           node-version: 24.19.0
           check-latest: false
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - name: Set up uv with a lock-keyed cache
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -352,12 +374,42 @@ jobs:
             fc-list --format '%{file}\n' | wc -l)" -eq 32
           test "$(/opt/libreoffice26.2/program/soffice --version | awk '{$1=$1; print}')" \
             = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
-      - name: Set up the pinned Node runtime for browser and Mermaid tests
-        if: ${{ matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-') }}
+      - name: Set up the pinned Node runtime for Mermaid tests
+        if: ${{ matrix.domain == 'document-engines' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.1
           check-latest: false
+      - name: Set up pinned Node for rootless E2E
+        if: ${{ startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          check-latest: false
+      - name: Bootstrap verified Corepack and pnpm for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        run: |
+          set -euo pipefail
+          scripts/javascript/bootstrap-pnpm.sh "$RUNNER_TEMP/markweave-js-tools"
+          echo "$RUNNER_TEMP/markweave-js-tools/bin" >> "$GITHUB_PATH"
+          echo "COREPACK_HOME=$RUNNER_TEMP/markweave-js-tools/corepack-home" >> "$GITHUB_ENV"
+          echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
+      - name: Restore the exact pnpm store cache for workspace domains
+        if: ${{ matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Rehearse the exact npm rollback candidate
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
+          T67_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          scripts/javascript/run_bounded_benchmark_command.py
+          900 10 /dev/stderr t67/rollback --
+          bash scripts/javascript/rehearse-npm-rollback.sh
+          "$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"
       - name: Install verified Mermaid and Chrome for document-engine tests
         if: ${{ matrix.domain == 'document-engines' }}
         env:
@@ -386,11 +438,53 @@ jobs:
         run: uv run python -m scripts.ci.prepare_s3_test_bucket
       - name: Install the locked E2E browser driver
         if: ${{ startsWith(matrix.domain, 'e2e-') }}
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter md-converter-web-tests
       - name: Run selected domain suite without a shell
         env:
           MARKWEAVE_TOOLCHAIN_CACHE_DIRECTORY: ${{ runner.temp }}/markweave-toolchain
         run: uv run python -m scripts.ci.run_domain "${{ matrix.domain }}"
+      - name: Verify the accepted T67 benchmark metadata
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/javascript/verify_benchmark_artifact_metadata.py
+          "$RUNNER_TEMP/t67-benchmark-metadata.txt"
+      - name: Download the accepted T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: 9911803951
+          path: artifacts/package-manager-benchmark
+          github-token: ${{ github.token }}
+          repository: Guillaume-Lombardo/simple-md-to-docx-converter
+          run-id: 33799673333
+      - name: Verify the accepted T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          bash scripts/javascript/reuse-package-benchmark.sh
+          "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
+          "$RUNNER_TEMP/t67-benchmark-metadata.txt"
+      - name: Collect the T67 package-manager benchmark
+        if: ${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}
+        env:
+          NPM_BASELINE_SHA: 1594128bc84290df3699390643c729ef9d5d6d30
+          PNPM_CANDIDATE_SHA: ${{ github.sha }}
+        run: >-
+          scripts/javascript/run_bounded_benchmark_command.py
+          1620 20 /dev/stderr t67/benchmark --
+          bash scripts/javascript/benchmark-package-managers.sh
+          "$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark
+      - name: Retain the T67 package-manager benchmark
+        if: ${{ always() && matrix.domain == 'frontend' && ((github.event_name == 'pull_request' && github.head_ref == 'chore/T67-pnpm-workspace' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-manager-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/package-manager-benchmark
+          if-no-files-found: error
+          retention-days: 30
       - name: Retain failed E2E evidence
         if: ${{ failure() && startsWith(matrix.domain, 'e2e-') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

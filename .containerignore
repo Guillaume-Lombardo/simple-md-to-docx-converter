@@ -6,6 +6,8 @@
 coverage.json
 htmlcov
 node_modules
+.pnpm-tools
+.pnpm-store
 tests
 tickets
 docs

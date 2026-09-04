@@ -4,16 +4,24 @@ ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/nodejs-24-minimal@sha256:ec0fc
 FROM ${BUILDER_IMAGE} AS build
 USER 0
 WORKDIR /opt/app-root/src
-ENV NEXT_TELEMETRY_DISABLED=1
-COPY package.json package-lock.json ./
-RUN test "$(node --version)" = "v24.19.0" && test "$(npm --version)" = "11.17.0" \
-    && npm ci --ignore-scripts
-COPY app ./app
-COPY components ./components
-COPY public ./public
-COPY src ./src
-COPY next-env.d.ts next.config.ts postcss.config.mjs proxy.ts tsconfig.json ./
-RUN npm run build && npm prune --omit=dev --ignore-scripts && npm cache clean --force
+ENV COREPACK_HOME=/opt/markweave-js-tools/corepack-home \
+    COREPACK_ENABLE_NETWORK=0 \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PATH=/opt/markweave-js-tools/bin:$PATH
+COPY scripts/javascript/bootstrap-pnpm.sh /usr/local/bin/bootstrap-pnpm
+RUN test "$(node --version)" = "v24.19.0" \
+    && /usr/local/bin/bootstrap-pnpm /opt/markweave-js-tools \
+    && test "$(pnpm --version)" = "11.25.0"
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY web/package.json ./web/package.json
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @markweave/web...
+COPY web/app ./web/app
+COPY web/components ./web/components
+COPY web/public ./web/public
+COPY web/src ./web/src
+COPY web/next-env.d.ts web/next.config.ts web/postcss.config.mjs web/proxy.ts web/tsconfig.json ./web/
+RUN pnpm --filter @markweave/web run build \
+    && pnpm --filter @markweave/web deploy --prod --legacy /opt/markweave-web-production
 
 FROM ${RUNTIME_IMAGE} AS runtime
 USER 0
@@ -22,17 +30,16 @@ ENV HOME=/tmp/home \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
     NODE_OPTIONS=--max-old-space-size=160 \
-    NPM_CONFIG_CACHE=/tmp/npm-cache \
     PORT=3000 \
     PROBE_PORT=3001
-COPY --from=build --chown=1001:0 /opt/app-root/src/.next ./.next
-COPY --from=build --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
-COPY --from=build --chown=1001:0 /opt/app-root/src/package.json ./package.json
-COPY --from=build --chown=1001:0 /opt/app-root/src/next.config.ts ./next.config.ts
-COPY --from=build --chown=1001:0 /opt/app-root/src/public ./public
-COPY --chown=1001:0 server.mjs ./server.mjs
-COPY --chown=1001:0 router.mjs ./router.mjs
-COPY --chown=1001:0 src/runtime ./src/runtime
+COPY --from=build --chown=1001:0 /opt/app-root/src/web/.next ./.next
+COPY --from=build --chown=1001:0 /opt/markweave-web-production/node_modules ./node_modules
+COPY --from=build --chown=1001:0 /opt/markweave-web-production/package.json ./package.json
+COPY --from=build --chown=1001:0 /opt/app-root/src/web/next.config.ts ./next.config.ts
+COPY --from=build --chown=1001:0 /opt/app-root/src/web/public ./public
+COPY --chown=1001:0 web/server.mjs ./server.mjs
+COPY --chown=1001:0 web/router.mjs ./router.mjs
+COPY --chown=1001:0 web/src/runtime ./src/runtime
 RUN chmod -R g=u /opt/markweave-web && chmod -R a-w /opt/markweave-web
 USER 1001
 EXPOSE 3000 3001 8080

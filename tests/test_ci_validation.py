@@ -227,14 +227,14 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
 
 @pytest.mark.unit
 def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
-    """Both retained-evidence uploads use the reviewed v7 pin without direct mode."""
+    """Every retained-evidence upload uses the reviewed v7 pin."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     upload_lines = [
         line.strip()
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 2
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 3
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -373,10 +373,8 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
         "matrix.domain == 'compose' || matrix.domain == 'container' || "
         "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
     )
-    assert (
-        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
-        in workflow
-    )
+    assert "matrix.domain == 'document-engines'" in workflow
+    assert "Set up pinned Node for rootless E2E" in workflow
     assert "failure() && startsWith(matrix.domain, 'e2e-')" in workflow
     assert (
         "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
@@ -390,7 +388,65 @@ def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
     assert "- name: Set up pinned Node for frontend smoke" in workflow
     assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
     assert "node-version: 24.19.0" in workflow
-    assert "cache-dependency-path: web/package-lock.json" in workflow
+    assert "pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}" in workflow
+    assert "Rehearse the exact npm rollback candidate" in workflow
+    assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
+    assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
+    assert "Collect the T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 benchmark metadata" in workflow
+    assert "Download the accepted T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 package-manager benchmark" in workflow
+    assert "Retain the T67 package-manager benchmark" in workflow
+    assert "900 10 /dev/stderr t67/rollback --" in workflow
+    assert 900 + 10 < 45 * 60 / 2
+    assert "1620 20 /dev/stderr t67/benchmark --" in workflow
+    assert "PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "actions: read" in workflow
+    assert (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
+    )
+    assert "run-id: 33799673333" in workflow
+    assert "artifact-ids: 9911803951" in workflow
+    assert "repository: Guillaume-Lombardo/simple-md-to-docx-converter" in workflow
+    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow
+    assert '"$RUNNER_TEMP/t67-benchmark-metadata.txt"' in workflow
+    assert "rerun_t67_benchmark:" in workflow
+    assert "artifacts/package-manager-benchmark" in workflow
+    rollback_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+        "github.head_ref == 'chore/T67-pnpm-workspace' && "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert f"if: {rollback_condition}" in workflow
+    wrong_artifact = workflow.replace(
+        "artifact-ids: 9911803951", "artifact-ids: 9911803952"
+    )
+    assert (
+        "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        in validate_workflow_text(wrong_artifact)
+    )
+    manual_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+        "&& inputs.rerun_t67_benchmark && "
+        "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+    )
+    assert f"if: {manual_condition}" in workflow
+    weakened_manual = workflow.replace(
+        manual_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(weakened_manual)
+    )
+    future_frontend_pr = workflow.replace(
+        rollback_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(future_frontend_pr)
+    )
     weakened = workflow.replace(
         "- name: Set up pinned Node for frontend smoke\n"
         "        if: ${{ matrix.domain == 'frontend' }}\n"

@@ -73,8 +73,9 @@ retain the API's generated names, `nosniff`, content digest, and authorization b
 
 ## Verification
 
-`npm --prefix web test` executes the isolated frontend unit and component suites and independently
-blocks line, branch, and function coverage below 90%. Functional tests exercise the ASGI
+`pnpm --filter @markweave/web run test:coverage` executes the frontend unit and component suites
+through the root workspace and independently blocks line, branch, and function coverage below
+90%. Functional tests exercise the ASGI
 application through an HTTPS test origin over real SQLite and filesystem boundaries and separately verify owner
 representation, search, authorization, and storage failures against live PostgreSQL and RustFS.
 A pinned-Chromium Next.js browser scenario runs two ordinary users and an administrator against the

@@ -73,9 +73,18 @@ uv run ty check
 Verify the native final-image browser support module with the locked, dependency-free Node test
 package. Its command blocks below 90% line, branch, or function coverage:
 
+The [JavaScript package-management guide](package-management.md) records the reviewed bootstrap,
+workspace boundary, isolated Mermaid exception, cache policy, benchmark requirements, and rollback
+procedure.
+
 ```bash
-npm ci --ignore-scripts
-npm run test:web
+cd "$(git rev-parse --show-toplevel)"
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run workspace:check
+pnpm run test:web
 ```
 
 Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or

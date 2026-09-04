@@ -30,7 +30,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Web migration target | A Next.js, TypeScript, and Tailwind CSS application under `web/` owns browser pages and assets after the staged T58–T64 migration; the existing FastAPI-rendered frontend remains active until verified cutover |
 | Browser boundary | Browser pages and both exact `/api/v1` and `/api/v1/**` use one public origin; Next.js route handlers must not duplicate FastAPI business or authorization rules |
 | Frontend topology | A separate stateless rootless Next.js process serves browser pages behind the same TLS router as FastAPI; browsers call FastAPI directly through relative same-origin exact `/api/v1` or `/api/v1/**` URLs, and the frontend has no business-service or persistence credentials |
-| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0` and npm `11.17.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3`, all exact and lockfile-integrity pinned as reviewed on 2026-09-01 |
+| Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
 | Mermaid | Local Mermaid CLI and Chromium |
@@ -202,12 +202,33 @@ field. It preserves both header directions unchanged on direct FastAPI routes.
 Uploads and downloads pass router-to-FastAPI without traversing Next.js, and retain FastAPI's
 scanner, authorization, filename, digest, content-type, `nosniff`, and private no-store contracts.
 
-The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. npm is the
-only package manager; `packageManager` and every direct dependency are exact, `web/package-lock.json`
-pins the complete integrity-checked graph, and deterministic installation uses `npm ci
---ignore-scripts`. Updates occur only through reviewed pull requests with support, license,
-vulnerability, build, browser, rootless, and rollback evidence. No production build or startup
-resolves a tag, range, Git URL, CDN, or dynamically downloaded asset.
+The root browser-test package and `web/` use one pnpm workspace and one root `pnpm-lock.yaml`.
+Workspace membership explicitly includes only the repository root and `web/` and explicitly
+excludes `spikes/toolchain`; an automated negative-membership test enforces that boundary. The
+isolated Mermaid production graph remains npm-based, retains its independent lock and exact Mermaid
+version, and is installed only with `npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts`.
+
+The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. Node.js
+`24.19.0`, Corepack `0.36.0`, pnpm `11.25.0`, the integrity-bound root `packageManager` selection,
+and every direct dependency are exact. Bootstrap downloads Corepack only from its immutable exact
+npm-registry tarball URL, verifies the reviewed SHA-512 before installing it, and asks that verified
+Corepack to acquire pnpm only under the reviewed package-manager integrity hash. Every later command
+sets `COREPACK_ENABLE_NETWORK=0`; a mismatch or unavailable verified byte fails closed instead of
+activating a package manager implicitly.
+
+Deterministic installation uses `pnpm install --frozen-lockfile --ignore-scripts`. The root lock
+pins the complete integrity-checked application and browser-test graph and preserves the reviewed
+npm-baseline package/version set, peer resolution, and overrides. CI caches only pnpm's
+content-addressable store under a key containing the operating system, exact Node.js version, exact
+pnpm version, and lock digest; untrusted contexts may restore but never write caches. Frontend image
+construction uses the repository root context, builds from the frozen workspace graph, and copies
+only a target-platform `pnpm deploy --prod --legacy` graph into the runtime. Corepack, pnpm, their
+caches, development dependencies, and package-manager network access are absent at runtime.
+Updates occur only through reviewed pull requests with support, license, vulnerability, build,
+browser, rootless, cold-cache, benchmark, and rollback evidence. No production build or startup
+resolves a tag, range, Git URL, CDN, or dynamically downloaded asset. Historical release-evidence
+recovery binds the root pnpm lock when the release source contains one and otherwise binds the
+legacy frontend npm lock, so old exact bytes remain recoverable without rebuilding.
 
 Final releases bind one source SHA and version to the PyPI package plus distinct backend and
 frontend GHCR manifest digests. Each image is built and serialized once and receives CycloneDX and
@@ -649,6 +670,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T65 | Expose authenticated domain-specific conversion options, template context, and the administrator absolute-session ceiling for authoritative frontend runtime metadata | T45, T57, T59, T61 |
 | T66 | Expose authoritative role-specific idle-session policy bounds, defaults, and minute granularity for the administration frontend | T59, T65 |
 | T68 | Restore host routing for the CNI-free rootless Podman trusted-upstream and insecure Next.js quickstarts | T64 |
+| T67 | Migrate root browser-test and Next.js tooling to one deterministic pnpm workspace while preserving the isolated npm Mermaid graph, release evidence, and rollback | T64 |
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
 | T70 | Implement the secure local anydoc adapter and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
@@ -663,11 +685,9 @@ publication boundary.
 
 For experimental reverse conversion, T69 is a blocking evidence and contract spike. T70 implements
 the local engine and package builder only after the asset-position strategy and PDF limitations are
-approved. T71 then adds the persistent backend workflow. T67 must finish the JavaScript workspace
-migration and make its resulting package-manager, bootstrap, workspace, command, and lockfile
-contract normative before T72 starts. Until that T67 update is merged, the existing npm contract in
-section 3.3.1 remains authoritative; T69-T73 do not preselect pnpm, Corepack, or another replacement.
-T72 then builds the Revert workspace on T67's finalized toolchain. T46, T48, and T50 must finish
+approved. T71 then adds the persistent backend workflow. T67 follows T64 and establishes the
+normative package-manager, bootstrap, workspace, command, and lockfile contract before T72 starts.
+T72 then builds the Revert workspace on that finalized pnpm toolchain. T46, T48, and T50 must finish
 their baseline security/support policies, mutation gate, and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
 surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
