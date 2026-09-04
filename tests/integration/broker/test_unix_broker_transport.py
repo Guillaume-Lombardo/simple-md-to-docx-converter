@@ -30,7 +30,10 @@ PRINCIPAL = AuthenticatedPrincipal(UUID("00000000-0000-4000-8000-000000000005"))
 
 
 def _server(
-    tmp_path: Path, mocker: MockerFixture
+    tmp_path: Path,
+    mocker: MockerFixture,
+    *,
+    limits: UnixTransportLimits | None = None,
 ) -> tuple[Path, UnixBrokerServer, Any]:
     parent = tmp_path / "broker"
     parent.mkdir(mode=0o700)
@@ -43,7 +46,7 @@ def _server(
         expected_client_uid=os.geteuid(),
         principal=PRINCIPAL,
         dispatcher=dispatcher,
-        limits=UnixTransportLimits(0.25, 1, 1, 1),
+        limits=limits or UnixTransportLimits(0.25, 1, 1, 1),
     )
     return path, server, dispatcher
 
@@ -190,8 +193,9 @@ def test_lifecycle_lock_prevents_replacement_during_reconciliation(
 def test_dispatch_deadline_stops_admission_and_blocks_restart_until_drained(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    path, server, dispatcher = _server(tmp_path, mocker)
-    server._limits = UnixTransportLimits(0.05, 0.05, 1, 1)
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(0.05, 0.05, 1, 1)
+    )
     release = Event()
     exited = Event()
 
@@ -236,8 +240,9 @@ def test_dispatch_deadline_stops_admission_and_blocks_restart_until_drained(
 def test_expired_queued_dispatch_never_enters_service_after_active_request(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    path, server, dispatcher = _server(tmp_path, mocker)
-    server._limits = UnixTransportLimits(0.1, 1, 2, 2)
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(0.1, 1, 2, 2)
+    )
     entered = Event()
     release = Event()
     sequences: list[int] = []
@@ -278,6 +283,67 @@ def test_expired_queued_dispatch_never_enters_service_after_active_request(
     assert sequences == [1]
     with pytest.raises(RuntimeError, match="server failed"):
         server.stop()
+
+
+def test_unexpected_dispatch_failure_fences_queued_request_before_gate_release(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(
+        tmp_path, mocker, limits=UnixTransportLimits(0.5, 1, 2, 2)
+    )
+    entered = Event()
+    release = Event()
+    calls: list[int] = []
+
+    def failing_dispatch(
+        _principal: AuthenticatedPrincipal, request: ReadyRequest
+    ) -> ReadyResponse:
+        calls.append(request.sequence)
+        if request.sequence == 1:
+            entered.set()
+            assert release.wait(1)
+            raise ValueError("private runtime detail")
+        return ReadyResponse(request.request_id, True)
+
+    dispatcher.dispatch.side_effect = failing_dispatch
+    server.start()
+
+    def request(sequence: int) -> None:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=1,
+        )
+        with suppress(BrokerError):
+            client.request(ReadyRequest(UUID(int=sequence), sequence))
+
+    first = Thread(target=request, args=(1,))
+    second = Thread(target=request, args=(2,))
+    first.start()
+    assert entered.wait(1)
+    second.start()
+    deadline = monotonic() + 1
+    while len(server._connections) < 2 and monotonic() < deadline:
+        sleep(0.001)
+    assert len(server._connections) == 2
+
+    server._threads_lock.acquire()
+    try:
+        release.set()
+        sleep(0.05)
+        assert calls == [1]
+    finally:
+        server._threads_lock.release()
+
+    first.join(1)
+    second.join(1)
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert calls == [1]
+    with pytest.raises(RuntimeError, match="server failed") as stopped:
+        server.stop()
+    assert isinstance(stopped.value.__cause__, ValueError)
 
 
 @pytest.mark.parametrize(

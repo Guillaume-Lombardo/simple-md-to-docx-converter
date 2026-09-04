@@ -376,12 +376,16 @@ class UnixBrokerServer:
             self._record_fatal(TimeoutError("Broker dispatch gate deadline expired"))
             return
         try:
-            response = self._dispatch_before_deadline(request, deadline)
+            try:
+                response = self._dispatch_before_deadline(request, deadline)
+                frame = None if response is None else encode_response(response)
+            except BaseException as error:
+                self._record_fatal(error)
+                return
         finally:
             self._dispatch_gate.release()
-        if response is None:
+        if frame is None:
             return
-        frame = encode_response(response)
         try:
             _send_all(connection, frame, deadline)
         except OSError, TimeoutError:
