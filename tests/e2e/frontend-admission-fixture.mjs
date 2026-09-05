@@ -7,11 +7,23 @@ import {
 
 const evidence = "/evidence";
 const held = [];
+let admissionHighWater = 0;
 let page;
 page = createPageServer((_request, response) => {
   held.push(response);
+  if (page.admission.inFlight > admissionHighWater) {
+    admissionHighWater = page.admission.inFlight;
+    writeFileSync(
+      `${evidence}/frontend-admission-high-water`,
+      `${admissionHighWater}\n`,
+      { mode: 0o600 },
+    );
+  }
   if (page.admission.inFlight === 128)
     writeFileSync(`${evidence}/frontend-saturated`, "128\n", { mode: 0o600 });
+});
+writeFileSync(`${evidence}/frontend-admission-high-water`, "0\n", {
+  mode: 0o600,
 });
 page.server.listen(3000, "0.0.0.0", () => {
   writeFileSync(`${evidence}/frontend-admission-ready`, "true\n", {

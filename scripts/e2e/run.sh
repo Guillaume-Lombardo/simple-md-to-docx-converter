@@ -119,6 +119,34 @@ remove_artifacts() {
   rm -rf -- "$artifact_directory"
 }
 
+retain_frontend_admission_evidence() {
+  local evidence_name evidence_value
+  for evidence_name in \
+    frontend-admission-ready \
+    frontend-admission-high-water \
+    frontend-saturated; do
+    if [[ ! -f "$evidence_directory/$evidence_name" \
+      || -L "$evidence_directory/$evidence_name" ]]; then
+      continue
+    fi
+    evidence_value="$(head -c 16 -- "$evidence_directory/$evidence_name" 2>/dev/null \
+      || true)"
+    case "$evidence_name" in
+      frontend-admission-ready)
+        [[ "$evidence_value" == true ]] || continue
+        ;;
+      frontend-admission-high-water)
+        [[ "$evidence_value" =~ ^[0-9]{1,3}$ ]] || continue
+        ((10#$evidence_value <= 128)) || continue
+        ;;
+      frontend-saturated)
+        [[ "$evidence_value" == 128 ]] || continue
+        ;;
+    esac
+    printf '%s\n' "$evidence_value" >"$artifact_directory/$evidence_name"
+  done
+}
+
 collect_failure_artifacts() {
   local resource container_state container_exit_code container_oom_killed
   mkdir -p -- "$artifact_directory"
@@ -183,6 +211,7 @@ collect_failure_artifacts() {
     cp -a -- "$temporary_directory/browser-artifacts/." "$artifact_directory/" \
       || true
   fi
+  retain_frontend_admission_evidence
   printf 'profile=%s\nresult=failed\n' "$profile" >"$artifact_directory/summary.txt"
 }
 
@@ -405,6 +434,25 @@ start_frontend() {
   echo "Timed out waiting for the frontend readiness probe." >&2
   e2e_podman logs "$frontend_name" >&2 || true
   return 1
+}
+
+admission_frontend_origin() {
+  local frontend_address octet
+  local -a address_octets
+  frontend_address="$(podman inspect "$frontend_name" --format \
+    "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}")"
+  if [[ ! "$frontend_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Admission frontend has no unambiguous IPv4 address on the E2E network." >&2
+    return 1
+  fi
+  IFS=. read -r -a address_octets <<<"$frontend_address"
+  for octet in "${address_octets[@]}"; do
+    if [[ ! "$octet" =~ ^[0-9]{1,3}$ ]] || ((10#$octet > 255)); then
+      echo "Admission frontend has an invalid IPv4 address." >&2
+      return 1
+    fi
+  done
+  printf 'http://%s:3000\n' "$frontend_address"
 }
 
 restart_backend_and_router() {
@@ -1006,8 +1054,9 @@ if [[ ! -f "$evidence_directory/frontend-admission-ready" ]]; then
   e2e_podman logs "$frontend_name" >&2 || true
   exit 1
 fi
+admission_origin="$(admission_frontend_origin)"
 start_production_router "$application_name" http://127.0.0.1:8080 \
-  http://frontend:3000 401 false
+  "$admission_origin" 401 false
 e2e_podman exec \
   --env MARKWEAVE_E2E_RUNTIME_FAILURE=admission \
   "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs &

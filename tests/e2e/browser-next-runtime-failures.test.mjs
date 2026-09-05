@@ -17,7 +17,7 @@ function openDedicatedRequest(admissionId) {
     (response) => {
       response.resume();
       admissionError = new Error(
-        `Frontend hold request ${admissionId} returned before saturation`,
+        `Frontend hold request ${admissionId} returned HTTP ${response.statusCode} before saturation`,
       );
     },
   );
