@@ -478,6 +478,7 @@ class BrokerProcess:
     def run(self) -> int:
         """Reconcile, listen, and stop with content-free terminal status."""
 
+        shutdown_proven = False
         previous = {
             number: signal.signal(number, self._handle_signal)
             for number in (signal.SIGINT, signal.SIGTERM)
@@ -493,11 +494,14 @@ class BrokerProcess:
                 self._server.stop()
             except BaseException:
                 failed = True
+            else:
+                shutdown_proven = True
             return 1 if failed else 0
         finally:
-            self._shutdown_complete.set()
-            if self._watchdog is not None:
-                self._watchdog.join()
+            if shutdown_proven:
+                self._shutdown_complete.set()
+                if self._watchdog is not None:
+                    self._watchdog.join()
             for number, handler in previous.items():
                 signal.signal(number, handler)
 

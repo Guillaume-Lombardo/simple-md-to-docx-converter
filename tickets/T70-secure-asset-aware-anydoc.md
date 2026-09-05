@@ -437,6 +437,12 @@ for reverse conversion.
   the clean-wheel installation probe passes. The public protocol remains v1; STAGE/COLLECT wire
   operations, T71 jobs/leases/publication, production budgets, mTLS, deployment manifests,
   Kubernetes, OCR, and UI remain excluded.
+* 2026-09-05: Follow-up review corrected the hard shutdown proof boundary. An unsuccessful Unix
+  handler drain no longer marks process shutdown complete or disarms the independent watchdog; the
+  watchdog remains live through interpreter teardown and forces a bounded nonzero exit even when a
+  non-daemon handler would otherwise keep the process alive. A real subprocess regression proves
+  the hard deadline and content-free output. The 572-test broker selection, focused subprocess
+  regression, Ruff, and `ty` pass.
 
 ## Synchronization
 

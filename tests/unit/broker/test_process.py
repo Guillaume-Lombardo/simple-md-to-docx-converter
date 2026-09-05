@@ -329,12 +329,20 @@ def test_process_returns_nonzero_for_internal_fatal(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
     server = _server(tmp_path, mocker)
+    hard_exit = mocker.Mock()
     mocker.patch.object(
         server, "start", side_effect=lambda: server._record_fatal(ValueError())
     )
     mocker.patch.object(server, "stop", side_effect=RuntimeError())
+    process = BrokerProcess(
+        server, hard_shutdown_timeout_seconds=0.001, hard_exit=hard_exit
+    )
 
-    assert BrokerProcess(server, hard_shutdown_timeout_seconds=1).run() == 1
+    assert process.run() == 1
+    assert process._watchdog is not None
+    process._watchdog.join()
+    assert not process._shutdown_complete.is_set()
+    hard_exit.assert_called_once_with(1)
 
 
 @pytest.mark.unit

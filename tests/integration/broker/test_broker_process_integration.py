@@ -248,6 +248,57 @@ def _assert_unit_absent(unit_id: UUID) -> None:
     assert not cgroup.exists()
 
 
+def test_failed_handler_drain_is_bounded_by_independent_hard_watchdog() -> None:
+    program = """
+import time
+from threading import Thread
+
+from markweave.broker.process import BrokerProcess
+from markweave.broker.unix_transport import UnixBrokerServer
+
+
+class UndrainedServer(UnixBrokerServer):
+    def __init__(self):
+        pass
+
+    @property
+    def failed(self):
+        return False
+
+    def start(self):
+        pass
+
+    def wait_stopping(self, timeout=None):
+        return True
+
+    def stop(self):
+        Thread(target=lambda: time.sleep(10), daemon=False).start()
+        raise RuntimeError("private handler failure")
+
+    def request_stop(self):
+        pass
+
+
+raise SystemExit(
+    BrokerProcess(UndrainedServer(), hard_shutdown_timeout_seconds=0.1).run()
+)
+"""
+    started = time.monotonic()
+
+    completed = subprocess.run(
+        (sys.executable, "-c", program),
+        check=False,
+        capture_output=True,
+        timeout=2,
+        cwd=ROOT,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+    assert time.monotonic() - started < 1
+
+
 @pytest.mark.parametrize("requested_signal", [signal.SIGINT, signal.SIGTERM])
 def test_real_process_serves_complete_lifecycle_and_stops_cleanly(
     tmp_path: Path,
