@@ -349,6 +349,64 @@ def test_create_recovers_exact_lost_response_without_duplicate(
 
 
 @pytest.mark.unit
+def test_failed_create_without_container_removes_only_the_empty_cgroup(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.create_code = 125
+    command.create_output = b""
+
+    with pytest.raises(PodmanRuntimeError, match="command failed"):
+        runtime(command).create(unit, policy)
+
+    assert command.exists is False
+    assert not any(call[0][0] == "rm" for call in command.calls)
+    assert ("container", "exists", NAME) in [call[0] for call in command.calls]
+    assert command.cgroup_removals == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+
+
+@pytest.mark.unit
+def test_failed_create_requires_both_name_and_label_absence_before_cgroup_cleanup(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.create_code = 125
+    command.create_output = b""
+    original = command.__call__
+
+    def substituted_discovery(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        if arguments[3] == "ps":
+            return 0, json.dumps([{"Names": ["substituted"]}]).encode()
+        return original(
+            arguments,
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=substituted_discovery,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
+        backend.create(unit, policy)
+
+    assert command.cgroup_removals == []
+
+
+@pytest.mark.unit
 def test_successful_create_requires_exact_returned_container_identity(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
@@ -1117,6 +1175,70 @@ def test_cgroup_root_and_live_process_binding_fail_closed(
     )
     with pytest.raises(PodmanRuntimeError, match="binding"):
         backend.create(unit, policy)
+
+
+@pytest.mark.unit
+def test_live_process_accepts_exact_crun_systemd_container_subgroup(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    requested_paths: list[Path] = []
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=command,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: (
+            requested_paths.append(path) or b"populated 1\nfrozen 0\n"
+        ),
+        process_cgroup_read=lambda pid: (
+            f"0::{CGROUP_RUNTIME_PATH}/container\n".encode()
+        ),
+    )
+
+    created = backend.create(unit, policy)
+
+    assert created.container_id == CONTAINER_ID
+    expected = CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"
+    assert requested_paths
+    assert set(requested_paths) == {expected}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        f"0::{CGROUP_RUNTIME_PATH}/container/child\n".encode(),
+        f"0::{CGROUP_RUNTIME_PATH}/other\n".encode(),
+        f"1::{CGROUP_RUNTIME_PATH}/container\n".encode(),
+        f"0::{CGROUP_RUNTIME_PATH}/container".encode(),
+        f"0::{CGROUP_RUNTIME_PATH}//container\n".encode(),
+        f"0::{CGROUP_RUNTIME_PATH}/container\n0::/other\n".encode(),
+    ],
+)
+def test_process_cgroup_compatibility_rejects_any_other_descendant_or_format(
+    evidence: bytes,
+) -> None:
+    assert not podman_runtime._matches_process_cgroup(evidence, CGROUP_RUNTIME_PATH)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+        f"0::{CGROUP_RUNTIME_PATH}/container\n".encode(),
+    ],
+)
+def test_process_cgroup_compatibility_accepts_only_two_exact_forms(
+    evidence: bytes,
+) -> None:
+    assert podman_runtime._matches_process_cgroup(evidence, CGROUP_RUNTIME_PATH)
 
 
 @pytest.mark.unit

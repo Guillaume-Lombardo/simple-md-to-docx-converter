@@ -353,8 +353,15 @@ for reverse conversion.
   filesystem failures, and bounded cgroup evidence. Follow-up review then restricted failed-create
   rollback to the canonical ID returned by the successful create response, required exact-ID
   absence plus empty label-scoped discovery before cgroup cleanup, and extended the same cleanup
-  guarantee across `BaseException` interruptions. The local Podman 5.4.2 lifecycle suite remains
-  four-for-four. The 108 backend tests and 2,920-test light selection pass at 90.06% application
+  guarantee across `BaseException` interruptions. The next hosted run exposed crun's documented
+  cgroup-v2 systemd `container` subgroup: live process binding now accepts only the exact inspected
+  scope or that scope plus `/container`, while retaining exact `State.CgroupPath` and populated
+  parent-leaf evidence and rejecting every other descendant or format. Failed creates that prove
+  both exact-name and label-scoped absence now remove their empty precreated cgroup without
+  weakening lost-response recovery. The controlled fixture installs signal handlers before fork,
+  and only the parent publishes readiness after its resistant child exists. The local Podman 5.4.2
+  lifecycle suite remains four-for-four. The 119 backend tests, two fixture-ordering tests, and
+  2,933-test light selection pass at 90.09% application
   branch coverage, correcting the hosted run's 89.77% result. Hosted Podman 4.9.3 remains to be
   reconfirmed by CI after independent review. No Kubernetes acceptance is claimed.
 

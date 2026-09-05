@@ -396,6 +396,7 @@ class PodmanIsolationRuntime:
             accepted_exit_codes=frozenset({0, 125}),
         )
         created_id: str | None = None
+        inspected: Mapping[str, Any] | None = None
         try:
             created_id = _create_response_identity(output)
             inspected = self._inspect(name)
@@ -431,6 +432,8 @@ class PodmanIsolationRuntime:
                         "Podman failed creation cleanup is unconfirmed"
                     ) from create_error
                 self._cleanup_failed_create(unit.unit_id, created_id)
+            elif inspected is None:
+                self._cleanup_absent_failed_create(unit.unit_id, name)
             raise
 
     def _cleanup_failed_create(self, unit_id: UUID, container_id: str) -> None:
@@ -440,11 +443,19 @@ class PodmanIsolationRuntime:
                 max_output_bytes=1024,
                 accepted_exit_codes=frozenset({0, 1}),
             )
-        failed = False
-        absent = False
+        if not self._confirm_container_absence(unit_id, container_id):
+            raise PodmanRuntimeError("Podman failed creation cleanup is unconfirmed")
+        self._remove_failed_create_cgroup(unit_id)
+
+    def _cleanup_absent_failed_create(self, unit_id: UUID, name: str) -> None:
+        if not self._confirm_container_absence(unit_id, name):
+            raise PodmanRuntimeError("Podman failed creation cleanup is unconfirmed")
+        self._remove_failed_create_cgroup(unit_id)
+
+    def _confirm_container_absence(self, unit_id: UUID, identity: str) -> bool:
         try:
             exists_code, _ = self._call(
-                ("container", "exists", container_id),
+                ("container", "exists", identity),
                 max_output_bytes=0,
                 accepted_exit_codes=frozenset({0, 1}),
             )
@@ -461,18 +472,17 @@ class PodmanIsolationRuntime:
                 max_output_bytes=_INSPECT_MAX_BYTES,
             )
             discovered = _json(discovery_output)
-            absent = exists_code == 1 and type(discovered) is list and not discovered
+            return exists_code == 1 and type(discovered) is list and not discovered
         except BaseException:
-            failed = True
-        if absent:
-            try:
-                self._cgroup_remove(self._cgroup_path(unit_id))
-            except BaseException:
-                failed = True
-        else:
-            failed = True
-        if failed:
-            raise PodmanRuntimeError("Podman failed creation cleanup is unconfirmed")
+            return False
+
+    def _remove_failed_create_cgroup(self, unit_id: UUID) -> None:
+        try:
+            self._cgroup_remove(self._cgroup_path(unit_id))
+        except BaseException as error:
+            raise PodmanRuntimeError(
+                "Podman failed creation cleanup is unconfirmed"
+            ) from error
 
     def hard_terminate(self, runtime_unit: RuntimeUnit) -> None:
         """Send SIGKILL to the verified complete container unit, idempotently."""
@@ -909,9 +919,8 @@ class PodmanIsolationRuntime:
             raise PodmanRuntimeError("Podman cgroup binding is invalid")
         if running:
             pid = _integer(state, "Pid")
-            if (
-                pid <= 0
-                or self._process_cgroup_read(pid) != f"0::{expected}\n".encode()
+            if pid <= 0 or not _matches_process_cgroup(
+                self._process_cgroup_read(pid), expected
             ):
                 raise PodmanRuntimeError("Podman cgroup binding is invalid")
             events = _parse_cgroup_events(
@@ -1284,6 +1293,15 @@ def _create_response_identity(output: bytes) -> str | None:
     if _CONTAINER_ID_PATTERN.fullmatch(identity) is None:
         return None
     return identity
+
+
+def _matches_process_cgroup(evidence: bytes, expected: str) -> bool:
+    """Match the two exact cgroup-v2 placements supported by crun systemd."""
+
+    return evidence in {
+        f"0::{expected}\n".encode(),
+        f"0::{expected}/container\n".encode(),
+    }
 
 
 def _string(value: Mapping[str, Any], key: str) -> str:
