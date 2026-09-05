@@ -516,6 +516,11 @@ def test_real_client_rejects_untrusted_or_misidentified_server(
             SERVER_URI,
             SERVER_PRINCIPAL,
         )
+        server_peer = MtlsPeerIdentity(
+            SERVER_URI,
+            (_pin(certificates.extra_san_server_certificate),),
+            SERVER_PRINCIPAL,
+        )
     elif failure == "expired":
         server_local = MtlsLocalIdentity(
             certificates.ca,
@@ -527,11 +532,6 @@ def test_real_client_rejects_untrusted_or_misidentified_server(
         server_peer = MtlsPeerIdentity(
             SERVER_URI,
             (_pin(certificates.expired_server_certificate),),
-            SERVER_PRINCIPAL,
-        )
-        server_peer = MtlsPeerIdentity(
-            SERVER_URI,
-            (_pin(certificates.extra_san_server_certificate),),
             SERVER_PRINCIPAL,
         )
     elif failure == "pin":
