@@ -173,6 +173,23 @@ def test_rejects_duplicate_configuration_keys(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_rejects_nonfinite_json_float_literal_before_canonicalization(
+    tmp_path: Path,
+) -> None:
+    path, _ = _configuration(tmp_path)
+    encoded = path.read_text(encoding="ascii")
+    path.write_text(
+        encoded.replace(
+            '"hard_shutdown_timeout_seconds":3', '"hard_shutdown_timeout_seconds":1e400'
+        ),
+        encoding="ascii",
+    )
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
 def test_rejects_oversized_configuration_before_decoding(tmp_path: Path) -> None:
     path, _ = _configuration(tmp_path)
     path.write_bytes(b"{" + b" " * 16_384 + b"}")
@@ -336,14 +353,13 @@ def test_factory_rejects_root_and_missing_fixed_commands_before_inventory(
 ) -> None:
     path, _ = _configuration(tmp_path)
     config = load_broker_process_config(path)
-    uid = os.geteuid()
     inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
     mocker.patch("markweave.broker.process.os.geteuid", return_value=0)
     with pytest.raises(BrokerProcessConfigurationError):
         build_broker_server(config)
     inventory.assert_not_called()
 
-    mocker.patch("markweave.broker.process.os.geteuid", return_value=uid)
+    mocker.patch("markweave.broker.process.os.geteuid", return_value=1000)
     mocker.patch("markweave.broker.process._PODMAN", tmp_path / "missing-podman")
     with pytest.raises(BrokerProcessConfigurationError):
         build_broker_server(config)

@@ -454,6 +454,13 @@ for reverse conversion.
   Configuration and key reads are nonblocking as well as no-follow, rejecting owner FIFOs without
   hanging, and extreme canonical JSON numbers map to the same bounded configuration failure. The
   574-test broker selection, targeted authority subprocess tests, Ruff, and `ty` pass.
+* 2026-09-05: PR review follow-up made non-finite exponent-form JSON numbers fail during parsing,
+  before canonical re-encoding, and made the missing-command unit case independent of the runner's
+  actual UID. Cold-runner subprocess allowances no longer compete with the deliberately short hard
+  watchdog assertion. The lifecycle-lock E2E now starts a second low-level Unix server against the
+  same socket, so it exercises the socket lock independently of the separate per-EUID process
+  authority lock while proving the first broker remains live. All 12 real process E2Es, 51 focused
+  process/configuration tests, 73 Unix transport tests, Ruff, and `ty` pass.
 
 ## Synchronization
 

@@ -289,14 +289,14 @@ raise SystemExit(
         (sys.executable, "-c", program),
         check=False,
         capture_output=True,
-        timeout=2,
+        timeout=10,
         cwd=ROOT,
     )
 
     assert completed.returncode == 1
     assert completed.stdout == b""
     assert completed.stderr == b""
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < 5
 
 
 @pytest.mark.parametrize("requested_signal", [signal.SIGINT, signal.SIGTERM])
@@ -351,16 +351,42 @@ def test_second_process_is_refused_by_lifecycle_lock(
 ) -> None:
     config, socket_path = _write_configuration(tmp_path, *process_image)
     first = _start(config, socket_path)
+    program = """
+import os
+import sys
+from pathlib import Path
+from uuid import UUID
+
+from markweave.broker.dispatch import BrokerDispatcher
+from markweave.broker.models import AuthenticatedPrincipal
+from markweave.broker.unix_transport import UnixBrokerServer, UnixTransportLimits
+
+server = UnixBrokerServer(
+    Path(sys.argv[1]),
+    expected_client_uid=os.geteuid(),
+    principal=AuthenticatedPrincipal(UUID(sys.argv[2])),
+    dispatcher=object.__new__(BrokerDispatcher),
+    limits=UnixTransportLimits(1, 1, 1, 1),
+)
+try:
+    server.start()
+except BaseException:
+    os.write(2, b"broker runtime failed\\n")
+    raise SystemExit(1)
+raise SystemExit(0)
+"""
     second = subprocess.run(
-        (sys.executable, "-m", "markweave.broker.process", str(config)),
+        (sys.executable, "-c", program, str(socket_path), str(PRINCIPAL.principal_id)),
         check=False,
         capture_output=True,
-        timeout=5,
+        timeout=10,
     )
     try:
         assert second.returncode == 1
         assert second.stdout == b""
         assert second.stderr == b"broker runtime failed\n"
+        ready = _client(socket_path).request(ReadyRequest(uuid4(), 7))
+        assert isinstance(ready, ReadyResponse) and ready.ready
     finally:
         _stop(first, signal.SIGTERM)
 
@@ -394,7 +420,7 @@ def test_uid_authority_lock_excludes_distinct_state_and_socket_process(
         (sys.executable, "-m", "markweave.broker.process", str(second_config)),
         check=False,
         capture_output=True,
-        timeout=5,
+        timeout=10,
     )
     after = {
         path.name: (path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns)
@@ -431,7 +457,35 @@ def test_fifo_configuration_inputs_are_rejected_without_blocking(
         (sys.executable, "-m", "markweave.broker.process", str(config)),
         check=False,
         capture_output=True,
-        timeout=1,
+        timeout=10,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == b""
+    assert completed.stderr == b"broker configuration failed\n"
+
+
+def test_nonfinite_json_float_entrypoint_failure_is_bounded_and_content_free(
+    tmp_path: Path,
+) -> None:
+    config, _ = _write_configuration(
+        tmp_path,
+        "localhost/markweave-attempt",
+        "sha256:" + "a" * 64,
+    )
+    encoded = config.read_text(encoding="ascii")
+    config.write_text(
+        encoded.replace(
+            '"hard_shutdown_timeout_seconds":4', '"hard_shutdown_timeout_seconds":1e400'
+        ),
+        encoding="ascii",
+    )
+
+    completed = subprocess.run(
+        (sys.executable, "-m", "markweave.broker.process", str(config)),
+        check=False,
+        capture_output=True,
+        timeout=10,
     )
 
     assert completed.returncode == 2

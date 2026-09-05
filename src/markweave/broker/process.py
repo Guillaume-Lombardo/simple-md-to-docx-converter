@@ -90,6 +90,13 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        _configuration_failure()
+    return parsed
+
+
 def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
@@ -197,6 +204,7 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
             decoded,
             object_pairs_hook=_pairs,
             parse_constant=lambda _value: _configuration_failure(),
+            parse_float=_finite_json_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise BrokerProcessConfigurationError(
