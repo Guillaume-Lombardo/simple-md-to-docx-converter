@@ -405,6 +405,12 @@ for reverse conversion.
   backpressure, and retains the absolute deadline when a child never reads. Regression tests cover
   all three paths. The 715 broker/reversion/container tests and all six real rootless Podman
   integrations pass; the fresh-image build and hosted Podman 4.9 boundary remain assigned to CI.
+* 2026-09-05: The real-Podman workspace overlay now rejects incompatible base-image overrides
+  before copying into a fixed interpreter layout. Its build preflight requires the exact executable
+  venv, Python 3.14, matching prefix and site-packages membership, and an existing attempt-runner
+  import resolving from that destination. The controlled overlay build, complete smoke, and all six
+  real rootless integrations pass; an incompatible local image is rejected at the preflight and
+  produces no tagged result.
 
 ## Synchronization
 

@@ -2,6 +2,8 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 USER 0
+RUN test -x /opt/markweave/venv/bin/python \
+    && /opt/markweave/venv/bin/python -c 'import pathlib, sys; destination = pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages"); assert sys.version_info[:2] == (3, 14); assert pathlib.Path(sys.executable).resolve() == pathlib.Path("/opt/markweave/venv/bin/python").resolve(); assert pathlib.Path(sys.prefix).resolve() == pathlib.Path("/opt/markweave/venv").resolve(); assert str(destination) in sys.path; import markweave.reversions.attempt_main as attempt_main; assert pathlib.Path(attempt_main.__file__).resolve().parent == destination / "markweave/reversions"'
 COPY LICENSE /opt/markweave/licenses/markweave/LICENSE
 COPY src/markweave/reversions \
     /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions

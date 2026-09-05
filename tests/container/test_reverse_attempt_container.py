@@ -101,6 +101,27 @@ def test_reverse_attempt_image_has_fixed_minimal_runtime_contract() -> None:
 
 
 @pytest.mark.unit
+def test_workspace_overlay_fails_closed_on_incompatible_base_image() -> None:
+    fixture = (
+        ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"
+    ).read_text(encoding="utf-8")
+
+    preflight = fixture.index("RUN test -x /opt/markweave/venv/bin/python")
+    overlay = fixture.index("COPY src/markweave/reversions")
+    assert preflight < overlay
+    for contract in (
+        "sys.version_info[:2] == (3, 14)",
+        'pathlib.Path("/opt/markweave/venv/bin/python").resolve()',
+        'pathlib.Path("/opt/markweave/venv").resolve()',
+        'pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages")',
+        "str(destination) in sys.path",
+        "import markweave.reversions.attempt_main as attempt_main",
+        'destination / "markweave/reversions"',
+    ):
+        assert contract in fixture
+
+
+@pytest.mark.unit
 def test_reverse_attempt_smoke_enforces_runtime_separation() -> None:
     smoke = (ROOT / "scripts/container/smoke-reverse-attempt.sh").read_text(
         encoding="utf-8"
