@@ -7,19 +7,35 @@ import test from "node:test";
 import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
+const admissionTimeoutMs = 25_000;
 
 function openDedicatedRequest(path) {
   let request;
+  let admissionSettled = false;
+  let admissionTimer;
   const admitted = new Promise((resolve, reject) => {
+    const finishAdmission = (callback, value) => {
+      if (admissionSettled) return;
+      admissionSettled = true;
+      clearTimeout(admissionTimer);
+      callback(value);
+    };
     request = http.request(
       `${baseURL}${path}`,
       { agent: false },
       (response) => {
         response.resume();
-        resolve(response.statusCode);
+        finishAdmission(resolve, response.statusCode);
       },
     );
-    request.once("error", reject);
+    request.once("error", (error) => finishAdmission(reject, error));
+    admissionTimer = setTimeout(() => {
+      finishAdmission(
+        reject,
+        new Error(`Timed out waiting for frontend admission for ${path}`),
+      );
+      request.destroy();
+    }, admissionTimeoutMs);
     request.end();
   });
   return { admitted, request };

@@ -382,6 +382,11 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
         'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
         "  http://frontend:3000 401 false" in runner
     )
+    admission_started = runner.index("admission_test_pid=$!")
+    admission_finished = runner.index('wait "$admission_test_pid"')
+    admission_supervision = runner[admission_started:admission_finished]
+    assert "for _ in $(seq 1 1200); do" in admission_supervision
+    assert "for _ in $(seq 1 200); do" not in admission_supervision
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
@@ -406,7 +411,14 @@ def test_admission_browser_waits_for_every_frontend_admission() -> None:
     assert "request = http.request(" in source
     assert "`${baseURL}${path}`" in source
     assert "{ agent: false }" in source
-    assert "resolve(response.statusCode);" in source
+    assert "const admissionTimeoutMs = 25_000;" in source
+    assert "finishAdmission(resolve, response.statusCode);" in source
+    assert 'request.once("error", (error) => finishAdmission(reject, error));' in source
+    assert "if (admissionSettled) return;" in source
+    assert "clearTimeout(admissionTimer);" in source
+    assert "Timed out waiting for frontend admission for ${path}" in source
+    assert "request.destroy();" in source
+    assert source.index("admissionTimer = setTimeout") < source.index("request.end();")
     assert "await Promise.all(held.map(({ admitted }) => admitted));" in source
     assert "socket.once" not in source
     assert "response.writeHead(200);" in fixture
