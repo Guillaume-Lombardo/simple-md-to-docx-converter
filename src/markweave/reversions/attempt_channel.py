@@ -44,7 +44,7 @@ _RESPONSE_METADATA_TEMP_PATH = Path("/work/.response.json.tmp")
 _REQUEST_COMMIT_TEMP_PATH = Path("/work/.request.commit.tmp")
 _RESPONSE_STATE_TEMP_PATH = Path("/work/.response.state.tmp")
 
-_CHILD_FAILURE_CATEGORIES = frozenset(
+CHILD_FAILURE_CATEGORIES = frozenset(
     {
         ReverseErrorCategory.UNSUPPORTED,
         ReverseErrorCategory.MALFORMED,
@@ -220,7 +220,7 @@ def encode_response_metadata(response: ReverseAttemptResponse) -> bytes:
     """Encode fixed canonical success or content-free failure metadata."""
 
     if isinstance(response, ReverseAttemptFailure):
-        if response.category not in _CHILD_FAILURE_CATEGORIES:
+        if response.category not in CHILD_FAILURE_CATEGORIES:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         return _canonical_metadata(
             {
@@ -317,7 +317,7 @@ def decode_response_metadata(
             category = ReverseErrorCategory(category_value)
         except KeyError, ValueError:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
-        if category not in _CHILD_FAILURE_CATEGORIES:
+        if category not in CHILD_FAILURE_CATEGORIES:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         return ReverseAttemptFailure(
             attempt_id=_uuid(metadata["attempt_id"]), category=category

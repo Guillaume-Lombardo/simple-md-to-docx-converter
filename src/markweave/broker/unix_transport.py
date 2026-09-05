@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import BoundedSemaphore, Event, Lock, Thread, current_thread
 from time import monotonic
-from typing import Final
+from typing import Final, cast
+from uuid import UUID
 
 from markweave.broker.dispatch import BrokerDispatcher, request_operation
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
-from markweave.broker.models import AuthenticatedPrincipal
+from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
 from markweave.broker.protocol import (
     LENGTH_PREFIX_BYTES,
     AcknowledgeRequest,
@@ -42,6 +43,25 @@ from markweave.broker.protocol import (
     encode_request,
     encode_response,
 )
+from markweave.broker.workspace_protocol import (
+    WORKSPACE_PROTOCOL_NAME,
+    WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
+    WorkspaceOperation,
+    WorkspaceRequestHeader,
+    WorkspaceResponse,
+    WorkspaceStageHeader,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    bind_workspace_result,
+    bind_workspace_source,
+    decode_workspace_request_header,
+    decode_workspace_response_header,
+    encode_workspace_request,
+    encode_workspace_response,
+    frame_protocol,
+)
+from markweave.reversions.models import ReverseContentLimits
 
 _PEER_CREDENTIALS: Final = struct.Struct("3i")
 _PARENT_MODE: Final = 0o700
@@ -172,6 +192,18 @@ def _receive_frame(
     return prefix + payload
 
 
+def _receive_header(connection: socket.socket, deadline: float) -> bytes:
+    prefix = _receive_exact(connection, LENGTH_PREFIX_BYTES, deadline)
+    length = decode_length_prefix(prefix)
+    return prefix + _receive_exact(connection, length, deadline)
+
+
+def _require_eof(connection: socket.socket, deadline: float) -> None:
+    connection.settimeout(_remaining(deadline))
+    if connection.recv(1) != b"":
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+
+
 def _send_all(connection: socket.socket, frame: bytes, deadline: float) -> None:
     view = memoryview(frame)
     while view:
@@ -185,7 +217,7 @@ def _send_all(connection: socket.socket, frame: bytes, deadline: float) -> None:
 class UnixBrokerServer:
     """Serve one authenticated request per filesystem Unix connection."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         path: Path,
         *,
@@ -193,6 +225,7 @@ class UnixBrokerServer:
         principal: AuthenticatedPrincipal,
         dispatcher: BrokerDispatcher,
         limits: UnixTransportLimits,
+        workspace_limits: RuntimeChannelLimits | None = None,
     ) -> None:
         self._path, self._parent = _validate_socket_path(path)
         if type(expected_client_uid) is not int or expected_client_uid < 0:
@@ -205,10 +238,16 @@ class UnixBrokerServer:
             raise ValueError("Broker dispatcher is invalid")
         if type(limits) is not UnixTransportLimits:
             raise ValueError("Broker Unix transport limits are invalid")
+        if (
+            workspace_limits is not None
+            and type(workspace_limits) is not RuntimeChannelLimits
+        ):
+            raise ValueError("Broker Unix workspace limits are invalid")
         self._expected_client_uid = expected_client_uid
         self._principal = principal
         self._dispatcher = dispatcher
         self._limits = limits
+        self._workspace_limits = workspace_limits
         self._listener: socket.socket | None = None
         self._socket_identity: tuple[int, int] | None = None
         self._lock_fd: int | None = None
@@ -424,13 +463,23 @@ class UnixBrokerServer:
                 self._threads.discard(current)
                 self._connections.discard(connection)
 
-    def _handle(self, connection: socket.socket) -> None:
+    def _handle(self, connection: socket.socket) -> None:  # noqa: PLR0912
         deadline = monotonic() + self._limits.operation_timeout_seconds
         try:
             _, uid, _ = _peer_credentials(connection)
             if uid != self._expected_client_uid:
                 raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
-            request = decode_request(_receive_frame(connection, deadline))
+            header = _receive_header(connection, deadline)
+            workspace = frame_protocol(header) == WORKSPACE_PROTOCOL_NAME
+            if workspace:
+                if self._workspace_limits is None:
+                    raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+                request = self._receive_workspace_request(
+                    connection, header, deadline, self._workspace_limits
+                )
+            else:
+                request = decode_request(header)
+                _require_eof(connection, deadline)
         except BrokerError, OSError, TimeoutError:
             return
         try:
@@ -444,7 +493,15 @@ class UnixBrokerServer:
         try:
             try:
                 response = self._dispatch_before_deadline(request, deadline)
-                frame = None if response is None else encode_response(response)
+                if response is None:
+                    frame = None
+                elif workspace:
+                    frame = encode_workspace_response(
+                        cast(WorkspaceResponse, response),
+                        cast(RuntimeChannelLimits, self._workspace_limits),
+                    )
+                else:
+                    frame = encode_response(cast(BrokerResponse, response))
             except BaseException as error:
                 self._record_fatal(error)
                 return
@@ -457,9 +514,30 @@ class UnixBrokerServer:
         except OSError, TimeoutError:
             return
 
+    @staticmethod
+    def _receive_workspace_request(
+        connection: socket.socket,
+        header: bytes,
+        deadline: float,
+        limits: RuntimeChannelLimits,
+    ) -> WorkspaceStageRequest | WorkspaceCollectRequest:
+        request: WorkspaceRequestHeader = decode_workspace_request_header(
+            header, limits
+        )
+        if type(request) is WorkspaceStageHeader:
+            source = _receive_exact(connection, request.source_length, deadline)
+            _require_eof(connection, deadline)
+            return bind_workspace_source(request, source)
+        if type(request) is not WorkspaceCollectRequest:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        _require_eof(connection, deadline)
+        return request
+
     def _dispatch_before_deadline(
-        self, request: BrokerRequest, deadline: float
-    ) -> BrokerResponse | None:
+        self,
+        request: BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest,
+        deadline: float,
+    ) -> BrokerResponse | WorkspaceResponse | None:
         if self._stopping.is_set():
             return None
         try:
@@ -475,7 +553,10 @@ class UnixBrokerServer:
         )
         watchdog.start()
         try:
-            response = self._dispatcher.dispatch(self._principal, request)
+            if isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
+                response = self._dispatcher.dispatch_workspace(self._principal, request)
+            else:
+                response = self._dispatcher.dispatch(self._principal, request)
         finally:
             completed.set()
             watchdog.join()
@@ -598,6 +679,7 @@ class UnixBrokerClient:
         expected_server_uid: int,
         expected_principal: AuthenticatedPrincipal,
         operation_timeout_seconds: float,
+        workspace_limits: RuntimeChannelLimits | None = None,
     ) -> None:
         self._path, _ = _validate_socket_path(path)
         if type(expected_server_uid) is not int or expected_server_uid < 0:
@@ -612,9 +694,15 @@ class UnixBrokerClient:
             or not math.isfinite(operation_timeout_seconds)
         ):
             raise ValueError("Broker Unix client timeout is invalid")
+        if (
+            workspace_limits is not None
+            and type(workspace_limits) is not RuntimeChannelLimits
+        ):
+            raise ValueError("Broker Unix workspace limits are invalid")
         self._expected_server_uid = expected_server_uid
         self._expected_principal = expected_principal
         self._operation_timeout_seconds = float(operation_timeout_seconds)
+        self._workspace_limits = workspace_limits
 
     def request(self, request: BrokerRequest) -> BrokerResponse:
         """Perform one request/response exchange under one absolute deadline."""
@@ -658,6 +746,88 @@ class UnixBrokerClient:
             raise _transport_failure()
         if socket_stat.st_uid != self._expected_server_uid:
             raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
+
+    def stage_workspace(
+        self, request: WorkspaceStageRequest
+    ) -> WorkspaceStageReceipt | WorkspaceErrorResponse:
+        """Transfer one bounded source and receive a header-only receipt."""
+
+        response = self._workspace_exchange(request)
+        if isinstance(response, (WorkspaceStageReceipt, WorkspaceErrorResponse)):
+            return response
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+
+    def collect_workspace(self, request: WorkspaceCollectRequest) -> WorkspaceResponse:
+        """Collect one pending, failure, or bounded success response."""
+
+        response = self._workspace_exchange(request)
+        if type(response) is WorkspaceStageReceipt:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        return response
+
+    def _workspace_exchange(
+        self, request: WorkspaceStageRequest | WorkspaceCollectRequest
+    ) -> WorkspaceResponse:
+        deadline = monotonic() + self._operation_timeout_seconds
+        limits = self._workspace_limits
+        if limits is None:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        if type(request) is WorkspaceStageRequest:
+            source = getattr(request, "source", None)
+            declared = getattr(request, "limits", None)
+            values = tuple(
+                getattr(declared, name, None)
+                for name in ReverseContentLimits.__dataclass_fields__
+            )
+            if any(type(value) is not int for value in values):
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            try:
+                validated = ReverseContentLimits(*cast("tuple[int, ...]", values))
+            except TypeError, ValueError:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR) from None
+            if (
+                type(source) is not bytes
+                or not source
+                or len(source) > limits.max_input_bytes
+                or type(declared) is not ReverseContentLimits
+                or len(source) > validated.max_input_bytes
+                or validated.max_input_bytes > limits.max_input_bytes
+                or validated.max_output_bytes > limits.max_output_bytes
+            ):
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        encoded = encode_workspace_request(request)
+        try:
+            _remaining(deadline)
+        except TimeoutError as error:
+            raise _transport_failure(error) from error
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self._verify_socket_leaf()
+            connection.settimeout(_remaining(deadline))
+            connection.connect(str(self._path))
+            _, uid, _ = _peer_credentials(connection)
+            if uid != self._expected_server_uid:
+                raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
+            _send_all(connection, encoded, deadline)
+            connection.shutdown(socket.SHUT_WR)
+            header = _receive_header(connection, deadline)
+            response, length, digest = decode_workspace_response_header(header, limits)
+            payload = _receive_exact(
+                connection,
+                length,
+                deadline,
+                eof_category=BrokerErrorCategory.TRANSPORT_FAILURE,
+            )
+            _require_eof(connection, deadline)
+            response = bind_workspace_result(response, payload, digest)
+            _validate_workspace_response_binding(request, response)
+            return response
+        except BrokerError:
+            raise
+        except (OSError, TimeoutError) as error:
+            raise _transport_failure(error) from error
+        finally:
+            connection.close()
 
 
 def _validate_response_binding(
@@ -711,4 +881,46 @@ def _validate_response_binding(
         case ReadyRequest(), ReadyResponse():
             valid = True
     if not valid:
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+
+
+def _validate_workspace_response_binding(
+    request: WorkspaceStageRequest | WorkspaceCollectRequest,
+    response: WorkspaceResponse,
+) -> None:
+    if response.request_id != request.request_id:
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+    operation = (
+        WorkspaceOperation.STAGE
+        if type(request) is WorkspaceStageRequest
+        else WorkspaceOperation.COLLECT
+    )
+    if type(response) is WorkspaceErrorResponse:
+        if response.operation is not operation:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        return
+    if isinstance(request, WorkspaceStageRequest):
+        if (
+            type(response) is not WorkspaceStageReceipt
+            or response.request_id != request.request_id
+            or response.stage_sequence != request.sequence
+            or response.attempt_id != request.attempt_id
+            or response.unit_id != request.unit_id
+            or response.create_sequence != request.create_sequence
+            or type(response.incarnation_id) is not UUID
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        return
+    if not isinstance(request, WorkspaceCollectRequest):
+        raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+    receipt = getattr(response, "receipt", None)
+    expected = WorkspaceStageReceipt(
+        request.receipt_request_id,
+        request.stage_sequence,
+        request.attempt_id,
+        request.unit_id,
+        request.create_sequence,
+        request.incarnation_id,
+    )
+    if receipt != expected:
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)

@@ -18,7 +18,12 @@ from markweave.broker.models import (
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
-from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
+from markweave.reversions.models import (
+    ReverseAttemptFailure,
+    ReverseAttemptRequest,
+    ReverseAttemptResponse,
+    ReverseAttemptSuccess,
+)
 
 _INCARNATION_NAMESPACE = UUID("90ad36ea-46fe-46d2-90d0-445945e75ee0")
 FaultPoint = Literal["before", "after"]
@@ -307,3 +312,17 @@ class FakeIsolationRuntime:
         """Simulate runtime absence without manufacturing evidence."""
 
         self._records.pop(unit_id, None)
+
+    def publish_response(self, unit_id: UUID, response: ReverseAttemptResponse) -> None:
+        """Publish an exact attempt response for orchestration tests."""
+
+        record = self._records.get(unit_id)
+        if (
+            record is None
+            or type(response) not in {ReverseAttemptSuccess, ReverseAttemptFailure}
+            or response.attempt_id != record.attempt_id
+            or record.terminated
+            or record.removed
+        ):
+            raise ValueError("Fake runtime response is invalid")
+        record.response = response

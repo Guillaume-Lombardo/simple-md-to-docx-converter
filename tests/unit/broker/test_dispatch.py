@@ -32,6 +32,15 @@ from markweave.broker.protocol import (
     TerminateResponse,
 )
 from markweave.broker.service import IsolationBrokerService
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
+    WorkspaceOperation,
+    WorkspacePendingResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+)
+from markweave.reversions.models import ReverseContentLimits
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +60,7 @@ PROOF = TerminationProof(
     DIGEST,
     DIGEST,
 )
+CONTENT_LIMITS = ReverseContentLimits(10, 10, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
 
 
 def _dispatcher(mocker: MockerFixture) -> tuple[BrokerDispatcher, Any]:
@@ -173,3 +183,50 @@ def test_dispatch_rejects_untrusted_principal(mocker: MockerFixture) -> None:
         dispatcher.dispatch(
             cast("AuthenticatedPrincipal", object()), ReadyRequest(REQUEST_ID, 1)
         )
+
+
+def test_workspace_dispatches_stage_collect_and_maps_service_error(
+    mocker: MockerFixture,
+) -> None:
+    dispatcher, service = _dispatcher(mocker)
+    incarnation = UUID("00000000-0000-4000-8000-000000000006")
+    stage = WorkspaceStageRequest(
+        REQUEST_ID, 7, ATTEMPT_ID, UNIT_ID, 1, ".docx", CONTENT_LIMITS, b"x"
+    )
+    receipt = WorkspaceStageReceipt(REQUEST_ID, 7, ATTEMPT_ID, UNIT_ID, 1, incarnation)
+    service.stage_workspace.return_value = receipt
+    assert dispatcher.dispatch_workspace(PRINCIPAL, stage) == receipt
+    service.stage_workspace.assert_called_once_with(PRINCIPAL, stage)
+
+    collect = WorkspaceCollectRequest(
+        UUID("00000000-0000-4000-8000-000000000007"),
+        8,
+        REQUEST_ID,
+        7,
+        ATTEMPT_ID,
+        UNIT_ID,
+        1,
+        incarnation,
+    )
+    pending = WorkspacePendingResponse(collect.request_id, receipt)
+    service.collect_workspace.return_value = pending
+    assert dispatcher.dispatch_workspace(PRINCIPAL, collect) == pending
+    service.collect_workspace.side_effect = BrokerError(
+        BrokerErrorCategory.RUNTIME_FAILURE
+    )
+    assert dispatcher.dispatch_workspace(PRINCIPAL, collect) == WorkspaceErrorResponse(
+        collect.request_id,
+        WorkspaceOperation.COLLECT,
+        BrokerErrorCategory.RUNTIME_FAILURE,
+    )
+
+
+def test_workspace_dispatch_rejects_untrusted_principal_and_model(
+    mocker: MockerFixture,
+) -> None:
+    dispatcher, _ = _dispatcher(mocker)
+    with pytest.raises(ValueError, match="principal"):
+        dispatcher.dispatch_workspace(cast(Any, object()), cast(Any, object()))
+    with pytest.raises(BrokerError) as caught:
+        dispatcher.dispatch_workspace(PRINCIPAL, cast(Any, object()))
+    assert caught.value.category is BrokerErrorCategory.PROTOCOL_ERROR

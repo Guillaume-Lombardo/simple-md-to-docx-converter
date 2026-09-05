@@ -462,6 +462,44 @@ for reverse conversion.
   authority lock while proving the first broker remains live. All 12 real process E2Es, 51 focused
   process/configuration tests, 73 Unix transport tests, Ruff, and `ty` pass.
 
+* 2026-09-05: Added the separately versioned `markweave-reverse-broker-workspace` v1 Unix
+  subprotocol without changing lifecycle protocol v1. STAGE authenticates the peer before reading
+  a canonical bounded header or allocating its exact digest-bound source body, derives the durable
+  unit incarnation, and returns a content-free receipt. A volatile unit-scoped replay ledger makes
+  an exact lost-response retry idempotent without a second runtime copy and rejects substitutions.
+  COLLECT is read-only and receipt-bound, returning canonical pending/failure headers or a bounded
+  digest-bound result body; service and runtime/inventory failures fence readiness. Low-level Unix
+  servers keep workspace operations disabled unless explicit policy channel ceilings are supplied,
+  while production assembly passes those existing T71-owned policy inputs without adding defaults.
+  Security coverage includes malformed, noncanonical, oversized, partial, slow/disconnected,
+  replayed, and identity-substituted traffic, with no dispatch before exact payload, digest, and EOF
+  validation. Real Unix and rootless Podman process E2E covers READY through CREATE, lost STAGE ACK
+  replay, pending/success/failure COLLECT, TERMINATE, PROOF, ACK, restart reconciliation, and exact
+  cleanup. The complete broker boundary passes 649 tests; the 3,084-test light selection reaches
+  93.88% total and 90.04% branch coverage. Persistent T71 jobs/leases/publication, mTLS, deployment,
+  Kubernetes, OCR, and public APIs remain excluded; no Kubernetes acceptance is claimed.
+
+* 2026-09-05: Workspace protocol review follow-up now rediscovers and validates the exact live
+  runtime incarnation before returning an idempotent STAGE receipt; absent, substituted, or failed
+  discovery fences readiness without performing a second copy. COLLECT accepts only exact runtime
+  response model types, the child channel's closed failure-category allowlist, and non-empty result
+  bytes within both the staged request and runtime policy output ceilings. The final workspace wire
+  encoder independently enforces its channel ceiling and rejects non-child categories. The Unix
+  client validates the source and every declared content-limit invariant against its configured
+  channel before encoding or creating a socket. Real pending-response coverage now uses a fixed
+  content-free `/work/test.release` barrier instead of an elapsed-time assumption. The complete
+  reviewed broker selection was corrected to 663 tests (624 unit, 18 Unix, 13 process, and 8
+  Podman); the added absolute-deadline regression raises the current boundary to 664 tests (625
+  unit plus the same integrations). All 13 real broker-process and 8 real Podman integrations pass,
+  and the 3,098-test light selection reaches 93.88% total and 90.06% branch coverage.
+
+* 2026-09-05: Post-rebase validation on main `64f8a14` required no product correction. The exact
+  rebase head `53e3cb8` passes 141 focused workspace/Unix/service tests, the complete 664-test
+  broker boundary, all 13 real broker-process and 8 real Podman integrations, Ruff, and `ty`. Main's
+  additional light test raises that selection to 3,099 passing tests at 93.88% total and 90.06%
+  branch coverage (4,195/4,658); changed application coverage is 94.23% (539/572 lines). The
+  lifecycle v1 wire remains unchanged and no temporary Podman resource remains.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,

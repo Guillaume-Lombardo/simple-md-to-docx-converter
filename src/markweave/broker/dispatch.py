@@ -23,6 +23,13 @@ from markweave.broker.protocol import (
     TerminateResponse,
 )
 from markweave.broker.service import IsolationBrokerService
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
+    WorkspaceOperation,
+    WorkspaceResponse,
+    WorkspaceStageRequest,
+)
 
 
 def request_operation(request: BrokerRequest) -> BrokerOperation:
@@ -103,3 +110,27 @@ class BrokerDispatcher:
         """Complete fail-closed reconciliation before a transport is exposed."""
 
         self._service.start()
+
+    def dispatch_workspace(
+        self,
+        principal: AuthenticatedPrincipal,
+        request: WorkspaceStageRequest | WorkspaceCollectRequest,
+    ) -> WorkspaceResponse:
+        """Dispatch one separately versioned workspace operation."""
+
+        if type(principal) is not AuthenticatedPrincipal:
+            raise ValueError("Authenticated broker principal is invalid")
+        if type(request) is WorkspaceStageRequest:
+            operation = WorkspaceOperation.STAGE
+        elif type(request) is WorkspaceCollectRequest:
+            operation = WorkspaceOperation.COLLECT
+        else:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        try:
+            if type(request) is WorkspaceStageRequest:
+                return self._service.stage_workspace(principal, request)
+            if type(request) is WorkspaceCollectRequest:
+                return self._service.collect_workspace(principal, request)
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        except BrokerError as error:
+            return WorkspaceErrorResponse(request.request_id, operation, error.category)

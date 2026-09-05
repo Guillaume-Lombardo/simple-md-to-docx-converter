@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import RLock
 from typing import Never
 from uuid import UUID, uuid4, uuid5
@@ -21,6 +21,23 @@ from markweave.broker.models import (
     policy_specification_evidence,
 )
 from markweave.broker.ports import BrokerInventory, IsolationRuntime, RuntimeUnit
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    collect_response,
+    receipt_for,
+    stage_fingerprint,
+)
+from markweave.reversions.attempt_channel import CHILD_FAILURE_CATEGORIES
+from markweave.reversions.errors import ReverseErrorCategory
+from markweave.reversions.models import (
+    ReverseAttemptFailure,
+    ReverseAttemptResponse,
+    ReverseAttemptSuccess,
+    ReverseOutputMode,
+)
 
 _PROOF_NAMESPACE = UUID("54bd5544-7973-41ae-a7fc-c56664411769")
 
@@ -29,6 +46,13 @@ _PROOF_NAMESPACE = UUID("54bd5544-7973-41ae-a7fc-c56664411769")
 class _StoredRuntimeUnit:
     unit_id: UUID
     incarnation: RuntimeIncarnation
+
+
+@dataclass(frozen=True, slots=True)
+class _StagedWorkspace:
+    fingerprint: str = field(repr=False)
+    receipt: WorkspaceStageReceipt
+    max_output_bytes: int
 
 
 class IsolationBrokerService:
@@ -57,6 +81,7 @@ class IsolationBrokerService:
         self._unit_id_factory = unit_id_factory
         self._gate = RLock()
         self._ready = False
+        self._staged_workspaces: dict[UUID, _StagedWorkspace] = {}
 
     @property
     def ready(self) -> bool:
@@ -70,6 +95,7 @@ class IsolationBrokerService:
 
         with self._gate:
             self._ready = False
+            self._staged_workspaces.clear()
             try:
                 self._reconcile()
             except BrokerError:
@@ -155,6 +181,89 @@ class IsolationBrokerService:
             self._require_ready()
             return self._request_unit(principal, attempt_id, unit_id)
 
+    def stage_workspace(
+        self,
+        principal: AuthenticatedPrincipal,
+        request: WorkspaceStageRequest,
+    ) -> WorkspaceStageReceipt:
+        """Stage once and replay only the exact successful volatile request."""
+
+        with self._gate:
+            self._require_ready()
+            if type(request) is not WorkspaceStageRequest:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            unit = self._request_unit(principal, request.attempt_id, request.unit_id)
+            self._require_workspace_identity(unit, request.create_sequence, None)
+            fingerprint = stage_fingerprint(request)
+            staged = self._staged_workspaces.get(unit.unit_id)
+            if staged is not None:
+                if staged.fingerprint != fingerprint:
+                    raise BrokerError(BrokerErrorCategory.REPLAY_REJECTED)
+                try:
+                    runtime_unit = self._runtime_for(unit)
+                except BrokerError:
+                    raise
+                except Exception as error:
+                    self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
+                if (
+                    runtime_unit.incarnation.incarnation_id
+                    != staged.receipt.incarnation_id
+                ):
+                    self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
+                return staged.receipt
+            try:
+                runtime_unit = self._runtime_for(unit)
+                self._runtime.stage_request(runtime_unit, request.reverse_request())
+            except BrokerError:
+                raise
+            except Exception as error:
+                self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
+            if unit.runtime_incarnation is None:  # guarded by identity validation
+                self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
+            receipt = receipt_for(request, unit.runtime_incarnation.incarnation_id)
+            self._staged_workspaces[unit.unit_id] = _StagedWorkspace(
+                fingerprint, receipt, request.limits.max_output_bytes
+            )
+            return receipt
+
+    def collect_workspace(
+        self,
+        principal: AuthenticatedPrincipal,
+        request: WorkspaceCollectRequest,
+    ) -> WorkspaceResponse:
+        """Read an exact receipt-bound response without mutating broker state."""
+
+        with self._gate:
+            self._require_ready()
+            if type(request) is not WorkspaceCollectRequest:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            unit = self._request_unit(principal, request.attempt_id, request.unit_id)
+            self._require_workspace_identity(
+                unit, request.create_sequence, request.incarnation_id
+            )
+            staged = self._staged_workspaces.get(unit.unit_id)
+            expected = WorkspaceStageReceipt(
+                request.receipt_request_id,
+                request.stage_sequence,
+                request.attempt_id,
+                request.unit_id,
+                request.create_sequence,
+                request.incarnation_id,
+            )
+            if staged is None or staged.receipt != expected:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            try:
+                runtime_unit = self._runtime_for(unit)
+                response = self._runtime.try_collect_response(
+                    runtime_unit, request.attempt_id
+                )
+            except BrokerError:
+                raise
+            except Exception as error:
+                self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
+            self._validate_workspace_response(response, request.attempt_id, staged)
+            return collect_response(request.request_id, staged.receipt, response)
+
     def terminate(
         self,
         principal: AuthenticatedPrincipal,
@@ -205,11 +314,14 @@ class IsolationBrokerService:
         with self._gate:
             self._require_ready()
             self._validate_request(principal, attempt_id, unit_id, proof_id)
-            return self._inventory_call(
+            acknowledged = self._inventory_call(
                 lambda: self._inventory.acknowledge(
                     principal.principal_id, attempt_id, unit_id, proof_id
                 )
             )
+            if acknowledged:
+                self._staged_workspaces.pop(unit_id, None)
+            return acknowledged
 
     def _request_unit(
         self,
@@ -224,6 +336,21 @@ class IsolationBrokerService:
         self._require_owner(unit, principal, attempt_id, unit_id)
         return unit
 
+    @staticmethod
+    def _require_workspace_identity(
+        unit: ManagedUnit, create_sequence: int, incarnation_id: UUID | None
+    ) -> None:
+        if (
+            unit.state is not ManagedUnitState.CREATED
+            or unit.create_sequence != create_sequence
+            or unit.runtime_incarnation is None
+            or (
+                incarnation_id is not None
+                and unit.runtime_incarnation.incarnation_id != incarnation_id
+            )
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+
     def _runtime_for(self, unit: ManagedUnit) -> RuntimeUnit:
         if unit.runtime_incarnation is None:
             self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN)
@@ -235,6 +362,40 @@ class IsolationBrokerService:
             return _StoredRuntimeUnit(unit.unit_id, unit.runtime_incarnation)
         self._validate_runtime_unit(unit, runtime_unit, require_persisted=True)
         return runtime_unit
+
+    def _validate_workspace_response(
+        self,
+        response: ReverseAttemptResponse | None,
+        attempt_id: UUID,
+        staged: _StagedWorkspace,
+    ) -> None:
+        if response is None:
+            return
+        valid = False
+        if type(response) is ReverseAttemptFailure:
+            answer_attempt = getattr(response, "attempt_id", None)
+            category = getattr(response, "category", None)
+            valid = (
+                type(answer_attempt) is UUID
+                and answer_attempt == attempt_id
+                and type(category) is ReverseErrorCategory
+                and category in CHILD_FAILURE_CATEGORIES
+            )
+        elif type(response) is ReverseAttemptSuccess:
+            answer_attempt = getattr(response, "attempt_id", None)
+            mode = getattr(response, "mode", None)
+            result = getattr(response, "result", None)
+            valid = (
+                type(answer_attempt) is UUID
+                and answer_attempt == attempt_id
+                and type(mode) is ReverseOutputMode
+                and type(result) is bytes
+                and bool(result)
+                and len(result) <= staged.max_output_bytes
+                and len(result) <= self._policy.channel_limits.max_output_bytes
+            )
+        if not valid:
+            self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
 
     def _discovered(self) -> dict[UUID, RuntimeUnit]:
         discovered: dict[UUID, RuntimeUnit] = {}
