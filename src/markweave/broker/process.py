@@ -64,6 +64,7 @@ _IMAGE_REPOSITORY_PATTERN = re.compile(
     r"/[a-z0-9][a-z0-9._/-]*\Z"
 )
 _TLS_MATERIAL_MAX_BYTES = 65_536
+_SECURE_FILE_READ_CHUNK = 8192
 _UNIX_TRANSPORT = "unix"
 _MTLS_TRANSPORT = "mtls"
 
@@ -170,6 +171,31 @@ def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
             ) from error
     finally:
         os.close(descriptor)
+
+
+def _verify_open_file_length(descriptor: int, *, maximum: int) -> None:
+    """Prove a retained secure file still has its validated bounded length."""
+
+    try:
+        expected = os.fstat(descriptor).st_size
+        observed = 0
+        while observed <= maximum:
+            chunk = os.pread(
+                descriptor,
+                min(_SECURE_FILE_READ_CHUNK, maximum + 1 - observed),
+                observed,
+            )
+            if not chunk:
+                break
+            observed += len(chunk)
+        if observed != expected or observed > maximum:
+            _configuration_failure()
+    except BrokerProcessConfigurationError:
+        raise
+    except OSError as error:
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
 
 
 def _secure_directory(path: Path) -> tuple[int, int]:
@@ -454,7 +480,10 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
             _configuration_failure()
         for material_path in material_paths:
             _secure_directory(material_path.parent)
-            _secure_file_bytes(material_path, maximum=_TLS_MATERIAL_MAX_BYTES)
+            descriptor = _open_secure_file(
+                material_path, maximum=_TLS_MATERIAL_MAX_BYTES
+            )
+            os.close(descriptor)
         try:
             local_principal_value = mtls["local_principal_id"]
             if type(local_principal_value) is not str:
@@ -627,8 +656,11 @@ def _prepared_mtls_server_context(
             local.certificate_chain,
             local.private_key,
         ):
-            descriptors.append(  # noqa: PERF401 - retain earlier FDs for cleanup
-                _open_secure_file(path, maximum=_TLS_MATERIAL_MAX_BYTES)
+            descriptor = _open_secure_file(path, maximum=_TLS_MATERIAL_MAX_BYTES)
+            descriptors.append(descriptor)
+            _verify_open_file_length(
+                descriptor,
+                maximum=_TLS_MATERIAL_MAX_BYTES,
             )
         loaded_identity = MtlsLocalIdentity(
             Path(f"/proc/self/fd/{descriptors[0]}"),

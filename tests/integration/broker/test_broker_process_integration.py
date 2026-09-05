@@ -438,7 +438,9 @@ def _start(config: Path, socket_path: Path) -> subprocess.Popen[bytes]:
         if process.poll() is not None:
             break
         time.sleep(0.05)
-    stdout, stderr = process.communicate(timeout=2)
+    if process.poll() is None:
+        process.kill()
+    stdout, stderr = process.communicate(timeout=5)
     raise AssertionError((process.returncode, stdout, stderr))
 
 

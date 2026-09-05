@@ -512,7 +512,7 @@ def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
         dispatcher=dispatcher.return_value,
         limits=config.transport_limits,
         workspace_limits=config.policy.channel_limits,
-        server_context=mtls_server.call_args.kwargs["server_context"],
+        server_context=context_builder.return_value,
     )
     assert config.mtls_local_identity is not None
     loaded_identity = context_builder.call_args.args[0]
@@ -558,6 +558,24 @@ def test_factory_preserves_secure_mtls_file_rejection_before_inventory(
         build_broker_server(config)
 
     inventory.assert_not_called()
+
+
+@pytest.mark.unit
+def test_factory_rejects_changed_mtls_file_length_before_inventory(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, _ = _mtls_configuration(tmp_path)
+    config = load_broker_process_config(path)
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
+    mocker.patch("markweave.broker.process.os.pread", return_value=b"")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
+    authority.assert_not_called()
+    assert not (config.state_directory / "inventory.sqlite3").exists()
 
 
 @pytest.mark.unit
