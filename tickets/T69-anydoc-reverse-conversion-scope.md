@@ -24,10 +24,10 @@ normative product, security, packaging, and compatibility contract before implem
   semantics. A Python timeout or cancellation flag that leaves native work running is insufficient,
   and lease expiry must not permit overlapping native execution. Because the shared-process
   contract cannot satisfy these properties, record the approved external-isolation-broker design:
-  only the broker holds Podman/Kubernetes workload authority; the application uses a narrow
-  authenticated Unix/mTLS protocol and receives no raw runtime socket or workload-mutating service
-  account; each immutable-image, fixed-argument disposable attempt runs without network, secrets,
-  persistent volumes, or publication capability; and broker-proven whole-unit termination precedes
+  only the broker holds rootless Podman workload authority; the application uses a narrow
+  authenticated Unix/mTLS protocol and receives no raw runtime socket; each immutable-image,
+  fixed-argument disposable attempt runs without network, secrets, persistent mounts, or publication
+  capability; and broker-proven whole-unit termination precedes
   recovery. The runtime applies an autonomous deadline at creation, and broker restart/reconnect
   remains fail closed until its mandatory crash-consistent content-free inventory has swept every
   orphan and reconstructed any proof interrupted between kill/removal and acknowledgement. Runtime
@@ -81,8 +81,8 @@ normative product, security, packaging, and compatibility contract before implem
 * Keep every document-controlled operation local and network-independent.
 * Keep the Python binding in-process only inside the approved broker-created disposable per-attempt
   kernel isolation unit, with bounded threads and the smallest concurrency that meets the measured
-  service objective. Keep Podman/Kubernetes authority exclusively in the broker, never the
-  application or child, and leave CPU, memory, PID/descendant, and workspace/ephemeral budget values
+  service objective. Keep rootless Podman authority exclusively in the broker, never the
+  application or child, and leave CPU, memory, PID/descendant, and workspace budget values
   configurable for T71. Require an independently enforced runtime deadline plus fail-closed broker
   startup/reconnect reconciliation, write-ahead identity before create, durable lifecycle
   transitions, and tombstone retention until durable proof acknowledgement; user or document input
@@ -155,6 +155,10 @@ normative product, security, packaging, and compatibility contract before implem
   unresolved review threads, and independent review. The squash merge is
   `6c2dc557822e178e19f95c66d1bcb7b3d45a63cc`; exact-main run `33868412766` passed the complete
   matrix and final gate. The remote feature branch was removed.
+* 2026-09-05: The product manager narrowed the required T70 runtime to rootless Podman after
+  Kubernetes feasibility analysis. Optional Kubernetes support and its required node attester move
+  to non-blocking T74. This supersedes the earlier two-backend wording without weakening the broker,
+  containment, reconciliation, or termination-proof contract.
 
 ## Synchronization
 

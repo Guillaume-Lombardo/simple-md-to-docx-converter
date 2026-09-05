@@ -12,11 +12,13 @@ project: Markdown to DOCX and PDF Converter
 ## Objective
 
 Harden, document, and verify the complete reverse-conversion workflow against the exact final
-backend/frontend images in both storage profiles.
+backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Acceptance criteria
 
-* Build the exact final backend and frontend images once and run the complete authenticated Revert
+* Extend the atomic release set with the third public reverse-attempt image, pinned by immutable
+  digest and built from the same reviewed source identity as the matching backend and frontend
+  images. Build the exact final three-image set once and run the complete authenticated Revert
   workflow with Playwright against standalone SQLite/filesystem and distributed PostgreSQL/S3
   profiles.
 * From the exact same final backend image, run the installed HTTP-only `markweave` reverse-job CLI
@@ -95,8 +97,8 @@ backend/frontend images in both storage profiles.
 
 ## Quality requirements
 
-* Preserve the matched backend/frontend release identity and existing production routing/security
-  contracts.
+* Preserve the matched backend/frontend/reverse-attempt release identity and existing production
+  routing/security contracts.
 * Treat regression beyond the approved CPU, memory, thread, or concurrency envelope as blocking.
 * Require independent review and exact-head plus exact-main CI evidence before completion.
 * Keep repository artifacts and user-facing text in English.
@@ -106,6 +108,9 @@ backend/frontend images in both storage profiles.
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70, T71, and T72.
 * 2026-09-03: Final-image acceptance now includes explicit CPU-only proof and measured low-compute
   regression gates.
+* 2026-09-05: Product-manager decision deferred the third public reverse-attempt image from T70 to
+  T73. T73 now owns its atomic inclusion in the final matched release set; T70 and T71 may use only
+  locally built or CI-built exact images before that publication boundary.
 
 ## Synchronization
 

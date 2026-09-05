@@ -39,7 +39,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Reverse-conversion output | Structured UTF-8 Markdown with deterministic safe relative image links; plain Markdown only when no embedded or unavailable image position exists, otherwise a deterministic ZIP carries Markdown, normalized referenced assets when available, and the content-free manifest |
 | Reverse-conversion OCR | No OCR; scanned or image-only documents fail locally with a stable safe error, and adding an OCR service requires separately approved future scope |
 | Reverse-conversion compute | CPU-only and low-compute with bounded threads and concurrency; do not use a GPU, ML model, browser, Pandoc, LibreOffice, or another document engine |
-| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns Podman or Kubernetes workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, service-account token, secret, ConfigMap, PVC, persistence credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, workspace/ephemeral, and autonomous runtime-deadline limits. A mandatory bounded crash-consistent content-free broker inventory records identity before creation and retains a termination tombstone until durable worker/T71 acknowledgement; runtime labels are supplementary only. The broker refuses readiness and creation until its idempotent sweep completes, and worker recovery remains blocked until proof is durably recorded. |
+| Reverse-conversion execution isolation | A trusted external isolation broker, separate from the application worker and any attempt unit, exclusively owns rootless Podman workload authority. Through a narrow authenticated Unix-socket or mutually authenticated TLS protocol, the worker-side supervisor requests one immutable-image, fixed-argument disposable unit per attempt. The child receives bounded local input/output only, has no network, credential, raw OCI socket, or publication capability, and runs the anydoc native call in-process under kernel-enforced CPU, memory, PID/descendant, workspace, and autonomous runtime-deadline limits. A mandatory bounded crash-consistent content-free broker inventory records identity before creation and retains a termination tombstone until durable worker/T71 acknowledgement; runtime labels are supplementary only. The broker refuses readiness and creation until its idempotent sweep completes, and worker recovery remains blocked until proof is durably recorded. Kubernetes support is optional future scope owned by T74 and does not block T70-T73. |
 | Reverse-conversion asset serialization | Use one narrowly bounded maintained internal adapter around the pinned anydoc document model and renderer behavior; prohibit a second parser or broad fork, require security/parity/compatibility/SBOM/license ownership, and remove it when upstream provides a supported asset-aware hook |
 | Runtime | Rootless Podman and arbitrary-UID OpenShift compatibility |
 | Forge and CI | GitHub and GitHub Actions |
@@ -232,12 +232,15 @@ resolves a tag, range, Git URL, CDN, or dynamically downloaded asset. Historical
 recovery binds the root pnpm lock when the release source contains one and otherwise binds the
 legacy frontend npm lock, so old exact bytes remain recoverable without rebuilding.
 
-Final releases bind one source SHA and version to the PyPI package plus distinct backend and
-frontend GHCR manifest digests. Each image is built and serialized once and receives CycloneDX and
-SPDX SBOMs, vulnerability evidence, a publication receipt, and provenance for its public digest.
-Deployment manifests pin both exact digests and prohibit mixed frontend/backend releases. Partial
-publication is recovered from retained exact bytes without rebuilding or is treated as a failed
-release.
+Final releases bind one source SHA and version to the PyPI package and every image in that release's
+atomic GHCR set. Releases before public reverse conversion contain distinct backend and frontend
+manifest digests. Starting with the separately approved T73 release, the atomic set also contains a
+distinct reverse-attempt manifest digest built from the same source identity. Each required image is
+built and serialized once and receives CycloneDX and SPDX SBOMs, vulnerability evidence, a
+publication receipt, and provenance for its public digest. Deployment manifests pin every exact
+digest in the applicable set and prohibit mixed releases. Partial publication of any required image
+is recovered from retained exact bytes without rebuilding or is treated as a failed release. This
+transition does not add an image to an already published immutable release.
 
 T60–T63 left the legacy FastAPI pages on the production route while building and verifying
 the frontend foundation, authentication, conversion, and administration parity. T64 completed
@@ -305,12 +308,12 @@ memory, retained asset bytes, and concurrency scaling on representative and conf
 Those measurements determine reviewed configurable budgets and a bounded thread/concurrency policy;
 no unmeasured numeric threshold is fixed in this specification.
 
-The synchronous native call runs in-process only inside one disposable Podman container or
-Kubernetes workload placed in a dedicated stable kernel isolation unit for one attempt. A trusted
+The synchronous native call runs in-process only inside one disposable rootless Podman container
+placed in a dedicated stable kernel isolation unit for one attempt. A trusted
 isolation broker outside both the application worker and the attempt unit exclusively holds the
-Podman or Kubernetes workload authority needed to create, constrain, inspect, terminate, and
-remove that unit. The application and child never receive a raw OCI socket or workload-mutating
-Kubernetes service account.
+Podman workload authority needed to create, constrain, inspect, terminate, and remove that unit.
+The application and child never receive a raw OCI socket. An optional Kubernetes backend is
+deferred to T74 and must preserve this contract without blocking the reverse-conversion delivery.
 
 The worker-side attempt supervisor owns the durable attempt token and lease heartbeat, sends one
 bounded request to the broker, accepts one bounded result, revalidates both before publication,
@@ -322,11 +325,9 @@ credential, namespace, security profile, or resource ceiling.
 
 The broker launches only the reviewed image pinned by immutable digest and its fixed
 reverse-attempt argument vector. The child receives bounded local input and output only; it has no
-network access, service-account token, Secret, ConfigMap, PVC, database or object-store credential,
-broker credential, runtime socket, or publication capability. Podman runs it with no network and a
-fresh bounded workspace. Kubernetes runs it with service-account automount disabled, service links
-disabled, no secret-bearing or persistent volume, and enforced default-deny egress. Both backends
-apply the same capability-free, no-new-privileges, read-only-root, arbitrary-UID contract. T71
+network access, database or object-store credential, broker credential, runtime socket, or
+publication capability. Podman runs it with no network and a fresh bounded workspace under the
+capability-free, no-new-privileges, read-only-root, arbitrary-UID contract. T71
 supplies reviewed configurable CPU, memory, PID/descendant, and workspace or ephemeral-storage
 budgets, and the broker enforces them at the runtime/kernel boundary. Userspace sampling is
 observability, not containment.
@@ -354,8 +355,8 @@ lease and attempt token for publication. Python timeouts, cancellation flags, us
 sampling, or publication fencing alone remain insufficient.
 
 The broker durably records runtime-confirmed exit and empty transitions before removal, then records
-the removed transition before returning proof. A missing runtime object, delete acknowledgement, or
-Kubernetes force-delete response alone is never proof. If the broker crashes after kill or removal
+the removed transition before returning proof. A missing runtime object or removal acknowledgement
+alone is never proof. If the broker crashes after kill or removal
 but before returning proof, idempotent restart reconciliation resumes from the inventory and runtime
 state. The content-free termination tombstone is retained until the worker/T71 durably acknowledges
 the proof. The worker keeps recovery blocked until T71 has durably recorded it.
@@ -732,10 +733,11 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T68 | Restore host routing for the CNI-free rootless Podman trusted-upstream and insecure Next.js quickstarts | T64 |
 | T67 | Migrate root browser-test and Next.js tooling to one deterministic pnpm workspace while preserving the isolated npm Mermaid graph, release evidence, and rollback | T64 |
 | T69 | Validate and specify the pinned local anydoc engine, supported formats, asset-aware serialization, PDF limitations, supply chain, and resource contract | T04, T20, T45, T64 |
-| T70 | Implement the external Podman/Kubernetes isolation broker and authenticated bounded protocol, disposable anydoc attempt runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
+| T70 | Implement the external rootless Podman isolation broker and authenticated bounded protocol, disposable anydoc attempt runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
 | T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
+| T74 | Design and implement the optional Kubernetes reverse-isolation backend and node attester without weakening the T70 proof contract | T70, T71 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -744,7 +746,7 @@ network namespace. It does not change the router's public-host policy or the hos
 publication boundary.
 
 For experimental reverse conversion, T69 fixes the approved evidence and contract. T70 implements
-the trusted external isolation broker and its Podman/Kubernetes backends, authenticated bounded
+the trusted external isolation broker and its rootless Podman backend, authenticated bounded
 protocol, disposable attempt runner, bounded internal renderer adapter, and package builder. T71
 binds that runner and its content-free stable-unit termination proof to persistent leases, recovery,
 publication, and the backend workflow. T67 follows T64 and establishes the normative
@@ -754,8 +756,9 @@ their baseline security/support policies, mutation gate, and cross-surface docum
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
 surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
 ticket is active. T73 owns the complete final-image, two-profile, cross-format, reverse-security,
-dedicated reverse-documentation, and release-readiness acceptance matrix. OCR remains outside this
-sequence.
+dedicated reverse-documentation, third public reverse-attempt image contract, and release-readiness
+acceptance matrix. OCR remains outside this sequence. T74 separately owns optional Kubernetes
+support and does not block T70-T73.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
@@ -795,7 +798,7 @@ the ticket before touching any path owned by another active ticket.
 - T69 owns the exact reverse-conversion format matrix, pinned anydoc release and binding, asset-aware
   serializer strategy, content-free manifest schema, asset-free download type, honest text-PDF/image
   contract, and synchronous-native-call cancellation/timeout/memory/lease decision. Its approved
-  contract uses a trusted external broker as the sole holder of Podman/Kubernetes workload
+  contract uses a trusted external broker as the sole holder of rootless Podman workload
   authority, a narrow authenticated Unix/mTLS control protocol, one immutable-image/fixed-argument
   disposable kernel-isolated unit per attempt, configurable T71-owned CPU/memory/PID/workspace
   budgets and autonomous runtime deadline, mandatory crash-consistent content-free inventory and
@@ -804,7 +807,7 @@ the ticket before touching any path owned by another active ticket.
   may expose a raw runtime socket or workload-mutating service account to the application, broaden
   the validated format/PDF claims, or fall back to shared-process execution, a second parser, or an
   unconstrained serializer fork.
-- T70 owns the broker service and protocol, Podman/Kubernetes isolation backends, immutable
+- T70 owns the broker service and protocol, the rootless Podman isolation backend, immutable
   attempt-image/argument policy, mandatory crash-consistent managed-unit inventory/tombstones,
   supplementary runtime-label discovery, startup/reconnect orphan sweep, stable-unit
   terminate-and-prove protocol, and
@@ -813,6 +816,10 @@ the ticket before touching any path owned by another active ticket.
   Markdown/assets package builder. T71 may configure reviewed budgets and persist the stable unit
   identity/proof and resulting package, but must not introduce a second broker, runner, parser,
   renderer adapter, or manifest serializer.
+- T74 owns any optional Kubernetes reverse-isolation backend. It must use a separately reviewed
+  trusted node attester on a dedicated pool and preserve T70's containment, reconciliation, and
+  termination-proof contract. T74 is not a dependency of T70-T73 or the reverse-conversion
+  delivery.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.
