@@ -578,6 +578,31 @@ def test_factory_rejects_mixed_unix_and_mtls_state_before_inventory(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("invalid_field", ["socket", "limits"])
+def test_factory_rejects_incoherent_unix_state_before_inventory(
+    tmp_path: Path, mocker: MockerFixture, invalid_field: str
+) -> None:
+    path, _ = _configuration(tmp_path)
+    config = load_broker_process_config(path)
+    if invalid_field == "socket":
+        config = replace(config, socket_path=None)
+    else:
+        config = replace(
+            config,
+            transport_limits=MtlsTransportLimits(1, 1, 2, 2, 2, 2),
+        )
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
+    authority.assert_not_called()
+    assert not (config.state_directory / "inventory.sqlite3").exists()
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("invalid_field", ["socket", "limits", "endpoint", "kind"])
 def test_factory_rejects_incoherent_mtls_state_before_inventory(
     tmp_path: Path, mocker: MockerFixture, invalid_field: str

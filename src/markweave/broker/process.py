@@ -599,7 +599,9 @@ def _prepared_mtls_server_context(
 ) -> MtlsServerContext | None:
     if config.transport_kind == _UNIX_TRANSPORT:
         if (
-            config.mtls_endpoint is not None
+            config.socket_path is None
+            or type(config.transport_limits) is not UnixTransportLimits
+            or config.mtls_endpoint is not None
             or config.mtls_local_identity is not None
             or config.mtls_client_identity is not None
         ):
