@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+from markweave.broker import podman_runtime
 from markweave.broker.errors import BrokerError
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
@@ -277,10 +278,10 @@ def test_real_rootless_podman_whole_unit_lifecycle_and_proof(
         == "1001:0"
     )
     assert len(_podman("top", inspected["Id"], "hpid").stdout.splitlines()) == 3
-    process_cgroup = Path(f"/proc/{inspected['State']['Pid']}/cgroup").read_text(
-        encoding="ascii"
+    process_cgroup = Path(f"/proc/{inspected['State']['Pid']}/cgroup").read_bytes()
+    assert podman_runtime._matches_process_cgroup(
+        process_cgroup, inspected["State"]["CgroupPath"]
     )
-    assert process_cgroup == f"0::{inspected['State']['CgroupPath']}\n"
     actual_scope = Path("/sys/fs/cgroup") / inspected["State"]["CgroupPath"].lstrip("/")
     assert actual_scope.parent == _cgroup_path(created.unit_id)
     assert (_cgroup_path(created.unit_id) / "cgroup.events").read_text(

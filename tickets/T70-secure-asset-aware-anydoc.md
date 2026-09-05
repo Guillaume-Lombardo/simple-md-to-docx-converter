@@ -356,7 +356,10 @@ for reverse conversion.
   guarantee across `BaseException` interruptions. The next hosted run exposed crun's documented
   cgroup-v2 systemd `container` subgroup: live process binding now accepts only the exact inspected
   scope or that scope plus `/container`, while retaining exact `State.CgroupPath` and populated
-  parent-leaf evidence and rejecting every other descendant or format. Failed creates that prove
+  parent-leaf evidence and rejecting every other descendant or format. A subsequent hosted run
+  passed that runtime check and exposed only the integration assertion's former single-form
+  assumption; the boundary test now uses the same exact two-form predicate before continuing
+  through product termination and cleanup. Failed creates that prove
   both exact-name and label-scoped absence now remove their empty precreated cgroup without
   weakening lost-response recovery. The controlled fixture installs signal handlers before fork,
   and only the parent publishes readiness after its resistant child exists. The local Podman 5.4.2
