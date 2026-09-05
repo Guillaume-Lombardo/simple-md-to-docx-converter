@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,11 +34,15 @@ REQUEST_METADATA_PATH = Path("/work/request.json")
 SOURCE_PATH = Path("/work/source.bin")
 RESULT_PATH = Path("/work/result.bin")
 RESPONSE_METADATA_PATH = Path("/work/response.json")
+REQUEST_COMMIT_PATH = Path("/work/request.commit")
+RESPONSE_STATE_PATH = Path("/work/response.state")
 
 _REQUEST_METADATA_TEMP_PATH = Path("/work/.request.json.tmp")
 _SOURCE_TEMP_PATH = Path("/work/.source.bin.tmp")
 _RESULT_TEMP_PATH = Path("/work/.result.bin.tmp")
 _RESPONSE_METADATA_TEMP_PATH = Path("/work/.response.json.tmp")
+_REQUEST_COMMIT_TEMP_PATH = Path("/work/.request.commit.tmp")
+_RESPONSE_STATE_TEMP_PATH = Path("/work/.response.state.tmp")
 
 _CHILD_FAILURE_CATEGORIES = frozenset(
     {
@@ -237,6 +242,41 @@ def encode_response_metadata(response: ReverseAttemptResponse) -> bytes:
     )
 
 
+def encode_channel_state(attempt_id: UUID, state: str) -> bytes:
+    """Encode the fixed attempt-bound workspace commit state."""
+
+    if type(attempt_id) is not UUID or state not in {"pending", "complete"}:
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    return _canonical_metadata(
+        {
+            "attempt_id": str(attempt_id),
+            "protocol": PROTOCOL_NAME,
+            "state": state,
+            "type": "channel_state",
+            "version": PROTOCOL_VERSION,
+        }
+    )
+
+
+def decode_channel_state(encoded: bytes, expected_attempt_id: UUID) -> str:
+    """Decode an exact attempt-bound pending or complete marker."""
+
+    metadata = _decode_metadata(encoded)
+    _require_keys(
+        metadata,
+        frozenset({"attempt_id", "protocol", "state", "type", "version"}),
+    )
+    _protocol_header(metadata, "channel_state")
+    state = metadata.get("state")
+    if (
+        _uuid(metadata.get("attempt_id")) != expected_attempt_id
+        or type(state) is not str
+        or state not in {"pending", "complete"}
+    ):
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    return state
+
+
 def decode_response_metadata(
     encoded: bytes, result: bytes | None
 ) -> ReverseAttemptResponse:
@@ -352,6 +392,41 @@ def _atomic_write(path: Path, temporary_path: Path, content: bytes) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
+def _atomic_replace(path: Path, temporary_path: Path, content: bytes) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    if not stat.S_ISREG(metadata.st_mode):
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(temporary_path, flags, 0o600)
+        view = memoryview(content)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.replace(temporary_path, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError:
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        with suppress(OSError):
+            temporary_path.unlink(missing_ok=True)
+
+
 def write_request(request: ReverseAttemptRequest, limits: AttemptChannelLimits) -> None:
     """Atomically stage the fixed source then commit its request metadata."""
 
@@ -367,11 +442,19 @@ def write_request(request: ReverseAttemptRequest, limits: AttemptChannelLimits) 
         _REQUEST_METADATA_TEMP_PATH,
         encode_request_metadata(request),
     )
+    _atomic_write(
+        RESPONSE_STATE_PATH,
+        _RESPONSE_STATE_TEMP_PATH,
+        encode_channel_state(request.attempt_id, "pending"),
+    )
+    _atomic_write(REQUEST_COMMIT_PATH, _REQUEST_COMMIT_TEMP_PATH, b"committed\n")
 
 
 def read_request(limits: AttemptChannelLimits) -> ReverseAttemptRequest:
     """Read one fixed request with strict metadata and source bounds."""
 
+    if _read_bounded(REQUEST_COMMIT_PATH, len(b"committed\n")) != b"committed\n":
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
     metadata = _read_bounded(REQUEST_METADATA_PATH, MAX_METADATA_BYTES)
     source = _read_bounded(SOURCE_PATH, limits.max_input_bytes)
     request = decode_request_metadata(metadata, source)
@@ -383,14 +466,39 @@ def read_request(limits: AttemptChannelLimits) -> ReverseAttemptRequest:
     return request
 
 
+def wait_for_request(limits: AttemptChannelLimits) -> ReverseAttemptRequest:
+    """Wait for the broker's final request marker under the runtime deadline."""
+
+    while True:
+        try:
+            metadata = REQUEST_COMMIT_PATH.lstat()
+        except FileNotFoundError:
+            time.sleep(0.01)
+            continue
+        except OSError:
+            reject(ReverseErrorCategory.PROTOCOL_ERROR)
+        if not stat.S_ISREG(metadata.st_mode):
+            reject(ReverseErrorCategory.PROTOCOL_ERROR)
+        return read_request(limits)
+
+
 def write_response(
     response: ReverseAttemptResponse, limits: AttemptChannelLimits
 ) -> None:
     """Atomically stage a result, when present, then commit response metadata."""
 
+    if (
+        isinstance(response, ReverseAttemptSuccess)
+        and len(response.result) > limits.max_output_bytes
+    ):
+        reject(ReverseErrorCategory.RESOURCE_LIMIT)
+    try:
+        state_metadata = RESPONSE_STATE_PATH.lstat()
+    except OSError:
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
+    if not stat.S_ISREG(state_metadata.st_mode):
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
     if isinstance(response, ReverseAttemptSuccess):
-        if len(response.result) > limits.max_output_bytes:
-            reject(ReverseErrorCategory.RESOURCE_LIMIT)
         _atomic_write(RESULT_PATH, _RESULT_TEMP_PATH, response.result)
     else:
         try:
@@ -406,6 +514,11 @@ def write_response(
         _RESPONSE_METADATA_TEMP_PATH,
         encode_response_metadata(response),
     )
+    _atomic_replace(
+        RESPONSE_STATE_PATH,
+        _RESPONSE_STATE_TEMP_PATH,
+        encode_channel_state(response.attempt_id, "complete"),
+    )
 
 
 def read_response(
@@ -416,6 +529,9 @@ def read_response(
     if type(expected_attempt_id) is not UUID:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
 
+    state = _read_bounded(RESPONSE_STATE_PATH, MAX_METADATA_BYTES)
+    if decode_channel_state(state, expected_attempt_id) != "complete":
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
     metadata = _read_bounded(RESPONSE_METADATA_PATH, MAX_METADATA_BYTES)
     decoded = _decode_metadata(metadata)
     message_type = decoded.get("type")

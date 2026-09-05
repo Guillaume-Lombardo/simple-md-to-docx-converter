@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import stat
+import tarfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +19,7 @@ from markweave.broker.models import (
     EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
     policy_specification_evidence,
@@ -28,6 +31,16 @@ from markweave.broker.podman_runtime import (
     PodmanRuntimeError,
     PodmanRuntimeUnit,
     SystemdCgroupRemover,
+)
+from markweave.reversions.attempt_channel import (
+    encode_channel_state,
+    encode_response_metadata,
+)
+from markweave.reversions.models import (
+    ReverseAttemptRequest,
+    ReverseAttemptSuccess,
+    ReverseContentLimits,
+    ReverseOutputMode,
 )
 from tests.unit.broker.runtime_conformance import assert_lifecycle_conformance
 
@@ -66,6 +79,7 @@ def policy() -> BrokerPolicy:
         "t70-test",
         IMAGE_DIGEST,
         RuntimeLimits(100_001, 100_000, 268_435_456, 31, 16_777_216, 2_001),
+        RuntimeChannelLimits(1_000_000, 2_000_000),
     )
 
 
@@ -98,15 +112,20 @@ class PodmanDouble:
         self.rm_code = 0
         self.rm_removes = True
         self.cgroup_removals: list[Path] = []
+        self.workspace: dict[str, bytes] = {}
+        self.input_archives: list[bytes] = []
+        self.mutate_after_cp = False
+        self.cp_error = False
 
     def remove_cgroup(self, path: Path) -> None:
         self.cgroup_removals.append(path)
 
-    def __call__(  # noqa: PLR0911 - one bounded response per emulated subcommand
+    def __call__(  # noqa: PLR0911,PLR0912 - bounded emulated subcommands
         self,
         arguments: Sequence[str],
         *,
         max_output_bytes: int | None = None,
+        input_bytes: bytes | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
         raw = tuple(arguments)
@@ -143,6 +162,27 @@ class PodmanDouble:
         if argv[0] == "start":
             self.status = "running"
             return 0, (self.container_id + "\n").encode()
+        if argv[0] == "cp" and argv[1] == "-":
+            if self.cp_error:
+                raise PodmanRuntimeError("content-free cp failure")
+            assert input_bytes is not None
+            self.input_archives.append(input_bytes)
+            with tarfile.open(fileobj=io.BytesIO(input_bytes), mode="r:") as archive:
+                for member in archive.getmembers():
+                    stream = archive.extractfile(member)
+                    assert stream is not None
+                    self.workspace[member.name] = stream.read()
+            if self.mutate_after_cp:
+                self.overrides["Id"] = "6" * 64
+            return 0, b""
+        if argv[0] == "cp" and argv[-1] == "-":
+            if self.cp_error:
+                raise PodmanRuntimeError("content-free cp failure")
+            leaf = argv[1].rsplit("/", 1)[-1]
+            output = _file_archive(leaf, self.workspace[leaf])
+            if self.mutate_after_cp:
+                self.overrides["Id"] = "6" * 64
+            return 0, output
         if argv[0] == "kill":
             self.status = "exited"
             return 0, (self.container_id + "\n").encode()
@@ -181,7 +221,12 @@ class PodmanDouble:
                 "Cmd": None,
                 "CreateCommand": ["/usr/bin/podman", *self.full_create_arguments],
                 "Entrypoint": list(podman_runtime._FIXED_ENTRYPOINT),
-                "Env": [*podman_runtime._FIXED_ENVIRONMENT, f"HOSTNAME={NAME}"],
+                "Env": [
+                    *podman_runtime._FIXED_ENVIRONMENT,
+                    "MARKWEAVE_REVERSE_MAX_INPUT_BYTES=1000000",
+                    "MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES=2000000",
+                    f"HOSTNAME={NAME}",
+                ],
                 "Labels": labels,
                 "StopTimeout": 0,
                 "Timeout": 3,
@@ -249,6 +294,36 @@ class PodmanDouble:
                 target = target[part]
             del target[parts[-1]]
         return value
+
+
+def _file_archive(name: str, content: bytes) -> bytes:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        information = tarfile.TarInfo(name)
+        information.size = len(content)
+        archive.addfile(information, io.BytesIO(content))
+    return output.getvalue()
+
+
+def _workspace_request(
+    source: bytes = b"private document bytes",
+) -> ReverseAttemptRequest:
+    limits = ReverseContentLimits(
+        1_000_000,
+        2_000_000,
+        100_000,
+        1_000,
+        1_000,
+        1_000_000,
+        1_000,
+        32,
+        16,
+        500_000,
+        1_000_000,
+        1_000_000,
+        2_000_000,
+    )
+    return ReverseAttemptRequest(ATTEMPT_ID, ".docx", limits, source)
 
 
 def runtime(command: PodmanDouble) -> PodmanIsolationRuntime:
@@ -330,6 +405,233 @@ def test_podman_backend_satisfies_shared_runtime_contract(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
     assert_lifecycle_conformance(runtime(PodmanDouble()), unit, policy)
+
+
+@pytest.mark.unit
+def test_workspace_stage_and_collect_are_bounded_and_attempt_bound(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    runtime_unit = backend.create(unit, policy)
+    request = _workspace_request()
+
+    backend.stage_request(runtime_unit, request)
+
+    assert tuple(command.workspace) == (
+        "source.bin",
+        "request.json",
+        "response.state",
+        "request.commit",
+    )
+    assert command.workspace["source.bin"] == request.source
+    assert command.workspace["request.commit"] == b"committed\n"
+    assert backend.try_collect_response(runtime_unit, ATTEMPT_ID) is None
+    command.workspace["response.json"] = b"partial"
+    command.workspace["result.bin"] = b"partial"
+    assert backend.try_collect_response(runtime_unit, ATTEMPT_ID) is None
+
+    response = ReverseAttemptSuccess(
+        ATTEMPT_ID, ReverseOutputMode.MARKDOWN, b"converted"
+    )
+    command.workspace["result.bin"] = response.result
+    command.workspace["response.json"] = encode_response_metadata(response)
+    command.workspace["response.state"] = encode_channel_state(ATTEMPT_ID, "complete")
+    assert backend.try_collect_response(runtime_unit, ATTEMPT_ID) == response
+    assert request.source not in b"\0".join(
+        argument.encode() for call, _, _ in command.calls for argument in call
+    )
+
+
+@pytest.mark.unit
+def test_workspace_rejects_wrong_attempt_limits_and_stopped_incarnation(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    runtime_unit = backend.create(unit, policy)
+    wrong = _workspace_request()
+    wrong = ReverseAttemptRequest(
+        UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        wrong.extension,
+        wrong.limits,
+        wrong.source,
+    )
+    with pytest.raises(PodmanRuntimeError, match="request"):
+        backend.stage_request(runtime_unit, wrong)
+    with pytest.raises(PodmanRuntimeError, match="identity"):
+        backend.try_collect_response(runtime_unit, wrong.attempt_id)
+    command.status = "exited"
+    with pytest.raises(PodmanRuntimeError, match="not running"):
+        backend.stage_request(runtime_unit, _workspace_request())
+
+
+@pytest.mark.unit
+def test_workspace_revalidates_incarnation_after_every_copy(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    stage_command = PodmanDouble()
+    stage_backend = runtime(stage_command)
+    stage_unit = stage_backend.create(unit, policy)
+    stage_command.mutate_after_cp = True
+    with pytest.raises(PodmanRuntimeError):
+        stage_backend.stage_request(stage_unit, _workspace_request())
+
+    collect_command = PodmanDouble()
+    collect_backend = runtime(collect_command)
+    collect_unit = collect_backend.create(unit, policy)
+    collect_command.workspace["response.state"] = encode_channel_state(
+        ATTEMPT_ID, "pending"
+    )
+    collect_command.mutate_after_cp = True
+    with pytest.raises(PodmanRuntimeError):
+        collect_backend.try_collect_response(collect_unit, ATTEMPT_ID)
+
+
+@pytest.mark.unit
+def test_workspace_copy_errors_revalidate_the_exact_live_incarnation(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    runtime_unit = backend.create(unit, policy)
+    command.cp_error = True
+
+    with pytest.raises(PodmanRuntimeError, match="cp failure"):
+        backend.stage_request(runtime_unit, _workspace_request())
+    with pytest.raises(PodmanRuntimeError, match="cp failure"):
+        backend.try_collect_response(runtime_unit, ATTEMPT_ID)
+
+    assert [call[0][0] for call in command.calls].count("container") >= 4
+
+
+@pytest.mark.unit
+def test_workspace_malformed_complete_metadata_revalidates_incarnation(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    runtime_unit = backend.create(unit, policy)
+    command.workspace["response.state"] = encode_channel_state(ATTEMPT_ID, "complete")
+    command.workspace["response.json"] = b"{not-json}\n"
+
+    with pytest.raises(PodmanRuntimeError, match="response is invalid"):
+        backend.try_collect_response(runtime_unit, ATTEMPT_ID)
+
+    assert [call[0][0] for call in command.calls].count("container") >= 3
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda archive: archive[:600],
+        lambda archive: archive + b"extra" + b"\0" * 507,
+        lambda archive: _file_archive("../response.json", b"x"),
+        lambda archive: _file_archive("extra", b"x") + archive,
+    ),
+)
+def test_workspace_tar_rejects_truncation_extra_and_paths(mutate) -> None:
+    archive = _file_archive("response.json", b"{}\n")
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(mutate(archive), "response.json", 4096)
+
+
+@pytest.mark.unit
+def test_workspace_tar_rejects_links_and_oversized_members() -> None:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as archive:
+        link = tarfile.TarInfo("response.json")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "private"
+        archive.addfile(link)
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            output.getvalue(), "response.json", 4096
+        )
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            _file_archive("result.bin", b"xx"), "result.bin", 1
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "expected_name", "maximum"),
+    (
+        ("not-bytes", "response.json", 4096),
+        (b"", 1, 4096),
+        (b"", "unknown", 4096),
+        (b"", "response.json", True),
+        (b"", "response.json", -1),
+        (b"x" * 10_240, "response.json", 1),
+        (b"x", "response.json", 4096),
+        (b"\0" * 512, "response.json", 4096),
+        (b"\0" * 1024 + b"x" + b"\0" * 511, "response.json", 4096),
+    ),
+)
+def test_workspace_tar_rejects_each_invalid_envelope_dimension(
+    value: object, expected_name: object, maximum: object
+) -> None:
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            cast(Any, value), cast(Any, expected_name), cast(Any, maximum)
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("maximum", (True, -1))
+def test_workspace_tar_ceiling_rejects_invalid_bounds(maximum: object) -> None:
+    with pytest.raises(PodmanRuntimeError, match="bound"):
+        podman_runtime._tar_output_ceiling(cast(Any, maximum))
+
+
+@pytest.mark.unit
+def test_request_archive_wraps_tar_encoder_failure(mocker: MockerFixture) -> None:
+    mocker.patch.object(
+        podman_runtime.tarfile,
+        "open",
+        side_effect=tarfile.TarError("document-content-must-not-escape"),
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="archive") as captured:
+        podman_runtime._build_request_archive(_workspace_request())
+
+    assert "document-content" not in str(captured.value)
+
+
+@pytest.mark.unit
+def test_workspace_tar_rejects_multiple_regular_members_and_nonzero_padding() -> None:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for name in ("response.json", "result.bin"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            archive.addfile(member, io.BytesIO(b"x"))
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            output.getvalue(), "response.json", 4096
+        )
+
+    padded = bytearray(_file_archive("response.json", b"x"))
+    padded[1024] = 1
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(bytes(padded), "response.json", 4096)
+
+
+@pytest.mark.unit
+def test_workspace_tar_rejects_regular_member_with_pax_metadata() -> None:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("response.json")
+        member.size = 1
+        member.pax_headers = {"comment": "not-allowlisted"}
+        archive.addfile(member, io.BytesIO(b"x"))
+
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            output.getvalue(), "response.json", 4096
+        )
 
 
 @pytest.mark.unit
@@ -740,6 +1042,7 @@ def test_create_rejects_caller_owned_model_substitution(
         policy.revision,
         f"sha256:{'9' * 64}",
         policy.limits,
+        policy.channel_limits,
     )
 
     with pytest.raises(PodmanRuntimeError, match="create contract"):
@@ -1551,7 +1854,29 @@ def test_command_runner_rejects_invalid_contract_and_failed_exec(
     with pytest.raises(PodmanRuntimeError, match="contract"):
         failed(())
     with pytest.raises(PodmanRuntimeError, match="contract"):
-        failed(("fixed",), max_output_bytes=128 * 1024 + 1)
+        failed(("fixed",), max_output_bytes=-1)
+
+
+@pytest.mark.unit
+def test_command_runner_streams_bounded_stdin_without_deadlock() -> None:
+    runner = BoundedCommandRunner(
+        Path("/bin/cat"), PodmanCommandLimits(2), environment={}
+    )
+    content = b"x" * (256 * 1024)
+
+    code, output = runner(("-",), input_bytes=content, max_output_bytes=len(content))
+
+    assert code == 0
+    assert output == content
+
+
+@pytest.mark.unit
+def test_command_runner_rejects_invalid_input_type() -> None:
+    runner = BoundedCommandRunner(
+        Path("/bin/true"), PodmanCommandLimits(1), environment={}
+    )
+    with pytest.raises(PodmanRuntimeError, match="contract"):
+        runner(("fixed",), input_bytes=cast(Any, bytearray(b"private")))
 
 
 @pytest.mark.unit

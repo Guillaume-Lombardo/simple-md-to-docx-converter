@@ -14,6 +14,7 @@ from markweave.broker.models import (
     RuntimeIncarnation,
     TerminationProof,
 )
+from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
 
 
 class BrokerInventory(Protocol):
@@ -85,6 +86,16 @@ class IsolationRuntime(Protocol):
 
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> RuntimeUnit:
         """Create only a CREATE_INTENT unit using the fixed image/argument policy."""
+
+    def stage_request(
+        self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
+    ) -> None:
+        """Stage one bounded request into the exact live unit and commit it."""
+
+    def try_collect_response(
+        self, runtime_unit: RuntimeUnit, expected_attempt_id: UUID
+    ) -> ReverseAttemptResponse | None:
+        """Return a committed bounded response, or None while it remains pending."""
 
     def hard_terminate(self, runtime_unit: RuntimeUnit) -> None:
         """Request termination of the whole stable unit and every descendant."""

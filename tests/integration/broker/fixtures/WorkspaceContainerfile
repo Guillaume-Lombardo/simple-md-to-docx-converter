@@ -1,0 +1,11 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER 0
+COPY src/markweave/reversions \
+    /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions
+RUN find /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions \
+        -type f -name '*.pyc' -delete \
+    && chmod -R a-w \
+        /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions
+USER 1001:0

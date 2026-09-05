@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import selectors
 import signal
 import stat
 import subprocess
+import tarfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -24,11 +26,24 @@ from markweave.broker.models import (
     EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
+from markweave.reversions.attempt_channel import (
+    MAX_METADATA_BYTES,
+    decode_channel_state,
+    decode_response_metadata,
+    encode_channel_state,
+    encode_request_metadata,
+)
+from markweave.reversions.errors import ReverseConversionError
+from markweave.reversions.models import (
+    ReverseAttemptRequest,
+    ReverseAttemptResponse,
+)
 
 _INCARNATION_NAMESPACE: Final = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
 _NAME_PREFIX: Final = "markweave-reverse-"
@@ -49,6 +64,8 @@ _MEMORY_LABEL: Final = f"{_LABEL_PREFIX}memory-bytes"
 _PID_LIMIT_LABEL: Final = f"{_LABEL_PREFIX}pid-limit"
 _WORKSPACE_LABEL: Final = f"{_LABEL_PREFIX}workspace-bytes"
 _WALL_TIME_LABEL: Final = f"{_LABEL_PREFIX}wall-time-millis"
+_MAX_INPUT_LABEL: Final = f"{_LABEL_PREFIX}max-input-bytes"
+_MAX_OUTPUT_LABEL: Final = f"{_LABEL_PREFIX}max-output-bytes"
 _MANAGED_LABEL_KEYS: Final = frozenset(
     {
         _ATTEMPT_LABEL,
@@ -67,6 +84,8 @@ _MANAGED_LABEL_KEYS: Final = frozenset(
         _UNIT_LABEL,
         _WORKSPACE_LABEL,
         _WALL_TIME_LABEL,
+        _MAX_INPUT_LABEL,
+        _MAX_OUTPUT_LABEL,
     }
 )
 _IMAGE_REPOSITORY_PATTERN = re.compile(
@@ -102,6 +121,10 @@ _MAX_LABEL_BYTES: Final = 128
 _CGROUP_EVENTS_MAX_BYTES: Final = 4096
 _SYSTEMD_PROPERTIES_MAX_BYTES: Final = 512
 _OWNER_ONLY_MODE: Final = 0o700
+_TAR_BLOCK_BYTES: Final = 512
+_TAR_END_BYTES: Final = 1024
+_TAR_PADDING_BYTES: Final = 10_240
+_REQUEST_COMMIT = b"committed\n"
 
 
 class PodmanRuntimeError(RuntimeError):
@@ -184,6 +207,7 @@ class BoundedCommandRunner:
         arguments: Sequence[str],
         *,
         max_output_bytes: int | None = None,
+        input_bytes: bytes | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
         if (
@@ -191,18 +215,21 @@ class BoundedCommandRunner:
             or any(type(argument) is not str or not argument for argument in arguments)
             or not accepted_exit_codes
             or any(type(code) is not int for code in accepted_exit_codes)
+            or (input_bytes is not None and type(input_bytes) is not bytes)
         ):
             raise PodmanRuntimeError("Podman command contract failed")
         ceiling = (
             self._limits.output_bytes if max_output_bytes is None else max_output_bytes
         )
-        if type(ceiling) is not int or not 0 <= ceiling <= _MAX_COMMAND_OUTPUT_BYTES:
+        if type(ceiling) is not int or ceiling < 0:
             raise PodmanRuntimeError("Podman command contract failed")
         deadline = self._monotonic() + self._limits.operation_seconds
         try:
             process = subprocess.Popen(  # noqa: S603 - argv is broker-authored
                 (str(self._executable), *arguments),
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE
+                if input_bytes is not None
+                else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
@@ -210,7 +237,11 @@ class BoundedCommandRunner:
             )
         except OSError as error:
             raise PodmanRuntimeError("Podman command failed") from error
-        if process.stdout is None or process.stderr is None:
+        if (
+            process.stdout is None
+            or process.stderr is None
+            or (input_bytes is not None and process.stdin is None)
+        ):
             self._terminate(process)
             raise PodmanRuntimeError("Podman command failed")
         output = bytearray()
@@ -219,6 +250,9 @@ class BoundedCommandRunner:
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ, True)
             selector.register(process.stderr, selectors.EVENT_READ, False)
+            input_view = memoryview(input_bytes) if input_bytes is not None else None
+            if process.stdin is not None:
+                selector.register(process.stdin, selectors.EVENT_WRITE, None)
             while selector.get_map():
                 remaining = deadline - self._monotonic()
                 if remaining <= 0:
@@ -227,6 +261,17 @@ class BoundedCommandRunner:
                 if not ready:
                     raise TimeoutError
                 for key, _ in ready:
+                    if key.data is None:
+                        if input_view:
+                            written = os.write(key.fd, input_view[:8192])
+                            if written <= 0:
+                                raise OSError
+                            input_view = input_view[written:]
+                        if not input_view:
+                            selector.unregister(key.fileobj)
+                            if process.stdin is not None:
+                                process.stdin.close()
+                        continue
                     chunk = os.read(key.fd, 8192)
                     if not chunk:
                         selector.unregister(key.fileobj)
@@ -254,6 +299,8 @@ class BoundedCommandRunner:
                 selector.close()
             process.stdout.close()
             process.stderr.close()
+            if process.stdin is not None and not process.stdin.closed:
+                process.stdin.close()
         if return_code not in accepted_exit_codes:
             raise PodmanRuntimeError("Podman command failed")
         return return_code, bytes(output)
@@ -435,6 +482,102 @@ class PodmanIsolationRuntime:
             elif inspected is None:
                 self._cleanup_absent_failed_create(unit.unit_id, name)
             raise
+
+    def stage_request(
+        self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
+    ) -> None:
+        """Copy one broker-authored request archive and publish its final marker."""
+
+        verified = self._coerce_unit(runtime_unit)
+        inspected, policy = self._workspace_context(verified)
+        labels = _mapping(_mapping(inspected, "Config"), "Labels")
+        if (
+            type(request) is not ReverseAttemptRequest
+            or str(request.attempt_id) != _label(labels, _ATTEMPT_LABEL)
+            or len(request.source) > policy.channel_limits.max_input_bytes
+            or request.limits.max_input_bytes > policy.channel_limits.max_input_bytes
+            or request.limits.max_output_bytes > policy.channel_limits.max_output_bytes
+        ):
+            raise PodmanRuntimeError("Podman workspace request is invalid")
+        archive = _build_request_archive(request)
+        try:
+            self._call(
+                ("cp", "-", f"{verified.container_id}:/work"),
+                max_output_bytes=0,
+                input_bytes=archive,
+            )
+        except BaseException:
+            self._workspace_context(verified)
+            raise
+        self._workspace_context(verified)
+
+    def try_collect_response(
+        self, runtime_unit: RuntimeUnit, expected_attempt_id: UUID
+    ) -> ReverseAttemptResponse | None:
+        """Copy and validate an exact committed response from the live tmpfs."""
+
+        verified = self._coerce_unit(runtime_unit)
+        inspected, policy = self._workspace_context(verified)
+        labels = _mapping(_mapping(inspected, "Config"), "Labels")
+        if type(expected_attempt_id) is not UUID or str(expected_attempt_id) != _label(
+            labels, _ATTEMPT_LABEL
+        ):
+            raise PodmanRuntimeError("Podman workspace response identity is invalid")
+        try:
+            state = self._copy_workspace_file(
+                verified, "response.state", MAX_METADATA_BYTES
+            )
+            channel_state = decode_channel_state(state, expected_attempt_id)
+            if channel_state == "pending":
+                response: ReverseAttemptResponse | None = None
+            else:
+                metadata = self._copy_workspace_file(
+                    verified, "response.json", MAX_METADATA_BYTES
+                )
+                try:
+                    shape = json.loads(metadata.decode("ascii"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise PodmanRuntimeError(
+                        "Podman workspace response is invalid"
+                    ) from error
+                result = (
+                    self._copy_workspace_file(
+                        verified,
+                        "result.bin",
+                        policy.channel_limits.max_output_bytes,
+                    )
+                    if isinstance(shape, Mapping) and shape.get("type") == "success"
+                    else None
+                )
+                response = decode_response_metadata(metadata, result)
+        except ReverseConversionError as error:
+            raise PodmanRuntimeError("Podman workspace response is invalid") from error
+        except BaseException:
+            self._workspace_context(verified)
+            raise
+        self._workspace_context(verified)
+        return response
+
+    def _copy_workspace_file(
+        self, runtime_unit: PodmanRuntimeUnit, leaf: str, maximum: int
+    ) -> bytes:
+        _, output = self._call(
+            ("cp", f"{runtime_unit.container_id}:/work/{leaf}", "-"),
+            max_output_bytes=_tar_output_ceiling(maximum),
+        )
+        return _read_single_file_archive(output, leaf, maximum)
+
+    def _workspace_context(
+        self, runtime_unit: PodmanRuntimeUnit
+    ) -> tuple[Mapping[str, Any], BrokerPolicy]:
+        self._require_rootless_environment()
+        inspected = self._inspect(runtime_unit.container_id)
+        self._verify_incarnation(inspected, runtime_unit)
+        state = _mapping(inspected, "State")
+        if not _boolean(state, "Running") or _string(state, "Status") != "running":
+            raise PodmanRuntimeError("Podman workspace unit is not running")
+        labels = _mapping(_mapping(inspected, "Config"), "Labels")
+        return inspected, _policy_from_labels(labels)
 
     def _cleanup_failed_create(self, unit_id: UUID, container_id: str) -> None:
         with suppress(BaseException):
@@ -711,7 +854,12 @@ class PodmanIsolationRuntime:
             "--entrypoint",
             json.dumps(_FIXED_ENTRYPOINT, separators=(",", ":")),
         ]
-        for environment in _FIXED_ENVIRONMENT:
+        environment_values = (
+            *_FIXED_ENVIRONMENT,
+            f"MARKWEAVE_REVERSE_MAX_INPUT_BYTES={policy.channel_limits.max_input_bytes}",
+            f"MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES={policy.channel_limits.max_output_bytes}",
+        )
+        for environment in environment_values:
             arguments.extend(("--env", environment))
         for key in sorted(labels):
             arguments.extend(("--label", f"{key}={labels[key]}"))
@@ -784,11 +932,19 @@ class PodmanIsolationRuntime:
         arguments: Sequence[str],
         *,
         max_output_bytes: int | None = None,
+        input_bytes: bytes | None = None,
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
+        if input_bytes is None:
+            return self._command(
+                self._podman_arguments(arguments),
+                max_output_bytes=max_output_bytes,
+                accepted_exit_codes=accepted_exit_codes,
+            )
         return self._command(
             self._podman_arguments(arguments),
             max_output_bytes=max_output_bytes,
+            input_bytes=input_bytes,
             accepted_exit_codes=accepted_exit_codes,
         )
 
@@ -999,6 +1155,10 @@ class PodmanIsolationRuntime:
             != sorted(
                 (
                     *_FIXED_ENVIRONMENT,
+                    "MARKWEAVE_REVERSE_MAX_INPUT_BYTES="
+                    f"{policy.channel_limits.max_input_bytes}",
+                    "MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES="
+                    f"{policy.channel_limits.max_output_bytes}",
                     f"HOSTNAME={_string(inspected, 'Name').lstrip('/')}",
                 )
             )
@@ -1223,6 +1383,8 @@ def _labels(
         _RUN_AS_UID_LABEL: str(run_as_uid),
         _WORKSPACE_LABEL: str(policy.limits.workspace_bytes),
         _WALL_TIME_LABEL: str(policy.limits.wall_time_millis),
+        _MAX_INPUT_LABEL: str(policy.channel_limits.max_input_bytes),
+        _MAX_OUTPUT_LABEL: str(policy.channel_limits.max_output_bytes),
     }
 
 
@@ -1239,9 +1401,101 @@ def _policy_from_labels(labels: Mapping[str, Any]) -> BrokerPolicy:
                 _positive_integer_label(labels, _WORKSPACE_LABEL),
                 _positive_integer_label(labels, _WALL_TIME_LABEL),
             ),
+            RuntimeChannelLimits(
+                _positive_integer_label(labels, _MAX_INPUT_LABEL),
+                _positive_integer_label(labels, _MAX_OUTPUT_LABEL),
+            ),
         )
     except ValueError as error:
         raise PodmanRuntimeError("Podman policy labels are invalid") from error
+
+
+def _build_request_archive(request: ReverseAttemptRequest) -> bytes:
+    entries = (
+        ("source.bin", request.source),
+        ("request.json", encode_request_metadata(request)),
+        ("response.state", encode_channel_state(request.attempt_id, "pending")),
+        ("request.commit", _REQUEST_COMMIT),
+    )
+    output = io.BytesIO()
+    try:
+        with tarfile.open(
+            fileobj=output, mode="w", format=tarfile.USTAR_FORMAT
+        ) as archive:
+            for name, content in entries:
+                information = tarfile.TarInfo(name)
+                information.size = len(content)
+                information.mode = 0o440
+                information.uid = 0
+                information.gid = 0
+                information.mtime = 0
+                information.uname = ""
+                information.gname = ""
+                archive.addfile(information, io.BytesIO(content))
+    except (OSError, tarfile.TarError, ValueError) as error:
+        raise PodmanRuntimeError("Podman workspace archive failed") from error
+    encoded = output.getvalue()
+    used = sum(
+        _TAR_BLOCK_BYTES
+        + ((len(content) + _TAR_BLOCK_BYTES - 1) // _TAR_BLOCK_BYTES) * _TAR_BLOCK_BYTES
+        for _, content in entries
+    )
+    return encoded[: used + _TAR_END_BYTES]
+
+
+def _tar_output_ceiling(content_bytes: int) -> int:
+    if type(content_bytes) is not int or content_bytes < 0:
+        raise PodmanRuntimeError("Podman workspace bound is invalid")
+    blocks = (content_bytes + _TAR_BLOCK_BYTES - 1) // _TAR_BLOCK_BYTES
+    records = (blocks + 3 + 19) // 20
+    return max(_TAR_PADDING_BYTES, records * _TAR_PADDING_BYTES)
+
+
+def _read_single_file_archive(value: bytes, expected_name: str, maximum: int) -> bytes:
+    if (
+        type(value) is not bytes
+        or type(expected_name) is not str
+        or expected_name not in {"response.state", "response.json", "result.bin"}
+        or type(maximum) is not int
+        or maximum < 0
+        or len(value) > _tar_output_ceiling(maximum)
+        or len(value) % _TAR_BLOCK_BYTES
+        or len(value) < _TAR_END_BYTES
+        or value[-_TAR_END_BYTES:] != b"\0" * _TAR_END_BYTES
+    ):
+        raise PodmanRuntimeError("Podman workspace archive is invalid")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(value), mode="r:") as archive:
+            members = archive.getmembers()
+            if len(members) != 1:
+                raise PodmanRuntimeError("Podman workspace archive is invalid")
+            member = members[0]
+            if (
+                member.name != expected_name
+                or member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE}
+                or member.linkname
+                or member.pax_headers
+                or member.size > maximum
+                or member.offset != 0
+                or member.offset_data != _TAR_BLOCK_BYTES
+            ):
+                raise PodmanRuntimeError("Podman workspace archive is invalid")
+            content_end = (
+                member.offset_data
+                + ((member.size + _TAR_BLOCK_BYTES - 1) // _TAR_BLOCK_BYTES)
+                * _TAR_BLOCK_BYTES
+            )
+            if len(value) - content_end < _TAR_END_BYTES or any(value[content_end:]):
+                raise PodmanRuntimeError("Podman workspace archive is invalid")
+            stream = archive.extractfile(member)
+            if stream is None:
+                raise PodmanRuntimeError("Podman workspace archive is invalid")
+            content = stream.read(maximum + 1)
+            if len(content) != member.size or len(content) > maximum:
+                raise PodmanRuntimeError("Podman workspace archive is invalid")
+            return content
+    except (OSError, EOFError, tarfile.TarError) as error:
+        raise PodmanRuntimeError("Podman workspace archive is invalid") from error
 
 
 def _json(output: bytes) -> Any:

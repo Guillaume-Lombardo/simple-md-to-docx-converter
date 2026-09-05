@@ -26,6 +26,7 @@ from markweave.broker.models import (
     ManagedUnit,
     ManagedUnitState,
     ReplayPosition,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
     policy_specification_evidence,
@@ -42,11 +43,13 @@ POLICY = BrokerPolicy(
     "t71-v1",
     "sha256:" + "b" * 64,
     RuntimeLimits(100_000, 100_000, 512_000_000, 32, 16_000_000, 30_000),
+    RuntimeChannelLimits(1_000_000, 2_000_000),
 )
 ROLLED_POLICY = BrokerPolicy(
     "t71-v2",
     "sha256:" + "d" * 64,
     RuntimeLimits(90_000, 100_000, 384_000_000, 24, 12_000_000, 25_000),
+    RuntimeChannelLimits(900_000, 1_800_000),
 )
 
 

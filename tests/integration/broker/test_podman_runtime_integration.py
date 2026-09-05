@@ -18,6 +18,7 @@ from markweave.broker.models import (
     BrokerPolicy,
     ManagedUnitState,
     ReplayPosition,
+    RuntimeChannelLimits,
     RuntimeLimits,
 )
 from markweave.broker.podman_runtime import (
@@ -28,11 +29,17 @@ from markweave.broker.podman_runtime import (
     SystemdCgroupRemover,
 )
 from markweave.broker.service import IsolationBrokerService
+from markweave.reversions.models import (
+    ReverseAttemptFailure,
+    ReverseAttemptRequest,
+    ReverseContentLimits,
+)
 
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
 SYSTEMCTL = Path("/usr/bin/systemctl")
 TEST_IMAGE = "localhost/markweave-t70-runtime-integration:current"
+WORKSPACE_IMAGE = "localhost/markweave-t70-workspace-integration:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("33333333-3333-4333-8333-333333333333"))
 UNIT_IDS = (
@@ -40,6 +47,8 @@ UNIT_IDS = (
     UUID("44444444-4444-4444-8444-444444444442"),
     UUID("44444444-4444-4444-8444-444444444443"),
     UUID("44444444-4444-4444-8444-444444444444"),
+    UUID("44444444-4444-4444-8444-444444444445"),
+    UUID("44444444-4444-4444-8444-444444444446"),
 )
 
 
@@ -167,12 +176,161 @@ def controlled_image() -> Iterator[tuple[str, str]]:
             _podman("image", "rm", "--force", base)
 
 
+@pytest.fixture(scope="module")
+def workspace_image(
+    controlled_image: tuple[str, str],
+) -> Iterator[tuple[str, str]]:
+    del controlled_image
+    base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
+    _podman(
+        "build",
+        "--format",
+        "oci",
+        "--tag",
+        WORKSPACE_IMAGE,
+        "--file",
+        str(ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"),
+        "--build-arg",
+        f"BASE_IMAGE={base}",
+        str(ROOT),
+    )
+    inspected = json.loads(
+        _podman("image", "inspect", WORKSPACE_IMAGE, "--format", "json").stdout
+    )[0]
+    digest = inspected["Digest"]
+    assert isinstance(digest, str) and digest.startswith("sha256:")
+    try:
+        yield WORKSPACE_IMAGE.rsplit(":", 1)[0], digest
+    finally:
+        _podman("image", "rm", "--force", WORKSPACE_IMAGE)
+
+
 def _policy(image_digest: str, wall_time_millis: int = 10_000) -> BrokerPolicy:
     return BrokerPolicy(
         "integration",
         image_digest,
         RuntimeLimits(100_000, 100_000, 268_435_456, 16, 8_388_608, wall_time_millis),
+        RuntimeChannelLimits(1_000_000, 2_000_000),
     )
+
+
+def _request(attempt_id: UUID) -> ReverseAttemptRequest:
+    source = (ROOT / "spikes/anydoc/corpus/pdf/text.pdf").read_bytes()
+    return ReverseAttemptRequest(
+        attempt_id,
+        ".pdf",
+        ReverseContentLimits(
+            1_000_000,
+            2_000_000,
+            100_000,
+            1_000,
+            1_000,
+            1_000_000,
+            1_000,
+            32,
+            16,
+            500_000,
+            1_000_000,
+            1_000_000,
+            2_000_000,
+        ),
+        source,
+    )
+
+
+@pytest.mark.integration
+def test_real_rootless_podman_bounded_workspace_round_trip(
+    tmp_path: Path, workspace_image: tuple[str, str]
+) -> None:
+    repository, digest = workspace_image
+    service, inventory, runtime = _service(
+        tmp_path, repository, _policy(digest), UNIT_IDS[4]
+    )
+    attempt_id = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    runtime_unit = runtime.discover(limit=1)[0]
+    request = _request(attempt_id)
+
+    runtime.stage_request(runtime_unit, request)
+    staged_state = json.loads(
+        _podman(
+            "container", "inspect", runtime_unit.container_id, "--format", "json"
+        ).stdout
+    )[0]["State"]
+    assert staged_state["Running"] is True, json.dumps(staged_state, sort_keys=True)
+    deadline = time.monotonic() + 10
+    response = None
+    while response is None and time.monotonic() < deadline:
+        response = runtime.try_collect_response(runtime_unit, attempt_id)
+        if response is None:
+            time.sleep(0.05)
+
+    assert response is not None
+    assert not isinstance(response, ReverseAttemptFailure), (
+        response.category if isinstance(response, ReverseAttemptFailure) else None
+    )
+    inspected = json.loads(
+        _podman(
+            "container", "inspect", runtime_unit.container_id, "--format", "json"
+        ).stdout
+    )[0]
+    assert inspected["State"]["Running"] is True
+    assert "MARKWEAVE_REVERSE_MAX_INPUT_BYTES=1000000" in inspected["Config"]["Env"]
+    assert "MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES=2000000" in inspected["Config"]["Env"]
+    serialized = json.dumps(inspected["Config"]["Labels"], sort_keys=True).encode()
+    assert request.source[:32] not in serialized
+    for inventory_file in tmp_path.glob("inventory.sqlite3*"):
+        assert request.source[:32] not in inventory_file.read_bytes()
+    logs = _podman("logs", runtime_unit.container_id, check=False)
+    assert logs.stdout == ""
+    assert request.source[:32].hex() not in logs.stderr
+
+    proof = service.terminate(PRINCIPAL, attempt_id, created.unit_id)
+    assert proof.unit_id == created.unit_id
+    retained = inventory.get(created.unit_id)
+    assert retained is not None and retained.state is ManagedUnitState.REMOVED
+    _assert_systemd_slice_clean(created.unit_id)
+
+
+@pytest.mark.integration
+def test_staged_workspace_is_swept_after_broker_crash(
+    tmp_path: Path, workspace_image: tuple[str, str]
+) -> None:
+    repository, digest = workspace_image
+    policy = _policy(digest, 2_001)
+    service, inventory, runtime = _service(tmp_path, repository, policy, UNIT_IDS[5])
+    attempt_id = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+    created = service.create(ReplayPosition(PRINCIPAL, 1), attempt_id)
+    runtime_unit = runtime.discover(limit=1)[0]
+    runtime.stage_request(runtime_unit, _request(attempt_id))
+    del service
+    del inventory
+
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        inspected = json.loads(
+            _podman(
+                "container", "inspect", runtime_unit.container_id, "--format", "json"
+            ).stdout
+        )[0]
+        if inspected["State"]["Status"] in {"exited", "stopped"}:
+            break
+        time.sleep(0.1)
+    assert inspected["State"]["Status"] in {"exited", "stopped"}
+
+    restarted_inventory = SQLiteBrokerInventory(
+        tmp_path / "inventory.sqlite3", b"i" * 32, max_records=8
+    )
+    restarted = IsolationBrokerService(
+        restarted_inventory,
+        _runtime(repository, tmp_path / "hooks"),
+        policy,
+        max_discovered_units=8,
+    )
+    restarted.start()
+    retained = restarted_inventory.get(created.unit_id)
+    assert retained is not None and retained.state is ManagedUnitState.REMOVED
+    _assert_systemd_slice_clean(created.unit_id)
 
 
 def _runtime(

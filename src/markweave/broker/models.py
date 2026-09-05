@@ -82,12 +82,28 @@ class RuntimeLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeChannelLimits:
+    """Positive T71-supplied byte ceilings for the attempt workspace channel."""
+
+    max_input_bytes: int
+    max_output_bytes: int
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not int or value <= 0
+            for value in (self.max_input_bytes, self.max_output_bytes)
+        ):
+            raise ValueError("Broker channel limits must be positive integers")
+
+
+@dataclass(frozen=True, slots=True)
 class BrokerPolicy:
     """One fixed broker-owned image and runtime policy revision."""
 
     revision: str
     image_digest: str
     limits: RuntimeLimits
+    channel_limits: RuntimeChannelLimits
 
     def __post_init__(self) -> None:
         if (
@@ -102,6 +118,8 @@ class BrokerPolicy:
             raise ValueError("Broker attempt image digest must be immutable SHA-256")
         if type(self.limits) is not RuntimeLimits:
             raise ValueError("Broker runtime limits are invalid")
+        if type(self.channel_limits) is not RuntimeChannelLimits:
+            raise ValueError("Broker channel limits are invalid")
 
 
 def policy_specification_evidence(policy: BrokerPolicy) -> EvidenceDigest:
@@ -118,6 +136,10 @@ def policy_specification_evidence(policy: BrokerPolicy) -> EvidenceDigest:
                 field: getattr(policy.limits, field)
                 for field in RuntimeLimits.__dataclass_fields__
             },
+            "channel_limits": {
+                field: getattr(policy.channel_limits, field)
+                for field in RuntimeChannelLimits.__dataclass_fields__
+            },
             "policy_revision": policy.revision,
             "security": {
                 "capabilities": list(_FIXED_RUNTIME_CAPABILITIES),
@@ -129,7 +151,7 @@ def policy_specification_evidence(policy: BrokerPolicy) -> EvidenceDigest:
                 "service_links": False,
                 "workspace": _FIXED_RUNTIME_WORKSPACE,
             },
-            "schema_version": 1,
+            "schema_version": 2,
         },
         ensure_ascii=True,
         allow_nan=False,
