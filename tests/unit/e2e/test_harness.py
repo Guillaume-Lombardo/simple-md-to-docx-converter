@@ -40,15 +40,15 @@ def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostn
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("network_address", "inspected_address", "expected_code", "expected_origin"),
+    ("inspected_address", "expected_code", "expected_origin"),
     [
-        ("10.89.2.17/24", "10.89.2.17", 0, "http://10.89.2.17:3000\n"),
-        ("10.89.2.17/24", "10.89.2.18", 1, ""),
-        ("10.89.2.999/24", "10.89.2.999", 1, ""),
+        ("10.89.2.17", 0, "http://10.89.2.17:3000\n"),
+        ("", 1, ""),
+        ("10.89.2.17\n10.89.2.18", 1, ""),
+        ("10.89.2.999", 1, ""),
     ],
 )
-def test_admission_frontend_origin_requires_matching_podman_inventory(
-    network_address: str,
+def test_admission_frontend_origin_requires_one_valid_named_network_address(
     inspected_address: str,
     expected_code: int,
     expected_origin: str,
@@ -66,11 +66,7 @@ def test_admission_frontend_origin_requires_matching_podman_inventory(
             'network_name="e2e-network"\n'
             'frontend_name="e2e-frontend"\n'
             "podman() {\n"
-            '  if [[ "$1" == network ]]; then\n'
-            "    printf '%s\\n' \"$NETWORK_ADDRESS\"\n"
-            "  else\n"
-            "    printf '%s\\n' \"$INSPECTED_ADDRESS\"\n"
-            "  fi\n"
+            "  printf '%s\\n' \"$INSPECTED_ADDRESS\"\n"
             "}\n"
             f"{helper}\n"
             "admission_frontend_origin",
@@ -79,11 +75,7 @@ def test_admission_frontend_origin_requires_matching_podman_inventory(
         check=False,
         capture_output=True,
         text=True,
-        env=os.environ
-        | {
-            "NETWORK_ADDRESS": network_address,
-            "INSPECTED_ADDRESS": inspected_address,
-        },
+        env=os.environ | {"INSPECTED_ADDRESS": inspected_address},
     )
 
     assert result.returncode == expected_code
@@ -456,11 +448,9 @@ def test_admission_phase_uses_only_the_revalidated_numeric_frontend_origin() -> 
     )[0]
 
     assert fixture_ready < origin < router
-    assert 'podman network inspect "$network_name"' in helper
-    assert '.Name \\"$frontend_name\\"' in helper
-    assert "{{range .Interfaces}}{{range .Subnets}}{{.IPNet}}" in helper
     assert 'podman inspect "$frontend_name"' in helper
-    assert 'frontend_address" != "$inspected_address' in helper
+    assert 'index .NetworkSettings.Networks \\"$network_name\\"' in helper
+    assert "podman network inspect" not in helper
     assert "10#$octet > 255" in helper
     assert "printf 'http://%s:3000\\n'" in helper
     assert runner.count("http://frontend:3000 401 false") == 0

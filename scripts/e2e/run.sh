@@ -437,16 +437,12 @@ start_frontend() {
 }
 
 admission_frontend_origin() {
-  local network_entry frontend_address inspected_address octet
+  local frontend_address octet
   local -a address_octets
-  network_entry="$(podman network inspect "$network_name" --format \
-    "{{range .Containers}}{{if eq .Name \"$frontend_name\"}}{{range .Interfaces}}{{range .Subnets}}{{.IPNet}}{{end}}{{end}}{{end}}{{end}}")"
-  frontend_address="${network_entry%%/*}"
-  inspected_address="$(podman inspect "$frontend_name" \
-    --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
-  if [[ -z "$frontend_address" || "$frontend_address" != "$inspected_address" \
-    || ! "$frontend_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Admission frontend has no stable IPv4 address on the E2E network." >&2
+  frontend_address="$(podman inspect "$frontend_name" --format \
+    "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}")"
+  if [[ ! "$frontend_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Admission frontend has no unambiguous IPv4 address on the E2E network." >&2
     return 1
   fi
   IFS=. read -r -a address_octets <<<"$frontend_address"
