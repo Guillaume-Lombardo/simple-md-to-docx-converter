@@ -492,11 +492,8 @@ def write_response(
         and len(response.result) > limits.max_output_bytes
     ):
         reject(ReverseErrorCategory.RESOURCE_LIMIT)
-    try:
-        state_metadata = RESPONSE_STATE_PATH.lstat()
-    except OSError:
-        reject(ReverseErrorCategory.PROTOCOL_ERROR)
-    if not stat.S_ISREG(state_metadata.st_mode):
+    state = _read_bounded(RESPONSE_STATE_PATH, MAX_METADATA_BYTES)
+    if decode_channel_state(state, response.attempt_id) != "pending":
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
     if isinstance(response, ReverseAttemptSuccess):
         _atomic_write(RESULT_PATH, _RESULT_TEMP_PATH, response.result)

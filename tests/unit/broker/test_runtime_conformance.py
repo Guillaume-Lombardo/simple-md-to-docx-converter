@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -54,5 +55,8 @@ def test_fake_backend_satisfies_shared_runtime_contract() -> None:
         workspace_runtime.try_collect_response(workspace_unit, request.attempt_id)
         is None
     )
+    for wrong_attempt_id in (uuid4(), cast(Any, "not-a-uuid")):
+        with pytest.raises(FakeRuntimeError, match="workspace"):
+            workspace_runtime.try_collect_response(workspace_unit, wrong_attempt_id)
     with pytest.raises(FakeRuntimeError, match="workspace"):
         workspace_runtime.stage_request(workspace_unit, request)

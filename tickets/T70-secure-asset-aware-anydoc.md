@@ -386,6 +386,16 @@ for reverse conversion.
   data enters labels, logs, or inventory. Production budget values, the public transport,
   persistent reverse jobs, publication, production assembly, mTLS, Kubernetes, and OCR remain
   outside this slice; no Kubernetes acceptance is claimed.
+* 2026-09-05: Follow-up review made every response-file copy revalidate the exact incarnation
+  before any subsequent copy or decode, including protocol-error paths. Raw archive validation now
+  requires the exact fixed-path USTAR header, rejects GNU/PAX forms, and verifies both file-block
+  padding and all trailing blocks are zero. The child accepts a response write only while the
+  existing state is canonical `pending` for the same attempt; malformed, already-complete, and
+  substituted-attempt states remain untouched. The shared fake runtime now rejects wrong or
+  ill-typed expected attempt identities even while no response is available. Regression coverage
+  includes post-copy identity substitution with an exact operation-local inspect count. The 706
+  broker/reversion tests and all six real rootless Podman 5.4 integrations pass; hosted Podman 4.9
+  and a fresh full-image build remain CI validation boundaries.
 
 ## Synchronization
 

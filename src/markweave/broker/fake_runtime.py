@@ -187,6 +187,8 @@ class FakeIsolationRuntime:
         if (
             record.terminated
             or record.removed
+            or type(expected_attempt_id) is not UUID
+            or record.attempt_id != expected_attempt_id
             or (response is not None and response.attempt_id != expected_attempt_id)
         ):
             raise FakeRuntimeError("Isolation runtime workspace contract failed")

@@ -520,6 +520,31 @@ def test_workspace_rejects_nonregular_result_and_response_state(
     assert result_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
 
 
+@pytest.mark.parametrize("state_kind", ("malformed", "complete", "mismatched"))
+def test_response_writer_requires_exact_attempt_bound_pending_state(
+    mocker, tmp_path: Path, state_kind: str
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    attempt_id = uuid4()
+    state = {
+        "malformed": b"{not-json}\n",
+        "complete": channel.encode_channel_state(attempt_id, "complete"),
+        "mismatched": channel.encode_channel_state(uuid4(), "pending"),
+    }[state_kind]
+    (tmp_path / "response.state").write_bytes(state)
+
+    with pytest.raises(ReverseConversionError) as captured:
+        channel.write_response(
+            ReverseAttemptSuccess(attempt_id, ReverseOutputMode.MARKDOWN, b"result"),
+            LIMITS,
+        )
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+    assert not (tmp_path / "result.bin").exists()
+    assert not (tmp_path / "response.json").exists()
+    assert (tmp_path / "response.state").read_bytes() == state
+
+
 def test_response_reader_rejects_unknown_type_and_stale_metadata_identity(
     mocker, tmp_path: Path
 ) -> None:

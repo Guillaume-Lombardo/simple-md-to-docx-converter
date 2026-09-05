@@ -115,6 +115,7 @@ class PodmanDouble:
         self.workspace: dict[str, bytes] = {}
         self.input_archives: list[bytes] = []
         self.mutate_after_cp = False
+        self.mutate_after_cp_leaf: str | None = None
         self.cp_error = False
 
     def remove_cgroup(self, path: Path) -> None:
@@ -180,7 +181,7 @@ class PodmanDouble:
                 raise PodmanRuntimeError("content-free cp failure")
             leaf = argv[1].rsplit("/", 1)[-1]
             output = _file_archive(leaf, self.workspace[leaf])
-            if self.mutate_after_cp:
+            if self.mutate_after_cp or self.mutate_after_cp_leaf == leaf:
                 self.overrides["Id"] = "6" * 64
             return 0, output
         if argv[0] == "kill":
@@ -522,6 +523,43 @@ def test_workspace_malformed_complete_metadata_revalidates_incarnation(
 
 
 @pytest.mark.unit
+def test_workspace_canonical_protocol_error_still_revalidates_after_copy(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    backend = runtime(command)
+    runtime_unit = backend.create(unit, policy)
+    inspections_before_collect = sum(
+        call[0][:2] == ("container", "inspect") for call in command.calls
+    )
+    command.workspace["response.state"] = encode_channel_state(ATTEMPT_ID, "complete")
+    command.workspace["response.json"] = (
+        json.dumps(
+            {
+                "attempt_id": str(ATTEMPT_ID),
+                "category": "lease_lost",
+                "protocol": "markweave-reverse-attempt",
+                "type": "failure",
+                "version": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+    command.mutate_after_cp_leaf = "response.json"
+
+    with pytest.raises(PodmanRuntimeError, match="invalid"):
+        backend.try_collect_response(runtime_unit, ATTEMPT_ID)
+
+    collect_inspections = (
+        sum(call[0][:2] == ("container", "inspect") for call in command.calls)
+        - inspections_before_collect
+    )
+    assert collect_inspections == 3
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "mutate",
     (
@@ -618,6 +656,13 @@ def test_workspace_tar_rejects_multiple_regular_members_and_nonzero_padding() ->
     with pytest.raises(PodmanRuntimeError, match="archive"):
         podman_runtime._read_single_file_archive(bytes(padded), "response.json", 4096)
 
+    data_padding = bytearray(_file_archive("response.json", b"x"))
+    data_padding[513] = 1
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            bytes(data_padding), "response.json", 4096
+        )
+
 
 @pytest.mark.unit
 def test_workspace_tar_rejects_regular_member_with_pax_metadata() -> None:
@@ -626,6 +671,20 @@ def test_workspace_tar_rejects_regular_member_with_pax_metadata() -> None:
         member = tarfile.TarInfo("response.json")
         member.size = 1
         member.pax_headers = {"comment": "not-allowlisted"}
+        archive.addfile(member, io.BytesIO(b"x"))
+
+    with pytest.raises(PodmanRuntimeError, match="archive"):
+        podman_runtime._read_single_file_archive(
+            output.getvalue(), "response.json", 4096
+        )
+
+
+@pytest.mark.unit
+def test_workspace_tar_rejects_valid_gnu_header() -> None:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w", format=tarfile.GNU_FORMAT) as archive:
+        member = tarfile.TarInfo("response.json")
+        member.size = 1
         archive.addfile(member, io.BytesIO(b"x"))
 
     with pytest.raises(PodmanRuntimeError, match="archive"):

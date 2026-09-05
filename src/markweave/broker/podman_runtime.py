@@ -552,20 +552,22 @@ class PodmanIsolationRuntime:
                 response = decode_response_metadata(metadata, result)
         except ReverseConversionError as error:
             raise PodmanRuntimeError("Podman workspace response is invalid") from error
-        except BaseException:
-            self._workspace_context(verified)
-            raise
-        self._workspace_context(verified)
         return response
 
     def _copy_workspace_file(
         self, runtime_unit: PodmanRuntimeUnit, leaf: str, maximum: int
     ) -> bytes:
-        _, output = self._call(
-            ("cp", f"{runtime_unit.container_id}:/work/{leaf}", "-"),
-            max_output_bytes=_tar_output_ceiling(maximum),
-        )
-        return _read_single_file_archive(output, leaf, maximum)
+        try:
+            _, output = self._call(
+                ("cp", f"{runtime_unit.container_id}:/work/{leaf}", "-"),
+                max_output_bytes=_tar_output_ceiling(maximum),
+            )
+            content = _read_single_file_archive(output, leaf, maximum)
+        except BaseException:
+            self._workspace_context(runtime_unit)
+            raise
+        self._workspace_context(runtime_unit)
+        return content
 
     def _workspace_context(
         self, runtime_unit: PodmanRuntimeUnit
@@ -1470,14 +1472,29 @@ def _read_single_file_archive(value: bytes, expected_name: str, maximum: int) ->
             if len(members) != 1:
                 raise PodmanRuntimeError("Podman workspace archive is invalid")
             member = members[0]
+            header = value[:_TAR_BLOCK_BYTES]
+            encoded_name = expected_name.encode("ascii")
             if (
                 member.name != expected_name
-                or member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE}
+                or member.type != tarfile.REGTYPE
                 or member.linkname
                 or member.pax_headers
                 or member.size > maximum
                 or member.offset != 0
                 or member.offset_data != _TAR_BLOCK_BYTES
+                or header[:100] != encoded_name.ljust(100, b"\0")
+                or re.fullmatch(rb"[0-7]{7}\0", header[100:108]) is None
+                or re.fullmatch(rb"[0-7]{7}\0", header[108:116]) is None
+                or re.fullmatch(rb"[0-7]{7}\0", header[116:124]) is None
+                or re.fullmatch(rb"[0-7]{11}\0", header[124:136]) is None
+                or re.fullmatch(rb"[0-7]{11}\0", header[136:148]) is None
+                or re.fullmatch(rb"[0-7]{6}\0 ", header[148:156]) is None
+                or header[156:157] != tarfile.REGTYPE
+                or header[157:257] != b"\0" * 100
+                or header[257:263] != b"ustar\0"
+                or header[263:265] != b"00"
+                or header[345:500] != b"\0" * 155
+                or header[500:512] != b"\0" * 12
             ):
                 raise PodmanRuntimeError("Podman workspace archive is invalid")
             content_end = (
@@ -1485,7 +1502,11 @@ def _read_single_file_archive(value: bytes, expected_name: str, maximum: int) ->
                 + ((member.size + _TAR_BLOCK_BYTES - 1) // _TAR_BLOCK_BYTES)
                 * _TAR_BLOCK_BYTES
             )
-            if len(value) - content_end < _TAR_END_BYTES or any(value[content_end:]):
+            if (
+                any(value[member.offset_data + member.size : content_end])
+                or len(value) - content_end < _TAR_END_BYTES
+                or any(value[content_end:])
+            ):
                 raise PodmanRuntimeError("Podman workspace archive is invalid")
             stream = archive.extractfile(member)
             if stream is None:
