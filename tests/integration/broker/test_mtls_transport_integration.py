@@ -88,8 +88,8 @@ class CertificateSet:
     expired_client_key: Path
 
 
-def _run(*arguments: str) -> None:
-    subprocess.run(
+def _run(*arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         arguments,
         check=True,
         capture_output=True,
@@ -155,6 +155,19 @@ def _issue(  # noqa: PLR0913
         "-out",
         str(certificate),
     )
+    if expired:
+        end_date = _run(
+            "openssl", "x509", "-enddate", "-noout", "-in", str(certificate)
+        ).stdout.strip()
+        prefix = "notAfter="
+        if not end_date.startswith(prefix):
+            raise RuntimeError("Expired test certificate validity is unavailable")
+        expires_at = ssl.cert_time_to_seconds(end_date.removeprefix(prefix))
+        wait_deadline = time.monotonic() + 2
+        while time.time() <= expires_at:
+            if time.monotonic() >= wait_deadline:
+                raise RuntimeError("Expired test certificate did not expire")
+            time.sleep(0.01)
     return certificate, key
 
 
