@@ -136,6 +136,10 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
         "tests/integration/broker/test_podman_runtime_integration.py",
         "tests/integration/broker/test_broker_process_integration.py",
         "tests/integration/broker/test_unix_broker_transport.py",
+        "packaging/broker/broker-unix-v1.json.in",
+        "packaging/broker/broker-mtls-v2.json.in",
+        "packaging/systemd/user/markweave-broker.service",
+        "docs/reverse-broker-deployment.md",
         "spikes/anydoc/LICENSE.anydoc",
         "spikes/anydoc/corpus/docx/text.docx",
         "LICENSE",
@@ -146,6 +150,20 @@ def test_reverse_attempt_inputs_select_container_validation(path: str) -> None:
     """Every input baked into or exercised against the attempt image rebuilds it."""
 
     assert "container" in select_domains([path])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "packaging/broker/broker-unix-v1.json.in",
+        "packaging/broker/broker-mtls-v2.json.in",
+        "packaging/systemd/user/markweave-broker.service",
+        "docs/reverse-broker-deployment.md",
+    ],
+)
+def test_broker_service_deployment_selects_only_container_domain(path: str) -> None:
+    assert select_domains([path]) == ["container"]
 
 
 @pytest.mark.unit
