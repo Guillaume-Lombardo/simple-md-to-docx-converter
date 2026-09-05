@@ -33,7 +33,7 @@ from markweave.broker.mtls_transport import (
     MtlsPeerIdentity,
     MtlsServerContext,
     MtlsTransportLimits,
-    build_mtls_server_context,
+    build_mtls_server_context_from_material,
 )
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
@@ -64,7 +64,7 @@ _IMAGE_REPOSITORY_PATTERN = re.compile(
     r"/[a-z0-9][a-z0-9._/-]*\Z"
 )
 _TLS_MATERIAL_MAX_BYTES = 65_536
-_SECURE_FILE_READ_CHUNK = 8192
+_TLS_MATERIAL_COUNT = 3
 _UNIX_TRANSPORT = "unix"
 _MTLS_TRANSPORT = "mtls"
 
@@ -93,6 +93,7 @@ class BrokerProcessConfig:
     mtls_endpoint: MtlsEndpoint | None = None
     mtls_local_identity: MtlsLocalIdentity | None = None
     mtls_client_identity: MtlsPeerIdentity | None = None
+    mtls_material: tuple[bytes, bytes, bytes] | None = field(default=None, repr=False)
 
 
 def _configuration_failure() -> Never:
@@ -171,31 +172,6 @@ def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
             ) from error
     finally:
         os.close(descriptor)
-
-
-def _verify_open_file_length(descriptor: int, *, maximum: int) -> None:
-    """Prove a retained secure file still has its validated bounded length."""
-
-    try:
-        expected = os.fstat(descriptor).st_size
-        observed = 0
-        while observed <= maximum:
-            chunk = os.pread(
-                descriptor,
-                min(_SECURE_FILE_READ_CHUNK, maximum + 1 - observed),
-                observed,
-            )
-            if not chunk:
-                break
-            observed += len(chunk)
-        if observed != expected or observed > maximum:
-            _configuration_failure()
-    except BrokerProcessConfigurationError:
-        raise
-    except OSError as error:
-        raise BrokerProcessConfigurationError(
-            "Broker process configuration is invalid"
-        ) from error
 
 
 def _secure_directory(path: Path) -> tuple[int, int]:
@@ -455,6 +431,7 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
     mtls_endpoint: MtlsEndpoint | None = None
     mtls_local_identity: MtlsLocalIdentity | None = None
     mtls_client_identity: MtlsPeerIdentity | None = None
+    mtls_material: tuple[bytes, bytes, bytes] | None = None
     if transport_kind == _MTLS_TRANSPORT:
         mtls = _required_object(
             root["mtls"],
@@ -478,12 +455,17 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         material_paths = (ca_path, certificate_path, private_key_path)
         if len(set(material_paths)) != len(material_paths):
             _configuration_failure()
+        loaded_material: list[bytes] = []
         for material_path in material_paths:
             _secure_directory(material_path.parent)
-            descriptor = _open_secure_file(
-                material_path, maximum=_TLS_MATERIAL_MAX_BYTES
+            loaded_material.append(
+                _secure_file_bytes(material_path, maximum=_TLS_MATERIAL_MAX_BYTES)
             )
-            os.close(descriptor)
+        mtls_material = (
+            loaded_material[0],
+            loaded_material[1],
+            loaded_material[2],
+        )
         try:
             local_principal_value = mtls["local_principal_id"]
             if type(local_principal_value) is not str:
@@ -531,6 +513,7 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         mtls_endpoint,
         mtls_local_identity,
         mtls_client_identity,
+        mtls_material,
     )
 
 
@@ -633,9 +616,11 @@ def _prepared_mtls_server_context(
             or config.mtls_endpoint is not None
             or config.mtls_local_identity is not None
             or config.mtls_client_identity is not None
+            or config.mtls_material is not None
         ):
             _configuration_failure()
         return None
+    material = config.mtls_material
     if (
         config.transport_kind != _MTLS_TRANSPORT
         or config.socket_path is not None
@@ -644,43 +629,25 @@ def _prepared_mtls_server_context(
         or config.mtls_endpoint.port == 0
         or config.mtls_local_identity is None
         or config.mtls_client_identity is None
+        or type(material) is not tuple
+        or len(material) != _TLS_MATERIAL_COUNT
+        or any(
+            type(value) is not bytes or not 0 < len(value) <= _TLS_MATERIAL_MAX_BYTES
+            for value in material
+        )
         or config.mtls_local_identity.principal == config.principal
         or config.mtls_client_identity.principal != config.principal
     ):
         _configuration_failure()
     local = config.mtls_local_identity
-    descriptors: list[int] = []
     try:
-        for path in (
-            local.ca_certificate,
-            local.certificate_chain,
-            local.private_key,
-        ):
-            descriptor = _open_secure_file(path, maximum=_TLS_MATERIAL_MAX_BYTES)
-            descriptors.append(descriptor)
-            _verify_open_file_length(
-                descriptor,
-                maximum=_TLS_MATERIAL_MAX_BYTES,
-            )
-        loaded_identity = MtlsLocalIdentity(
-            Path(f"/proc/self/fd/{descriptors[0]}"),
-            Path(f"/proc/self/fd/{descriptors[1]}"),
-            Path(f"/proc/self/fd/{descriptors[2]}"),
-            local.uri_san,
-            local.principal,
-        )
-        return build_mtls_server_context(
-            loaded_identity, declared_identity=config.mtls_local_identity
-        )
+        return build_mtls_server_context_from_material(local, material)
     except BrokerProcessConfigurationError:
         raise
     except (OSError, ValueError) as error:
         raise BrokerProcessConfigurationError(
             "Broker process configuration is invalid"
         ) from error
-    finally:
-        for descriptor in descriptors:
-            os.close(descriptor)
 
 
 def build_broker_server(

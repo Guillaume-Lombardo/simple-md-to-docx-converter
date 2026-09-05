@@ -485,6 +485,33 @@ def test_server_context_uses_the_direct_identity_when_no_alias_is_needed(
     assert prepared._context is context
 
 
+def test_server_context_loads_an_immutable_material_snapshot(
+    mocker: MockerFixture,
+) -> None:
+    context = mocker.Mock(spec=ssl.SSLContext)
+    observed: tuple[bytes, bytes, bytes] | None = None
+
+    def load_context(identity: MtlsLocalIdentity, *, server: bool) -> ssl.SSLContext:
+        nonlocal observed
+        assert server
+        observed = (
+            identity.ca_certificate.read_bytes(),
+            identity.certificate_chain.read_bytes(),
+            identity.private_key.read_bytes(),
+        )
+        return context
+
+    mocker.patch.object(mtls_transport, "_tls_context", side_effect=load_context)
+    material = (b"private CA", b"server certificate", b"private key")
+
+    prepared = mtls_transport.build_mtls_server_context_from_material(LOCAL, material)
+
+    assert observed == material
+    assert prepared._local_identity == LOCAL
+    assert prepared._context is context
+    assert "private key" not in repr(prepared)
+
+
 def test_server_preserves_stop_requested_before_start(
     mocker: MockerFixture,
 ) -> None:

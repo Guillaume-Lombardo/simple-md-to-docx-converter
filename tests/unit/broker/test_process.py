@@ -488,6 +488,20 @@ def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
 ) -> None:
     path, _ = _mtls_configuration(tmp_path)
     config = load_broker_process_config(path)
+    assert config.mtls_local_identity is not None
+    assert config.mtls_material is not None
+    original_material = config.mtls_material
+    for index, material_path in enumerate(
+        (
+            config.mtls_local_identity.ca_certificate,
+            config.mtls_local_identity.certificate_chain,
+            config.mtls_local_identity.private_key,
+        )
+    ):
+        replacement = material_path.with_name(f"replacement-{index}")
+        replacement.write_bytes(f"REPLACED-{index}".encode())
+        replacement.chmod(0o600)
+        replacement.replace(material_path)
     mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
     mocker.patch("markweave.broker.process.PodmanIsolationRuntime")
     service = mocker.patch("markweave.broker.process.IsolationBrokerService")
@@ -495,8 +509,10 @@ def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
     unix_server = mocker.patch("markweave.broker.process.UnixBrokerServer")
     mtls_server = mocker.patch("markweave.broker.process.MtlsBrokerServer")
     mtls_server.return_value._adopt_authority_lock.side_effect = os.close
+    server_context = object()
     context_builder = mocker.patch(
-        "markweave.broker.process.build_mtls_server_context", return_value=object()
+        "markweave.broker.process.build_mtls_server_context_from_material",
+        return_value=server_context,
     )
     mocker.patch("markweave.broker.process.BoundedCommandRunner")
 
@@ -512,15 +528,11 @@ def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
         dispatcher=dispatcher.return_value,
         limits=config.transport_limits,
         workspace_limits=config.policy.channel_limits,
-        server_context=context_builder.return_value,
+        server_context=server_context,
     )
-    assert config.mtls_local_identity is not None
-    loaded_identity = context_builder.call_args.args[0]
-    assert loaded_identity.principal == config.mtls_local_identity.principal
-    assert str(loaded_identity.private_key).startswith("/proc/self/fd/")
-    assert context_builder.call_args.kwargs == {
-        "declared_identity": config.mtls_local_identity
-    }
+    context_builder.assert_called_once_with(
+        config.mtls_local_identity, original_material
+    )
 
 
 @pytest.mark.unit
@@ -531,44 +543,6 @@ def test_factory_rejects_invalid_mtls_pem_before_inventory_mutation(
     config = load_broker_process_config(path)
     inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
     authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
-
-    with pytest.raises(BrokerProcessConfigurationError):
-        build_broker_server(config)
-
-    inventory.assert_not_called()
-    authority.assert_not_called()
-    assert not (config.state_directory / "inventory.sqlite3").exists()
-
-
-@pytest.mark.unit
-def test_factory_preserves_secure_mtls_file_rejection_before_inventory(
-    tmp_path: Path, mocker: MockerFixture
-) -> None:
-    path, _ = _mtls_configuration(tmp_path)
-    config = load_broker_process_config(path)
-    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
-    mocker.patch(
-        "markweave.broker.process._open_secure_file",
-        side_effect=BrokerProcessConfigurationError(
-            "Broker process configuration is invalid"
-        ),
-    )
-
-    with pytest.raises(BrokerProcessConfigurationError):
-        build_broker_server(config)
-
-    inventory.assert_not_called()
-
-
-@pytest.mark.unit
-def test_factory_rejects_changed_mtls_file_length_before_inventory(
-    tmp_path: Path, mocker: MockerFixture
-) -> None:
-    path, _ = _mtls_configuration(tmp_path)
-    config = load_broker_process_config(path)
-    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
-    authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
-    mocker.patch("markweave.broker.process.os.pread", return_value=b"")
 
     with pytest.raises(BrokerProcessConfigurationError):
         build_broker_server(config)
@@ -621,7 +595,9 @@ def test_factory_rejects_incoherent_unix_state_before_inventory(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("invalid_field", ["socket", "limits", "endpoint", "kind"])
+@pytest.mark.parametrize(
+    "invalid_field", ["socket", "limits", "endpoint", "kind", "material"]
+)
 def test_factory_rejects_incoherent_mtls_state_before_inventory(
     tmp_path: Path, mocker: MockerFixture, invalid_field: str
 ) -> None:
@@ -633,6 +609,8 @@ def test_factory_rejects_incoherent_mtls_state_before_inventory(
         config = replace(config, transport_limits=UnixTransportLimits(1, 2, 2, 2))
     elif invalid_field == "endpoint":
         config = replace(config, mtls_endpoint=None)
+    elif invalid_field == "material":
+        config = replace(config, mtls_material=None)
     else:
         config = replace(config, transport_kind="tcp")
     inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")

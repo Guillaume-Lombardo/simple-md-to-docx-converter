@@ -522,13 +522,16 @@ for reverse conversion.
   two client leaf-certificate pins, and absolute CA, chain, and private-key paths; mixed or
   incomplete transport state is rejected. TLS files are opened nonblocking with no-follow and
   close-on-exec, constrained to distinct owner-only regular single-link files under canonical
-  owner-only parents, and loaded through held `/proc/self/fd` handles before any inventory or
-  authority mutation. The preloaded context remains bound to the original declared identity. The
+  owner-only parents, and copied exactly once into immutable bounded snapshots before any inventory
+  or authority mutation. OpenSSL loads those snapshots through ephemeral close-on-exec memory-file
+  handles, so a path replacement between configuration parsing and server construction cannot
+  substitute CA, certificate, or key material. The preloaded context remains bound to the original
+  declared identity. The
   mTLS listener adopts the existing per-EUID broker authority lock and retains it whenever handler
   drainage is not proven. Real subprocess and rootless-Podman coverage exercises complete lifecycle
   and workspace pending/success/failure paths, SIGINT/SIGTERM, wrong pin/CA/SAN/EKU with no state
   mutation, malformed/insecure/symlink/FIFO TLS material before state creation, two-process lock
-  exclusion, and SIGKILL orphan reconciliation before readiness. The 796-test broker boundary and
+  exclusion, and SIGKILL orphan reconciliation before readiness. The 807-test broker boundary and
   3,233-test light selection pass at 93.82% total and 90.04% branch coverage; changed application
   lines reach 90.45%. Ruff and `ty` pass. Deployment manifests remain excluded. A future Secret
   projection must atomically copy and chown TLS material into EUID-owned `0400`/`0600` files below

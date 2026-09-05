@@ -67,6 +67,8 @@ _IPV4_VERSION: Final = 4
 _MAX_PORT: Final = 65535
 _MAX_PINS: Final = 2
 _MAX_URI_LENGTH: Final = 255
+_TLS_MATERIAL_COUNT: Final = 3
+_TLS_MATERIAL_MAX_BYTES: Final = 65_536
 _SERVER_CONTEXT_TOKEN = object()
 
 
@@ -442,6 +444,49 @@ def build_mtls_server_context(
     return MtlsServerContext(
         _tls_context(local, server=True), binding, _SERVER_CONTEXT_TOKEN
     )
+
+
+def build_mtls_server_context_from_material(
+    local: MtlsLocalIdentity,
+    material: tuple[bytes, bytes, bytes],
+) -> MtlsServerContext:
+    """Load one immutable material snapshot and bind it to its declared identity."""
+
+    if (
+        type(local) is not MtlsLocalIdentity
+        or type(material) is not tuple
+        or len(material) != _TLS_MATERIAL_COUNT
+        or any(
+            type(value) is not bytes or not 0 < len(value) <= _TLS_MATERIAL_MAX_BYTES
+            for value in material
+        )
+    ):
+        raise ValueError("Broker mTLS certificate material is invalid")
+    descriptors: list[int] = []
+    try:
+        for value in material:
+            descriptor = os.memfd_create("markweave-tls-material", os.MFD_CLOEXEC)
+            descriptors.append(descriptor)
+            offset = 0
+            while offset < len(value):
+                written = os.write(descriptor, value[offset:])
+                if written <= 0:
+                    raise ValueError("Broker mTLS certificate material is invalid")
+                offset += written
+            os.lseek(descriptor, 0, os.SEEK_SET)
+        loaded = MtlsLocalIdentity(
+            Path(f"/proc/self/fd/{descriptors[0]}"),
+            Path(f"/proc/self/fd/{descriptors[1]}"),
+            Path(f"/proc/self/fd/{descriptors[2]}"),
+            local.uri_san,
+            local.principal,
+        )
+        return MtlsServerContext(
+            _tls_context(loaded, server=True), local, _SERVER_CONTEXT_TOKEN
+        )
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
 
 
 def _authenticate_peer(
