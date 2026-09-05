@@ -133,6 +133,8 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
         "tests/integration/broker/fixtures/Containerfile",
         "tests/integration/broker/fixtures/attempt_main.py",
         "tests/integration/broker/test_podman_runtime_integration.py",
+        "tests/integration/broker/test_broker_process_integration.py",
+        "tests/integration/broker/test_unix_broker_transport.py",
         "spikes/anydoc/LICENSE.anydoc",
         "spikes/anydoc/corpus/docx/text.docx",
         "LICENSE",

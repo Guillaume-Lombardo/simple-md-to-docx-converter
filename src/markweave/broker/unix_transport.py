@@ -221,6 +221,38 @@ class UnixBrokerServer:
         self._accept_thread: Thread | None = None
         self._fatal_error: BaseException | None = None
 
+    @property
+    def stopping(self) -> bool:
+        """Return the content-free admission-stop signal."""
+
+        return self._stopping.is_set()
+
+    @property
+    def failed(self) -> bool:
+        """Return whether an internal transport failure requested shutdown."""
+
+        with self._threads_lock:
+            return self._fatal_error is not None
+
+    def wait_stopping(self, timeout: float | None = None) -> bool:
+        """Wait for requested or fatal shutdown without exposing its cause."""
+
+        if timeout is not None and (
+            type(timeout) not in {int, float}
+            or timeout < 0
+            or not math.isfinite(timeout)
+        ):
+            raise ValueError("Broker Unix wait timeout is invalid")
+        return self._stopping.wait(timeout)
+
+    def request_stop(self) -> None:
+        """Stop new admission and wake the serving process."""
+
+        self._stopping.set()
+        listener = self._listener
+        if listener is not None:
+            listener.close()
+
     def start(self) -> None:
         """Bind the owner-only socket and start bounded connection handling."""
 

@@ -29,7 +29,7 @@ bash scripts/container/build.sh "$final_image"
 bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
 bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
 MARKWEAVE_T70_PODMAN_TEST_IMAGE="$reverse_attempt_image" \
-  uv run pytest tests/integration/broker/test_podman_runtime_integration.py \
+  uv run pytest tests/integration/broker \
     -m integration --no-cov
 source_date_epoch="$(git show -s --format=%ct HEAD)"
 readonly source_date_epoch

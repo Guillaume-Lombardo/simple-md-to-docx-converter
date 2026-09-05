@@ -565,3 +565,59 @@ def test_response_binding_rejects_every_identity_mismatch(
     with pytest.raises(BrokerError) as captured:
         _validate_response_binding(broker_request, response, PRINCIPAL)
     assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+
+def test_public_stop_signal_is_content_free_and_wakes_waiters(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    server = UnixBrokerServer(
+        _private_parent(tmp_path) / "broker.sock",
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+
+    assert not server.stopping
+    assert not server.failed
+    assert not server.wait_stopping(0)
+
+    server.request_stop()
+
+    assert server.stopping
+    assert server.wait_stopping(0)
+    assert not server.failed
+
+
+def test_public_fatal_signal_exposes_no_internal_cause(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    server = UnixBrokerServer(
+        _private_parent(tmp_path) / "broker.sock",
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+
+    server._record_fatal(ValueError("private document detail"))
+
+    assert server.failed
+    assert server.stopping
+    assert server.wait_stopping(0)
+
+
+@pytest.mark.parametrize("timeout", [-1, float("inf"), True, "1"])
+def test_public_stop_wait_rejects_invalid_timeout(
+    tmp_path: Path, mocker: MockerFixture, timeout: object
+) -> None:
+    server = UnixBrokerServer(
+        _private_parent(tmp_path) / "broker.sock",
+        expected_client_uid=os.geteuid(),
+        principal=PRINCIPAL,
+        dispatcher=mocker.Mock(spec=BrokerDispatcher),
+        limits=_limits(),
+    )
+
+    with pytest.raises(ValueError, match="wait timeout"):
+        server.wait_stopping(cast("float", timeout))

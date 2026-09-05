@@ -61,8 +61,7 @@ DOMAIN_PATTERNS: Mapping[str, tuple[str, ...]] = {
         "src/markweave/broker/**",
         "scripts/container/**",
         "tests/container/**",
-        "tests/integration/broker/fixtures/**",
-        "tests/integration/broker/test_podman_runtime_integration.py",
+        "tests/integration/broker/**",
     ),
     "document-engines": (
         "package.json",

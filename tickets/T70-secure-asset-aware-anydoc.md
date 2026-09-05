@@ -420,6 +420,23 @@ for reverse conversion.
   converted into an explicit failed contract check. A real Python 3.14 base retaining the expected
   venv and module layout but with `anydoc` removed is rejected without producing an overlay image.
   The positive overlay build, complete smoke, and all eight real rootless Podman integrations pass.
+* 2026-09-05: Added the host-native lifecycle-only broker process assembly. A bounded canonical
+  owner-only configuration supplies every lifecycle, transport, Podman, inventory, and channel
+  limit; the authentication key is read from a pre-existing single-link owner file with
+  `O_NOFOLLOW` and `O_CLOEXEC`, while the SQLite database and sidecars are created under umask 077
+  and revalidated as owner-only regular files. The factory derives the rootless UID and cgroup root,
+  uses fixed absolute Podman and systemd commands with allowlisted environments, gives inventory and
+  discovery the same capacity, and completes startup reconciliation before exposing the Unix
+  listener. The transport now exposes a content-free stopping/fatal signal, and the process maps
+  signals and internal failures to bounded exit behavior with an independent hard shutdown
+  watchdog. The installed `markweave-broker` entry point retains a dependency-light failure boundary
+  for minimal wheel profiles. Real subprocess coverage exercises the complete lifecycle, lock
+  exclusion, SIGINT/SIGTERM, SIGKILL orphan reconciliation before readiness, malformed modes/config,
+  and exact container/cgroup cleanup. The full broker boundary passes 29 tests against rootless
+  Podman 5.4, the light selection passes 3,024 tests at 93.99% total and 90.13% branch coverage, and
+  the clean-wheel installation probe passes. The public protocol remains v1; STAGE/COLLECT wire
+  operations, T71 jobs/leases/publication, production budgets, mTLS, deployment manifests,
+  Kubernetes, OCR, and UI remain excluded.
 
 ## Synchronization
 

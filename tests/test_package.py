@@ -33,7 +33,10 @@ def test_internal_runtime_factory_is_not_reexported_as_public_api() -> None:
 def test_package_declares_the_markweave_console_entry_point() -> None:
     """The installed executable resolves to the stable root registry."""
     metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert metadata["project"]["scripts"] == {"markweave": "markweave.cli.main:main"}
+    assert metadata["project"]["scripts"] == {
+        "markweave": "markweave.cli.main:main",
+        "markweave-broker": "markweave.broker_process:main",
+    }
 
 
 @pytest.mark.unit

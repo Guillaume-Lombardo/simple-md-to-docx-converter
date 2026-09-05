@@ -63,6 +63,7 @@ reverse-attempt = [
 
 [project.scripts]
 markweave = "markweave.cli.main:main"
+markweave-broker = "markweave.broker_process:main"
 
 [project.urls]
 Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/python-distribution.md"
