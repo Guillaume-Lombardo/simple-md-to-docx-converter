@@ -40,6 +40,8 @@ PODMAN = Path("/usr/bin/podman")
 SYSTEMCTL = Path("/usr/bin/systemctl")
 TEST_IMAGE = "localhost/markweave-t70-runtime-integration:current"
 WORKSPACE_IMAGE = "localhost/markweave-t70-workspace-integration:current"
+INCOMPATIBLE_BASE_IMAGE = "localhost/markweave-t70-incompatible-base:current"
+REJECTED_WORKSPACE_IMAGE = "localhost/markweave-t70-rejected-workspace:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("33333333-3333-4333-8333-333333333333"))
 UNIT_IDS = (
@@ -203,6 +205,49 @@ def workspace_image(
         yield WORKSPACE_IMAGE.rsplit(":", 1)[0], digest
     finally:
         _podman("image", "rm", "--force", WORKSPACE_IMAGE)
+
+
+@pytest.mark.integration
+def test_workspace_overlay_rejects_optimized_wrong_interpreter_base(
+    controlled_image: tuple[str, str],
+) -> None:
+    del controlled_image
+    base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
+    fixture_root = ROOT / "tests/integration/broker/fixtures"
+    try:
+        _podman(
+            "build",
+            "--format",
+            "oci",
+            "--tag",
+            INCOMPATIBLE_BASE_IMAGE,
+            "--file",
+            str(fixture_root / "IncompatibleWorkspaceBase.Containerfile"),
+            "--build-arg",
+            f"BASE_IMAGE={base}",
+            str(fixture_root),
+        )
+        rejected = _podman(
+            "build",
+            "--format",
+            "oci",
+            "--tag",
+            REJECTED_WORKSPACE_IMAGE,
+            "--file",
+            str(fixture_root / "WorkspaceContainerfile"),
+            "--build-arg",
+            f"BASE_IMAGE={INCOMPATIBLE_BASE_IMAGE}",
+            str(ROOT),
+            check=False,
+        )
+        assert rejected.returncode != 0
+        assert (
+            _podman("image", "exists", REJECTED_WORKSPACE_IMAGE, check=False).returncode
+            == 1
+        )
+    finally:
+        _podman("image", "rm", "--force", REJECTED_WORKSPACE_IMAGE, check=False)
+        _podman("image", "rm", "--force", INCOMPATIBLE_BASE_IMAGE, check=False)
 
 
 def _policy(image_digest: str, wall_time_millis: int = 10_000) -> BrokerPolicy:

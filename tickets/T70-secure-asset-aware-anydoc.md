@@ -408,9 +408,12 @@ for reverse conversion.
 * 2026-09-05: The real-Podman workspace overlay now rejects incompatible base-image overrides
   before copying into a fixed interpreter layout. Its build preflight requires the exact executable
   venv, Python 3.14, matching prefix and site-packages membership, and an existing attempt-runner
-  import resolving from that destination. The controlled overlay build, complete smoke, and all six
-  real rootless integrations pass; an incompatible local image is rejected at the preflight and
-  produces no tagged result.
+  import resolving from that destination. Review then made the preflight independent of Python
+  assertion optimization and inherited `PYTHON*` variables: it executes with an empty environment,
+  ignores Python environment settings, and exits explicitly from boolean checks. A real adversarial
+  base with `PYTHONOPTIMIZE=1`, a Python 3.9 interpreter at the expected executable path, and a decoy
+  module is rejected without producing an image. The controlled overlay build, complete smoke, and
+  all seven real rootless integrations pass.
 
 ## Synchronization
 

@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 USER 0
 RUN test -x /opt/markweave/venv/bin/python \
-    && /opt/markweave/venv/bin/python -c 'import pathlib, sys; destination = pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages"); assert sys.version_info[:2] == (3, 14); assert pathlib.Path(sys.executable).resolve() == pathlib.Path("/opt/markweave/venv/bin/python").resolve(); assert pathlib.Path(sys.prefix).resolve() == pathlib.Path("/opt/markweave/venv").resolve(); assert str(destination) in sys.path; import markweave.reversions.attempt_main as attempt_main; assert pathlib.Path(attempt_main.__file__).resolve().parent == destination / "markweave/reversions"'
+    && env -i /opt/markweave/venv/bin/python -E -c 'import importlib.util, pathlib, sys; destination = pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages"); executable = pathlib.Path("/opt/markweave/venv/bin/python").resolve(); specification = importlib.util.find_spec("markweave.reversions.attempt_main"); valid = sys.version_info[:2] == (3, 14) and pathlib.Path(sys.executable).resolve() == executable and pathlib.Path(sys.prefix).resolve() == pathlib.Path("/opt/markweave/venv").resolve() and str(destination) in sys.path and specification is not None and specification.origin is not None and pathlib.Path(specification.origin).resolve().parent == destination / "markweave/reversions"; raise SystemExit(0 if valid else 1)'
 COPY LICENSE /opt/markweave/licenses/markweave/LICENSE
 COPY src/markweave/reversions \
     /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions

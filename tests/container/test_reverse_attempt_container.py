@@ -109,14 +109,18 @@ def test_workspace_overlay_fails_closed_on_incompatible_base_image() -> None:
     preflight = fixture.index("RUN test -x /opt/markweave/venv/bin/python")
     overlay = fixture.index("COPY src/markweave/reversions")
     assert preflight < overlay
+    assert "env -i /opt/markweave/venv/bin/python -E -c" in fixture
+    assert "assert " not in fixture
     for contract in (
         "sys.version_info[:2] == (3, 14)",
         'pathlib.Path("/opt/markweave/venv/bin/python").resolve()',
         'pathlib.Path("/opt/markweave/venv").resolve()',
         'pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages")',
         "str(destination) in sys.path",
-        "import markweave.reversions.attempt_main as attempt_main",
-        'destination / "markweave/reversions"',
+        'find_spec("markweave.reversions.attempt_main")',
+        "specification.origin is not None",
+        'pathlib.Path(specification.origin).resolve().parent == destination / "markweave/reversions"',
+        "raise SystemExit(0 if valid else 1)",
     ):
         assert contract in fixture
 
