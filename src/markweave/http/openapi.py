@@ -96,6 +96,21 @@ def document_openapi_contract(app: FastAPI, *, session_cookie_name: str) -> None
         response = schema["paths"][path]["get"]["responses"]["200"]
         response.setdefault("headers", {}).update(template_download_headers)
 
+    reversion_capability_headers = {
+        "Cache-Control": {
+            "description": "Prevents shared and private caching of runtime capabilities.",
+            "schema": {"type": "string", "const": "private, no-store"},
+        },
+        "X-Content-Type-Options": {
+            "description": "Prevents content-type sniffing.",
+            "schema": {"type": "string", "const": "nosniff"},
+        },
+    }
+    reversion_response = schema["paths"]["/api/v1/reversions/capabilities"]["get"][
+        "responses"
+    ]["200"]
+    reversion_response.setdefault("headers", {}).update(reversion_capability_headers)
+
     policy_etag_header = {
         "description": "Current role-specific idle-session policy revision.",
         "schema": {"type": "string"},

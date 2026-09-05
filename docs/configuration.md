@@ -116,6 +116,17 @@ row and its immutable audits in database backup, restore, and rollback procedure
 | `MARKWEAVE_CONVERSION_FONT_MANIFEST_PATH` | Required path | Both; image's locked font manifest |
 | `MARKWEAVE_CONVERSION_RETRY_AFTER_SECONDS` | Required positive integer | API responses in both profiles |
 
+## Reverse-conversion admission
+
+| Environment variable | Requirement | Applies to / constraint |
+| --- | --- | --- |
+| `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES` | Optional positive integer; no default | Both profiles; authoritative maximum exposed by the authenticated capabilities endpoint |
+
+When `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES` is absent, existing forward-conversion deployments
+continue to start, but `GET /api/v1/reversions/capabilities` fails safely with `503` and reverse
+submission remains unavailable. Operators must select a measured, reviewed value before enabling
+the reverse workflow; Markweave does not infer one from the forward-conversion upload limit.
+
 ## Jobs, workers, metrics, and retention
 
 | Environment variable | Requirement or default | Applies to / constraint |

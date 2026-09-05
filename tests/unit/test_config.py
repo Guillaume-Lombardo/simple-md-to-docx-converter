@@ -68,7 +68,22 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.malware_scanning_mode is MalwareScanningMode.CLAMAV
     assert settings.public_origin is None
     assert settings.insecure_evaluation_mode is False
+    assert settings.reversion_upload_max_bytes is None
     assert secret not in repr(settings)
+
+
+@pytest.mark.unit
+def test_reverse_upload_limit_is_optional_but_strictly_positive() -> None:
+    configured = Settings.model_validate(
+        _environment_configuration(reversion_upload_max_bytes=4_194_304)
+    )
+    assert configured.reversion_upload_max_bytes == 4_194_304
+
+    for invalid in (0, -1):
+        with pytest.raises(ValidationError):
+            Settings.model_validate(
+                _environment_configuration(reversion_upload_max_bytes=invalid)
+            )
 
 
 @pytest.mark.unit
@@ -164,6 +179,7 @@ def test_deprecated_idle_environment_input_is_never_silently_ignored(
         ("port", "8080", "08080"),
         ("session_idle_seconds", "1800", "01800"),
         ("insecure_evaluation_mode", "true", "TRUE"),
+        ("reversion_upload_max_bytes", "4194304", "04194304"),
         (
             "public_origin",
             "https://Converter.Example:8443",

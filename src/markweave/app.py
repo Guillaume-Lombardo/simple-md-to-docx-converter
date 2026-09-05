@@ -14,6 +14,7 @@ from markweave.http.routers import (
     audit_observability,
     authentication,
     conversions,
+    reversions,
     templates,
 )
 from markweave.jobs.runner import EmbeddedWorker
@@ -88,6 +89,7 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
         authentication.build_router(dependencies),
         administration.build_router(dependencies),
         conversions.build_router(dependencies),
+        reversions.build_router(dependencies),
         templates.build_router(dependencies),
     )
     for router in routers:

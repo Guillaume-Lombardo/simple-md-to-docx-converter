@@ -1,13 +1,17 @@
 """Unit coverage for the exact T69 format-admission matrix."""
 
+import json
+from pathlib import Path
 from typing import cast
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.formats import (
     APPROVED_FORMATS,
     FORMAT_CAPABILITY_SCHEMA_VERSION,
+    REVERSE_ADMISSION_POLICY,
     FormatAdmission,
     FormatFamily,
     admit_format,
@@ -45,6 +49,46 @@ def test_approved_matrix_is_ordered_and_contains_all_twenty_one_extensions() -> 
         ".csv",
         ".pdf",
     )
+
+
+def test_typed_policy_matches_the_approved_evidence_contract() -> None:
+    contract = json.loads(
+        (Path(__file__).parents[3] / "spikes/anydoc/contract.json").read_text()
+    )
+    policy = REVERSE_ADMISSION_POLICY
+
+    assert policy.schema_version == contract["schema_version"]
+    assert [
+        {
+            "family": approved.family.value,
+            "extensions": list(approved.extensions),
+            "detected_formats": list(approved.detected_formats),
+            "content_detection": approved.content_detection,
+            **(
+                {"selected_parser_format": approved.selected_parser_format}
+                if approved.selected_parser_format is not None
+                else {}
+            ),
+        }
+        for approved in policy.formats
+    ] == contract["format_families"]
+    assert (
+        policy.extension_is_hint
+        is not contract["admission"]["extension_is_authoritative"]
+    )
+    assert policy.mismatch_policy == contract["admission"]["mismatch_policy"]
+    assert policy.undetected_policy == contract["admission"]["undetected_policy"]
+    assert policy.scanner_order == contract["admission"]["scanner_order"]
+    assert policy.csv_policy == contract["format_families"][6]["content_detection"]
+
+
+def test_admit_format_delegates_to_the_exposed_policy(mocker: MockerFixture) -> None:
+    expected = FormatAdmission(FormatFamily.WORD, ".docx", "docx", "docx")
+    policy = mocker.patch("markweave.reversions.formats.REVERSE_ADMISSION_POLICY")
+    policy.admit.return_value = expected
+
+    assert admit_format(".DOCX", "DOCX") is expected
+    policy.admit.assert_called_once_with(".DOCX", "DOCX", csv_text_validated=False)
 
 
 @pytest.mark.parametrize(
