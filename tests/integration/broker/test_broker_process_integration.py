@@ -63,6 +63,7 @@ PROCESS_IMAGE = "localhost/markweave-t70-process-integration:current"
 PROCESS_WORKSPACE_IMAGE = "localhost/markweave-t70-process-workspace:current"
 PROCESS_WORKSPACE_BASE_IMAGE = "localhost/markweave-t70-process-workspace-base:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
+BROKER_EXECUTABLE = ROOT / ".venv/bin/markweave-broker"
 PRINCIPAL = AuthenticatedPrincipal(UUID("55555555-5555-4555-8555-555555555555"))
 SERVER_PRINCIPAL = AuthenticatedPrincipal(UUID("66666666-6666-4666-8666-666666666666"))
 CLIENT_URI = "spiffe://markweave.test/worker"
@@ -517,6 +518,124 @@ def _cleanup_unit(unit_id: UUID) -> None:
         capture_output=True,
         timeout=20,
     )
+
+
+def _systemd_properties(unit: str) -> dict[str, str]:
+    shown = subprocess.run(
+        (
+            "/usr/bin/systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=ActiveState",
+            "--property=ExecMainStatus",
+            "--property=KillMode",
+            "--property=MainPID",
+            "--property=NRestarts",
+            "--property=Result",
+            "--property=SubState",
+            "--property=TimeoutStopUSec",
+            "--property=UMask",
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return dict(line.split("=", 1) for line in shown.stdout.splitlines() if "=" in line)
+
+
+def _start_systemd_broker(config: Path, *, restart: bool = True) -> str:
+    assert BROKER_EXECUTABLE.is_file()
+    unit = f"markweave-broker-test-{uuid4().hex}.service"
+    completed = subprocess.run(
+        (
+            "/usr/bin/systemd-run",
+            "--user",
+            "--quiet",
+            f"--unit={unit}",
+            "--property=Type=exec",
+            f"--property=Restart={'on-failure' if restart else 'no'}",
+            "--property=RestartPreventExitStatus=2",
+            "--property=KillMode=control-group",
+            "--property=TimeoutStopSec=infinity",
+            "--property=UMask=0077",
+            "--setenv=CONTAINER_HOST=tcp://127.0.0.1:1/private",
+            "--setenv=CONTAINERS_CONF=/private/containers.conf",
+            str(BROKER_EXECUTABLE),
+            str(config),
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    return unit
+
+
+def _wait_systemd_ready(
+    unit: str, client: UnixBrokerClient | MtlsBrokerClient, sequence: int
+) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            ready = client.request(ReadyRequest(uuid4(), sequence))
+            if isinstance(ready, ReadyResponse) and ready.ready:
+                properties = _systemd_properties(unit)
+                assert properties["ActiveState"] == "active"
+                assert properties["KillMode"] == "control-group"
+                assert properties["TimeoutStopUSec"] == "infinity"
+                assert properties["UMask"] == "0077"
+                return
+        except Exception:
+            ready = None
+        if _systemd_properties(unit).get("ActiveState") == "failed":
+            break
+        time.sleep(0.05)
+    raise AssertionError(_systemd_properties(unit))
+
+
+def _stop_systemd_broker(unit: str) -> dict[str, str]:
+    subprocess.run(
+        ("/usr/bin/systemctl", "--user", "stop", unit),
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    deadline = time.monotonic() + 10
+    properties: dict[str, str] = {}
+    while time.monotonic() < deadline:
+        properties = _systemd_properties(unit)
+        if properties.get("ActiveState") in {"failed", "inactive", None}:
+            break
+        time.sleep(0.05)
+    subprocess.run(
+        ("/usr/bin/systemctl", "--user", "reset-failed", unit),
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    return properties
+
+
+def _systemd_broker_diagnostics(unit: str) -> bytes:
+    completed = subprocess.run(
+        (
+            "/usr/bin/journalctl",
+            "--user",
+            f"--unit={unit}",
+            "--output=cat",
+            "--no-pager",
+            "--grep=^broker (configuration|runtime) failed$",
+        ),
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    return completed.stdout
 
 
 @pytest.mark.parametrize("failure", ["malformed", "mode", "symlink", "fifo"])
@@ -1398,3 +1517,292 @@ def test_real_process_rejects_bad_config_and_key_modes_content_free(
     assert rejected.stdout == b""
     assert rejected.stderr == b"broker configuration failed\n"
     assert str(config).encode() not in rejected.stderr
+
+
+def _systemd_transport(
+    root: Path, image: tuple[str, str], transport_kind: str
+) -> tuple[Path, UnixBrokerClient | MtlsBrokerClient, Path | None]:
+    if transport_kind == "unix":
+        config, socket_path = _write_configuration(root, *image)
+        return config, _client(socket_path), socket_path
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        root, *image
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    value["transport"]["operation_timeout_seconds"] = 10
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    return (
+        config,
+        MtlsBrokerClient(
+            endpoint,
+            local_identity=client_local,
+            server_identity=server_peer,
+            operation_timeout_seconds=10,
+            workspace_limits=CHANNEL_LIMITS,
+        ),
+        None,
+    )
+
+
+def _collect_systemd_workspace(
+    client: UnixBrokerClient | MtlsBrokerClient,
+    receipt: WorkspaceStageReceipt,
+    *,
+    sequence: int,
+) -> WorkspaceSuccessResponse | WorkspaceFailureResponse:
+    deadline = time.monotonic() + 25
+    response: object = WorkspacePendingResponse(uuid4(), receipt)
+    while (
+        isinstance(response, WorkspacePendingResponse) and time.monotonic() < deadline
+    ):
+        response = client.collect_workspace(
+            WorkspaceCollectRequest(
+                uuid4(),
+                sequence,
+                receipt.request_id,
+                receipt.stage_sequence,
+                receipt.attempt_id,
+                receipt.unit_id,
+                receipt.create_sequence,
+                receipt.incarnation_id,
+            )
+        )
+        sequence += 1
+        if isinstance(response, WorkspacePendingResponse):
+            time.sleep(0.05)
+    assert isinstance(response, (WorkspaceSuccessResponse, WorkspaceFailureResponse))
+    return response
+
+
+def _terminate_acknowledge_systemd_unit(
+    client: UnixBrokerClient | MtlsBrokerClient,
+    *,
+    attempt_id: UUID,
+    unit_id: UUID,
+    sequence: int,
+) -> None:
+    terminated = client.request(
+        TerminateRequest(uuid4(), sequence, attempt_id, unit_id)
+    )
+    assert isinstance(terminated, TerminateResponse)
+    proof = client.request(ProofRequest(uuid4(), sequence + 1, attempt_id, unit_id))
+    assert isinstance(proof, ProofResponse)
+    assert proof.proof == terminated.proof
+    acknowledged = client.request(
+        AcknowledgeRequest(
+            uuid4(),
+            sequence + 2,
+            attempt_id,
+            unit_id,
+            terminated.proof.proof_id,
+        )
+    )
+    assert isinstance(acknowledged, AcknowledgeResponse)
+    assert acknowledged.acknowledged
+    _assert_unit_absent(unit_id)
+
+
+@pytest.mark.parametrize("transport_kind", ["unix", "mtls"])
+def test_systemd_user_service_runs_workspace_success_and_failure(
+    tmp_path: Path,
+    process_workspace_image: tuple[str, str],
+    transport_kind: str,
+) -> None:
+    config, client, socket_path = _systemd_transport(
+        tmp_path, process_workspace_image, transport_kind
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    value["runtime_limits"]["wall_time_millis"] = 30_000
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    unit = _start_systemd_broker(config)
+    units: list[tuple[UUID, UUID]] = []
+    try:
+        _wait_systemd_ready(unit, client, 1)
+        successful_attempt = uuid4()
+        created = client.request(CreateRequest(uuid4(), 2, successful_attempt))
+        assert isinstance(created, CreateResponse)
+        units.append((successful_attempt, created.unit_id))
+        receipt = client.stage_workspace(
+            WorkspaceStageRequest(
+                uuid4(),
+                3,
+                successful_attempt,
+                created.unit_id,
+                2,
+                ".pdf",
+                CONTENT_LIMITS,
+                (ROOT / "spikes/anydoc/corpus/pdf/text.pdf").read_bytes(),
+            )
+        )
+        assert isinstance(receipt, WorkspaceStageReceipt)
+        _release_workspace_attempt(created.unit_id)
+        success = _collect_systemd_workspace(client, receipt, sequence=4)
+        assert isinstance(success, WorkspaceSuccessResponse)
+        assert success.result
+        _terminate_acknowledge_systemd_unit(
+            client,
+            attempt_id=successful_attempt,
+            unit_id=created.unit_id,
+            sequence=10,
+        )
+
+        failed_attempt = uuid4()
+        failed = client.request(CreateRequest(uuid4(), 20, failed_attempt))
+        assert isinstance(failed, CreateResponse)
+        units.append((failed_attempt, failed.unit_id))
+        failed_receipt = client.stage_workspace(
+            WorkspaceStageRequest(
+                uuid4(),
+                21,
+                failed_attempt,
+                failed.unit_id,
+                20,
+                ".pdf",
+                CONTENT_LIMITS,
+                b"not a PDF",
+            )
+        )
+        assert isinstance(failed_receipt, WorkspaceStageReceipt)
+        _release_workspace_attempt(failed.unit_id)
+        failure = _collect_systemd_workspace(client, failed_receipt, sequence=22)
+        assert isinstance(failure, WorkspaceFailureResponse)
+        _terminate_acknowledge_systemd_unit(
+            client,
+            attempt_id=failed_attempt,
+            unit_id=failed.unit_id,
+            sequence=30,
+        )
+        properties = _stop_systemd_broker(unit)
+        assert properties["ActiveState"] == "inactive"
+        assert properties["ExecMainStatus"] == "0"
+        assert properties["Result"] == "success"
+        if socket_path is not None:
+            assert not socket_path.exists()
+    finally:
+        _stop_systemd_broker(unit)
+        for _, unit_id in units:
+            _cleanup_unit(unit_id)
+
+
+def test_systemd_user_service_restarts_and_sweeps_live_orphan_before_ready(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    config, socket_path = _write_configuration(tmp_path, *process_image)
+    client = _client(socket_path)
+    unit = _start_systemd_broker(config)
+    attempt_id = uuid4()
+    unit_id: UUID | None = None
+    try:
+        _wait_systemd_ready(unit, client, 1)
+        initial_pid = _systemd_properties(unit)["MainPID"]
+        created = client.request(CreateRequest(uuid4(), 2, attempt_id))
+        assert isinstance(created, CreateResponse)
+        unit_id = created.unit_id
+        assert (
+            _podman(
+                "container", "exists", f"markweave-reverse-{unit_id.hex}", check=False
+            ).returncode
+            == 0
+        )
+
+        killed = subprocess.run(
+            (
+                "/usr/bin/systemctl",
+                "--user",
+                "kill",
+                "--kill-whom=main",
+                "--signal=SIGKILL",
+                unit,
+            ),
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+        assert killed.returncode == 0
+        _wait_systemd_ready(unit, client, 3)
+        properties = _systemd_properties(unit)
+        assert int(properties["NRestarts"]) >= 1
+        assert properties["MainPID"] != initial_pid
+        status = client.request(StatusRequest(uuid4(), 4, attempt_id, unit_id))
+        assert isinstance(status, StatusResponse)
+        assert status.state is ManagedUnitState.REMOVED
+        _assert_unit_absent(unit_id)
+        proof = client.request(ProofRequest(uuid4(), 5, attempt_id, unit_id))
+        assert isinstance(proof, ProofResponse)
+        acknowledged = client.request(
+            AcknowledgeRequest(uuid4(), 6, attempt_id, unit_id, proof.proof.proof_id)
+        )
+        assert isinstance(acknowledged, AcknowledgeResponse)
+        assert acknowledged.acknowledged
+        properties = _stop_systemd_broker(unit)
+        assert properties["Result"] == "success"
+    finally:
+        _stop_systemd_broker(unit)
+        if unit_id is not None:
+            _cleanup_unit(unit_id)
+
+
+def test_systemd_user_service_does_not_restart_invalid_configuration(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    config, _ = _write_configuration(tmp_path, *process_image)
+    value = json.loads(config.read_text(encoding="ascii"))
+    Path(value["inventory_key_path"]).chmod(0o644)
+    unit = _start_systemd_broker(config)
+    try:
+        deadline = time.monotonic() + 10
+        properties: dict[str, str] = {}
+        while time.monotonic() < deadline:
+            properties = _systemd_properties(unit)
+            if properties.get("ActiveState") == "failed":
+                break
+            time.sleep(0.05)
+        assert properties["ActiveState"] == "failed"
+        assert properties["ExecMainStatus"] == "2"
+        assert properties["NRestarts"] == "0"
+        assert properties["Result"] == "exit-code"
+        assert _systemd_broker_diagnostics(unit) == b"broker configuration failed\n"
+        assert list((tmp_path / "state").iterdir()) == []
+    finally:
+        _stop_systemd_broker(unit)
+
+
+def test_second_systemd_user_service_is_refused_by_per_uid_authority(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    first_root = _private_directory(tmp_path / "first")
+    second_root = _private_directory(tmp_path / "second")
+    first_config, first_socket = _write_configuration(first_root, *process_image)
+    second_config, _ = _write_configuration(second_root, *process_image)
+    first_client = _client(first_socket)
+    first_unit = _start_systemd_broker(first_config)
+    second_unit: str | None = None
+    try:
+        _wait_systemd_ready(first_unit, first_client, 1)
+        second_unit = _start_systemd_broker(second_config, restart=False)
+        deadline = time.monotonic() + 10
+        properties: dict[str, str] = {}
+        while time.monotonic() < deadline:
+            properties = _systemd_properties(second_unit)
+            if properties.get("ActiveState") == "failed":
+                break
+            time.sleep(0.05)
+        assert properties["ActiveState"] == "failed"
+        assert properties["ExecMainStatus"] == "1"
+        assert properties["NRestarts"] == "0"
+        assert _systemd_broker_diagnostics(second_unit) == b"broker runtime failed\n"
+        assert list((second_root / "state").iterdir()) == []
+        ready = first_client.request(ReadyRequest(uuid4(), 2))
+        assert isinstance(ready, ReadyResponse) and ready.ready
+        first_properties = _stop_systemd_broker(first_unit)
+        assert first_properties["Result"] == "success"
+    finally:
+        if second_unit is not None:
+            _stop_systemd_broker(second_unit)
+        _stop_systemd_broker(first_unit)
