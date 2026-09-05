@@ -6,7 +6,7 @@ import stat
 import struct
 from math import inf, nan
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any, cast
 from uuid import UUID
 
@@ -769,6 +769,36 @@ def test_workspace_client_rejects_channel_substitution_before_encode_or_socket(
 
     assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
     encode.assert_not_called()
+    socket_factory.assert_not_called()
+
+
+def test_workspace_client_deadline_includes_encoding_before_socket_allocation(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    parent = _private_parent(tmp_path)
+    client = UnixBrokerClient(
+        parent / "broker.sock",
+        expected_server_uid=os.geteuid(),
+        expected_principal=PRINCIPAL,
+        operation_timeout_seconds=0.01,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+
+    def slow_encode(_request) -> bytes:
+        sleep(0.05)
+        return b"unused"
+
+    encode = mocker.patch(
+        "markweave.broker.unix_transport.encode_workspace_request",
+        side_effect=slow_encode,
+    )
+    socket_factory = mocker.patch("markweave.broker.unix_transport.socket.socket")
+
+    with pytest.raises(BrokerError) as captured:
+        client.stage_workspace(_workspace_stage())
+
+    assert captured.value.category is BrokerErrorCategory.TRANSPORT_FAILURE
+    encode.assert_called_once_with(_workspace_stage())
     socket_factory.assert_not_called()
 
 

@@ -768,6 +768,7 @@ class UnixBrokerClient:
     def _workspace_exchange(
         self, request: WorkspaceStageRequest | WorkspaceCollectRequest
     ) -> WorkspaceResponse:
+        deadline = monotonic() + self._operation_timeout_seconds
         limits = self._workspace_limits
         if limits is None:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -795,7 +796,10 @@ class UnixBrokerClient:
             ):
                 raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         encoded = encode_workspace_request(request)
-        deadline = monotonic() + self._operation_timeout_seconds
+        try:
+            _remaining(deadline)
+        except TimeoutError as error:
+            raise _transport_failure(error) from error
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             self._verify_socket_leaf()

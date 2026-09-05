@@ -488,7 +488,9 @@ for reverse conversion.
   client validates the source and every declared content-limit invariant against its configured
   channel before encoding or creating a socket. Real pending-response coverage now uses a fixed
   content-free `/work/test.release` barrier instead of an elapsed-time assumption. The complete
-  broker boundary passes 660 tests, all 13 real broker-process and 8 real Podman integrations pass,
+  reviewed broker selection was corrected to 663 tests (624 unit, 18 Unix, 13 process, and 8
+  Podman); the added absolute-deadline regression raises the current boundary to 664 tests (625
+  unit plus the same integrations). All 13 real broker-process and 8 real Podman integrations pass,
   and the 3,098-test light selection reaches 93.88% total and 90.06% branch coverage.
 
 ## Synchronization
