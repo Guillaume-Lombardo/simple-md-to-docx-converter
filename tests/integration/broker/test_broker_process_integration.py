@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -15,10 +16,18 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from markweave.broker.errors import BrokerError
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     ManagedUnitState,
     RuntimeChannelLimits,
+)
+from markweave.broker.mtls_transport import (
+    MtlsBrokerClient,
+    MtlsEndpoint,
+    MtlsLocalIdentity,
+    MtlsPeerIdentity,
+    leaf_certificate_sha256,
 )
 from markweave.broker.protocol import (
     AcknowledgeRequest,
@@ -55,6 +64,9 @@ PROCESS_WORKSPACE_IMAGE = "localhost/markweave-t70-process-workspace:current"
 PROCESS_WORKSPACE_BASE_IMAGE = "localhost/markweave-t70-process-workspace-base:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("55555555-5555-4555-8555-555555555555"))
+SERVER_PRINCIPAL = AuthenticatedPrincipal(UUID("66666666-6666-4666-8666-666666666666"))
+CLIENT_URI = "spiffe://markweave.test/worker"
+SERVER_URI = "spiffe://markweave.test/broker"
 CHANNEL_LIMITS = RuntimeChannelLimits(1_000_000, 2_000_000)
 CONTENT_LIMITS = ReverseContentLimits(
     1_000_000,
@@ -236,6 +248,160 @@ def _write_configuration(root: Path, repository: str, digest: str) -> tuple[Path
     return config, socket_path
 
 
+def _write_process_ca(root: Path, *, name: str = "ca") -> Path:
+    certificate = root / f"{name}.crt"
+    subprocess.run(
+        (
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            f"/CN={name}",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+            "-keyout",
+            str(root / f"{name}.key"),
+            "-out",
+            str(certificate),
+        ),
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    certificate.chmod(0o600)
+    return certificate
+
+
+def _issue_process_certificate(
+    root: Path, *, name: str, uri: str, eku: str, ca_name: str = "ca"
+) -> tuple[Path, Path]:
+    certificate = root / f"{name}.crt"
+    key = root / f"{name}.key"
+    request = root / f"{name}.csr"
+    extensions = root / f"{name}.ext"
+    extensions.write_text(
+        "basicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature\n"
+        f"extendedKeyUsage={eku}\n"
+        f"subjectAltName=URI:{uri}\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid,issuer\n",
+        encoding="ascii",
+    )
+    subprocess.run(
+        (
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            f"/CN={name}",
+            "-keyout",
+            str(key),
+            "-out",
+            str(request),
+        ),
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    subprocess.run(
+        (
+            "openssl",
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(request),
+            "-CA",
+            str(root / f"{ca_name}.crt"),
+            "-CAkey",
+            str(root / f"{ca_name}.key"),
+            "-CAcreateserial",
+            "-extfile",
+            str(extensions),
+            "-out",
+            str(certificate),
+        ),
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    certificate.chmod(0o600)
+    key.chmod(0o600)
+    return certificate, key
+
+
+def _write_mtls_configuration(
+    root: Path, repository: str, digest: str
+) -> tuple[Path, MtlsEndpoint, MtlsLocalIdentity, MtlsPeerIdentity]:
+    config, _ = _write_configuration(root, repository, digest)
+    material = _private_directory(root / "mtls")
+    ca = _write_process_ca(material)
+    server_certificate, server_key = _issue_process_certificate(
+        material, name="server", uri=SERVER_URI, eku="serverAuth"
+    )
+    client_certificate, client_key = _issue_process_certificate(
+        material, name="client", uri=CLIENT_URI, eku="clientAuth"
+    )
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        endpoint = MtlsEndpoint("127.0.0.1", reservation.getsockname()[1])
+    value = json.loads(config.read_text(encoding="ascii"))
+    value.pop("socket_path")
+    value["schema_version"] = 2
+    value["transport_kind"] = "mtls"
+    value["transport"] = {
+        "listen_backlog": 4,
+        "max_handlers": 4,
+        "max_handshakes": 4,
+        "max_pending_exchanges": 4,
+        "operation_timeout_seconds": 3,
+        "shutdown_timeout_seconds": 2,
+    }
+    value["mtls"] = {
+        "ca_certificate_path": str(ca),
+        "certificate_chain_path": str(server_certificate),
+        "client_leaf_certificate_sha256": [
+            leaf_certificate_sha256(
+                ssl.PEM_cert_to_DER_cert(client_certificate.read_text(encoding="ascii"))
+            )
+        ],
+        "client_uri_san": CLIENT_URI,
+        "endpoint_host": endpoint.host,
+        "endpoint_port": endpoint.port,
+        "local_principal_id": str(SERVER_PRINCIPAL.principal_id),
+        "local_uri_san": SERVER_URI,
+        "private_key_path": str(server_key),
+    }
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    client_local = MtlsLocalIdentity(
+        ca, client_certificate, client_key, CLIENT_URI, PRINCIPAL
+    )
+    server_peer = MtlsPeerIdentity(
+        SERVER_URI,
+        (
+            leaf_certificate_sha256(
+                ssl.PEM_cert_to_DER_cert(server_certificate.read_text(encoding="ascii"))
+            ),
+        ),
+        SERVER_PRINCIPAL,
+    )
+    return config, endpoint, client_local, server_peer
+
+
 def _start(config: Path, socket_path: Path) -> subprocess.Popen[bytes]:
     environment = dict(os.environ)
     environment.update(
@@ -272,7 +438,56 @@ def _start(config: Path, socket_path: Path) -> subprocess.Popen[bytes]:
         if process.poll() is not None:
             break
         time.sleep(0.05)
-    stdout, stderr = process.communicate(timeout=2)
+    if process.poll() is None:
+        process.kill()
+    stdout, stderr = process.communicate(timeout=5)
+    raise AssertionError((process.returncode, stdout, stderr))
+
+
+def _start_mtls(
+    config: Path,
+    endpoint: MtlsEndpoint,
+    local_identity: MtlsLocalIdentity,
+    server_identity: MtlsPeerIdentity,
+) -> tuple[subprocess.Popen[bytes], MtlsBrokerClient]:
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "CONTAINER_HOST": "tcp://127.0.0.1:1/private",
+            "CONTAINERS_CONF": "/private/containers.conf",
+            "HOME": "/private/home",
+            "PATH": "/private/bin",
+        }
+    )
+    process = subprocess.Popen(
+        (sys.executable, "-m", "markweave.broker.process", str(config)),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        env=environment,
+    )
+    client = MtlsBrokerClient(
+        endpoint,
+        local_identity=local_identity,
+        server_identity=server_identity,
+        operation_timeout_seconds=3,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            response = client.request(ReadyRequest(uuid4(), 1))
+            if isinstance(response, ReadyResponse) and response.ready:
+                return process, client
+        except Exception:
+            response = None
+        if process.poll() is not None:
+            break
+        time.sleep(0.05)
+    if process.poll() is None:
+        process.kill()
+    stdout, stderr = process.communicate(timeout=5)
     raise AssertionError((process.returncode, stdout, stderr))
 
 
@@ -302,6 +517,138 @@ def _cleanup_unit(unit_id: UUID) -> None:
         capture_output=True,
         timeout=20,
     )
+
+
+@pytest.mark.parametrize("failure", ["malformed", "mode", "symlink", "fifo"])
+def test_real_process_rejects_insecure_mtls_key_before_state_mutation(
+    tmp_path: Path, failure: str
+) -> None:
+    config, _, _, _ = _write_mtls_configuration(
+        tmp_path, "localhost/unused-attempt", "sha256:" + "a" * 64
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    private_key = Path(value["mtls"]["private_key_path"])
+    if failure == "malformed":
+        private_key.write_text("not a private key", encoding="ascii")
+    elif failure == "mode":
+        private_key.chmod(0o644)
+    elif failure == "symlink":
+        target = private_key.parent / "replacement.key"
+        target.write_bytes(private_key.read_bytes())
+        target.chmod(0o600)
+        private_key.unlink()
+        private_key.symlink_to(target)
+    else:
+        private_key.unlink()
+        os.mkfifo(private_key, mode=0o600)
+
+    completed = subprocess.run(
+        (sys.executable, "-m", "markweave.broker.process", str(config)),
+        check=False,
+        capture_output=True,
+        timeout=10,
+        cwd=ROOT,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == b""
+    assert completed.stderr == b"broker configuration failed\n"
+    assert list((tmp_path / "state").iterdir()) == []
+
+
+def test_real_process_rejects_wrong_mtls_pin_without_inventory_mutation(
+    tmp_path: Path,
+) -> None:
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        tmp_path, "localhost/unused-attempt", "sha256:" + "a" * 64
+    )
+    process, client = _start_mtls(config, endpoint, client_local, server_peer)
+    inventory = tmp_path / "state" / "inventory.sqlite3"
+    before = (inventory.stat().st_size, inventory.stat().st_mtime_ns)
+    wrong_peer = MtlsPeerIdentity(SERVER_URI, ("sha256:" + "0" * 64,), SERVER_PRINCIPAL)
+    wrong_client = MtlsBrokerClient(
+        endpoint,
+        local_identity=client_local,
+        server_identity=wrong_peer,
+        operation_timeout_seconds=2,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    try:
+        with pytest.raises(BrokerError):
+            wrong_client.request(ReadyRequest(uuid4(), 2))
+        assert (inventory.stat().st_size, inventory.stat().st_mtime_ns) == before
+        ready = client.request(ReadyRequest(uuid4(), 3))
+        assert isinstance(ready, ReadyResponse) and ready.ready
+        _stop(process, signal.SIGTERM)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+
+
+@pytest.mark.parametrize("failure", ["ca", "uri-san", "eku"])
+def test_real_process_rejects_invalid_client_certificate_without_dispatch(
+    tmp_path: Path, failure: str
+) -> None:
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        tmp_path, "localhost/unused-attempt", "sha256:" + "a" * 64
+    )
+    material = client_local.certificate_chain.parent
+    ca_name = "ca"
+    uri = CLIENT_URI
+    eku = "clientAuth"
+    if failure == "ca":
+        _write_process_ca(material, name="untrusted-ca")
+        ca_name = "untrusted-ca"
+    elif failure == "uri-san":
+        uri = "spiffe://markweave.test/other-worker"
+    else:
+        eku = "serverAuth"
+    certificate, key = _issue_process_certificate(
+        material,
+        name=f"invalid-{failure}",
+        uri=uri,
+        eku=eku,
+        ca_name=ca_name,
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    value["mtls"]["client_leaf_certificate_sha256"].append(
+        leaf_certificate_sha256(
+            ssl.PEM_cert_to_DER_cert(certificate.read_text(encoding="ascii"))
+        )
+    )
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    invalid_local = MtlsLocalIdentity(
+        client_local.ca_certificate,
+        certificate,
+        key,
+        CLIENT_URI,
+        PRINCIPAL,
+    )
+    process, client = _start_mtls(config, endpoint, client_local, server_peer)
+    inventory = tmp_path / "state" / "inventory.sqlite3"
+    before = (inventory.stat().st_size, inventory.stat().st_mtime_ns)
+    invalid_client = MtlsBrokerClient(
+        endpoint,
+        local_identity=invalid_local,
+        server_identity=server_peer,
+        operation_timeout_seconds=2,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    try:
+        with pytest.raises(BrokerError):
+            invalid_client.request(ReadyRequest(uuid4(), 2))
+        assert (inventory.stat().st_size, inventory.stat().st_mtime_ns) == before
+        ready = client.request(ReadyRequest(uuid4(), 3))
+        assert isinstance(ready, ReadyResponse) and ready.ready
+        _stop(process, signal.SIGTERM)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
 
 
 def _assert_unit_absent(unit_id: UUID) -> None:
@@ -434,6 +781,224 @@ def test_real_process_serves_complete_lifecycle_and_stops_cleanly(
             process.kill()
             process.wait(timeout=3)
         if unit_id is not None:
+            _cleanup_unit(unit_id)
+
+
+def test_real_process_serves_complete_lifecycle_over_mtls(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        tmp_path, *process_image
+    )
+    process, client = _start_mtls(config, endpoint, client_local, server_peer)
+    attempt_id = uuid4()
+    unit_id: UUID | None = None
+    try:
+        created = client.request(CreateRequest(uuid4(), 2, attempt_id))
+        assert isinstance(created, CreateResponse)
+        assert created.state is ManagedUnitState.CREATED
+        unit_id = created.unit_id
+        status = client.request(StatusRequest(uuid4(), 3, attempt_id, unit_id))
+        assert isinstance(status, StatusResponse)
+        terminated = client.request(TerminateRequest(uuid4(), 4, attempt_id, unit_id))
+        assert isinstance(terminated, TerminateResponse)
+        proof = client.request(ProofRequest(uuid4(), 5, attempt_id, unit_id))
+        assert isinstance(proof, ProofResponse)
+        assert proof.proof == terminated.proof
+        acknowledged = client.request(
+            AcknowledgeRequest(
+                uuid4(), 6, attempt_id, unit_id, terminated.proof.proof_id
+            )
+        )
+        assert isinstance(acknowledged, AcknowledgeResponse)
+        _assert_unit_absent(unit_id)
+        _stop(process, signal.SIGTERM)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        if unit_id is not None:
+            _cleanup_unit(unit_id)
+
+
+def test_second_mtls_process_is_refused_before_shared_state_mutation(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    first_root = _private_directory(tmp_path / "first")
+    second_root = _private_directory(tmp_path / "second")
+    first_config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        first_root, *process_image
+    )
+    first, client = _start_mtls(first_config, endpoint, client_local, server_peer)
+    second_config, _, _, _ = _write_mtls_configuration(second_root, *process_image)
+    first_value = json.loads(first_config.read_text(encoding="ascii"))
+    second_value = json.loads(second_config.read_text(encoding="ascii"))
+    second_value["state_directory"] = first_value["state_directory"]
+    second_config.write_text(
+        json.dumps(second_value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    inventory = Path(first_value["state_directory"]) / "inventory.sqlite3"
+    before = (inventory.stat().st_size, inventory.stat().st_mtime_ns)
+    try:
+        second = subprocess.run(
+            (
+                sys.executable,
+                "-m",
+                "markweave.broker.process",
+                str(second_config),
+            ),
+            check=False,
+            capture_output=True,
+            timeout=10,
+            cwd=ROOT,
+        )
+
+        assert second.returncode == 1
+        assert second.stdout == b""
+        assert second.stderr == b"broker runtime failed\n"
+        assert (inventory.stat().st_size, inventory.stat().st_mtime_ns) == before
+        ready = client.request(ReadyRequest(uuid4(), 2))
+        assert isinstance(ready, ReadyResponse) and ready.ready
+        _stop(first, signal.SIGTERM)
+    finally:
+        if first.poll() is None:
+            first.kill()
+            first.wait(timeout=3)
+
+
+def test_real_process_workspace_pending_success_and_failure_over_mtls(  # noqa: PLR0915
+    tmp_path: Path, process_workspace_image: tuple[str, str]
+) -> None:
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        tmp_path, *process_workspace_image
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    value["runtime_limits"]["wall_time_millis"] = 30_000
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    process, client = _start_mtls(config, endpoint, client_local, server_peer)
+    units: list[tuple[UUID, UUID]] = []
+    try:
+        successful_attempt = uuid4()
+        created = client.request(CreateRequest(uuid4(), 2, successful_attempt))
+        assert isinstance(created, CreateResponse)
+        units.append((successful_attempt, created.unit_id))
+        stage = WorkspaceStageRequest(
+            uuid4(),
+            3,
+            successful_attempt,
+            created.unit_id,
+            2,
+            ".pdf",
+            CONTENT_LIMITS,
+            (ROOT / "spikes/anydoc/corpus/pdf/text.pdf").read_bytes(),
+        )
+        receipt = client.stage_workspace(stage)
+        assert isinstance(receipt, WorkspaceStageReceipt)
+        pending = client.collect_workspace(
+            WorkspaceCollectRequest(
+                uuid4(),
+                4,
+                receipt.request_id,
+                receipt.stage_sequence,
+                receipt.attempt_id,
+                receipt.unit_id,
+                receipt.create_sequence,
+                receipt.incarnation_id,
+            )
+        )
+        assert isinstance(pending, WorkspacePendingResponse)
+        _release_workspace_attempt(created.unit_id)
+        response = pending
+        sequence = 5
+        deadline = time.monotonic() + 25
+        while (
+            isinstance(response, WorkspacePendingResponse)
+            and time.monotonic() < deadline
+        ):
+            response = client.collect_workspace(
+                WorkspaceCollectRequest(
+                    uuid4(),
+                    sequence,
+                    receipt.request_id,
+                    receipt.stage_sequence,
+                    receipt.attempt_id,
+                    receipt.unit_id,
+                    receipt.create_sequence,
+                    receipt.incarnation_id,
+                )
+            )
+            sequence += 1
+            if isinstance(response, WorkspacePendingResponse):
+                time.sleep(0.05)
+        assert isinstance(response, WorkspaceSuccessResponse)
+        assert response.result
+
+        failed_attempt = uuid4()
+        failed = client.request(CreateRequest(uuid4(), 20, failed_attempt))
+        assert isinstance(failed, CreateResponse)
+        units.append((failed_attempt, failed.unit_id))
+        failed_receipt = client.stage_workspace(
+            WorkspaceStageRequest(
+                uuid4(),
+                21,
+                failed_attempt,
+                failed.unit_id,
+                20,
+                ".pdf",
+                CONTENT_LIMITS,
+                b"not a PDF",
+            )
+        )
+        assert isinstance(failed_receipt, WorkspaceStageReceipt)
+        _release_workspace_attempt(failed.unit_id)
+        failed_response: object = WorkspacePendingResponse(uuid4(), failed_receipt)
+        deadline = time.monotonic() + 25
+        while (
+            isinstance(failed_response, WorkspacePendingResponse)
+            and time.monotonic() < deadline
+        ):
+            failed_response = client.collect_workspace(
+                WorkspaceCollectRequest(
+                    uuid4(),
+                    22,
+                    failed_receipt.request_id,
+                    failed_receipt.stage_sequence,
+                    failed_receipt.attempt_id,
+                    failed_receipt.unit_id,
+                    failed_receipt.create_sequence,
+                    failed_receipt.incarnation_id,
+                )
+            )
+            if isinstance(failed_response, WorkspacePendingResponse):
+                time.sleep(0.05)
+        assert isinstance(failed_response, WorkspaceFailureResponse)
+
+        for sequence, (attempt_id, unit_id) in enumerate(units, start=30):
+            terminated = client.request(
+                TerminateRequest(uuid4(), sequence, attempt_id, unit_id)
+            )
+            assert isinstance(terminated, TerminateResponse)
+            acknowledged = client.request(
+                AcknowledgeRequest(
+                    uuid4(),
+                    sequence + 10,
+                    attempt_id,
+                    unit_id,
+                    terminated.proof.proof_id,
+                )
+            )
+            assert isinstance(acknowledged, AcknowledgeResponse)
+            _assert_unit_absent(unit_id)
+        _stop(process, signal.SIGINT)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        for _, unit_id in units:
             _cleanup_unit(unit_id)
 
 
@@ -756,6 +1321,48 @@ def test_sigkill_live_orphan_is_reconciled_before_restarted_listener(
         restarted = _start(config, socket_path)
         try:
             status = _client(socket_path).request(
+                StatusRequest(uuid4(), 3, attempt_id, created.unit_id)
+            )
+            assert isinstance(status, StatusResponse)
+            assert status.state is ManagedUnitState.REMOVED
+            _assert_unit_absent(created.unit_id)
+        finally:
+            _stop(restarted, signal.SIGTERM)
+    finally:
+        _cleanup_unit(created.unit_id)
+
+
+def test_mtls_sigkill_live_orphan_is_reconciled_before_restarted_listener(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    config, endpoint, client_local, server_peer = _write_mtls_configuration(
+        tmp_path, *process_image
+    )
+    first, client = _start_mtls(config, endpoint, client_local, server_peer)
+    attempt_id = uuid4()
+    created = client.request(CreateRequest(uuid4(), 2, attempt_id))
+    assert isinstance(created, CreateResponse)
+    try:
+        first.kill()
+        stdout, stderr = first.communicate(timeout=3)
+        assert first.returncode == -signal.SIGKILL
+        assert stdout == b""
+        assert stderr == b""
+        assert (
+            _podman(
+                "container",
+                "exists",
+                f"markweave-reverse-{created.unit_id.hex}",
+                check=False,
+            ).returncode
+            == 0
+        )
+
+        restarted, restarted_client = _start_mtls(
+            config, endpoint, client_local, server_peer
+        )
+        try:
+            status = restarted_client.request(
                 StatusRequest(uuid4(), 3, attempt_id, created.unit_id)
             )
             assert isinstance(status, StatusResponse)

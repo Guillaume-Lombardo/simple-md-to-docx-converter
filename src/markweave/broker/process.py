@@ -26,6 +26,15 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeLimits,
 )
+from markweave.broker.mtls_transport import (
+    MtlsBrokerServer,
+    MtlsEndpoint,
+    MtlsLocalIdentity,
+    MtlsPeerIdentity,
+    MtlsServerContext,
+    MtlsTransportLimits,
+    build_mtls_server_context_from_material,
+)
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
     PodmanCommandLimits,
@@ -45,7 +54,8 @@ _SYSTEMCTL = Path("/usr/bin/systemctl")
 _INVENTORY_NAME = "inventory.sqlite3"
 _AUTHORITY_DIRECTORY_NAME = "markweave-broker"
 _AUTHORITY_LOCK_NAME = "broker-authority.lock"
-_SCHEMA_VERSION = 1
+_LEGACY_SCHEMA_VERSION = 1
+_TRANSPORT_SCHEMA_VERSION = 2
 _DISTINCT_RUNTIME_DIRECTORIES = 3
 _AUTHENTICATION_KEY_BYTES = 32
 _IMAGE_REPOSITORY_MAX_BYTES = 128
@@ -53,6 +63,10 @@ _IMAGE_REPOSITORY_PATTERN = re.compile(
     r"(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?"
     r"/[a-z0-9][a-z0-9._/-]*\Z"
 )
+_TLS_MATERIAL_MAX_BYTES = 65_536
+_TLS_MATERIAL_COUNT = 3
+_UNIX_TRANSPORT = "unix"
+_MTLS_TRANSPORT = "mtls"
 
 
 class BrokerProcessConfigurationError(ValueError):
@@ -63,7 +77,7 @@ class BrokerProcessConfigurationError(ValueError):
 class BrokerProcessConfig:
     """Complete deployment-supplied broker process configuration."""
 
-    socket_path: Path
+    socket_path: Path | None
     state_directory: Path
     hooks_directory: Path
     inventory_key_path: Path
@@ -71,10 +85,15 @@ class BrokerProcessConfig:
     principal: AuthenticatedPrincipal
     policy: BrokerPolicy
     max_units: int
-    transport_limits: UnixTransportLimits
+    transport_limits: UnixTransportLimits | MtlsTransportLimits
     hard_shutdown_timeout_seconds: float
     podman_limits: PodmanCommandLimits
     authentication_key: bytes = field(repr=False)
+    transport_kind: str = _UNIX_TRANSPORT
+    mtls_endpoint: MtlsEndpoint | None = None
+    mtls_local_identity: MtlsLocalIdentity | None = None
+    mtls_client_identity: MtlsPeerIdentity | None = None
+    mtls_material: tuple[bytes, bytes, bytes] | None = field(default=None, repr=False)
 
 
 def _configuration_failure() -> Never:
@@ -97,24 +116,42 @@ def _finite_json_float(value: str) -> float:
     return parsed
 
 
-def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
+def _open_secure_file(path: Path, *, maximum: int) -> int:
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptor: int | None = None
     try:
         descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        named = path.lstat()
+        resolved = path.resolve(strict=True)
+        if (
+            resolved != path
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) not in _OWNER_FILE_MODES
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or not 0 < opened.st_size <= maximum
+        ):
+            _configuration_failure()
+        return descriptor
+    except BrokerProcessConfigurationError:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
+
+
+def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
+    descriptor = _open_secure_file(path, maximum=maximum)
+    try:
         try:
             opened = os.fstat(descriptor)
-            named = path.lstat()
-            resolved = path.resolve(strict=True)
-            if (
-                resolved != path
-                or not stat.S_ISREG(opened.st_mode)
-                or opened.st_uid != os.geteuid()
-                or stat.S_IMODE(opened.st_mode) not in _OWNER_FILE_MODES
-                or opened.st_nlink != 1
-                or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
-                or opened.st_size > maximum
-            ):
-                _configuration_failure()
             chunks: list[bytes] = []
             remaining = maximum + 1
             while remaining:
@@ -127,14 +164,14 @@ def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
             if len(value) > maximum or len(value) != opened.st_size:
                 _configuration_failure()
             return value
-        finally:
-            os.close(descriptor)
-    except BrokerProcessConfigurationError:
-        raise
-    except OSError as error:
-        raise BrokerProcessConfigurationError(
-            "Broker process configuration is invalid"
-        ) from error
+        except BrokerProcessConfigurationError:
+            raise
+        except OSError as error:
+            raise BrokerProcessConfigurationError(
+                "Broker process configuration is invalid"
+            ) from error
+    finally:
+        os.close(descriptor)
 
 
 def _secure_directory(path: Path) -> tuple[int, int]:
@@ -210,25 +247,38 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         raise BrokerProcessConfigurationError(
             "Broker process configuration is invalid"
         ) from error
-    root_fields = frozenset(
-        {
-            "channel_limits",
-            "hard_shutdown_timeout_seconds",
-            "hooks_directory",
-            "image_digest",
-            "image_repository",
-            "inventory_key_path",
-            "max_units",
-            "podman",
-            "policy_revision",
-            "principal_id",
-            "runtime_limits",
-            "schema_version",
-            "socket_path",
-            "state_directory",
-            "transport",
-        }
-    )
+    if type(value) is not dict or type(value.get("schema_version")) is not int:
+        _configuration_failure()
+    schema_version = value["schema_version"]
+    common_fields = {
+        "channel_limits",
+        "hard_shutdown_timeout_seconds",
+        "hooks_directory",
+        "image_digest",
+        "image_repository",
+        "inventory_key_path",
+        "max_units",
+        "podman",
+        "policy_revision",
+        "principal_id",
+        "runtime_limits",
+        "schema_version",
+        "state_directory",
+        "transport",
+    }
+    if schema_version == _LEGACY_SCHEMA_VERSION:
+        transport_kind = _UNIX_TRANSPORT
+        root_fields = frozenset(common_fields | {"socket_path"})
+    elif schema_version == _TRANSPORT_SCHEMA_VERSION:
+        transport_kind = value.get("transport_kind")
+        if transport_kind == _UNIX_TRANSPORT:
+            root_fields = frozenset(common_fields | {"socket_path", "transport_kind"})
+        elif transport_kind == _MTLS_TRANSPORT:
+            root_fields = frozenset(common_fields | {"mtls", "transport_kind"})
+        else:
+            _configuration_failure()
+    else:
+        _configuration_failure()
     root = _required_object(value, root_fields)
     canonical = (
         json.dumps(
@@ -240,11 +290,7 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         )
         + "\n"
     )
-    if (
-        decoded != canonical
-        or type(root["schema_version"]) is not int
-        or root["schema_version"] != _SCHEMA_VERSION
-    ):
+    if decoded != canonical or root["schema_version"] != schema_version:
         _configuration_failure()
 
     runtime = _required_object(
@@ -264,32 +310,43 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         root["channel_limits"],
         frozenset({"max_input_bytes", "max_output_bytes"}),
     )
-    transport = _required_object(
-        root["transport"],
-        frozenset(
-            {
-                "listen_backlog",
-                "max_handlers",
-                "operation_timeout_seconds",
-                "shutdown_timeout_seconds",
-            }
-        ),
-    )
+    unix_transport_fields = {
+        "listen_backlog",
+        "max_handlers",
+        "operation_timeout_seconds",
+        "shutdown_timeout_seconds",
+    }
+    transport_fields = unix_transport_fields
+    if transport_kind == _MTLS_TRANSPORT:
+        transport_fields = unix_transport_fields | {
+            "max_handshakes",
+            "max_pending_exchanges",
+        }
+    transport = _required_object(root["transport"], frozenset(transport_fields))
     podman = _required_object(
         root["podman"], frozenset({"operation_timeout_seconds", "output_bytes"})
     )
-    socket_path = _absolute_path(root["socket_path"])
     state_directory = _absolute_path(root["state_directory"])
     hooks_directory = _absolute_path(root["hooks_directory"])
     key_path = _absolute_path(root["inventory_key_path"])
-    if socket_path.name in {"", ".", ".."}:
-        _configuration_failure()
-    directory_identities = {
-        _secure_directory(state_directory),
-        _secure_directory(socket_path.parent),
-        _secure_directory(hooks_directory),
-    }
-    if len(directory_identities) != _DISTINCT_RUNTIME_DIRECTORIES:
+    state_identity = _secure_directory(state_directory)
+    hooks_identity = _secure_directory(hooks_directory)
+    socket_path: Path | None = None
+    if transport_kind == _UNIX_TRANSPORT:
+        socket_path = _absolute_path(root["socket_path"])
+        if socket_path.name in {"", ".", ".."}:
+            _configuration_failure()
+        directory_identities = {
+            state_identity,
+            _secure_directory(socket_path.parent),
+            hooks_identity,
+        }
+    else:
+        directory_identities = {state_identity, hooks_identity}
+    expected_directory_count = (
+        _DISTINCT_RUNTIME_DIRECTORIES if socket_path is not None else 2
+    )
+    if len(directory_identities) != expected_directory_count:
         _configuration_failure()
     try:
         if os.listdir(hooks_directory):
@@ -344,12 +401,22 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
                 )
             ),
         )
-        limits = UnixTransportLimits(
-            _positive_number(transport["operation_timeout_seconds"]),
-            _positive_number(transport["shutdown_timeout_seconds"]),
-            _positive_integer(transport["max_handlers"]),
-            _positive_integer(transport["listen_backlog"]),
-        )
+        if transport_kind == _UNIX_TRANSPORT:
+            limits: UnixTransportLimits | MtlsTransportLimits = UnixTransportLimits(
+                _positive_number(transport["operation_timeout_seconds"]),
+                _positive_number(transport["shutdown_timeout_seconds"]),
+                _positive_integer(transport["max_handlers"]),
+                _positive_integer(transport["listen_backlog"]),
+            )
+        else:
+            limits = MtlsTransportLimits(
+                _positive_number(transport["operation_timeout_seconds"]),
+                _positive_number(transport["shutdown_timeout_seconds"]),
+                _positive_integer(transport["max_handshakes"]),
+                _positive_integer(transport["max_pending_exchanges"]),
+                _positive_integer(transport["max_handlers"]),
+                _positive_integer(transport["listen_backlog"]),
+            )
         hard_shutdown = _positive_number(root["hard_shutdown_timeout_seconds"])
         podman_limits = PodmanCommandLimits(
             _positive_number(podman["operation_timeout_seconds"]),
@@ -361,6 +428,74 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         ) from error
     if hard_shutdown <= limits.shutdown_timeout_seconds:
         _configuration_failure()
+    mtls_endpoint: MtlsEndpoint | None = None
+    mtls_local_identity: MtlsLocalIdentity | None = None
+    mtls_client_identity: MtlsPeerIdentity | None = None
+    mtls_material: tuple[bytes, bytes, bytes] | None = None
+    if transport_kind == _MTLS_TRANSPORT:
+        mtls = _required_object(
+            root["mtls"],
+            frozenset(
+                {
+                    "ca_certificate_path",
+                    "certificate_chain_path",
+                    "client_leaf_certificate_sha256",
+                    "client_uri_san",
+                    "endpoint_host",
+                    "endpoint_port",
+                    "local_principal_id",
+                    "local_uri_san",
+                    "private_key_path",
+                }
+            ),
+        )
+        ca_path = _absolute_path(mtls["ca_certificate_path"])
+        certificate_path = _absolute_path(mtls["certificate_chain_path"])
+        private_key_path = _absolute_path(mtls["private_key_path"])
+        material_paths = (ca_path, certificate_path, private_key_path)
+        if len(set(material_paths)) != len(material_paths):
+            _configuration_failure()
+        loaded_material: list[bytes] = []
+        for material_path in material_paths:
+            _secure_directory(material_path.parent)
+            loaded_material.append(
+                _secure_file_bytes(material_path, maximum=_TLS_MATERIAL_MAX_BYTES)
+            )
+        mtls_material = (
+            loaded_material[0],
+            loaded_material[1],
+            loaded_material[2],
+        )
+        try:
+            local_principal_value = mtls["local_principal_id"]
+            if type(local_principal_value) is not str:
+                _configuration_failure()
+            local_principal = AuthenticatedPrincipal(UUID(local_principal_value))
+            if (
+                str(local_principal.principal_id) != local_principal_value
+                or local_principal == principal
+            ):
+                _configuration_failure()
+            pins_value = mtls["client_leaf_certificate_sha256"]
+            if type(pins_value) is not list:
+                _configuration_failure()
+            mtls_endpoint = MtlsEndpoint(
+                mtls["endpoint_host"], _positive_integer(mtls["endpoint_port"])
+            )
+            mtls_local_identity = MtlsLocalIdentity(
+                ca_path,
+                certificate_path,
+                private_key_path,
+                mtls["local_uri_san"],
+                local_principal,
+            )
+            mtls_client_identity = MtlsPeerIdentity(
+                mtls["client_uri_san"], tuple(pins_value), principal
+            )
+        except (TypeError, ValueError) as error:
+            raise BrokerProcessConfigurationError(
+                "Broker process configuration is invalid"
+            ) from error
     return BrokerProcessConfig(
         socket_path,
         state_directory,
@@ -374,6 +509,11 @@ def load_broker_process_config(  # noqa: PLR0912,PLR0915
         hard_shutdown,
         podman_limits,
         authentication_key,
+        transport_kind,
+        mtls_endpoint,
+        mtls_local_identity,
+        mtls_client_identity,
+        mtls_material,
     )
 
 
@@ -466,8 +606,54 @@ def _runtime_environment() -> tuple[dict[str, str], dict[str, str]]:
     return {**common, "CONTAINERS_CONF": "/dev/null"}, common
 
 
-def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
-    """Construct the complete runtime, inventory, service, and Unix transport."""
+def _prepared_mtls_server_context(
+    config: BrokerProcessConfig,
+) -> MtlsServerContext | None:
+    if config.transport_kind == _UNIX_TRANSPORT:
+        if (
+            config.socket_path is None
+            or type(config.transport_limits) is not UnixTransportLimits
+            or config.mtls_endpoint is not None
+            or config.mtls_local_identity is not None
+            or config.mtls_client_identity is not None
+            or config.mtls_material is not None
+        ):
+            _configuration_failure()
+        return None
+    material = config.mtls_material
+    if (
+        config.transport_kind != _MTLS_TRANSPORT
+        or config.socket_path is not None
+        or type(config.transport_limits) is not MtlsTransportLimits
+        or config.mtls_endpoint is None
+        or config.mtls_endpoint.port == 0
+        or config.mtls_local_identity is None
+        or config.mtls_client_identity is None
+        or type(material) is not tuple
+        or len(material) != _TLS_MATERIAL_COUNT
+        or any(
+            type(value) is not bytes or not 0 < len(value) <= _TLS_MATERIAL_MAX_BYTES
+            for value in material
+        )
+        or config.mtls_local_identity.principal == config.principal
+        or config.mtls_client_identity.principal != config.principal
+    ):
+        _configuration_failure()
+    local = config.mtls_local_identity
+    try:
+        return build_mtls_server_context_from_material(local, material)
+    except BrokerProcessConfigurationError:
+        raise
+    except (OSError, ValueError) as error:
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
+
+
+def build_broker_server(
+    config: BrokerProcessConfig,
+) -> UnixBrokerServer | MtlsBrokerServer:
+    """Construct the complete runtime, inventory, service, and selected transport."""
 
     if type(config) is not BrokerProcessConfig:
         _configuration_failure()
@@ -476,6 +662,7 @@ def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
     for command in (_PODMAN, _SYSTEMCTL):
         if not command.is_file() or not os.access(command, os.X_OK):
             _configuration_failure()
+    mtls_server_context = _prepared_mtls_server_context(config)
     inventory_path = config.state_directory / _INVENTORY_NAME
     _inventory_files(inventory_path)
     os.umask(0o077)
@@ -512,14 +699,43 @@ def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
             config.policy,
             max_discovered_units=config.max_units,
         )
-        server = UnixBrokerServer(
-            config.socket_path,
-            expected_client_uid=os.geteuid(),
-            principal=config.principal,
-            dispatcher=BrokerDispatcher(service),
-            limits=config.transport_limits,
-            workspace_limits=config.policy.channel_limits,
-        )
+        dispatcher = BrokerDispatcher(service)
+        if config.transport_kind == _UNIX_TRANSPORT:
+            if (
+                config.socket_path is None
+                or type(config.transport_limits) is not UnixTransportLimits
+            ):
+                _configuration_failure()
+            server: UnixBrokerServer | MtlsBrokerServer = UnixBrokerServer(
+                config.socket_path,
+                expected_client_uid=os.geteuid(),
+                principal=config.principal,
+                dispatcher=dispatcher,
+                limits=config.transport_limits,
+                workspace_limits=config.policy.channel_limits,
+            )
+        elif config.transport_kind == _MTLS_TRANSPORT:
+            if (
+                config.socket_path is not None
+                or type(config.transport_limits) is not MtlsTransportLimits
+                or config.mtls_endpoint is None
+                or config.mtls_endpoint.port == 0
+                or config.mtls_local_identity is None
+                or config.mtls_client_identity is None
+                or mtls_server_context is None
+            ):
+                _configuration_failure()
+            server = MtlsBrokerServer(
+                config.mtls_endpoint,
+                local_identity=config.mtls_local_identity,
+                client_identity=config.mtls_client_identity,
+                dispatcher=dispatcher,
+                limits=config.transport_limits,
+                workspace_limits=config.policy.channel_limits,
+                server_context=mtls_server_context,
+            )
+        else:
+            _configuration_failure()
         server._adopt_authority_lock(authority_lock)
         return server
     except BaseException:
@@ -532,13 +748,13 @@ class BrokerProcess:
 
     def __init__(
         self,
-        server: UnixBrokerServer,
+        server: UnixBrokerServer | MtlsBrokerServer,
         *,
         hard_shutdown_timeout_seconds: float,
         hard_exit: Callable[[int], Never] = os._exit,
     ) -> None:
         if (
-            not isinstance(server, UnixBrokerServer)
+            not isinstance(server, (UnixBrokerServer, MtlsBrokerServer))
             or type(hard_shutdown_timeout_seconds) not in {int, float}
             or hard_shutdown_timeout_seconds <= 0
             or not math.isfinite(hard_shutdown_timeout_seconds)

@@ -24,7 +24,9 @@ from markweave.broker.mtls_transport import (
     MtlsEndpoint,
     MtlsLocalIdentity,
     MtlsPeerIdentity,
+    MtlsServerContext,
     MtlsTransportLimits,
+    build_mtls_server_context,
     leaf_certificate_sha256,
 )
 from markweave.broker.podman_runtime import (
@@ -67,6 +69,7 @@ __all__ = [
     "MtlsEndpoint",
     "MtlsLocalIdentity",
     "MtlsPeerIdentity",
+    "MtlsServerContext",
     "MtlsTransportLimits",
     "PodmanCommandLimits",
     "PodmanIsolationRuntime",
@@ -88,6 +91,7 @@ __all__ = [
     "WorkspaceStageReceipt",
     "WorkspaceStageRequest",
     "WorkspaceSuccessResponse",
+    "build_mtls_server_context",
     "is_next_unit_state",
     "leaf_certificate_sha256",
     "policy_specification_evidence",

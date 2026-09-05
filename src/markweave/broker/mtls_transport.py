@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import ipaddress
 import json
 import math
+import os
 import secrets
 import socket
 import ssl
@@ -65,6 +67,9 @@ _IPV4_VERSION: Final = 4
 _MAX_PORT: Final = 65535
 _MAX_PINS: Final = 2
 _MAX_URI_LENGTH: Final = 255
+_TLS_MATERIAL_COUNT: Final = 3
+_TLS_MATERIAL_MAX_BYTES: Final = 65_536
+_SERVER_CONTEXT_TOKEN = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +167,20 @@ class MtlsPeerIdentity:
             or type(self.principal) is not AuthenticatedPrincipal
         ):
             raise ValueError("Broker mTLS peer identity is invalid")
+
+
+class MtlsServerContext:
+    """Opaque, fully loaded server TLS context safe to retain after FD closure."""
+
+    __slots__ = ("_context", "_local_identity")
+
+    def __init__(
+        self, context: ssl.SSLContext, local_identity: MtlsLocalIdentity, token: object
+    ) -> None:
+        if token is not _SERVER_CONTEXT_TOKEN:
+            raise ValueError("Broker mTLS server context is invalid")
+        self._context = context
+        self._local_identity = local_identity
 
 
 @dataclass(slots=True)
@@ -383,6 +402,93 @@ def _tls_context(local: MtlsLocalIdentity, *, server: bool) -> ssl.SSLContext:
     return context
 
 
+def build_mtls_server_context(
+    local: MtlsLocalIdentity,
+    *,
+    declared_identity: MtlsLocalIdentity | None = None,
+) -> MtlsServerContext:
+    """Load one exact server identity into an opaque, memory-resident context."""
+
+    binding = local if declared_identity is None else declared_identity
+    if (
+        type(local) is not MtlsLocalIdentity
+        or type(binding) is not MtlsLocalIdentity
+        or local.uri_san != binding.uri_san
+        or local.principal != binding.principal
+    ):
+        raise ValueError("Broker mTLS local identity is invalid")
+    if local != binding:
+        try:
+            for loaded_path, declared_path in zip(
+                (
+                    local.ca_certificate,
+                    local.certificate_chain,
+                    local.private_key,
+                ),
+                (
+                    binding.ca_certificate,
+                    binding.certificate_chain,
+                    binding.private_key,
+                ),
+                strict=True,
+            ):
+                loaded = os.stat(loaded_path)
+                declared = os.stat(declared_path, follow_symlinks=False)
+                if (loaded.st_dev, loaded.st_ino) != (
+                    declared.st_dev,
+                    declared.st_ino,
+                ):
+                    raise ValueError("Broker mTLS local identity is invalid")
+        except OSError as error:
+            raise ValueError("Broker mTLS local identity is invalid") from error
+    return MtlsServerContext(
+        _tls_context(local, server=True), binding, _SERVER_CONTEXT_TOKEN
+    )
+
+
+def build_mtls_server_context_from_material(
+    local: MtlsLocalIdentity,
+    material: tuple[bytes, bytes, bytes],
+) -> MtlsServerContext:
+    """Load one immutable material snapshot and bind it to its declared identity."""
+
+    if (
+        type(local) is not MtlsLocalIdentity
+        or type(material) is not tuple
+        or len(material) != _TLS_MATERIAL_COUNT
+        or any(
+            type(value) is not bytes or not 0 < len(value) <= _TLS_MATERIAL_MAX_BYTES
+            for value in material
+        )
+    ):
+        raise ValueError("Broker mTLS certificate material is invalid")
+    descriptors: list[int] = []
+    try:
+        for value in material:
+            descriptor = os.memfd_create("markweave-tls-material", os.MFD_CLOEXEC)
+            descriptors.append(descriptor)
+            offset = 0
+            while offset < len(value):
+                written = os.write(descriptor, value[offset:])
+                if written <= 0:
+                    raise ValueError("Broker mTLS certificate material is invalid")
+                offset += written
+            os.lseek(descriptor, 0, os.SEEK_SET)
+        loaded = MtlsLocalIdentity(
+            Path(f"/proc/self/fd/{descriptors[0]}"),
+            Path(f"/proc/self/fd/{descriptors[1]}"),
+            Path(f"/proc/self/fd/{descriptors[2]}"),
+            local.uri_san,
+            local.principal,
+        )
+        return MtlsServerContext(
+            _tls_context(loaded, server=True), local, _SERVER_CONTEXT_TOKEN
+        )
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
+
+
 def _authenticate_peer(
     connection: ssl.SSLSocket, expected: MtlsPeerIdentity
 ) -> tuple[AuthenticatedPrincipal, str]:
@@ -549,6 +655,7 @@ class MtlsBrokerServer:
         dispatcher: BrokerDispatcher,
         limits: MtlsTransportLimits,
         workspace_limits: RuntimeChannelLimits | None = None,
+        server_context: MtlsServerContext | None = None,
     ) -> None:
         if (
             type(endpoint) is not MtlsEndpoint
@@ -560,6 +667,13 @@ class MtlsBrokerServer:
                 workspace_limits is not None
                 and type(workspace_limits) is not RuntimeChannelLimits
             )
+            or (
+                server_context is not None
+                and (
+                    type(server_context) is not MtlsServerContext
+                    or server_context._local_identity != local_identity
+                )
+            )
         ):
             raise ValueError("Broker mTLS server configuration is invalid")
         self._endpoint = endpoint
@@ -568,7 +682,11 @@ class MtlsBrokerServer:
         self._dispatcher = dispatcher
         self._limits = limits
         self._workspace_limits = workspace_limits
-        self._context = _tls_context(local_identity, server=True)
+        self._context = (
+            _tls_context(local_identity, server=True)
+            if server_context is None
+            else server_context._context
+        )
         self._listener: socket.socket | None = None
         self._accept_thread: Thread | None = None
         self._stopping = Event()
@@ -584,6 +702,7 @@ class MtlsBrokerServer:
         self._sockets: set[socket.socket] = set()
         self._reservations: dict[str, _Reservation] = {}
         self._fatal_error: BaseException | None = None
+        self._authority_lock_fd: int | None = None
 
     @property
     def endpoint(self) -> MtlsEndpoint:
@@ -619,6 +738,15 @@ class MtlsBrokerServer:
         if listener is not None:
             listener.close()
 
+    def _adopt_authority_lock(self, descriptor: int) -> None:
+        if (
+            type(descriptor) is not int
+            or descriptor < 0
+            or self._authority_lock_fd is not None
+        ):
+            raise ValueError("Broker authority lock is invalid")
+        self._authority_lock_fd = descriptor
+
     def start(self) -> None:
         if self._listener is not None:
             raise RuntimeError("Broker mTLS server is already running")
@@ -629,6 +757,7 @@ class MtlsBrokerServer:
             self._dispatcher.start()
             if self._stopping.is_set():
                 listener.close()
+                self._release_authority_lock()
                 return
             listener.listen(self._limits.listen_backlog)
             listener.settimeout(min(self._limits.operation_timeout_seconds, 0.25))
@@ -640,13 +769,16 @@ class MtlsBrokerServer:
             listener.close()
             self._listener = None
             self._accept_thread = None
+            self._release_authority_lock()
             raise
 
     def stop(self) -> None:
         self._stopping.set()
         listener = self._listener
-        if listener is not None:
-            listener.close()
+        if listener is None:
+            self._release_authority_lock()
+            return
+        listener.close()
         deadline = monotonic() + self._limits.shutdown_timeout_seconds
         accept_thread = self._accept_thread
         if accept_thread is not None:
@@ -681,8 +813,19 @@ class MtlsBrokerServer:
             raise RuntimeError("Broker mTLS handlers did not drain")
         self._listener = None
         self._accept_thread = None
+        self._release_authority_lock()
         if fatal is not None:
             raise RuntimeError("Broker mTLS server failed") from fatal
+
+    def _release_authority_lock(self) -> None:
+        descriptor = self._authority_lock_fd
+        if descriptor is None:
+            return
+        self._authority_lock_fd = None
+        with suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        with suppress(OSError):
+            os.close(descriptor)
 
     def __enter__(self) -> MtlsBrokerServer:
         self.start()

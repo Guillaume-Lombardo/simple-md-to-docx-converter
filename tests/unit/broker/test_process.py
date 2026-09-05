@@ -16,6 +16,10 @@ from pytest_mock import MockerFixture
 
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.models import AuthenticatedPrincipal
+from markweave.broker.mtls_transport import (
+    MtlsEndpoint,
+    MtlsTransportLimits,
+)
 from markweave.broker.process import (
     BrokerProcess,
     BrokerProcessConfigurationError,
@@ -79,17 +83,166 @@ def _configuration(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     return path, value
 
 
+def _mtls_configuration(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    path, value = _configuration(tmp_path)
+    material = _directory(tmp_path / "mtls")
+    for name, content in (
+        ("ca.pem", "CA"),
+        ("server.pem", "CERTIFICATE"),
+        ("server.key", "PRIVATE KEY"),
+    ):
+        candidate = material / name
+        candidate.write_text(content, encoding="ascii")
+        candidate.chmod(0o600)
+    value.pop("socket_path")
+    value["schema_version"] = 2
+    value["transport_kind"] = "mtls"
+    value["transport"] = {
+        "listen_backlog": 2,
+        "max_handlers": 2,
+        "max_handshakes": 2,
+        "max_pending_exchanges": 2,
+        "operation_timeout_seconds": 1,
+        "shutdown_timeout_seconds": 2,
+    }
+    value["mtls"] = {
+        "ca_certificate_path": str(material / "ca.pem"),
+        "certificate_chain_path": str(material / "server.pem"),
+        "client_leaf_certificate_sha256": ["sha256:" + "b" * 64],
+        "client_uri_san": "spiffe://markweave.test/worker",
+        "endpoint_host": "127.0.0.1",
+        "endpoint_port": 9443,
+        "local_principal_id": "22222222-2222-4222-8222-222222222222",
+        "local_uri_san": "spiffe://markweave.test/broker",
+        "private_key_path": str(material / "server.key"),
+    }
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    return path, value
+
+
 @pytest.mark.unit
 def test_loads_complete_canonical_owner_only_configuration(tmp_path: Path) -> None:
     path, _ = _configuration(tmp_path)
 
     config = load_broker_process_config(path)
 
+    assert config.socket_path is not None
     assert config.socket_path.name == "broker.sock"
     assert config.max_units == 4
     assert config.policy.channel_limits.max_input_bytes == 101
     assert config.authentication_key == b"\x11" * 32
     assert "11" * 32 not in repr(config)
+
+
+@pytest.mark.unit
+def test_loads_explicit_unix_v2_without_changing_unix_contract(tmp_path: Path) -> None:
+    path, value = _configuration(tmp_path)
+    value["schema_version"] = 2
+    value["transport_kind"] = "unix"
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+
+    config = load_broker_process_config(path)
+
+    assert config.transport_kind == "unix"
+    assert config.socket_path is not None
+    assert config.mtls_endpoint is None
+    assert type(config.transport_limits) is UnixTransportLimits
+
+
+@pytest.mark.unit
+def test_loads_explicit_mtls_configuration_with_no_unix_socket(
+    tmp_path: Path,
+) -> None:
+    path, _ = _mtls_configuration(tmp_path)
+
+    config = load_broker_process_config(path)
+
+    assert config.transport_kind == "mtls"
+    assert config.socket_path is None
+    assert config.mtls_endpoint == MtlsEndpoint("127.0.0.1", 9443)
+    assert type(config.transport_limits) is MtlsTransportLimits
+    assert config.mtls_local_identity is not None
+    assert config.mtls_client_identity is not None
+    assert config.mtls_client_identity.principal == config.principal
+    assert "PRIVATE KEY" not in repr(config)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update({"schema_version": 3}),
+        lambda value: value.pop("transport_kind"),
+        lambda value: value.update({"transport_kind": "tcp"}),
+        lambda value: value["transport"].pop("max_handshakes"),  # type: ignore[union-attr]
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"endpoint_host": "localhost"}
+        ),
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"endpoint_port": 0}
+        ),
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"client_leaf_certificate_sha256": []}
+        ),
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"client_leaf_certificate_sha256": ["sha256:" + "A" * 64]}
+        ),
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"client_uri_san": "https://markweave.test/worker"}
+        ),
+        lambda value: value["mtls"].update(  # type: ignore[union-attr]
+            {"local_principal_id": value["principal_id"]}
+        ),
+        lambda value: value["mtls"].update({"unknown": True}),  # type: ignore[union-attr]
+    ],
+)
+def test_rejects_incomplete_or_noncanonical_mtls_configuration(
+    tmp_path: Path, mutation: Callable[[dict[str, object]], None]
+) -> None:
+    path, value = _mtls_configuration(tmp_path)
+    mutation(value)
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
+def test_rejects_linked_or_insecure_mtls_private_key(tmp_path: Path) -> None:
+    path, value = _mtls_configuration(tmp_path)
+    mtls = value["mtls"]
+    assert isinstance(mtls, dict)
+    private_key = Path(cast(str, mtls["private_key_path"]))
+    private_key.chmod(0o644)
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+    private_key.chmod(0o600)
+    (private_key.parent / "linked.key").hardlink_to(private_key)
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
+def test_rejects_mtls_fifo_without_blocking(tmp_path: Path) -> None:
+    path, value = _mtls_configuration(tmp_path)
+    mtls = value["mtls"]
+    assert isinstance(mtls, dict)
+    private_key = Path(cast(str, mtls["private_key_path"]))
+    private_key.unlink()
+    os.mkfifo(private_key, mode=0o600)
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
 
 
 @pytest.mark.unit
@@ -327,6 +480,145 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
         not any(key.startswith("CONTAINER_") for key in environment)
         for environment in environments
     )
+
+
+@pytest.mark.unit
+def test_factory_selects_mtls_with_exact_loaded_identity_and_workspace_limits(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, _ = _mtls_configuration(tmp_path)
+    config = load_broker_process_config(path)
+    assert config.mtls_local_identity is not None
+    assert config.mtls_material is not None
+    original_material = config.mtls_material
+    for index, material_path in enumerate(
+        (
+            config.mtls_local_identity.ca_certificate,
+            config.mtls_local_identity.certificate_chain,
+            config.mtls_local_identity.private_key,
+        )
+    ):
+        replacement = material_path.with_name(f"replacement-{index}")
+        replacement.write_bytes(f"REPLACED-{index}".encode())
+        replacement.chmod(0o600)
+        replacement.replace(material_path)
+    mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    mocker.patch("markweave.broker.process.PodmanIsolationRuntime")
+    service = mocker.patch("markweave.broker.process.IsolationBrokerService")
+    dispatcher = mocker.patch("markweave.broker.process.BrokerDispatcher")
+    unix_server = mocker.patch("markweave.broker.process.UnixBrokerServer")
+    mtls_server = mocker.patch("markweave.broker.process.MtlsBrokerServer")
+    mtls_server.return_value._adopt_authority_lock.side_effect = os.close
+    server_context = object()
+    context_builder = mocker.patch(
+        "markweave.broker.process.build_mtls_server_context_from_material",
+        return_value=server_context,
+    )
+    mocker.patch("markweave.broker.process.BoundedCommandRunner")
+
+    built = build_broker_server(config)
+
+    assert built is mtls_server.return_value
+    unix_server.assert_not_called()
+    dispatcher.assert_called_once_with(service.return_value)
+    mtls_server.assert_called_once_with(
+        config.mtls_endpoint,
+        local_identity=config.mtls_local_identity,
+        client_identity=config.mtls_client_identity,
+        dispatcher=dispatcher.return_value,
+        limits=config.transport_limits,
+        workspace_limits=config.policy.channel_limits,
+        server_context=server_context,
+    )
+    context_builder.assert_called_once_with(
+        config.mtls_local_identity, original_material
+    )
+
+
+@pytest.mark.unit
+def test_factory_rejects_invalid_mtls_pem_before_inventory_mutation(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, _ = _mtls_configuration(tmp_path)
+    config = load_broker_process_config(path)
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
+    authority.assert_not_called()
+    assert not (config.state_directory / "inventory.sqlite3").exists()
+
+
+@pytest.mark.unit
+def test_factory_rejects_mixed_unix_and_mtls_state_before_inventory(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, _ = _configuration(tmp_path)
+    config = replace(
+        load_broker_process_config(path),
+        mtls_endpoint=MtlsEndpoint("127.0.0.1", 9443),
+    )
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid_field", ["socket", "limits"])
+def test_factory_rejects_incoherent_unix_state_before_inventory(
+    tmp_path: Path, mocker: MockerFixture, invalid_field: str
+) -> None:
+    path, _ = _configuration(tmp_path)
+    config = load_broker_process_config(path)
+    if invalid_field == "socket":
+        config = replace(config, socket_path=None)
+    else:
+        config = replace(
+            config,
+            transport_limits=MtlsTransportLimits(1, 1, 2, 2, 2, 2),
+        )
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+    authority = mocker.patch("markweave.broker.process._acquire_authority_lock")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
+    authority.assert_not_called()
+    assert not (config.state_directory / "inventory.sqlite3").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_field", ["socket", "limits", "endpoint", "kind", "material"]
+)
+def test_factory_rejects_incoherent_mtls_state_before_inventory(
+    tmp_path: Path, mocker: MockerFixture, invalid_field: str
+) -> None:
+    path, _ = _mtls_configuration(tmp_path)
+    config = load_broker_process_config(path)
+    if invalid_field == "socket":
+        config = replace(config, socket_path=tmp_path / "broker.sock")
+    elif invalid_field == "limits":
+        config = replace(config, transport_limits=UnixTransportLimits(1, 2, 2, 2))
+    elif invalid_field == "endpoint":
+        config = replace(config, mtls_endpoint=None)
+    elif invalid_field == "material":
+        config = replace(config, mtls_material=None)
+    else:
+        config = replace(config, transport_kind="tcp")
+    inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    inventory.assert_not_called()
 
 
 @pytest.mark.unit

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import ssl
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -439,6 +442,110 @@ def test_tls_context_rejects_missing_explicit_material() -> None:
         mtls_transport._tls_context(LOCAL, server=False)
 
 
+def test_preloaded_server_context_is_bound_to_declared_original_identity(
+    mocker: MockerFixture,
+) -> None:
+    context = mocker.Mock(spec=ssl.SSLContext)
+    mocker.patch.object(mtls_transport, "_tls_context", return_value=context)
+    mocker.patch.object(
+        mtls_transport.os,
+        "stat",
+        return_value=mocker.Mock(st_dev=1, st_ino=2),
+    )
+    loaded = replace(
+        LOCAL,
+        ca_certificate=Path("/proc/self/fd/10"),
+        certificate_chain=Path("/proc/self/fd/11"),
+        private_key=Path("/proc/self/fd/12"),
+    )
+    prepared = mtls_transport.build_mtls_server_context(loaded, declared_identity=LOCAL)
+
+    assert prepared._local_identity == LOCAL
+    assert "/proc/self/fd" not in repr(prepared._local_identity)
+    with pytest.raises(ValueError, match="server configuration is invalid"):
+        mtls_transport.MtlsBrokerServer(
+            MtlsEndpoint("127.0.0.1", 0),
+            local_identity=replace(LOCAL, private_key=Path("/different.key")),
+            client_identity=PEER,
+            dispatcher=mocker.Mock(spec=BrokerDispatcher),
+            limits=MtlsTransportLimits(1, 1, 1, 1, 1, 1),
+            server_context=prepared,
+        )
+
+
+def test_server_context_uses_the_direct_identity_when_no_alias_is_needed(
+    mocker: MockerFixture,
+) -> None:
+    context = mocker.Mock(spec=ssl.SSLContext)
+    mocker.patch.object(mtls_transport, "_tls_context", return_value=context)
+
+    prepared = mtls_transport.build_mtls_server_context(LOCAL)
+
+    assert prepared._local_identity == LOCAL
+    assert prepared._context is context
+
+
+def test_server_context_loads_an_immutable_material_snapshot(
+    mocker: MockerFixture,
+) -> None:
+    context = mocker.Mock(spec=ssl.SSLContext)
+    observed: tuple[bytes, bytes, bytes] | None = None
+
+    def load_context(identity: MtlsLocalIdentity, *, server: bool) -> ssl.SSLContext:
+        nonlocal observed
+        assert server
+        observed = (
+            identity.ca_certificate.read_bytes(),
+            identity.certificate_chain.read_bytes(),
+            identity.private_key.read_bytes(),
+        )
+        return context
+
+    mocker.patch.object(mtls_transport, "_tls_context", side_effect=load_context)
+    material = (b"private CA", b"server certificate", b"private key")
+
+    prepared = mtls_transport.build_mtls_server_context_from_material(LOCAL, material)
+
+    assert observed == material
+    assert prepared._local_identity == LOCAL
+    assert prepared._context is context
+    assert "private key" not in repr(prepared)
+
+
+@pytest.mark.parametrize(
+    ("local", "material"),
+    [
+        (object(), (b"ca", b"certificate", b"key")),
+        (LOCAL, (b"ca", b"certificate")),
+        (LOCAL, (b"", b"certificate", b"key")),
+        (LOCAL, (b"ca", "certificate", b"key")),
+    ],
+)
+def test_server_context_rejects_invalid_material_snapshot(
+    local: object, material: object
+) -> None:
+    with pytest.raises(ValueError, match="certificate material is invalid"):
+        mtls_transport.build_mtls_server_context_from_material(
+            cast(Any, local), cast(Any, material)
+        )
+
+
+def test_server_context_closes_memory_file_after_short_write(
+    mocker: MockerFixture,
+) -> None:
+    descriptor = os.memfd_create("test-mtls-material", os.MFD_CLOEXEC)
+    mocker.patch.object(mtls_transport.os, "memfd_create", return_value=descriptor)
+    mocker.patch.object(mtls_transport.os, "write", return_value=0)
+
+    with pytest.raises(ValueError, match="certificate material is invalid"):
+        mtls_transport.build_mtls_server_context_from_material(
+            LOCAL, (b"ca", b"certificate", b"key")
+        )
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
 def test_server_preserves_stop_requested_before_start(
     mocker: MockerFixture,
 ) -> None:
@@ -473,6 +580,38 @@ def test_server_rejects_second_start(mocker: MockerFixture) -> None:
             server.start()
     finally:
         server.stop()
+
+
+def test_mtls_server_releases_adopted_authority_lock_after_proven_stop(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    server = _mock_server(mocker)
+    descriptor = os.open(tmp_path / "authority.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    server._adopt_authority_lock(descriptor)
+    with pytest.raises(ValueError, match="authority lock is invalid"):
+        server._adopt_authority_lock(descriptor)
+
+    server.stop()
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_mtls_server_retains_authority_lock_when_handlers_do_not_drain(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    server = _mock_server(mocker)
+    descriptor = os.open(tmp_path / "authority.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    server._adopt_authority_lock(descriptor)
+    server._listener = mocker.Mock(spec=socket.socket)
+    server._threads.add(mocker.Mock())
+    mocker.patch.object(mtls_transport, "monotonic", side_effect=[0.0, 2.0])
+
+    with pytest.raises(RuntimeError, match="handlers did not drain"):
+        server.stop()
+
+    os.fstat(descriptor)
+    os.close(descriptor)
 
 
 def test_server_channel_handlers_reject_wrong_roles_and_digest(
