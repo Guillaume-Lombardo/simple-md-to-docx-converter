@@ -97,7 +97,7 @@ def _release_workspace_attempt(unit_id: UUID) -> None:
 
 
 @pytest.fixture(scope="module")
-def process_image() -> Iterator[tuple[str, str]]:
+def process_base_image() -> Iterator[str]:
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
     built_base = base == DEFAULT_BASE_IMAGE
     if built_base:
@@ -107,6 +107,17 @@ def process_image() -> Iterator[tuple[str, str]]:
             cwd=ROOT,
             timeout=600,
         )
+    else:
+        _podman("image", "exists", base)
+    try:
+        yield base
+    finally:
+        if built_base:
+            _podman("image", "rm", "--force", base, check=False)
+
+
+@pytest.fixture(scope="module")
+def process_image(process_base_image: str) -> Iterator[tuple[str, str]]:
     _podman(
         "build",
         "--format",
@@ -116,7 +127,7 @@ def process_image() -> Iterator[tuple[str, str]]:
         "--file",
         str(ROOT / "tests/integration/broker/fixtures/Containerfile"),
         "--build-arg",
-        f"BASE_IMAGE={base}",
+        f"BASE_IMAGE={process_base_image}",
         str(ROOT / "tests/integration/broker/fixtures"),
     )
     inspected = json.loads(
@@ -128,13 +139,10 @@ def process_image() -> Iterator[tuple[str, str]]:
         yield PROCESS_IMAGE.rsplit(":", 1)[0], digest
     finally:
         _podman("image", "rm", "--force", PROCESS_IMAGE, check=False)
-        if built_base:
-            _podman("image", "rm", "--force", base, check=False)
 
 
 @pytest.fixture(scope="module")
-def process_workspace_image() -> Iterator[tuple[str, str]]:
-    base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
+def process_workspace_image(process_base_image: str) -> Iterator[tuple[str, str]]:
     _podman(
         "build",
         "--format",
@@ -144,7 +152,7 @@ def process_workspace_image() -> Iterator[tuple[str, str]]:
         "--file",
         str(ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"),
         "--build-arg",
-        f"BASE_IMAGE={base}",
+        f"BASE_IMAGE={process_base_image}",
         str(ROOT),
     )
     _podman(

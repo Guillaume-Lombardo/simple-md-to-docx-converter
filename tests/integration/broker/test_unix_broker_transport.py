@@ -41,6 +41,7 @@ ATTEMPT_ID = UUID("00000000-0000-4000-8000-000000000002")
 UNIT_ID = UUID("00000000-0000-4000-8000-000000000003")
 INCARNATION_ID = UUID("00000000-0000-4000-8000-000000000004")
 CHANNEL = RuntimeChannelLimits(1000, 2000)
+PEER_CLOSE_TIMEOUT_SECONDS = 1.0
 CONTENT_LIMITS = ReverseContentLimits(
     1000, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
 )
@@ -84,11 +85,26 @@ def _workspace_stage(source: bytes = b"private") -> WorkspaceStageRequest:
 
 
 def _assert_peer_closed(connection: socket.socket) -> None:
+    connection.settimeout(PEER_CLOSE_TIMEOUT_SECONDS)
     try:
         received = connection.recv(1)
     except ConnectionResetError:
         received = b""
-    assert received == b""
+    except TimeoutError as error:
+        raise AssertionError("Broker peer did not close before deadline") from error
+    assert received == b"", "Broker peer sent unexpected data before closing"
+
+
+def test_peer_close_assertion_fails_deterministically_on_timeout(
+    mocker: MockerFixture,
+) -> None:
+    connection = mocker.Mock(spec=socket.socket)
+    connection.recv.side_effect = TimeoutError
+
+    with pytest.raises(AssertionError, match="did not close before deadline"):
+        _assert_peer_closed(connection)
+
+    connection.settimeout.assert_called_once_with(PEER_CLOSE_TIMEOUT_SECONDS)
 
 
 def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
