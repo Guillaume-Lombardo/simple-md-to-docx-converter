@@ -398,17 +398,25 @@ def test_admission_fixture_reports_only_listening_readiness() -> None:
 
 
 @pytest.mark.unit
-def test_admission_browser_opens_every_hold_on_a_dedicated_connected_socket() -> None:
+def test_admission_browser_waits_for_every_frontend_admission() -> None:
     source = RUNTIME_FAILURE_BROWSER.read_text(encoding="utf-8")
+    fixture = ADMISSION_FIXTURE.read_text(encoding="utf-8")
 
     assert 'import http from "node:http";' in source
     assert "request = http.request(" in source
     assert "`${baseURL}${path}`" in source
     assert "{ agent: false }" in source
-    assert 'socket.once("connect", resolve);' in source
-    assert "await Promise.all(held.map(({ connected }) => connected));" in source
+    assert "resolve(response.statusCode);" in source
+    assert "await Promise.all(held.map(({ admitted }) => admitted));" in source
+    assert "socket.once" not in source
+    assert "response.writeHead(200);" in fixture
+    assert "response.flushHeaders();" in fixture
+    assert 'response.write("admitted\\n");' in fixture
+    assert fixture.index("frontend-saturated") < fixture.index(
+        'response.write("admitted\\n");'
+    )
     assert source.index("await Promise.all(held.map") < source.index(
-        'await waitFor("/evidence/frontend-saturated")'
+        'assert.equal(existsSync("/evidence/frontend-saturated"), true);'
     )
     assert "} finally {" in source
     assert "held.forEach(({ request }) => request.destroy());" in source

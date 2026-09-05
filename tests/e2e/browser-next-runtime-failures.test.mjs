@@ -10,26 +10,19 @@ const baseURL = "http://localhost:3100";
 
 function openDedicatedRequest(path) {
   let request;
-  const connected = new Promise((resolve, reject) => {
+  const admitted = new Promise((resolve, reject) => {
     request = http.request(
       `${baseURL}${path}`,
       { agent: false },
       (response) => {
         response.resume();
+        resolve(response.statusCode);
       },
     );
     request.once("error", reject);
-    request.once("socket", (socket) => {
-      if (!socket.connecting) {
-        resolve();
-        return;
-      }
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
     request.end();
   });
-  return { connected, request };
+  return { admitted, request };
 }
 
 async function waitFor(path) {
@@ -116,13 +109,14 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
 
 test("production route exposes exact saturation and draining failures", async () => {
   if (process.env.MARKWEAVE_E2E_RUNTIME_FAILURE !== "admission") return;
-  // Each request owns a socket. Global fetch/undici connection pooling may
-  // queue part of this burst client-side and therefore never exercise all 128
-  // production-server admission slots.
+  // Each request owns a socket. The fixture writes an HTTP acknowledgement
+  // only after its production-server admission handler accepts the request,
+  // so this handshake cannot confuse a router TCP connection with admission.
   const held = Array.from({ length: 128 }, () => openDedicatedRequest("/hold"));
   try {
-    await Promise.all(held.map(({ connected }) => connected));
-    await waitFor("/evidence/frontend-saturated");
+    const statuses = await Promise.all(held.map(({ admitted }) => admitted));
+    assert.deepEqual(statuses, Array.from({ length: 128 }, () => 200));
+    assert.equal(existsSync("/evidence/frontend-saturated"), true);
     const saturated = await fetch(`${baseURL}/overflow`);
     assert.equal(saturated.status, 503);
     assert.equal(await saturated.text(), "");
