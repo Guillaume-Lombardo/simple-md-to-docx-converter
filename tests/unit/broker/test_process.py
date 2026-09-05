@@ -7,6 +7,7 @@ import os
 import pwd
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -100,6 +101,9 @@ def test_loads_complete_canonical_owner_only_configuration(tmp_path: Path) -> No
         lambda value: value["transport"].update(  # type: ignore[union-attr]
             {"operation_timeout_seconds": float("inf")}
         ),
+        lambda value: value["transport"].update(  # type: ignore[union-attr]
+            {"operation_timeout_seconds": "1"}
+        ),
         lambda value: value.update({"socket_path": "relative.sock"}),
         lambda value: value["runtime_limits"].update(  # type: ignore[union-attr]
             {"pid_limit": 0}
@@ -127,6 +131,13 @@ def test_rejects_invalid_configuration_values(
 
     with pytest.raises(BrokerProcessConfigurationError):
         load_broker_process_config(path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/broker.json", Path("broker.json")])
+def test_rejects_non_path_or_relative_configuration_path(path: object) -> None:
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(cast(Any, path))
 
 
 @pytest.mark.unit
@@ -324,6 +335,34 @@ def _server(tmp_path: Path, mocker: MockerFixture) -> UnixBrokerServer:
         dispatcher=dispatcher,
         limits=UnixTransportLimits(1, 1, 1, 1),
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("server_value", "timeout", "hard_exit"),
+    [
+        ("server", 1, os._exit),
+        (None, "1", os._exit),
+        (None, 0, os._exit),
+        (None, float("inf"), os._exit),
+        (None, 1, None),
+    ],
+)
+def test_process_rejects_invalid_constructor_arguments(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    server_value: object,
+    timeout: object,
+    hard_exit: object,
+) -> None:
+    server = _server(tmp_path, mocker) if server_value is None else server_value
+
+    with pytest.raises(ValueError, match="Broker process is invalid"):
+        BrokerProcess(
+            cast(Any, server),
+            hard_shutdown_timeout_seconds=cast(Any, timeout),
+            hard_exit=cast(Any, hard_exit),
+        )
 
 
 @pytest.mark.unit
