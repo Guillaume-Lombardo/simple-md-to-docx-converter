@@ -640,15 +640,15 @@ def test_fake_runtime_enforces_lifecycle_and_discovery_limits(
     with pytest.raises(FakeRuntimeError):
         runtime.remove(runtime_unit)
     with pytest.raises(FakeRuntimeError):
-        runtime.confirm_removed(runtime_unit)
+        runtime.confirm_removed(runtime_unit, EvidenceDigest("sha256:" + "f" * 64))
     with pytest.raises(FakeRuntimeError):
         runtime.discover(limit=0)
 
     runtime.hard_terminate(runtime_unit)
     runtime.confirm_exit(runtime_unit)
-    runtime.confirm_empty(runtime_unit)
+    empty_evidence = runtime.confirm_empty(runtime_unit)
     runtime.remove(runtime_unit)
-    runtime.confirm_removed(runtime_unit)
+    runtime.confirm_removed(runtime_unit, empty_evidence)
     with pytest.raises(FakeRuntimeError):
         runtime.hard_terminate(runtime_unit)
 

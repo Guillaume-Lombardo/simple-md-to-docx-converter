@@ -262,6 +262,111 @@ for reverse conversion.
   total branch coverage for the two new modules; the complete 374-test broker selection, Ruff,
   `ty`, and diff validation also pass. The exact light gate passes 2,801 tests at 94.07% total,
   90.21% application branch coverage, and 91.41% changed application-line coverage.
+* 2026-09-04: Implemented the lifecycle-only rootless Podman backend behind the shared isolation
+  runtime contract. The broker now creates or recovers one deterministic labelled container from
+  the configured repository and immutable digest with pulls disabled, a fixed reverse-attempt
+  entrypoint and empty argument vector, no network, no inherited environment or health command,
+  no runtime logging, a read-only root without implicit writable root tmpfs mounts, no
+  capabilities, no-new-privileges, a fixed non-root UID, private PID/UTS and no IPC namespace,
+  no restart, and exact T71-supplied CPU, memory/swap, PID, workspace-tmpfs, and whole-second
+  runtime deadline limits. Every shell-free Podman command has an absolute deadline, bounded
+  output, process-group cleanup on every post-spawn exceptional exit, and content-free errors.
+  Podman runs locally with an explicit hermetic environment and an empty owner-only hooks
+  directory; the broker validates the realized mounts, environment, identity, namespaces,
+  capabilities, security options, logging, cgroup placement, and resource limits before start.
+  Exact create-command and immutable-label
+  evidence makes a lost create response idempotently recoverable while rejecting image, policy,
+  identity, or incarnation substitution. Rootless cgroup-v2 and seccomp are mandatory.
+  Termination sends whole-container SIGKILL and separately requires canonical runtime-confirmed
+  exit, an exact retained cgroup-v2 `populated=0` result, and no active exec sessions. The
+  authenticated inventory persists that empty evidence before deletion; removal proof binds it to
+  bounded exact-name and label-scoped post-delete absence, so crash recovery does not depend on
+  finite runtime event retention. Absence or a kill/remove acknowledgement without the prior
+  durable empty transition is never proof. Bounded label discovery
+  rejects malformed, duplicate, unknown, and substituted units, and retained incarnation evidence
+  reconstructs proof after removal-response loss. The 57 focused unit/shared-conformance tests and
+  four real rootless Podman integrations cover a signal-resistant descendant, autonomous expiry
+  while the broker is down, startup sweep/readiness refusal, and crash recovery after removal.
+  The container CI domain builds a controlled derivative of the reviewed attempt image and runs
+  this real lifecycle suite. The real fixture also proves that fixed UID/GID `1001:0` can traverse
+  and write the bounded `/work` tmpfs without making it world-accessible. Workspace data
+  transfer/result extraction, T71 supervisor and reverse
+  channel ceilings, mTLS, Kubernetes, production composition, and application/job integration
+  remain explicitly outside this slice. The complete 435-test broker selection passes, the new
+  backend reaches 93% branch coverage, and the exact light gate passes 2,860 tests at 94.04% total
+  and 90.11% application branch coverage; Ruff, `ty`, CI-selector validation, and diff validation
+  also pass.
+* 2026-09-05: Closed the independent lifecycle review findings. Whole-unit emptiness is now a
+  positive exact cgroup-v2 `populated=0` proof retained across container exit, removal recovery is
+  bound to the authenticated pre-delete empty transition instead of finite event logs, and the
+  group-writable but not world-accessible workspace is usable by fixed UID/GID `1001:0`. Podman
+  commands use a hermetic environment, force the local engine, disable hooks through a verified
+  empty owner-only directory, and validate the complete realized isolation and resource spec before
+  start. Unexpected post-spawn command-runner failures now kill and reap the process group. The 423
+  broker unit tests and four real rootless Podman integrations pass. The canonical non-engine run
+  completed 3,117 passing tests at 94.91% total and 90.95% application branch coverage; its 30
+  PostgreSQL setup errors and three S3 failures are the documented unavailable local services, and
+  the unrelated release process-reaping timing test remains the only other failure. Ruff and `ty`
+  pass. No Kubernetes acceptance is claimed.
+* 2026-09-05: Corrected the rootless systemd cgroup binding after exact-head review found that
+  dash-expanded slice hierarchy could leave the broker reading an empty sibling cgroup. The
+  backend now requires Podman's local rootless systemd cgroup manager and the exact delegated
+  cgroup-v2 root, creates and verifies a dedicated deterministic parent and unit slice, and binds
+  the realized Podman `CgroupPath` to both the live init process's `/proc` membership and
+  `populated=1` in the exact unit slice before accepting a running container. Empty evidence still
+  requires that same slice to reach `populated=0`, and cleanup stops the exact bounded systemd unit
+  and positively verifies its disappearance. A real rootless test begins without the parent,
+  independently follows Podman's inspected process cgroup, observes the populated transition
+  while a signal-resistant descendant is alive and after whole-container termination, and leaves
+  no dedicated slice behind. Wrong managers, roots, runtime paths, process memberships, and
+  unconfirmed systemd cleanup fail closed. The 66 backend unit tests, complete 427-test broker
+  unit selection, and four real Podman integrations pass; Ruff and `ty` pass. The canonical
+  non-engine run completed 3,121 passing tests at 94.84% total and 90.85% application branch
+  coverage; its 30 PostgreSQL setup errors, three unavailable-S3 failures, and the unrelated known
+  release reaping timing failure remain documented local-environment limitations. No Kubernetes
+  acceptance is claimed.
+* 2026-09-05: Finished the lifecycle review by removing the shared systemd slice hierarchy. Each
+  unit now receives one non-hierarchical deterministic slice directly under the verified rootless
+  user-service cgroup, so removing one unit cannot race with sibling cleanup or retain a
+  broker-created parent. Cleanup uses bounded `systemctl --user` commands and requires exact
+  `loaded/inactive/dead` manager state, an empty manager `ControlGroup`, and filesystem absence;
+  integration setup and teardown no longer remove managed cgroups directly. All four real Podman
+  scenarios verify this manager and path state. The three successful broker lifecycle scenarios
+  do so read-only and also require absence from active and all-unit listings; only the deliberate
+  identity-substitution scenario uses explicit fixture recovery after the broker correctly refuses
+  cleanup. The container CI selector now covers every broker module and the complete real-Podman
+  fixture directory, preventing lifecycle dependency or fixture changes from bypassing the
+  boundary suite. The 427 broker tests, 390
+  selector/CI/container tests, four real Podman integrations, Ruff, and `ty` pass. The canonical
+  non-engine selection completed 3,129 passing tests at 94.80% total and 90.80% application branch
+  coverage, with the same 30 unavailable-PostgreSQL errors, three unavailable-S3 failures, and
+  unrelated known release reaping timing failure. No Kubernetes acceptance is claimed.
+* 2026-09-05: Restored compatibility with the hosted Ubuntu runner's Podman 4.9.3 after its first
+  container-domain run exposed the older exact inspect projection. Podman 4.9 joins the configured
+  entrypoint vector into one string, while Podman 5.4 returns the vector; the broker now accepts
+  only those two exact representations while still requiring the exact broker-authored create
+  command, labels, image digest, policy, and complete realized isolation spec. A successful create
+  that fails validation is rolled back by exact container ID and cgroup identity; both cleanup
+  boundaries are attempted, an inactive empty precreated cgroup leaf is removed safely, and any
+  unconfirmed cleanup remains a content-free failure. Unit tests cover both Podman projections,
+  near substitutions, recovered-container non-removal, malformed identity output, systemd and
+  filesystem failures, and bounded cgroup evidence. Follow-up review then restricted failed-create
+  rollback to the canonical ID returned by the successful create response, required exact-ID
+  absence plus empty label-scoped discovery before cgroup cleanup, and extended the same cleanup
+  guarantee across `BaseException` interruptions. The next hosted run exposed crun's documented
+  cgroup-v2 systemd `container` subgroup: live process binding now accepts only the exact inspected
+  scope or that scope plus `/container`, while retaining exact `State.CgroupPath` and populated
+  parent-leaf evidence and rejecting every other descendant or format. A subsequent hosted run
+  passed that runtime check and exposed only the integration assertion's former single-form
+  assumption; the boundary test now uses the same exact two-form predicate before continuing
+  through product termination and cleanup. Failed creates that prove
+  both exact-name and label-scoped absence now remove their empty precreated cgroup without
+  weakening lost-response recovery. The controlled fixture installs signal handlers before fork,
+  and only the parent publishes readiness after its resistant child exists. The local Podman 5.4.2
+  lifecycle suite remains four-for-four. The 119 backend tests, two fixture-ordering tests, and
+  2,933-test light selection pass at 90.09% application
+  branch coverage, correcting the hosted run's 89.77% result. Hosted Podman 4.9.3 remains to be
+  reconfirmed by CI after independent review. No Kubernetes acceptance is claimed.
 
 ## Synchronization
 

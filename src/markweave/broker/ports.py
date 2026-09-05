@@ -98,8 +98,10 @@ class IsolationRuntime(Protocol):
     def remove(self, runtime_unit: RuntimeUnit) -> None:
         """Request removal; successful acknowledgement is not proof."""
 
-    def confirm_removed(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
-        """Return positive removal evidence, never absence or delete receipt alone."""
+    def confirm_removed(
+        self, runtime_unit: RuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        """Bind durable empty evidence to bounded post-delete runtime absence."""
 
     def discover(self, *, limit: int) -> tuple[RuntimeUnit, ...]:
         """Discover broker-labelled units only as supplementary evidence."""
