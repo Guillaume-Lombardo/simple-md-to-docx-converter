@@ -15,6 +15,18 @@ from markweave.broker.models import (
     is_next_unit_state,
     policy_specification_evidence,
 )
+from markweave.broker.mtls_transport import (
+    MTLS_ALPN,
+    MTLS_PROTOCOL_NAME,
+    MTLS_PROTOCOL_VERSION,
+    MtlsBrokerClient,
+    MtlsBrokerServer,
+    MtlsEndpoint,
+    MtlsLocalIdentity,
+    MtlsPeerIdentity,
+    MtlsTransportLimits,
+    leaf_certificate_sha256,
+)
 from markweave.broker.podman_runtime import (
     BoundedCommandRunner,
     PodmanCommandLimits,
@@ -39,6 +51,9 @@ from markweave.broker.workspace_protocol import (
 )
 
 __all__ = [
+    "MTLS_ALPN",
+    "MTLS_PROTOCOL_NAME",
+    "MTLS_PROTOCOL_VERSION",
     "AuthenticatedPrincipal",
     "BoundedCommandRunner",
     "BrokerError",
@@ -47,6 +62,12 @@ __all__ = [
     "EvidenceDigest",
     "ManagedUnit",
     "ManagedUnitState",
+    "MtlsBrokerClient",
+    "MtlsBrokerServer",
+    "MtlsEndpoint",
+    "MtlsLocalIdentity",
+    "MtlsPeerIdentity",
+    "MtlsTransportLimits",
     "PodmanCommandLimits",
     "PodmanIsolationRuntime",
     "PodmanRuntimeError",
@@ -68,5 +89,6 @@ __all__ = [
     "WorkspaceStageRequest",
     "WorkspaceSuccessResponse",
     "is_next_unit_state",
+    "leaf_certificate_sha256",
     "policy_specification_evidence",
 ]
