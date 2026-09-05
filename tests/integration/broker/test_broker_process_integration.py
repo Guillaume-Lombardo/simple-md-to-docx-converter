@@ -370,10 +370,18 @@ server = UnixBrokerServer(
 )
 try:
     server.start()
-except BaseException:
+except RuntimeError as error:
+    if str(error) != "Broker Unix server is already active":
+        os.write(2, b"unexpected runtime failure\\n")
+        raise SystemExit(2)
     os.write(2, b"broker runtime failed\\n")
     raise SystemExit(1)
-raise SystemExit(0)
+except BaseException:
+    os.write(2, b"unexpected broker failure\\n")
+    raise SystemExit(3)
+server.stop()
+os.write(2, b"unexpected broker start\\n")
+raise SystemExit(4)
 """
     second = subprocess.run(
         (sys.executable, "-c", program, str(socket_path), str(PRINCIPAL.principal_id)),
