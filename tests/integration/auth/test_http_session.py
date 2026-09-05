@@ -95,6 +95,77 @@ def test_real_argon2_http_session_and_logout_cycle(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_reversion_capabilities_cross_real_session_and_http_boundaries(
+    tmp_path: Path,
+) -> None:
+    password = "admin-" + "password"
+
+    def settings(data_directory: Path, upload_limit: int | None) -> Settings:
+        return Settings(
+            **template_settings(),
+            initial_admin_username="admin",
+            initial_admin_password=password,
+            storage_profile="standalone",
+            standalone_data_directory=data_directory,
+            conversion_upload_max_bytes=1_000_000,
+            conversion_request_max_bytes=1_100_000,
+            reversion_upload_max_bytes=upload_limit,
+            conversion_retry_after_seconds=1,
+            job_result_retention_seconds=3_600,
+        )
+
+    with (
+        running_server(settings(tmp_path / "configured", 4_194_304)) as base_url,
+        httpx.Client(base_url=base_url) as client,
+    ):
+        anonymous = client.get("/api/v1/reversions/capabilities")
+        login = client.post(
+            "/api/v1/login",
+            headers={"Origin": base_url},
+            json={"username": "admin", "password": password},
+        )
+        cookie = login.cookies.get("md_converter_session")
+        session_headers = {"Cookie": f"md_converter_session={cookie}"}
+        first = client.get("/api/v1/reversions/capabilities", headers=session_headers)
+        second = client.get("/api/v1/reversions/capabilities", headers=session_headers)
+
+    assert anonymous.status_code == 401
+    assert anonymous.json()["error"]["code"] == "AUTHENTICATION_REQUIRED"
+    assert login.status_code == 200
+    assert first.status_code == second.status_code == 200
+    assert first.content == second.content
+    assert first.headers["Cache-Control"] == "private, no-store"
+    assert first.headers["X-Content-Type-Options"] == "nosniff"
+    assert first.json()["maximum_upload_bytes"] == 4_194_304
+
+    with (
+        running_server(settings(tmp_path / "unavailable", None)) as base_url,
+        httpx.Client(base_url=base_url) as client,
+    ):
+        login = client.post(
+            "/api/v1/login",
+            headers={"Origin": base_url},
+            json={"username": "admin", "password": password},
+        )
+        cookie = login.cookies.get("md_converter_session")
+        unavailable = client.get(
+            "/api/v1/reversions/capabilities",
+            headers={"Cookie": f"md_converter_session={cookie}"},
+        )
+
+    assert login.status_code == 200
+    assert unavailable.status_code == 503
+    assert unavailable.headers["Cache-Control"] == "private, no-store"
+    assert unavailable.headers["X-Content-Type-Options"] == "nosniff"
+    assert unavailable.json() == {
+        "error": {
+            "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+            "message": "Reverse-conversion capabilities are unavailable.",
+        }
+    }
+
+
+@pytest.mark.integration
 def test_public_origin_is_enforced_across_real_http_boundary(tmp_path: Path) -> None:
     password = "admin-" + "password"
     settings = Settings(

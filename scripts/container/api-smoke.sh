@@ -8,6 +8,7 @@ readonly clamav_name=md-converter-t20-api-smoke-clamav
 readonly network_name=md-converter-t20-api-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
+readonly expect_reversion_capabilities="${MARKWEAVE_EXPECT_REVERSION_CAPABILITIES:-true}"
 seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=false
@@ -169,9 +170,26 @@ podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'import urllib.request; assert b"\"status\":\"ready\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/ready", timeout=2).read()'
 podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)'
+if [[ "$expect_reversion_capabilities" == true ]]; then
+  podman cp "$repository/scripts/container/api_workflow_smoke.py" \
+    "$legacy_container_name:/work/api_workflow_smoke.py"
+  podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python \
+    /work/api_workflow_smoke.py \
+    --base-url http://127.0.0.1:18080 \
+    --expect-reversion-capabilities-unavailable
+elif [[ "$expect_reversion_capabilities" != false ]]; then
+  echo "MARKWEAVE_EXPECT_REVERSION_CAPABILITIES must be true or false." >&2
+  exit 2
+fi
 podman rm --force "$legacy_container_name" >/dev/null
 legacy_created=false
 echo "Final-image legacy configuration smoke passed for $image."
+
+reversion_capability_arguments=()
+if [[ "$expect_reversion_capabilities" == true ]]; then
+  settings+=(--env MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304)
+  reversion_capability_arguments+=(--expect-reversion-upload-max-bytes 4194304)
+fi
 
 podman run --detach \
   --name "$container_name" \
@@ -222,6 +240,7 @@ podman cp "$container_name:/tmp/t20-template.docx" \
   "$template_directory/template.docx"
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$port" \
-  --template "$template_directory/template.docx"
+  --template "$template_directory/template.docx" \
+  "${reversion_capability_arguments[@]}"
 
 echo "Final-image standalone conversion workflow smoke passed for $image."

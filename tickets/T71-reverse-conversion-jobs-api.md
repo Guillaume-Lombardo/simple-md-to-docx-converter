@@ -2,7 +2,7 @@
 ticket: T71
 linear_id: G1L-539
 linear_url: https://linear.app/g1lom/issue/G1L-539/t71-add-persistent-reverse-conversion-jobs-and-api
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -92,6 +92,39 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70.
 * 2026-09-03: Added a distinct measured low-compute budget and fair-scheduling requirement for the
   CPU-only reverse workload.
+* 2026-09-06: Started from verified T70-complete main
+  `8df5ff709964df3fa6dbbf5c9c226e9ae90c3550`. The first cohesive slice owns the authenticated,
+  deterministic `GET /api/v1/reversions/capabilities` contract and one reusable typed reverse
+  admission-policy seam. It includes the T69 format/detection matrix, configured upload ceiling,
+  result modes and PDF/local/no-OCR limitations, private/no-store and nosniff headers, OpenAPI and
+  generated TypeScript bindings, configuration and storage-profile parity tests. Submission and
+  lifecycle routes, CLI, persistence, migrations, scanner/storage reservation, worker/broker/lease/
+  publication, queue metrics, and production execution budgets remain excluded. Missing reverse
+  upload configuration fails closed without inventing a product value.
+* 2026-09-06: Implemented the first slice with one T69-derived typed admission policy shared by the
+  runtime capabilities response and `admit_format`. The authenticated endpoint exposes the ordered
+  21-extension matrix, detection and CSV/mismatch/undetected/scanner rules, configured positive
+  upload ceiling, deterministic package modes, honest PDF limitations, and local/no-OCR/no-hosted-
+  fallback guarantees without importing anydoc on the request path. Regular users and
+  administrators receive identical deterministic bytes; anonymous access is rejected, and an
+  absent reverse upload ceiling returns the stable safe `503` contract while forward-only startup
+  remains compatible. The canonical OpenAPI addition is classified compatible and the generated
+  TypeScript bindings are synchronized. Targeted validation passed 226 tests plus Ruff formatting,
+  Ruff lint, `ty`, OpenAPI freshness/compatibility, generated-binding freshness, documentation and
+  CI validation. The broad canonical local selection reached 3,557 passes and 94.67% total coverage;
+  it could not complete because this worktree has no configured PostgreSQL/RustFS services (30
+  PostgreSQL setup errors and three RustFS failures). One unrelated real-process timeout failure
+  from that loaded run passed immediately in isolation. Submission and lifecycle work remains for
+  later T71 slices.
+* 2026-09-06: Independent-review follow-up added a real Uvicorn/SQLite/Argon2 session-boundary test
+  for anonymous `401`, configured deterministic `200`, and missing-configuration `503` behavior.
+  Both success and unavailable responses now declare their private/no-store and nosniff headers in
+  canonical OpenAPI. The final rootless-image smoke exercises those authorization and configuration
+  branches through the installed application before completing the existing conversion workflow.
+* 2026-09-06: Corrected the E2E rollback routing so its pinned historical image retains the prior
+  route contract instead of being required to expose the new capabilities endpoint. Candidate-image
+  final smoke validation continues to require the anonymous `401`, missing-configuration `503`, and
+  configured deterministic `200` branches by default.
 
 ## Synchronization
 

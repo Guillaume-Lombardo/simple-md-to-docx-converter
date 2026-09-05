@@ -49,6 +49,7 @@ def _contract_settings() -> Settings:
         initial_admin_password=SecretStr(_NON_SECRET_PLACEHOLDER),
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=1_000_000,
         conversion_retry_after_seconds=2,
         template_max_archive_bytes=1_000_000,
         template_request_max_bytes=1_100_000,

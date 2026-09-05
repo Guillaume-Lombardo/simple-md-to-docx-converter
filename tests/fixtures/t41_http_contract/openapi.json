@@ -493,6 +493,21 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "FormatFamily": {
+        "description": "Ordered format families approved by T69.",
+        "enum": [
+          "word",
+          "powerpoint",
+          "excel",
+          "opendocument",
+          "rtf",
+          "epub",
+          "csv",
+          "pdf"
+        ],
+        "title": "FormatFamily",
+        "type": "string"
+      },
       "IdleSessionPolicyDurationBoundsResponse": {
         "description": "Authoritative whole-minute bounds and default for one session role.",
         "properties": {
@@ -685,6 +700,208 @@
           "password"
         ],
         "title": "PasswordResetRequest",
+        "type": "object"
+      },
+      "ReverseOutputMode": {
+        "description": "Deterministic result shapes approved by T69.",
+        "enum": [
+          "markdown",
+          "markdown_with_assets",
+          "markdown_with_unavailable_assets"
+        ],
+        "title": "ReverseOutputMode",
+        "type": "string"
+      },
+      "ReversionAdmissionPolicyResponse": {
+        "description": "Client-visible rules that preserve authoritative server admission.",
+        "properties": {
+          "csv_policy": {
+            "title": "Csv Policy",
+            "type": "string"
+          },
+          "extension_is_hint": {
+            "title": "Extension Is Hint",
+            "type": "boolean"
+          },
+          "mismatch_policy": {
+            "title": "Mismatch Policy",
+            "type": "string"
+          },
+          "scanner_order": {
+            "title": "Scanner Order",
+            "type": "string"
+          },
+          "undetected_policy": {
+            "title": "Undetected Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extension_is_hint",
+          "mismatch_policy",
+          "undetected_policy",
+          "csv_policy",
+          "scanner_order"
+        ],
+        "title": "ReversionAdmissionPolicyResponse",
+        "type": "object"
+      },
+      "ReversionCapabilitiesResponse": {
+        "description": "Versioned authoritative reverse-conversion runtime contract.",
+        "properties": {
+          "admission": {
+            "$ref": "#/components/schemas/ReversionAdmissionPolicyResponse"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ReversionExecutionCapabilitiesResponse"
+          },
+          "format_families": {
+            "items": {
+              "$ref": "#/components/schemas/ReversionFormatCapabilityResponse"
+            },
+            "title": "Format Families",
+            "type": "array"
+          },
+          "maximum_upload_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Maximum Upload Bytes",
+            "type": "integer"
+          },
+          "pdf": {
+            "$ref": "#/components/schemas/ReversionPdfCapabilitiesResponse"
+          },
+          "result_package_modes": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseOutputMode"
+            },
+            "title": "Result Package Modes",
+            "type": "array"
+          },
+          "schema_version": {
+            "minimum": 1.0,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "format_families",
+          "admission",
+          "maximum_upload_bytes",
+          "result_package_modes",
+          "pdf",
+          "execution"
+        ],
+        "title": "ReversionCapabilitiesResponse",
+        "type": "object"
+      },
+      "ReversionExecutionCapabilitiesResponse": {
+        "description": "Client-visible reverse execution guarantees.",
+        "properties": {
+          "hosted_fallback": {
+            "title": "Hosted Fallback",
+            "type": "boolean"
+          },
+          "local": {
+            "title": "Local",
+            "type": "boolean"
+          },
+          "ocr": {
+            "title": "Ocr",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "local",
+          "ocr",
+          "hosted_fallback"
+        ],
+        "title": "ReversionExecutionCapabilitiesResponse",
+        "type": "object"
+      },
+      "ReversionFormatCapabilityResponse": {
+        "description": "One ordered reverse-conversion format family and detection contract.",
+        "properties": {
+          "content_detection": {
+            "title": "Content Detection",
+            "type": "string"
+          },
+          "detected_formats": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detected Formats",
+            "type": "array"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extensions",
+            "type": "array"
+          },
+          "family": {
+            "$ref": "#/components/schemas/FormatFamily"
+          },
+          "selected_parser_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Parser Format"
+          }
+        },
+        "required": [
+          "family",
+          "extensions",
+          "detected_formats",
+          "content_detection",
+          "selected_parser_format"
+        ],
+        "title": "ReversionFormatCapabilityResponse",
+        "type": "object"
+      },
+      "ReversionPdfCapabilitiesResponse": {
+        "description": "Client-visible limitations of the pinned PDF path.",
+        "properties": {
+          "contract": {
+            "title": "Contract",
+            "type": "string"
+          },
+          "document_model_available": {
+            "title": "Document Model Available",
+            "type": "boolean"
+          },
+          "embedded_assets_available": {
+            "title": "Embedded Assets Available",
+            "type": "boolean"
+          },
+          "image_preservation": {
+            "title": "Image Preservation",
+            "type": "boolean"
+          },
+          "mixed_or_image_only_pages": {
+            "title": "Mixed Or Image Only Pages",
+            "type": "string"
+          },
+          "warning": {
+            "title": "Warning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract",
+          "document_model_available",
+          "embedded_assets_available",
+          "image_preservation",
+          "mixed_or_image_only_pages",
+          "warning"
+        ],
+        "title": "ReversionPdfCapabilitiesResponse",
         "type": "object"
       },
       "Role": {
@@ -3331,6 +3548,102 @@
         "summary": "Change Own Password",
         "tags": [
           "authentication"
+        ]
+      }
+    },
+    "/api/v1/reversions/capabilities": {
+      "get": {
+        "operationId": "get_reversion_capabilities_api_v1_reversions_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReversionCapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents shared and private caching of runtime capabilities.",
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content-type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              },
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication failed or is required",
+            "headers": {
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The service is not ready",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents shared and private caching of runtime capabilities.",
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content-type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              },
+              "X-Correlation-ID": {
+                "description": "Server-generated request correlation identifier.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Reversion Capabilities",
+        "tags": [
+          "reversions"
         ]
       }
     },

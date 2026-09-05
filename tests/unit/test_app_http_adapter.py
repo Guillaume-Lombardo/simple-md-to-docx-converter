@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from pytest_mock import MockerFixture
 
 from markweave.app import AppComponents, create_app
 from markweave.auth.errors import (
+    AUTHENTICATION_REQUIRED,
     INVALID_CREDENTIALS,
 )
 from markweave.auth.memory import MemoryReadinessProbe
@@ -50,6 +52,7 @@ from markweave.malware import (
 )
 from markweave.observability import QueueObserver
 from markweave.persistence.errors import PersistenceError
+from markweave.reversions.formats import REVERSE_ADMISSION_POLICY
 from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
@@ -225,13 +228,14 @@ def _route_manifest(app: FastAPI) -> list[dict[str, Any]]:
     return manifest
 
 
-def isolated_client(
+def isolated_client(  # noqa: PLR0913 - explicit adapter configuration
     mocker: MockerFixture,
     *,
     ready: bool = True,
     scanner: UploadScanner | None = None,
     public_origin: str | None = None,
     insecure_evaluation_mode: bool = False,
+    reversion_upload_max_bytes: int | None = None,
 ) -> tuple[TestClient, Any, User, User]:
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
@@ -246,6 +250,7 @@ def isolated_client(
         standalone_data_directory="/data",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=reversion_upload_max_bytes,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
         public_origin=public_origin,
@@ -286,6 +291,7 @@ def _lifecycle_settings() -> Settings:
         standalone_data_directory="/data",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=1_000_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
@@ -301,16 +307,144 @@ def _distributed_http_settings() -> Settings:
         s3_bucket="objects",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=1_000_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
 
 
+@pytest.mark.unit
+def test_reversion_capabilities_are_authenticated_content_free_and_deterministic(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, admin, alice = isolated_client(
+        mocker, reversion_upload_max_bytes=4_194_304
+    )
+    auth.authenticate.side_effect = (alice, admin)
+    before_anydoc_modules = {
+        name for name in sys.modules if name == "anydoc" or name.startswith("anydoc.")
+    }
+
+    with client:
+        regular = client.get(
+            "/api/v1/reversions/capabilities",
+            headers={"Cookie": "md_converter_session=regular-session"},
+        )
+        administrator = client.get(
+            "/api/v1/reversions/capabilities",
+            headers={"Cookie": "md_converter_session=admin-session"},
+        )
+
+    assert regular.status_code == administrator.status_code == 200
+    assert regular.content == administrator.content
+    assert regular.headers["Cache-Control"] == "private, no-store"
+    assert regular.headers["X-Content-Type-Options"] == "nosniff"
+    payload = regular.json()
+    assert payload == {
+        "schema_version": 1,
+        "format_families": [
+            {
+                "family": approved.family.value,
+                "extensions": list(approved.extensions),
+                "detected_formats": list(approved.detected_formats),
+                "content_detection": approved.content_detection,
+                "selected_parser_format": approved.selected_parser_format,
+            }
+            for approved in REVERSE_ADMISSION_POLICY.formats
+        ],
+        "admission": {
+            "extension_is_hint": True,
+            "mismatch_policy": REVERSE_ADMISSION_POLICY.mismatch_policy,
+            "undetected_policy": REVERSE_ADMISSION_POLICY.undetected_policy,
+            "csv_policy": REVERSE_ADMISSION_POLICY.csv_policy,
+            "scanner_order": REVERSE_ADMISSION_POLICY.scanner_order,
+        },
+        "maximum_upload_bytes": 4_194_304,
+        "result_package_modes": [
+            "markdown",
+            "markdown_with_assets",
+            "markdown_with_unavailable_assets",
+        ],
+        "pdf": {
+            "contract": "text extraction only",
+            "document_model_available": False,
+            "embedded_assets_available": False,
+            "image_preservation": False,
+            "mixed_or_image_only_pages": (
+                "reject the complete input as needs_ocr when any page yields no text"
+            ),
+            "warning": (
+                "PDF images, layout, and source-position image links are not preserved"
+            ),
+        },
+        "execution": {"local": True, "ocr": False, "hosted_fallback": False},
+    }
+    assert {
+        name for name in sys.modules if name == "anydoc" or name.startswith("anydoc.")
+    } == before_anydoc_modules
+    forbidden_keys = {
+        "source_bytes",
+        "result_bytes",
+        "original_filename",
+        "markdown",
+        "asset_names",
+        "asset_bytes",
+        "content_digest",
+        "download_capability",
+    }
+
+    def keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | {key for item in value.values() for key in keys(item)}
+        if isinstance(value, list):
+            return {key for item in value for key in keys(item)}
+        return set()
+
+    assert keys(payload).isdisjoint(forbidden_keys)
+
+
+@pytest.mark.unit
+def test_reversion_capabilities_reject_anonymous_access(mocker: MockerFixture) -> None:
+    client, auth, _, _ = isolated_client(mocker, reversion_upload_max_bytes=4_194_304)
+    auth.authenticate.side_effect = AUTHENTICATION_REQUIRED.new()
+
+    with client:
+        response = client.get("/api/v1/reversions/capabilities")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "error": {
+            "code": "AUTHENTICATION_REQUIRED",
+            "message": "Authentication is required.",
+        }
+    }
+
+
+@pytest.mark.unit
+def test_reversion_capabilities_fail_safely_without_upload_configuration(
+    mocker: MockerFixture,
+) -> None:
+    client, _, _, _ = isolated_client(mocker)
+
+    with client:
+        response = client.get("/api/v1/reversions/capabilities")
+
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.json() == {
+        "error": {
+            "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+            "message": "Reverse-conversion capabilities are unavailable.",
+        }
+    }
+
+
 def _lifecycle_components(mocker: MockerFixture, engine: Any) -> AppComponents:
     auth = mocker.Mock(spec=AuthenticationService)
-    auth.bootstrap_admin.return_value = User(
-        uuid4(), "Admin", "admin", "hash", Role.ADMIN
-    )
+    actor = User(uuid4(), "Admin", "admin", "hash", Role.ADMIN)
+    auth.bootstrap_admin.return_value = actor
+    auth.authenticate.return_value = actor
     return AppComponents(
         authentication=auth,
         readiness=MemoryReadinessProbe(),
@@ -823,6 +957,7 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "422",
             "503",
         },
+        ("/api/v1/reversions/capabilities", "get"): {"200", "401", "503"},
     }
     for (path, method), statuses in expected.items():
         responses = paths[path][method]["responses"]
@@ -833,6 +968,17 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             ]
             assert reference.endswith("/ErrorResponse")
     assert error_responses(422)[422]["model"] is ErrorResponse
+    capability_responses = paths["/api/v1/reversions/capabilities"]["get"]["responses"]
+    for status_code in ("200", "503"):
+        capability_headers = capability_responses[status_code]["headers"]
+        assert capability_headers["Cache-Control"]["schema"] == {
+            "type": "string",
+            "const": "private, no-store",
+        }
+        assert capability_headers["X-Content-Type-Options"]["schema"] == {
+            "type": "string",
+            "const": "nosniff",
+        }
     result_schema = paths["/api/v1/conversions/{job_id}/result"]["get"]["responses"][
         "200"
     ]["content"]["application/octet-stream"]["schema"]
@@ -922,6 +1068,28 @@ def test_http_contract_is_unchanged_for_both_storage_profiles(
             expected_routes,
             location=f"{profile}/routes",
         )
+
+
+@pytest.mark.unit
+def test_reversion_capability_bytes_match_across_storage_profiles(
+    mocker: MockerFixture,
+) -> None:
+    standalone = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+    distributed = create_app(
+        _distributed_http_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    responses = []
+    for app in (standalone, distributed):
+        with TestClient(app, base_url="https://testserver") as client:
+            responses.append(client.get("/api/v1/reversions/capabilities"))
+
+    assert all(response.status_code == 200 for response in responses)
+    assert responses[0].content == responses[1].content
 
 
 @pytest.mark.unit

@@ -71,6 +71,22 @@ export const vErrorResponse = v.object({
 });
 
 /**
+ * FormatFamily
+ *
+ * Ordered format families approved by T69.
+ */
+export const vFormatFamily = v.picklist([
+    'word',
+    'powerpoint',
+    'excel',
+    'opendocument',
+    'rtf',
+    'epub',
+    'csv',
+    'pdf'
+]);
+
+/**
  * IdleSessionPolicyDurationBoundsResponse
  *
  * Authoritative whole-minute bounds and default for one session role.
@@ -164,6 +180,83 @@ export const vPasswordChangeRequirementRequest = v.object({
 export const vPasswordResetRequest = v.object({
     password: v.string(),
     password_change_required: v.optional(v.boolean(), false)
+});
+
+/**
+ * ReverseOutputMode
+ *
+ * Deterministic result shapes approved by T69.
+ */
+export const vReverseOutputMode = v.picklist([
+    'markdown',
+    'markdown_with_assets',
+    'markdown_with_unavailable_assets'
+]);
+
+/**
+ * ReversionAdmissionPolicyResponse
+ *
+ * Client-visible rules that preserve authoritative server admission.
+ */
+export const vReversionAdmissionPolicyResponse = v.object({
+    csv_policy: v.string(),
+    extension_is_hint: v.boolean(),
+    mismatch_policy: v.string(),
+    scanner_order: v.string(),
+    undetected_policy: v.string()
+});
+
+/**
+ * ReversionExecutionCapabilitiesResponse
+ *
+ * Client-visible reverse execution guarantees.
+ */
+export const vReversionExecutionCapabilitiesResponse = v.object({
+    hosted_fallback: v.boolean(),
+    local: v.boolean(),
+    ocr: v.boolean()
+});
+
+/**
+ * ReversionFormatCapabilityResponse
+ *
+ * One ordered reverse-conversion format family and detection contract.
+ */
+export const vReversionFormatCapabilityResponse = v.object({
+    content_detection: v.string(),
+    detected_formats: v.array(v.string()),
+    extensions: v.array(v.string()),
+    family: vFormatFamily,
+    selected_parser_format: v.nullable(v.string())
+});
+
+/**
+ * ReversionPdfCapabilitiesResponse
+ *
+ * Client-visible limitations of the pinned PDF path.
+ */
+export const vReversionPdfCapabilitiesResponse = v.object({
+    contract: v.string(),
+    document_model_available: v.boolean(),
+    embedded_assets_available: v.boolean(),
+    image_preservation: v.boolean(),
+    mixed_or_image_only_pages: v.string(),
+    warning: v.string()
+});
+
+/**
+ * ReversionCapabilitiesResponse
+ *
+ * Versioned authoritative reverse-conversion runtime contract.
+ */
+export const vReversionCapabilitiesResponse = v.object({
+    admission: vReversionAdmissionPolicyResponse,
+    execution: vReversionExecutionCapabilitiesResponse,
+    format_families: v.array(vReversionFormatCapabilityResponse),
+    maximum_upload_bytes: v.pipe(v.number(), v.integer(), v.gtValue(0)),
+    pdf: vReversionPdfCapabilitiesResponse,
+    result_package_modes: v.array(vReverseOutputMode),
+    schema_version: v.pipe(v.number(), v.integer(), v.minValue(1))
 });
 
 /**
@@ -530,6 +623,11 @@ export const vChangeOwnPasswordApiV1PasswordPostHeaders = v.object({
  * Successful Response
  */
 export const vChangeOwnPasswordApiV1PasswordPostResponse = v.void();
+
+/**
+ * Successful Response
+ */
+export const vGetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponse = vReversionCapabilitiesResponse;
 
 /**
  * Successful Response

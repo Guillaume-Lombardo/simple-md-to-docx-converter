@@ -28,6 +28,7 @@ export PYTHONPATH="$repository"
 export UV_PROJECT="$repository/pyproject.toml"
 if [[ "$profile" == standalone ]]; then
   MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST=true \
+    MARKWEAVE_EXPECT_REVERSION_CAPABILITIES=false \
     MARKWEAVE_REPOSITORY_ROOT="$repository" \
     bash "$repository/scripts/container/api-smoke.sh" "$released_image"
 else

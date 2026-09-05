@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from markweave.auth.models import Role
 from markweave.jobs.models import JobOutput, TemplateMode
+from markweave.reversions.formats import FormatFamily
+from markweave.reversions.models import ReverseOutputMode
 from markweave.templates.models import TemplateSelectionSource, TemplateStatus
 
 
@@ -184,6 +186,57 @@ class ConversionOptionsResponse(BaseModel):
         ):
             raise ValueError("Template version fields are inconsistent")
         return self
+
+
+class ReversionFormatCapabilityResponse(BaseModel):
+    """One ordered reverse-conversion format family and detection contract."""
+
+    family: FormatFamily
+    extensions: tuple[str, ...]
+    detected_formats: tuple[str, ...]
+    content_detection: str
+    selected_parser_format: str | None
+
+
+class ReversionAdmissionPolicyResponse(BaseModel):
+    """Client-visible rules that preserve authoritative server admission."""
+
+    extension_is_hint: bool
+    mismatch_policy: str
+    undetected_policy: str
+    csv_policy: str
+    scanner_order: str
+
+
+class ReversionPdfCapabilitiesResponse(BaseModel):
+    """Client-visible limitations of the pinned PDF path."""
+
+    contract: str
+    document_model_available: bool
+    embedded_assets_available: bool
+    image_preservation: bool
+    mixed_or_image_only_pages: str
+    warning: str
+
+
+class ReversionExecutionCapabilitiesResponse(BaseModel):
+    """Client-visible reverse execution guarantees."""
+
+    local: bool
+    ocr: bool
+    hosted_fallback: bool
+
+
+class ReversionCapabilitiesResponse(BaseModel):
+    """Versioned authoritative reverse-conversion runtime contract."""
+
+    schema_version: Annotated[int, Field(strict=True, ge=1)]
+    format_families: tuple[ReversionFormatCapabilityResponse, ...]
+    admission: ReversionAdmissionPolicyResponse
+    maximum_upload_bytes: Annotated[int, Field(strict=True, gt=0)]
+    result_package_modes: tuple[ReverseOutputMode, ...]
+    pdf: ReversionPdfCapabilitiesResponse
+    execution: ReversionExecutionCapabilitiesResponse
 
 
 class TemplateAdministrationContextResponse(BaseModel):

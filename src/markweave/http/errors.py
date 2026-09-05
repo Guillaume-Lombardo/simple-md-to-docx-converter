@@ -22,6 +22,7 @@ from markweave.jobs.errors import (
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
 from markweave.persistence.errors import PersistenceError
+from markweave.reversions.capabilities import ReversionCapabilitiesUnavailableError
 from markweave.storage import ObjectStoreError
 from markweave.templates.errors import (
     TemplateConflictError,
@@ -97,6 +98,24 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "PERSISTENCE_UNAVAILABLE",
                     "message": "Persistent storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionCapabilitiesUnavailableError)
+    def reversion_capabilities_unavailable_handler(
+        _request: Request, _error: ReversionCapabilitiesUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+                    "message": "Reverse-conversion capabilities are unavailable.",
                 }
             },
         )

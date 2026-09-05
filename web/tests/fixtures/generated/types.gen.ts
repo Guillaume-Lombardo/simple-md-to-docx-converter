@@ -280,6 +280,13 @@ export type ErrorResponse = {
 };
 
 /**
+ * FormatFamily
+ *
+ * Ordered format families approved by T69.
+ */
+export type FormatFamily = 'word' | 'powerpoint' | 'excel' | 'opendocument' | 'rtf' | 'epub' | 'csv' | 'pdf';
+
+/**
  * IdleSessionPolicyDurationBoundsResponse
  *
  * Authoritative whole-minute bounds and default for one session role.
@@ -425,6 +432,145 @@ export type PasswordResetRequest = {
      * Password Change Required
      */
     password_change_required?: boolean;
+};
+
+/**
+ * ReverseOutputMode
+ *
+ * Deterministic result shapes approved by T69.
+ */
+export type ReverseOutputMode = 'markdown' | 'markdown_with_assets' | 'markdown_with_unavailable_assets';
+
+/**
+ * ReversionAdmissionPolicyResponse
+ *
+ * Client-visible rules that preserve authoritative server admission.
+ */
+export type ReversionAdmissionPolicyResponse = {
+    /**
+     * Csv Policy
+     */
+    csv_policy: string;
+    /**
+     * Extension Is Hint
+     */
+    extension_is_hint: boolean;
+    /**
+     * Mismatch Policy
+     */
+    mismatch_policy: string;
+    /**
+     * Scanner Order
+     */
+    scanner_order: string;
+    /**
+     * Undetected Policy
+     */
+    undetected_policy: string;
+};
+
+/**
+ * ReversionCapabilitiesResponse
+ *
+ * Versioned authoritative reverse-conversion runtime contract.
+ */
+export type ReversionCapabilitiesResponse = {
+    admission: ReversionAdmissionPolicyResponse;
+    execution: ReversionExecutionCapabilitiesResponse;
+    /**
+     * Format Families
+     */
+    format_families: Array<ReversionFormatCapabilityResponse>;
+    /**
+     * Maximum Upload Bytes
+     */
+    maximum_upload_bytes: number;
+    pdf: ReversionPdfCapabilitiesResponse;
+    /**
+     * Result Package Modes
+     */
+    result_package_modes: Array<ReverseOutputMode>;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+};
+
+/**
+ * ReversionExecutionCapabilitiesResponse
+ *
+ * Client-visible reverse execution guarantees.
+ */
+export type ReversionExecutionCapabilitiesResponse = {
+    /**
+     * Hosted Fallback
+     */
+    hosted_fallback: boolean;
+    /**
+     * Local
+     */
+    local: boolean;
+    /**
+     * Ocr
+     */
+    ocr: boolean;
+};
+
+/**
+ * ReversionFormatCapabilityResponse
+ *
+ * One ordered reverse-conversion format family and detection contract.
+ */
+export type ReversionFormatCapabilityResponse = {
+    /**
+     * Content Detection
+     */
+    content_detection: string;
+    /**
+     * Detected Formats
+     */
+    detected_formats: Array<string>;
+    /**
+     * Extensions
+     */
+    extensions: Array<string>;
+    family: FormatFamily;
+    /**
+     * Selected Parser Format
+     */
+    selected_parser_format: string | null;
+};
+
+/**
+ * ReversionPdfCapabilitiesResponse
+ *
+ * Client-visible limitations of the pinned PDF path.
+ */
+export type ReversionPdfCapabilitiesResponse = {
+    /**
+     * Contract
+     */
+    contract: string;
+    /**
+     * Document Model Available
+     */
+    document_model_available: boolean;
+    /**
+     * Embedded Assets Available
+     */
+    embedded_assets_available: boolean;
+    /**
+     * Image Preservation
+     */
+    image_preservation: boolean;
+    /**
+     * Mixed Or Image Only Pages
+     */
+    mixed_or_image_only_pages: string;
+    /**
+     * Warning
+     */
+    warning: string;
 };
 
 /**
@@ -1434,6 +1580,35 @@ export type ChangeOwnPasswordApiV1PasswordPostResponses = {
 };
 
 export type ChangeOwnPasswordApiV1PasswordPostResponse = ChangeOwnPasswordApiV1PasswordPostResponses[keyof ChangeOwnPasswordApiV1PasswordPostResponses];
+
+export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/reversions/capabilities';
+};
+
+export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetError = GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetErrors[keyof GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetErrors];
+
+export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReversionCapabilitiesResponse;
+};
+
+export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponse = GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses[keyof GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses];
 
 export type ApiSessionApiV1SessionGetData = {
     body?: never;

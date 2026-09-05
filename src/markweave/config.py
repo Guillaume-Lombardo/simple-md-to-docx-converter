@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     insecure_evaluation_mode: bool = False
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
+    reversion_upload_max_bytes: int | None = Field(default=None, gt=0)
     conversion_max_decompressed_bytes: int = Field(gt=0)
     conversion_max_files: int = Field(gt=0)
     conversion_max_images: int = Field(gt=0)
