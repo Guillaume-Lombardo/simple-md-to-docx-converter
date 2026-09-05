@@ -510,7 +510,7 @@ for reverse conversion.
   operation deadline, explicit handshake/pending/handler capacities, bounded framing, and
   content-free failures. Real AF_INET/OpenSSL tests cover lifecycle and workspace success plus
   malformed, oversized, truncated, extra, replayed, substituted, mis-pinned, wrong-SAN, wrong-EKU,
-  untrusted, expired, slow, disconnected, and shutdown traffic. All 98 focused mTLS tests and the
+  untrusted, expired, slow, disconnected, and shutdown traffic. All 100 focused mTLS tests and the
   complete 763-test broker unit/integration boundary pass; the new module reaches 94.08% statement
   and 90.63% branch coverage. Ruff and `ty` pass. Production process assembly, deployment,
   Kubernetes, T71 orchestration/publication, HTTP, and UI remain excluded from this slice.
