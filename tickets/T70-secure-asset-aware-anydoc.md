@@ -446,9 +446,11 @@ for reverse conversion.
 * 2026-09-05: The final process review closed four additional authority and boundedness gaps. The
   container-domain selector now includes the dependency-light top-level broker entry point. A stop
   requested during startup reconciliation is preserved across socket setup, so the real Unix
-  listener never begins admission and no CREATE or ACK reaches dispatch. A separate owner-only
-  state-authority lock is acquired before SQLite is opened and retained until successful handler
-  drainage; two processes cannot reconcile or mutate one inventory through distinct socket paths.
+  listener never begins admission and no CREATE or ACK reaches dispatch, including when the stop
+  arrives immediately before `start()`. A single owner-only authority lock under the canonical
+  EUID-derived runtime root is acquired before SQLite is opened and retained until successful
+  handler drainage; two processes cannot share the per-UID Podman/label/cgroup authority even with
+  entirely distinct state and socket paths.
   Configuration and key reads are nonblocking as well as no-follow, rejecting owner FIFOs without
   hanging, and extreme canonical JSON numbers map to the same bounded configuration failure. The
   574-test broker selection, targeted authority subprocess tests, Ruff, and `ty` pass.

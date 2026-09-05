@@ -365,27 +365,30 @@ def test_second_process_is_refused_by_lifecycle_lock(
         _stop(first, signal.SIGTERM)
 
 
-def test_state_authority_lock_excludes_distinct_socket_process_without_mutation(
+def test_uid_authority_lock_excludes_distinct_state_and_socket_process(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:
     config, socket_path = _write_configuration(tmp_path, *process_image)
-    second_config_directory = _private_directory(tmp_path / "second-config")
-    second_socket_directory = _private_directory(tmp_path / "second-socket")
-    second_socket = second_socket_directory / "broker.sock"
-    second_value = json.loads(config.read_text(encoding="ascii"))
-    second_value["socket_path"] = str(second_socket)
-    second_config = second_config_directory / "broker.json"
-    second_config.write_text(
-        json.dumps(second_value, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="ascii",
-    )
-    second_config.chmod(0o600)
+    second_root = _private_directory(tmp_path / "second")
+    second_config, second_socket = _write_configuration(second_root, *process_image)
+    first_value = json.loads(config.read_text(encoding="ascii"))
+    second_value = json.loads(second_config.read_text(encoding="ascii"))
+    assert first_value["state_directory"] != second_value["state_directory"]
     first = _start(config, socket_path)
-    state_directory = Path(second_value["state_directory"])
+    first_state = Path(first_value["state_directory"])
+    second_state = Path(second_value["state_directory"])
     before = {
         path.name: (path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns)
-        for path in state_directory.iterdir()
+        for path in first_state.iterdir()
     }
+    assert list(second_state.iterdir()) == []
+    authority_directory = Path(f"/run/user/{os.geteuid()}/markweave-broker")
+    assert authority_directory.resolve(strict=True) == authority_directory
+    assert authority_directory.stat().st_uid == os.geteuid()
+    assert authority_directory.stat().st_mode & 0o777 == 0o700
+    assert (
+        authority_directory / "broker-authority.lock"
+    ).stat().st_mode & 0o777 == 0o600
 
     second = subprocess.run(
         (sys.executable, "-m", "markweave.broker.process", str(second_config)),
@@ -395,7 +398,7 @@ def test_state_authority_lock_excludes_distinct_socket_process_without_mutation(
     )
     after = {
         path.name: (path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns)
-        for path in state_directory.iterdir()
+        for path in first_state.iterdir()
     }
     try:
         assert second.returncode == 1
@@ -403,6 +406,7 @@ def test_state_authority_lock_excludes_distinct_socket_process_without_mutation(
         assert second.stderr == b"broker runtime failed\n"
         assert not second_socket.exists()
         assert after == before
+        assert list(second_state.iterdir()) == []
         ready = _client(socket_path).request(ReadyRequest(uuid4(), 7))
         assert isinstance(ready, ReadyResponse) and ready.ready
     finally:

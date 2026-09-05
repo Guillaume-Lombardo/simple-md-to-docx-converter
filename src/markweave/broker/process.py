@@ -43,6 +43,7 @@ _INVENTORY_MODE = 0o600
 _PODMAN = Path("/usr/bin/podman")
 _SYSTEMCTL = Path("/usr/bin/systemctl")
 _INVENTORY_NAME = "inventory.sqlite3"
+_AUTHORITY_DIRECTORY_NAME = "markweave-broker"
 _AUTHORITY_LOCK_NAME = "broker-authority.lock"
 _SCHEMA_VERSION = 1
 _DISTINCT_RUNTIME_DIRECTORIES = 3
@@ -391,8 +392,24 @@ def _inventory_files(path: Path) -> None:
         _inventory_leaf(candidate)
 
 
-def _acquire_authority_lock(state_directory: Path) -> int:
-    path = state_directory / _AUTHORITY_LOCK_NAME
+def _runtime_root() -> Path:
+    root = Path(f"/run/user/{os.geteuid()}")
+    _secure_directory(root)
+    return root
+
+
+def _acquire_authority_lock() -> int:
+    authority_directory = _runtime_root() / _AUTHORITY_DIRECTORY_NAME
+    try:
+        authority_directory.mkdir(mode=_OWNER_DIRECTORY_MODE)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
+    _secure_directory(authority_directory)
+    path = authority_directory / _AUTHORITY_LOCK_NAME
     descriptor: int | None = None
     try:
         descriptor = os.open(
@@ -431,7 +448,7 @@ def _acquire_authority_lock(state_directory: Path) -> int:
 def _runtime_environment() -> tuple[dict[str, str], dict[str, str]]:
     uid = os.geteuid()
     home = pwd.getpwuid(uid).pw_dir
-    runtime_directory = f"/run/user/{uid}"
+    runtime_directory = str(_runtime_root())
     common = {
         "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime_directory}/bus",
         "HOME": home,
@@ -454,7 +471,7 @@ def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
     inventory_path = config.state_directory / _INVENTORY_NAME
     _inventory_files(inventory_path)
     os.umask(0o077)
-    authority_lock = _acquire_authority_lock(config.state_directory)
+    authority_lock = _acquire_authority_lock()
     authentication_key = config.authentication_key
     try:
         if type(authentication_key) is not bytes:

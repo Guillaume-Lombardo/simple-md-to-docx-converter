@@ -99,6 +99,33 @@ def test_shutdown_during_real_reconciliation_never_opens_admission(
     hard_exit.assert_not_called()
 
 
+def test_shutdown_immediately_before_real_start_never_opens_admission(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker)
+    hard_exit = mocker.Mock()
+    process = BrokerProcess(
+        server, hard_shutdown_timeout_seconds=1, hard_exit=hard_exit
+    )
+    process._handle_signal(15, None)
+
+    def assert_bound_socket_is_not_listening() -> None:
+        with (
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection,
+            pytest.raises(OSError),
+        ):
+            connection.connect(str(path))
+
+    dispatcher.start.side_effect = assert_bound_socket_is_not_listening
+
+    assert process.run() == 0
+
+    assert server.stopping
+    assert not path.exists()
+    dispatcher.dispatch.assert_not_called()
+    hard_exit.assert_not_called()
+
+
 def test_server_authenticates_peer_before_read_or_dispatch(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:

@@ -268,7 +268,6 @@ class UnixBrokerServer:
 
         if self._listener is not None:
             raise RuntimeError("Broker Unix server is already running")
-        self._stopping.clear()
         self._acquire_lifecycle_lock()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         identity: tuple[int, int] | None = None
