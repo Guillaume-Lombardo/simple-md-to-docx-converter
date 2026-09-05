@@ -500,6 +500,21 @@ for reverse conversion.
   branch coverage (4,195/4,658); changed application coverage is 94.23% (539/572 lines). The
   lifecycle v1 wire remains unchanged and no temporary Podman resource remains.
 
+* 2026-09-05: Added an inert paired-channel mTLS transport without changing lifecycle v1 or
+  workspace v1. Both peers require TLS 1.3 and certificates from the dedicated private CA, then
+  bind the exact single SPIFFE URI SAN, role EKU, and one of at most two configured SHA-256 hashes
+  of the exact leaf-certificate DER to one stable principal. The server issues a 256-bit CSPRNG
+  exchange identity on the response channel; the separately authenticated request channel must
+  present the same leaf and exchange, deliver one exact bounded v1 frame, and complete authenticated
+  TLS `close_notify` before dispatch. Pairing is one-shot and replay-resistant, with one absolute
+  operation deadline, explicit handshake/pending/handler capacities, bounded framing, and
+  content-free failures. Real AF_INET/OpenSSL tests cover lifecycle and workspace success plus
+  malformed, oversized, truncated, extra, replayed, substituted, mis-pinned, wrong-SAN, wrong-EKU,
+  untrusted, expired, slow, disconnected, and shutdown traffic. All 100 focused mTLS tests and the
+  complete 763-test broker unit/integration boundary pass; the new module reaches 94.08% statement
+  and 90.63% branch coverage. Ruff and `ty` pass. Production process assembly, deployment,
+  Kubernetes, T71 orchestration/publication, HTTP, and UI remain excluded from this slice.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,
