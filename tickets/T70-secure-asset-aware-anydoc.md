@@ -21,15 +21,15 @@ for reverse conversion.
   verification.
 * Parse only the format matrix approved by T69 from bounded in-memory or isolated-workspace inputs
   after the existing malware-scanning boundary.
-* Implement a trusted external isolation broker as the only holder of Podman/Kubernetes workload
+* Implement a trusted external isolation broker as the only holder of rootless Podman workload
   authority. The application worker reaches it only through a narrow authenticated owner-restricted
-  Unix socket or mutually authenticated TLS protocol and receives no raw OCI socket or workload-
-  mutating service account. The broker accepts only bounded requests, content-free stable attempt
+  Unix socket or mutually authenticated TLS protocol and receives no raw OCI socket. The broker
+  accepts only bounded requests, content-free stable attempt
   identities, the reviewed image pinned by immutable digest, and a fixed reverse-attempt argv;
   user/document data cannot select runtime policy. It creates one disposable process/container
   workload per attempt in a dedicated stable kernel isolation unit. The anydoc binding runs in-
-  process only inside that unit with bounded threads. The child has no network, service-account
-  token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication
+  process only inside that unit with bounded threads. The child has no network, persistence or
+  broker credential, runtime socket, or publication
   capability. T71 supplies reviewed configurable CPU, memory, PID/descendant, and
   workspace/ephemeral budgets, which the broker enforces at the runtime/kernel boundary. The
   reviewed T71-configured wall-time deadline is applied autonomously by the runtime at creation, so
@@ -43,7 +43,7 @@ for reverse conversion.
   reconciliation completes successfully. It durably records runtime-confirmed exit and empty before
   removal, records removed before proof return, and retains the tombstone until durable worker/T71
   proof acknowledgement. A crash between kill/removal and proof resumes from inventory and runtime
-  state; absence, delete acknowledgement, or Kubernetes force-delete alone is not proof. The
+  state; absence or removal acknowledgement alone is not proof. The
   worker-side supervisor owns heartbeat, attempt token, bounded output validation, and publication.
   Cancellation, deadline, lease loss, broker disconnect, or resource failure stops output
   acceptance and makes the broker hard-terminate the whole stable unit, prove it empty, remove it,
@@ -93,8 +93,8 @@ for reverse conversion.
   startup/reconnect orphan sweeping, creation/readiness refusal during incomplete reconciliation,
   write-ahead identity, crash-consistent transition ordering, tombstone acknowledgement, idempotent
   proof reconstruction after a crash between kill and proof, and fail-closed behavior when
-  termination proof is unavailable. Explicitly reject absence, delete acknowledgement, and
-  Kubernetes force-delete as standalone proof.
+  termination proof is unavailable. Explicitly reject absence or removal acknowledgement as
+  standalone proof.
 
 ## Dependencies
 
@@ -105,8 +105,8 @@ for reverse conversion.
 
 ## Implementation boundary
 
-* Own the external broker service and authenticated bounded protocol, Podman and Kubernetes
-  isolation backends, immutable image/argv and child-security policy, supervised disposable-attempt
+* Own the external broker service and authenticated bounded protocol, the rootless Podman isolation
+  backend, immutable image/argv and child-security policy, supervised disposable-attempt
   runner, mandatory crash-consistent managed-unit inventory/tombstones, supplementary runtime-label
   discovery, reconciliation, and terminate-and-prove protocol, anydoc adapter, bounded internal
   renderer compatibility
@@ -125,13 +125,13 @@ for reverse conversion.
   scanning invariants.
 * Meet the measured low-compute envelope approved by T69 and expose no unbounded internal
   parallelism.
-* Test both broker transports and both runtime backends. Authenticate peers, reject replay,
-  oversized/truncated/extra protocol frames and every caller-selected image/argv/mount/network/
+* Test both broker transports and the rootless Podman runtime backend. Authenticate peers, reject
+  replay, oversized/truncated/extra protocol frames and every caller-selected image/argv/mount/network/
   credential/resource override, fail closed on broker disconnect or unavailable termination proof,
   and prove that runtime authority is absent from the application and child. Cover restart with a
   live orphan, runtime expiry while the broker is down, incomplete sweep readiness/create refusal,
   forged or user-controlled inventory/labels, write-ahead failure, transition persistence failure,
-  tombstone retention/acknowledgement, Kubernetes force-delete, and crashes both before and after
+  tombstone retention/acknowledgement, and crashes both before and after
   removal but before proof.
 * Maintain the repository coverage thresholds and add a dedicated real-anydoc integration marker
   or domain if required by T69.
@@ -556,6 +556,13 @@ for reverse conversion.
   selector, documentation, and quality tests pass; Ruff, `ty`, CI configuration validation, uv-lock
   validation, and diff checks pass. The public third-image release contract, T71 worker integration,
   Compose/application wiring, Kubernetes, HTTP, and UI remain excluded.
+
+* 2026-09-05: Product-manager decisions close the two remaining T70 scope boundaries. Rootless
+  Podman is the sole required runtime backend for T70 and optional Kubernetes support moves to the
+  non-blocking T74 ticket because the standard Pod API cannot satisfy the approved containment and
+  termination-proof contract. Publication of the reverse-attempt image as a third atomic public
+  image moves to T73; T70 and T71 use only exact locally built or CI-built images before that
+  release boundary. No T70 implementation work remains after PR #202 and its exact-main CI passed.
 
 ## Synchronization
 

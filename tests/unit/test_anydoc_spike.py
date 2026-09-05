@@ -91,17 +91,17 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
             "status": "approved",
             "selected": "external_isolation_broker_managed_disposable_runtime_unit",
             "requirements": [
-                "the anydoc native call runs in-process only inside one immutable-image fixed-argument disposable Podman container or Kubernetes workload placed in a dedicated kernel isolation unit for one attempt",
-                "a trusted external isolation broker exclusively holds Podman or Kubernetes workload authority and the application receives no raw OCI socket or workload-mutating service account",
+                "the anydoc native call runs in-process only inside one immutable-image fixed-argument disposable rootless Podman container placed in a dedicated kernel isolation unit for one attempt",
+                "a trusted external isolation broker exclusively holds rootless Podman workload authority and the application receives no raw OCI socket",
                 "the worker-side supervisor reaches the broker only through a narrow authenticated owner-restricted Unix socket or mutually authenticated TLS protocol",
-                "the child has no network, service-account token, Secret, ConfigMap, PVC, persistence or broker credential, runtime socket, or publication capability and receives and returns only bounded local data",
-                "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace or ephemeral-storage budgets enforced by the broker at the runtime and kernel boundary",
+                "the child has no network, persistence or broker credential, runtime socket, or publication capability and receives and returns only bounded local data",
+                "T71 supplies reviewed per-attempt CPU, memory, PID and descendant, and workspace budgets enforced by the broker at the runtime and kernel boundary",
                 "cancellation, deadline, lease loss, broker disconnect, or a hard resource limit stops output acceptance and makes the broker hard-kill the complete stable unit",
                 "the broker proves the stable isolation unit empty and removed and T71 durably records that proof before recovery or another attempt may start",
                 "the runtime autonomously enforces the reviewed T71-configured wall-time deadline applied at unit creation even if the worker or broker process crashes",
                 "broker startup and reconnect use a mandatory bounded crash-consistent content-free inventory to idempotently sweep every managed orphan and refuse readiness and creation until reconciliation and termination proof complete",
                 "broker identity is durable before runtime create, exit and empty are durable before removal, removed is durable before proof return, and the tombstone remains until durable worker or T71 acknowledgement",
-                "runtime labels are supplementary only and absence, delete acknowledgement, or Kubernetes force-delete alone is never termination proof",
+                "runtime labels are supplementary only and absence or removal acknowledgement alone is never termination proof",
                 "a crash between kill or removal and proof resumes from inventory and runtime state while worker recovery remains blocked until proof is durably recorded",
                 "the worker-side supervisor owns heartbeat and the attempt token, validates bounded output, revalidates the lease and token, and is the only publisher",
             ],
@@ -164,6 +164,8 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         ),
         "native_call_scope": "in-process inside the disposable isolation unit only",
         "runtime_authority_owner": "external_isolation_broker",
+        "required_runtime_backend": "rootless_podman",
+        "optional_runtime_backend_ticket": "T74",
         "broker_transports": ["authenticated_unix_socket", "mutual_tls"],
         "application_has_raw_runtime_authority": False,
         "attempt_image_selection": "immutable_digest_fixed_by_broker",
@@ -190,7 +192,6 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         ),
         "reconciliation_is_idempotent": True,
         "runtime_absence_or_delete_acknowledgement_is_proof": False,
-        "kubernetes_force_delete_is_proof": False,
         "managed_unit_metadata_user_controlled": False,
         "startup_and_reconnect_action": (
             "reconcile_sweep_hard_kill_and_prove_every_managed_orphan"
@@ -201,10 +202,8 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
         ),
         "child_forbidden_resources": [
             "network",
-            "service_account_token",
             "secrets",
-            "config_maps",
-            "persistent_volumes",
+            "persistent_mounts",
             "persistence_credentials",
             "broker_credentials",
             "runtime_socket",
@@ -226,7 +225,7 @@ def test_candidate_contract_records_approved_product_decisions() -> None:
             "cpu",
             "memory",
             "pids_and_descendants",
-            "workspace_or_ephemeral_storage",
+            "workspace_storage",
         ],
         "budget_configuration_owner": "T71",
         "child_has_network_or_persistence_credentials": False,
@@ -246,7 +245,7 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
     )
     expected_spec_decisions = (
         "A trusted external isolation broker, separate from the application worker and "
-        "any attempt unit, exclusively owns Podman or Kubernetes workload authority.",
+        "any attempt unit, exclusively owns rootless Podman workload authority.",
         "Use one narrowly bounded maintained internal adapter around the pinned anydoc "
         "document model and renderer behavior; prohibit a second parser or broad fork, "
         "require security/parity/compatibility/SBOM/license ownership, and remove it when "
@@ -256,8 +255,8 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         assert decision in product_spec
 
     expected_t70_requirements = (
-        "Implement a trusted external isolation broker as the only holder of Podman/"
-        "Kubernetes workload authority.",
+        "Implement a trusted external isolation broker as the only holder of rootless "
+        "Podman workload authority.",
         "Implement one narrowly bounded maintained internal compatibility adapter around "
         "the pinned anydoc `Document` model and renderer behavior. Consume the single "
         "parsed document; never reparse source bytes or add a second parser. Inventory "
@@ -275,15 +274,15 @@ def test_approved_decisions_are_reflected_in_spec_and_t70_contract() -> None:
         assert requirement in t70
     for invariant in (
         "authenticated owner-restricted Unix socket or mutually authenticated TLS",
-        "no raw OCI socket or workload-mutating service account",
-        "no network, service-account token, Secret, ConfigMap, PVC",
+        "receives no raw OCI socket",
+        "no network, persistence or broker credential",
         "prove it empty, remove it, and return a content-free proof before recovery",
         "runtime at creation, so",
         "refuses readiness and every create request until reconciliation completes",
         "crash between kill/removal and proof",
         "mandatory bounded crash-consistent content-free inventory/tombstone",
         "records the broker-authored stable identity before runtime create",
-        "Kubernetes force-delete alone is not proof",
+        "absence or removal acknowledgement alone is not proof",
     ):
         assert invariant in t70
 
