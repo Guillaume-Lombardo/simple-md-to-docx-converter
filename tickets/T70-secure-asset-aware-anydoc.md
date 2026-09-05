@@ -531,7 +531,7 @@ for reverse conversion.
   drainage is not proven. Real subprocess and rootless-Podman coverage exercises complete lifecycle
   and workspace pending/success/failure paths, SIGINT/SIGTERM, wrong pin/CA/SAN/EKU with no state
   mutation, malformed/insecure/symlink/FIFO TLS material before state creation, two-process lock
-  exclusion, and SIGKILL orphan reconciliation before readiness. The 807-test broker boundary and
+  exclusion, and SIGKILL orphan reconciliation before readiness. The 812-test broker boundary and
   3,233-test light selection pass at 93.82% total and 90.04% branch coverage; changed application
   lines reach 90.45%. Ruff and `ty` pass. Deployment manifests remain excluded. A future Secret
   projection must atomically copy and chown TLS material into EUID-owned `0400`/`0600` files below
