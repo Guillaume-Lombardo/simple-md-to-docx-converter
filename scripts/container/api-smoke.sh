@@ -169,9 +169,17 @@ podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'import urllib.request; assert b"\"status\":\"ready\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/ready", timeout=2).read()'
 podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)'
+podman cp "$repository/scripts/container/api_workflow_smoke.py" \
+  "$legacy_container_name:/work/api_workflow_smoke.py"
+podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python \
+  /work/api_workflow_smoke.py \
+  --base-url http://127.0.0.1:18080 \
+  --expect-reversion-capabilities-unavailable
 podman rm --force "$legacy_container_name" >/dev/null
 legacy_created=false
 echo "Final-image legacy configuration smoke passed for $image."
+
+settings+=(--env MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304)
 
 podman run --detach \
   --name "$container_name" \
@@ -222,6 +230,7 @@ podman cp "$container_name:/tmp/t20-template.docx" \
   "$template_directory/template.docx"
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$port" \
-  --template "$template_directory/template.docx"
+  --template "$template_directory/template.docx" \
+  --expect-reversion-upload-max-bytes 4194304
 
 echo "Final-image standalone conversion workflow smoke passed for $image."

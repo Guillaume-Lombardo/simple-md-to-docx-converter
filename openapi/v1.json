@@ -3617,6 +3617,20 @@
             },
             "description": "The service is not ready",
             "headers": {
+              "Cache-Control": {
+                "description": "Prevents shared and private caching of runtime capabilities.",
+                "schema": {
+                  "const": "private, no-store",
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content-type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              },
               "X-Correlation-ID": {
                 "description": "Server-generated request correlation identifier.",
                 "schema": {

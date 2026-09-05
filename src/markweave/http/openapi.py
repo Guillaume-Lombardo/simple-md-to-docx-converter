@@ -106,10 +106,13 @@ def document_openapi_contract(app: FastAPI, *, session_cookie_name: str) -> None
             "schema": {"type": "string", "const": "nosniff"},
         },
     }
-    reversion_response = schema["paths"]["/api/v1/reversions/capabilities"]["get"][
+    reversion_responses = schema["paths"]["/api/v1/reversions/capabilities"]["get"][
         "responses"
-    ]["200"]
-    reversion_response.setdefault("headers", {}).update(reversion_capability_headers)
+    ]
+    for status_code in ("200", "503"):
+        reversion_responses[status_code].setdefault("headers", {}).update(
+            reversion_capability_headers
+        )
 
     policy_etag_header = {
         "description": "Current role-specific idle-session policy revision.",

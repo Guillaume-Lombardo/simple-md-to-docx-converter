@@ -208,6 +208,19 @@ def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
     )
 
 
+def test_final_image_smoke_covers_reversion_capability_auth_and_configuration() -> None:
+    smoke = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+
+    assert smoke.count("--expect-reversion-capabilities-unavailable") == 1
+    assert smoke.count("--expect-reversion-upload-max-bytes 4194304") == 1
+    assert smoke.count("MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304") == 1
+    assert smoke.index("legacy_settings=()") < smoke.index(
+        "MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304"
+    )
+    assert '"$legacy_container_name:/work/api_workflow_smoke.py"' in smoke
+    assert "/work/api_workflow_smoke.py" in smoke
+
+
 def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
     readiness = Path("scripts/container/wait-for-fake-clamav.sh").read_text(
         encoding="utf-8"
@@ -250,7 +263,7 @@ def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
     assert 'scanner_host_mapping=(--add-host "clamav:$clamav_address")' in distributed
     assert distributed.count('"${scanner_host_mapping[@]}"') == 4
     assert standalone.index("standalone-network") < standalone.index(
-        "scripts.container.api_workflow_smoke"
+        "--expect-reversion-upload-max-bytes 4194304"
     )
     assert distributed.index("distributed-mapped") < distributed.index(
         "scripts.container.api_workflow_smoke"

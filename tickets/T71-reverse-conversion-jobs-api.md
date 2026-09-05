@@ -116,6 +116,11 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   PostgreSQL setup errors and three RustFS failures). One unrelated real-process timeout failure
   from that loaded run passed immediately in isolation. Submission and lifecycle work remains for
   later T71 slices.
+* 2026-09-06: Independent-review follow-up added a real Uvicorn/SQLite/Argon2 session-boundary test
+  for anonymous `401`, configured deterministic `200`, and missing-configuration `503` behavior.
+  Both success and unavailable responses now declare their private/no-store and nosniff headers in
+  canonical OpenAPI. The final rootless-image smoke exercises those authorization and configuration
+  branches through the installed application before completing the existing conversion workflow.
 
 ## Synchronization
 

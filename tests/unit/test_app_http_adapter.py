@@ -968,17 +968,17 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             ]
             assert reference.endswith("/ErrorResponse")
     assert error_responses(422)[422]["model"] is ErrorResponse
-    capability_headers = paths["/api/v1/reversions/capabilities"]["get"]["responses"][
-        "200"
-    ]["headers"]
-    assert capability_headers["Cache-Control"]["schema"] == {
-        "type": "string",
-        "const": "private, no-store",
-    }
-    assert capability_headers["X-Content-Type-Options"]["schema"] == {
-        "type": "string",
-        "const": "nosniff",
-    }
+    capability_responses = paths["/api/v1/reversions/capabilities"]["get"]["responses"]
+    for status_code in ("200", "503"):
+        capability_headers = capability_responses[status_code]["headers"]
+        assert capability_headers["Cache-Control"]["schema"] == {
+            "type": "string",
+            "const": "private, no-store",
+        }
+        assert capability_headers["X-Content-Type-Options"]["schema"] == {
+            "type": "string",
+            "const": "nosniff",
+        }
     result_schema = paths["/api/v1/conversions/{job_id}/result"]["get"]["responses"][
         "200"
     ]["content"]["application/octet-stream"]["schema"]
