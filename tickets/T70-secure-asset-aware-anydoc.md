@@ -550,7 +550,9 @@ for reverse conversion.
   readiness, restart reconciliation, and fail-closed recovery. Five real systemd-user E2Es cover
   Unix and mTLS workspace success/failure, `SIGKILL` restart with orphan sweep before readiness,
   invalid configuration without restart or state, per-EUID authority exclusion, and clean stop.
-  After rebasing onto the mTLS process squash merge, all 817 broker tests and 154 deployment,
+  A focused regression ensures service-property mismatches fail immediately instead of being
+  swallowed by readiness polling. After rebasing onto the mTLS process squash merge, all 818 broker
+  tests and 154 deployment,
   selector, documentation, and quality tests pass; Ruff, `ty`, CI configuration validation, uv-lock
   validation, and diff checks pass. The public third-image release contract, T71 worker integration,
   Compose/application wiring, Kubernetes, HTTP, and UI remain excluded.

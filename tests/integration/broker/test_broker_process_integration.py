@@ -15,6 +15,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker.errors import BrokerError
 from markweave.broker.models import (
@@ -581,19 +582,38 @@ def _wait_systemd_ready(
     while time.monotonic() < deadline:
         try:
             ready = client.request(ReadyRequest(uuid4(), sequence))
-            if isinstance(ready, ReadyResponse) and ready.ready:
-                properties = _systemd_properties(unit)
-                assert properties["ActiveState"] == "active"
-                assert properties["KillMode"] == "control-group"
-                assert properties["TimeoutStopUSec"] == "infinity"
-                assert properties["UMask"] == "0077"
-                return
         except Exception:
             ready = None
+        if isinstance(ready, ReadyResponse) and ready.ready:
+            properties = _systemd_properties(unit)
+            assert properties["ActiveState"] == "active"
+            assert properties["KillMode"] == "control-group"
+            assert properties["TimeoutStopUSec"] == "infinity"
+            assert properties["UMask"] == "0077"
+            return
         if _systemd_properties(unit).get("ActiveState") == "failed":
             break
         time.sleep(0.05)
     raise AssertionError(_systemd_properties(unit))
+
+
+def test_systemd_user_service_readiness_rejects_property_mismatch(
+    mocker: MockerFixture,
+) -> None:
+    client = mocker.Mock(spec=UnixBrokerClient)
+    client.request.return_value = ReadyResponse(uuid4(), True)
+    mocker.patch(
+        f"{__name__}._systemd_properties",
+        return_value={
+            "ActiveState": "active",
+            "KillMode": "control-group",
+            "TimeoutStopUSec": "infinity",
+            "UMask": "0022",
+        },
+    )
+
+    with pytest.raises(AssertionError):
+        _wait_systemd_ready("markweave-broker-test.service", client, 1)
 
 
 def _stop_systemd_broker(unit: str) -> dict[str, str]:
