@@ -153,6 +153,15 @@ def test_rejects_noncanonical_or_missing_configuration(
 
 
 @pytest.mark.unit
+def test_rejects_non_ascii_configuration(tmp_path: Path) -> None:
+    path, _ = _configuration(tmp_path)
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
 def test_rejects_duplicate_configuration_keys(tmp_path: Path) -> None:
     path, _ = _configuration(tmp_path)
     path.write_text('{"schema_version":1,"schema_version":1}\n', encoding="ascii")
@@ -226,6 +235,19 @@ def test_rejects_shared_or_insecure_runtime_directories(tmp_path: Path) -> None:
     state_value = value["state_directory"]
     assert isinstance(state_value, str)
     Path(state_value).chmod(0o750)
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(path)
+
+
+@pytest.mark.unit
+def test_rejects_missing_runtime_directory(tmp_path: Path) -> None:
+    path, value = _configuration(tmp_path)
+    value["state_directory"] = str(tmp_path / "missing-state")
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+
     with pytest.raises(BrokerProcessConfigurationError):
         load_broker_process_config(path)
 
