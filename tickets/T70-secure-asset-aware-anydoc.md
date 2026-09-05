@@ -2,7 +2,7 @@
 ticket: T70
 linear_id: G1L-538
 linear_url: https://linear.app/g1lom/issue/G1L-538/t70-implement-secure-asset-aware-anydoc-conversion
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -563,6 +563,10 @@ for reverse conversion.
   termination-proof contract. Publication of the reverse-attempt image as a third atomic public
   image moves to T73; T70 and T71 use only exact locally built or CI-built images before that
   release boundary. No T70 implementation work remains after PR #202 and its exact-main CI passed.
+* 2026-09-05: Completed after PR #203 merged the approved scope closure as
+  `ab91a68c4012b77f167d7e44d65a26c2e2221d2c`. Exact-head run `33993223919` passed on attempt 2,
+  CodeRabbit and independent review approved with zero unresolved threads, and exact-main run
+  `33993776613` passed its selected suite and final gate. Linear G1L-538 is Done.
 
 ## Synchronization
 
