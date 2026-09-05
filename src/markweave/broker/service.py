@@ -30,6 +30,14 @@ from markweave.broker.workspace_protocol import (
     receipt_for,
     stage_fingerprint,
 )
+from markweave.reversions.attempt_channel import CHILD_FAILURE_CATEGORIES
+from markweave.reversions.errors import ReverseErrorCategory
+from markweave.reversions.models import (
+    ReverseAttemptFailure,
+    ReverseAttemptResponse,
+    ReverseAttemptSuccess,
+    ReverseOutputMode,
+)
 
 _PROOF_NAMESPACE = UUID("54bd5544-7973-41ae-a7fc-c56664411769")
 
@@ -44,6 +52,7 @@ class _StoredRuntimeUnit:
 class _StagedWorkspace:
     fingerprint: str = field(repr=False)
     receipt: WorkspaceStageReceipt
+    max_output_bytes: int
 
 
 class IsolationBrokerService:
@@ -190,6 +199,17 @@ class IsolationBrokerService:
             if staged is not None:
                 if staged.fingerprint != fingerprint:
                     raise BrokerError(BrokerErrorCategory.REPLAY_REJECTED)
+                try:
+                    runtime_unit = self._runtime_for(unit)
+                except BrokerError:
+                    raise
+                except Exception as error:
+                    self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
+                if (
+                    runtime_unit.incarnation.incarnation_id
+                    != staged.receipt.incarnation_id
+                ):
+                    self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
                 return staged.receipt
             try:
                 runtime_unit = self._runtime_for(unit)
@@ -202,7 +222,7 @@ class IsolationBrokerService:
                 self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
             receipt = receipt_for(request, unit.runtime_incarnation.incarnation_id)
             self._staged_workspaces[unit.unit_id] = _StagedWorkspace(
-                fingerprint, receipt
+                fingerprint, receipt, request.limits.max_output_bytes
             )
             return receipt
 
@@ -241,8 +261,7 @@ class IsolationBrokerService:
                 raise
             except Exception as error:
                 self._fail(BrokerErrorCategory.RUNTIME_FAILURE, cause=error)
-            if response is not None and response.attempt_id != request.attempt_id:
-                self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
+            self._validate_workspace_response(response, request.attempt_id, staged)
             return collect_response(request.request_id, staged.receipt, response)
 
     def terminate(
@@ -343,6 +362,40 @@ class IsolationBrokerService:
             return _StoredRuntimeUnit(unit.unit_id, unit.runtime_incarnation)
         self._validate_runtime_unit(unit, runtime_unit, require_persisted=True)
         return runtime_unit
+
+    def _validate_workspace_response(
+        self,
+        response: ReverseAttemptResponse | None,
+        attempt_id: UUID,
+        staged: _StagedWorkspace,
+    ) -> None:
+        if response is None:
+            return
+        valid = False
+        if type(response) is ReverseAttemptFailure:
+            answer_attempt = getattr(response, "attempt_id", None)
+            category = getattr(response, "category", None)
+            valid = (
+                type(answer_attempt) is UUID
+                and answer_attempt == attempt_id
+                and type(category) is ReverseErrorCategory
+                and category in CHILD_FAILURE_CATEGORIES
+            )
+        elif type(response) is ReverseAttemptSuccess:
+            answer_attempt = getattr(response, "attempt_id", None)
+            mode = getattr(response, "mode", None)
+            result = getattr(response, "result", None)
+            valid = (
+                type(answer_attempt) is UUID
+                and answer_attempt == attempt_id
+                and type(mode) is ReverseOutputMode
+                and type(result) is bytes
+                and bool(result)
+                and len(result) <= staged.max_output_bytes
+                and len(result) <= self._policy.channel_limits.max_output_bytes
+            )
+        if not valid:
+            self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
 
     def _discovered(self) -> dict[UUID, RuntimeUnit]:
         discovered: dict[UUID, RuntimeUnit] = {}

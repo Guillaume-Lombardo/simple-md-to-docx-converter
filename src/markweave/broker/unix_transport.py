@@ -61,6 +61,7 @@ from markweave.broker.workspace_protocol import (
     encode_workspace_response,
     frame_protocol,
 )
+from markweave.reversions.models import ReverseContentLimits
 
 _PEER_CREDENTIALS: Final = struct.Struct("3i")
 _PARENT_MODE: Final = 0o700
@@ -495,7 +496,10 @@ class UnixBrokerServer:
                 if response is None:
                     frame = None
                 elif workspace:
-                    frame = encode_workspace_response(cast(WorkspaceResponse, response))
+                    frame = encode_workspace_response(
+                        cast(WorkspaceResponse, response),
+                        cast(RuntimeChannelLimits, self._workspace_limits),
+                    )
                 else:
                     frame = encode_response(cast(BrokerResponse, response))
             except BaseException as error:
@@ -767,6 +771,30 @@ class UnixBrokerClient:
         limits = self._workspace_limits
         if limits is None:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        if type(request) is WorkspaceStageRequest:
+            source = getattr(request, "source", None)
+            declared = getattr(request, "limits", None)
+            values = tuple(
+                getattr(declared, name, None)
+                for name in ReverseContentLimits.__dataclass_fields__
+            )
+            if any(type(value) is not int for value in values):
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            try:
+                validated = ReverseContentLimits(*cast("tuple[int, ...]", values))
+            except TypeError, ValueError:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR) from None
+            if (
+                type(source) is not bytes
+                or not source
+                or len(source) > limits.max_input_bytes
+                or type(declared) is not ReverseContentLimits
+                or len(source) > validated.max_input_bytes
+                or validated.max_input_bytes > limits.max_input_bytes
+                or validated.max_output_bytes > limits.max_output_bytes
+            ):
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        encoded = encode_workspace_request(request)
         deadline = monotonic() + self._operation_timeout_seconds
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -776,7 +804,7 @@ class UnixBrokerClient:
             _, uid, _ = _peer_credentials(connection)
             if uid != self._expected_server_uid:
                 raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
-            _send_all(connection, encode_workspace_request(request), deadline)
+            _send_all(connection, encoded, deadline)
             connection.shutdown(socket.SHUT_WR)
             header = _receive_header(connection, deadline)
             response, length, digest = decode_workspace_response_header(header, limits)

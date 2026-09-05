@@ -479,6 +479,18 @@ for reverse conversion.
   93.88% total and 90.04% branch coverage. Persistent T71 jobs/leases/publication, mTLS, deployment,
   Kubernetes, OCR, and public APIs remain excluded; no Kubernetes acceptance is claimed.
 
+* 2026-09-05: Workspace protocol review follow-up now rediscovers and validates the exact live
+  runtime incarnation before returning an idempotent STAGE receipt; absent, substituted, or failed
+  discovery fences readiness without performing a second copy. COLLECT accepts only exact runtime
+  response model types, the child channel's closed failure-category allowlist, and non-empty result
+  bytes within both the staged request and runtime policy output ceilings. The final workspace wire
+  encoder independently enforces its channel ceiling and rejects non-child categories. The Unix
+  client validates the source and every declared content-limit invariant against its configured
+  channel before encoding or creating a socket. Real pending-response coverage now uses a fixed
+  content-free `/work/test.release` barrier instead of an elapsed-time assumption. The complete
+  broker boundary passes 660 tests, all 13 real broker-process and 8 real Podman integrations pass,
+  and the 3,098-test light selection reaches 93.88% total and 90.06% branch coverage.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,

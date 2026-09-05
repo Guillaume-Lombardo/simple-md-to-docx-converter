@@ -687,6 +687,91 @@ def test_workspace_client_is_disabled_without_explicit_limits(tmp_path: Path) ->
     assert enabled_error.value.category is BrokerErrorCategory.TRANSPORT_FAILURE
 
 
+@pytest.mark.parametrize(
+    "stage",
+    [
+        WorkspaceStageRequest(
+            REQUEST_ID,
+            7,
+            ATTEMPT_ID,
+            UNIT_ID,
+            3,
+            ".docx",
+            CONTENT_LIMITS,
+            b"x" * 1001,
+        ),
+        WorkspaceStageRequest(
+            REQUEST_ID,
+            7,
+            ATTEMPT_ID,
+            UNIT_ID,
+            3,
+            ".docx",
+            ReverseContentLimits(
+                500, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+            ),
+            b"x" * 501,
+        ),
+        WorkspaceStageRequest(
+            REQUEST_ID,
+            7,
+            ATTEMPT_ID,
+            UNIT_ID,
+            3,
+            ".docx",
+            ReverseContentLimits(
+                2000, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+            ),
+            b"x",
+        ),
+        WorkspaceStageRequest(
+            REQUEST_ID,
+            7,
+            ATTEMPT_ID,
+            UNIT_ID,
+            3,
+            ".docx",
+            ReverseContentLimits(
+                1000, 3000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+            ),
+            b"x",
+        ),
+        WorkspaceStageRequest(
+            REQUEST_ID,
+            7,
+            ATTEMPT_ID,
+            UNIT_ID,
+            3,
+            ".docx",
+            cast("ReverseContentLimits", object()),
+            b"x",
+        ),
+    ],
+)
+def test_workspace_client_rejects_channel_substitution_before_encode_or_socket(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    stage: WorkspaceStageRequest,
+) -> None:
+    parent = _private_parent(tmp_path)
+    client = UnixBrokerClient(
+        parent / "broker.sock",
+        expected_server_uid=os.geteuid(),
+        expected_principal=PRINCIPAL,
+        operation_timeout_seconds=1,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    encode = mocker.patch("markweave.broker.unix_transport.encode_workspace_request")
+    socket_factory = mocker.patch("markweave.broker.unix_transport.socket.socket")
+
+    with pytest.raises(BrokerError) as captured:
+        client.stage_workspace(stage)
+
+    assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+    encode.assert_not_called()
+    socket_factory.assert_not_called()
+
+
 def test_public_stop_signal_is_content_free_and_wakes_waiters(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:

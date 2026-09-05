@@ -205,7 +205,7 @@ def test_collect_and_every_response_shape_round_trip() -> None:
         ),
     )
     for response in responses:
-        header, payload = _header(encode_workspace_response(response))
+        header, payload = _header(encode_workspace_response(response, CHANNEL))
         decoded, length, digest = decode_workspace_response_header(header, CHANNEL)
         assert length == len(payload)
         assert bind_workspace_result(decoded, payload, digest) == response
@@ -270,19 +270,22 @@ def test_decoder_rejects_duplicate_nonobject_wrong_protocol_and_invalid_limits()
 def test_response_decoder_rejects_wrong_operation_receipt_and_categories() -> None:
     receipt = WorkspaceStageReceipt(REQUEST, 7, ATTEMPT, UNIT, 3, INCARNATION)
     frames = (
-        encode_workspace_response(receipt),
+        encode_workspace_response(receipt, CHANNEL),
         encode_workspace_response(
-            WorkspaceFailureResponse(REQUEST, receipt, ReverseErrorCategory.MALFORMED)
+            WorkspaceFailureResponse(REQUEST, receipt, ReverseErrorCategory.MALFORMED),
+            CHANNEL,
         ),
         encode_workspace_response(
             WorkspaceSuccessResponse(
                 REQUEST, receipt, ReverseOutputMode.MARKDOWN, b"result"
-            )
+            ),
+            CHANNEL,
         ),
         encode_workspace_response(
             WorkspaceErrorResponse(
                 REQUEST, WorkspaceOperation.COLLECT, BrokerErrorCategory.RUNTIME_FAILURE
-            )
+            ),
+            CHANNEL,
         ),
     )
     mutations = (
@@ -306,12 +309,31 @@ def test_response_encoder_rejects_invalid_models_and_nonpayload_binding() -> Non
             REQUEST, cast(Any, "bad"), BrokerErrorCategory.RUNTIME_FAILURE
         ),
         WorkspaceFailureResponse(REQUEST, receipt, cast(Any, "bad")),
+        WorkspaceFailureResponse(REQUEST, receipt, ReverseErrorCategory.CANCELLED),
         WorkspaceSuccessResponse(REQUEST, receipt, cast(Any, "bad"), b"result"),
         WorkspaceSuccessResponse(REQUEST, receipt, ReverseOutputMode.MARKDOWN, b""),
     )
     for response in invalid:
         with pytest.raises(BrokerError):
-            encode_workspace_response(response)
+            encode_workspace_response(response, CHANNEL)
+    with pytest.raises(BrokerError):
+        encode_workspace_response(
+            WorkspaceSuccessResponse(
+                REQUEST, receipt, ReverseOutputMode.MARKDOWN, b"x" * 2001
+            ),
+            CHANNEL,
+        )
+    with pytest.raises(BrokerError):
+        encode_workspace_response(receipt, cast(Any, object()))
+    failure = encode_workspace_response(
+        WorkspaceFailureResponse(REQUEST, receipt, ReverseErrorCategory.MALFORMED),
+        CHANNEL,
+    )
+    invalid_child_category = _replace_header(
+        failure, lambda value: value.update(category="cancelled")
+    )
+    with pytest.raises(BrokerError):
+        decode_workspace_response_header(_header(invalid_child_category)[0], CHANNEL)
     with pytest.raises(BrokerError):
         bind_workspace_result(
             WorkspacePendingResponse(REQUEST, receipt), b"extra", None
@@ -323,7 +345,7 @@ def test_response_rejects_truncated_extra_wrong_digest_and_output_bound() -> Non
     response = WorkspaceSuccessResponse(
         REQUEST, receipt, ReverseOutputMode.MARKDOWN, b"result"
     )
-    wire = encode_workspace_response(response)
+    wire = encode_workspace_response(response, CHANNEL)
     header, payload = _header(wire)
     decoded, _, digest = decode_workspace_response_header(header, CHANNEL)
     with pytest.raises(BrokerError):

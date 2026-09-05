@@ -86,6 +86,16 @@ def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
     )
 
 
+def _release_workspace_attempt(unit_id: UUID) -> None:
+    released = _podman(
+        "exec",
+        f"markweave-reverse-{unit_id.hex}",
+        "/usr/bin/touch",
+        "/work/test.release",
+    )
+    assert released.stdout == ""
+
+
 @pytest.fixture(scope="module")
 def process_image() -> Iterator[tuple[str, str]]:
     base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
@@ -477,6 +487,8 @@ def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure( 
             )
             collect_sequence += 1
             if isinstance(response, WorkspacePendingResponse):
+                if not pending_seen:
+                    _release_workspace_attempt(created.unit_id)
                 pending_seen = True
                 time.sleep(0.05)
                 continue
@@ -504,6 +516,7 @@ def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure( 
         assert isinstance(failed_receipt, WorkspaceStageReceipt)
         deadline = time.monotonic() + 25
         failed_response = None
+        failed_pending_seen = False
         while time.monotonic() < deadline:
             failed_response = client.collect_workspace(
                 WorkspaceCollectRequest(
@@ -518,9 +531,13 @@ def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure( 
                 )
             )
             if isinstance(failed_response, WorkspacePendingResponse):
+                if not failed_pending_seen:
+                    _release_workspace_attempt(failed.unit_id)
+                failed_pending_seen = True
                 time.sleep(0.05)
                 continue
             break
+        assert failed_pending_seen
         assert isinstance(failed_response, WorkspaceFailureResponse)
 
         for index, (attempt_id, unit_id) in enumerate(units, start=30):

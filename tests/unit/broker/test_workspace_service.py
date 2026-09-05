@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -13,8 +14,10 @@ from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
+    EvidenceDigest,
     ReplayPosition,
     RuntimeChannelLimits,
+    RuntimeIncarnation,
     RuntimeLimits,
 )
 from markweave.broker.service import IsolationBrokerService
@@ -127,6 +130,43 @@ def test_exact_stage_replay_returns_receipt_without_second_runtime_copy(
         service.stage_workspace(PRINCIPAL, changed)
     assert caught.value.category is BrokerErrorCategory.REPLAY_REJECTED
     assert service.ready
+
+
+@pytest.mark.parametrize("runtime_state", ["absent", "substituted", "fault"])
+def test_exact_stage_replay_revalidates_runtime_before_returning_receipt(
+    tmp_path: Path, runtime_state: str
+) -> None:
+    service, runtime = _service(tmp_path)
+    service.create(ReplayPosition(PRINCIPAL, 7), ATTEMPT)
+    request = _stage(service)
+    receipt = service.stage_workspace(PRINCIPAL, request)
+    persisted = service.status(PRINCIPAL, ATTEMPT, UNIT)
+    assert persisted.runtime_incarnation is not None
+    if runtime_state == "fault":
+        runtime.inject_fault("discover")
+    else:
+        runtime.forget(UNIT)
+    if runtime_state == "substituted":
+        runtime.seed(
+            UNIT,
+            RuntimeIncarnation(
+                UUID("70000000-0000-4000-8000-000000000001"),
+                EvidenceDigest(persisted.runtime_incarnation.specification.value),
+            ),
+        )
+
+    with pytest.raises(BrokerError) as caught:
+        service.stage_workspace(PRINCIPAL, request)
+
+    expected = {
+        "absent": BrokerErrorCategory.TERMINATION_UNPROVEN,
+        "substituted": BrokerErrorCategory.RECONCILIATION_INCOMPLETE,
+        "fault": BrokerErrorCategory.RUNTIME_FAILURE,
+    }[runtime_state]
+    assert caught.value.category is expected
+    assert runtime.calls.count("stage_request:before") == 1
+    assert receipt.incarnation_id == persisted.runtime_incarnation.incarnation_id
+    assert not service.ready
 
 
 def test_collect_is_receipt_bound_pending_failure_success_and_read_only(
@@ -252,6 +292,51 @@ def test_workspace_rejects_invalid_models_and_wrong_runtime_response(
     )
     with pytest.raises(BrokerError) as caught:
         service.collect_workspace(PRINCIPAL, collect)
+    assert caught.value.category is BrokerErrorCategory.RUNTIME_FAILURE
+    assert not service.ready
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        cast(Any, object()),
+        object.__new__(ReverseAttemptSuccess),
+        ReverseAttemptFailure(ATTEMPT, ReverseErrorCategory.CANCELLED),
+        ReverseAttemptSuccess(ATTEMPT, ReverseOutputMode.MARKDOWN, b""),
+        ReverseAttemptSuccess(ATTEMPT, ReverseOutputMode.MARKDOWN, b"x" * 2001),
+    ],
+)
+def test_collect_rejects_invalid_runtime_response_and_fences_readiness(
+    tmp_path: Path, mocker: MockerFixture, response: Any
+) -> None:
+    service, runtime = _service(tmp_path)
+    service.create(ReplayPosition(PRINCIPAL, 7), ATTEMPT)
+    stage = _stage(service)
+    receipt = service.stage_workspace(PRINCIPAL, stage)
+    collect = _collect(stage, receipt.incarnation_id)
+    mocker.patch.object(runtime, "try_collect_response", return_value=response)
+
+    with pytest.raises(BrokerError) as caught:
+        service.collect_workspace(PRINCIPAL, collect)
+
+    assert caught.value.category is BrokerErrorCategory.RUNTIME_FAILURE
+    assert not service.ready
+
+
+def test_collect_enforces_staged_request_output_limit(tmp_path: Path) -> None:
+    service, runtime = _service(tmp_path)
+    service.create(ReplayPosition(PRINCIPAL, 7), ATTEMPT)
+    stage = replace(_stage(service), limits=replace(LIMITS, max_output_bytes=1000))
+    receipt = service.stage_workspace(PRINCIPAL, stage)
+    collect = _collect(stage, receipt.incarnation_id)
+    runtime.publish_response(
+        UNIT,
+        ReverseAttemptSuccess(ATTEMPT, ReverseOutputMode.MARKDOWN, b"x" * 1001),
+    )
+
+    with pytest.raises(BrokerError) as caught:
+        service.collect_workspace(PRINCIPAL, collect)
+
     assert caught.value.category is BrokerErrorCategory.RUNTIME_FAILURE
     assert not service.ready
 

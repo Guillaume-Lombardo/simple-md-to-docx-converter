@@ -12,6 +12,7 @@ from uuid import UUID
 
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import MAX_SEQUENCE, RuntimeChannelLimits
+from markweave.reversions.attempt_channel import CHILD_FAILURE_CATEGORIES
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.formats import normalize_extension_hint
 from markweave.reversions.models import (
@@ -490,9 +491,13 @@ def _receipt_mapping(receipt: WorkspaceStageReceipt) -> dict[str, object]:
     }
 
 
-def encode_workspace_response(response: WorkspaceResponse) -> bytes:
+def encode_workspace_response(
+    response: WorkspaceResponse, channel: RuntimeChannelLimits
+) -> bytes:
     """Encode a header and exact raw result bytes when successful."""
 
+    if type(channel) is not RuntimeChannelLimits:
+        _fail()
     if type(response) is WorkspaceStageReceipt:
         value = _base(response.request_id, WorkspaceOperation.STAGE)
         value.update(outcome="receipt", **_receipt_mapping(response))
@@ -517,7 +522,10 @@ def encode_workspace_response(response: WorkspaceResponse) -> bytes:
     if isinstance(response, WorkspacePendingResponse):
         value["outcome"] = "pending"
     elif isinstance(response, WorkspaceFailureResponse):
-        if type(response.category) is not ReverseErrorCategory:
+        if (
+            type(response.category) is not ReverseErrorCategory
+            or response.category not in CHILD_FAILURE_CATEGORIES
+        ):
             _fail()
         value.update(outcome="failure", category=response.category)
     elif isinstance(response, WorkspaceSuccessResponse):
@@ -525,6 +533,7 @@ def encode_workspace_response(response: WorkspaceResponse) -> bytes:
             type(response.mode) is not ReverseOutputMode
             or type(response.result) is not bytes
             or not response.result
+            or len(response.result) > channel.max_output_bytes
         ):
             _fail()
         payload = response.result
@@ -597,6 +606,8 @@ def decode_workspace_response_header(  # noqa: PLR0912
         try:
             category = ReverseErrorCategory(value.get("category"))
         except TypeError, ValueError:
+            _fail()
+        if category not in CHILD_FAILURE_CATEGORIES:
             _fail()
         return WorkspaceFailureResponse(request_id, receipt, category), 0, None
     if outcome == "success" and set(value) == common | receipt_keys | {
