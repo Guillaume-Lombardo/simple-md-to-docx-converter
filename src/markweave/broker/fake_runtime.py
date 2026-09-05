@@ -13,6 +13,7 @@ from markweave.broker.models import (
     EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     policy_specification_evidence,
 )
@@ -68,6 +69,7 @@ _INITIAL_RUNTIME_STATE = FakeRuntimeState()
 class _RuntimeRecord:
     unit: FakeRuntimeUnit
     attempt_id: UUID | None = None
+    channel_limits: RuntimeChannelLimits | None = None
     terminated: bool = False
     exit_confirmed: bool = False
     empty_confirmed: bool = False
@@ -144,7 +146,9 @@ class FakeIsolationRuntime:
         )
         runtime_unit = FakeRuntimeUnit(unit.unit_id, incarnation)
         self._records[unit.unit_id] = _RuntimeRecord(
-            runtime_unit, attempt_id=unit.attempt_id
+            runtime_unit,
+            attempt_id=unit.attempt_id,
+            channel_limits=policy.channel_limits,
         )
         self._checkpoint("create", "after")
         return runtime_unit
@@ -169,8 +173,13 @@ class FakeIsolationRuntime:
         if (
             record.terminated
             or record.removed
+            or type(request) is not ReverseAttemptRequest
             or record.request is not None
             or record.attempt_id != request.attempt_id
+            or record.channel_limits is None
+            or len(request.source) > record.channel_limits.max_input_bytes
+            or request.limits.max_input_bytes > record.channel_limits.max_input_bytes
+            or request.limits.max_output_bytes > record.channel_limits.max_output_bytes
         ):
             raise FakeRuntimeError("Isolation runtime workspace contract failed")
         record.request = request

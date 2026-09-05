@@ -396,6 +396,15 @@ for reverse conversion.
   includes post-copy identity substitution with an exact operation-local inspect count. The 706
   broker/reversion tests and all six real rootless Podman 5.4 integrations pass; hosted Podman 4.9
   and a fresh full-image build remain CI validation boundaries.
+* 2026-09-05: Hosted fresh-image CI exposed that the smoke harness polled a child-owned atomic
+  `0600` state file directly from the host. It now performs that content-free readiness check
+  through `podman unshare`, preserving the child-only workspace mode and arbitrary UID; the full
+  smoke passes against the controlled current-code overlay. CodeRabbit review also identified two
+  valid conformance issues: the fake runtime now persists and enforces the exact policy channel
+  ceilings, and the bounded command runner makes its stdin pipe nonblocking, retries temporary
+  backpressure, and retains the absolute deadline when a child never reads. Regression tests cover
+  all three paths. The 715 broker/reversion/container tests and all six real rootless Podman
+  integrations pass; the fresh-image build and hosted Podman 4.9 boundary remain assigned to CI.
 
 ## Synchronization
 

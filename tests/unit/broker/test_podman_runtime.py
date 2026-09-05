@@ -1930,6 +1930,52 @@ def test_command_runner_streams_bounded_stdin_without_deadlock() -> None:
 
 
 @pytest.mark.unit
+def test_command_runner_retries_nonblocking_partial_stdin_write(
+    mocker: MockerFixture,
+) -> None:
+    runner = BoundedCommandRunner(
+        Path("/bin/cat"), PodmanCommandLimits(2), environment={}
+    )
+    content = b"x" * (32 * 1024)
+    original_write = podman_runtime.os.write
+    attempts = 0
+
+    def write_after_temporary_backpressure(
+        descriptor: int, value: bytes | memoryview
+    ) -> int:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise BlockingIOError
+        return original_write(descriptor, value[:1024])
+
+    set_blocking = mocker.spy(podman_runtime.os, "set_blocking")
+    mocker.patch.object(
+        podman_runtime.os, "write", side_effect=write_after_temporary_backpressure
+    )
+
+    code, output = runner(("-",), input_bytes=content, max_output_bytes=len(content))
+
+    assert code == 0
+    assert output == content
+    assert attempts > 1
+    assert any(call.args[1] is False for call in set_blocking.call_args_list)
+
+
+@pytest.mark.unit
+def test_command_runner_deadline_survives_child_that_never_reads_stdin(
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "no-stdin-reader"
+    executable.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+    executable.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    runner = BoundedCommandRunner(executable, PodmanCommandLimits(0.05), environment={})
+
+    with pytest.raises(PodmanRuntimeError, match="bounds"):
+        runner(("fixed",), input_bytes=b"x" * (256 * 1024))
+
+
+@pytest.mark.unit
 def test_command_runner_rejects_invalid_input_type() -> None:
     runner = BoundedCommandRunner(
         Path("/bin/true"), PodmanCommandLimits(1), environment={}

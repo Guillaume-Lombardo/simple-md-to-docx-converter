@@ -60,3 +60,20 @@ def test_fake_backend_satisfies_shared_runtime_contract() -> None:
             workspace_runtime.try_collect_response(workspace_unit, wrong_attempt_id)
     with pytest.raises(FakeRuntimeError, match="workspace"):
         workspace_runtime.stage_request(workspace_unit, request)
+
+    for invalid_request in (
+        cast(Any, "not-a-request"),
+        replace(
+            request,
+            source=b"xx",
+            limits=replace(request.limits, max_input_bytes=2),
+        ),
+        replace(request, limits=replace(request.limits, max_input_bytes=2)),
+        replace(request, limits=replace(request.limits, max_output_bytes=2)),
+    ):
+        fresh_runtime = FakeIsolationRuntime()
+        fresh_unit = fresh_runtime.create(
+            replace(unit, unit_id=uuid4(), attempt_id=workspace_attempt_id), policy
+        )
+        with pytest.raises(FakeRuntimeError, match="workspace"):
+            fresh_runtime.stage_request(fresh_unit, invalid_request)

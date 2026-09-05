@@ -128,7 +128,7 @@ container_id="$(podman run --detach \
   "$image")"
 
 deadline="$((SECONDS + 60))"
-until grep -q '"state":"complete"' "$workspace/response.state"; do
+until podman unshare grep -q '"state":"complete"' "$workspace/response.state"; do
   test "$SECONDS" -lt "$deadline"
   sleep 0.1
 done

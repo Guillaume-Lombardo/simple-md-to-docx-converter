@@ -2,6 +2,7 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 USER 0
+COPY LICENSE /opt/markweave/licenses/markweave/LICENSE
 COPY src/markweave/reversions \
     /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions
 RUN find /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions \

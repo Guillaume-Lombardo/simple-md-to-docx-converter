@@ -252,6 +252,7 @@ class BoundedCommandRunner:
             selector.register(process.stderr, selectors.EVENT_READ, False)
             input_view = memoryview(input_bytes) if input_bytes is not None else None
             if process.stdin is not None:
+                os.set_blocking(process.stdin.fileno(), False)
                 selector.register(process.stdin, selectors.EVENT_WRITE, None)
             while selector.get_map():
                 remaining = deadline - self._monotonic()
@@ -263,7 +264,10 @@ class BoundedCommandRunner:
                 for key, _ in ready:
                     if key.data is None:
                         if input_view:
-                            written = os.write(key.fd, input_view[:8192])
+                            try:
+                                written = os.write(key.fd, input_view[:8192])
+                            except BlockingIOError:
+                                continue
                             if written <= 0:
                                 raise OSError
                             input_view = input_view[written:]

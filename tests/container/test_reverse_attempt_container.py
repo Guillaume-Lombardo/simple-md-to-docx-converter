@@ -126,6 +126,7 @@ def test_reverse_attempt_smoke_enforces_runtime_separation() -> None:
         "decode_response_metadata",
         'Path("spikes/anydoc/corpus/docx/text.docx")',
         'podman unshare chown -R 12345:0 -- "$workspace"',
+        'podman unshare grep -q \'"state":"complete"\'',
         'PurePosixPath("safe.svg")',
         "MARKDOWN_WITH_ASSETS",
         '"assets/image-0001.png"',
