@@ -512,6 +512,40 @@ def test_server_context_loads_an_immutable_material_snapshot(
     assert "private key" not in repr(prepared)
 
 
+@pytest.mark.parametrize(
+    ("local", "material"),
+    [
+        (object(), (b"ca", b"certificate", b"key")),
+        (LOCAL, (b"ca", b"certificate")),
+        (LOCAL, (b"", b"certificate", b"key")),
+        (LOCAL, (b"ca", "certificate", b"key")),
+    ],
+)
+def test_server_context_rejects_invalid_material_snapshot(
+    local: object, material: object
+) -> None:
+    with pytest.raises(ValueError, match="certificate material is invalid"):
+        mtls_transport.build_mtls_server_context_from_material(
+            cast(Any, local), cast(Any, material)
+        )
+
+
+def test_server_context_closes_memory_file_after_short_write(
+    mocker: MockerFixture,
+) -> None:
+    descriptor = os.memfd_create("test-mtls-material", os.MFD_CLOEXEC)
+    mocker.patch.object(mtls_transport.os, "memfd_create", return_value=descriptor)
+    mocker.patch.object(mtls_transport.os, "write", return_value=0)
+
+    with pytest.raises(ValueError, match="certificate material is invalid"):
+        mtls_transport.build_mtls_server_context_from_material(
+            LOCAL, (b"ca", b"certificate", b"key")
+        )
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
 def test_server_preserves_stop_requested_before_start(
     mocker: MockerFixture,
 ) -> None:
