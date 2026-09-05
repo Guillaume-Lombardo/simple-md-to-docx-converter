@@ -7,6 +7,7 @@ import ssl
 import struct
 import subprocess
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
@@ -43,6 +44,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
     WorkspaceFailureResponse,
     WorkspacePendingResponse,
+    WorkspaceResponse,
     WorkspaceStageReceipt,
     WorkspaceStageRequest,
     WorkspaceSuccessResponse,
@@ -486,6 +488,7 @@ def test_real_paired_mtls_workspace_collect_outcomes(
         1,
         INCARNATION_ID,
     )
+    response: WorkspaceResponse
     if outcome == "pending":
         response = WorkspacePendingResponse(request.request_id, receipt)
     elif outcome == "failure":
@@ -1035,13 +1038,17 @@ def test_real_internal_dispatch_failure_sets_content_free_fatal_signal(
     server, client_local, server_peer = _server(certificates, dispatcher, timeout=1)
 
     server.start()
-    client = _client(server, client_local, server_peer, timeout=1)
-    with pytest.raises(BrokerError) as captured:
-        client.request(ReadyRequest(REQUEST_ID, 1))
-    assert server.wait_stopping(1)
-    assert server.failed
-    with pytest.raises(RuntimeError, match="Broker mTLS server failed") as stopped:
-        server.stop()
+    try:
+        client = _client(server, client_local, server_peer, timeout=1)
+        with pytest.raises(BrokerError) as captured:
+            client.request(ReadyRequest(REQUEST_ID, 1))
+        assert server.wait_stopping(1)
+        assert server.failed
+        with pytest.raises(RuntimeError, match="Broker mTLS server failed") as stopped:
+            server.stop()
+    finally:
+        with suppress(RuntimeError):
+            server.stop()
 
     assert "private dispatcher detail" not in str(captured.value)
     assert "private dispatcher detail" not in str(stopped.value)
