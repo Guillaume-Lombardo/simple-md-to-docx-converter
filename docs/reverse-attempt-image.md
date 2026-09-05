@@ -12,18 +12,27 @@ python -m markweave.reversions.attempt_main
 ```
 
 It accepts no command arguments. The external isolation broker supplies a fresh bounded `/work`
-ephemeral mount containing `request.json` and `source.bin`, plus the required
+tmpfs through a fixed local `podman cp` tar stream. The archive contains only `request.json`,
+`source.bin`, an attempt-bound pending response state, and a final `request.commit` marker. The
+child does not inspect the request until that final marker exists, so a partial copy never starts
+conversion. The broker also supplies the required
 `MARKWEAVE_REVERSE_MAX_INPUT_BYTES` and `MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES` transport ceilings.
 The image defines no default for either T71-owned value and fails closed when either is absent or
-noncanonical. The attempt writes `response.json` and, on success, `result.bin` to that same mount.
-Document bytes never cross stdout or stderr. The
+noncanonical. Those values are part of the broker policy digest, immutable runtime labels, and the
+allowlisted realized environment. The attempt writes `response.json` and, on success, `result.bin`
+before atomically replacing the attempt-bound response state with `complete`. It then stays alive
+until the broker's existing whole-unit terminate-and-prove lifecycle removes the tmpfs. The broker
+copies only those fixed response files, parses the returned tar without extraction, enforces exact
+entry/type/path and byte bounds, and revalidates the exact runtime incarnation before and after
+each copy. Document bytes never cross stdout or stderr, labels, or the content-free inventory. The
 broker, not the image, enforces no network, a read-only root, no capabilities, no-new-privileges,
 an arbitrary UID, the reviewed CPU, memory, PID, workspace and autonomous wall-time ceilings, and
 whole-unit termination. The image contains no runtime socket, service-account token, application
 credentials, Pandoc, LibreOffice, browser, Mermaid CLI, HTTP server, or publication client.
 
-The rootless smoke test runs a real asset-bearing DOCX through the fixed workspace entrypoint and
-verifies its closed Markdown/PNG/manifest ZIP. It also rasterizes a safe SVG through the installed
+The rootless smoke test runs a real asset-bearing DOCX through the fixed workspace entrypoint,
+waits for its committed response, terminates the still-live child, and verifies its closed
+Markdown/PNG/manifest ZIP. It also rasterizes a safe SVG through the installed
 CairoSVG/Cairo path under the same arbitrary-UID, read-only-root, networkless policy.
 
 `RAYON_NUM_THREADS=1` preserves the low-compute policy measured by T69. The image does not expose a

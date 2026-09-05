@@ -367,6 +367,59 @@ for reverse conversion.
   2,933-test light selection pass at 90.09% application
   branch coverage, correcting the hosted run's 89.77% result. Hosted Podman 4.9.3 remains to be
   reconfirmed by CI after independent review. No Kubernetes acceptance is claimed.
+* 2026-09-05: Added the next internal Podman workspace slice without exposing it through the public
+  Unix protocol or adding T71 job/lease/publication behavior. T71-supplied input and output channel
+  ceilings are now mandatory policy inputs and are bound into schema-v2 policy evidence,
+  immutable runtime labels, the create command, and the allowlisted realized environment. The
+  broker stages exactly one deterministic minimal tar stream containing fixed request files, an
+  attempt-bound pending state, and a final commit marker into the bounded `/work` tmpfs. It
+  collects only fixed response files from a complete attempt-bound state, parses returned tar
+  bytes without extraction, rejects non-regular, linked, escaping, extra, truncated, malformed, or
+  oversized archives, and revalidates the exact unit/incarnation before and after every copy. The
+  child waits for the request commit, publishes result and metadata before atomically committing
+  the response, and remains alive until the existing whole-container terminate-and-prove path
+  removes its tmpfs. Six real rootless Podman integrations now include a successful PDF workspace
+  round trip and autonomous crash cleanup after staging, alongside the four lifecycle scenarios;
+  they retain the exact Podman 4.9/5.4 cgroup compatibility contract. Focused unit/security tests
+  cover pending and partial responses, channel bounds and policy evidence, strict tar paths/types/
+  links/padding, streaming command bounds, and pre/post-copy identity substitution. No document
+  data enters labels, logs, or inventory. Production budget values, the public transport,
+  persistent reverse jobs, publication, production assembly, mTLS, Kubernetes, and OCR remain
+  outside this slice; no Kubernetes acceptance is claimed.
+* 2026-09-05: Follow-up review made every response-file copy revalidate the exact incarnation
+  before any subsequent copy or decode, including protocol-error paths. Raw archive validation now
+  requires the exact fixed-path USTAR header, rejects GNU/PAX forms, and verifies both file-block
+  padding and all trailing blocks are zero. The child accepts a response write only while the
+  existing state is canonical `pending` for the same attempt; malformed, already-complete, and
+  substituted-attempt states remain untouched. The shared fake runtime now rejects wrong or
+  ill-typed expected attempt identities even while no response is available. Regression coverage
+  includes post-copy identity substitution with an exact operation-local inspect count. The 706
+  broker/reversion tests and all six real rootless Podman 5.4 integrations pass; hosted Podman 4.9
+  and a fresh full-image build remain CI validation boundaries.
+* 2026-09-05: Hosted fresh-image CI exposed that the smoke harness polled a child-owned atomic
+  `0600` state file directly from the host. It now performs that content-free readiness check
+  through `podman unshare`, preserving the child-only workspace mode and arbitrary UID; the full
+  smoke passes against the controlled current-code overlay. CodeRabbit review also identified two
+  valid conformance issues: the fake runtime now persists and enforces the exact policy channel
+  ceilings, and the bounded command runner makes its stdin pipe nonblocking, retries temporary
+  backpressure, and retains the absolute deadline when a child never reads. Regression tests cover
+  all three paths. The 715 broker/reversion/container tests and all six real rootless Podman
+  integrations pass; the fresh-image build and hosted Podman 4.9 boundary remain assigned to CI.
+* 2026-09-05: The real-Podman workspace overlay now rejects incompatible base-image overrides
+  before copying into a fixed interpreter layout. Its build preflight requires the exact executable
+  venv, Python 3.14, matching prefix and site-packages membership, and an existing attempt-runner
+  import resolving from that destination. Review then made the preflight independent of Python
+  assertion optimization and inherited `PYTHON*` variables: it executes with an empty environment,
+  ignores Python environment settings, and exits explicitly from boolean checks. A real adversarial
+  base with `PYTHONOPTIMIZE=1`, a Python 3.9 interpreter at the expected executable path, and a decoy
+  module is rejected without producing an image. The controlled overlay build, complete smoke, and
+  all seven real rootless integrations pass.
+* 2026-09-05: Follow-up review corrected the base-image preflight to execute the installed attempt
+  runner rather than only resolve its module specification. The import is isolated from inherited
+  Python environment settings, and every import exception including a zero-status `SystemExit` is
+  converted into an explicit failed contract check. A real Python 3.14 base retaining the expected
+  venv and module layout but with `anydoc` removed is rejected without producing an overlay image.
+  The positive overlay build, complete smoke, and all eight real rootless Podman integrations pass.
 
 ## Synchronization
 

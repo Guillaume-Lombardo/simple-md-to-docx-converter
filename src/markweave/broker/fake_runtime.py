@@ -13,10 +13,12 @@ from markweave.broker.models import (
     EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
+from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
 
 _INCARNATION_NAMESPACE = UUID("90ad36ea-46fe-46d2-90d0-445945e75ee0")
 FaultPoint = Literal["before", "after"]
@@ -66,10 +68,14 @@ _INITIAL_RUNTIME_STATE = FakeRuntimeState()
 @dataclass(slots=True)
 class _RuntimeRecord:
     unit: FakeRuntimeUnit
+    attempt_id: UUID | None = None
+    channel_limits: RuntimeChannelLimits | None = None
     terminated: bool = False
     exit_confirmed: bool = False
     empty_confirmed: bool = False
     removed: bool = False
+    request: ReverseAttemptRequest | None = None
+    response: ReverseAttemptResponse | None = None
 
 
 def _digest(*parts: object) -> EvidenceDigest:
@@ -139,7 +145,11 @@ class FakeIsolationRuntime:
             policy_specification_evidence(policy),
         )
         runtime_unit = FakeRuntimeUnit(unit.unit_id, incarnation)
-        self._records[unit.unit_id] = _RuntimeRecord(runtime_unit)
+        self._records[unit.unit_id] = _RuntimeRecord(
+            runtime_unit,
+            attempt_id=unit.attempt_id,
+            channel_limits=policy.channel_limits,
+        )
         self._checkpoint("create", "after")
         return runtime_unit
 
@@ -152,6 +162,47 @@ class FakeIsolationRuntime:
             raise FakeRuntimeError("Isolation runtime unit was already removed")
         record.terminated = True
         self._checkpoint("hard_terminate", "after")
+
+    def stage_request(
+        self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
+    ) -> None:
+        """Stage one exact request for port-level orchestration tests."""
+
+        self._checkpoint("stage_request", "before")
+        record = self._record(runtime_unit)
+        if (
+            record.terminated
+            or record.removed
+            or type(request) is not ReverseAttemptRequest
+            or record.request is not None
+            or record.attempt_id != request.attempt_id
+            or record.channel_limits is None
+            or len(request.source) > record.channel_limits.max_input_bytes
+            or request.limits.max_input_bytes > record.channel_limits.max_input_bytes
+            or request.limits.max_output_bytes > record.channel_limits.max_output_bytes
+        ):
+            raise FakeRuntimeError("Isolation runtime workspace contract failed")
+        record.request = request
+        self._checkpoint("stage_request", "after")
+
+    def try_collect_response(
+        self, runtime_unit: RuntimeUnit, expected_attempt_id: UUID
+    ) -> ReverseAttemptResponse | None:
+        """Collect only an attempt-bound response configured by a test."""
+
+        self._checkpoint("try_collect_response", "before")
+        record = self._record(runtime_unit)
+        response = record.response
+        if (
+            record.terminated
+            or record.removed
+            or type(expected_attempt_id) is not UUID
+            or record.attempt_id != expected_attempt_id
+            or (response is not None and response.attempt_id != expected_attempt_id)
+        ):
+            raise FakeRuntimeError("Isolation runtime workspace contract failed")
+        self._checkpoint("try_collect_response", "after")
+        return response
 
     def confirm_exit(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
         """Return stable positive exit evidence after whole-unit termination."""

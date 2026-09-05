@@ -237,9 +237,10 @@ def test_main_reads_executes_and_writes_without_output(mocker: Any) -> None:
     mocker.patch.object(
         attempt_main, "channel_limits_from_environment", return_value=channel_limits
     )
-    mocker.patch.object(attempt_main, "read_request", return_value=request)
+    mocker.patch.object(attempt_main, "wait_for_request", return_value=request)
     mocker.patch.object(attempt_main, "_execute", return_value=response)
     write = mocker.patch.object(attempt_main, "write_response")
+    mocker.patch.object(attempt_main, "_linger_until_terminated", return_value=0)
     mocker.patch.object(attempt_main.sys, "argv", ["attempt_main"])
 
     assert attempt_main.main() == 0
@@ -258,7 +259,7 @@ def test_main_rejects_arguments_and_unreadable_request(mocker: Any) -> None:
     )
     mocker.patch.object(
         attempt_main,
-        "read_request",
+        "wait_for_request",
         side_effect=lambda _limits: reject(ReverseErrorCategory.PROTOCOL_ERROR),
     )
     assert attempt_main.main() == 2
@@ -271,7 +272,7 @@ def test_main_fails_closed_when_response_cannot_be_written(mocker: Any) -> None:
     mocker.patch.object(
         attempt_main, "channel_limits_from_environment", return_value=channel_limits
     )
-    mocker.patch.object(attempt_main, "read_request", return_value=request)
+    mocker.patch.object(attempt_main, "wait_for_request", return_value=request)
     mocker.patch.object(
         attempt_main,
         "_execute",

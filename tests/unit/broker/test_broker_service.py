@@ -19,6 +19,7 @@ from markweave.broker.models import (
     BrokerPolicy,
     ManagedUnitState,
     ReplayPosition,
+    RuntimeChannelLimits,
     RuntimeLimits,
 )
 from markweave.broker.service import IsolationBrokerService
@@ -38,6 +39,7 @@ POLICY = BrokerPolicy(
     "t71-v1",
     "sha256:" + "a" * 64,
     RuntimeLimits(100_000, 100_000, 512_000_000, 32, 16_000_000, 30_000),
+    RuntimeChannelLimits(1_000_000, 2_000_000),
 )
 
 

@@ -15,6 +15,7 @@ from markweave.broker.models import (
     ManagedUnit,
     ManagedUnitState,
     ReplayPosition,
+    RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
     TerminationProof,
@@ -36,6 +37,10 @@ def limits() -> RuntimeLimits:
     return RuntimeLimits(100_000, 100_000, 512_000_000, 64, 32_000_000, 30_000)
 
 
+def channel_limits() -> RuntimeChannelLimits:
+    return RuntimeChannelLimits(1_000_000, 2_000_000)
+
+
 def principal() -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(PRINCIPAL_ID)
 
@@ -47,12 +52,23 @@ def incarnation() -> RuntimeIncarnation:
 def test_runtime_policy_requires_explicit_positive_limits_and_immutable_digest() -> (
     None
 ):
-    policy = BrokerPolicy("t71-v1", DIGEST, limits())
+    policy = BrokerPolicy("t71-v1", DIGEST, limits(), channel_limits())
 
     assert policy.image_digest == DIGEST
     assert policy.limits.pid_limit == 64
+    assert policy.channel_limits.max_input_bytes == 1_000_000
     with pytest.raises(TypeError):
         cast(Any, RuntimeLimits)()
+
+
+@pytest.mark.parametrize("invalid", [0, -1, True, 1.5, "1"])
+def test_runtime_channel_limits_require_explicit_positive_integers(
+    invalid: object,
+) -> None:
+    with pytest.raises(ValueError, match="channel limits"):
+        RuntimeChannelLimits(cast(Any, invalid), 1)
+    with pytest.raises(ValueError, match="channel limits"):
+        RuntimeChannelLimits(1, cast(Any, invalid))
 
 
 @pytest.mark.parametrize("field", RuntimeLimits.__dataclass_fields__)
@@ -79,7 +95,7 @@ def test_runtime_limits_reject_non_positive_or_non_integer_values(
 )
 def test_policy_rejects_invalid_revision(revision: object) -> None:
     with pytest.raises(ValueError, match="revision"):
-        BrokerPolicy(cast(Any, revision), DIGEST, limits())
+        BrokerPolicy(cast(Any, revision), DIGEST, limits(), channel_limits())
 
 
 @pytest.mark.parametrize(
@@ -88,30 +104,33 @@ def test_policy_rejects_invalid_revision(revision: object) -> None:
 )
 def test_policy_rejects_mutable_or_noncanonical_image_digest(digest: object) -> None:
     with pytest.raises(ValueError, match="immutable SHA-256"):
-        BrokerPolicy("t71-v1", cast(Any, digest), limits())
+        BrokerPolicy("t71-v1", cast(Any, digest), limits(), channel_limits())
 
 
 def test_policy_rejects_a_limit_lookalike() -> None:
     with pytest.raises(ValueError, match="runtime limits"):
-        BrokerPolicy("t71-v1", DIGEST, cast(Any, object()))
+        BrokerPolicy("t71-v1", DIGEST, cast(Any, object()), channel_limits())
 
 
 def test_policy_specification_evidence_binds_fixed_runtime_contract() -> None:
-    policy = BrokerPolicy("t71-v1", DIGEST, limits())
+    policy = BrokerPolicy("t71-v1", DIGEST, limits(), channel_limits())
     assert policy_specification_evidence(policy) == EvidenceDigest(
-        "sha256:d162a075aea2c90d2d6398693521ef9adde22b47fcd3e3b729beb6c969627117"
+        "sha256:df16badaa0a81484f3d7c2a8553907ecae03436fac6a14aaca1c13dfb1c0d89f"
     )
     assert policy_specification_evidence(
-        BrokerPolicy("t71-v2", DIGEST, limits())
+        BrokerPolicy("t71-v2", DIGEST, limits(), channel_limits())
+    ) != policy_specification_evidence(policy)
+    assert policy_specification_evidence(
+        BrokerPolicy("t71-v1", DIGEST, limits(), RuntimeChannelLimits(2, 3))
     ) != policy_specification_evidence(policy)
     with pytest.raises(ValueError, match="policy"):
         policy_specification_evidence(cast(Any, object()))
 
 
 def test_policy_specification_evidence_has_no_mutable_module_security_mapping() -> None:
-    policy = BrokerPolicy("t71-v1", DIGEST, limits())
+    policy = BrokerPolicy("t71-v1", DIGEST, limits(), channel_limits())
     expected = EvidenceDigest(
-        "sha256:d162a075aea2c90d2d6398693521ef9adde22b47fcd3e3b729beb6c969627117"
+        "sha256:df16badaa0a81484f3d7c2a8553907ecae03436fac6a14aaca1c13dfb1c0d89f"
     )
 
     assert not hasattr(broker_models, "_FIXED_RUNTIME_SECURITY")

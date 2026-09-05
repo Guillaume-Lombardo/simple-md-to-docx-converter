@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -48,10 +49,14 @@ def _patch_workspace(mocker, workspace: Path) -> None:
         "SOURCE_PATH": "source.bin",
         "RESULT_PATH": "result.bin",
         "RESPONSE_METADATA_PATH": "response.json",
+        "REQUEST_COMMIT_PATH": "request.commit",
+        "RESPONSE_STATE_PATH": "response.state",
         "_REQUEST_METADATA_TEMP_PATH": ".request.json.tmp",
         "_SOURCE_TEMP_PATH": ".source.bin.tmp",
         "_RESULT_TEMP_PATH": ".result.bin.tmp",
         "_RESPONSE_METADATA_TEMP_PATH": ".response.json.tmp",
+        "_REQUEST_COMMIT_TEMP_PATH": ".request.commit.tmp",
+        "_RESPONSE_STATE_TEMP_PATH": ".response.state.tmp",
     }
     for name, leaf in paths.items():
         mocker.patch.object(channel, name, workspace / leaf)
@@ -263,6 +268,9 @@ def test_fixed_workspace_request_and_success_round_trip_atomically(
 def test_fixed_workspace_failure_has_no_result_file(mocker, tmp_path: Path) -> None:
     _patch_workspace(mocker, tmp_path)
     failure = ReverseAttemptFailure(uuid4(), ReverseErrorCategory.ENCRYPTED)
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(failure.attempt_id, "pending")
+    )
 
     channel.write_response(failure, LIMITS)
 
@@ -290,9 +298,13 @@ def test_fixed_workspace_rejects_missing_nonregular_and_duplicate_files(
     assert duplicate.value.category is ReverseErrorCategory.PROTOCOL_ERROR
 
     (tmp_path / "result.bin").write_bytes(b"stale")
+    attempt_id = uuid4()
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(attempt_id, "pending")
+    )
     with pytest.raises(ReverseConversionError) as failure_with_result:
         channel.write_response(
-            ReverseAttemptFailure(uuid4(), ReverseErrorCategory.MALFORMED), LIMITS
+            ReverseAttemptFailure(attempt_id, ReverseErrorCategory.MALFORMED), LIMITS
         )
     assert failure_with_result.value.category is ReverseErrorCategory.PROTOCOL_ERROR
 
@@ -327,6 +339,9 @@ def test_fixed_workspace_rejects_oversized_files_symlinks_and_stale_results(
             ReverseAttemptFailure(request.attempt_id, ReverseErrorCategory.MALFORMED)
         )
     )
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(request.attempt_id, "complete")
+    )
     (tmp_path / "result.bin").write_bytes(b"stale")
     with pytest.raises(ReverseConversionError) as stale:
         channel.read_response(LIMITS, request.attempt_id)
@@ -338,6 +353,9 @@ def test_response_is_bound_to_the_expected_attempt_identity(
 ) -> None:
     _patch_workspace(mocker, tmp_path)
     stale = ReverseAttemptSuccess(uuid4(), ReverseOutputMode.MARKDOWN, b"result")
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(stale.attempt_id, "pending")
+    )
     channel.write_response(stale, LIMITS)
 
     with pytest.raises(ReverseConversionError) as captured:
@@ -387,6 +405,7 @@ def test_transport_ceiling_rejects_larger_embedded_input_or_output_policy(
     )
     (tmp_path / "request.json").write_bytes(channel.encode_request_metadata(request))
     (tmp_path / "source.bin").write_bytes(request.source)
+    (tmp_path / "request.commit").write_bytes(b"committed\n")
 
     with pytest.raises(ReverseConversionError) as captured:
         channel.read_request(LIMITS)
@@ -400,3 +419,178 @@ def test_channel_limits_require_positive_non_boolean_integers(
 ) -> None:
     with pytest.raises(ValueError, match="must be positive"):
         channel.AttemptChannelLimits(*invalid)
+
+
+@pytest.mark.parametrize(
+    ("attempt_id", "state"),
+    (("not-a-uuid", "pending"), (uuid4(), "unknown")),
+)
+def test_channel_state_rejects_invalid_identity_or_state(
+    attempt_id: object, state: str
+) -> None:
+    with pytest.raises(ReverseConversionError) as captured:
+        channel.encode_channel_state(cast(Any, attempt_id), state)
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_fixed_workspace_requires_exact_commit_and_complete_state(
+    mocker, tmp_path: Path
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    request = _request()
+    channel.write_request(request, LIMITS)
+    (tmp_path / "request.commit").write_bytes(b"partial\n")
+
+    with pytest.raises(ReverseConversionError) as request_error:
+        channel.read_request(LIMITS)
+    assert request_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(request.attempt_id, "pending")
+    )
+    with pytest.raises(ReverseConversionError) as response_error:
+        channel.read_response(LIMITS, request.attempt_id)
+    assert response_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_response_reader_rejects_non_uuid_expected_identity(
+    mocker, tmp_path: Path
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+
+    with pytest.raises(ReverseConversionError) as captured:
+        channel.read_response(LIMITS, cast(Any, "not-a-uuid"))
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_wait_for_request_polls_for_marker_then_reads_exact_request(
+    mocker, tmp_path: Path
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    request = _request()
+    channel.write_request(request, LIMITS)
+    marker = tmp_path / "request.commit"
+    marker_content = marker.read_bytes()
+    marker.unlink()
+
+    def restore_marker(_seconds: float) -> None:
+        marker.write_bytes(marker_content)
+
+    sleep = mocker.patch.object(channel.time, "sleep", side_effect=restore_marker)
+
+    assert channel.wait_for_request(LIMITS) == request
+    sleep.assert_called_once_with(0.01)
+
+
+def test_wait_for_request_rejects_nonregular_marker(mocker, tmp_path: Path) -> None:
+    _patch_workspace(mocker, tmp_path)
+    (tmp_path / "request.commit").mkdir()
+
+    with pytest.raises(ReverseConversionError) as captured:
+        channel.wait_for_request(LIMITS)
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_workspace_rejects_nonregular_result_and_response_state(
+    mocker, tmp_path: Path
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    attempt_id = uuid4()
+    (tmp_path / "response.state").mkdir()
+
+    with pytest.raises(ReverseConversionError) as replace_error:
+        channel.write_response(
+            ReverseAttemptSuccess(attempt_id, ReverseOutputMode.MARKDOWN, b"result"),
+            LIMITS,
+        )
+    assert replace_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    (tmp_path / "response.state").rmdir()
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(attempt_id, "pending")
+    )
+    (tmp_path / "result.bin").mkdir()
+    with pytest.raises(ReverseConversionError) as result_error:
+        channel.write_response(
+            ReverseAttemptFailure(attempt_id, ReverseErrorCategory.MALFORMED), LIMITS
+        )
+    assert result_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+@pytest.mark.parametrize("state_kind", ("malformed", "complete", "mismatched"))
+def test_response_writer_requires_exact_attempt_bound_pending_state(
+    mocker, tmp_path: Path, state_kind: str
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    attempt_id = uuid4()
+    state = {
+        "malformed": b"{not-json}\n",
+        "complete": channel.encode_channel_state(attempt_id, "complete"),
+        "mismatched": channel.encode_channel_state(uuid4(), "pending"),
+    }[state_kind]
+    (tmp_path / "response.state").write_bytes(state)
+
+    with pytest.raises(ReverseConversionError) as captured:
+        channel.write_response(
+            ReverseAttemptSuccess(attempt_id, ReverseOutputMode.MARKDOWN, b"result"),
+            LIMITS,
+        )
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+    assert not (tmp_path / "result.bin").exists()
+    assert not (tmp_path / "response.json").exists()
+    assert (tmp_path / "response.state").read_bytes() == state
+
+
+def test_response_reader_rejects_unknown_type_and_stale_metadata_identity(
+    mocker, tmp_path: Path
+) -> None:
+    _patch_workspace(mocker, tmp_path)
+    expected_attempt_id = uuid4()
+    (tmp_path / "response.state").write_bytes(
+        channel.encode_channel_state(expected_attempt_id, "complete")
+    )
+    unknown = {
+        "attempt_id": str(expected_attempt_id),
+        "protocol": channel.PROTOCOL_NAME,
+        "type": "unknown",
+        "version": channel.PROTOCOL_VERSION,
+    }
+    (tmp_path / "response.json").write_bytes(
+        json.dumps(unknown, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    with pytest.raises(ReverseConversionError) as unknown_error:
+        channel.read_response(LIMITS, expected_attempt_id)
+    assert unknown_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    stale = ReverseAttemptFailure(uuid4(), ReverseErrorCategory.MALFORMED)
+    (tmp_path / "response.json").write_bytes(channel.encode_response_metadata(stale))
+    with pytest.raises(ReverseConversionError) as stale_error:
+        channel.read_response(LIMITS, expected_attempt_id)
+    assert stale_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_workspace_file_primitives_reject_directories_and_short_writes(
+    mocker, tmp_path: Path
+) -> None:
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    with pytest.raises(ReverseConversionError) as read_error:
+        channel._read_bounded(directory, 16)
+    assert read_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    with pytest.raises(ReverseConversionError) as replace_error:
+        channel._atomic_replace(directory, tmp_path / ".replace.tmp", b"value")
+    assert replace_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    write = mocker.patch.object(channel.os, "write", return_value=0)
+    with pytest.raises(ReverseConversionError) as write_error:
+        channel._atomic_write(
+            tmp_path / "destination", tmp_path / ".write.tmp", b"value"
+        )
+    assert write_error.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+    write.assert_called_once()
+    assert not (tmp_path / ".write.tmp").exists()

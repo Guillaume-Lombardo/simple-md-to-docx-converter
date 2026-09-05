@@ -1,0 +1,14 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER 0
+RUN test -x /opt/markweave/venv/bin/python \
+    && env -i /opt/markweave/venv/bin/python -E -c 'import importlib, pathlib, sys; destination = pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages"); executable = pathlib.Path("/opt/markweave/venv/bin/python").resolve(); scope = {"importlib": importlib}; exec("def load_attempt_main():\n    try:\n        return importlib.import_module(\"markweave.reversions.attempt_main\")\n    except BaseException:\n        return None", scope); attempt_main = scope["load_attempt_main"](); origin = getattr(attempt_main, "__file__", None); valid = sys.version_info[:2] == (3, 14) and pathlib.Path(sys.executable).resolve() == executable and pathlib.Path(sys.prefix).resolve() == pathlib.Path("/opt/markweave/venv").resolve() and str(destination) in sys.path and origin is not None and pathlib.Path(origin).resolve().parent == destination / "markweave/reversions"; raise SystemExit(0 if valid else 1)'
+COPY LICENSE /opt/markweave/licenses/markweave/LICENSE
+COPY src/markweave/reversions \
+    /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions
+RUN find /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions \
+        -type f -name '*.pyc' -delete \
+    && chmod -R a-w \
+        /opt/markweave/venv/lib/python3.14/site-packages/markweave/reversions
+USER 1001:0

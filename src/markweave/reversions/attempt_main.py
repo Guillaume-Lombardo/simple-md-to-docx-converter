@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 from typing import cast
 
@@ -14,7 +15,7 @@ from markweave.reversions._anydoc_compat import (
 from markweave.reversions.assets import AssetNormalizationResult, normalize_assets
 from markweave.reversions.attempt_channel import (
     AttemptChannelLimits,
-    read_request,
+    wait_for_request,
     write_response,
 )
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
@@ -133,6 +134,13 @@ def _execute(request: ReverseAttemptRequest) -> ReverseAttemptResponse:
         )
 
 
+def _linger_until_terminated() -> int:
+    """Retain the tmpfs response until the broker terminates the stable unit."""
+
+    while True:
+        signal.pause()
+
+
 def main() -> int:
     """Run exactly one fixed-workspace attempt without writing document data to logs."""
 
@@ -140,7 +148,7 @@ def main() -> int:
         return 2
     try:
         channel_limits = channel_limits_from_environment()
-        request = read_request(channel_limits)
+        request = wait_for_request(channel_limits)
     except ReverseConversionError, ValueError:
         return 2
     response = _execute(request)
@@ -148,7 +156,7 @@ def main() -> int:
         write_response(response, channel_limits)
     except ReverseConversionError:
         return 3
-    return 0
+    return _linger_until_terminated()
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised by the image smoke

@@ -47,6 +47,9 @@ readonly workspace="$run_root/work"
 readonly stdout_file="$run_root/stdout"
 readonly stderr_file="$run_root/stderr"
 cleanup() {
+  if test -n "${container_id:-}"; then
+    podman rm --force "$container_id" >/dev/null 2>&1 || true
+  fi
   podman unshare rm -rf -- "$run_root"
 }
 trap cleanup EXIT
@@ -58,7 +61,10 @@ import sys
 from uuid import UUID
 import zipfile
 
-from markweave.reversions.attempt_channel import encode_request_metadata
+from markweave.reversions.attempt_channel import (
+    encode_channel_state,
+    encode_request_metadata,
+)
 from markweave.reversions.models import ReverseAttemptRequest, ReverseContentLimits
 
 workspace = Path(sys.argv[1])
@@ -97,13 +103,17 @@ request = ReverseAttemptRequest(
 )
 (workspace / "source.bin").write_bytes(source)
 (workspace / "request.json").write_bytes(encode_request_metadata(request))
+(workspace / "response.state").write_bytes(
+    encode_channel_state(request.attempt_id, "pending")
+)
+(workspace / "request.commit").write_bytes(b"committed\n")
 PY
 
 # Rootless Podman maps the arbitrary container UID through its subordinate-ID
 # namespace. Make the bind-mounted broker workspace writable by that mapped UID.
 podman unshare chown -R 12345:0 -- "$workspace"
 
-podman run --rm \
+container_id="$(podman run --detach \
   --network none \
   --read-only \
   --cap-drop all \
@@ -115,7 +125,18 @@ podman run --rm \
   --volume "$workspace:/work:rw" \
   --env MARKWEAVE_REVERSE_MAX_INPUT_BYTES=1000000 \
   --env MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES=2000000 \
-  "$image" >"$stdout_file" 2>"$stderr_file"
+  "$image")"
+
+deadline="$((SECONDS + 60))"
+until podman unshare grep -q '"state":"complete"' "$workspace/response.state"; do
+  test "$SECONDS" -lt "$deadline"
+  sleep 0.1
+done
+podman logs "$container_id" >"$stdout_file" 2>"$stderr_file"
+podman kill --signal KILL "$container_id" >/dev/null
+test "$(podman wait "$container_id")" = "137"
+podman rm "$container_id" >/dev/null
+container_id=""
 
 test ! -s "$stdout_file"
 test ! -s "$stderr_file"
