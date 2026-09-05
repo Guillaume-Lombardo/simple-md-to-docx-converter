@@ -121,6 +121,10 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   Both success and unavailable responses now declare their private/no-store and nosniff headers in
   canonical OpenAPI. The final rootless-image smoke exercises those authorization and configuration
   branches through the installed application before completing the existing conversion workflow.
+* 2026-09-06: Corrected the E2E rollback routing so its pinned historical image retains the prior
+  route contract instead of being required to expose the new capabilities endpoint. Candidate-image
+  final smoke validation continues to require the anonymous `401`, missing-configuration `503`, and
+  configured deterministic `200` branches by default.
 
 ## Synchronization
 
