@@ -382,6 +382,11 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
         'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
         "  http://frontend:3000 401 false" in runner
     )
+    admission_started = runner.index("admission_test_pid=$!")
+    admission_finished = runner.index('wait "$admission_test_pid"')
+    admission_supervision = runner[admission_started:admission_finished]
+    assert "for _ in $(seq 1 1200); do" in admission_supervision
+    assert "for _ in $(seq 1 200); do" not in admission_supervision
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
@@ -398,17 +403,35 @@ def test_admission_fixture_reports_only_listening_readiness() -> None:
 
 
 @pytest.mark.unit
-def test_admission_browser_opens_every_hold_on_a_dedicated_connected_socket() -> None:
+def test_admission_browser_waits_for_every_frontend_admission() -> None:
     source = RUNTIME_FAILURE_BROWSER.read_text(encoding="utf-8")
+    fixture = ADMISSION_FIXTURE.read_text(encoding="utf-8")
 
     assert 'import http from "node:http";' in source
-    assert "request = http.request(" in source
-    assert "`${baseURL}${path}`" in source
+    assert "const request = http.request(" in source
+    assert "`${baseURL}/hold`" in source
     assert "{ agent: false }" in source
-    assert 'socket.once("connect", resolve);' in source
-    assert "await Promise.all(held.map(({ connected }) => connected));" in source
-    assert source.index("await Promise.all(held.map") < source.index(
-        'await waitFor("/evidence/frontend-saturated")'
+    assert "const admissionTimeoutMs = 25_000;" in source
+    assert "const deadline = Date.now() + admissionTimeoutMs;" in source
+    assert "while (Date.now() < deadline)" in source
+    assert "const failed = requests.find(" in source
+    assert "if (failed) throw failed.admissionError;" in source
+    assert 'existsSync("/evidence/frontend-saturated")' in source
+    assert "Timed out waiting for frontend saturation" in source
+    assert "Frontend hold request ${admissionId} returned before saturation" in source
+    assert "Frontend hold request ${admissionId} failed before saturation" in source
+    assert "await waitForSaturation(held);" in source
+    assert "socket.once" not in source
+    assert "if (page.admission.inFlight === 128)" in fixture
+    assert 'writeFileSync(`${evidence}/frontend-saturated`, "128\\n"' in fixture
+    assert "response.writeHead(200);" not in fixture
+    assert "response.flushHeaders();" not in fixture
+    assert 'response.write("admitted\\n");' not in fixture
+    assert fixture.index("frontend-saturated") < fixture.index(
+        "frontend-admission-ready"
+    )
+    assert source.index("await waitForSaturation(held);") < source.index(
+        'assert.equal(existsSync("/evidence/frontend-saturated"), true);'
     )
     assert "} finally {" in source
     assert "held.forEach(({ request }) => request.destroy());" in source

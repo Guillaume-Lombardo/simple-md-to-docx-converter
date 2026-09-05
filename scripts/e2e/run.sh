@@ -1012,7 +1012,9 @@ e2e_podman exec \
   --env MARKWEAVE_E2E_RUNTIME_FAILURE=admission \
   "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs &
 admission_test_pid=$!
-for _ in $(seq 1 200); do
+# The browser test owns a 25-second pre-admission deadline. Give it five more
+# seconds to publish the drain request or exit through its cleanup path.
+for _ in $(seq 1 1200); do
   [[ -f "$evidence_directory/frontend-request-drain" ]] && break
   kill -0 "$admission_test_pid" 2>/dev/null || break
   sleep 0.025

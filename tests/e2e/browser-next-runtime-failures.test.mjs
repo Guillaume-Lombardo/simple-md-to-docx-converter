@@ -7,29 +7,45 @@ import test from "node:test";
 import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
+const admissionTimeoutMs = 25_000;
 
-function openDedicatedRequest(path) {
-  let request;
-  const connected = new Promise((resolve, reject) => {
-    request = http.request(
-      `${baseURL}${path}`,
-      { agent: false },
-      (response) => {
-        response.resume();
-      },
+function openDedicatedRequest(admissionId) {
+  let admissionError;
+  const request = http.request(
+    `${baseURL}/hold`,
+    { agent: false },
+    (response) => {
+      response.resume();
+      admissionError = new Error(
+        `Frontend hold request ${admissionId} returned before saturation`,
+      );
+    },
+  );
+  request.once("error", () => {
+    admissionError = new Error(
+      `Frontend hold request ${admissionId} failed before saturation`,
     );
-    request.once("error", reject);
-    request.once("socket", (socket) => {
-      if (!socket.connecting) {
-        resolve();
-        return;
-      }
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
-    request.end();
   });
-  return { connected, request };
+  request.end();
+  return {
+    get admissionError() {
+      return admissionError;
+    },
+    request,
+  };
+}
+
+async function waitForSaturation(requests) {
+  const deadline = Date.now() + admissionTimeoutMs;
+  while (Date.now() < deadline) {
+    const failed = requests.find(
+      ({ admissionError }) => admissionError !== undefined,
+    );
+    if (failed) throw failed.admissionError;
+    if (existsSync("/evidence/frontend-saturated")) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for frontend saturation");
 }
 
 async function waitFor(path) {
@@ -116,13 +132,15 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
 
 test("production route exposes exact saturation and draining failures", async () => {
   if (process.env.MARKWEAVE_E2E_RUNTIME_FAILURE !== "admission") return;
-  // Each request owns a socket. Global fetch/undici connection pooling may
-  // queue part of this burst client-side and therefore never exercise all 128
-  // production-server admission slots.
-  const held = Array.from({ length: 128 }, () => openDedicatedRequest("/hold"));
+  // Each request owns a socket. Only the fixture's admission owner writes the
+  // saturation evidence after accepting all 128, so the test cannot confuse a
+  // router TCP connection or a proxy-generated response with admission.
+  const held = Array.from({ length: 128 }, (_, admissionId) =>
+    openDedicatedRequest(admissionId),
+  );
   try {
-    await Promise.all(held.map(({ connected }) => connected));
-    await waitFor("/evidence/frontend-saturated");
+    await waitForSaturation(held);
+    assert.equal(existsSync("/evidence/frontend-saturated"), true);
     const saturated = await fetch(`${baseURL}/overflow`);
     assert.equal(saturated.status, 503);
     assert.equal(await saturated.text(), "");
