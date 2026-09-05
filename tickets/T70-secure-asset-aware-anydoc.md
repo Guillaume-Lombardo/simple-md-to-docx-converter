@@ -462,6 +462,23 @@ for reverse conversion.
   authority lock while proving the first broker remains live. All 12 real process E2Es, 51 focused
   process/configuration tests, 73 Unix transport tests, Ruff, and `ty` pass.
 
+* 2026-09-05: Added the separately versioned `markweave-reverse-broker-workspace` v1 Unix
+  subprotocol without changing lifecycle protocol v1. STAGE authenticates the peer before reading
+  a canonical bounded header or allocating its exact digest-bound source body, derives the durable
+  unit incarnation, and returns a content-free receipt. A volatile unit-scoped replay ledger makes
+  an exact lost-response retry idempotent without a second runtime copy and rejects substitutions.
+  COLLECT is read-only and receipt-bound, returning canonical pending/failure headers or a bounded
+  digest-bound result body; service and runtime/inventory failures fence readiness. Low-level Unix
+  servers keep workspace operations disabled unless explicit policy channel ceilings are supplied,
+  while production assembly passes those existing T71-owned policy inputs without adding defaults.
+  Security coverage includes malformed, noncanonical, oversized, partial, slow/disconnected,
+  replayed, and identity-substituted traffic, with no dispatch before exact payload, digest, and EOF
+  validation. Real Unix and rootless Podman process E2E covers READY through CREATE, lost STAGE ACK
+  replay, pending/success/failure COLLECT, TERMINATE, PROOF, ACK, restart reconciliation, and exact
+  cleanup. The complete broker boundary passes 649 tests; the 3,084-test light selection reaches
+  93.88% total and 90.04% branch coverage. Persistent T71 jobs/leases/publication, mTLS, deployment,
+  Kubernetes, OCR, and public APIs remain excluded; no Kubernetes acceptance is claimed.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,

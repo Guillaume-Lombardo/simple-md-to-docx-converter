@@ -14,7 +14,7 @@ from pytest_mock import MockerFixture
 
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
-from markweave.broker.models import AuthenticatedPrincipal
+from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
 from markweave.broker.process import BrokerProcess
 from markweave.broker.protocol import ReadyRequest, ReadyResponse, encode_request
 from markweave.broker.unix_transport import (
@@ -23,11 +23,27 @@ from markweave.broker.unix_transport import (
     UnixTransportLimits,
     _peer_credentials,
 )
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspacePendingResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    WorkspaceSuccessResponse,
+    encode_workspace_request,
+)
+from markweave.reversions.models import ReverseContentLimits, ReverseOutputMode
 
 pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 REQUEST_ID = UUID("00000000-0000-4000-8000-000000000001")
 PRINCIPAL = AuthenticatedPrincipal(UUID("00000000-0000-4000-8000-000000000005"))
+ATTEMPT_ID = UUID("00000000-0000-4000-8000-000000000002")
+UNIT_ID = UUID("00000000-0000-4000-8000-000000000003")
+INCARNATION_ID = UUID("00000000-0000-4000-8000-000000000004")
+CHANNEL = RuntimeChannelLimits(1000, 2000)
+CONTENT_LIMITS = ReverseContentLimits(
+    1000, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+)
 
 
 def _server(
@@ -35,6 +51,7 @@ def _server(
     mocker: MockerFixture,
     *,
     limits: UnixTransportLimits | None = None,
+    workspace: bool = False,
 ) -> tuple[Path, UnixBrokerServer, Any]:
     parent = tmp_path / "broker"
     parent.mkdir(mode=0o700)
@@ -48,8 +65,30 @@ def _server(
         principal=PRINCIPAL,
         dispatcher=dispatcher,
         limits=limits or UnixTransportLimits(0.25, 1, 1, 1),
+        workspace_limits=CHANNEL if workspace else None,
     )
     return path, server, dispatcher
+
+
+def _workspace_stage(source: bytes = b"private") -> WorkspaceStageRequest:
+    return WorkspaceStageRequest(
+        REQUEST_ID,
+        7,
+        ATTEMPT_ID,
+        UNIT_ID,
+        6,
+        ".docx",
+        CONTENT_LIMITS,
+        source,
+    )
+
+
+def _assert_peer_closed(connection: socket.socket) -> None:
+    try:
+        received = connection.recv(1)
+    except ConnectionResetError:
+        received = b""
+    assert received == b""
 
 
 def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
@@ -70,6 +109,93 @@ def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
     assert response == ReadyResponse(REQUEST_ID, True)
     dispatcher.dispatch.assert_called_once_with(PRINCIPAL, request)
     assert not path.exists()
+
+
+def test_real_workspace_stage_collect_pending_and_success_exchange(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker, workspace=True)
+    stage = _workspace_stage()
+    receipt = WorkspaceStageReceipt(
+        stage.request_id,
+        stage.sequence,
+        stage.attempt_id,
+        stage.unit_id,
+        stage.create_sequence,
+        INCARNATION_ID,
+    )
+    collect = WorkspaceCollectRequest(
+        UUID("00000000-0000-4000-8000-000000000006"),
+        8,
+        receipt.request_id,
+        receipt.stage_sequence,
+        receipt.attempt_id,
+        receipt.unit_id,
+        receipt.create_sequence,
+        receipt.incarnation_id,
+    )
+    dispatcher.dispatch_workspace.side_effect = (
+        receipt,
+        WorkspacePendingResponse(collect.request_id, receipt),
+        WorkspaceSuccessResponse(
+            collect.request_id, receipt, ReverseOutputMode.MARKDOWN, b"result"
+        ),
+    )
+
+    with server:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=1,
+            workspace_limits=CHANNEL,
+        )
+        assert client.stage_workspace(stage) == receipt
+        assert client.collect_workspace(collect) == WorkspacePendingResponse(
+            collect.request_id, receipt
+        )
+        assert client.collect_workspace(collect) == WorkspaceSuccessResponse(
+            collect.request_id, receipt, ReverseOutputMode.MARKDOWN, b"result"
+        )
+
+    assert dispatcher.dispatch_workspace.call_count == 3
+    assert "private" not in repr(stage)
+    assert "result" not in repr(dispatcher.dispatch_workspace.call_args_list[-1])
+
+
+def test_workspace_disabled_and_partial_or_oversized_payload_never_dispatch(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(
+        tmp_path,
+        mocker,
+        limits=UnixTransportLimits(0.1, 1, 2, 2),
+    )
+    with server, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(path))
+        connection.sendall(encode_workspace_request(_workspace_stage()))
+        connection.shutdown(socket.SHUT_WR)
+        _assert_peer_closed(connection)
+    dispatcher.dispatch_workspace.assert_not_called()
+
+    second = tmp_path / "second"
+    second.mkdir()
+    path, server, dispatcher = _server(
+        second,
+        mocker,
+        limits=UnixTransportLimits(0.1, 1, 2, 2),
+        workspace=True,
+    )
+    wire = encode_workspace_request(_workspace_stage())
+    header_length = int.from_bytes(wire[:4], "big") + 4
+    with server:
+        for invalid in (wire[: header_length + 2], (4097).to_bytes(4, "big")):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.connect(str(path))
+                connection.sendall(invalid)
+                connection.shutdown(socket.SHUT_WR)
+                _assert_peer_closed(connection)
+    dispatcher.dispatch_workspace.assert_not_called()
 
 
 def test_shutdown_during_real_reconciliation_never_opens_admission(

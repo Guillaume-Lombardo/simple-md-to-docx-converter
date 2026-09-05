@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -14,7 +15,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from markweave.broker.models import AuthenticatedPrincipal, ManagedUnitState
+from markweave.broker.models import (
+    AuthenticatedPrincipal,
+    ManagedUnitState,
+    RuntimeChannelLimits,
+)
 from markweave.broker.protocol import (
     AcknowledgeRequest,
     AcknowledgeResponse,
@@ -30,14 +35,42 @@ from markweave.broker.protocol import (
     TerminateResponse,
 )
 from markweave.broker.unix_transport import UnixBrokerClient
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceFailureResponse,
+    WorkspacePendingResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    WorkspaceSuccessResponse,
+    encode_workspace_request,
+)
+from markweave.reversions.models import ReverseContentLimits
 
 pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).parents[3]
 PODMAN = Path("/usr/bin/podman")
 PROCESS_IMAGE = "localhost/markweave-t70-process-integration:current"
+PROCESS_WORKSPACE_IMAGE = "localhost/markweave-t70-process-workspace:current"
+PROCESS_WORKSPACE_BASE_IMAGE = "localhost/markweave-t70-process-workspace-base:current"
 DEFAULT_BASE_IMAGE = "localhost/markweave-reverse-attempt:t70-runtime-integration"
 PRINCIPAL = AuthenticatedPrincipal(UUID("55555555-5555-4555-8555-555555555555"))
+CHANNEL_LIMITS = RuntimeChannelLimits(1_000_000, 2_000_000)
+CONTENT_LIMITS = ReverseContentLimits(
+    1_000_000,
+    2_000_000,
+    100_000,
+    1_000,
+    1_000,
+    1_000_000,
+    1_000,
+    32,
+    16,
+    500_000,
+    1_000_000,
+    1_000_000,
+    2_000_000,
+)
 
 
 def _podman(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -87,6 +120,45 @@ def process_image() -> Iterator[tuple[str, str]]:
         _podman("image", "rm", "--force", PROCESS_IMAGE, check=False)
         if built_base:
             _podman("image", "rm", "--force", base, check=False)
+
+
+@pytest.fixture(scope="module")
+def process_workspace_image() -> Iterator[tuple[str, str]]:
+    base = os.environ.get("MARKWEAVE_T70_PODMAN_TEST_IMAGE", DEFAULT_BASE_IMAGE)
+    _podman(
+        "build",
+        "--format",
+        "oci",
+        "--tag",
+        PROCESS_WORKSPACE_BASE_IMAGE,
+        "--file",
+        str(ROOT / "tests/integration/broker/fixtures/WorkspaceContainerfile"),
+        "--build-arg",
+        f"BASE_IMAGE={base}",
+        str(ROOT),
+    )
+    _podman(
+        "build",
+        "--format",
+        "oci",
+        "--tag",
+        PROCESS_WORKSPACE_IMAGE,
+        "--file",
+        str(ROOT / "tests/integration/broker/fixtures/DelayedWorkspaceContainerfile"),
+        "--build-arg",
+        f"BASE_IMAGE={PROCESS_WORKSPACE_BASE_IMAGE}",
+        str(ROOT / "tests/integration/broker/fixtures"),
+    )
+    inspected = json.loads(
+        _podman("image", "inspect", PROCESS_WORKSPACE_IMAGE, "--format", "json").stdout
+    )[0]
+    digest = inspected["Digest"]
+    assert isinstance(digest, str) and digest.startswith("sha256:")
+    try:
+        yield PROCESS_WORKSPACE_IMAGE.rsplit(":", 1)[0], digest
+    finally:
+        _podman("image", "rm", "--force", PROCESS_WORKSPACE_IMAGE, check=False)
+        _podman("image", "rm", "--force", PROCESS_WORKSPACE_BASE_IMAGE, check=False)
 
 
 def _private_directory(path: Path) -> Path:
@@ -192,6 +264,7 @@ def _client(socket_path: Path) -> UnixBrokerClient:
         expected_server_uid=os.geteuid(),
         expected_principal=PRINCIPAL,
         operation_timeout_seconds=3,
+        workspace_limits=CHANNEL_LIMITS,
     )
 
 
@@ -343,6 +416,135 @@ def test_real_process_serves_complete_lifecycle_and_stops_cleanly(
             process.kill()
             process.wait(timeout=3)
         if unit_id is not None:
+            _cleanup_unit(unit_id)
+
+
+def test_real_process_workspace_lost_receipt_retry_pending_success_and_failure(  # noqa: PLR0915
+    tmp_path: Path, process_workspace_image: tuple[str, str]
+) -> None:
+    config, socket_path = _write_configuration(tmp_path, *process_workspace_image)
+    value = json.loads(config.read_text(encoding="ascii"))
+    value["runtime_limits"]["wall_time_millis"] = 30_000
+    config.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    process = _start(config, socket_path)
+    client = _client(socket_path)
+    units: list[tuple[UUID, UUID]] = []
+    try:
+        successful_attempt = uuid4()
+        created = client.request(CreateRequest(uuid4(), 2, successful_attempt))
+        assert isinstance(created, CreateResponse)
+        units.append((successful_attempt, created.unit_id))
+        source = (ROOT / "spikes/anydoc/corpus/pdf/text.pdf").read_bytes()
+        stage = WorkspaceStageRequest(
+            uuid4(),
+            3,
+            successful_attempt,
+            created.unit_id,
+            2,
+            ".pdf",
+            CONTENT_LIMITS,
+            source,
+        )
+
+        # Simulate a lost STAGE acknowledgement after the complete request reached the broker.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(3)
+            connection.connect(str(socket_path))
+            connection.sendall(encode_workspace_request(stage))
+            connection.shutdown(socket.SHUT_WR)
+        receipt = client.stage_workspace(stage)
+        assert isinstance(receipt, WorkspaceStageReceipt)
+
+        collect_sequence = 4
+        pending_seen = False
+        deadline = time.monotonic() + 25
+        response = None
+        while time.monotonic() < deadline:
+            response = client.collect_workspace(
+                WorkspaceCollectRequest(
+                    uuid4(),
+                    collect_sequence,
+                    receipt.request_id,
+                    receipt.stage_sequence,
+                    receipt.attempt_id,
+                    receipt.unit_id,
+                    receipt.create_sequence,
+                    receipt.incarnation_id,
+                )
+            )
+            collect_sequence += 1
+            if isinstance(response, WorkspacePendingResponse):
+                pending_seen = True
+                time.sleep(0.05)
+                continue
+            break
+        assert pending_seen
+        assert isinstance(response, WorkspaceSuccessResponse)
+        assert response.result
+        assert source[:32] not in repr(response).encode()
+
+        failed_attempt = uuid4()
+        failed = client.request(CreateRequest(uuid4(), 20, failed_attempt))
+        assert isinstance(failed, CreateResponse)
+        units.append((failed_attempt, failed.unit_id))
+        failed_stage = WorkspaceStageRequest(
+            uuid4(),
+            21,
+            failed_attempt,
+            failed.unit_id,
+            20,
+            ".pdf",
+            CONTENT_LIMITS,
+            b"not a PDF",
+        )
+        failed_receipt = client.stage_workspace(failed_stage)
+        assert isinstance(failed_receipt, WorkspaceStageReceipt)
+        deadline = time.monotonic() + 25
+        failed_response = None
+        while time.monotonic() < deadline:
+            failed_response = client.collect_workspace(
+                WorkspaceCollectRequest(
+                    uuid4(),
+                    22,
+                    failed_receipt.request_id,
+                    failed_receipt.stage_sequence,
+                    failed_receipt.attempt_id,
+                    failed_receipt.unit_id,
+                    failed_receipt.create_sequence,
+                    failed_receipt.incarnation_id,
+                )
+            )
+            if isinstance(failed_response, WorkspacePendingResponse):
+                time.sleep(0.05)
+                continue
+            break
+        assert isinstance(failed_response, WorkspaceFailureResponse)
+
+        for index, (attempt_id, unit_id) in enumerate(units, start=30):
+            terminated = client.request(
+                TerminateRequest(uuid4(), index, attempt_id, unit_id)
+            )
+            assert isinstance(terminated, TerminateResponse)
+            acknowledged = client.request(
+                AcknowledgeRequest(
+                    uuid4(),
+                    index + 10,
+                    attempt_id,
+                    unit_id,
+                    terminated.proof.proof_id,
+                )
+            )
+            assert isinstance(acknowledged, AcknowledgeResponse)
+            _assert_unit_absent(unit_id)
+        _stop(process, signal.SIGTERM)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        for _, unit_id in units:
             _cleanup_unit(unit_id)
 
 

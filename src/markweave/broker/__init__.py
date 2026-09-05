@@ -28,6 +28,15 @@ from markweave.broker.unix_transport import (
     UnixBrokerServer,
     UnixTransportLimits,
 )
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
+    WorkspaceFailureResponse,
+    WorkspacePendingResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    WorkspaceSuccessResponse,
+)
 
 __all__ = [
     "AuthenticatedPrincipal",
@@ -51,6 +60,13 @@ __all__ = [
     "UnixBrokerClient",
     "UnixBrokerServer",
     "UnixTransportLimits",
+    "WorkspaceCollectRequest",
+    "WorkspaceErrorResponse",
+    "WorkspaceFailureResponse",
+    "WorkspacePendingResponse",
+    "WorkspaceStageReceipt",
+    "WorkspaceStageRequest",
+    "WorkspaceSuccessResponse",
     "is_next_unit_state",
     "policy_specification_evidence",
 ]

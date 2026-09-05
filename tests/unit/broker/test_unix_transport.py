@@ -19,6 +19,7 @@ from markweave.broker.models import (
     AuthenticatedPrincipal,
     EvidenceDigest,
     ManagedUnitState,
+    RuntimeChannelLimits,
     TerminationProof,
 )
 from markweave.broker.protocol import (
@@ -47,6 +48,22 @@ from markweave.broker.unix_transport import (
     _remaining,
     _send_all,
     _validate_response_binding,
+    _validate_workspace_response_binding,
+)
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
+    WorkspaceFailureResponse,
+    WorkspaceOperation,
+    WorkspacePendingResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
+    WorkspaceSuccessResponse,
+)
+from markweave.reversions.errors import ReverseErrorCategory
+from markweave.reversions.models import (
+    ReverseContentLimits,
+    ReverseOutputMode,
 )
 
 pytestmark = pytest.mark.unit
@@ -55,6 +72,7 @@ REQUEST_ID = UUID("00000000-0000-4000-8000-000000000001")
 ATTEMPT_ID = UUID("00000000-0000-4000-8000-000000000002")
 UNIT_ID = UUID("00000000-0000-4000-8000-000000000003")
 PROOF_ID = UUID("00000000-0000-4000-8000-000000000004")
+INCARNATION_ID = UUID("00000000-0000-4000-8000-000000000006")
 PRINCIPAL = AuthenticatedPrincipal(UUID("00000000-0000-4000-8000-000000000005"))
 DIGEST = EvidenceDigest("sha256:" + "a" * 64)
 PROOF = TerminationProof(
@@ -67,6 +85,26 @@ PROOF = TerminationProof(
     DIGEST,
     DIGEST,
 )
+CONTENT_LIMITS = ReverseContentLimits(
+    1000, 2000, 100, 10, 10, 100, 10, 5, 2, 100, 200, 500, 1000
+)
+CHANNEL_LIMITS = RuntimeChannelLimits(1000, 2000)
+
+
+def _workspace_stage() -> WorkspaceStageRequest:
+    return WorkspaceStageRequest(
+        REQUEST_ID, 7, ATTEMPT_ID, UNIT_ID, 3, ".docx", CONTENT_LIMITS, b"source"
+    )
+
+
+def _workspace_receipt(request_id: UUID = REQUEST_ID) -> WorkspaceStageReceipt:
+    return WorkspaceStageReceipt(request_id, 7, ATTEMPT_ID, UNIT_ID, 3, INCARNATION_ID)
+
+
+def _workspace_collect() -> WorkspaceCollectRequest:
+    return WorkspaceCollectRequest(
+        PROOF_ID, 8, REQUEST_ID, 7, ATTEMPT_ID, UNIT_ID, 3, INCARNATION_ID
+    )
 
 
 def _private_parent(tmp_path: Path) -> Path:
@@ -565,6 +603,88 @@ def test_response_binding_rejects_every_identity_mismatch(
     with pytest.raises(BrokerError) as captured:
         _validate_response_binding(broker_request, response, PRINCIPAL)
     assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+
+def test_workspace_response_binding_accepts_exact_response_variants() -> None:
+    stage = _workspace_stage()
+    receipt = _workspace_receipt()
+    collect = _workspace_collect()
+
+    _validate_workspace_response_binding(stage, receipt)
+    _validate_workspace_response_binding(
+        stage,
+        WorkspaceErrorResponse(
+            REQUEST_ID, WorkspaceOperation.STAGE, BrokerErrorCategory.RUNTIME_FAILURE
+        ),
+    )
+    for response in (
+        WorkspacePendingResponse(PROOF_ID, receipt),
+        WorkspaceFailureResponse(PROOF_ID, receipt, ReverseErrorCategory.MALFORMED),
+        WorkspaceSuccessResponse(
+            PROOF_ID, receipt, ReverseOutputMode.MARKDOWN, b"result"
+        ),
+    ):
+        _validate_workspace_response_binding(collect, response)
+
+
+@pytest.mark.parametrize(
+    ("workspace_request", "response"),
+    [
+        (_workspace_stage(), _workspace_receipt(PROOF_ID)),
+        (
+            _workspace_stage(),
+            WorkspaceErrorResponse(
+                REQUEST_ID,
+                WorkspaceOperation.COLLECT,
+                BrokerErrorCategory.RUNTIME_FAILURE,
+            ),
+        ),
+        (
+            _workspace_stage(),
+            WorkspacePendingResponse(REQUEST_ID, _workspace_receipt()),
+        ),
+        (
+            _workspace_collect(),
+            WorkspacePendingResponse(
+                PROOF_ID,
+                WorkspaceStageReceipt(
+                    REQUEST_ID, 8, ATTEMPT_ID, UNIT_ID, 3, INCARNATION_ID
+                ),
+            ),
+        ),
+    ],
+)
+def test_workspace_response_binding_rejects_substitution(
+    workspace_request, response
+) -> None:
+    with pytest.raises(BrokerError) as captured:
+        _validate_workspace_response_binding(workspace_request, response)
+    assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+
+def test_workspace_client_is_disabled_without_explicit_limits(tmp_path: Path) -> None:
+    parent = _private_parent(tmp_path)
+    client = UnixBrokerClient(
+        parent / "broker.sock",
+        expected_server_uid=os.geteuid(),
+        expected_principal=PRINCIPAL,
+        operation_timeout_seconds=1,
+    )
+
+    with pytest.raises(BrokerError) as captured:
+        client.stage_workspace(_workspace_stage())
+    assert captured.value.category is BrokerErrorCategory.PROTOCOL_ERROR
+
+    enabled = UnixBrokerClient(
+        parent / "other.sock",
+        expected_server_uid=os.geteuid(),
+        expected_principal=PRINCIPAL,
+        operation_timeout_seconds=1,
+        workspace_limits=CHANNEL_LIMITS,
+    )
+    with pytest.raises(BrokerError) as enabled_error:
+        enabled.stage_workspace(_workspace_stage())
+    assert enabled_error.value.category is BrokerErrorCategory.TRANSPORT_FAILURE
 
 
 def test_public_stop_signal_is_content_free_and_wakes_waiters(

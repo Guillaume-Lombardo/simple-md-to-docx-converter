@@ -518,6 +518,7 @@ def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
             principal=config.principal,
             dispatcher=BrokerDispatcher(service),
             limits=config.transport_limits,
+            workspace_limits=config.policy.channel_limits,
         )
         server._adopt_authority_lock(authority_lock)
         return server
