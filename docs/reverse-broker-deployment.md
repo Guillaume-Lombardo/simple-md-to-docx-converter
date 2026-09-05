@@ -41,11 +41,17 @@ image value.
 
 For mTLS, use a dedicated private CA and the exact client and broker SPIFFE URI identities. Configure
 one current client leaf-certificate SHA-256 pin, or the reviewed current and next pins during a
-bounded rotation. A secret store projection that produces root-owned or group-readable files does
-not satisfy the process contract. Copy each secret into a temporary file on the destination
-filesystem, set the broker EUID ownership and mode `0400` or `0600`, verify it is regular and
-single-link, then atomically rename it into the owner-only material directory. Do not use `fsGroup`
-or another group-readable relaxation.
+bounded rotation. Render `@REQUIRED_CLIENT_LEAF_CERTIFICATE_SHA256_JSON@` as a complete canonical
+JSON array containing exactly one or two distinct `sha256:<64 lowercase hexadecimal characters>`
+strings. Generate that array with a JSON serializer from already validated pin values; do not quote
+the placeholder, concatenate JSON fragments, or interpolate untrusted text into the template. The
+template contains no fallback pin.
+
+A secret store projection that produces root-owned or group-readable files does not satisfy the
+process contract. Copy each secret into a temporary file on the destination filesystem, set the
+broker EUID ownership and mode `0400` or `0600`, verify it is regular and single-link, then
+atomically rename it into the owner-only material directory. Do not use `fsGroup` or another
+group-readable relaxation.
 
 Configuration, labels, inventory, and service diagnostics contain only content-free identities and
 policy evidence. Never place document bytes, document names, content-derived hashes, registry

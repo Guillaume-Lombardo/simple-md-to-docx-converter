@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 
 from markweave.broker.mtls_transport import MtlsTransportLimits
-from markweave.broker.process import load_broker_process_config
+from markweave.broker.process import (
+    BrokerProcessConfigurationError,
+    load_broker_process_config,
+)
 from markweave.broker.unix_transport import UnixTransportLimits
 
 pytestmark = pytest.mark.unit
@@ -33,7 +36,9 @@ def _material(path: Path, value: bytes = b"material\n") -> Path:
     return path
 
 
-def _rendered_values(tmp_path: Path) -> dict[str, str]:
+def _rendered_values(
+    tmp_path: Path, *, client_pins: tuple[str, ...] = ("sha256:" + "b" * 64,)
+) -> dict[str, str]:
     state = _private_directory(tmp_path / "state")
     socket = _private_directory(tmp_path / "socket")
     hooks = _private_directory(tmp_path / "hooks")
@@ -54,7 +59,9 @@ def _rendered_values(tmp_path: Path) -> dict[str, str]:
         "@REQUIRED_BROKER_PRINCIPAL_UUID@": "22222222-2222-4222-8222-222222222222",
         "@REQUIRED_BROKER_SPIFFE_URI@": "spiffe://markweave.test/broker",
         "@REQUIRED_CANONICAL_IPV4_ADDRESS@": "127.0.0.1",
-        "@REQUIRED_CLIENT_LEAF_CERTIFICATE_SHA256@": "sha256:" + "b" * 64,
+        "@REQUIRED_CLIENT_LEAF_CERTIFICATE_SHA256_JSON@": json.dumps(
+            client_pins, separators=(",", ":")
+        ),
         "@REQUIRED_CLIENT_SPIFFE_URI@": "spiffe://markweave.test/worker",
         "@REQUIRED_CPU_PERIOD_MICROS@": "100000",
         "@REQUIRED_CPU_QUOTA_MICROS@": "50000",
@@ -82,9 +89,14 @@ def _rendered_values(tmp_path: Path) -> dict[str, str]:
     }
 
 
-def _render(template: Path, tmp_path: Path) -> Path:
+def _render(
+    template: Path,
+    tmp_path: Path,
+    *,
+    client_pins: tuple[str, ...] = ("sha256:" + "b" * 64,),
+) -> Path:
     rendered = template.read_text(encoding="ascii")
-    values = _rendered_values(tmp_path)
+    values = _rendered_values(tmp_path, client_pins=client_pins)
     assert set(TOKEN.findall(rendered)) <= set(values)
     for token, value in values.items():
         rendered = rendered.replace(token, value)
@@ -165,5 +177,52 @@ def test_configuration_templates_have_only_explicit_required_inputs() -> None:
     assert TOKEN.search(mtls)
     assert "socket_path" in unix and "mtls" not in unix
     assert '"transport_kind":"mtls"' in mtls and "socket_path" not in mtls
+    assert (
+        '"client_leaf_certificate_sha256":'
+        "@REQUIRED_CLIENT_LEAF_CERTIFICATE_SHA256_JSON@" in mtls
+    )
+    assert '"@REQUIRED_CLIENT_LEAF_CERTIFICATE_SHA256_JSON@"' not in mtls
+    assert '"client_leaf_certificate_sha256":[' not in mtls
+    assert "sha256:" not in mtls
     assert "document" not in unix.casefold()
     assert "document" not in mtls.casefold()
+
+
+@pytest.mark.parametrize(
+    "client_pins",
+    [
+        ("sha256:" + "b" * 64,),
+        ("sha256:" + "b" * 64, "sha256:" + "c" * 64),
+    ],
+)
+def test_mtls_template_renders_exactly_one_or_two_explicit_client_pins(
+    tmp_path: Path, client_pins: tuple[str, ...]
+) -> None:
+    config_path = _render(MTLS_TEMPLATE, tmp_path, client_pins=client_pins)
+    rendered = config_path.read_text(encoding="ascii")
+    value = json.loads(rendered)
+    config = load_broker_process_config(config_path)
+
+    assert value["mtls"]["client_leaf_certificate_sha256"] == list(client_pins)
+    assert config.mtls_client_identity is not None
+    assert config.mtls_client_identity.leaf_certificate_sha256 == client_pins
+    assert rendered == json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+@pytest.mark.parametrize(
+    "client_pins",
+    [
+        (),
+        (
+            "sha256:" + "b" * 64,
+            "sha256:" + "c" * 64,
+            "sha256:" + "d" * 64,
+        ),
+    ],
+)
+def test_mtls_template_rejects_pin_lists_outside_the_rotation_contract(
+    tmp_path: Path, client_pins: tuple[str, ...]
+) -> None:
+    config_path = _render(MTLS_TEMPLATE, tmp_path, client_pins=client_pins)
+    with pytest.raises(BrokerProcessConfigurationError):
+        load_broker_process_config(config_path)
