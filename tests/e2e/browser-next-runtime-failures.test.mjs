@@ -9,36 +9,43 @@ import { chromium } from "playwright-core";
 const baseURL = "http://localhost:3100";
 const admissionTimeoutMs = 25_000;
 
-function openDedicatedRequest(path) {
-  let request;
-  let admissionSettled = false;
-  let admissionTimer;
-  const admitted = new Promise((resolve, reject) => {
-    const finishAdmission = (callback, value) => {
-      if (admissionSettled) return;
-      admissionSettled = true;
-      clearTimeout(admissionTimer);
-      callback(value);
-    };
-    request = http.request(
-      `${baseURL}${path}`,
-      { agent: false },
-      (response) => {
-        response.resume();
-        finishAdmission(resolve, response.statusCode);
-      },
-    );
-    request.once("error", (error) => finishAdmission(reject, error));
-    admissionTimer = setTimeout(() => {
-      finishAdmission(
-        reject,
-        new Error(`Timed out waiting for frontend admission for ${path}`),
+function openDedicatedRequest(admissionId) {
+  let admissionError;
+  const request = http.request(
+    `${baseURL}/hold`,
+    { agent: false },
+    (response) => {
+      response.resume();
+      admissionError = new Error(
+        `Frontend hold request ${admissionId} returned before saturation`,
       );
-      request.destroy();
-    }, admissionTimeoutMs);
-    request.end();
+    },
+  );
+  request.once("error", () => {
+    admissionError = new Error(
+      `Frontend hold request ${admissionId} failed before saturation`,
+    );
   });
-  return { admitted, request };
+  request.end();
+  return {
+    get admissionError() {
+      return admissionError;
+    },
+    request,
+  };
+}
+
+async function waitForSaturation(requests) {
+  const deadline = Date.now() + admissionTimeoutMs;
+  while (Date.now() < deadline) {
+    const failed = requests.find(
+      ({ admissionError }) => admissionError !== undefined,
+    );
+    if (failed) throw failed.admissionError;
+    if (existsSync("/evidence/frontend-saturated")) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for frontend saturation");
 }
 
 async function waitFor(path) {
@@ -125,13 +132,14 @@ test("backend outage renders a bounded safe UI without mutation replay", async (
 
 test("production route exposes exact saturation and draining failures", async () => {
   if (process.env.MARKWEAVE_E2E_RUNTIME_FAILURE !== "admission") return;
-  // Each request owns a socket. The fixture writes an HTTP acknowledgement
-  // only after its production-server admission handler accepts the request,
-  // so this handshake cannot confuse a router TCP connection with admission.
-  const held = Array.from({ length: 128 }, () => openDedicatedRequest("/hold"));
+  // Each request owns a socket. Only the fixture's admission owner writes the
+  // saturation evidence after accepting all 128, so the test cannot confuse a
+  // router TCP connection or a proxy-generated response with admission.
+  const held = Array.from({ length: 128 }, (_, admissionId) =>
+    openDedicatedRequest(admissionId),
+  );
   try {
-    const statuses = await Promise.all(held.map(({ admitted }) => admitted));
-    assert.deepEqual(statuses, Array.from({ length: 128 }, () => 200));
+    await waitForSaturation(held);
     assert.equal(existsSync("/evidence/frontend-saturated"), true);
     const saturated = await fetch(`${baseURL}/overflow`);
     assert.equal(saturated.status, 503);

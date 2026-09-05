@@ -12,9 +12,6 @@ page = createPageServer((_request, response) => {
   held.push(response);
   if (page.admission.inFlight === 128)
     writeFileSync(`${evidence}/frontend-saturated`, "128\n", { mode: 0o600 });
-  response.writeHead(200);
-  response.flushHeaders();
-  response.write("admitted\n");
 });
 page.server.listen(3000, "0.0.0.0", () => {
   writeFileSync(`${evidence}/frontend-admission-ready`, "true\n", {

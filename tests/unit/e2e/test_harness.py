@@ -408,26 +408,29 @@ def test_admission_browser_waits_for_every_frontend_admission() -> None:
     fixture = ADMISSION_FIXTURE.read_text(encoding="utf-8")
 
     assert 'import http from "node:http";' in source
-    assert "request = http.request(" in source
-    assert "`${baseURL}${path}`" in source
+    assert "const request = http.request(" in source
+    assert "`${baseURL}/hold`" in source
     assert "{ agent: false }" in source
     assert "const admissionTimeoutMs = 25_000;" in source
-    assert "finishAdmission(resolve, response.statusCode);" in source
-    assert 'request.once("error", (error) => finishAdmission(reject, error));' in source
-    assert "if (admissionSettled) return;" in source
-    assert "clearTimeout(admissionTimer);" in source
-    assert "Timed out waiting for frontend admission for ${path}" in source
-    assert "request.destroy();" in source
-    assert source.index("admissionTimer = setTimeout") < source.index("request.end();")
-    assert "await Promise.all(held.map(({ admitted }) => admitted));" in source
+    assert "const deadline = Date.now() + admissionTimeoutMs;" in source
+    assert "while (Date.now() < deadline)" in source
+    assert "const failed = requests.find(" in source
+    assert "if (failed) throw failed.admissionError;" in source
+    assert 'existsSync("/evidence/frontend-saturated")' in source
+    assert "Timed out waiting for frontend saturation" in source
+    assert "Frontend hold request ${admissionId} returned before saturation" in source
+    assert "Frontend hold request ${admissionId} failed before saturation" in source
+    assert "await waitForSaturation(held);" in source
     assert "socket.once" not in source
-    assert "response.writeHead(200);" in fixture
-    assert "response.flushHeaders();" in fixture
-    assert 'response.write("admitted\\n");' in fixture
+    assert "if (page.admission.inFlight === 128)" in fixture
+    assert 'writeFileSync(`${evidence}/frontend-saturated`, "128\\n"' in fixture
+    assert "response.writeHead(200);" not in fixture
+    assert "response.flushHeaders();" not in fixture
+    assert 'response.write("admitted\\n");' not in fixture
     assert fixture.index("frontend-saturated") < fixture.index(
-        'response.write("admitted\\n");'
+        "frontend-admission-ready"
     )
-    assert source.index("await Promise.all(held.map") < source.index(
+    assert source.index("await waitForSaturation(held);") < source.index(
         'assert.equal(existsSync("/evidence/frontend-saturated"), true);'
     )
     assert "} finally {" in source
