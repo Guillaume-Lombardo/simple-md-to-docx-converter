@@ -537,6 +537,24 @@ for reverse conversion.
   projection must atomically copy and chown TLS material into EUID-owned `0400`/`0600` files below
   owner-only directories; group-readable `fsGroup` projection does not satisfy this contract.
 
+* 2026-09-05: Added the reviewed host-native rootless-Podman deployment surface for the broker.
+  The broker runs as a systemd user service with the exact installed executable and owner-only
+  configuration path, `Restart=on-failure`, configuration exit status `2` excluded from restart,
+  `KillMode=control-group`, the broker watchdog left authoritative through an infinite service stop
+  timeout, and no ambient credential, runtime socket, endpoint, capacity, or workload budget. The
+  explicit schema-v1 Unix and schema-v2 mTLS templates contain required deployment tokens instead
+  of product defaults; the mTLS template safely accepts a canonical JSON list of exactly one or two
+  validated client certificate pins for bounded rotation. Deployment guidance covers cgroup v2,
+  the systemd user manager and lingering, subordinate IDs, local rootless Podman authority, exact
+  image repository and digest, owner-only directories/files, atomic secret copying, authenticated
+  readiness, restart reconciliation, and fail-closed recovery. Five real systemd-user E2Es cover
+  Unix and mTLS workspace success/failure, `SIGKILL` restart with orphan sweep before readiness,
+  invalid configuration without restart or state, per-EUID authority exclusion, and clean stop.
+  After rebasing onto the mTLS process squash merge, all 817 broker tests and 154 deployment,
+  selector, documentation, and quality tests pass; Ruff, `ty`, CI configuration validation, uv-lock
+  validation, and diff checks pass. The public third-image release contract, T71 worker integration,
+  Compose/application wiring, Kubernetes, HTTP, and UI remain excluded.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria,
