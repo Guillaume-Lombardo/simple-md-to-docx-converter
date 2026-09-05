@@ -15,6 +15,7 @@ from pytest_mock import MockerFixture
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal
+from markweave.broker.process import BrokerProcess
 from markweave.broker.protocol import ReadyRequest, ReadyResponse, encode_request
 from markweave.broker.unix_transport import (
     UnixBrokerClient,
@@ -69,6 +70,60 @@ def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
     assert response == ReadyResponse(REQUEST_ID, True)
     dispatcher.dispatch.assert_called_once_with(PRINCIPAL, request)
     assert not path.exists()
+
+
+def test_shutdown_during_real_reconciliation_never_opens_admission(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker)
+    hard_exit = mocker.Mock()
+    process = BrokerProcess(
+        server, hard_shutdown_timeout_seconds=1, hard_exit=hard_exit
+    )
+
+    def request_shutdown_during_reconciliation() -> None:
+        process._handle_signal(15, None)
+        with (
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection,
+            pytest.raises(OSError),
+        ):
+            connection.connect(str(path))
+
+    dispatcher.start.side_effect = request_shutdown_during_reconciliation
+
+    assert process.run() == 0
+
+    assert server.stopping
+    assert not path.exists()
+    dispatcher.dispatch.assert_not_called()
+    hard_exit.assert_not_called()
+
+
+def test_shutdown_immediately_before_real_start_never_opens_admission(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker)
+    hard_exit = mocker.Mock()
+    process = BrokerProcess(
+        server, hard_shutdown_timeout_seconds=1, hard_exit=hard_exit
+    )
+    process._handle_signal(15, None)
+
+    def assert_bound_socket_is_not_listening() -> None:
+        with (
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection,
+            pytest.raises(OSError),
+        ):
+            connection.connect(str(path))
+
+    dispatcher.start.side_effect = assert_bound_socket_is_not_listening
+
+    assert process.run() == 0
+
+    assert server.stopping
+    assert not path.exists()
+    dispatcher.dispatch.assert_not_called()
+    hard_exit.assert_not_called()
 
 
 def test_server_authenticates_peer_before_read_or_dispatch(

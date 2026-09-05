@@ -48,8 +48,10 @@ def test_real_build_validation_clean_install_and_tamper_failure(
         assert "create_app" not in package_init
         assert '__all__ = ["__version__"]' in package_init
         entry_points = wheel.read("markweave-0.6.1.dist-info/entry_points.txt").decode()
-        assert (
-            entry_points == "[console_scripts]\nmarkweave = markweave.cli.main:main\n"
+        assert entry_points == (
+            "[console_scripts]\n"
+            "markweave = markweave.cli.main:main\n"
+            "markweave-broker = markweave.broker_process:main\n"
         )
         assert not any(name.startswith("md_converter/") for name in names)
         assert "md_converter.py" not in names

@@ -204,6 +204,24 @@ adapter.close()
 
 BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg", "anydoc")
 
+BROKER_CONSOLE_CHECK = """\
+import subprocess
+import sys
+
+completed = subprocess.run(
+    [sys.executable, "-I", sys.argv[1]],
+    check=False,
+    capture_output=True,
+    timeout=5,
+)
+if (
+    completed.returncode != 2
+    or completed.stdout != b""
+    or completed.stderr != b"broker configuration failed\\n"
+):
+    raise SystemExit("broker console contract failed")
+"""
+
 
 @dataclass(frozen=True)
 class InstallationProfile:
@@ -431,6 +449,7 @@ def verify_clean_install(
                         timeout=CONSOLE_TIMEOUT_SECONDS,
                     )
             console = environment / "bin" / "markweave"
+            broker_console = environment / "bin" / "markweave-broker"
             for arguments, label in (
                 (
                     (str(python), "-I", str(console), "--version"),
@@ -447,6 +466,12 @@ def verify_clean_install(
                     label=label,
                     timeout=CONSOLE_TIMEOUT_SECONDS,
                 )
+            run_command(
+                (str(python), "-I", "-c", BROKER_CONSOLE_CHECK, str(broker_console)),
+                cwd=root,
+                label=f"isolated {profile.name} broker console check",
+                timeout=CONSOLE_TIMEOUT_SECONDS,
+            )
     return CleanInstallResult(wheel_name=artifacts.wheel.name, sha256=wheel_digest)
 
 

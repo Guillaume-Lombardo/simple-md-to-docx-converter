@@ -420,6 +420,47 @@ for reverse conversion.
   converted into an explicit failed contract check. A real Python 3.14 base retaining the expected
   venv and module layout but with `anydoc` removed is rejected without producing an overlay image.
   The positive overlay build, complete smoke, and all eight real rootless Podman integrations pass.
+* 2026-09-05: Added the host-native lifecycle-only broker process assembly. A bounded canonical
+  owner-only configuration supplies every lifecycle, transport, Podman, inventory, and channel
+  limit; the authentication key is read from a pre-existing single-link owner file with
+  `O_NOFOLLOW` and `O_CLOEXEC`, while the SQLite database and sidecars are created under umask 077
+  and revalidated as owner-only regular files. The factory derives the rootless UID and cgroup root,
+  uses fixed absolute Podman and systemd commands with allowlisted environments, gives inventory and
+  discovery the same capacity, and completes startup reconciliation before exposing the Unix
+  listener. The transport now exposes a content-free stopping/fatal signal, and the process maps
+  signals and internal failures to bounded exit behavior with an independent hard shutdown
+  watchdog. The installed `markweave-broker` entry point retains a dependency-light failure boundary
+  for minimal wheel profiles. Real subprocess coverage exercises the complete lifecycle, lock
+  exclusion, SIGINT/SIGTERM, SIGKILL orphan reconciliation before readiness, malformed modes/config,
+  and exact container/cgroup cleanup. The full broker boundary passes 29 tests against rootless
+  Podman 5.4, the light selection passes 3,024 tests at 93.99% total and 90.13% branch coverage, and
+  the clean-wheel installation probe passes. The public protocol remains v1; STAGE/COLLECT wire
+  operations, T71 jobs/leases/publication, production budgets, mTLS, deployment manifests,
+  Kubernetes, OCR, and UI remain excluded.
+* 2026-09-05: Follow-up review corrected the hard shutdown proof boundary. An unsuccessful Unix
+  handler drain no longer marks process shutdown complete or disarms the independent watchdog; the
+  watchdog remains live through interpreter teardown and forces a bounded nonzero exit even when a
+  non-daemon handler would otherwise keep the process alive. A real subprocess regression proves
+  the hard deadline and content-free output. The 572-test broker selection, focused subprocess
+  regression, Ruff, and `ty` pass.
+* 2026-09-05: The final process review closed four additional authority and boundedness gaps. The
+  container-domain selector now includes the dependency-light top-level broker entry point. A stop
+  requested during startup reconciliation is preserved across socket setup, so the real Unix
+  listener never begins admission and no CREATE or ACK reaches dispatch, including when the stop
+  arrives immediately before `start()`. A single owner-only authority lock under the canonical
+  EUID-derived runtime root is acquired before SQLite is opened and retained until successful
+  handler drainage; two processes cannot share the per-UID Podman/label/cgroup authority even with
+  entirely distinct state and socket paths.
+  Configuration and key reads are nonblocking as well as no-follow, rejecting owner FIFOs without
+  hanging, and extreme canonical JSON numbers map to the same bounded configuration failure. The
+  574-test broker selection, targeted authority subprocess tests, Ruff, and `ty` pass.
+* 2026-09-05: PR review follow-up made non-finite exponent-form JSON numbers fail during parsing,
+  before canonical re-encoding, and made the missing-command unit case independent of the runner's
+  actual UID. Cold-runner subprocess allowances no longer compete with the deliberately short hard
+  watchdog assertion. The lifecycle-lock E2E now starts a second low-level Unix server against the
+  same socket, so it exercises the socket lock independently of the separate per-EUID process
+  authority lock while proving the first broker remains live. All 12 real process E2Es, 51 focused
+  process/configuration tests, 73 Unix transport tests, Ruff, and `ty` pass.
 
 ## Synchronization
 

@@ -17,6 +17,7 @@ from scripts.release.verify_install import (
     BASE_FORBIDDEN_MODULES,
     BASE_ISOLATION_CHECK,
     BASE_RECOVERY_CHECK,
+    BROKER_CONSOLE_CHECK,
     CONSOLE_TIMEOUT_SECONDS,
     DISTRIBUTED_RECOVERY_CHECK,
     ENVIRONMENT_TIMEOUT_SECONDS,
@@ -191,6 +192,7 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
                 ),
                 f"isolated {profile.name} console version check",
                 f"isolated {profile.name} console help check",
+                f"isolated {profile.name} broker console check",
             ]
         )
     assert events == expected_events
@@ -259,13 +261,19 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
+    broker_console = environment / "bin" / "markweave-broker"
+    assert calls[7] == (
+        (str(python), "-I", "-c", BROKER_CONSOLE_CHECK, str(broker_console)),
+        root,
+        CONSOLE_TIMEOUT_SECONDS,
+    )
     standalone_python = root / "venv-standalone" / "bin" / "python"
-    assert calls[17] == (
+    assert calls[19] == (
         (str(standalone_python), "-I", "-c", STANDALONE_RECOVERY_CHECK),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
-    distributed_install = calls[21]
+    distributed_install = calls[24]
     assert distributed_install[0][-1] == f"{private_wheel}[distributed]"
     assert distributed_install[2] == INSTALL_TIMEOUT_SECONDS
     assert all(cwd == root for _, cwd, _ in calls)
