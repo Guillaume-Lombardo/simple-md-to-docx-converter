@@ -117,9 +117,12 @@ def test_workspace_overlay_fails_closed_on_incompatible_base_image() -> None:
         'pathlib.Path("/opt/markweave/venv").resolve()',
         'pathlib.Path("/opt/markweave/venv/lib/python3.14/site-packages")',
         "str(destination) in sys.path",
-        'find_spec("markweave.reversions.attempt_main")',
-        "specification.origin is not None",
-        'pathlib.Path(specification.origin).resolve().parent == destination / "markweave/reversions"',
+        'importlib.import_module(\\"markweave.reversions.attempt_main\\")',
+        "except BaseException:",
+        "return None",
+        'getattr(attempt_main, "__file__", None)',
+        "origin is not None",
+        'pathlib.Path(origin).resolve().parent == destination / "markweave/reversions"',
         "raise SystemExit(0 if valid else 1)",
     ):
         assert contract in fixture

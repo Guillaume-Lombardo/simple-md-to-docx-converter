@@ -414,6 +414,12 @@ for reverse conversion.
   base with `PYTHONOPTIMIZE=1`, a Python 3.9 interpreter at the expected executable path, and a decoy
   module is rejected without producing an image. The controlled overlay build, complete smoke, and
   all seven real rootless integrations pass.
+* 2026-09-05: Follow-up review corrected the base-image preflight to execute the installed attempt
+  runner rather than only resolve its module specification. The import is isolated from inherited
+  Python environment settings, and every import exception including a zero-status `SystemExit` is
+  converted into an explicit failed contract check. A real Python 3.14 base retaining the expected
+  venv and module layout but with `anydoc` removed is rejected without producing an overlay image.
+  The positive overlay build, complete smoke, and all eight real rootless Podman integrations pass.
 
 ## Synchronization
 
