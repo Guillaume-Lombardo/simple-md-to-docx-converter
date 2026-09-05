@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
 import os
@@ -42,6 +43,7 @@ _INVENTORY_MODE = 0o600
 _PODMAN = Path("/usr/bin/podman")
 _SYSTEMCTL = Path("/usr/bin/systemctl")
 _INVENTORY_NAME = "inventory.sqlite3"
+_AUTHORITY_LOCK_NAME = "broker-authority.lock"
 _SCHEMA_VERSION = 1
 _DISTINCT_RUNTIME_DIRECTORIES = 3
 _AUTHENTICATION_KEY_BYTES = 32
@@ -88,7 +90,7 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _secure_file_bytes(path: Path, *, maximum: int) -> bytes:
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
         try:
@@ -159,9 +161,15 @@ def _positive_integer(value: Any) -> int:
 
 
 def _positive_number(value: Any) -> float:
-    if type(value) not in {int, float} or value <= 0 or not math.isfinite(value):
+    if type(value) not in {int, float}:
         _configuration_failure()
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        _configuration_failure()
+    if number <= 0 or not math.isfinite(number):
+        _configuration_failure()
+    return number
 
 
 def _absolute_path(value: Any) -> Path:
@@ -383,6 +391,43 @@ def _inventory_files(path: Path) -> None:
         _inventory_leaf(candidate)
 
 
+def _acquire_authority_lock(state_directory: Path) -> int:
+    path = state_directory / _AUTHORITY_LOCK_NAME
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            _INVENTORY_MODE,
+        )
+        opened = os.fstat(descriptor)
+        named = path.lstat()
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != _INVENTORY_MODE
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            _configuration_failure()
+    except BrokerProcessConfigurationError:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise BrokerProcessConfigurationError(
+            "Broker process configuration is invalid"
+        ) from error
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        os.close(descriptor)
+        raise RuntimeError("Broker authority lock is unavailable") from error
+    return descriptor
+
+
 def _runtime_environment() -> tuple[dict[str, str], dict[str, str]]:
     uid = os.geteuid()
     home = pwd.getpwuid(uid).pw_dir
@@ -409,44 +454,51 @@ def build_broker_server(config: BrokerProcessConfig) -> UnixBrokerServer:
     inventory_path = config.state_directory / _INVENTORY_NAME
     _inventory_files(inventory_path)
     os.umask(0o077)
+    authority_lock = _acquire_authority_lock(config.state_directory)
     authentication_key = config.authentication_key
-    if type(authentication_key) is not bytes:
-        _configuration_failure()
-    inventory = SQLiteBrokerInventory(
-        inventory_path, authentication_key, max_records=config.max_units
-    )
-    _inventory_files(inventory_path)
-    podman_environment, systemd_environment = _runtime_environment()
-    runtime = PodmanIsolationRuntime(
-        image_repository=config.image_repository,
-        run_as_uid=os.geteuid(),
-        command=BoundedCommandRunner(
-            _PODMAN, config.podman_limits, environment=podman_environment
-        ),
-        cgroup_root=Path(
-            f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
-            f"user@{os.geteuid()}.service"
-        ),
-        hooks_directory=config.hooks_directory,
-        cgroup_remove=SystemdCgroupRemover(
-            BoundedCommandRunner(
-                _SYSTEMCTL, config.podman_limits, environment=systemd_environment
-            )
-        ),
-    )
-    service = IsolationBrokerService(
-        inventory,
-        runtime,
-        config.policy,
-        max_discovered_units=config.max_units,
-    )
-    return UnixBrokerServer(
-        config.socket_path,
-        expected_client_uid=os.geteuid(),
-        principal=config.principal,
-        dispatcher=BrokerDispatcher(service),
-        limits=config.transport_limits,
-    )
+    try:
+        if type(authentication_key) is not bytes:
+            _configuration_failure()
+        inventory = SQLiteBrokerInventory(
+            inventory_path, authentication_key, max_records=config.max_units
+        )
+        _inventory_files(inventory_path)
+        podman_environment, systemd_environment = _runtime_environment()
+        runtime = PodmanIsolationRuntime(
+            image_repository=config.image_repository,
+            run_as_uid=os.geteuid(),
+            command=BoundedCommandRunner(
+                _PODMAN, config.podman_limits, environment=podman_environment
+            ),
+            cgroup_root=Path(
+                f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
+                f"user@{os.geteuid()}.service"
+            ),
+            hooks_directory=config.hooks_directory,
+            cgroup_remove=SystemdCgroupRemover(
+                BoundedCommandRunner(
+                    _SYSTEMCTL, config.podman_limits, environment=systemd_environment
+                )
+            ),
+        )
+        service = IsolationBrokerService(
+            inventory,
+            runtime,
+            config.policy,
+            max_discovered_units=config.max_units,
+        )
+        server = UnixBrokerServer(
+            config.socket_path,
+            expected_client_uid=os.geteuid(),
+            principal=config.principal,
+            dispatcher=BrokerDispatcher(service),
+            limits=config.transport_limits,
+        )
+        server._adopt_authority_lock(authority_lock)
+        return server
+    except BaseException:
+        os.close(authority_lock)
+        raise
 
 
 class BrokerProcess:

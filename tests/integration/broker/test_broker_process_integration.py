@@ -365,6 +365,76 @@ def test_second_process_is_refused_by_lifecycle_lock(
         _stop(first, signal.SIGTERM)
 
 
+def test_state_authority_lock_excludes_distinct_socket_process_without_mutation(
+    tmp_path: Path, process_image: tuple[str, str]
+) -> None:
+    config, socket_path = _write_configuration(tmp_path, *process_image)
+    second_config_directory = _private_directory(tmp_path / "second-config")
+    second_socket_directory = _private_directory(tmp_path / "second-socket")
+    second_socket = second_socket_directory / "broker.sock"
+    second_value = json.loads(config.read_text(encoding="ascii"))
+    second_value["socket_path"] = str(second_socket)
+    second_config = second_config_directory / "broker.json"
+    second_config.write_text(
+        json.dumps(second_value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    second_config.chmod(0o600)
+    first = _start(config, socket_path)
+    state_directory = Path(second_value["state_directory"])
+    before = {
+        path.name: (path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns)
+        for path in state_directory.iterdir()
+    }
+
+    second = subprocess.run(
+        (sys.executable, "-m", "markweave.broker.process", str(second_config)),
+        check=False,
+        capture_output=True,
+        timeout=5,
+    )
+    after = {
+        path.name: (path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns)
+        for path in state_directory.iterdir()
+    }
+    try:
+        assert second.returncode == 1
+        assert second.stdout == b""
+        assert second.stderr == b"broker runtime failed\n"
+        assert not second_socket.exists()
+        assert after == before
+        ready = _client(socket_path).request(ReadyRequest(uuid4(), 7))
+        assert isinstance(ready, ReadyResponse) and ready.ready
+    finally:
+        _stop(first, signal.SIGTERM)
+
+
+@pytest.mark.parametrize("fifo", ["config", "key"])
+def test_fifo_configuration_inputs_are_rejected_without_blocking(
+    tmp_path: Path, fifo: str
+) -> None:
+    config, _ = _write_configuration(
+        tmp_path,
+        "localhost/markweave-attempt",
+        "sha256:" + "a" * 64,
+    )
+    value = json.loads(config.read_text(encoding="ascii"))
+    target = config if fifo == "config" else Path(value["inventory_key_path"])
+    target.unlink()
+    os.mkfifo(target, mode=0o600)
+
+    completed = subprocess.run(
+        (sys.executable, "-m", "markweave.broker.process", str(config)),
+        check=False,
+        capture_output=True,
+        timeout=1,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == b""
+    assert completed.stderr == b"broker configuration failed\n"
+
+
 def test_sigkill_live_orphan_is_reconciled_before_restarted_listener(
     tmp_path: Path, process_image: tuple[str, str]
 ) -> None:

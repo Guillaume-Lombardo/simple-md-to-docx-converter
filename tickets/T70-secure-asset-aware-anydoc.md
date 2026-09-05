@@ -443,6 +443,15 @@ for reverse conversion.
   non-daemon handler would otherwise keep the process alive. A real subprocess regression proves
   the hard deadline and content-free output. The 572-test broker selection, focused subprocess
   regression, Ruff, and `ty` pass.
+* 2026-09-05: The final process review closed four additional authority and boundedness gaps. The
+  container-domain selector now includes the dependency-light top-level broker entry point. A stop
+  requested during startup reconciliation is preserved across socket setup, so the real Unix
+  listener never begins admission and no CREATE or ACK reaches dispatch. A separate owner-only
+  state-authority lock is acquired before SQLite is opened and retained until successful handler
+  drainage; two processes cannot reconcile or mutate one inventory through distinct socket paths.
+  Configuration and key reads are nonblocking as well as no-follow, rejecting owner FIFOs without
+  hanging, and extreme canonical JSON numbers map to the same bounded configuration failure. The
+  574-test broker selection, targeted authority subprocess tests, Ruff, and `ty` pass.
 
 ## Synchronization
 

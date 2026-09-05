@@ -212,6 +212,7 @@ class UnixBrokerServer:
         self._listener: socket.socket | None = None
         self._socket_identity: tuple[int, int] | None = None
         self._lock_fd: int | None = None
+        self._authority_lock_fd: int | None = None
         self._stopping = Event()
         self._handlers = BoundedSemaphore(limits.max_handlers)
         self._dispatch_gate = Lock()
@@ -253,11 +254,21 @@ class UnixBrokerServer:
         if listener is not None:
             listener.close()
 
+    def _adopt_authority_lock(self, descriptor: int) -> None:
+        if (
+            type(descriptor) is not int
+            or descriptor < 0
+            or self._authority_lock_fd is not None
+        ):
+            raise ValueError("Broker authority lock is invalid")
+        self._authority_lock_fd = descriptor
+
     def start(self) -> None:
         """Bind the owner-only socket and start bounded connection handling."""
 
         if self._listener is not None:
             raise RuntimeError("Broker Unix server is already running")
+        self._stopping.clear()
         self._acquire_lifecycle_lock()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         identity: tuple[int, int] | None = None
@@ -266,17 +277,28 @@ class UnixBrokerServer:
             listener.bind(str(self._path))
             os.chmod(self._path, _SOCKET_MODE)
             identity = self._socket_stat()
+            self._listener = listener
+            self._socket_identity = identity
             self._dispatcher.start()
-            listener.listen(self._limits.listen_backlog)
-            listener.settimeout(min(self._limits.operation_timeout_seconds, 0.25))
+            if not self._stopping.is_set():
+                try:
+                    listener.listen(self._limits.listen_backlog)
+                    listener.settimeout(
+                        min(self._limits.operation_timeout_seconds, 0.25)
+                    )
+                except OSError:
+                    if not self._stopping.is_set():
+                        raise
         except BaseException:
             listener.close()
             self._remove_path_if_identity(identity)
+            self._listener = None
+            self._socket_identity = None
             self._release_lifecycle_lock()
+            self._release_authority_lock()
             raise
-        self._stopping.clear()
-        self._listener = listener
-        self._socket_identity = identity
+        if self._stopping.is_set():
+            return
         thread = Thread(target=self._accept_loop, name="broker-unix-accept")
         self._accept_thread = thread
         try:
@@ -288,6 +310,7 @@ class UnixBrokerServer:
             self._accept_thread = None
             self._socket_identity = None
             self._release_lifecycle_lock()
+            self._release_authority_lock()
             raise
 
     def stop(self) -> None:
@@ -295,6 +318,7 @@ class UnixBrokerServer:
 
         listener = self._listener
         if listener is None:
+            self._release_authority_lock()
             return
         self._stopping.set()
         listener.close()
@@ -328,11 +352,22 @@ class UnixBrokerServer:
         self._accept_thread = None
         self._socket_identity = None
         self._release_lifecycle_lock()
+        self._release_authority_lock()
         with self._threads_lock:
             fatal_error = self._fatal_error
             self._fatal_error = None
         if fatal_error is not None:
             raise RuntimeError("Broker Unix server failed") from fatal_error
+
+    def _release_authority_lock(self) -> None:
+        descriptor = self._authority_lock_fd
+        if descriptor is None:
+            return
+        self._authority_lock_fd = None
+        with suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        with suppress(OSError):
+            os.close(descriptor)
 
     def __enter__(self) -> UnixBrokerServer:
         self.start()

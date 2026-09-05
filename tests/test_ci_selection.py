@@ -124,6 +124,7 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
         "src/markweave/conversion/errors.py",
         "src/markweave/conversion/images.py",
         "src/markweave/broker/podman_runtime.py",
+        "src/markweave/broker_process.py",
         "src/markweave/broker/service.py",
         "src/markweave/broker/inventory.py",
         "src/markweave/broker/models.py",

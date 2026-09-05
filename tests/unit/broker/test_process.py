@@ -106,6 +106,7 @@ def test_loads_complete_canonical_owner_only_configuration(tmp_path: Path) -> No
         ),
         lambda value: value.update({"socket_path": None}),
         lambda value: value.update({"hard_shutdown_timeout_seconds": 0}),
+        lambda value: value.update({"hard_shutdown_timeout_seconds": 10**400}),
         lambda value: value.update({"hard_shutdown_timeout_seconds": 2}),
         lambda value: value.update({"image_repository": "INVALID"}),
         lambda value: value.update({"principal_id": None}),
@@ -242,6 +243,7 @@ def test_factory_uses_derived_identity_capacity_and_hermetic_commands(
     service = mocker.patch("markweave.broker.process.IsolationBrokerService")
     dispatcher = mocker.patch("markweave.broker.process.BrokerDispatcher")
     server = mocker.patch("markweave.broker.process.UnixBrokerServer")
+    server.return_value._adopt_authority_lock.side_effect = os.close
     runner = mocker.patch("markweave.broker.process.BoundedCommandRunner")
     try:
         built = build_broker_server(config)
