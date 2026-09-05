@@ -39,6 +39,58 @@ def test_final_frontend_binds_and_probes_loopback_independently_of_runtime_hostn
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("network_address", "inspected_address", "expected_code", "expected_origin"),
+    [
+        ("10.89.2.17/24", "10.89.2.17", 0, "http://10.89.2.17:3000\n"),
+        ("10.89.2.17/24", "10.89.2.18", 1, ""),
+        ("10.89.2.999/24", "10.89.2.999", 1, ""),
+    ],
+)
+def test_admission_frontend_origin_requires_matching_podman_inventory(
+    network_address: str,
+    inspected_address: str,
+    expected_code: int,
+    expected_origin: str,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    helper_body = runner.split("admission_frontend_origin() {", 1)[1].split(
+        "\nrestart_backend_and_router() {", 1
+    )[0]
+    helper = f"admission_frontend_origin() {{{helper_body}"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'network_name="e2e-network"\n'
+            'frontend_name="e2e-frontend"\n'
+            "podman() {\n"
+            '  if [[ "$1" == network ]]; then\n'
+            "    printf '%s\\n' \"$NETWORK_ADDRESS\"\n"
+            "  else\n"
+            "    printf '%s\\n' \"$INSPECTED_ADDRESS\"\n"
+            "  fi\n"
+            "}\n"
+            f"{helper}\n"
+            "admission_frontend_origin",
+            "bash",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "NETWORK_ADDRESS": network_address,
+            "INSPECTED_ADDRESS": inspected_address,
+        },
+    )
+
+    assert result.returncode == expected_code
+    assert result.stdout == expected_origin
+
+
+@pytest.mark.unit
 def test_admin_browser_disambiguates_concurrent_account_fields() -> None:
     source = ADMIN_BROWSER.read_text(encoding="utf-8")
 
@@ -370,17 +422,13 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     )
     admission_router = runner.index(
         'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
-        "  http://frontend:3000 401 false"
+        '  "$admission_origin" 401 false'
     )
     assert fixture_started < fixture_ready < admission_router
     assert 'echo "Timed out waiting for the admission frontend." >&2' in runner
     assert (
         'e2e_podman logs "$frontend_name" >&2 || true'
         in runner[fixture_ready:admission_router]
-    )
-    assert (
-        'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
-        "  http://frontend:3000 401 false" in runner
     )
     admission_started = runner.index("admission_test_pid=$!")
     admission_finished = runner.index('wait "$admission_test_pid"')
@@ -390,6 +438,32 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert 'podman logs "$router_name" >&2 || true' in runner
     assert 'podman logs "$frontend_name" >&2 || true' in runner
     assert 'podman restart --time 15 "$application_name"' not in runner[first_router:]
+
+
+@pytest.mark.unit
+def test_admission_phase_uses_only_the_revalidated_numeric_frontend_origin() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    fixture_ready = runner.index(
+        '[[ -f "$evidence_directory/frontend-admission-ready" ]] && break'
+    )
+    origin = runner.index('admission_origin="$(admission_frontend_origin)"')
+    router = runner.index(
+        'start_production_router "$application_name" http://127.0.0.1:8080 \\\n'
+        '  "$admission_origin" 401 false'
+    )
+    helper = runner.split("admission_frontend_origin() {", 1)[1].split(
+        "\nrestart_backend_and_router() {", 1
+    )[0]
+
+    assert fixture_ready < origin < router
+    assert 'podman network inspect "$network_name"' in helper
+    assert '.Name \\"$frontend_name\\"' in helper
+    assert "{{range .Interfaces}}{{range .Subnets}}{{.IPNet}}" in helper
+    assert 'podman inspect "$frontend_name"' in helper
+    assert 'frontend_address" != "$inspected_address' in helper
+    assert "10#$octet > 255" in helper
+    assert "printf 'http://%s:3000\\n'" in helper
+    assert runner.count("http://frontend:3000 401 false") == 0
 
 
 @pytest.mark.unit
@@ -418,11 +492,18 @@ def test_admission_browser_waits_for_every_frontend_admission() -> None:
     assert "if (failed) throw failed.admissionError;" in source
     assert 'existsSync("/evidence/frontend-saturated")' in source
     assert "Timed out waiting for frontend saturation" in source
-    assert "Frontend hold request ${admissionId} returned before saturation" in source
+    assert (
+        "Frontend hold request ${admissionId} returned HTTP "
+        "${response.statusCode} before saturation"
+    ) in source
     assert "Frontend hold request ${admissionId} failed before saturation" in source
     assert "await waitForSaturation(held);" in source
     assert "socket.once" not in source
     assert "if (page.admission.inFlight === 128)" in fixture
+    assert "if (page.admission.inFlight > admissionHighWater)" in fixture
+    assert "admissionHighWater = page.admission.inFlight;" in fixture
+    assert "frontend-admission-high-water" in fixture
+    assert 'frontend-admission-high-water`, "0\\n"' in fixture
     assert 'writeFileSync(`${evidence}/frontend-saturated`, "128\\n"' in fixture
     assert "response.writeHead(200);" not in fixture
     assert "response.flushHeaders();" not in fixture
@@ -436,6 +517,68 @@ def test_admission_browser_waits_for_every_frontend_admission() -> None:
     assert "} finally {" in source
     assert "held.forEach(({ request }) => request.destroy());" in source
     assert "new AbortController()" not in source
+
+
+@pytest.mark.unit
+def test_failure_artifacts_retain_bounded_frontend_admission_evidence(
+    tmp_path: Path,
+) -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    collector = runner.split("collect_failure_artifacts() {", 1)[1].split(
+        "\ncleanup() {", 1
+    )[0]
+    retention_body = runner.split("retain_frontend_admission_evidence() {", 1)[1].split(
+        "\ncollect_failure_artifacts() {", 1
+    )[0]
+    retention = f"retain_frontend_admission_evidence() {{{retention_body}"
+
+    assert "retain_frontend_admission_evidence" in collector
+    assert collector.index("cp -a --") < collector.index(
+        "retain_frontend_admission_evidence"
+    )
+    assert "frontend-admission-ready" in retention
+    assert "frontend-admission-high-water" in retention
+    assert "frontend-saturated" in retention
+    assert 'head -c 16 -- "$evidence_directory/$evidence_name"' in retention
+    assert '[[ "$evidence_value" =~ ^[0-9]{1,3}$ ]]' in retention
+    assert "10#$evidence_value >= 1" not in retention
+    assert "10#$evidence_value <= 128" in retention
+    assert '[[ "$evidence_value" == 128 ]]' in retention
+    assert "printf '%s\\n' \"$evidence_value\"" in retention
+
+    evidence = tmp_path / "evidence"
+    artifacts = tmp_path / "artifacts"
+    evidence.mkdir()
+    artifacts.mkdir()
+    (evidence / "frontend-admission-ready").write_text("true\n", encoding="utf-8")
+    (evidence / "frontend-admission-high-water").write_text("127\n", encoding="utf-8")
+    (evidence / "frontend-saturated").write_text("129\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail\n"
+            'evidence_directory="$1"\n'
+            'artifact_directory="$2"\n'
+            f"{retention}\n"
+            "retain_frontend_admission_evidence",
+            "bash",
+            str(evidence),
+            str(artifacts),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (artifacts / "frontend-admission-ready").read_text(encoding="utf-8") == (
+        "true\n"
+    )
+    assert (artifacts / "frontend-admission-high-water").read_text(
+        encoding="utf-8"
+    ) == "127\n"
+    assert not (artifacts / "frontend-saturated").exists()
 
 
 @pytest.mark.parametrize(
