@@ -74,6 +74,7 @@ _IMAGE_REPOSITORY_PATTERN = re.compile(
     r"/[a-z0-9][a-z0-9._/-]*\Z"
 )
 _CONTAINER_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+_CONTAINER_ID_LENGTH: Final = 64
 _TIMESTAMP_PATTERN = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+(?:Z|[+-][0-9:]+)?\Z"
 )
@@ -395,24 +396,14 @@ class PodmanIsolationRuntime:
             accepted_exit_codes=frozenset({0, 125}),
         )
         created_id: str | None = None
-        inspected_id: str | None = None
-        runtime_unit: PodmanRuntimeUnit | None = None
         try:
-            with suppress(UnicodeDecodeError):
-                created_id = output.strip().decode("ascii", errors="strict")
+            created_id = _create_response_identity(output)
             inspected = self._inspect(name)
-            raw_inspected_id = inspected.get("Id")
-            if (
-                type(raw_inspected_id) is str
-                and _CONTAINER_ID_PATTERN.fullmatch(raw_inspected_id) is not None
-            ):
-                inspected_id = raw_inspected_id
             runtime_unit = self._verified_unit(inspected, expected=unit, policy=policy)
             if (
-                created_id is None
-                or (create_code == 0 and created_id != runtime_unit.container_id)
-                or (create_code != 0 and created_id)
-            ):
+                create_code == 0
+                and (created_id is None or created_id != runtime_unit.container_id)
+            ) or (create_code != 0 and output != b""):
                 raise PodmanRuntimeError("Podman create identity is invalid")
             state = _mapping(inspected, "State")
             status = _string(state, "Status")
@@ -430,36 +421,55 @@ class PodmanIsolationRuntime:
             if status not in {"running", "exited", "stopped"}:
                 raise PodmanRuntimeError("Podman container state is invalid")
             return runtime_unit
-        except Exception as create_error:
+        except BaseException as create_error:
             if create_code == 0:
-                cleanup_identity = (
-                    runtime_unit.container_id
-                    if runtime_unit is not None
-                    else inspected_id or created_id
-                )
                 if (
-                    cleanup_identity is None
-                    or _CONTAINER_ID_PATTERN.fullmatch(cleanup_identity) is None
+                    created_id is None
+                    or _CONTAINER_ID_PATTERN.fullmatch(created_id) is None
                 ):
                     raise PodmanRuntimeError(
                         "Podman failed creation cleanup is unconfirmed"
                     ) from create_error
-                self._cleanup_failed_create(unit.unit_id, cleanup_identity)
+                self._cleanup_failed_create(unit.unit_id, created_id)
             raise
 
     def _cleanup_failed_create(self, unit_id: UUID, container_id: str) -> None:
-        failed = False
-        try:
+        with suppress(BaseException):
             self._call(
                 ("rm", "--force", container_id),
                 max_output_bytes=1024,
                 accepted_exit_codes=frozenset({0, 1}),
             )
-        except PodmanRuntimeError:
-            failed = True
+        failed = False
+        absent = False
         try:
-            self._cgroup_remove(self._cgroup_path(unit_id))
-        except OSError, PodmanRuntimeError:
+            exists_code, _ = self._call(
+                ("container", "exists", container_id),
+                max_output_bytes=0,
+                accepted_exit_codes=frozenset({0, 1}),
+            )
+            _, discovery_output = self._call(
+                (
+                    "ps",
+                    "--all",
+                    "--no-trunc",
+                    "--filter",
+                    f"label={_UNIT_LABEL}={unit_id}",
+                    "--format",
+                    "json",
+                ),
+                max_output_bytes=_INSPECT_MAX_BYTES,
+            )
+            discovered = _json(discovery_output)
+            absent = exists_code == 1 and type(discovered) is list and not discovered
+        except BaseException:
+            failed = True
+        if absent:
+            try:
+                self._cgroup_remove(self._cgroup_path(unit_id))
+            except BaseException:
+                failed = True
+        else:
             failed = True
         if failed:
             raise PodmanRuntimeError("Podman failed creation cleanup is unconfirmed")
@@ -1255,6 +1265,25 @@ def _mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     if not isinstance(nested, Mapping):
         raise PodmanRuntimeError("Podman evidence field is invalid")
     return nested
+
+
+def _create_response_identity(output: bytes) -> str | None:
+    """Return only a canonical ID emitted by a successful local create."""
+
+    raw = (
+        output[:-1]
+        if len(output) == _CONTAINER_ID_LENGTH + 1 and output.endswith(b"\n")
+        else output
+    )
+    if len(raw) != _CONTAINER_ID_LENGTH:
+        return None
+    try:
+        identity = raw.decode("ascii", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if _CONTAINER_ID_PATTERN.fullmatch(identity) is None:
+        return None
+    return identity
 
 
 def _string(value: Mapping[str, Any], key: str) -> str:

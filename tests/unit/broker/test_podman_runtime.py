@@ -95,6 +95,8 @@ class PodmanDouble:
         self.removed_paths: set[str] = set()
         self.create_code = 0
         self.create_output = CONTAINER_ID.encode()
+        self.rm_code = 0
+        self.rm_removes = True
         self.cgroup_removals: list[Path] = []
 
     def remove_cgroup(self, path: Path) -> None:
@@ -147,8 +149,9 @@ class PodmanDouble:
         if argv[:2] == ("container", "exists"):
             return (0 if self.exists else 1), b""
         if argv[0] == "rm":
-            self.exists = False
-            return 0, (self.container_id + "\n").encode()
+            if self.rm_removes:
+                self.exists = False
+            return self.rm_code, (self.container_id + "\n").encode()
         if argv[0] == "ps":
             summaries = [{"Names": [NAME]}] if self.exists else []
             return 0, json.dumps(summaries).encode()
@@ -352,8 +355,67 @@ def test_successful_create_requires_exact_returned_container_identity(
     command = PodmanDouble()
     command.create_output = b""
 
-    with pytest.raises(PodmanRuntimeError, match="identity"):
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
         created_runtime(command, unit, policy)
+    assert command.exists is True
+    assert not any(call[0][0] == "rm" for call in command.calls)
+    assert command.cgroup_removals == []
+
+
+@pytest.mark.unit
+def test_failed_create_cleanup_uses_only_the_authoritative_returned_identity(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    returned_id = "6" * 64
+    command.create_output = returned_id.encode()
+    cleanup_calls: list[tuple[str, ...]] = []
+    original = command.__call__
+
+    def divergent_boundary(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        argv = tuple(arguments)[3:]
+        if argv[0] == "rm":
+            cleanup_calls.append(argv)
+            return 0, (returned_id + "\n").encode()
+        if argv[:2] == ("container", "exists") and argv[2] == returned_id:
+            cleanup_calls.append(argv)
+            return 1, b""
+        return original(
+            arguments,
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    removed_cgroups: list[Path] = []
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=divergent_boundary,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=removed_cgroups.append,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+        cgroup_read=lambda path: b"populated 1\nfrozen 0\n",
+        process_cgroup_read=lambda pid: f"0::{CGROUP_RUNTIME_PATH}\n".encode(),
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
+        backend.create(unit, policy)
+
+    assert cleanup_calls == [
+        ("rm", "--force", returned_id),
+        ("container", "exists", returned_id),
+    ]
+    assert command.exists is True
+    assert all(call != ("rm", "--force", CONTAINER_ID) for call in cleanup_calls)
+    assert removed_cgroups == []
 
 
 @pytest.mark.unit
@@ -399,7 +461,7 @@ def test_create_accepts_only_exact_legacy_podman_entrypoint_projection(
 
 
 @pytest.mark.unit
-def test_failed_create_cleanup_attempts_both_boundaries_and_fails_closed(
+def test_failed_create_cleanup_does_not_remove_cgroup_while_container_exists(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
     command = PodmanDouble()
@@ -414,7 +476,7 @@ def test_failed_create_cleanup_attempts_both_boundaries_and_fails_closed(
         accepted_exit_codes: frozenset[int] = frozenset({0}),
     ) -> tuple[int, bytes]:
         if arguments[3] == "rm":
-            raise PodmanRuntimeError("Podman command failed")
+            raise KeyboardInterrupt
         return original(
             arguments,
             max_output_bytes=max_output_bytes,
@@ -438,7 +500,114 @@ def test_failed_create_cleanup_attempts_both_boundaries_and_fails_closed(
     with pytest.raises(PodmanRuntimeError, match="cleanup"):
         backend.create(unit, policy)
 
-    assert removed_cgroups == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+    assert removed_cgroups == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rm_code", [0, 1])
+def test_failed_create_cleanup_rejects_rm_that_leaves_container_present(
+    unit: ManagedUnit, policy: BrokerPolicy, rm_code: int
+) -> None:
+    command = PodmanDouble()
+    command.overrides["Config.Entrypoint"] = "substituted"
+    command.rm_code = rm_code
+    command.rm_removes = False
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
+        runtime(command).create(unit, policy)
+
+    assert command.exists is True
+    assert command.cgroup_removals == []
+    assert any(
+        call[0] == ("container", "exists", CONTAINER_ID) for call in command.calls
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt(), SystemExit(7)])
+def test_failed_create_cleanup_re_raises_base_exception_after_confirmed_cleanup(
+    unit: ManagedUnit, policy: BrokerPolicy, interruption: BaseException
+) -> None:
+    command = PodmanDouble()
+    original = command.__call__
+    interrupted = False
+
+    def interrupted_boundary(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        nonlocal interrupted
+        argv = tuple(arguments)[3:]
+        if argv[:2] == ("container", "inspect") and not interrupted:
+            interrupted = True
+            raise interruption
+        return original(
+            arguments,
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=interrupted_boundary,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+    )
+
+    with pytest.raises(type(interruption)):
+        backend.create(unit, policy)
+
+    assert command.exists is False
+    assert command.cgroup_removals == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+
+
+@pytest.mark.unit
+def test_unconfirmed_cleanup_masks_base_exception_with_content_free_error(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    command = PodmanDouble()
+    command.rm_removes = False
+    original = command.__call__
+
+    def interrupted_boundary(
+        arguments: Sequence[str],
+        *,
+        max_output_bytes: int | None = None,
+        accepted_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> tuple[int, bytes]:
+        if tuple(arguments)[3:5] == ("container", "inspect"):
+            raise KeyboardInterrupt
+        return original(
+            arguments,
+            max_output_bytes=max_output_bytes,
+            accepted_exit_codes=accepted_exit_codes,
+        )
+
+    backend = PodmanIsolationRuntime(
+        image_repository=IMAGE_REPOSITORY,
+        run_as_uid=1001,
+        command=interrupted_boundary,
+        cgroup_root=CGROUP_ROOT,
+        hooks_directory=HOOKS,
+        cgroup_remove=command.remove_cgroup,
+        hooks_directory_validate=lambda path: None,
+        cgroup_root_validate=lambda path: None,
+        cgroup_create=lambda path: None,
+    )
+
+    with pytest.raises(PodmanRuntimeError, match="cleanup") as raised:
+        backend.create(unit, policy)
+
+    assert str(raised.value) == "Podman failed creation cleanup is unconfirmed"
+    assert command.exists is True
+    assert command.cgroup_removals == []
 
 
 @pytest.mark.unit
@@ -1269,15 +1438,45 @@ def test_create_rejects_non_ascii_identity_and_unknown_state(
 ) -> None:
     command = PodmanDouble()
     command.create_output = b"\xff"
-    with pytest.raises(PodmanRuntimeError, match="identity"):
+    with pytest.raises(PodmanRuntimeError, match="cleanup"):
         created_runtime(command, unit, policy)
-    assert command.exists is False
-    assert command.cgroup_removals == [CGROUP_ROOT / f"markweavet70{UNIT_ID.hex}.slice"]
+    assert command.exists is True
+    assert command.cgroup_removals == []
 
     command = PodmanDouble()
     command.status = "unknown"
     with pytest.raises(PodmanRuntimeError, match="state"):
         created_runtime(command, unit, policy)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "output",
+    [
+        CONTAINER_ID.encode(),
+        (CONTAINER_ID + "\n").encode(),
+    ],
+)
+def test_create_response_identity_accepts_only_canonical_output(output: bytes) -> None:
+    assert podman_runtime._create_response_identity(output) == CONTAINER_ID
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "output",
+    [
+        b"",
+        (" " + CONTAINER_ID).encode(),
+        (CONTAINER_ID + " ").encode(),
+        (CONTAINER_ID + "\n\n").encode(),
+        b"A" * 64,
+        b"f" * 63,
+        b"f" * 65,
+        b"\xff" * 64,
+    ],
+)
+def test_create_response_identity_rejects_noncanonical_output(output: bytes) -> None:
+    assert podman_runtime._create_response_identity(output) is None
 
 
 @pytest.mark.unit
