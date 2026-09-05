@@ -137,11 +137,7 @@ def _issue(  # noqa: PLR0913
         "-out",
         str(request),
     )
-    validity = (
-        ("-not_before", "20000101000000Z", "-not_after", "20010101000000Z")
-        if expired
-        else ("-days", "1")
-    )
+    validity = ("-days", "0" if expired else "1")
     _run(
         "openssl",
         "x509",
