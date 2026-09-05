@@ -82,6 +82,10 @@ class CertificateSet:
     next_client_key: Path
     extra_san_server_certificate: Path
     extra_san_server_key: Path
+    expired_server_certificate: Path
+    expired_server_key: Path
+    expired_client_certificate: Path
+    expired_client_key: Path
 
 
 def _run(*arguments: str) -> None:
@@ -102,6 +106,7 @@ def _issue(  # noqa: PLR0913
     uri: str,
     eku: str,
     extra_san: bool = False,
+    expired: bool = False,
 ) -> tuple[Path, Path]:
     certificate = root / f"{name}.crt"
     key = root / f"{name}.key"
@@ -132,12 +137,16 @@ def _issue(  # noqa: PLR0913
         "-out",
         str(request),
     )
+    validity = (
+        ("-not_before", "20000101000000Z", "-not_after", "20010101000000Z")
+        if expired
+        else ("-days", "1")
+    )
     _run(
         "openssl",
         "x509",
         "-req",
-        "-days",
-        "1",
+        *validity,
         "-in",
         str(request),
         "-CA",
@@ -229,6 +238,22 @@ def certificates(tmp_path_factory: pytest.TempPathFactory) -> CertificateSet:
         eku="serverAuth",
         extra_san=True,
     )
+    expired_server_certificate, expired_server_key = _issue(
+        root,
+        name="expired-server",
+        ca_name="ca",
+        uri=SERVER_URI,
+        eku="serverAuth",
+        expired=True,
+    )
+    expired_client_certificate, expired_client_key = _issue(
+        root,
+        name="expired-client",
+        ca_name="ca",
+        uri=CLIENT_URI,
+        eku="clientAuth",
+        expired=True,
+    )
     return CertificateSet(
         ca,
         server_certificate,
@@ -244,6 +269,10 @@ def certificates(tmp_path_factory: pytest.TempPathFactory) -> CertificateSet:
         next_client_key,
         extra_san_server_certificate,
         extra_san_server_key,
+        expired_server_certificate,
+        expired_server_key,
+        expired_client_certificate,
+        expired_client_key,
     )
 
 
@@ -472,7 +501,7 @@ def test_real_paired_mtls_workspace_collect_outcomes(
     dispatcher.dispatch_workspace.assert_called_once_with(CLIENT_PRINCIPAL, request)
 
 
-@pytest.mark.parametrize("failure", ["pin", "uri", "extra-san", "wrong-ca"])
+@pytest.mark.parametrize("failure", ["pin", "uri", "extra-san", "wrong-ca", "expired"])
 def test_real_client_rejects_untrusted_or_misidentified_server(
     certificates: CertificateSet, mocker: MockerFixture, failure: str
 ) -> None:
@@ -485,6 +514,19 @@ def test_real_client_rejects_untrusted_or_misidentified_server(
             certificates.extra_san_server_certificate,
             certificates.extra_san_server_key,
             SERVER_URI,
+            SERVER_PRINCIPAL,
+        )
+    elif failure == "expired":
+        server_local = MtlsLocalIdentity(
+            certificates.ca,
+            certificates.expired_server_certificate,
+            certificates.expired_server_key,
+            SERVER_URI,
+            SERVER_PRINCIPAL,
+        )
+        server_peer = MtlsPeerIdentity(
+            SERVER_URI,
+            (_pin(certificates.expired_server_certificate),),
             SERVER_PRINCIPAL,
         )
         server_peer = MtlsPeerIdentity(
@@ -530,22 +572,26 @@ def test_real_client_rejects_untrusted_or_misidentified_server(
     dispatcher.dispatch.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["eku", "extra-san"])
+@pytest.mark.parametrize("failure", ["eku", "extra-san", "expired"])
 def test_real_server_rejects_wrong_client_role_before_dispatch(
     certificates: CertificateSet, mocker: MockerFixture, failure: str
 ) -> None:
     dispatcher = mocker.Mock(spec=BrokerDispatcher)
     server_local, _, _, server_peer = _identities(certificates)
-    certificate = (
-        certificates.wrong_client_certificate
-        if failure == "eku"
-        else certificates.extra_san_certificate
-    )
-    key = (
-        certificates.wrong_client_key
-        if failure == "eku"
-        else certificates.extra_san_key
-    )
+    certificate, key = {
+        "eku": (
+            certificates.wrong_client_certificate,
+            certificates.wrong_client_key,
+        ),
+        "extra-san": (
+            certificates.extra_san_certificate,
+            certificates.extra_san_key,
+        ),
+        "expired": (
+            certificates.expired_client_certificate,
+            certificates.expired_client_key,
+        ),
+    }[failure]
     client_local = MtlsLocalIdentity(
         certificates.ca, certificate, key, CLIENT_URI, CLIENT_PRINCIPAL
     )
