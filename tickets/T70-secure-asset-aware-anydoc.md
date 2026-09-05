@@ -496,9 +496,9 @@ for reverse conversion.
 * 2026-09-05: Post-rebase validation on main `64f8a14` required no product correction. The exact
   rebase head `53e3cb8` passes 141 focused workspace/Unix/service tests, the complete 664-test
   broker boundary, all 13 real broker-process and 8 real Podman integrations, Ruff, and `ty`. Main's
-  additional light test raises that selection to 3,099 passing tests at 93.88% total and 90.04%
-  branch coverage; changed application coverage is 94.23% (539/572 lines). The lifecycle v1 wire
-  remains unchanged and no temporary Podman resource remains.
+  additional light test raises that selection to 3,099 passing tests at 93.88% total and 90.06%
+  branch coverage (4,195/4,658); changed application coverage is 94.23% (539/572 lines). The
+  lifecycle v1 wire remains unchanged and no temporary Podman resource remains.
 
 ## Synchronization
 
