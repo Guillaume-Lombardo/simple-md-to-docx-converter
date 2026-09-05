@@ -6,6 +6,7 @@ import json
 import os
 import pwd
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -105,6 +106,7 @@ def test_loads_complete_canonical_owner_only_configuration(tmp_path: Path) -> No
             {"operation_timeout_seconds": "1"}
         ),
         lambda value: value.update({"socket_path": "relative.sock"}),
+        lambda value: value.update({"socket_path": "/"}),
         lambda value: value["runtime_limits"].update(  # type: ignore[union-attr]
             {"pid_limit": 0}
         ),
@@ -334,17 +336,44 @@ def test_factory_rejects_root_and_missing_fixed_commands_before_inventory(
 ) -> None:
     path, _ = _configuration(tmp_path)
     config = load_broker_process_config(path)
+    uid = os.geteuid()
     inventory = mocker.patch("markweave.broker.process.SQLiteBrokerInventory")
     mocker.patch("markweave.broker.process.os.geteuid", return_value=0)
     with pytest.raises(BrokerProcessConfigurationError):
         build_broker_server(config)
     inventory.assert_not_called()
 
-    mocker.patch("markweave.broker.process.os.geteuid", return_value=os.geteuid())
+    mocker.patch("markweave.broker.process.os.geteuid", return_value=uid)
     mocker.patch("markweave.broker.process._PODMAN", tmp_path / "missing-podman")
     with pytest.raises(BrokerProcessConfigurationError):
         build_broker_server(config)
     inventory.assert_not_called()
+
+
+@pytest.mark.unit
+def test_factory_rejects_wrong_config_type() -> None:
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(cast(Any, object()))
+
+
+@pytest.mark.unit
+def test_factory_rejects_non_bytes_key_and_releases_authority_lock(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, _ = _configuration(tmp_path)
+    config = replace(
+        load_broker_process_config(path), authentication_key=cast(Any, "not-bytes")
+    )
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    mocker.patch(
+        "markweave.broker.process._acquire_authority_lock", return_value=descriptor
+    )
+
+    with pytest.raises(BrokerProcessConfigurationError):
+        build_broker_server(config)
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
 
 
 def _server(tmp_path: Path, mocker: MockerFixture) -> UnixBrokerServer:
