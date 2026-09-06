@@ -197,7 +197,12 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   blocked. This closes the retained non-ACK tombstone gap, but deliberately does not claim arbitrary
   online-backup restore completeness: a proof ACKed and erased by the broker after an older database
   snapshot cannot be reconstructed without a quiesced/drained backup contract or retained broker
-  ACK history.
+  ACK history. One principal therefore belongs to one durable database/broker inventory domain;
+  replacing or independently restoring the broker inventory requires a separate coordinated
+  recovery contract and is not inferred from high-water values alone.
+  The base is the exact #206 merge `369b9c2c19deb63ec575c5bf079d1a957cdd24ca`; main run
+  `34007228309` attempt 2 passed. Attempt 1 contained only the known distributed Playwright alert
+  timeout flake; the exact pull-request run and retry passed. T71 remains In Progress.
 
 ## Synchronization
 

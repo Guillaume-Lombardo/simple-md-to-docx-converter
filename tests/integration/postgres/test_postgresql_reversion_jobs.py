@@ -30,6 +30,7 @@ from tests.reversion_job_repository_contracts import (
     POLICY_SPECIFICATION,
     PRINCIPAL,
     RETENTION_END,
+    complete_empty_reconciliation,
     exercise_reversion_job_repository_contract,
     proof,
     submission,
@@ -98,6 +99,7 @@ def test_postgresql_reconciliation_advances_hwm_and_retains_orphan_before_ack() 
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     token = uuid4()
     repository.begin_reconciliation(
         PRINCIPAL, "postgres-reconciler", token, NOW, LEASE_END
@@ -158,11 +160,13 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     for name in ("SequenceOne", "SequenceTwo"):
         owner = _user(users, name)
         job, _ = repository.create(submission(owner.id))
         repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     barrier = Barrier(2)
 
     def claim(worker: str) -> ReversionJob | None:
@@ -249,9 +253,11 @@ def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
     users = SqlUserRepository(engine)
     owner = _user(users, "RecoveryProofRace")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     job, _ = repository.create(submission(owner.id))
     repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     claimed = repository.claim("proof-owner", principal, NOW, LEASE_END)
     assert claimed is not None
     assert claimed.current_attempt_id is not None and claimed.lease_token is not None

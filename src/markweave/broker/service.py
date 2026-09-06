@@ -132,7 +132,15 @@ class IsolationBrokerService:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         with self._gate:
             self._ready = False
-            self._reconcile()
+            self._staged_workspaces.clear()
+            try:
+                self._reconcile()
+            except BrokerError:
+                raise
+            except Exception as error:
+                raise BrokerError(
+                    BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+                ) from error
             self._ready = True
             high_water, tombstone = self._inventory_call(
                 lambda: self._inventory.reconciliation_page(

@@ -416,6 +416,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                if self._engine.dialect.name == "postgresql":
+                    database.execute(text("SELECT pg_advisory_xact_lock(1830285107)"))
                 row = self._lock_principal(database, principal.principal_id)
                 exact_replay = row.reconciliation_token == str(token)
                 if (
@@ -454,6 +456,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                if self._engine.dialect.name == "postgresql":
+                    database.execute(text("SELECT pg_advisory_xact_lock(1830285107)"))
                 row = self._lock_principal(database, principal.principal_id)
                 if (
                     row.reconciliation_token != str(token)
@@ -500,6 +504,32 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 ReversionAttemptRow.create_sequence == tombstone.create_sequence,
             )
         )
+        attempt_collision = database.scalar(
+            select(ReversionAttemptRow.attempt_id)
+            .where(
+                or_(
+                    ReversionAttemptRow.attempt_id == str(proof.attempt_id),
+                    ReversionAttemptRow.unit_id == str(proof.unit_id),
+                    ReversionAttemptRow.proof_id == str(proof.proof_id),
+                )
+            )
+            .limit(1)
+        )
+        orphan_collision = database.scalar(
+            select(ReversionOrphanProofRow)
+            .where(
+                or_(
+                    ReversionOrphanProofRow.attempt_id == str(proof.attempt_id),
+                    ReversionOrphanProofRow.unit_id == str(proof.unit_id),
+                    ReversionOrphanProofRow.proof_id == str(proof.proof_id),
+                )
+            )
+            .limit(1)
+        )
+        if attempt_collision is not None and (
+            attempt is None or attempt_collision != attempt.attempt_id
+        ):
+            raise ReversionJobConflictError
         if attempt is None:
             existing = database.get(
                 ReversionOrphanProofRow,
@@ -529,6 +559,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 if persisted != values:
                     raise ReversionJobConflictError
                 return
+            if orphan_collision is not None:
+                raise ReversionJobConflictError
             database.add(
                 ReversionOrphanProofRow(
                     principal_id=principal_row.principal_id,
@@ -546,10 +578,27 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 )
             )
             return
-        if (
-            attempt.attempt_id != str(proof.attempt_id)
-            or attempt.principal_id != str(proof.principal.principal_id)
-            or attempt.policy_revision != proof.policy_revision
+        if orphan_collision is not None:
+            raise ReversionJobConflictError
+        if attempt.attempt_id != str(proof.attempt_id) or attempt.principal_id != str(
+            proof.principal.principal_id
+        ):
+            raise ReversionJobConflictError
+        if attempt.create_intent_at is None:
+            if any(
+                value is not None
+                for value in (
+                    attempt.policy_revision,
+                    attempt.policy_specification,
+                    attempt.unit_id,
+                )
+            ):
+                raise ReversionJobConflictError
+            attempt.create_intent_at = now
+            attempt.policy_revision = proof.policy_revision
+            attempt.policy_specification = tombstone.policy_specification.value
+        elif (
+            attempt.policy_revision != proof.policy_revision
             or attempt.policy_specification != tombstone.policy_specification.value
             or attempt.unit_id not in {None, str(proof.unit_id)}
         ):
@@ -610,18 +659,39 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         ReversionAttemptRow.principal_id == str(principal.principal_id),
                         ReversionAttemptRow.create_sequence
                         == tombstone.create_sequence,
-                        ReversionAttemptRow.proof_id == str(tombstone.proof.proof_id),
                     )
                 )
                 if attempt is not None:
+                    proof = tombstone.proof
+                    if (
+                        attempt.attempt_id != str(proof.attempt_id)
+                        or attempt.unit_id != str(proof.unit_id)
+                        or attempt.proof_id != str(proof.proof_id)
+                        or attempt.policy_specification
+                        != tombstone.policy_specification.value
+                        or attempt.proof_policy_revision != proof.policy_revision
+                        or attempt.exit_evidence != proof.exit_evidence.value
+                        or attempt.empty_evidence != proof.empty_evidence.value
+                        or attempt.removal_evidence != proof.removal_evidence.value
+                    ):
+                        raise ReversionJobConflictError
                     attempt.proof_acknowledged_at = attempt.proof_acknowledged_at or now
                 else:
                     orphan = database.get(
                         ReversionOrphanProofRow,
                         (str(principal.principal_id), tombstone.create_sequence),
                     )
-                    if orphan is None or orphan.proof_id != str(
-                        tombstone.proof.proof_id
+                    proof = tombstone.proof
+                    if orphan is None or (
+                        orphan.attempt_id != str(proof.attempt_id)
+                        or orphan.unit_id != str(proof.unit_id)
+                        or orphan.proof_id != str(proof.proof_id)
+                        or orphan.policy_revision != proof.policy_revision
+                        or orphan.policy_specification
+                        != tombstone.policy_specification.value
+                        or orphan.exit_evidence != proof.exit_evidence.value
+                        or orphan.empty_evidence != proof.empty_evidence.value
+                        or orphan.removal_evidence != proof.removal_evidence.value
                     ):
                         raise ReversionJobConflictError
                     orphan.acknowledged_at = orphan.acknowledged_at or now
@@ -650,7 +720,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     select(ReversionAttemptRow)
                     .where(
                         ReversionAttemptRow.principal_id == str(principal.principal_id),
-                        ReversionAttemptRow.reconciliation_ack_intent_at.is_not(None),
+                        ReversionAttemptRow.proof_id.is_not(None),
                         ReversionAttemptRow.proof_acknowledged_at.is_(None),
                     )
                     .order_by(ReversionAttemptRow.create_sequence)
@@ -666,7 +736,11 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 ).all()
                 values: list[ReconciliationTombstone] = []
                 for item in (*attempts, *orphans):
-                    values.append(  # noqa: PERF401 - narrows two ORM row types
+                    if isinstance(item, ReversionAttemptRow):
+                        item.reconciliation_ack_intent_at = (
+                            item.reconciliation_ack_intent_at or now
+                        )
+                    values.append(
                         ReconciliationTombstone(
                             item.create_sequence,
                             EvidenceDigest(cast(str, item.policy_specification)),
@@ -688,6 +762,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                             ),
                         )
                     )
+                database.flush()
                 return tuple(sorted(values, key=lambda item: item.create_sequence))
         except ReversionJobLeaseLostError:
             raise
@@ -721,6 +796,26 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 if unproven is not None:
                     raise ReversionProofRequiredError
                 if not row.reconciliation_fixed_point:
+                    raise ReversionJobConflictError
+                pending_attempt = database.scalar(
+                    select(ReversionAttemptRow.attempt_id)
+                    .where(
+                        ReversionAttemptRow.principal_id == str(principal.principal_id),
+                        ReversionAttemptRow.proof_id.is_not(None),
+                        ReversionAttemptRow.proof_acknowledged_at.is_(None),
+                    )
+                    .limit(1)
+                )
+                pending_orphan = database.scalar(
+                    select(ReversionOrphanProofRow.proof_id)
+                    .where(
+                        ReversionOrphanProofRow.principal_id
+                        == str(principal.principal_id),
+                        ReversionOrphanProofRow.acknowledged_at.is_(None),
+                    )
+                    .limit(1)
+                )
+                if pending_attempt is not None or pending_orphan is not None:
                     raise ReversionJobConflictError
                 row.reconciliation_complete = True
                 row.reconciliation_owner = None

@@ -12,6 +12,7 @@ from markweave.broker.models import (
     EvidenceDigest,
     TerminationProof,
 )
+from markweave.broker.reconciliation_protocol import ReconciliationResponse
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -93,9 +94,32 @@ def trace() -> ReversionTraceMetadata:
     )
 
 
+def complete_empty_reconciliation(
+    repository: SqlReversionJobRepository,
+    principal: AuthenticatedPrincipal = PRINCIPAL,
+) -> None:
+    """Establish explicit fail-closed readiness for repository contract tests."""
+
+    token = uuid4()
+    cursor = repository.begin_reconciliation(
+        principal, "contract-reconciler", token, NOW, LEASE_END
+    )
+    for _ in range(2):
+        repository.record_reconciliation_page(
+            principal,
+            token,
+            ReconciliationResponse(
+                uuid4(), principal.principal_id, cursor, cursor, None, True
+            ),
+            NOW,
+        )
+    repository.complete_reconciliation(principal, token, NOW)
+
+
 def exercise_reversion_job_repository_contract(  # noqa: PLR0915
     repository: SqlReversionJobRepository, owner_id: UUID, other_owner_id: UUID
 ) -> None:
+    complete_empty_reconciliation(repository)
     first_submission = submission(owner_id, idempotency_digest="3" * 64)
     first, replayed = repository.create(first_submission)
     assert not replayed

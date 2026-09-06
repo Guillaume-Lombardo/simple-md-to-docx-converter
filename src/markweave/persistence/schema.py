@@ -15,7 +15,6 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     false,
-    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -533,15 +532,28 @@ class ReversionBrokerPrincipalRow(Base):
     __tablename__ = "reversion_broker_principals"
     __table_args__ = (
         CheckConstraint(
-            "create_sequence_high_water >= 0",
+            "create_sequence_high_water >= 0 AND create_sequence_high_water <= 9223372036854775807",
             name="ck_reversion_broker_principals_high_water",
         ),
         CheckConstraint(
-            "reconciliation_cursor >= 0", name="ck_reversion_broker_principals_cursor"
+            "reconciliation_cursor >= 0 AND reconciliation_cursor <= 9223372036854775807",
+            name="ck_reversion_broker_principals_cursor",
         ),
         CheckConstraint(
-            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= 0",
+            "reconciliation_observed_head IS NULL OR (reconciliation_observed_head >= 0 AND reconciliation_observed_head <= 9223372036854775807)",
             name="ck_reversion_broker_principals_observed_head",
+        ),
+        CheckConstraint(
+            "reconciliation_cursor <= create_sequence_high_water",
+            name="ck_reversion_broker_principals_cursor_high_water",
+        ),
+        CheckConstraint(
+            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= reconciliation_cursor",
+            name="ck_reversion_broker_principals_observed_cursor",
+        ),
+        CheckConstraint(
+            "NOT reconciliation_fixed_point OR reconciliation_observed_head IS NOT NULL",
+            name="ck_reversion_broker_principals_fixed_point",
         ),
         CheckConstraint(
             "(reconciliation_owner IS NULL AND reconciliation_token IS NULL AND reconciliation_expires_at IS NULL) OR "
@@ -555,7 +567,7 @@ class ReversionBrokerPrincipalRow(Base):
         BigInteger, nullable=False, default=0
     )
     reconciliation_complete: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=true()
+        Boolean, nullable=False, default=False, server_default=false()
     )
     reconciliation_owner: Mapped[str | None] = mapped_column(String(255))
     reconciliation_token: Mapped[str | None] = mapped_column(String(36))
@@ -676,6 +688,7 @@ class ReversionOrphanProofRow(Base):
         ),
         UniqueConstraint("proof_id", name="uq_reversion_orphan_proof"),
         UniqueConstraint("unit_id", name="uq_reversion_orphan_unit"),
+        UniqueConstraint("attempt_id", name="uq_reversion_orphan_attempt"),
         CheckConstraint("create_sequence > 0", name="ck_reversion_orphan_sequence"),
     )
 

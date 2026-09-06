@@ -43,6 +43,7 @@ from tests.reversion_job_repository_contracts import (
     POLICY_SPECIFICATION,
     PRINCIPAL,
     RETENTION_END,
+    complete_empty_reconciliation,
     exercise_reversion_job_repository_contract,
     proof,
     submission,
@@ -99,6 +100,7 @@ def test_sqlite_reverse_owner_quota_and_replay_precede_global_capacity(
     owner = _user(users, "Quota")
     other = _user(users, "Capacity")
     repository = SqlReversionJobRepository(engine, ReversionAdmissionPolicy(1, 1))
+    complete_empty_reconciliation(repository)
     original = submission(owner.id, idempotency_digest="a" * 64)
     created, _ = repository.create(original)
     replay, replayed = repository.create(
@@ -120,6 +122,7 @@ def test_sqlite_reverse_cancellation_failure_and_proof_fences(tmp_path: Path) ->
     owner = _user(users, "Lifecycle")
     other = _user(users, "Outsider")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
 
     queued, _ = repository.create(submission(owner.id))
     assert repository.request_cancel(queued.id, other.id, NOW, RETENTION_END) is None
@@ -274,6 +277,7 @@ def test_sqlite_reverse_recovery_without_create_intent_and_incomplete_upload(
     users = SqlUserRepository(engine)
     owner = _user(users, "Recovery")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     ready, _ = repository.create(submission(owner.id))
     repository.activate_source(ready.id, NOW)
     claim = repository.claim("worker", PRINCIPAL, NOW, NOW + timedelta(seconds=1))
@@ -297,6 +301,7 @@ def test_sqlite_reverse_repository_sanitizes_database_failures(tmp_path: Path) -
     engine = create_database_engine(standalone_database_url(tmp_path))
     upgrade_database(engine)
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     owner_id = uuid4()
     job_id = uuid4()
     attempt_id = uuid4()
@@ -462,11 +467,13 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     for name in ("SequenceOne", "SequenceTwo"):
         owner = _user(users, name)
         job, _ = repository.create(submission(owner.id))
         repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     barrier = Barrier(2)
 
     def claim(worker: str) -> ReversionJob | None:
@@ -552,9 +559,11 @@ def test_sqlite_recovery_proof_is_a_single_exact_cas(tmp_path: Path) -> None:
     users = SqlUserRepository(engine)
     owner = _user(users, "RecoveryProofRace")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     job, _ = repository.create(submission(owner.id))
     repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     claimed = repository.claim("proof-owner", principal, NOW, LEASE_END)
     assert claimed is not None
     assert claimed.current_attempt_id is not None and claimed.lease_token is not None
@@ -644,6 +653,7 @@ def test_sqlite_conflicting_idempotent_submissions_never_replay(tmp_path: Path) 
     upgrade_database(engine)
     owner = _user(SqlUserRepository(engine), "IdempotencyRace")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     key = "9" * 64
     barrier = Barrier(2)
 

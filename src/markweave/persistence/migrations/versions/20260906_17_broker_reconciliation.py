@@ -18,12 +18,19 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     with op.batch_alter_table("reversion_broker_principals") as batch:
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_high_water", type_="check"
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_high_water",
+            "create_sequence_high_water >= 0 AND create_sequence_high_water <= 9223372036854775807",
+        )
         batch.add_column(
             sa.Column(
                 "reconciliation_complete",
                 sa.Boolean(),
                 nullable=False,
-                server_default=sa.true(),
+                server_default=sa.false(),
             )
         )
         batch.add_column(
@@ -57,11 +64,24 @@ def upgrade() -> None:
             )
         )
         batch.create_check_constraint(
-            "ck_reversion_broker_principals_cursor", "reconciliation_cursor >= 0"
+            "ck_reversion_broker_principals_cursor",
+            "reconciliation_cursor >= 0 AND reconciliation_cursor <= 9223372036854775807",
         )
         batch.create_check_constraint(
             "ck_reversion_broker_principals_observed_head",
-            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= 0",
+            "reconciliation_observed_head IS NULL OR (reconciliation_observed_head >= 0 AND reconciliation_observed_head <= 9223372036854775807)",
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_cursor_high_water",
+            "reconciliation_cursor <= create_sequence_high_water",
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_observed_cursor",
+            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= reconciliation_cursor",
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_fixed_point",
+            "NOT reconciliation_fixed_point OR reconciliation_observed_head IS NOT NULL",
         )
         batch.create_check_constraint(
             "ck_reversion_broker_principals_reconciliation_lease",
@@ -104,6 +124,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("proof_id", name="uq_reversion_orphan_proof"),
         sa.UniqueConstraint("unit_id", name="uq_reversion_orphan_unit"),
+        sa.UniqueConstraint("attempt_id", name="uq_reversion_orphan_attempt"),
     )
 
 
@@ -118,7 +139,23 @@ def downgrade() -> None:
         batch.drop_constraint(
             "ck_reversion_broker_principals_observed_head", type_="check"
         )
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_fixed_point", type_="check"
+        )
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_observed_cursor", type_="check"
+        )
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_cursor_high_water", type_="check"
+        )
         batch.drop_constraint("ck_reversion_broker_principals_cursor", type_="check")
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_high_water", type_="check"
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_high_water",
+            "create_sequence_high_water >= 0",
+        )
         batch.drop_column("reconciliation_fixed_point")
         batch.drop_column("reconciliation_observed_head")
         batch.drop_column("reconciliation_cursor")

@@ -240,6 +240,38 @@ def test_runtime_reconnection_repeats_reconciliation(tmp_path: Path) -> None:
     )
 
 
+def test_reconciliation_page_sweeps_live_unit_before_returning_tombstone(
+    tmp_path: Path,
+) -> None:
+    broker, _, runtime = service(tmp_path)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+
+    response = broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert response.tombstone is not None
+    assert response.tombstone.proof.attempt_id == ATTEMPT_ID
+    assert response.tombstone.proof.unit_id == created.unit_id
+    assert response.create_sequence_high_water == 1
+    assert response.done is False
+    assert broker.ready
+    assert "hard_terminate:before" in runtime.calls
+
+
+def test_reconciliation_page_fault_never_returns_done_or_readiness(
+    tmp_path: Path,
+) -> None:
+    broker, _, runtime = service(tmp_path)
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    runtime.inject_fault("hard_terminate", point="before")
+
+    with pytest.raises(BrokerError):
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert not broker.ready
+
+
 def test_reconciliation_rejects_duplicate_runtime_discovery(
     tmp_path: Path,
     mocker: MockerFixture,
