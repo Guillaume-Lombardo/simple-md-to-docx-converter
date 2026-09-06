@@ -127,6 +127,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "reversion_attempts",
         "reversion_broker_principals",
         "reversion_jobs",
+        "reversion_orphan_proofs",
         "sessions",
         "system_template_selection",
         "template_audit_records",

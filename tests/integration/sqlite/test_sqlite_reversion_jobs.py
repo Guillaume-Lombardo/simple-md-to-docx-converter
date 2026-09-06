@@ -688,6 +688,36 @@ def test_sqlite_begin_reconciliation_and_claim_are_linearized(tmp_path: Path) ->
 
 
 @pytest.mark.integration
+def test_sqlite_expired_reconciliation_takeover_has_one_winner(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    repository.begin_reconciliation(
+        principal, "expired", uuid4(), NOW, NOW + timedelta(seconds=1)
+    )
+    barrier = Barrier(2)
+
+    def takeover(owner: str) -> bool:
+        barrier.wait()
+        try:
+            repository.begin_reconciliation(
+                principal,
+                owner,
+                uuid4(),
+                NOW + timedelta(seconds=2),
+                RETENTION_END,
+            )
+        except ReversionJobLeaseLostError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert sum(executor.map(takeover, ("takeover-a", "takeover-b"))) == 1
+    engine.dispose()
+
+
+@pytest.mark.integration
 def test_sqlite_recovery_proof_is_a_single_exact_cas(tmp_path: Path) -> None:
     engine = create_database_engine(standalone_database_url(tmp_path))
     upgrade_database(engine)

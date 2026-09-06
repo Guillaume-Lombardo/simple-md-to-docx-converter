@@ -21,6 +21,7 @@ from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
+    ReversionJobLeaseLostError,
 )
 from markweave.reversion_jobs.models import ReversionJob
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
@@ -275,6 +276,33 @@ def test_postgresql_begin_reconciliation_and_claim_are_linearized() -> None:
         claimed = claim_future.result()
     assert claimed is None or claimed.current_attempt_id is not None
     assert repository.claim("after-begin", principal, NOW, LEASE_END) is None
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_expired_reconciliation_takeover_has_one_winner() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    repository.begin_reconciliation(
+        principal, "expired", uuid4(), NOW, NOW.replace(microsecond=1)
+    )
+    barrier = Barrier(2)
+
+    def takeover(owner: str) -> bool:
+        barrier.wait()
+        try:
+            repository.begin_reconciliation(
+                principal, owner, uuid4(), LEASE_END, RETENTION_END
+            )
+        except ReversionJobLeaseLostError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert sum(executor.map(takeover, ("takeover-a", "takeover-b"))) == 1
     engine.dispose()
 
 
