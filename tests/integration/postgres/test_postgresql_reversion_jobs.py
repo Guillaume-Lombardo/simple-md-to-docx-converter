@@ -6,9 +6,13 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, inspect, text
 
 from markweave.auth.models import Role, User
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationResponse,
+    ReconciliationTombstone,
+)
 from markweave.jobs.models import JobOutput, JobSubmission
 from markweave.jobs.policy import JobAdmissionPolicy
 from markweave.persistence.jobs import SqlJobRepository
@@ -85,6 +89,59 @@ def test_postgresql_reversion_migration_round_trip() -> None:
         assert "reversion_attempts" not in inspect(engine).get_table_names()
     finally:
         upgrade_database(engine)
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_reconciliation_advances_hwm_and_retains_orphan_before_ack() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    token = uuid4()
+    repository.begin_reconciliation(
+        PRINCIPAL, "postgres-reconciler", token, NOW, LEASE_END
+    )
+    recovered = proof(uuid4(), uuid4())
+    tombstone = ReconciliationTombstone(12, POLICY_SPECIFICATION, recovered)
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(
+            uuid4(), PRINCIPAL.principal_id, 0, 15, tombstone, False
+        ),
+        NOW,
+    )
+    assert repository.pending_reconciliation_acknowledgements(
+        PRINCIPAL, token, NOW
+    ) == (tombstone,)
+    repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(uuid4(), PRINCIPAL.principal_id, 12, 14, None, True),
+        NOW,
+    )
+    repository.complete_reconciliation(PRINCIPAL, token, NOW)
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT create_sequence_high_water FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(PRINCIPAL.principal_id)},
+            ).scalar_one()
+            == 15
+        )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 12"
+                ),
+                {"principal": str(PRINCIPAL.principal_id)},
+            ).scalar_one()
+            is not None
+        )
     engine.dispose()
 
 

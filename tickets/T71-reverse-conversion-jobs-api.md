@@ -187,6 +187,17 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   family and whose trace format matches the selected parser. SQL row decoding translates malformed
   or tampered trace state into the stable repository error instead of exposing an unchecked domain
   value; direct-model and tampered-row tests cover the invariant.
+* 2026-09-06: Started the broker reconciliation slice from verified main `369b9c2c`. It adds the
+  separately versioned `markweave-reverse-broker-reconciliation` v1 protocol, authenticated
+  principal-isolated high-water/tombstone paging, durable per-principal reconciliation leases,
+  monotone local high-water repair, append-only orphan proof receipts, and replayable ACK intent.
+  Claims remain closed while reconciliation is incomplete or exclusively leased. The broker sweeps
+  live inventoried units before returning a page, and the database service rereads the head to a
+  fixed point before readiness. An exact restored create intent without a retained proof remains
+  blocked. This closes the retained non-ACK tombstone gap, but deliberately does not claim arbitrary
+  online-backup restore completeness: a proof ACKed and erased by the broker after an older database
+  snapshot cannot be reconstructed without a quiesced/drained backup contract or retained broker
+  ACK history.
 
 ## Synchronization
 
