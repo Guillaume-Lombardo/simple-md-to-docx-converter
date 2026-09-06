@@ -243,6 +243,23 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   hosted affected-domain checks will exercise those boundaries. CLI parity, reverse worker/runtime
   assembly, fair scheduling, production execution budgets, reverse observability, and complete
   distributed/final-image workflows remain for later T71 slices.
+* 2026-09-06: Merged that HTTP lifecycle as `91ebe08f644d76d37f0cc6a836f13ca7da64f348`
+  after all 13 exact-head checks passed, including light branch coverage, both storage profiles,
+  document engines, container, standalone/distributed E2E, and CodeRabbit's no-actionable-comment
+  follow-up. Started the HTTP-only CLI-parity slice from that exact main. It extends the stable
+  `jobs` family with reverse capabilities, bounded local preflight, idempotent submission and
+  retries, listing, status, bounded waiting, cancellation, and atomic result download while using
+  only authenticated API-v1 routes. Production reverse worker assembly, fair scheduling, budgets,
+  observability, and complete final-image execution remain for later T71 slices.
+* 2026-09-06: Completed the CLI-parity implementation and local verification. The new command
+  family is covered by 40 focused unit tests plus a real Uvicorn/SQLite integration lifecycle,
+  while the final-image workflow now exercises capabilities, idempotent submission, owner-visible
+  lifecycle operations, cancellation, and refused premature download. The light profile selected
+  3,624 tests and retained 90.22% application branch coverage; Ruff format/check, `ty`, CI-policy
+  validation, shell syntax, and diff checks pass. The broader local suite passed 3,926 tests; its
+  remaining 41 PostgreSQL setup errors and three RustFS failures require the hosted service
+  profiles, and the isolated process-group timeout passed on rerun. Publication and exact-head
+  hosted validation are the next step; worker execution remains intentionally outside this slice.
 
 ## Synchronization
 

@@ -91,3 +91,14 @@ def test_conversion_cli_e2e_requires_exact_human_output() -> None:
     assert not driver._has_exact_stdout(
         driver.subprocess.CompletedProcess([], 0, expected, "warning"), expected
     )
+
+
+def test_conversion_cli_e2e_exercises_reverse_http_lifecycle() -> None:
+    source = Path("tests/e2e/conversion_cli_workflow.py").read_text(encoding="utf-8")
+    settings = Path("scripts/e2e/runtime-settings.sh").read_text(encoding="utf-8")
+
+    for command in ("capabilities", "submit", "list", "show", "cancel", "download"):
+        assert f'"{command}"' in source
+    assert "reverse idempotent replay" in source
+    assert "MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=1000000" in settings
+    assert "MARKWEAVE_REVERSION_ACTIVE_LIMIT_PER_USER=8" in settings
