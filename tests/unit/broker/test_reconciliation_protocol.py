@@ -6,7 +6,9 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
+from markweave.broker import reconciliation_protocol
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
@@ -231,6 +233,92 @@ def test_request_decoder_rejects_wrong_operation_and_noncanonical_uuid() -> None
 def test_encode_response_rejects_invalid_values(response: Any) -> None:
     with pytest.raises(BrokerError):
         encode_response(response)
+
+
+def test_encoder_rejects_nonserializable_and_oversized_payloads(
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch.object(
+        reconciliation_protocol,
+        "_proof_mapping",
+        return_value={"invalid": object()},
+    )
+    response = ReconciliationResponse(
+        REQUEST, PRINCIPAL.principal_id, 1, 2, TOMBSTONE, False
+    )
+    with pytest.raises(BrokerError):
+        encode_response(response)
+    mocker.stopall()
+    mocker.patch.object(reconciliation_protocol, "MAX_FRAME_BYTES", 1)
+    with pytest.raises(BrokerError):
+        encode_request(ReconciliationRequest(REQUEST, 0))
+
+
+def test_decoder_rejects_duplicate_keys_and_invalid_uuid_shapes() -> None:
+    duplicate = (
+        b'{"after_create_sequence":0,"operation":"query","protocol":"'
+        + PROTOCOL_NAME.encode()
+        + b'","request_id":"'
+        + str(REQUEST).encode()
+        + b'","request_id":"'
+        + str(REQUEST).encode()
+        + b'","version":1}'
+    )
+    with pytest.raises(BrokerError):
+        decode_request(len(duplicate).to_bytes(4, "big") + duplicate)
+    for invalid in (1, "not-a-uuid"):
+        value = {
+            "after_create_sequence": 0,
+            "operation": "query",
+            "protocol": PROTOCOL_NAME,
+            "request_id": invalid,
+            "version": 1,
+        }
+        with pytest.raises(BrokerError):
+            decode_request(_raw_frame(value))
+
+
+def _success_mapping() -> dict[str, Any]:
+    encoded = encode_response(
+        ReconciliationResponse(REQUEST, PRINCIPAL.principal_id, 1, 2, TOMBSTONE, False)
+    )
+    return json.loads(encoded[4:])
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value.update(operation="ack"),
+        lambda value: value.update(outcome="unknown"),
+        lambda value: value.update(done=1),
+        lambda value: value.update(tombstone=[]),
+        lambda value: value["tombstone"].update(principal_id=str(OTHER.principal_id)),
+        lambda value: value["tombstone"].update(policy_revision=1),
+        lambda value: value["tombstone"].update(exit_evidence="invalid"),
+        lambda value: value["tombstone"].update(create_sequence=0),
+        lambda value: value.update(after_create_sequence=2),
+    ],
+)
+def test_response_decoder_rejects_each_invalid_success_bundle(mutate: Any) -> None:
+    value = _success_mapping()
+    mutate(value)
+    with pytest.raises(BrokerError):
+        decode_response(_raw_frame(value))
+
+
+def test_response_decoder_rejects_invalid_error_bundles() -> None:
+    encoded = encode_response(
+        ReconciliationErrorResponse(REQUEST, BrokerErrorCategory.PROTOCOL_ERROR)
+    )
+    value = json.loads(encoded[4:])
+    for mutation in (
+        {"extra": True},
+        {"category": 1},
+        {"category": "not-a-category"},
+    ):
+        candidate = {**value, **mutation}
+        with pytest.raises(BrokerError):
+            decode_response(_raw_frame(candidate))
 
 
 def test_inventory_pages_only_exact_principal_tombstones(tmp_path: Path) -> None:

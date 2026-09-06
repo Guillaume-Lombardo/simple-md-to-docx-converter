@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     EvidenceDigest,
     TerminationProof,
 )
-from markweave.broker.protocol import AcknowledgeResponse
+from markweave.broker.protocol import (
+    AcknowledgeResponse,
+    BrokerOperation,
+    ErrorResponse,
+)
 from markweave.broker.reconciliation_protocol import (
+    ReconciliationErrorResponse,
     ReconciliationResponse,
     ReconciliationTombstone,
 )
@@ -133,3 +140,91 @@ def test_reconciler_persists_page_before_broker_ack(mocker: MockerFixture) -> No
             now_factory=lambda: NOW,
         )
     assert events == ["persist", "ack"]
+
+
+@pytest.mark.parametrize(
+    ("limit", "factory"),
+    [
+        (0, lambda: REQUEST_IDS),
+        (True, lambda: REQUEST_IDS),
+        (1, None),
+    ],
+)
+def test_reconciler_rejects_invalid_configuration(
+    mocker: MockerFixture, limit: object, factory: object
+) -> None:
+    with pytest.raises(ValueError):
+        ReversionBrokerReconciler(
+            mocker.Mock(),
+            mocker.Mock(),
+            ack_batch_limit=cast(Any, limit),
+            request_id_factory=cast(Any, factory),
+        )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        ReconciliationErrorResponse(UUID(int=9), BrokerErrorCategory.INVENTORY_FAILURE),
+        object(),
+    ],
+)
+def test_reconciler_rejects_broker_page_failures(
+    mocker: MockerFixture, response: object
+) -> None:
+    store = mocker.Mock()
+    store.begin_reconciliation.return_value = 0
+    store.pending_reconciliation_acknowledgements.return_value = ()
+    broker = mocker.Mock()
+    broker.reconcile.return_value = response
+    reconciler = ReversionBrokerReconciler(
+        store, broker, ack_batch_limit=1, request_id_factory=lambda: UUID(int=1)
+    )
+    error = (
+        BrokerError if isinstance(response, ReconciliationErrorResponse) else ValueError
+    )
+    with pytest.raises(error):
+        reconciler.reconcile(
+            PRINCIPAL,
+            "reconciler",
+            TOKEN,
+            NOW,
+            NOW + timedelta(minutes=1),
+            now_factory=lambda: NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        ErrorResponse(
+            UUID(int=1), BrokerOperation.ACK, BrokerErrorCategory.INVENTORY_FAILURE
+        ),
+        object(),
+        AcknowledgeResponse(
+            UUID(int=1), PROOF.attempt_id, PROOF.unit_id, PROOF.proof_id, False
+        ),
+        AcknowledgeResponse(
+            UUID(int=1), UUID(int=2), PROOF.unit_id, PROOF.proof_id, True
+        ),
+        AcknowledgeResponse(
+            UUID(int=1), PROOF.attempt_id, UUID(int=2), PROOF.proof_id, True
+        ),
+        AcknowledgeResponse(
+            UUID(int=1), PROOF.attempt_id, PROOF.unit_id, UUID(int=2), True
+        ),
+    ],
+)
+def test_reconciler_rejects_invalid_acknowledgements(
+    mocker: MockerFixture, response: object
+) -> None:
+    store = mocker.Mock()
+    broker = mocker.Mock()
+    broker.request.return_value = response
+    reconciler = ReversionBrokerReconciler(
+        store, broker, ack_batch_limit=1, request_id_factory=lambda: UUID(int=1)
+    )
+    error = BrokerError if isinstance(response, ErrorResponse) else ValueError
+    with pytest.raises(error):
+        reconciler._ack(PRINCIPAL, TOKEN, TOMBSTONE, NOW)
+    store.mark_reconciliation_acknowledged.assert_not_called()
