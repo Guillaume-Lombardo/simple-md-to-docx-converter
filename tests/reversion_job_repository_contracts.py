@@ -62,12 +62,16 @@ def submission(
     )
 
 
-def proof(attempt_id: UUID, unit_id: UUID) -> TerminationProof:
+def proof(
+    attempt_id: UUID,
+    unit_id: UUID,
+    principal: AuthenticatedPrincipal = PRINCIPAL,
+) -> TerminationProof:
     return TerminationProof(
         uuid4(),
         attempt_id,
         unit_id,
-        PRINCIPAL,
+        principal,
         "reverse-policy-v1",
         EvidenceDigest("sha256:" + "b" * 64),
         EvidenceDigest("sha256:" + "c" * 64),
@@ -193,9 +197,10 @@ def exercise_reversion_job_repository_contract(  # noqa: PLR0915
     termination = proof(attempt.attempt_id, unit_id)
     with pytest.raises(ReversionJobLeaseLostError):
         repository.record_recovery_termination_proof(
-            attempt.attempt_id, uuid4(), termination, expired
+            first.id, attempt.attempt_id, uuid4(), termination, expired
         )
     recovered_attempt = repository.record_recovery_termination_proof(
+        first.id,
         attempt.attempt_id,
         recovery[0].recovery_token,
         termination,

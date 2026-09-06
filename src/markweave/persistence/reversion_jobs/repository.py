@@ -111,6 +111,10 @@ class SqlReversionJobRepository(_SqlReversionStore):
             )
             if replay is None:
                 raise ReversionJobRepositoryError from None
+            if replay.request_digest != submission.request_digest:
+                raise ReversionJobConflictError(
+                    "Reverse idempotency key conflicts"
+                ) from None
             return replay, True
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
@@ -280,6 +284,23 @@ class SqlReversionJobRepository(_SqlReversionStore):
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                principal_row = self._lock_principal(database, principal.principal_id)
+                unbound_attempt = database.scalar(
+                    select(ReversionAttemptRow.attempt_id)
+                    .join(
+                        ReversionJobRow,
+                        ReversionJobRow.current_attempt_id
+                        == ReversionAttemptRow.attempt_id,
+                    )
+                    .where(
+                        ReversionAttemptRow.principal_id == str(principal.principal_id),
+                        ReversionAttemptRow.unit_id.is_(None),
+                        ReversionJobRow.state == ReversionJobState.RUNNING.value,
+                    )
+                    .limit(1)
+                )
+                if unbound_attempt is not None:
+                    return None
                 statement = (
                     select(ReversionJobRow)
                     .where(
@@ -294,7 +315,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 row = database.scalar(statement)
                 if row is None:
                     return None
-                sequence = self._next_create_sequence(database, principal.principal_id)
+                sequence = self._next_create_sequence(database, principal_row)
                 attempt_number = row.attempt + 1
                 attempt_id = uuid4()
                 lease_token = uuid4()
@@ -326,9 +347,9 @@ class SqlReversionJobRepository(_SqlReversionStore):
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
 
-    def _next_create_sequence(
+    def _lock_principal(
         self, database: DatabaseSession, principal_id: UUID
-    ) -> int:
+    ) -> ReversionBrokerPrincipalRow:
         principal = str(principal_id)
         database.execute(
             text(
@@ -344,7 +365,15 @@ class SqlReversionJobRepository(_SqlReversionStore):
         if self._engine.dialect.name == "postgresql":
             statement = statement.with_for_update()
         row = database.scalar(statement)
-        if row is None or row.create_sequence_high_water >= MAX_SEQUENCE:
+        if row is None:
+            raise ReversionJobRepositoryError
+        return row
+
+    @staticmethod
+    def _next_create_sequence(
+        database: DatabaseSession, row: ReversionBrokerPrincipalRow
+    ) -> int:
+        if row.create_sequence_high_water >= MAX_SEQUENCE:
             raise ReversionJobRepositoryError
         row.create_sequence_high_water += 1
         database.flush()
@@ -613,6 +642,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
 
     def record_recovery_termination_proof(
         self,
+        job_id: UUID,
         attempt_id: UUID,
         recovery_token: UUID,
         proof: TerminationProof,
@@ -621,13 +651,29 @@ class SqlReversionJobRepository(_SqlReversionStore):
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
-                row = database.scalar(
-                    select(ReversionAttemptRow).where(
+                statement = (
+                    select(ReversionAttemptRow)
+                    .join(
+                        ReversionJobRow,
+                        and_(
+                            ReversionJobRow.id == ReversionAttemptRow.job_id,
+                            ReversionJobRow.current_attempt_id
+                            == ReversionAttemptRow.attempt_id,
+                        ),
+                    )
+                    .where(
+                        ReversionJobRow.id == str(job_id),
+                        ReversionJobRow.state == ReversionJobState.RUNNING.value,
                         ReversionAttemptRow.attempt_id == str(attempt_id),
                         ReversionAttemptRow.recovery_token == str(recovery_token),
                         ReversionAttemptRow.recovery_expires_at >= now,
+                        ReversionAttemptRow.proof_id.is_(None),
+                        ReversionAttemptRow.proof_recorded_at.is_(None),
                     )
                 )
+                if self._engine.dialect.name == "postgresql":
+                    statement = statement.with_for_update()
+                row = database.scalar(statement)
                 if row is None:
                     raise ReversionJobLeaseLostError("Reverse recovery lease was lost")
                 self._store_proof(database, row, proof, now)

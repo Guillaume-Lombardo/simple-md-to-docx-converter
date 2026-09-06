@@ -152,6 +152,15 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   restore can rewind the local create-sequence high-water mark relative to retained broker state;
   T70 exposes no broker high-water query, so later runtime integration must reconcile that gap and
   this foundation does not claim post-restore completeness.
+* 2026-09-06: Independent-review hardening serializes claims on the durable principal high-water
+  row and refuses to allocate a later broker sequence while that principal still owns a current
+  unbound attempt. Replaying the exact create intent and binding its broker unit unlocks the next
+  sequence; completed or otherwise resolved attempts do not block later work. Recovery-proof
+  recording now locks and conditionally selects the exact running job, current attempt, unexpired
+  recovery token and empty proof bundle, so concurrent conflicting proofs have exactly one winner
+  and cannot overwrite durable evidence. The post-unique-collision idempotency path now applies the
+  same request-digest compatibility check as the ordinary replay path. Real PostgreSQL and SQLite
+  races cover all three findings.
 
 ## Synchronization
 

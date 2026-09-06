@@ -106,6 +106,7 @@ class ReversionWorkerRepository(Protocol):  # pragma: no cover - structural port
 
     def record_recovery_termination_proof(
         self,
+        job_id: UUID,
         attempt_id: UUID,
         recovery_token: UUID,
         proof: TerminationProof,
