@@ -17,6 +17,8 @@ from markweave.auth.models import Role, User
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import EvidenceDigest, ManagedUnitState, TerminationProof
 from markweave.broker.protocol import (
+    AcknowledgeRequest,
+    AcknowledgeResponse,
     BrokerOperation,
     CreateRequest,
     CreateResponse,
@@ -35,19 +37,26 @@ from markweave.broker.workspace_protocol import (
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
-from markweave.reversion_jobs.models import ReversionJobStep
+from markweave.reversion_jobs.models import (
+    ReversionJobState,
+    ReversionJobStep,
+    reversion_result_object_id,
+)
+from markweave.reversion_jobs.result_validation import validate_reverse_result
 from markweave.reversion_jobs.runtime import ReversionWorkerRuntime
 from markweave.reversion_jobs.worker_execution import (
     ClaimedReversion,
     ReversionAttemptExecutor,
     ReversionClaimService,
 )
+from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.models import ReverseOutputMode
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 from tests.reversion_job_repository_contracts import (
     NOW,
     PRINCIPAL,
+    RETENTION_END,
     complete_empty_reconciliation,
     submission,
 )
@@ -147,9 +156,17 @@ def _successful_broker(mocker: MockerFixture, runtime: ReversionWorkerRuntime) -
                 unit_id,
                 ManagedUnitState.CREATED,
             )
-        assert type(message) is TerminateRequest
-        return TerminateResponse(
-            message.request_id, _proof(message.attempt_id, message.unit_id)
+        if type(message) is TerminateRequest:
+            return TerminateResponse(
+                message.request_id, _proof(message.attempt_id, message.unit_id)
+            )
+        assert type(message) is AcknowledgeRequest
+        return AcknowledgeResponse(
+            message.request_id,
+            message.attempt_id,
+            message.unit_id,
+            message.proof_id,
+            True,
         )
 
     def stage(message: WorkspaceStageRequest) -> WorkspaceStageReceipt:
@@ -311,3 +328,107 @@ def test_executor_rejects_corrupt_source_before_creating_runtime(
 
     assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
     cast(Any, runtime.broker).request.assert_not_called()
+
+
+def test_publication_commits_result_then_acknowledges_proof(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    heartbeat = mocker.Mock()
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, heartbeat)
+    result = validate_reverse_result(
+        claimed.job,
+        executed.result.mode,
+        executed.result.result,
+        CONTENT_LIMITS,
+    )
+
+    published = ReversionPublicationService(runtime).publish(
+        executed, result, heartbeat
+    )
+
+    result_id = reversion_result_object_id(claimed.job.id, claimed.job.attempt)
+    assert published.state is ReversionJobState.SUCCEEDED
+    assert published.result_object_id == result_id
+    assert (
+        objects.get(ObjectKey(ObjectScope.REVERSION_RESULT, owner.id, result_id))
+        == b"# Result\n"
+    )
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None and attempt.proof_acknowledged_at == NOW
+    assert (
+        type(cast(Any, runtime.broker).request.call_args.args[0]) is AcknowledgeRequest
+    )
+
+
+def test_publication_cancellation_race_deletes_result_but_acks_proof(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    heartbeat = mocker.Mock()
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, heartbeat)
+    result = validate_reverse_result(
+        claimed.job,
+        executed.result.mode,
+        executed.result.result,
+        CONTENT_LIMITS,
+    )
+    repo.request_cancel(claimed.job.id, owner.id, NOW, RETENTION_END)
+
+    published = ReversionPublicationService(runtime).publish(
+        executed, result, heartbeat
+    )
+
+    result_id = reversion_result_object_id(claimed.job.id, claimed.job.attempt)
+    assert published == type(published)(ReversionJobState.CANCELLED, None)
+    assert not objects.exists(
+        ObjectKey(ObjectScope.REVERSION_RESULT, owner.id, result_id)
+    )
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None and attempt.proof_acknowledged_at == NOW
+
+
+def test_publication_compensates_object_when_lease_interrupts_before_commit(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    execution_heartbeat = mocker.Mock()
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, execution_heartbeat)
+    result = validate_reverse_result(
+        claimed.job,
+        executed.result.mode,
+        executed.result.result,
+        CONTENT_LIMITS,
+    )
+    heartbeat = mocker.Mock()
+    heartbeat.raise_if_interrupted.side_effect = ReverseConversionError(
+        ReverseErrorCategory.LEASE_LOST
+    )
+
+    with pytest.raises(ReverseConversionError):
+        ReversionPublicationService(runtime).publish(executed, result, heartbeat)
+
+    result_id = reversion_result_object_id(claimed.job.id, claimed.job.attempt)
+    assert not objects.exists(
+        ObjectKey(ObjectScope.REVERSION_RESULT, owner.id, result_id)
+    )
+    retained = repo.get_internal(claimed.job.id)
+    assert retained is not None and retained.state is ReversionJobState.RUNNING
