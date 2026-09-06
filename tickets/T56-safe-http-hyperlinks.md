@@ -2,15 +2,6 @@
 ticket: T56
 linear_id: G1L-480
 linear_url: https://linear.app/g1lom/issue/G1L-480/t56-allow-safe-https-hyperlinks-without-remote-resource-loading
-status: In Progress
-priority: High
-project: Markdown to DOCX and PDF Converter
----
-
----
-ticket: T56
-linear_id: G1L-480
-linear_url: https://linear.app/g1lom/issue/G1L-480/t56-allow-safe-https-hyperlinks-without-remote-resource-loading
 status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
