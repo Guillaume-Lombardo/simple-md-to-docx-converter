@@ -45,7 +45,7 @@ def test_reconciler_drains_ack_then_requires_stable_fixed_point(
     store = mocker.Mock()
     broker = mocker.Mock()
     store.begin_reconciliation.return_value = 4
-    store.pending_reconciliation_acknowledgements.return_value = (TOMBSTONE,)
+    store.pending_reconciliation_acknowledgements.side_effect = ((TOMBSTONE,), ())
     store.record_reconciliation_page.side_effect = (None, None)
     broker.request.return_value = AcknowledgeResponse(
         UUID("30000000-0000-4000-8000-000000000001"),
@@ -74,7 +74,7 @@ def test_reconciler_drains_ack_then_requires_stable_fixed_point(
     )
     clock = mocker.Mock(return_value=NOW)
     reconciler = ReversionBrokerReconciler(
-        store, broker, request_id_factory=lambda: next(REQUEST_IDS)
+        store, broker, ack_batch_limit=2, request_id_factory=lambda: next(REQUEST_IDS)
     )
 
     reconciler.reconcile(
@@ -120,7 +120,7 @@ def test_reconciler_persists_page_before_broker_ack(mocker: MockerFixture) -> No
         _ for _ in ()
     ).throw(RuntimeError("stop after durable ack"))
     reconciler = ReversionBrokerReconciler(
-        store, broker, request_id_factory=lambda: next(REQUEST_IDS)
+        store, broker, ack_batch_limit=2, request_id_factory=lambda: next(REQUEST_IDS)
     )
 
     with pytest.raises(RuntimeError, match="durable ack"):

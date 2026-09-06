@@ -121,7 +121,7 @@ def test_postgresql_reconciliation_advances_hwm_and_retains_orphan_before_ack() 
         NOW,
     )
     assert repository.pending_reconciliation_acknowledgements(
-        PRINCIPAL, token, NOW
+        PRINCIPAL, token, NOW, 8
     ) == (tombstone,)
     repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
     repository.record_reconciliation_page(
@@ -242,6 +242,39 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
         NOW,
         RETENTION_END,
     )
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_begin_reconciliation_and_claim_are_linearized() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "ReconciliationClaimRace")
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    barrier = Barrier(2)
+    token = uuid4()
+
+    def begin() -> None:
+        barrier.wait()
+        repository.begin_reconciliation(principal, "racer", token, NOW, LEASE_END)
+
+    def claim() -> ReversionJob | None:
+        barrier.wait()
+        return repository.claim("racer", principal, NOW, LEASE_END)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        begin_future = executor.submit(begin)
+        claim_future = executor.submit(claim)
+        begin_future.result()
+        claimed = claim_future.result()
+    assert claimed is None or claimed.current_attempt_id is not None
+    assert repository.claim("after-begin", principal, NOW, LEASE_END) is None
     engine.dispose()
 
 

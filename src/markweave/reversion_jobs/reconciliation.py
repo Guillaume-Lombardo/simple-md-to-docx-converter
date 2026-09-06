@@ -39,7 +39,11 @@ class ReconciliationStore(Protocol):
         expires_at: datetime,
     ) -> int: ...
     def pending_reconciliation_acknowledgements(
-        self, principal: AuthenticatedPrincipal, token: UUID, now: datetime
+        self,
+        principal: AuthenticatedPrincipal,
+        token: UUID,
+        now: datetime,
+        limit: int,
     ) -> tuple[ReconciliationTombstone, ...]: ...
     def record_reconciliation_page(
         self,
@@ -68,13 +72,19 @@ class ReversionBrokerReconciler:
         store: ReconciliationStore,
         broker: ReconciliationBroker,
         *,
+        ack_batch_limit: int,
         request_id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
-        if not callable(request_id_factory):
-            raise ValueError("Reconciliation request identity factory is invalid")
+        if (
+            type(ack_batch_limit) is not int
+            or ack_batch_limit <= 0
+            or not callable(request_id_factory)
+        ):
+            raise ValueError("Reconciliation service configuration is invalid")
         self._store = store
         self._broker = broker
         self._request_id_factory = request_id_factory
+        self._ack_batch_limit = ack_batch_limit
 
     def reconcile(  # noqa: PLR0913 - explicit lease boundary
         self,
@@ -91,10 +101,11 @@ class ReversionBrokerReconciler:
         cursor = self._store.begin_reconciliation(
             principal, owner, token, now, expires_at
         )
-        for pending in self._store.pending_reconciliation_acknowledgements(
-            principal, token, now_factory()
+        while pending_batch := self._store.pending_reconciliation_acknowledgements(
+            principal, token, now_factory(), self._ack_batch_limit
         ):
-            self._ack(principal, token, pending, now_factory())
+            for pending in pending_batch:
+                self._ack(principal, token, pending, now_factory())
 
         stable_high_water: int | None = None
         while True:

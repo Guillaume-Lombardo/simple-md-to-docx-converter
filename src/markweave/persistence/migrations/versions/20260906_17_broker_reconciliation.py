@@ -126,9 +126,23 @@ def upgrade() -> None:
         sa.UniqueConstraint("unit_id", name="uq_reversion_orphan_unit"),
         sa.UniqueConstraint("attempt_id", name="uq_reversion_orphan_attempt"),
     )
+    op.create_index(
+        "ix_reversion_attempts_pending_ack",
+        "reversion_attempts",
+        ["principal_id", "proof_acknowledged_at", "create_sequence"],
+    )
+    op.create_index(
+        "ix_reversion_orphans_pending_ack",
+        "reversion_orphan_proofs",
+        ["principal_id", "acknowledged_at", "create_sequence"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_reversion_orphans_pending_ack", table_name="reversion_orphan_proofs"
+    )
+    op.drop_index("ix_reversion_attempts_pending_ack", table_name="reversion_attempts")
     op.drop_table("reversion_orphan_proofs")
     with op.batch_alter_table("reversion_attempts") as batch:
         batch.drop_column("reconciliation_ack_intent_at")

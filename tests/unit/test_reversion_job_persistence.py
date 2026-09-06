@@ -81,11 +81,12 @@ def test_reconciliation_is_exclusive_monotone_and_retains_orphan_before_ack(
         repository.record_reconciliation_page(principal, token, page, NOW) == tombstone
     )
     assert repository.pending_reconciliation_acknowledgements(
-        principal, token, NOW
+        principal, token, NOW, 8
     ) == (tombstone,)
     repository.mark_reconciliation_acknowledged(principal, token, tombstone, NOW)
     assert (
-        repository.pending_reconciliation_acknowledgements(principal, token, NOW) == ()
+        repository.pending_reconciliation_acknowledgements(principal, token, NOW, 8)
+        == ()
     )
     repository.record_reconciliation_page(
         principal,
@@ -208,7 +209,7 @@ def test_reconciliation_drains_preexisting_unacknowledged_attempt_proof(
     repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
 
     assert repository.pending_reconciliation_acknowledgements(
-        PRINCIPAL, token, NOW
+        PRINCIPAL, token, NOW, 8
     ) == (ReconciliationTombstone(1, POLICY_SPECIFICATION, retained),)
 
 

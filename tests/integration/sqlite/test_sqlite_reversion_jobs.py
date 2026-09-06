@@ -11,6 +11,20 @@ import pytest
 from sqlalchemy import text
 
 from markweave.auth.models import Role, User
+from markweave.broker.dispatch import BrokerDispatcher
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
+from markweave.broker.fake_runtime import FakeIsolationRuntime
+from markweave.broker.inventory import SQLiteBrokerInventory
+from markweave.broker.models import (
+    BrokerPolicy,
+    ReplayPosition,
+    RuntimeChannelLimits,
+    RuntimeLimits,
+    policy_specification_evidence,
+)
+from markweave.broker.protocol import AcknowledgeRequest
+from markweave.broker.reconciliation_protocol import ReconciliationRequest
+from markweave.broker.service import IsolationBrokerService
 from markweave.jobs.models import JobOutput, JobSubmission
 from markweave.jobs.policy import JobAdmissionPolicy
 from markweave.persistence.jobs import SqlJobRepository
@@ -37,6 +51,7 @@ from markweave.reversion_jobs.models import (
     ReversionLeaseHeartbeat,
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
+from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
     NOW,
@@ -53,6 +68,22 @@ from tests.reversion_job_repository_contracts import (
 REVERSION_MIGRATION = import_module(
     "markweave.persistence.migrations.versions.20260906_16_reversion_queue"
 )
+
+
+class _CrashAfterBrokerAck:
+    def __init__(self, dispatcher: BrokerDispatcher) -> None:
+        self.dispatcher = dispatcher
+        self.fail_once = True
+
+    def reconcile(self, request: ReconciliationRequest):
+        return self.dispatcher.dispatch_reconciliation(PRINCIPAL, request)
+
+    def request(self, request: AcknowledgeRequest):
+        response = self.dispatcher.dispatch(PRINCIPAL, request)
+        if type(request) is AcknowledgeRequest and self.fail_once:
+            self.fail_once = False
+            raise BrokerError(BrokerErrorCategory.TRANSPORT_FAILURE)
+        return response
 
 
 def _user(repository: SqlUserRepository, name: str) -> User:
@@ -88,6 +119,78 @@ def test_sqlite_reversion_repository_contract_and_restart(tmp_path: Path) -> Non
         == 1
     )
     reopened.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_real_broker_reconciliation_replays_crash_after_ack(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "BrokerReconcileCrash")
+    repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert (
+        claimed is not None
+        and claimed.current_attempt_id is not None
+        and claimed.lease_token is not None
+    )
+
+    policy = BrokerPolicy(
+        "reverse-policy-v1",
+        "sha256:" + "9" * 64,
+        RuntimeLimits(1, 1, 1, 1, 1, 1),
+        RuntimeChannelLimits(1, 1),
+    )
+    specification = policy_specification_evidence(policy)
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        policy.revision,
+        specification,
+        NOW,
+    )
+    broker = IsolationBrokerService(
+        SQLiteBrokerInventory(
+            tmp_path / "broker-inventory.sqlite3", bytes(range(32)), max_records=8
+        ),
+        FakeIsolationRuntime(),
+        policy,
+        max_discovered_units=8,
+    )
+    broker.start()
+    unit = broker.create(ReplayPosition(PRINCIPAL, 1), claimed.current_attempt_id)
+    repository.record_broker_unit(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit.unit_id,
+        NOW,
+    )
+    broker.terminate(PRINCIPAL, claimed.current_attempt_id, unit.unit_id)
+    gateway = _CrashAfterBrokerAck(BrokerDispatcher(broker))
+    reconciler = ReversionBrokerReconciler(repository, gateway, ack_batch_limit=2)
+    token = uuid4()
+
+    with pytest.raises(BrokerError) as crashed:
+        reconciler.reconcile(
+            PRINCIPAL, "reconciler", token, NOW, LEASE_END, now_factory=lambda: NOW
+        )
+    assert crashed.value.category is BrokerErrorCategory.TRANSPORT_FAILURE
+    reconciler.reconcile(
+        PRINCIPAL, "reconciler", token, NOW, LEASE_END, now_factory=lambda: NOW
+    )
+
+    attempt = repository.get_attempt(claimed.current_attempt_id)
+    assert attempt is not None and attempt.proof_acknowledged_at is not None
+    engine.dispose()
 
 
 @pytest.mark.integration
@@ -549,6 +652,38 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
         NOW,
         RETENTION_END,
     )
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_begin_reconciliation_and_claim_are_linearized(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "ReconciliationClaimRace")
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    barrier = Barrier(2)
+    token = uuid4()
+
+    def begin() -> None:
+        barrier.wait()
+        repository.begin_reconciliation(principal, "racer", token, NOW, LEASE_END)
+
+    def claim() -> ReversionJob | None:
+        barrier.wait()
+        return repository.claim("racer", principal, NOW, LEASE_END)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        begin_future = executor.submit(begin)
+        claim_future = executor.submit(claim)
+        begin_future.result()
+        claimed = claim_future.result()
+    assert claimed is None or claimed.current_attempt_id is not None
+    assert repository.claim("after-begin", principal, NOW, LEASE_END) is None
     engine.dispose()
 
 

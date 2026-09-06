@@ -702,10 +702,16 @@ class SqlReversionJobRepository(_SqlReversionStore):
             raise ReversionJobRepositoryError from None
 
     def pending_reconciliation_acknowledgements(
-        self, principal: AuthenticatedPrincipal, token: UUID, now: datetime
+        self,
+        principal: AuthenticatedPrincipal,
+        token: UUID,
+        now: datetime,
+        limit: int,
     ) -> tuple[ReconciliationTombstone, ...]:
         """Return durable exact ACK intents before any new broker page is read."""
 
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Reconciliation ACK batch limit is invalid")
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
@@ -724,6 +730,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         ReversionAttemptRow.proof_acknowledged_at.is_(None),
                     )
                     .order_by(ReversionAttemptRow.create_sequence)
+                    .limit(limit)
                 ).all()
                 orphans = database.scalars(
                     select(ReversionOrphanProofRow)
@@ -733,6 +740,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         ReversionOrphanProofRow.acknowledged_at.is_(None),
                     )
                     .order_by(ReversionOrphanProofRow.create_sequence)
+                    .limit(limit)
                 ).all()
                 values: list[ReconciliationTombstone] = []
                 for item in (*attempts, *orphans):
@@ -763,7 +771,9 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         )
                     )
                 database.flush()
-                return tuple(sorted(values, key=lambda item: item.create_sequence))
+                return tuple(
+                    sorted(values, key=lambda item: item.create_sequence)[:limit]
+                )
         except ReversionJobLeaseLostError:
             raise
         except SQLAlchemyError, TypeError, ValueError:

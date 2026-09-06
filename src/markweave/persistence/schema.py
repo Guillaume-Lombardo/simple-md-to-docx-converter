@@ -744,3 +744,15 @@ Index(
     ReversionAttemptRow.proof_recorded_at,
     ReversionAttemptRow.recovery_expires_at,
 )
+Index(
+    "ix_reversion_attempts_pending_ack",
+    ReversionAttemptRow.principal_id,
+    ReversionAttemptRow.proof_acknowledged_at,
+    ReversionAttemptRow.create_sequence,
+)
+Index(
+    "ix_reversion_orphans_pending_ack",
+    ReversionOrphanProofRow.principal_id,
+    ReversionOrphanProofRow.acknowledged_at,
+    ReversionOrphanProofRow.create_sequence,
+)
