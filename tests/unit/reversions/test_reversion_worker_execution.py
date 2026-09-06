@@ -678,10 +678,10 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     tmp_path: Path,
     repository: tuple[SqlReversionJobRepository, User, Engine],
     mocker: MockerFixture,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     repo, owner, _engine = repository
     metrics = OperationalMetrics()
+    log_event = mocker.patch("markweave.observability.log_event")
     runtime = replace(
         _runtime(mocker, repo, FilesystemObjectStore(tmp_path)), metrics=metrics
     )
@@ -718,13 +718,7 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     assert retained is not None and retained.state is ReversionJobState.FAILED
     assert retained.error_code == ReverseErrorCategory.MALFORMED.value
     failure_metric.assert_called_once_with(ReverseErrorCategory.MALFORMED.value)
-    assert "reversion_job_processing_failed" in caplog.messages
-    failure_record = next(
-        record
-        for record in caplog.records
-        if record.getMessage() == "reversion_job_processing_failed"
-    )
-    assert cast(Any, failure_record).error_code == "malformed"
+    log_event.assert_any_call("reversion_job_processing_failed", error_code="malformed")
     attempts = repo.list_attempts(job.id)
     assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == NOW
 

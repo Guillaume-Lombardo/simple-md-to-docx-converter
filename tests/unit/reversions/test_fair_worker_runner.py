@@ -112,9 +112,10 @@ def test_empty_preferred_family_falls_back_immediately(mocker: MockerFixture) ->
 
 
 def test_reverse_broker_failure_does_not_block_forward(
-    mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    mocker: MockerFixture,
 ) -> None:
     events: list[str] = []
+    log_event = mocker.patch("markweave.observability.log_event")
     metrics = OperationalMetrics()
     loop, forward, reverse, _bridge = _loop(mocker, events, metrics=metrics)
     forward.run_once.side_effect = [False, True]
@@ -131,8 +132,13 @@ def test_reverse_broker_failure_does_not_block_forward(
         'md_converter_reversion_runtime_faults_total{code="transport_failure"} 1'
         in rendered
     )
-    assert "reversion_runtime_fault_observed" in caplog.messages
-    assert "reversion_job_processing_failed" not in caplog.messages
+    log_event.assert_any_call(
+        "reversion_runtime_fault_observed", error_code="transport_failure"
+    )
+    assert all(
+        call.args[0] != "reversion_job_processing_failed"
+        for call in log_event.call_args_list
+    )
 
 
 def test_reverse_recovery_failure_does_not_block_forward(
