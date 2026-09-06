@@ -10,6 +10,7 @@ from uuid import UUID, uuid4, uuid5
 
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import (
+    MAX_SEQUENCE,
     AuthenticatedPrincipal,
     BrokerPolicy,
     EvidenceDigest,
@@ -127,7 +128,7 @@ class IsolationBrokerService:
             type(principal) is not AuthenticatedPrincipal
             or type(request_id) is not UUID
             or type(after_create_sequence) is not int
-            or after_create_sequence < 0
+            or not 0 <= after_create_sequence <= MAX_SEQUENCE
         ):
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         with self._gate:
@@ -141,7 +142,6 @@ class IsolationBrokerService:
                 raise BrokerError(
                     BrokerErrorCategory.RECONCILIATION_INCOMPLETE
                 ) from error
-            self._ready = True
             high_water, tombstone = self._inventory_call(
                 lambda: self._inventory.reconciliation_page(
                     principal.principal_id, after_create_sequence
@@ -152,14 +152,19 @@ class IsolationBrokerService:
                 or tombstone.proof.principal != principal
             ):
                 raise BrokerError(BrokerErrorCategory.INVENTORY_FAILURE)
-            return ReconciliationResponse(
-                request_id,
-                principal.principal_id,
-                after_create_sequence,
-                high_water,
-                tombstone,
-                tombstone is None,
-            )
+            try:
+                response = ReconciliationResponse(
+                    request_id,
+                    principal.principal_id,
+                    after_create_sequence,
+                    high_water,
+                    tombstone,
+                    tombstone is None,
+                )
+            except ValueError as error:
+                raise BrokerError(BrokerErrorCategory.INVENTORY_FAILURE) from error
+            self._ready = True
+            return response
 
     def create(
         self,

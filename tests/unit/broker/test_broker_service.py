@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from threading import Event, Thread
 from typing import cast
@@ -269,6 +270,47 @@ def test_reconciliation_page_fault_never_returns_done_or_readiness(
     with pytest.raises(BrokerError):
         broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
 
+    assert not broker.ready
+
+
+def test_reconciliation_page_rejects_cursor_above_inventory_high_water(
+    tmp_path: Path,
+) -> None:
+    broker, _, _ = service(tmp_path)
+    broker.start()
+
+    with pytest.raises(BrokerError) as caught:
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 1)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+
+
+def test_reconciliation_page_rejects_cross_principal_tombstone(
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    broker, broker_inventory, _ = service(tmp_path)
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    broker.runtime_reconnected()
+    high_water, tombstone = broker_inventory.reconciliation_page(
+        PRINCIPAL.principal_id, 0
+    )
+    assert tombstone is not None
+    mismatched = replace(
+        tombstone, proof=replace(tombstone.proof, principal=OTHER_PRINCIPAL)
+    )
+    mocker.patch.object(
+        broker_inventory,
+        "reconciliation_page",
+        return_value=(high_water, mismatched),
+    )
+
+    with pytest.raises(BrokerError) as caught:
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
     assert not broker.ready
 
 
