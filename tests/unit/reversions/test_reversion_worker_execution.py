@@ -72,7 +72,9 @@ from markweave.reversions.models import ReverseOutputMode
 from markweave.storage import (
     FilesystemObjectStore,
     ObjectKey,
+    ObjectNotFoundError,
     ObjectScope,
+    ObjectStoreError,
     ObjectTooLargeError,
 )
 from tests.reversion_job_repository_contracts import (
@@ -814,6 +816,33 @@ def test_worker_does_not_claim_when_shutdown_arrives_during_reconciliation(
     assert retained is not None and retained.state is ReversionJobState.QUEUED
     cast(Any, runtime.reconciler).reconcile.assert_called_once()
     claim.assert_not_called()
+
+
+@pytest.mark.parametrize("storage_error", [ObjectNotFoundError, ObjectStoreError])
+def test_worker_terminally_rejects_unreadable_durable_source(
+    storage_error: type[Exception],
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    job = _queue(runtime, repo, owner, b"source")
+    mocker.patch.object(
+        runtime.objects,
+        "get_bounded",
+        side_effect=storage_error("sanitized storage failure"),
+    )
+
+    worker = ReversionWorker(runtime)
+    assert worker.run_once()
+    assert not worker.run_once()
+
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.state is ReversionJobState.FAILED
+    assert retained.error_code == ReverseErrorCategory.PROTOCOL_ERROR.value
+    assert retained.attempt == 1
+    cast(Any, runtime.broker).request.assert_not_called()
 
 
 def test_claim_identity_and_latched_lease_loss_fail_closed(

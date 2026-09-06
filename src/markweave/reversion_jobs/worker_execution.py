@@ -44,7 +44,13 @@ from markweave.reversion_jobs.models import (
 from markweave.reversion_jobs.runtime import ReversionWorkerRuntime
 from markweave.reversions.errors import ReverseErrorCategory, reject
 from markweave.reversions.models import ReverseAttemptSuccess
-from markweave.storage import ObjectKey, ObjectScope, ObjectTooLargeError
+from markweave.storage import (
+    ObjectKey,
+    ObjectNotFoundError,
+    ObjectScope,
+    ObjectStoreError,
+    ObjectTooLargeError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +269,8 @@ class ReversionAttemptExecutor:
             )
         except ObjectTooLargeError:
             reject(ReverseErrorCategory.RESOURCE_LIMIT)
+        except ObjectNotFoundError, ObjectStoreError:
+            reject(ReverseErrorCategory.PROTOCOL_ERROR)
         if (
             len(source) != job.source_size
             or sha256(source).hexdigest() != job.source_sha256
