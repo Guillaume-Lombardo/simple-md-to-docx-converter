@@ -51,6 +51,7 @@ _LOG_EVENTS = frozenset(
         "reversion_job_expiration_completed",
         "reversion_job_processing_failed",
         "reversion_job_recovery_completed",
+        "reversion_runtime_fault_observed",
         "reversion_runtime_status_changed",
         "reversion_step_completed",
         "reversion_worker_retry_scheduled",
@@ -484,10 +485,20 @@ class OperationalMetrics:
             log_event("reversion_runtime_status_changed", runtime_state=state)
 
     def record_reversion_failure(self, code: str) -> None:
+        """Record one reverse job that reached the failed terminal state."""
+
         if code not in _LOG_ERROR_CODES:
             raise ValueError("Reverse failure code is invalid")
-        self._increment("md_converter_reversion_failures_total", code=code)
+        self._increment("md_converter_reversion_job_failures_total", code=code)
         log_event("reversion_job_processing_failed", error_code=code)
+
+    def record_reversion_fault(self, code: str) -> None:
+        """Record one retryable reverse infrastructure/runtime fault."""
+
+        if code not in _LOG_ERROR_CODES:
+            raise ValueError("Reverse fault code is invalid")
+        self._increment("md_converter_reversion_runtime_faults_total", code=code)
+        log_event("reversion_runtime_fault_observed", error_code=code)
 
     def record_reversion_retry(self, operation: str) -> None:
         if operation not in _REVERSION_OPERATIONS:

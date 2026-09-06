@@ -287,10 +287,14 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   failures, retries, recoveries, expirations, and durations without making global forward readiness
   fail solely because reverse execution is degraded. A real assembled standalone boundary test runs
   `build_components` through the fair loop against a Unix broker, proving forward progress during a
-  broker outage and reconnection followed by two serial reverse jobs under a cap of one. Targeted
+  broker outage and reconnection followed by two serial reverse jobs under a cap of one. Terminal
+  reverse-job failure categories are recorded only after the durable failed transition and remain
+  distinct from retryable scheduler/runtime faults. Proof recovery returns to reconciliation rather
+  than claiming early, and recovery metrics count only jobs actually requeued. Targeted
   unit, SQLite, and Unix transport coverage passes locally; PostgreSQL concurrency and the existing
-  mTLS transport contracts remain executable in hosted CI. A combined distributed PostgreSQL/S3/mTLS
-  final-image workflow is still outstanding with T73, so T71 remains In Progress.
+  mTLS transport contracts remain executable in hosted CI. The combined distributed
+  PostgreSQL/S3/mTLS final-image matrix belongs to the separate T73 delivery and does not block T71
+  acceptance. T71 remains In Progress until this runtime slice is published and verified on main.
 
 ## Synchronization
 

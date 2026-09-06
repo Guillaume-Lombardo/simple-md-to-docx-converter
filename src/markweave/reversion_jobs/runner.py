@@ -27,6 +27,7 @@ def _reverse_operation(phase: str) -> str:
     return {
         "reconcile": "reversion_reconciliation",
         "recover": "reversion_recovery",
+        "recover_proof": "reversion_recovery",
         "claim": "reversion_claim",
         "cleanup": "reversion_cleanup",
     }[phase]
@@ -148,7 +149,7 @@ class FairWorkerLoop:
                                 reverse_phase
                             )
                         except ReversionProofRequiredError:
-                            reverse_phase = "recover"
+                            reverse_phase = "recover_proof"
                             self._set_reverse_state("degraded_reconciliation")
                         except (
                             BrokerError,
@@ -184,10 +185,13 @@ class FairWorkerLoop:
                 ready = self._reverse.reconcile_step()
                 self._set_reverse_state("ready" if ready else "reconciling")
                 return False, "recover" if ready else phase
-            if phase == "recover":
+            if phase in {"recover", "recover_proof"}:
                 recovered = self._reverse.recover_step()
                 if self._metrics is not None:
-                    self._metrics.record_reversion_recovery(recovered.progressed)
+                    self._metrics.record_reversion_recovery(recovered.requeued)
+                if phase == "recover_proof":
+                    self._set_reverse_state("reconciling")
+                    return False, "reconcile"
                 self._set_reverse_state("ready")
                 return False, "claim"
             processed = self._reverse.run_reconciled_once()
@@ -249,7 +253,7 @@ class FairWorkerLoop:
         self._set_reverse_state(state)
         if self._metrics is not None:
             operation = _reverse_operation(phase)
-            self._metrics.record_reversion_failure(code)
+            self._metrics.record_reversion_fault(code)
             self._metrics.record_reversion_retry(operation)
         self._retry("reverse")
 

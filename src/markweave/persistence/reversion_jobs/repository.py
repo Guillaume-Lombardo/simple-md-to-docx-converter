@@ -1358,6 +1358,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 candidates = tuple(database.scalars(incomplete_ids))
                 if not candidates:
                     return recovered
+                self._after_incomplete_recovery_select()
                 incomplete_result = database.execute(
                     update(ReversionJobRow)
                     .where(
@@ -1377,6 +1378,9 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 return recovered + int(getattr(incomplete_result, "rowcount", 0))
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
+
+    def _after_incomplete_recovery_select(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
 
     def succeed(  # noqa: PLR0913, PLR0917
         self,

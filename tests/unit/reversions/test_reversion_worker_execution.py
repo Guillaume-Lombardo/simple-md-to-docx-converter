@@ -43,6 +43,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceStageRequest,
     WorkspaceSuccessResponse,
 )
+from markweave.observability import OperationalMetrics
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
@@ -677,9 +678,14 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     tmp_path: Path,
     repository: tuple[SqlReversionJobRepository, User, Engine],
     mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     repo, owner, _engine = repository
-    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    metrics = OperationalMetrics()
+    runtime = replace(
+        _runtime(mocker, repo, FilesystemObjectStore(tmp_path)), metrics=metrics
+    )
+    failure_metric = mocker.spy(metrics, "record_reversion_failure")
     job = _queue(runtime, repo, owner, b"source")
     _successful_broker(mocker, runtime)
     broker = cast(Any, runtime.broker)
@@ -711,6 +717,14 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     retained = repo.get_internal(job.id)
     assert retained is not None and retained.state is ReversionJobState.FAILED
     assert retained.error_code == ReverseErrorCategory.MALFORMED.value
+    failure_metric.assert_called_once_with(ReverseErrorCategory.MALFORMED.value)
+    assert "reversion_job_processing_failed" in caplog.messages
+    failure_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "reversion_job_processing_failed"
+    )
+    assert cast(Any, failure_record).error_code == "malformed"
     attempts = repo.list_attempts(job.id)
     assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == NOW
 

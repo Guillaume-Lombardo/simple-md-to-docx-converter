@@ -263,6 +263,7 @@ class AppComponents:
             shutdown_requested=stop_bridge.is_set,
             request_id_factory=uuid4,
             require_ready=True,
+            metrics=self.metrics,
         )
         return ReversionWorker(runtime), stop_bridge
 

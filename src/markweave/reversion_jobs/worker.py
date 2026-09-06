@@ -179,6 +179,8 @@ class ReversionWorker:
                     expires_at,
                 )
             )
+            if self._runtime.metrics is not None:
+                self._runtime.metrics.record_reversion_failure(error.category.value)
         attempt = self._runtime.repository.get_attempt(claimed.attempt_id)
         if attempt is not None and attempt.termination_proof is not None:
             self._publication.acknowledge_attempt(attempt)

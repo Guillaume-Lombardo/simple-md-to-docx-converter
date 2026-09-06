@@ -10,12 +10,15 @@ from pytest_mock import MockerFixture
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.jobs.runner import WorkerSchedule
 from markweave.jobs.worker import ConversionWorker
+from markweave.observability import OperationalMetrics, QueueSnapshot
+from markweave.reversion_jobs.errors import ReversionProofRequiredError
 from markweave.reversion_jobs.runner import (
     FairWorkerLoop,
     ReversionSchedule,
     StopSignalBridge,
 )
 from markweave.reversion_jobs.worker import ReversionWorker
+from markweave.reversion_jobs.worker_maintenance import ReversionRecoveryResult
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
 pytestmark = pytest.mark.unit
@@ -50,6 +53,7 @@ def _loop(
     events: list[str],
     *,
     reverse_schedule: ReversionSchedule | None = None,
+    metrics: OperationalMetrics | None = None,
 ) -> tuple[FairWorkerLoop, Any, Any, StopSignalBridge]:
     forward = mocker.Mock(spec=ConversionWorker)
     reverse = mocker.Mock(spec=ReversionWorker)
@@ -76,6 +80,7 @@ def _loop(
         reverse_schedule or ReversionSchedule(100, 3),
         stop_bridge=bridge,
         monotonic_clock=clock,
+        metrics=metrics,
     )
     return loop, forward, reverse, bridge
 
@@ -107,10 +112,11 @@ def test_empty_preferred_family_falls_back_immediately(mocker: MockerFixture) ->
 
 
 def test_reverse_broker_failure_does_not_block_forward(
-    mocker: MockerFixture,
+    mocker: MockerFixture, caplog: pytest.LogCaptureFixture
 ) -> None:
     events: list[str] = []
-    loop, forward, reverse, _bridge = _loop(mocker, events)
+    metrics = OperationalMetrics()
+    loop, forward, reverse, _bridge = _loop(mocker, events, metrics=metrics)
     forward.run_once.side_effect = [False, True]
     reverse.reconcile_step.side_effect = BrokerError(
         BrokerErrorCategory.TRANSPORT_FAILURE
@@ -120,6 +126,13 @@ def test_reverse_broker_failure_does_not_block_forward(
 
     assert forward.run_once.call_count >= 1
     reverse.reconcile_step.assert_called_once_with()
+    rendered = metrics.render(QueueSnapshot(0, 0, 0))
+    assert (
+        'md_converter_reversion_runtime_faults_total{code="transport_failure"} 1'
+        in rendered
+    )
+    assert "reversion_runtime_fault_observed" in caplog.messages
+    assert "reversion_job_processing_failed" not in caplog.messages
 
 
 def test_reverse_recovery_failure_does_not_block_forward(
@@ -179,6 +192,43 @@ def test_multi_page_reconciliation_interleaves_forward_before_reverse_claim(
         "forward",
         "reverse",
     ]
+
+
+def test_proof_recovery_returns_to_reconciliation_without_claiming(
+    mocker: MockerFixture,
+) -> None:
+    events: list[str] = []
+    metrics = OperationalMetrics()
+    loop, forward, reverse, _bridge = _loop(mocker, events, metrics=metrics)
+    forward.run_once.side_effect = lambda **_kwargs: events.append("forward") or True
+
+    def reconcile() -> bool:
+        events.append("reconcile")
+        if reverse.reconcile_step.call_count == 1:
+            raise ReversionProofRequiredError
+        return False
+
+    reverse.reconcile_step.side_effect = reconcile
+    reverse.recover_step.side_effect = lambda: (
+        events.append("recover") or ReversionRecoveryResult(1, 0)
+    )
+
+    loop.run(_StopAfter(events, 7))
+
+    assert events == [
+        "forward",
+        "reconcile",
+        "forward",
+        "recover",
+        "forward",
+        "reconcile",
+        "forward",
+    ]
+    reverse.run_reconciled_once.assert_not_called()
+    rendered = metrics.render(QueueSnapshot(0, 0, 0))
+    assert "md_converter_reversion_reconciliation_ready 0" in rendered
+    assert "md_converter_reversion_degraded 1" in rendered
+    assert "md_converter_reversion_recoveries_total 0" in rendered
 
 
 def test_due_reverse_cleanup_is_one_quantum_when_both_queues_are_empty(

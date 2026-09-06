@@ -36,6 +36,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceStageRequest,
 )
 from markweave.config import ReversionBrokerTransport, Settings
+from markweave.observability import OperationalMetrics
 from markweave.reversion_jobs.models import MAX_WORKER_ID_CHARACTERS
 from markweave.reversion_jobs.ports import ReversionWorkerRepository
 from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
@@ -127,6 +128,7 @@ class ReversionWorkerRuntime:
     shutdown_requested: Callable[[], bool]
     request_id_factory: Callable[[], UUID]
     require_ready: bool = False
+    metrics: OperationalMetrics | None = None
 
     def __post_init__(self) -> None:
         if (

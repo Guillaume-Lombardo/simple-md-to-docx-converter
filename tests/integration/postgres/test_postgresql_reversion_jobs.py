@@ -24,7 +24,11 @@ from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
     ReversionJobLeaseLostError,
 )
-from markweave.reversion_jobs.models import ReversionAttempt, ReversionJob
+from markweave.reversion_jobs.models import (
+    ReversionAttempt,
+    ReversionJob,
+    ReversionJobState,
+)
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
@@ -45,6 +49,15 @@ class _RecoveryRaceRepository(SqlReversionJobRepository):
         self._barrier = barrier
 
     def _before_recovery_proof_cas(self) -> None:
+        self._barrier.wait()
+
+
+class _IncompleteRecoveryRaceRepository(SqlReversionJobRepository):
+    def __init__(self, engine: Engine, barrier: Barrier) -> None:
+        super().__init__(engine)
+        self._barrier = barrier
+
+    def _after_incomplete_recovery_select(self) -> None:
         self._barrier.wait()
 
 
@@ -163,20 +176,27 @@ def test_postgresql_enforces_configured_reverse_running_limit() -> None:
 def test_postgresql_incomplete_recovery_workers_claim_distinct_rows() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
-    repository = SqlReversionJobRepository(engine)
+    repository = _IncompleteRecoveryRaceRepository(engine, Barrier(2))
     owner = _user(SqlUserRepository(engine), "IncompleteRecoveryRace")
+    job_ids = []
     for _ in range(2):
-        repository.create(submission(owner.id))
-    barrier = Barrier(2)
+        job, _created = repository.create(submission(owner.id))
+        job_ids.append(job.id)
 
     def recover() -> int:
-        barrier.wait()
         return repository.recover_expired_leases(NOW, RETENTION_END, NOW, limit=1)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         recovered = tuple(executor.map(lambda _value: recover(), range(2)))
 
     assert sum(recovered) == 2
+    retained = tuple(repository.get_internal(job_id) for job_id in job_ids)
+    assert all(
+        job is not None
+        and job.state is ReversionJobState.FAILED
+        and job.error_code == "source_upload_incomplete"
+        for job in retained
+    )
     engine.dispose()
 
 

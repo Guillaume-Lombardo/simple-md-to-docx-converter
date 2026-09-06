@@ -204,7 +204,8 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     metrics.record_request("POST", 202, 0.5)
     metrics.record_request("ATTACKER-CONTROLLED-METHOD", 400, 0.1)
     metrics.set_reversion_runtime_state("degraded_broker")
-    metrics.record_reversion_failure("transport_failure")
+    metrics.record_reversion_failure("malformed")
+    metrics.record_reversion_fault("protocol_error")
     metrics.record_reversion_retry("reversion_reconciliation")
     metrics.record_reversion_recovery(2)
     metrics.record_reversion_expiration(1)
@@ -247,8 +248,10 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     assert "md_converter_reversion_broker_ready 0" in rendered
     assert "md_converter_reversion_broker_fault 1" in rendered
     assert "md_converter_reversion_degraded 1" in rendered
+    assert 'md_converter_reversion_job_failures_total{code="malformed"} 1' in rendered
     assert (
-        'md_converter_reversion_failures_total{code="transport_failure"} 1' in rendered
+        'md_converter_reversion_runtime_faults_total{code="protocol_error"} 1'
+        in rendered
     )
     assert "md_converter_reversion_recoveries_total 2" in rendered
     assert "md_converter_reversion_expirations_total 1" in rendered
@@ -265,6 +268,8 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
         metrics.set_reversion_runtime_state("private-state")
     with pytest.raises(ValueError, match="failure code"):
         metrics.record_reversion_failure("private-code")
+    with pytest.raises(ValueError, match="fault code"):
+        metrics.record_reversion_fault("private-code")
     with pytest.raises(ValueError, match="retry operation"):
         metrics.record_reversion_retry("private-operation")
 

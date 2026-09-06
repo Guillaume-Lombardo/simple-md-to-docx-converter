@@ -43,8 +43,11 @@ rows. The endpoint exposes:
   process-local reverse execution state;
 - `md_converter_reversion_broker_fault`, `md_converter_reversion_reconciliation_fault`, and
   `md_converter_reversion_runtime_fault` as mutually exclusive content-free fault scopes;
-- `md_converter_reversion_failures_total`, `md_converter_reversion_worker_retries_total`,
-  `md_converter_reversion_recoveries_total`, and `md_converter_reversion_expirations_total`;
+- `md_converter_reversion_job_failures_total` for terminal job failures and
+  `md_converter_reversion_runtime_faults_total` for retryable infrastructure/runtime faults;
+- `md_converter_reversion_worker_retries_total`, `md_converter_reversion_recoveries_total`, and
+  `md_converter_reversion_expirations_total`; recovery counts only jobs actually requeued, not
+  intermediate proof acknowledgements;
 - `md_converter_reversion_operation_duration_seconds_count` and `_sum`, labelled only by the
   closed operations `reversion_reconciliation`, `reversion_recovery`, `reversion_claim`, and
   `reversion_cleanup`;
