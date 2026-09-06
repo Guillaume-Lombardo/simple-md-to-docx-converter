@@ -157,7 +157,7 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         if not content or len(content) > maximum:
             raise ReversionJobRequestError
         await run_in_threadpool(dependencies.components.scanner.scan, content)
-        admitted = admit_reverse_source(filename, content)
+        admitted = await run_in_threadpool(admit_reverse_source, filename, content)
         try:
             job, _replayed = await run_in_threadpool(
                 runtime.submit,

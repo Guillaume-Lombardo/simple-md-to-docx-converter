@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from hashlib import sha256
 from uuid import uuid4
@@ -15,6 +16,7 @@ from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import Role, User
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
+from markweave.http.middleware import BoundedRequestBody
 from markweave.jobs.service import JobService
 from markweave.malware import UploadScanner
 from markweave.reversion_jobs.errors import (
@@ -222,6 +224,33 @@ def test_submission_fails_closed_before_parsing_when_runtime_is_unconfigured(
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "REVERSION_SERVICE_UNAVAILABLE"
     assert response.headers["Cache-Control"] == "private, no-store"
+
+
+def test_unavailable_runtime_rejects_before_reading_any_request_bytes(
+    mocker: MockerFixture,
+) -> None:
+    downstream = mocker.AsyncMock()
+    receive = mocker.AsyncMock(side_effect=AssertionError("body must not be read"))
+    send = mocker.AsyncMock()
+    middleware = BoundedRequestBody(
+        downstream,
+        conversion_maximum_bytes=2_000,
+        reversion_maximum_bytes=None,
+        template_maximum_bytes=2_000,
+        template_metadata_maximum_bytes=1_000,
+    )
+
+    asyncio.run(
+        middleware(
+            {"type": "http", "method": "POST", "path": "/api/v1/reversions"},
+            receive,
+            send,
+        )
+    )
+
+    receive.assert_not_called()
+    downstream.assert_not_called()
+    assert send.await_args_list[0].args[0]["status"] == 503
 
 
 def test_submission_body_is_bounded_before_multipart_spooling(

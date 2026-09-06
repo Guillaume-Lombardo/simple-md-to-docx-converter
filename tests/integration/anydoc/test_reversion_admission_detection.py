@@ -11,7 +11,7 @@ from markweave.reversions.detection import admit_reverse_source
 
 pytestmark = pytest.mark.integration
 
-CORPUS = Path("spikes/anydoc/corpus")
+CORPUS = Path(__file__).resolve().parents[3] / "spikes" / "anydoc" / "corpus"
 
 
 def test_every_t69_corpus_source_reaches_its_approved_parser_family() -> None:
