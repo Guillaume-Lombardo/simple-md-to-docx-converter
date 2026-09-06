@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: In Progress
+status: Backlog
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
