@@ -30,6 +30,14 @@ rows. The endpoint exposes:
 
 - `md_converter_queue_depth` and `md_converter_queue_oldest_age_seconds`;
 - `md_converter_active_jobs`;
+- `md_converter_reversion_queue_depth`,
+  `md_converter_reversion_queue_oldest_age_seconds`, and
+  `md_converter_reversion_active_jobs` for the distinct reverse queue;
+- `md_converter_shared_capacity_used`, the queued-plus-running admission usage across both job
+  families;
+- `md_converter_reversion_proof_blocked_attempts`,
+  `md_converter_reversion_proof_ack_backlog`, and
+  `md_converter_reversion_reconciliation_pending` for content-free reverse safety backlogs;
 - `md_converter_job_step_duration_seconds_count` and `_sum`, labelled only by the fixed step;
 - `md_converter_job_failures_total`, labelled by stable safe error code;
 - `md_converter_job_saturation_total`, labelled `owner` or `global`;
@@ -41,6 +49,15 @@ Counters are process-local and reset on process restart. Durable job state remai
 queue depth, age, and active-job gauges are recomputed from the selected SQLite or PostgreSQL
 profile for every scrape. Distributed deployments aggregate process-local counters in the metrics
 backend and must not sum the database-derived gauges across API replicas.
+
+The original queue gauge names retain their forward-conversion meaning for dashboard compatibility.
+Reverse gauges use dedicated names rather than a user-controlled or content-derived label. A proof
+is counted as blocked only after its durable attempt lease has expired with a create intent and no
+termination proof. The acknowledgement backlog combines durable attempt and orphan proofs that have
+not yet been acknowledged. Reconciliation pending counts only durable broker-principal rows that
+are incomplete or actively leased; zero principals therefore remains neutral for a forward-only
+deployment and does not claim that a reverse broker is ready. These gauges contain no owner, job,
+attempt, unit, filename, format, digest, path, or document label.
 
 Each external-worker process must run the lifecycle returned by
 `AppComponents.build_external_worker_runtime`, not the bare loop. It binds a process-local HTTP

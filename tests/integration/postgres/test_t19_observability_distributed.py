@@ -30,6 +30,7 @@ from markweave.persistence.observability import (
     SqlOperationalObserver,
 )
 from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import (
     AuthenticationAuditRow,
     RetentionCleanupRunRow,
@@ -37,6 +38,11 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.storage import FilesystemObjectStore
+from tests.reversion_job_repository_contracts import (
+    NOW,
+    complete_empty_reconciliation,
+    submission,
+)
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
@@ -110,6 +116,19 @@ def test_postgresql_queue_observation_matches_standalone_contract(
         repository.claim("distributed-worker", now, now + timedelta(seconds=30))
         running = SqlOperationalObserver(engine).observe_queue(now)
         assert (running.depth, running.active_jobs) == (0, 1)
+
+        reverse_repository = SqlReversionJobRepository(engine)
+        complete_empty_reconciliation(reverse_repository)
+        reverse, _ = reverse_repository.create(submission(owner.id, created_at=NOW))
+        reverse_repository.activate_source(reverse.id, NOW)
+        mixed = SqlOperationalObserver(engine).observe_queue(NOW + timedelta(seconds=4))
+        assert mixed.reversion_depth == 1
+        assert mixed.reversion_oldest_age_seconds == 4
+        assert mixed.reversion_active_jobs == 0
+        assert mixed.shared_capacity_used == 2
+        assert mixed.reversion_proof_blocked_attempts == 0
+        assert mixed.reversion_proof_ack_backlog == 0
+        assert mixed.reversion_reconciliation_pending == 0
     finally:
         engine.dispose()
 

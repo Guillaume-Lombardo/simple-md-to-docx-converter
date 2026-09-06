@@ -287,11 +287,40 @@ class CorrelationMiddleware:
 
 @dataclass(frozen=True, slots=True)
 class QueueSnapshot:
-    """Low-cardinality queue gauges derived by one aggregate query."""
+    """Low-cardinality queue gauges derived by one aggregate query.
+
+    The original fields retain their forward-conversion meaning. Reverse work uses
+    separate fields and metric names so existing dashboards remain compatible.
+    """
 
     depth: int
     oldest_age_seconds: float
     active_jobs: int
+    reversion_depth: int = 0
+    reversion_oldest_age_seconds: float = 0.0
+    reversion_active_jobs: int = 0
+    shared_capacity_used: int = 0
+    reversion_proof_blocked_attempts: int = 0
+    reversion_proof_ack_backlog: int = 0
+    reversion_reconciliation_pending: int = 0
+
+    def __post_init__(self) -> None:
+        counts = (
+            self.depth,
+            self.active_jobs,
+            self.reversion_depth,
+            self.reversion_active_jobs,
+            self.shared_capacity_used,
+            self.reversion_proof_blocked_attempts,
+            self.reversion_proof_ack_backlog,
+            self.reversion_reconciliation_pending,
+        )
+        ages = (self.oldest_age_seconds, self.reversion_oldest_age_seconds)
+        if any(type(value) is not int or value < 0 for value in counts) or any(
+            type(value) not in {int, float} or not math.isfinite(value) or value < 0
+            for value in ages
+        ):
+            raise ValueError("Queue snapshot values must be finite and non-negative")
 
 
 class QueueObserver(Protocol):
@@ -396,6 +425,31 @@ class OperationalMetrics:
             ("md_converter_queue_depth", float(queue.depth)),
             ("md_converter_queue_oldest_age_seconds", queue.oldest_age_seconds),
             ("md_converter_active_jobs", float(queue.active_jobs)),
+            ("md_converter_reversion_queue_depth", float(queue.reversion_depth)),
+            (
+                "md_converter_reversion_queue_oldest_age_seconds",
+                queue.reversion_oldest_age_seconds,
+            ),
+            (
+                "md_converter_reversion_active_jobs",
+                float(queue.reversion_active_jobs),
+            ),
+            (
+                "md_converter_shared_capacity_used",
+                float(queue.shared_capacity_used),
+            ),
+            (
+                "md_converter_reversion_proof_blocked_attempts",
+                float(queue.reversion_proof_blocked_attempts),
+            ),
+            (
+                "md_converter_reversion_proof_ack_backlog",
+                float(queue.reversion_proof_ack_backlog),
+            ),
+            (
+                "md_converter_reversion_reconciliation_pending",
+                float(queue.reversion_reconciliation_pending),
+            ),
         )
         with self._lock:
             counters = tuple(sorted(self._counters.items()))
