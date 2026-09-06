@@ -83,6 +83,12 @@ def test_reconciliation_is_exclusive_monotone_and_retains_orphan_before_ack(
     assert repository.pending_reconciliation_acknowledgements(
         principal, token, NOW, 8
     ) == (tombstone,)
+    substituted = replace(
+        tombstone,
+        proof=replace(tombstone.proof, principal=AuthenticatedPrincipal(uuid4())),
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(principal, token, substituted, NOW)
     repository.mark_reconciliation_acknowledged(principal, token, tombstone, NOW)
     assert (
         repository.pending_reconciliation_acknowledgements(principal, token, NOW, 8)
@@ -207,17 +213,33 @@ def test_reconciliation_drains_preexisting_unacknowledged_attempt_proof(
     )
     token = uuid4()
     repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
-
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
     assert repository.pending_reconciliation_acknowledgements(
         PRINCIPAL, token, NOW, 8
-    ) == (ReconciliationTombstone(1, POLICY_SPECIFICATION, retained),)
+    ) == (tombstone,)
+    substituted = replace(
+        tombstone,
+        proof=replace(retained, principal=AuthenticatedPrincipal(uuid4())),
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, substituted, NOW)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("column", ["proof_unit_id", "proof_principal_id"])
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("proof_unit_id", str(uuid4())),
+        ("proof_principal_id", str(uuid4())),
+        ("policy_revision", "mutated-policy"),
+    ],
+)
 def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
     reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
     column: str,
+    value: str,
 ) -> None:
     repository, owner, _other, engine = reverse_repository
     job, _ = repository.create(submission(owner.id))
@@ -254,32 +276,26 @@ def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
     )
     token = uuid4()
     repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    assert repository.pending_reconciliation_acknowledgements(
+        PRINCIPAL, token, NOW, 8
+    ) == (tombstone,)
     with engine.begin() as connection:
         connection.execute(
             update(ReversionAttemptRow)
             .where(ReversionAttemptRow.attempt_id == str(claimed.current_attempt_id))
-            .values({column: str(uuid4())})
+            .values({column: value})
         )
-    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
     with pytest.raises(ReversionJobConflictError):
         repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
-
-
-@pytest.mark.unit
-def test_reconciliation_ack_rejects_substituted_proof_principal(
-    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
-) -> None:
-    repository, _owner, _other, _engine = reverse_repository
-    token = uuid4()
-    repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
-    retained = proof(uuid4(), uuid4())
-    tombstone = ReconciliationTombstone(
-        1,
-        POLICY_SPECIFICATION,
-        replace(retained, principal=AuthenticatedPrincipal(uuid4())),
-    )
-    with pytest.raises(ReversionJobConflictError):
-        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
+    with engine.connect() as connection:
+        acknowledged_at = connection.execute(
+            text(
+                "SELECT proof_acknowledged_at FROM reversion_attempts WHERE attempt_id = :attempt"
+            ),
+            {"attempt": str(claimed.current_attempt_id)},
+        ).scalar_one()
+    assert acknowledged_at is None
 
 
 @pytest.mark.unit

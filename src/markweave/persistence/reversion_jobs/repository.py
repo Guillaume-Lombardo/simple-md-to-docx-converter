@@ -680,12 +680,14 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         or attempt.proof_id != str(proof.proof_id)
                         or attempt.proof_principal_id
                         != str(proof.principal.principal_id)
+                        or attempt.policy_revision != proof.policy_revision
                         or attempt.policy_specification
                         != tombstone.policy_specification.value
                         or attempt.proof_policy_revision != proof.policy_revision
                         or attempt.exit_evidence != proof.exit_evidence.value
                         or attempt.empty_evidence != proof.empty_evidence.value
                         or attempt.removal_evidence != proof.removal_evidence.value
+                        or attempt.reconciliation_ack_intent_at is None
                     ):
                         raise ReversionJobConflictError
                     attempt.proof_acknowledged_at = attempt.proof_acknowledged_at or now
