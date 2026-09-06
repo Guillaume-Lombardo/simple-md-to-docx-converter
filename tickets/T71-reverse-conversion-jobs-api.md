@@ -2,7 +2,7 @@
 ticket: T71
 linear_id: G1L-539
 linear_url: https://linear.app/g1lom/issue/G1L-539/t71-add-persistent-reverse-conversion-jobs-and-api
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -298,6 +298,13 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   mTLS transport contracts remain executable in hosted CI. The combined distributed
   PostgreSQL/S3/mTLS final-image matrix belongs to the separate T73 delivery and does not block T71
   acceptance. T71 remains In Progress until this runtime slice is published and verified on main.
+* 2026-09-06: Completed T71 after PR #212 merged as
+  `e084a0759c2f3cb24cc2704564e4cecf296a30c7`. Exact-head run `34035904221` and exact-main run
+  `34037171719` passed the complete matrix, including both storage profiles, document engines,
+  container validation, standalone/distributed final-image E2E, the light branch and changed-line
+  coverage gates, and the final CI gate. CodeRabbit passed the exact head and all review threads
+  were resolved. The criterion-by-criterion acceptance audit found no remaining T71 gap; the
+  combined final three-image release matrix remains explicitly owned by T73.
 
 ## Synchronization
 
