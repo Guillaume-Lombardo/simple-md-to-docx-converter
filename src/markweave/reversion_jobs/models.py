@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid5
@@ -200,6 +201,32 @@ class ReversionSubmission:
             _sha256(self.idempotency_digest, "Reverse idempotency digest")
         require_correlation_id(self.correlation_id)
         object.__setattr__(self, "created_at", _utc(self.created_at))
+
+
+@dataclass(frozen=True, slots=True)
+class ReversionRequest:
+    """Validated owner request before durable identity allocation."""
+
+    owner_id: UUID
+    source_stem: str
+    admission: FormatAdmission
+    component_versions: tuple[tuple[str, str], ...]
+    now: datetime
+    source: bytes = dataclass_field(repr=False)
+    correlation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.owner_id) is not UUID:
+            raise ValueError("Reverse request owner identity must be a UUID")
+        _source_stem(self.source_stem)
+        if type(self.admission) is not FormatAdmission:
+            raise ValueError("Reverse format admission is invalid")
+        _component_versions(self.component_versions)
+        object.__setattr__(self, "now", _utc(self.now))
+        if type(self.source) is not bytes or not self.source:
+            raise ValueError("Reverse request source must not be empty")
+        if self.correlation_id is not None:
+            require_correlation_id(self.correlation_id)
 
 
 @dataclass(frozen=True, slots=True)

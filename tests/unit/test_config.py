@@ -69,21 +69,52 @@ def test_security_defaults_and_secret_redaction() -> None:
     assert settings.public_origin is None
     assert settings.insecure_evaluation_mode is False
     assert settings.reversion_upload_max_bytes is None
+    assert settings.reversion_request_max_bytes is None
+    assert settings.reversion_retry_after_seconds is None
+    assert settings.reversion_result_retention_seconds is None
+    assert settings.reversion_active_limit_per_user is None
     assert secret not in repr(settings)
 
 
 @pytest.mark.unit
-def test_reverse_upload_limit_is_optional_but_strictly_positive() -> None:
+def test_reverse_lifecycle_limits_are_optional_but_strictly_positive() -> None:
     configured = Settings.model_validate(
-        _environment_configuration(reversion_upload_max_bytes=4_194_304)
+        _environment_configuration(
+            reversion_upload_max_bytes=4_194_304,
+            reversion_request_max_bytes=4_300_000,
+            reversion_retry_after_seconds=3,
+            reversion_result_retention_seconds=86_400,
+            reversion_active_limit_per_user=2,
+        )
     )
     assert configured.reversion_upload_max_bytes == 4_194_304
+    assert configured.reversion_request_max_bytes == 4_300_000
+    assert configured.reversion_retry_after_seconds == 3
+    assert configured.reversion_result_retention_seconds == 86_400
+    assert configured.reversion_active_limit_per_user == 2
 
-    for invalid in (0, -1):
-        with pytest.raises(ValidationError):
-            Settings.model_validate(
-                _environment_configuration(reversion_upload_max_bytes=invalid)
+    for field_name in (
+        "reversion_upload_max_bytes",
+        "reversion_request_max_bytes",
+        "reversion_retry_after_seconds",
+        "reversion_result_retention_seconds",
+        "reversion_active_limit_per_user",
+    ):
+        for invalid in (0, -1):
+            with pytest.raises(ValidationError):
+                Settings.model_validate(
+                    _environment_configuration(**{field_name: invalid})
+                )
+
+    with pytest.raises(
+        ValidationError, match="reversion request limit must exceed the source limit"
+    ):
+        Settings.model_validate(
+            _environment_configuration(
+                reversion_upload_max_bytes=4_194_304,
+                reversion_request_max_bytes=4_194_304,
             )
+        )
 
 
 @pytest.mark.unit
@@ -180,6 +211,10 @@ def test_deprecated_idle_environment_input_is_never_silently_ignored(
         ("session_idle_seconds", "1800", "01800"),
         ("insecure_evaluation_mode", "true", "TRUE"),
         ("reversion_upload_max_bytes", "4194304", "04194304"),
+        ("reversion_request_max_bytes", "4300000", "04300000"),
+        ("reversion_retry_after_seconds", "3", "03"),
+        ("reversion_result_retention_seconds", "86400", "086400"),
+        ("reversion_active_limit_per_user", "2", "02"),
         (
             "public_origin",
             "https://Converter.Example:8443",

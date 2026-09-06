@@ -100,6 +100,16 @@ export type BodyCreateConversionApiV1ConversionsPost = {
 };
 
 /**
+ * Body_create_reversion_api_v1_reversions_post
+ */
+export type BodyCreateReversionApiV1ReversionsPost = {
+    /**
+     * Source
+     */
+    source: Blob | File;
+};
+
+/**
  * Body_create_template_api_v1_templates_post
  */
 export type BodyCreateTemplateApiV1TemplatesPost = {
@@ -542,6 +552,44 @@ export type ReversionFormatCapabilityResponse = {
 };
 
 /**
+ * ReversionJobState
+ *
+ * Persisted reverse-conversion lifecycle.
+ */
+export type ReversionJobState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * ReversionJobStep
+ *
+ * Closed content-free reverse-job step vocabulary.
+ */
+export type ReversionJobStep = 'queued' | 'isolating' | 'converting' | 'validating' | 'publishing' | 'complete';
+
+/**
+ * ReversionPageResponse
+ *
+ * Paginated owner-only reverse job response.
+ */
+export type ReversionPageResponse = {
+    /**
+     * Items
+     */
+    items: Array<ReversionResponse>;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Total
+     */
+    total: number;
+};
+
+/**
  * ReversionPdfCapabilitiesResponse
  *
  * Client-visible limitations of the pinned PDF path.
@@ -571,6 +619,81 @@ export type ReversionPdfCapabilitiesResponse = {
      * Warning
      */
     warning: string;
+};
+
+/**
+ * ReversionResponse
+ *
+ * Owner-only reverse job snapshot without source or result bytes.
+ */
+export type ReversionResponse = {
+    /**
+     * Attempt
+     */
+    attempt: number;
+    /**
+     * Cancel Requested
+     */
+    cancel_requested: boolean;
+    /**
+     * Component Versions
+     */
+    component_versions: Array<[
+        string,
+        string
+    ]>;
+    /**
+     * Correlation Id
+     */
+    correlation_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Detected Format
+     */
+    detected_format: string | null;
+    /**
+     * Error Code
+     */
+    error_code: string | null;
+    /**
+     * Error Message
+     */
+    error_message: string | null;
+    /**
+     * Expires At
+     */
+    expires_at: string | null;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    result_mode: ReverseOutputMode | null;
+    /**
+     * Result Size
+     */
+    result_size: number | null;
+    /**
+     * Source Extension
+     */
+    source_extension: string;
+    source_family: FormatFamily;
+    /**
+     * Source Stem
+     */
+    source_stem: string;
+    state: ReversionJobState;
+    step: ReversionJobStep;
+    /**
+     * Updated At
+     */
+    updated_at: string;
 };
 
 /**
@@ -1581,6 +1704,107 @@ export type ChangeOwnPasswordApiV1PasswordPostResponses = {
 
 export type ChangeOwnPasswordApiV1PasswordPostResponse = ChangeOwnPasswordApiV1PasswordPostResponses[keyof ChangeOwnPasswordApiV1PasswordPostResponses];
 
+export type ListReversionsApiV1ReversionsGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Offset
+         */
+        offset?: number;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/api/v1/reversions';
+};
+
+export type ListReversionsApiV1ReversionsGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type ListReversionsApiV1ReversionsGetError = ListReversionsApiV1ReversionsGetErrors[keyof ListReversionsApiV1ReversionsGetErrors];
+
+export type ListReversionsApiV1ReversionsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReversionPageResponse;
+};
+
+export type ListReversionsApiV1ReversionsGetResponse = ListReversionsApiV1ReversionsGetResponses[keyof ListReversionsApiV1ReversionsGetResponses];
+
+export type CreateReversionApiV1ReversionsPostData = {
+    body: BodyCreateReversionApiV1ReversionsPost;
+    headers?: {
+        /**
+         * Idempotency-Key
+         */
+        'Idempotency-Key'?: string | null;
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/reversions';
+};
+
+export type CreateReversionApiV1ReversionsPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The caller has exceeded a configured quota
+     */
+    429: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CreateReversionApiV1ReversionsPostError = CreateReversionApiV1ReversionsPostErrors[keyof CreateReversionApiV1ReversionsPostErrors];
+
+export type CreateReversionApiV1ReversionsPostResponses = {
+    /**
+     * Reverse conversion accepted or idempotently replayed
+     */
+    202: ReversionResponse;
+};
+
+export type CreateReversionApiV1ReversionsPostResponse = CreateReversionApiV1ReversionsPostResponses[keyof CreateReversionApiV1ReversionsPostResponses];
+
 export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetData = {
     body?: never;
     path?: never;
@@ -1609,6 +1833,146 @@ export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses = {
 };
 
 export type GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponse = GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses[keyof GetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponses];
+
+export type CancelReversionApiV1ReversionsJobIdDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reversions/{job_id}';
+};
+
+export type CancelReversionApiV1ReversionsJobIdDeleteErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type CancelReversionApiV1ReversionsJobIdDeleteError = CancelReversionApiV1ReversionsJobIdDeleteErrors[keyof CancelReversionApiV1ReversionsJobIdDeleteErrors];
+
+export type CancelReversionApiV1ReversionsJobIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReversionResponse;
+};
+
+export type CancelReversionApiV1ReversionsJobIdDeleteResponse = CancelReversionApiV1ReversionsJobIdDeleteResponses[keyof CancelReversionApiV1ReversionsJobIdDeleteResponses];
+
+export type GetReversionApiV1ReversionsJobIdGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reversions/{job_id}';
+};
+
+export type GetReversionApiV1ReversionsJobIdGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type GetReversionApiV1ReversionsJobIdGetError = GetReversionApiV1ReversionsJobIdGetErrors[keyof GetReversionApiV1ReversionsJobIdGetErrors];
+
+export type GetReversionApiV1ReversionsJobIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReversionResponse;
+};
+
+export type GetReversionApiV1ReversionsJobIdGetResponse = GetReversionApiV1ReversionsJobIdGetResponses[keyof GetReversionApiV1ReversionsJobIdGetResponses];
+
+export type DownloadReversionApiV1ReversionsJobIdResultGetData = {
+    body?: never;
+    path: {
+        /**
+         * Job Id
+         */
+        job_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reversions/{job_id}/result';
+};
+
+export type DownloadReversionApiV1ReversionsJobIdResultGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The requested resource was not found
+     */
+    404: ErrorResponse;
+    /**
+     * The request conflicts with current state
+     */
+    409: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DownloadReversionApiV1ReversionsJobIdResultGetError = DownloadReversionApiV1ReversionsJobIdResultGetErrors[keyof DownloadReversionApiV1ReversionsJobIdResultGetErrors];
+
+export type DownloadReversionApiV1ReversionsJobIdResultGetResponses = {
+    /**
+     * Immutable reverse-conversion result
+     */
+    200: Blob | File;
+};
+
+export type DownloadReversionApiV1ReversionsJobIdResultGetResponse = DownloadReversionApiV1ReversionsJobIdResultGetResponses[keyof DownloadReversionApiV1ReversionsJobIdResultGetResponses];
 
 export type ApiSessionApiV1SessionGetData = {
     body?: never;

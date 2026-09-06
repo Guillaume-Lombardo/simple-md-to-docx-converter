@@ -9,13 +9,14 @@ from markweave.auth.policy_errors import (
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.jobs.models import ConversionJob
+from markweave.reversion_jobs.models import ReversionJob
 from markweave.templates.errors import (
     TemplateConflictError,
     TemplatePreconditionRequiredError,
 )
 from markweave.templates.models import TemplateIdentity
 
-from .schemas import ConversionResponse, TemplateResponse
+from .schemas import ConversionResponse, ReversionResponse, TemplateResponse
 
 CSRF_COOKIE_NAME = "__Host-md_converter_csrf"
 _MAX_POLICY_REVISION_DIGITS = 19
@@ -64,6 +65,32 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
 
 def conversion_response(job: ConversionJob) -> ConversionResponse:
     return ConversionResponse.model_validate(job)
+
+
+def reversion_response(job: ReversionJob) -> ReversionResponse:
+    """Map one owner-visible reverse job without exposing content digests."""
+
+    return ReversionResponse(
+        id=job.id,
+        owner_id=job.owner_id,
+        source_stem=job.source_stem,
+        source_family=job.admission.family,
+        source_extension=job.admission.extension,
+        detected_format=job.admission.detected_format,
+        component_versions=job.component_versions,
+        correlation_id=job.correlation_id,
+        state=job.state,
+        step=job.step,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        attempt=job.attempt,
+        cancel_requested=job.cancel_requested,
+        result_mode=job.result_mode,
+        result_size=job.result_size,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        expires_at=job.expires_at,
+    )
 
 
 def template_response(

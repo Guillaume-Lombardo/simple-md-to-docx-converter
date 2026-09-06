@@ -42,6 +42,12 @@ class ReversionSubmissionRepository(Protocol):  # pragma: no cover - structural 
     def activate_source(self, job_id: UUID, now: datetime) -> ReversionJob: ...
 
 
+class ReversionRepository(  # pragma: no cover - structural port
+    OwnerReversionRepository, ReversionSubmissionRepository, Protocol
+):
+    """Public submission and owner-lifecycle repository boundary."""
+
+
 class ReversionWorkerRepository(Protocol):  # pragma: no cover - structural port
     """Internal-only unscoped lookup and exact attempt lifecycle."""
 

@@ -226,6 +226,23 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   timings, and batch counts remain caller-injected with no production defaults; HTTP/CLI wiring,
   fairness, observability, production budgets, and final deployment assembly remain for later T71
   slices.
+* 2026-09-06: Added the owner-only reverse HTTP lifecycle slice on exact main `d8361d0`. Authenticated
+  multipart submission now scans before bounded content detection and durable reservation, supports
+  idempotent replay, persists the source through the configured filesystem or S3 adapter, and
+  exposes owner-bound listing, status, cancellation, and deterministic Markdown/ZIP downloads.
+  Every non-owner lookup remains non-enumerating for a second user and a global administrator.
+  Optional reverse request, retry, retention, and owner-capacity settings enable the lifecycle only
+  when complete; the mixed-family global queue capacity remains atomic and shared without reusing
+  forward per-user or retention values. The T69 admission matrix is enforced after bounded CSV,
+  ZIP/OPC/ODF/EPUB/PDF/RTF, and validated CFB directory-stream detection; corrupt, cyclic, encrypted,
+  mismatched, and signature-spoofed inputs fail before persistence. Canonical OpenAPI and generated
+  TypeScript bindings are synchronized. Ruff, `ty`, 606 targeted tests, the real T69 21-extension
+  corpus, and a real Uvicorn/SQLite/filesystem two-user-plus-administrator lifecycle passed. The
+  exact light selection passed 3,582 tests at 93.92% total and 90.18% application branch coverage.
+  Host Pandoc and LibreOffice and local PostgreSQL/RustFS service variables remain unavailable;
+  hosted affected-domain checks will exercise those boundaries. CLI parity, reverse worker/runtime
+  assembly, fair scheduling, production execution budgets, reverse observability, and complete
+  distributed/final-image workflows remain for later T71 slices.
 
 ## Synchronization
 

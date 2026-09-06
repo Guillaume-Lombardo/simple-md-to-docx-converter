@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
     reversion_upload_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_request_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_retry_after_seconds: int | None = Field(default=None, gt=0)
+    reversion_result_retention_seconds: int | None = Field(default=None, gt=0)
+    reversion_active_limit_per_user: int | None = Field(default=None, gt=0)
     conversion_max_decompressed_bytes: int = Field(gt=0)
     conversion_max_files: int = Field(gt=0)
     conversion_max_images: int = Field(gt=0)
@@ -210,6 +214,12 @@ class Settings(BaseSettings):
             raise ValueError("initial administrator password must not be blank")
         if self.conversion_request_max_bytes <= self.conversion_upload_max_bytes:
             raise ValueError("conversion request limit must exceed the source limit")
+        if (
+            self.reversion_request_max_bytes is not None
+            and self.reversion_upload_max_bytes is not None
+            and self.reversion_request_max_bytes <= self.reversion_upload_max_bytes
+        ):
+            raise ValueError("reversion request limit must exceed the source limit")
         if self.template_request_max_bytes <= self.template_max_archive_bytes:
             raise ValueError("template request limit must exceed the archive limit")
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
