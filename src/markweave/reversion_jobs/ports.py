@@ -125,7 +125,11 @@ class ReversionWorkerRepository(Protocol):  # pragma: no cover - structural port
     ) -> ReversionAttempt: ...
 
     def recover_expired_leases(
-        self, now: datetime, expires_at: datetime, incomplete_before: datetime
+        self,
+        now: datetime,
+        expires_at: datetime,
+        incomplete_before: datetime,
+        limit: int,
     ) -> int: ...
 
     def succeed(  # noqa: PLR0913, PLR0917 - atomic publication contract

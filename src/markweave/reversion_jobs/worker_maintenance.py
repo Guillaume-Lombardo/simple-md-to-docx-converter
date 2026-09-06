@@ -30,7 +30,7 @@ class ReversionMaintenanceService:
         self._publication = ReversionPublicationService(runtime)
 
     def recover(self) -> int:
-        """Prove expired created units empty before making their jobs claimable."""
+        """Run one recovery step bounded by the configured batch size."""
 
         now = self._runtime.clock()
         attempts = self._runtime.repository.claim_recovery(
@@ -42,11 +42,15 @@ class ReversionMaintenanceService:
         for attempt in attempts:
             recorded = self._recover_attempt(attempt)
             self._publication.acknowledge_attempt(recorded)
+        remaining = self._runtime.policy.recovery_batch_size - len(attempts)
+        if not remaining:
+            return 0
         now = self._runtime.clock()
         return self._runtime.repository.recover_expired_leases(
             now,
             now + timedelta(seconds=self._runtime.policy.result_retention_seconds),
             now - timedelta(seconds=self._runtime.policy.incomplete_submission_seconds),
+            remaining,
         )
 
     def _recover_attempt(self, attempt: ReversionAttempt) -> ReversionAttempt:

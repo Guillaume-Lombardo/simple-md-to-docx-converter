@@ -16,6 +16,7 @@ from markweave.reversion_jobs.runner import (
     StopSignalBridge,
 )
 from markweave.reversion_jobs.worker import ReversionWorker
+from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
 pytestmark = pytest.mark.unit
 
@@ -53,8 +54,10 @@ def _loop(
     reverse.recover.return_value = 0
     forward.cleanup.return_value = 0
     reverse.cleanup.return_value = 0
+    reverse.reconcile_step.return_value = True
+    reverse.recover_step.return_value = 0
     forward.run_once.side_effect = lambda **_kwargs: events.append("forward") or True
-    reverse.run_once.side_effect = lambda: events.append("reverse") or True
+    reverse.run_reconciled_once.side_effect = lambda: events.append("reverse") or True
     bridge = StopSignalBridge()
     clock_value = 0.0
 
@@ -74,16 +77,16 @@ def _loop(
     return loop, forward, reverse, bridge
 
 
-def test_successful_jobs_alternate_strictly_and_start_with_forward(
+def test_forward_starts_and_reverse_gets_a_bounded_scheduling_turn(
     mocker: MockerFixture,
 ) -> None:
     events: list[str] = []
     loop, _forward, _reverse, bridge = _loop(mocker, events)
-    stop = _StopAfter(events, 4)
+    stop = _StopAfter(events, 5)
 
     loop.run(stop)
 
-    assert events == ["forward", "reverse", "forward", "reverse"]
+    assert events == ["forward", "forward", "forward", "reverse", "forward"]
     assert bridge.is_set()
 
 
@@ -93,11 +96,11 @@ def test_empty_preferred_family_falls_back_immediately(mocker: MockerFixture) ->
     forward.run_once.side_effect = lambda **_kwargs: (
         events.append("forward-empty") or False
     )
-    reverse.run_once.side_effect = lambda: events.append("reverse") or True
+    reverse.reconcile_step.return_value = False
 
     loop.run(_StopAfter(events, 2))
 
-    assert events == ["forward-empty", "reverse"]
+    assert events == ["forward-empty", "forward-empty"]
 
 
 def test_reverse_broker_failure_does_not_block_forward(
@@ -106,12 +109,14 @@ def test_reverse_broker_failure_does_not_block_forward(
     events: list[str] = []
     loop, forward, reverse, _bridge = _loop(mocker, events)
     forward.run_once.side_effect = [False, True]
-    reverse.run_once.side_effect = BrokerError(BrokerErrorCategory.TRANSPORT_FAILURE)
+    reverse.reconcile_step.side_effect = BrokerError(
+        BrokerErrorCategory.TRANSPORT_FAILURE
+    )
     stop = _StopAfterChecks(2)
     loop.run(stop)
 
     assert forward.run_once.call_count >= 1
-    reverse.run_once.assert_called_once_with()
+    reverse.reconcile_step.assert_called_once_with()
 
 
 def test_reverse_recovery_failure_does_not_block_forward(
@@ -119,12 +124,58 @@ def test_reverse_recovery_failure_does_not_block_forward(
 ) -> None:
     events: list[str] = []
     loop, forward, reverse, _bridge = _loop(mocker, events)
-    reverse.recover.side_effect = BrokerError(BrokerErrorCategory.TRANSPORT_FAILURE)
+    reverse.recover_step.side_effect = BrokerError(
+        BrokerErrorCategory.TRANSPORT_FAILURE
+    )
 
-    loop.run(_StopAfter(events, 1))
+    loop.run(_StopAfter(events, 3))
 
-    forward.run_once.assert_called_once()
-    reverse.run_once.assert_not_called()
+    assert forward.run_once.call_count == 3
+    reverse.recover_step.assert_called_once_with()
+    reverse.run_reconciled_once.assert_not_called()
+
+
+def test_reverse_semantic_protocol_failure_does_not_block_forward(
+    mocker: MockerFixture,
+) -> None:
+    events: list[str] = []
+    loop, forward, reverse, _bridge = _loop(mocker, events)
+    reverse.reconcile_step.side_effect = ReverseConversionError(
+        ReverseErrorCategory.PROTOCOL_ERROR
+    )
+
+    loop.run(_StopAfter(events, 2))
+
+    assert forward.run_once.call_count == 2
+    reverse.reconcile_step.assert_called_once_with()
+
+
+def test_multi_page_reconciliation_interleaves_forward_before_reverse_claim(
+    mocker: MockerFixture,
+) -> None:
+    events: list[str] = []
+    loop, forward, reverse, _bridge = _loop(mocker, events)
+    forward.run_once.side_effect = lambda **_kwargs: events.append("forward") or True
+    reverse.reconcile_step.side_effect = lambda: (
+        events.append("reconcile") or reverse.reconcile_step.call_count >= 3
+    )
+    reverse.recover_step.side_effect = lambda: events.append("recover") or 0
+    reverse.run_reconciled_once.side_effect = lambda: events.append("reverse") or True
+
+    loop.run(_StopAfter(events, 10))
+
+    assert events == [
+        "forward",
+        "reconcile",
+        "forward",
+        "reconcile",
+        "forward",
+        "reconcile",
+        "forward",
+        "recover",
+        "forward",
+        "reverse",
+    ]
 
 
 def test_stop_bridge_is_inert_until_bound_and_rejects_rebinding() -> None:

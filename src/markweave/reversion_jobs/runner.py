@@ -13,8 +13,12 @@ from markweave.jobs.runner import StopSignal, WorkerSchedule
 from markweave.jobs.worker import ConversionWorker
 from markweave.observability import OperationalMetrics, log_event
 from markweave.persistence.errors import PersistenceError
-from markweave.reversion_jobs.errors import ReversionJobError
+from markweave.reversion_jobs.errors import (
+    ReversionJobError,
+    ReversionProofRequiredError,
+)
 from markweave.reversion_jobs.worker import ReversionWorker
+from markweave.reversions.errors import ReverseConversionError
 from markweave.storage import ObjectStoreError
 
 
@@ -82,7 +86,7 @@ class FairWorkerLoop:
         self._metrics = metrics
         self._stop_bridge = stop_bridge
 
-    def run(self, stop: StopSignal) -> None:
+    def run(self, stop: StopSignal) -> None:  # noqa: PLR0912 - scheduling state machine
         """Prefer forward first, then alternate successful family claims."""
 
         self._stop_bridge.bind(stop)
@@ -92,11 +96,12 @@ class FairWorkerLoop:
         next_reverse_cleanup = now + self._reverse_schedule.cleanup_interval_seconds
         forward_retry_at = now
         reverse_retry_at = now
+        reverse_phase = "reconcile"
         while not stop.is_set():
             now = self._clock()
             forward_retry_at = self._recover_forward(now, forward_retry_at)
-            reverse_retry_at = self._recover_reverse(now, reverse_retry_at)
             processed = False
+            reverse_touched = False
             families = (
                 ("forward", "reverse") if prefer_forward else ("reverse", "forward")
             )
@@ -118,11 +123,15 @@ class FairWorkerLoop:
                         )
                         self._retry("forward")
                 elif family == "reverse" and now >= reverse_retry_at:
+                    reverse_touched = True
                     try:
-                        processed = self._reverse.run_once()
+                        processed, reverse_phase = self._run_reverse_step(reverse_phase)
+                    except ReversionProofRequiredError:
+                        reverse_phase = "recover"
                     except (
                         BrokerError,
                         ReversionJobError,
+                        ReverseConversionError,
                         ObjectStoreError,
                         PersistenceError,
                     ):
@@ -138,31 +147,51 @@ class FairWorkerLoop:
                 next_forward_cleanup = (
                     now + self._forward_schedule.cleanup_interval_seconds
                 )
-                try:
-                    self._forward.cleanup(limit=self._forward_schedule.cleanup_limit)
-                except JobRepositoryError, ObjectStoreError, PersistenceError:
+                if not self._cleanup_forward():
                     forward_retry_at = (
                         now + self._forward_schedule.error_backoff_seconds
                     )
-                    self._retry("forward")
-            if now >= next_reverse_cleanup:
+            if not reverse_touched and now >= next_reverse_cleanup:
                 next_reverse_cleanup = (
                     now + self._reverse_schedule.cleanup_interval_seconds
                 )
-                try:
-                    self._reverse.cleanup()
-                except (
-                    BrokerError,
-                    ReversionJobError,
-                    ObjectStoreError,
-                    PersistenceError,
-                ):
+                if not self._cleanup_reverse():
                     reverse_retry_at = (
                         now + self._reverse_schedule.error_backoff_seconds
                     )
-                    self._retry("reverse")
             if not processed:
                 stop.wait(self._forward_schedule.idle_poll_seconds)
+
+    def _run_reverse_step(self, phase: str) -> tuple[bool, str]:
+        if phase == "reconcile":
+            ready = self._reverse.reconcile_step()
+            return False, "recover" if ready else phase
+        if phase == "recover":
+            self._reverse.recover_step()
+            return False, "claim"
+        return self._reverse.run_reconciled_once(), "reconcile"
+
+    def _cleanup_forward(self) -> bool:
+        try:
+            self._forward.cleanup(limit=self._forward_schedule.cleanup_limit)
+        except JobRepositoryError, ObjectStoreError, PersistenceError:
+            self._retry("forward")
+            return False
+        return True
+
+    def _cleanup_reverse(self) -> bool:
+        try:
+            self._reverse.cleanup()
+        except (
+            BrokerError,
+            ReversionJobError,
+            ReverseConversionError,
+            ObjectStoreError,
+            PersistenceError,
+        ):
+            self._retry("reverse")
+            return False
+        return True
 
     def _recover_forward(self, now: float, retry_at: float) -> float:
         if now < retry_at:
@@ -177,16 +206,6 @@ class FairWorkerLoop:
         ):
             self._retry("forward")
             return now + self._forward_schedule.error_backoff_seconds
-        return retry_at
-
-    def _recover_reverse(self, now: float, retry_at: float) -> float:
-        if now < retry_at:
-            return retry_at
-        try:
-            self._reverse.recover()
-        except BrokerError, ReversionJobError, ObjectStoreError, PersistenceError:
-            self._retry("reverse")
-            return now + self._reverse_schedule.error_backoff_seconds
         return retry_at
 
     def _retry(self, family: str) -> None:

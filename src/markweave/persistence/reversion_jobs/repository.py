@@ -1290,8 +1290,14 @@ class SqlReversionJobRepository(_SqlReversionStore):
             raise ReversionJobRepositoryError from None
 
     def recover_expired_leases(
-        self, now: datetime, expires_at: datetime, incomplete_before: datetime
+        self,
+        now: datetime,
+        expires_at: datetime,
+        incomplete_before: datetime,
+        limit: int | None = None,
     ) -> int:
+        if limit is not None and (type(limit) is not int or limit <= 0):
+            raise ValueError("Reverse recovery limit must be a positive integer")
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
@@ -1312,6 +1318,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     )
                     .order_by(ReversionJobRow.id)
                 )
+                if limit is not None:
+                    statement = statement.limit(limit)
                 if self._engine.dialect.name == "postgresql":
                     statement = statement.with_for_update(skip_locked=True)
                 recovered = 0
@@ -1331,12 +1339,27 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     attempt.recovery_token = None
                     attempt.recovery_expires_at = None
                     recovered += 1
-                incomplete_result = database.execute(
-                    update(ReversionJobRow)
+                remaining = None if limit is None else limit - recovered
+                if remaining == 0:
+                    return recovered
+                incomplete_ids = (
+                    select(ReversionJobRow.id)
                     .where(
                         ReversionJobRow.state == ReversionJobState.QUEUED.value,
                         ReversionJobRow.source_ready.is_(False),
                         ReversionJobRow.created_at <= incomplete_before,
+                    )
+                    .order_by(ReversionJobRow.id)
+                )
+                if remaining is not None:
+                    incomplete_ids = incomplete_ids.limit(remaining)
+                candidates = tuple(database.scalars(incomplete_ids))
+                if not candidates:
+                    return recovered
+                incomplete_result = database.execute(
+                    update(ReversionJobRow)
+                    .where(
+                        ReversionJobRow.id.in_(candidates),
                     )
                     .values(
                         state=ReversionJobState.FAILED.value,
