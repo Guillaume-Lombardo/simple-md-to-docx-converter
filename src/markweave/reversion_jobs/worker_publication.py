@@ -13,6 +13,7 @@ from markweave.broker.protocol import (
     ErrorResponse,
 )
 from markweave.reversion_jobs.models import (
+    ReversionAttempt,
     ReversionJobState,
     ReversionJobStep,
     reversion_result_object_id,
@@ -92,18 +93,25 @@ class ReversionPublicationService:
 
         claimed = executed.claimed
         attempt = self._runtime.repository.get_attempt(claimed.attempt_id)
-        proof = executed.proof
         if (
             attempt is None
-            or attempt.termination_proof != proof
-            or attempt.unit_id != proof.unit_id
+            or attempt.termination_proof != executed.proof
+            or attempt.unit_id != executed.proof.unit_id
         ):
+            reject(ReverseErrorCategory.PROTOCOL_ERROR)
+        self.acknowledge_attempt(attempt)
+
+    def acknowledge_attempt(self, attempt: ReversionAttempt) -> None:
+        """ACK one locally durable active or recovery proof idempotently."""
+
+        proof = attempt.termination_proof
+        if proof is None or attempt.unit_id != proof.unit_id:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         response = self._runtime.broker.request(
             AcknowledgeRequest(
                 self._runtime.request_id_factory(),
                 attempt.create_sequence,
-                claimed.attempt_id,
+                attempt.attempt_id,
                 proof.unit_id,
                 proof.proof_id,
             )
@@ -114,9 +122,9 @@ class ReversionPublicationService:
             type(response) is not AcknowledgeResponse
             or not response.acknowledged
             or (response.attempt_id, response.unit_id, response.proof_id)
-            != (claimed.attempt_id, proof.unit_id, proof.proof_id)
+            != (attempt.attempt_id, proof.unit_id, proof.proof_id)
         ):
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         self._runtime.repository.acknowledge_termination_proof(
-            claimed.attempt_id, proof.proof_id, self._runtime.clock()
+            attempt.attempt_id, proof.proof_id, self._runtime.clock()
         )

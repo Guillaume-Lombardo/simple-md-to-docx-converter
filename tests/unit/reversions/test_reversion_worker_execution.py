@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +16,12 @@ from sqlalchemy import Engine, create_engine
 
 from markweave.auth.models import Role, User
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
-from markweave.broker.models import EvidenceDigest, ManagedUnitState, TerminationProof
+from markweave.broker.models import (
+    EvidenceDigest,
+    ManagedUnitState,
+    TerminationProof,
+    policy_specification_evidence,
+)
 from markweave.broker.protocol import (
     AcknowledgeRequest,
     AcknowledgeResponse,
@@ -38,12 +44,14 @@ from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.models import (
+    ReversionJob,
     ReversionJobState,
     ReversionJobStep,
     reversion_result_object_id,
 )
 from markweave.reversion_jobs.result_validation import validate_reverse_result
 from markweave.reversion_jobs.runtime import ReversionWorkerRuntime
+from markweave.reversion_jobs.worker import ReversionWorker
 from markweave.reversion_jobs.worker_execution import (
     ClaimedReversion,
     ReversionAttemptExecutor,
@@ -54,6 +62,7 @@ from markweave.reversions.errors import ReverseConversionError, ReverseErrorCate
 from markweave.reversions.models import ReverseOutputMode
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
 from tests.reversion_job_repository_contracts import (
+    LEASE_END,
     NOW,
     PRINCIPAL,
     RETENTION_END,
@@ -99,7 +108,7 @@ def _runtime(
         CONTENT_LIMITS,
         POLICY,
         "reverse-worker",
-        lambda: NOW,
+        mocker.Mock(return_value=NOW),
         lambda: 1.0,
         mocker.Mock(return_value=False),
         lambda: False,
@@ -126,6 +135,25 @@ def _claim(
     claimed = ReversionClaimService(runtime).claim()
     assert claimed is not None
     return claimed
+
+
+def _queue(
+    runtime: ReversionWorkerRuntime,
+    repository: SqlReversionJobRepository,
+    owner: User,
+    source: bytes,
+) -> ReversionJob:
+    submitted = replace(
+        submission(owner.id),
+        source_sha256=sha256(source).hexdigest(),
+        source_size=len(source),
+    )
+    job, _ = repository.create(submitted)
+    runtime.objects.put(
+        ObjectKey(ObjectScope.REVERSION_UPLOAD, owner.id, job.source_object_id), source
+    )
+    repository.activate_source(job.id, NOW)
+    return job
 
 
 def _proof(attempt_id: UUID, unit_id: UUID) -> TerminationProof:
@@ -432,3 +460,110 @@ def test_publication_compensates_object_when_lease_interrupts_before_commit(
     )
     retained = repo.get_internal(claimed.job.id)
     assert retained is not None and retained.state is ReversionJobState.RUNNING
+
+
+def test_worker_reconciles_and_completes_one_queued_job(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    job = _queue(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+
+    assert ReversionWorker(runtime).run_once()
+
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.state is ReversionJobState.SUCCEEDED
+    cast(Any, runtime.reconciler).reconcile.assert_called_once()
+    assert not ReversionWorker(runtime).run_once()
+
+
+def test_recovery_replays_create_and_requires_proof_before_requeue(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    repo.reserve_create_intent(
+        claimed.job.id,
+        claimed.attempt_id,
+        runtime.worker_id,
+        claimed.lease_token,
+        BROKER_POLICY.revision,
+        policy_specification_evidence(BROKER_POLICY),
+        NOW,
+    )
+    unit_id = uuid4()
+    broker = cast(Any, runtime.broker)
+
+    def request(message: object) -> object:
+        if type(message) is CreateRequest:
+            return CreateResponse(
+                message.request_id,
+                message.attempt_id,
+                unit_id,
+                ManagedUnitState.CREATED,
+            )
+        if type(message) is TerminateRequest:
+            return TerminateResponse(
+                message.request_id, _proof(message.attempt_id, message.unit_id)
+            )
+        assert type(message) is AcknowledgeRequest
+        return AcknowledgeResponse(
+            message.request_id,
+            message.attempt_id,
+            message.unit_id,
+            message.proof_id,
+            True,
+        )
+
+    broker.request.side_effect = request
+    recovered_at = LEASE_END + timedelta(seconds=1)
+    cast(Any, runtime.clock).return_value = recovered_at
+
+    assert ReversionWorker(runtime).recover() == 1
+
+    retained = repo.get_internal(claimed.job.id)
+    assert retained is not None and retained.state is ReversionJobState.QUEUED
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None and attempt.proof_acknowledged_at == recovered_at
+    assert [type(call.args[0]) for call in broker.request.call_args_list] == [
+        CreateRequest,
+        TerminateRequest,
+        AcknowledgeRequest,
+    ]
+
+
+def test_cleanup_deletes_reverse_objects_and_expires_job(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    job = _queue(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    worker = ReversionWorker(runtime)
+    assert worker.run_once()
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.result_object_id is not None
+    source_key = ObjectKey(
+        ObjectScope.REVERSION_UPLOAD, owner.id, retained.source_object_id
+    )
+    result_key = ObjectKey(
+        ObjectScope.REVERSION_RESULT, owner.id, retained.result_object_id
+    )
+    assert objects.exists(source_key) and objects.exists(result_key)
+    cast(Any, runtime.clock).return_value = RETENTION_END
+
+    assert worker.cleanup() == 1
+
+    assert not objects.exists(source_key) and not objects.exists(result_key)
+    expired = repo.get_internal(job.id)
+    assert expired is not None and expired.state is ReversionJobState.EXPIRED

@@ -30,7 +30,10 @@ from markweave.broker.workspace_protocol import (
     WorkspaceStageRequest,
     WorkspaceSuccessResponse,
 )
-from markweave.reversion_jobs.errors import ReversionJobLeaseLostError
+from markweave.reversion_jobs.errors import (
+    ReversionJobLeaseLostError,
+    ReversionWorkerInterruptedError,
+)
 from markweave.reversion_jobs.models import (
     ReversionJob,
     ReversionJobStep,
@@ -109,7 +112,7 @@ class ReversionHeartbeat:
         ):
             reject(ReverseErrorCategory.TIMED_OUT)
         if self._runtime.shutdown_requested():
-            reject(ReverseErrorCategory.CANCELLED)
+            raise ReversionWorkerInterruptedError("Reverse worker shutdown requested")
         job = self._claimed.job
         if self._runtime.repository.cancellation_requested(
             job.id,

@@ -25,6 +25,10 @@ class ReversionJobLeaseLostError(ReversionJobError):
     """A worker no longer owns the exact reverse attempt and lease."""
 
 
+class ReversionWorkerInterruptedError(ReversionJobError):
+    """The supervisor is shutting down before a terminal transition."""
+
+
 class ReversionProofRequiredError(ReversionJobError):
     """A broker create intent has no matching durable termination proof."""
 
