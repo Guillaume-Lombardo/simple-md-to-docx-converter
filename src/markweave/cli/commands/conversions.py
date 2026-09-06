@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from markweave.cli.commands import reversions
 from markweave.cli.commands.conversion_http import (
     ConversionHttpClient,
     ConversionHttpResponse,
@@ -158,6 +159,9 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "manifest", help="Download a conversion manifest."
     )
     _download_command(manifest, "jobs manifest", _download_manifest)
+
+    reverse = job_commands.add_parser("reverse", help="Manage reverse-conversion jobs.")
+    reversions.register(reverse)
 
 
 def _configure(

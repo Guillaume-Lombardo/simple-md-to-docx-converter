@@ -10,7 +10,7 @@ their assigned tickets.
 markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 
 login | logout | whoami | password change
-convert | jobs {list,show,wait,cancel,download,manifest}
+convert | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
 users {list,create,activate,deactivate,reset-password,require-password-change}
 audit | health {live,ready,metrics}
@@ -47,6 +47,33 @@ Remote command families use only the documented HTTP API. Authentication uses
 non-echoing password prompts and owner-only XDG profile persistence; passwords are
 never command arguments. Runtime and recovery commands are the only families
 allowed to access runtime or storage services directly.
+
+## Reverse-conversion jobs
+
+Reverse conversion extends the stable `jobs` family without adding a backend or object-store
+shortcut to the installed client:
+
+```text
+markweave jobs reverse capabilities --profile work
+markweave jobs reverse submit report.docx --idempotency-key report-42 --profile work
+markweave jobs reverse list --limit 50 --profile work
+markweave jobs reverse show JOB_UUID --profile work
+markweave --timeout 300 jobs reverse wait JOB_UUID --poll-interval 2 --profile work
+markweave jobs reverse cancel JOB_UUID --profile work
+markweave jobs reverse download JOB_UUID ./report.md --profile work
+```
+
+Submission first reads the authenticated capabilities endpoint. The client accepts only an
+extension advertised by that response, rejects a non-regular, empty, symlinked, or oversized file
+before submission, and still leaves content detection and malware scanning to the server. It sends
+only the source basename, because the owner-visible job contract retains the safe original stem;
+it never sends a local directory path. `--retries` repeats only ambiguous network failures and
+requires the same explicit idempotency key.
+
+Reverse listing, status, cancellation, and result download remain owner-only even for global
+administrators. Waiting requires the global positive `--timeout`. Downloads use the same private,
+atomic, no-symlink destination boundary as forward results; the caller chooses `.md` or `.zip`
+from the job's `result_mode`, and existing files are preserved unless `--overwrite` is explicit.
 
 ## Authentication profiles
 

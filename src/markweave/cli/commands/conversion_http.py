@@ -8,6 +8,7 @@ import ssl
 import stat
 import sys
 from dataclasses import dataclass, field
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -133,6 +134,45 @@ class ConversionHttpClient:
             overwrite=overwrite,
         )
 
+    def reversion_capabilities(self) -> ConversionHttpResponse:
+        """Read the authoritative reverse-conversion admission contract."""
+        return self.request("GET", "/api/v1/reversions/capabilities")
+
+    def submit_reversion(
+        self,
+        source: bytes,
+        *,
+        filename: str,
+        idempotency_key: str | None,
+    ) -> ConversionHttpResponse:
+        """Submit one reverse conversion with its basename only."""
+        body, content_type = _reversion_multipart_body(source, filename=filename)
+        headers = {"Content-Type": content_type}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        return self.request(
+            "POST", "/api/v1/reversions", csrf=True, headers=headers, body=body
+        )
+
+    def list_reversions(self, *, offset: int, limit: int) -> ConversionHttpResponse:
+        query = urlencode({"offset": offset, "limit": limit})
+        return self.request("GET", f"/api/v1/reversions?{query}")
+
+    def get_reversion(self, job_id: str) -> ConversionHttpResponse:
+        return self.request("GET", f"/api/v1/reversions/{job_id}")
+
+    def cancel_reversion(self, job_id: str) -> ConversionHttpResponse:
+        return self.request("DELETE", f"/api/v1/reversions/{job_id}", csrf=True)
+
+    def download_reversion_result(
+        self, job_id: str, destination: Path, *, overwrite: bool
+    ) -> ConversionHttpResponse:
+        return self.download(
+            f"/api/v1/reversions/{job_id}/result",
+            destination,
+            overwrite=overwrite,
+        )
+
     def request(
         self,
         method: str,
@@ -145,7 +185,12 @@ class ConversionHttpClient:
         """Return one bounded JSON response from an API-v1 endpoint."""
         response = self._open(method, path, csrf=csrf, headers=headers, body=body)
         try:
-            content = _read_bounded(response, _MAX_JSON_BYTES)
+            try:
+                content = _read_bounded(response, _MAX_JSON_BYTES)
+            except (IncompleteRead, TimeoutError, URLError, OSError) as error:
+                raise CliError(
+                    "network_error", "The service response was interrupted."
+                ) from error
             return ConversionHttpResponse(
                 response.status,
                 _decode_payload(content),
@@ -270,6 +315,33 @@ def _multipart_body(
         )
     )
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+def _reversion_multipart_body(source: bytes, *, filename: str) -> tuple[bytes, str]:
+    if (
+        not filename
+        or filename in {".", ".."}
+        or filename != Path(filename).name
+        or any(character in filename for character in '\\"\r\n')
+    ):
+        raise CliError("source_name_invalid", "The source filename is invalid.")
+    boundary = f"markweave-{uuid4().hex}"
+    while boundary.encode("ascii") in source:
+        boundary = f"markweave-{uuid4().hex}"
+    body = b"".join(
+        (
+            f"--{boundary}\r\n".encode(),
+            (
+                'Content-Disposition: form-data; name="source"; '
+                f'filename="{filename}"\r\n'
+            ).encode(),
+            b"Content-Type: application/octet-stream\r\n\r\n",
+            source,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        )
+    )
+    return body, f"multipart/form-data; boundary={boundary}"
 
 
 def _read_bounded(response: BinaryIO, limit: int) -> bytes:

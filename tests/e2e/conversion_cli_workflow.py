@@ -15,6 +15,8 @@ from uuid import UUID
 
 _STATE_HOME = "/tmp/markweave-t33-cli-state"  # noqa: S108 - container tmpfs
 _SOURCE = "/tmp/markweave-t33-source.md"  # noqa: S108 - container tmpfs
+_REVERSE_SOURCE = "/tmp/markweave-t71-source.rtf"  # noqa: S108 - container tmpfs
+_REVERSE_RESULT = "/tmp/markweave-t71-result.md"  # noqa: S108 - container tmpfs
 _RESULT = "/tmp/markweave-t33-result.zip"  # noqa: S108 - container tmpfs
 _MANIFEST = "/tmp/markweave-t33-manifest.json"  # noqa: S108 - container tmpfs
 
@@ -32,7 +34,8 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     setup = _inside(
         arguments.container,
         "from pathlib import Path; "
-        f"Path({_SOURCE!r}).write_text('# CLI final image\\n', encoding='utf-8')",
+        f"Path({_SOURCE!r}).write_text('# CLI final image\\n', encoding='utf-8'); "
+        f"Path({_REVERSE_SOURCE!r}).write_bytes(b'{{\\\\rtf1 Reverse CLI final image}}')",
     )
     if setup.returncode != 0:
         return _failure("source setup", setup.returncode)
@@ -159,6 +162,100 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if validation.returncode != 0:
         return _failure("download validation", validation.returncode)
+    reverse_capabilities = _json_result(
+        _run([*prefix, "--json", "jobs", "reverse", "capabilities"])
+    )
+    reverse_contract = (
+        reverse_capabilities.get("reversion_capabilities")
+        if isinstance(reverse_capabilities, dict)
+        else None
+    )
+    if (
+        not isinstance(reverse_contract, dict)
+        or reverse_contract.get("maximum_upload_bytes") != 1_000_000
+        or reverse_contract.get("execution")
+        != {"local": True, "ocr": False, "hosted_fallback": False}
+    ):
+        return _failure("reverse capabilities", 1)
+    reverse_key = f"t71-final-image-{arguments.profile}"
+    reverse_submission = _json_result(
+        _run(
+            [
+                *prefix,
+                "--json",
+                "jobs",
+                "reverse",
+                "submit",
+                _REVERSE_SOURCE,
+                "--idempotency-key",
+                reverse_key,
+            ]
+        )
+    )
+    if reverse_submission is None or reverse_submission.get("state") != "queued":
+        return _failure("reverse submission", 1)
+    try:
+        reverse_job_id = str(UUID(str(reverse_submission["id"])))
+    except KeyError, ValueError:
+        return _failure("reverse submission identity", 1)
+    reverse_replay = _json_result(
+        _run(
+            [
+                *prefix,
+                "--json",
+                "jobs",
+                "reverse",
+                "submit",
+                _REVERSE_SOURCE,
+                "--idempotency-key",
+                reverse_key,
+            ]
+        )
+    )
+    if reverse_replay is None or reverse_replay.get("id") != reverse_job_id:
+        return _failure("reverse idempotent replay", 1)
+    reverse_listing = _json_result(
+        _run([*prefix, "--json", "jobs", "reverse", "list", "--limit", "10"])
+    )
+    reverse_items = (
+        reverse_listing.get("items") if isinstance(reverse_listing, dict) else None
+    )
+    if not isinstance(reverse_items, list) or not any(
+        item.get("id") == reverse_job_id
+        for item in reverse_items
+        if isinstance(item, dict)
+    ):
+        return _failure("reverse job list", 1)
+    reverse_shown = _json_result(
+        _run([*prefix, "--json", "jobs", "reverse", "show", reverse_job_id])
+    )
+    if reverse_shown is None or reverse_shown.get("id") != reverse_job_id:
+        return _failure("reverse job show", 1)
+    reverse_wait = _run(
+        [
+            *prefix,
+            "--timeout",
+            "1",
+            "jobs",
+            "reverse",
+            "wait",
+            reverse_job_id,
+            "--poll-interval",
+            "0.1",
+        ]
+    )
+    if reverse_wait.returncode != 1 or "did not finish" not in reverse_wait.stderr:
+        return _failure("reverse bounded wait", reverse_wait.returncode)
+    reverse_cancelled = _json_result(
+        _run([*prefix, "--json", "jobs", "reverse", "cancel", reverse_job_id])
+    )
+    if reverse_cancelled is None or reverse_cancelled.get("state") != "cancelled":
+        return _failure("reverse job cancel", 1)
+    reverse_download = _run(
+        [*prefix, "jobs", "reverse", "download", reverse_job_id, _REVERSE_RESULT]
+    )
+    if reverse_download.returncode != 1 or "conflicts" not in reverse_download.stderr:
+        return _failure("reverse unavailable download", reverse_download.returncode)
     logout = _run([*prefix, "logout"])
     if logout.returncode != 0:
         return _failure("logout", logout.returncode)
@@ -166,7 +263,8 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         arguments.container,
         "import shutil; from pathlib import Path; "
         f"shutil.rmtree({_STATE_HOME!r}, ignore_errors=True); "
-        f"[Path(path).unlink(missing_ok=True) for path in {[_SOURCE, _RESULT, _MANIFEST]!r}]",
+        f"[Path(path).unlink(missing_ok=True) for path in "
+        f"{[_SOURCE, _REVERSE_SOURCE, _REVERSE_RESULT, _RESULT, _MANIFEST]!r}]",
     )
     if cleanup.returncode != 0:
         return _failure("cleanup", cleanup.returncode)
