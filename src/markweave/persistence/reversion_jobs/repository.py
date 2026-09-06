@@ -490,20 +490,23 @@ class SqlReversionJobRepository(_SqlReversionStore):
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
 
-    @staticmethod
-    def _retain_reconciliation_tombstone(
+    def _retain_reconciliation_tombstone(  # noqa: PLR0912 - explicit conflict fence
+        self,
         database: DatabaseSession,
         principal_row: ReversionBrokerPrincipalRow,
         tombstone: ReconciliationTombstone,
         now: datetime,
     ) -> None:
         proof = tombstone.proof
-        attempt = database.scalar(
-            select(ReversionAttemptRow).where(
-                ReversionAttemptRow.principal_id == principal_row.principal_id,
-                ReversionAttemptRow.create_sequence == tombstone.create_sequence,
-            )
+        attempt_statement = select(ReversionAttemptRow).where(
+            ReversionAttemptRow.principal_id == principal_row.principal_id,
+            ReversionAttemptRow.create_sequence == tombstone.create_sequence,
         )
+        if self._engine.dialect.name == "postgresql":
+            attempt_statement = attempt_statement.with_for_update()
+        attempt = database.scalar(attempt_statement)
+        if attempt is not None:
+            self._after_reconciliation_attempt_lock()
         attempt_collision = database.scalar(
             select(ReversionAttemptRow.attempt_id)
             .where(
@@ -639,6 +642,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
             attempt.reconciliation_ack_intent_at or now
         )
 
+    def _after_reconciliation_attempt_lock(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
+
+    def _before_active_attempt_lock(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
+
     def mark_reconciliation_acknowledged(
         self,
         principal: AuthenticatedPrincipal,
@@ -664,9 +673,13 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 if attempt is not None:
                     proof = tombstone.proof
                     if (
-                        attempt.attempt_id != str(proof.attempt_id)
+                        proof.principal.principal_id != principal.principal_id
+                        or attempt.attempt_id != str(proof.attempt_id)
                         or attempt.unit_id != str(proof.unit_id)
+                        or attempt.proof_unit_id != str(proof.unit_id)
                         or attempt.proof_id != str(proof.proof_id)
+                        or attempt.proof_principal_id
+                        != str(proof.principal.principal_id)
                         or attempt.policy_specification
                         != tombstone.policy_specification.value
                         or attempt.proof_policy_revision != proof.policy_revision
@@ -683,7 +696,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     )
                     proof = tombstone.proof
                     if orphan is None or (
-                        orphan.attempt_id != str(proof.attempt_id)
+                        proof.principal.principal_id != principal.principal_id
+                        or orphan.attempt_id != str(proof.attempt_id)
                         or orphan.unit_id != str(proof.unit_id)
                         or orphan.proof_id != str(proof.proof_id)
                         or orphan.policy_revision != proof.policy_revision
@@ -972,7 +986,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 self._require_active_lease(
                     database, job_id, attempt_id, worker_id, lease_token, now
                 )
-                row = database.get(ReversionAttemptRow, str(attempt_id))
+                self._before_active_attempt_lock()
+                row = database.get(
+                    ReversionAttemptRow,
+                    str(attempt_id),
+                    with_for_update=self._engine.dialect.name == "postgresql",
+                )
                 if row is None:
                     raise ReversionJobLeaseLostError
                 if row.create_intent_at is not None:
@@ -1009,7 +1028,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 self._require_active_lease(
                     database, job_id, attempt_id, worker_id, lease_token, now
                 )
-                row = database.get(ReversionAttemptRow, str(attempt_id))
+                self._before_active_attempt_lock()
+                row = database.get(
+                    ReversionAttemptRow,
+                    str(attempt_id),
+                    with_for_update=self._engine.dialect.name == "postgresql",
+                )
                 if row is None or row.create_intent_at is None:
                     raise ReversionJobConflictError("Reverse create intent is missing")
                 if row.unit_id is not None and row.unit_id != str(unit_id):
@@ -1039,7 +1063,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 self._require_active_lease(
                     database, job_id, attempt_id, worker_id, lease_token, now
                 )
-                row = database.get(ReversionAttemptRow, str(attempt_id))
+                self._before_active_attempt_lock()
+                row = database.get(
+                    ReversionAttemptRow,
+                    str(attempt_id),
+                    with_for_update=self._engine.dialect.name == "postgresql",
+                )
                 if row is None:
                     raise ReversionJobLeaseLostError
                 return self._store_proof(database, row, proof, now)
