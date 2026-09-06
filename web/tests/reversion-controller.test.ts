@@ -383,6 +383,35 @@ test("terminal and missing jobs stop polling while cancellation failures resume 
   controller.dispose();
 });
 
+test("persistent polling failures stop after a bounded number of retries", async () => {
+  const scheduled: Array<{ callback: () => void; delay: number }> = [];
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(capabilities())
+    .mockResolvedValueOnce({ items: [job()], limit: 10, offset: 0, total: 1 })
+    .mockRejectedValue(new TypeError("temporary"));
+  const controller = new ReversionController(
+    api({ json }),
+    undefined,
+    undefined,
+    (callback, delay) => {
+      scheduled.push({ callback, delay });
+      return scheduled.length as unknown as ReturnType<typeof setTimeout>;
+    },
+    vi.fn(),
+  );
+  await controller.load();
+  await controller.openJob(job().id);
+  expect(scheduled).toHaveLength(1);
+  for (let failure = 2; failure <= 6; failure += 1) {
+    scheduled.at(-1)!.callback();
+    await vi.waitFor(() => expect(json).toHaveBeenCalledTimes(2 + failure));
+  }
+  expect(scheduled).toHaveLength(5);
+  expect(controller.snapshot().error).toMatch(/Polling has stopped/);
+  controller.dispose();
+});
+
 test("401 expires the session and download validates private Markdown and ZIP responses", async () => {
   const expire = vi.fn();
   const download = vi
@@ -417,7 +446,8 @@ test("401 expires the session and download validates private Markdown and ZIP re
       limit: 10,
       offset: 0,
       total: 1,
-    });
+    })
+    .mockResolvedValue(job({ state: "succeeded", result_mode: "markdown" }));
   const controller = new ReversionController(api({ json, download }), expire);
   await controller.load();
   await controller.openJob(job().id);
@@ -425,6 +455,7 @@ test("401 expires the session and download validates private Markdown and ZIP re
   expect((await controller.download())?.filename).toBe("report assets.zip");
   expect(await controller.download()).toBeUndefined();
   expect(controller.snapshot().error).toMatch(/unexpected response/);
+  controller.dispose();
 
   const expired = new ReversionController(
     api({
@@ -439,6 +470,7 @@ test("401 expires the session and download validates private Markdown and ZIP re
   );
   await expired.load();
   expect(expire).toHaveBeenCalledOnce();
+  expired.dispose();
 });
 
 test("download rejects malformed filenames and does nothing without a successful job", async () => {

@@ -76,9 +76,9 @@ downloading their results.
   and confine changes to the Revert workspace, shared navigation, and frontend tests.
 * 2026-09-06: Implemented the authenticated experimental workspace, authoritative capability
   admission, stable ambiguous-retry idempotency, polling, cancellation, safe result download,
-  responsive presentation, and browser coverage. Frontend checks, 202 Vitest tests, the production
+  responsive presentation, and browser coverage. Frontend checks, 203 Vitest tests, the production
   build, four production-server tests, workspace validation, Ruff, and ty pass locally; frontend
-  branch coverage is 90.15%. The canonical Python suite was attempted: all locally runnable tests
+  branch coverage is 90.16%. The canonical Python suite was attempted: all locally runnable tests
   passed after moving the generated pnpm bootstrap cache outside the scanned tree, while the tests
   explicitly marked for PostgreSQL and S3 failed because those services were not available. The
   final-image browser run could not complete locally because the shared Podman image store exhausted

@@ -14,6 +14,7 @@ import { ApiError, ApiTransport } from "../api/transport";
 const CAPABILITIES_SCHEMA_VERSION = 1;
 const POLL_START_MS = 1_000;
 const POLL_MAX_MS = 10_000;
+const POLL_MAX_FAILURES = 6;
 const SAFE_FAILURE = "The request could not be completed. Try again.";
 const TERMINAL_STATES = new Set([
   "succeeded",
@@ -54,6 +55,7 @@ export class ReversionController {
   private cancellationRequest?: AbortController;
   private pollTimer?: ReturnType<typeof setTimeout>;
   private pollDelay = POLL_START_MS;
+  private pollFailures = 0;
   private idempotencyKey?: string;
 
   constructor(
@@ -284,6 +286,7 @@ export class ReversionController {
       );
       if (generation !== this.jobGeneration) return;
       this.publishJob(job, { error: undefined });
+      this.pollFailures = 0;
       if (!isTerminal(job)) {
         this.pollDelay = nextPollDelay(this.pollDelay);
         this.schedulePoll(jobId, generation);
@@ -291,8 +294,10 @@ export class ReversionController {
     } catch (error) {
       if (generation !== this.jobGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
+      this.pollFailures += 1;
       const willRetry =
-        !(error instanceof ApiError) || ![401, 404].includes(error.status);
+        this.pollFailures < POLL_MAX_FAILURES &&
+        (!(error instanceof ApiError) || ![401, 404].includes(error.status));
       const detail = errorMessage(error, "Status is temporarily unavailable.");
       this.publish({
         ...this.state,
@@ -313,6 +318,7 @@ export class ReversionController {
     this.cancellationRequest?.abort();
     this.clearPoll();
     this.pollDelay = initialDelay;
+    this.pollFailures = 0;
     const known = this.state.recent.find((job) => job.id === jobId);
     this.publish({
       ...this.state,

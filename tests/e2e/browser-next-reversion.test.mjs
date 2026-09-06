@@ -83,7 +83,7 @@ test(
       await page.getByText(/conversion was cancelled/i).waitFor();
       assert.equal(
         await page
-          .getByRole("button", { name: "Download Markdown result" })
+          .getByRole("button", { name: "Download result" })
           .count(),
         0,
       );

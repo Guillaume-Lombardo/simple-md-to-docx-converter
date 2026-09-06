@@ -174,9 +174,7 @@ test("drop, submission, status, and download form one browser workflow", async (
   expect(
     (multipartWithMetadata.mock.calls[0]![1] as FormData).get("source"),
   ).toBe(source);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Download Markdown result" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Download result" }));
   await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
   expect(createObjectURL).toHaveBeenCalledOnce();
   await vi.waitFor(() =>
@@ -208,9 +206,7 @@ test("recent running jobs can be reopened and cancelled", async () => {
   expect(await screen.findByText(/Converting the document/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Cancel conversion" }));
   expect(await screen.findByText(/Cancellation requested/)).toBeVisible();
-  expect(
-    screen.queryByRole("button", { name: "Download Markdown result" }),
-  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "Download result" })).toBeNull();
 });
 
 test("unavailable capabilities fail closed and retry without leaking details", async () => {

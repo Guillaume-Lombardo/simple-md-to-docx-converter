@@ -189,7 +189,7 @@ export function ReversionWorkspace({
                     })
                   }
                 >
-                  Download Markdown result
+                  Download result
                 </button>
               )}
             </section>
