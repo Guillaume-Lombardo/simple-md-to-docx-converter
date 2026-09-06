@@ -501,6 +501,7 @@ def test_reconciliation_ack_rejects_mutated_orphan_proof_bundle(
     principal = AuthenticatedPrincipal(uuid4())
     token = uuid4()
     repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+
     retained = proof(uuid4(), uuid4(), principal)
     tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
     repository.record_reconciliation_page(
@@ -567,7 +568,7 @@ def test_reconciliation_hydrates_exact_pre_intent_attempt_from_broker_proof(
 def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflicts(
     reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
 ) -> None:
-    repository, owner, _other, _engine = reverse_repository
+    repository, owner, _other, engine = reverse_repository
     principal = AuthenticatedPrincipal(uuid4())
     complete_empty_reconciliation(repository, principal)
     job, _ = repository.create(submission(owner.id))
@@ -581,6 +582,22 @@ def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflict
     retained = proof(attempt.attempt_id, unit_id, principal)
     token = uuid4()
     repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+
+    def snapshot() -> tuple[object, object]:
+        with engine.connect() as connection:
+            durable_attempt = connection.execute(
+                text(
+                    "SELECT create_intent_at, policy_revision, policy_specification, unit_id, proof_id, proof_unit_id, proof_principal_id, proof_policy_revision, exit_evidence, empty_evidence, removal_evidence, proof_recorded_at, reconciliation_ack_intent_at, proof_acknowledged_at FROM reversion_attempts WHERE attempt_id = :attempt"
+                ),
+                {"attempt": str(attempt.attempt_id)},
+            ).one()
+            durable_principal = connection.execute(
+                text(
+                    "SELECT create_sequence_high_water, reconciliation_cursor FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).one()
+        return durable_attempt, durable_principal
 
     def record(candidate: TerminationProof) -> None:
         tombstone = ReconciliationTombstone(
@@ -600,8 +617,13 @@ def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflict
             NOW,
         )
 
-    with pytest.raises(ReversionJobConflictError):
-        record(proof(uuid4(), unit_id, principal))
+    def reject(candidate: TerminationProof) -> None:
+        before = snapshot()
+        with pytest.raises(ReversionJobConflictError):
+            record(candidate)
+        assert snapshot() == before
+
+    reject(replace(retained, attempt_id=uuid4()))
     repository.reserve_create_intent(
         claimed.id,
         attempt.attempt_id,
@@ -611,8 +633,7 @@ def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflict
         POLICY_SPECIFICATION,
         NOW,
     )
-    with pytest.raises(ReversionJobConflictError):
-        record(replace(retained, policy_revision="other-policy"))
+    reject(replace(retained, policy_revision="other-policy"))
     repository.record_broker_unit(
         claimed.id,
         attempt.attempt_id,
@@ -629,8 +650,7 @@ def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflict
         retained,
         NOW,
     )
-    with pytest.raises(ReversionJobConflictError):
-        record(replace(retained, proof_id=uuid4()))
+    reject(replace(retained, proof_id=uuid4()))
 
 
 @pytest.mark.unit
