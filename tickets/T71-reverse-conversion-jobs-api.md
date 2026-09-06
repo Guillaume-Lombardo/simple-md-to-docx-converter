@@ -203,6 +203,16 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   The base is the exact #206 merge `369b9c2c19deb63ec575c5bf079d1a957cdd24ca`; main run
   `34007228309` attempt 2 passed. Attempt 1 contained only the known distributed Playwright alert
   timeout flake; the exact pull-request run and retry passed. T71 remains In Progress.
+* 2026-09-06: Hardened the reconciliation persistence contract before publication. Fresh principals
+  now start fail-closed, completion requires a persisted two-head fixed point and an empty bounded
+  ACK drain, and normal attempt proofs and orphan receipts share replayable acknowledgement handling.
+  Restored pre-intent attempts may be hydrated only by their exact broker tombstone; cross-ledger
+  attempt, sequence, unit, and proof collisions fail closed. Database constraints bind cursors to
+  monotone signed-64-bit high-water values, and SQLite/PostgreSQL races cover claim exclusion and
+  single-winner expired-lease takeover. This slice intentionally exposes the reconciler as an
+  application service without wiring a reverse worker runtime, which remains outside the current
+  queue/persistence scope; the fail-closed claim gate prevents bypass until that future assembly
+  performs reconciliation.
 
 ## Synchronization
 
