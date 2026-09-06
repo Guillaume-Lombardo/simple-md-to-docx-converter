@@ -2,7 +2,7 @@
 ticket: T72
 linear_id: G1L-540
 linear_url: https://linear.app/g1lom/issue/G1L-540/t72-build-the-experimental-revert-workspace
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -70,6 +70,21 @@ downloading their results.
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T71.
 * 2026-09-03: User-facing scope now communicates CPU-only, low-compute processing without an
   unsupported performance claim.
+* 2026-09-06: Started from verified main `156f2e644f3d6da8d6a43230e514705f12924fd4`
+  after T71 reached Done in the repository and Linear. The implementation will reuse the existing
+  generated OpenAPI/Valibot bindings and same-origin transport, keep capabilities authoritative,
+  and confine changes to the Revert workspace, shared navigation, and frontend tests.
+* 2026-09-06: Implemented the authenticated experimental workspace, authoritative capability
+  admission, stable ambiguous-retry idempotency, polling, cancellation, safe result download,
+  responsive presentation, and browser coverage. Frontend checks, 202 Vitest tests, the production
+  build, four production-server tests, workspace validation, Ruff, and ty pass locally; frontend
+  branch coverage is 90.15%. The canonical Python suite was attempted: all locally runnable tests
+  passed after moving the generated pnpm bootstrap cache outside the scanned tree, while the tests
+  explicitly marked for PostgreSQL and S3 failed because those services were not available. The
+  final-image browser run could not complete locally because the shared Podman image store exhausted
+  the VM filesystem while committing the frontend image. No unrelated global images or volumes were
+  removed; the hosted exact-head CI remains the blocking browser validation, while T73 retains the
+  complete successful two-profile final-image matrix.
 
 ## Synchronization
 

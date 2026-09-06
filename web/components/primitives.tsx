@@ -19,7 +19,13 @@ export function AppShell({
   user,
 }: {
   children: ReactNode;
-  current: "Convert" | "Password" | "Session policy" | "Templates" | "Users";
+  current:
+    | "Convert"
+    | "Password"
+    | "Revert"
+    | "Session policy"
+    | "Templates"
+    | "Users";
   onLogout?: () => void;
   pending?: boolean;
   user?: EffectiveUser;
@@ -42,6 +48,27 @@ export function AppShell({
           >
             Convert
           </Link>
+          {user && !user.password_change_required ? (
+            <Link
+              aria-current={current === "Revert" ? "page" : undefined}
+              aria-label="Revert, Experimental"
+              className="flex items-center gap-2 text-accent underline-offset-4 hover:underline"
+              href="/revert"
+            >
+              Revert
+              <span aria-hidden="true" className="experimental-stamp">
+                Experimental
+              </span>
+            </Link>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="flex items-center gap-2 text-muted"
+            >
+              Revert
+              <span className="experimental-stamp">Experimental</span>
+            </span>
+          )}
           {user && !user.password_change_required ? (
             <Link
               aria-current={current === "Templates" ? "page" : undefined}

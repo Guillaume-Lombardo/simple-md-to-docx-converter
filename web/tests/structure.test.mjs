@@ -96,12 +96,24 @@ test("shell links target only delivered application routes", async () => {
   );
   assert.deepEqual(destinations, [
     "/convert",
+    "/revert",
     "/templates",
     "/users",
     "/session-policy",
   ]);
   for (const destination of destinations)
     assert.ok((await stat(`app${destination}`)).isDirectory());
+});
+
+test("Revert remains a browser-only same-origin FastAPI client", async () => {
+  const controller = await readFile("src/reversion/controller.ts", "utf8");
+  const workspace = await readFile("src/reversion/workspace.tsx", "utf8");
+  assert.match(controller, /"\/api\/v1\/reversions\/capabilities"/);
+  assert.match(controller, /"\/api\/v1\/reversions"/);
+  assert.doesNotMatch(controller, /https?:\/\//);
+  for (const source of [controller, workspace])
+    assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/);
+  await assert.rejects(stat("app/api"), { code: "ENOENT" });
 });
 
 test("authentication keeps authority and secrets outside browser persistence", async () => {

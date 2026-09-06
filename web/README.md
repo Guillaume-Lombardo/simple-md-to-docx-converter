@@ -13,6 +13,13 @@ authoritative `401` clears stale browser state without replaying a mutation. Fix
 destinations prevent open redirects. The shell displays the effective role-specific inactivity
 duration returned by session inspection, including administrator changes.
 
+The experimental `/revert` workspace reads its versioned upload ceiling and format hints from the
+authenticated FastAPI capabilities endpoint. It submits and polls reverse jobs through relative
+same-origin URLs, keeps an idempotency key stable after an ambiguous submission result, and never
+replays a mutation automatically. Reverse conversion is local, CPU-only, and low-compute; it does
+not provide OCR or use a hosted fallback. T73 owns the final successful two-profile reverse browser
+workflow against the complete release image set.
+
 Use the reviewed Node.js 24.19.0, Corepack 0.36.0, and pnpm 11.25.0 workspace
 toolchain from the repository root:
 
