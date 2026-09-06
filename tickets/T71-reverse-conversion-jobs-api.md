@@ -182,6 +182,11 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   content-detected format. Publication binds every trace to the job's source family and parser
   format; in-process persistence tests round-trip both mixed-assets and CSV results and retain the
   existing mismatch rejection.
+* 2026-09-06: Reconstruction now independently enforces the same trace-to-admission binding as
+  publication: succeeded jobs require an exact trace object whose source family matches the admitted
+  family and whose trace format matches the selected parser. SQL row decoding translates malformed
+  or tampered trace state into the stable repository error instead of exposing an unchecked domain
+  value; direct-model and tampered-row tests cover the invariant.
 
 ## Synchronization
 

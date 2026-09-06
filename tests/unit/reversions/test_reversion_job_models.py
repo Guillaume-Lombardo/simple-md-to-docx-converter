@@ -243,3 +243,7 @@ def test_job_validates_state_bundles_and_exact_anydoc_version() -> None:
                 asset_bytes=1,
             ),
         )
+    with pytest.raises(ValueError, match="exact trace"):
+        replace(succeeded, trace="not-a-trace")
+    with pytest.raises(ValueError, match="does not match source admission"):
+        replace(succeeded, trace=replace(trace(), detected_format="pptx"))

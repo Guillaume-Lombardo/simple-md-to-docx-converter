@@ -112,6 +112,15 @@ def _trace_json(trace: ReversionTraceMetadata) -> str:
 
 
 def _job(row: ReversionJobRow) -> ReversionJob:
+    try:
+        return _mapped_job(row)
+    except ReversionJobRepositoryError:
+        raise
+    except TypeError, ValueError:
+        raise ReversionJobRepositoryError from None
+
+
+def _mapped_job(row: ReversionJobRow) -> ReversionJob:
     return ReversionJob(
         id=UUID(row.id),
         owner_id=UUID(row.owner_id),

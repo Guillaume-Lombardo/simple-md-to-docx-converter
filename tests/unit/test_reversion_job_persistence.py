@@ -7,13 +7,13 @@ from uuid import uuid4
 
 import pytest
 from pytest_mock import MockerFixture
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, text, update
 from sqlalchemy.exc import IntegrityError
 
 from markweave.auth.models import Role, User
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
-from markweave.persistence.reversion_jobs.common import _trace, _versions
-from markweave.persistence.schema import Base
+from markweave.persistence.reversion_jobs.common import _trace, _trace_json, _versions
+from markweave.persistence.schema import Base, ReversionJobRow
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -477,6 +477,16 @@ def test_in_process_publication_persists_mixed_assets_and_csv_parser_trace(
     assert succeeded.trace == result_trace
     persisted = repository.get_internal(claimed.id)
     assert persisted is not None and persisted.trace == result_trace
+    if result_trace.source_family is FormatFamily.WORD:
+        tampered = replace(result_trace, detected_format="pptx")
+        with _engine.begin() as database:
+            database.execute(
+                update(ReversionJobRow)
+                .where(ReversionJobRow.id == str(claimed.id))
+                .values(trace_metadata=_trace_json(tampered))
+            )
+        with pytest.raises(ReversionJobRepositoryError):
+            repository.get_internal(claimed.id)
 
 
 @pytest.mark.unit

@@ -385,6 +385,8 @@ class ReversionJob:
         if self.state is ReversionJobState.SUCCEEDED:
             if any(value is None for value in result_values):
                 raise ValueError("Succeeded reverse jobs require a complete result")
+            if type(self.trace) is not ReversionTraceMetadata:
+                raise ValueError("Succeeded reverse jobs require an exact trace")
             if self.result_sha256 is not None:
                 _sha256(self.result_sha256, "Reverse result digest")
             if type(self.result_size) is not int or self.result_size <= 0:
@@ -394,6 +396,11 @@ class ReversionJob:
                 and self.trace.result_mode is not self.result_mode
             ):
                 raise ValueError("Reverse trace and result mode differ")
+            if self.trace is not None and (
+                self.trace.source_family is not self.admission.family
+                or self.trace.detected_format != self.admission.parser_format
+            ):
+                raise ValueError("Reverse trace does not match source admission")
         elif any(value is not None for value in result_values):
             raise ValueError("Only succeeded reverse jobs may expose a result")
         if self.state is ReversionJobState.FAILED:
