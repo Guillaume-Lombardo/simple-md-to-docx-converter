@@ -18,6 +18,9 @@ from markweave.reversions.models import ReverseOutputMode
 SHA256_CHARACTERS = 64
 MAX_SOURCE_STEM_CHARACTERS = 255
 MAX_COMPONENT_VALUE_CHARACTERS = 255
+MAX_WORKER_ID_CHARACTERS = 255
+MAX_FAILURE_CODE_CHARACTERS = 128
+MAX_FAILURE_MESSAGE_CHARACTERS = 1024
 FIRST_CONTROL_CODEPOINT = 32
 DELETE_CODEPOINT = 127
 ANYDOC_COMPONENT = ("firecrawl-anydoc", "0.2.4")
@@ -450,10 +453,21 @@ class ReversionFailure:
     expires_at: datetime
 
     def __post_init__(self) -> None:
-        if not self.worker_id.strip():
-            raise ValueError("Reverse failure worker identity must not be blank")
-        if not self.code.strip() or not self.message.strip():
-            raise ValueError("Reverse failure details must not be blank")
+        if (
+            type(self.worker_id) is not str
+            or not self.worker_id.strip()
+            or len(self.worker_id) > MAX_WORKER_ID_CHARACTERS
+        ):
+            raise ValueError("Reverse failure worker identity is invalid")
+        if (
+            type(self.code) is not str
+            or not self.code.strip()
+            or len(self.code) > MAX_FAILURE_CODE_CHARACTERS
+            or type(self.message) is not str
+            or not self.message.strip()
+            or len(self.message) > MAX_FAILURE_MESSAGE_CHARACTERS
+        ):
+            raise ValueError("Reverse failure details are invalid")
         object.__setattr__(self, "now", _utc(self.now))
         object.__setattr__(self, "expires_at", _utc(self.expires_at))
 

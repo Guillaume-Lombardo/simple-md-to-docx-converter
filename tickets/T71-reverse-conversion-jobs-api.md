@@ -173,7 +173,8 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   admission, owner access, leases, cancellation, broker identity, proof replay, recovery, terminal
   cleanup, malformed rows, and sanitized database failures without reclassifying any real-boundary
   integration test. `ReversionFailure` now rejects blank worker, code, or message values and
-  normalizes its timestamps to UTC before persistence. The exact light selection passes 3,290 tests
+  enforces the PostgreSQL schema bounds (255/128/1024 characters respectively), rejects non-string
+  values, and normalizes its timestamps to UTC before persistence. The exact light selection passes 3,290 tests
   at 93.91% total and 90.09% application branch coverage; changed application coverage is 96.17%.
 
 ## Synchronization

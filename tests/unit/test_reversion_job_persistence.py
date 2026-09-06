@@ -517,13 +517,28 @@ def test_reversion_failure_rejects_unsafe_text_and_normalizes_timestamps() -> No
     normalized = failure()
     assert normalized.now == NOW
     assert normalized.expires_at == RETENTION_END
+    assert len(failure(worker_id="w" * 255).worker_id) == 255
+    assert len(failure(code="c" * 128).code) == 128
+    assert len(failure(message="m" * 1024).message) == 1024
 
-    with pytest.raises(ValueError, match="worker identity must not be blank"):
+    with pytest.raises(ValueError, match="worker identity is invalid"):
         failure(worker_id=" \t")
-    with pytest.raises(ValueError, match="details must not be blank"):
+    with pytest.raises(ValueError, match="worker identity is invalid"):
+        failure(worker_id="w" * 256)
+    with pytest.raises(ValueError, match="worker identity is invalid"):
+        replace(normalized, worker_id=1)
+    with pytest.raises(ValueError, match="details are invalid"):
         failure(code=" \t")
-    with pytest.raises(ValueError, match="details must not be blank"):
+    with pytest.raises(ValueError, match="details are invalid"):
+        failure(code="c" * 129)
+    with pytest.raises(ValueError, match="details are invalid"):
+        replace(normalized, code=1)
+    with pytest.raises(ValueError, match="details are invalid"):
         failure(message=" \t")
+    with pytest.raises(ValueError, match="details are invalid"):
+        failure(message="m" * 1025)
+    with pytest.raises(ValueError, match="details are invalid"):
+        replace(normalized, message=1)
     with pytest.raises(ValueError, match="timestamps must include a timezone"):
         failure(now=NOW.replace(tzinfo=None))
     with pytest.raises(ValueError, match="timestamps must include a timezone"):
