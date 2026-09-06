@@ -12,6 +12,7 @@ from markweave.reversion_jobs.models import (
     ReversionJob,
     ReversionJobState,
     ReversionJobStep,
+    ReversionLeaseRecoveryResult,
     ReversionTraceMetadata,
     reversion_result_object_id,
 )
@@ -27,6 +28,18 @@ from tests.reversion_job_repository_contracts import (
     submission,
     trace,
 )
+
+
+@pytest.mark.unit
+def test_lease_recovery_result_separates_outcomes_and_total_progress() -> None:
+    result = ReversionLeaseRecoveryResult(2, 3, 4)
+
+    assert result.outcomes == (2, 3, 4)
+    assert result.progressed == 9
+    with pytest.raises(ValueError, match="non-negative integers"):
+        ReversionLeaseRecoveryResult(0, -1, 0)
+    with pytest.raises(ValueError, match="non-negative integers"):
+        ReversionLeaseRecoveryResult(0, True, 0)
 
 
 @pytest.mark.unit

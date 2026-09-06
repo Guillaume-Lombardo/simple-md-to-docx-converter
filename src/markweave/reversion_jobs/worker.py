@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import UUID
 
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
+from markweave.broker.protocol import ReadyRequest, ReadyResponse
 from markweave.reversion_jobs.errors import (
     ReversionJobLeaseLostError,
     ReversionProofRequiredError,
@@ -21,7 +23,10 @@ from markweave.reversion_jobs.worker_execution import (
     ReversionClaimService,
     ReversionHeartbeat,
 )
-from markweave.reversion_jobs.worker_maintenance import ReversionMaintenanceService
+from markweave.reversion_jobs.worker_maintenance import (
+    ReversionMaintenanceService,
+    ReversionRecoveryResult,
+)
 from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
@@ -35,10 +40,20 @@ class ReversionWorker:
         self._executor = ReversionAttemptExecutor(runtime)
         self._publication = ReversionPublicationService(runtime)
         self._maintenance = ReversionMaintenanceService(runtime)
+        self._reconciliation_token = runtime.request_id_factory()
 
     def reconcile(self, token: UUID | None = None) -> None:
         """Reach the principal broker-inventory fixed point before queue work."""
 
+        if self._runtime.require_ready:
+            ready_request = ReadyRequest(self._runtime.request_id_factory(), 1)
+            ready_response = self._runtime.broker.request(ready_request)
+            if (
+                type(ready_response) is not ReadyResponse
+                or ready_response.request_id != ready_request.request_id
+                or not ready_response.ready
+            ):
+                raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
         now = self._runtime.clock()
         reconciliation_token = token or self._runtime.request_id_factory()
         self._runtime.reconciler.reconcile(
@@ -50,12 +65,41 @@ class ReversionWorker:
             now_factory=self._runtime.clock,
         )
 
+    def reconcile_step(self) -> bool:
+        """Advance one bounded authenticated reconciliation quantum."""
+
+        if self._runtime.require_ready:
+            ready_request = ReadyRequest(self._runtime.request_id_factory(), 1)
+            ready_response = self._runtime.broker.request(ready_request)
+            if (
+                type(ready_response) is not ReadyResponse
+                or ready_response.request_id != ready_request.request_id
+                or not ready_response.ready
+            ):
+                raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+        now = self._runtime.clock()
+        return self._runtime.reconciler.reconcile_step(
+            self._runtime.principal,
+            f"{self._runtime.worker_id}-reconciler",
+            self._reconciliation_token,
+            now,
+            now + timedelta(seconds=self._runtime.policy.recovery_lease_seconds),
+            now_factory=self._runtime.clock,
+        )
+
     def run_once(self) -> bool:
         """Run at most one exact reverse attempt after mandatory reconciliation."""
 
         if self._runtime.shutdown_requested():
             return False
         self.reconcile()
+        if self._runtime.shutdown_requested():
+            return False
+        return self.run_reconciled_once()
+
+    def run_reconciled_once(self) -> bool:
+        """Claim and execute once after a caller-observed reconciliation fixed point."""
+
         if self._runtime.shutdown_requested():
             return False
         claimed = self._claims.claim()
@@ -75,6 +119,11 @@ class ReversionWorker:
                 self._finish_rejection(claimed, error)
         return True
 
+    def recover_step(self) -> ReversionRecoveryResult:
+        """Run one recovery batch without starting another reconciliation drain."""
+
+        return self._maintenance.recover_step()
+
     def recover(self) -> int:
         """Reconcile first, then recover only attempts with durable empty proof."""
 
@@ -85,11 +134,11 @@ class ReversionWorker:
                 self.reconcile(token)
                 break
             except ReversionProofRequiredError:
-                recovered = self._maintenance.recover()
-                if not recovered:
+                result = self._maintenance.recover_step()
+                if not result.progressed:
                     raise
-                recovered_total += recovered
-        return recovered_total + self._maintenance.recover()
+                recovered_total += result.requeued
+        return recovered_total + self._maintenance.recover_step().requeued
 
     def cleanup(self) -> int:
         """Run one configured bounded reverse retention batch."""
@@ -130,6 +179,8 @@ class ReversionWorker:
                     expires_at,
                 )
             )
+            if self._runtime.metrics is not None:
+                self._runtime.metrics.record_reversion_failure(error.category.value)
         attempt = self._runtime.repository.get_attempt(claimed.attempt_id)
         if attempt is not None and attempt.termination_proof is not None:
             self._publication.acknowledge_attempt(attempt)

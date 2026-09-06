@@ -170,6 +170,7 @@ class ReversionClaimService:
             self._runtime.principal,
             now,
             now + timedelta(seconds=self._runtime.policy.lease_seconds),
+            self._runtime.policy.running_limit,
         )
         if job is None:
             return None

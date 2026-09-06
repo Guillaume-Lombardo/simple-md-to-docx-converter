@@ -43,6 +43,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceStageRequest,
     WorkspaceSuccessResponse,
 )
+from markweave.observability import OperationalMetrics
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
@@ -67,6 +68,7 @@ from markweave.reversion_jobs.worker_execution import (
     ReversionClaimService,
     ReversionHeartbeat,
 )
+from markweave.reversion_jobs.worker_maintenance import ReversionRecoveryResult
 from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.models import ReverseOutputMode
@@ -504,7 +506,10 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
     mocker: MockerFixture,
 ) -> None:
     repo, owner, _engine = repository
-    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    runtime = replace(
+        _runtime(mocker, repo, FilesystemObjectStore(tmp_path)),
+        policy=replace(POLICY, recovery_batch_size=1),
+    )
     claimed = _claim(runtime, repo, owner, b"source")
     repo.reserve_create_intent(
         claimed.job.id,
@@ -559,6 +564,23 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
         AcknowledgeRequest,
     ]
     assert cast(Any, runtime.reconciler).reconcile.call_count == 2
+
+
+def test_recovery_progress_excludes_cancelled_and_failed_jobs_from_requeues(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    repo.request_cancel(claimed.job.id, owner.id, NOW, RETENTION_END)
+    repo.create(replace(submission(owner.id), created_at=NOW - timedelta(days=1)))
+    cast(Any, runtime.clock).return_value = LEASE_END + timedelta(seconds=1)
+
+    result = ReversionWorker(runtime).recover_step()
+
+    assert result == ReversionRecoveryResult(progressed=2, requeued=0)
 
 
 def test_cleanup_deletes_reverse_objects_and_expires_job(
@@ -676,7 +698,12 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     mocker: MockerFixture,
 ) -> None:
     repo, owner, _engine = repository
-    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    metrics = OperationalMetrics()
+    log_event = mocker.patch("markweave.observability.log_event")
+    runtime = replace(
+        _runtime(mocker, repo, FilesystemObjectStore(tmp_path)), metrics=metrics
+    )
+    failure_metric = mocker.spy(metrics, "record_reversion_failure")
     job = _queue(runtime, repo, owner, b"source")
     _successful_broker(mocker, runtime)
     broker = cast(Any, runtime.broker)
@@ -708,6 +735,8 @@ def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
     retained = repo.get_internal(job.id)
     assert retained is not None and retained.state is ReversionJobState.FAILED
     assert retained.error_code == ReverseErrorCategory.MALFORMED.value
+    failure_metric.assert_called_once_with(ReverseErrorCategory.MALFORMED.value)
+    log_event.assert_any_call("reversion_job_processing_failed", error_code="malformed")
     attempts = repo.list_attempts(job.id)
     assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == NOW
 

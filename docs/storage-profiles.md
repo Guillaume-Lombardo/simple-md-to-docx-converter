@@ -73,6 +73,15 @@ MARKWEAVE_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
 MARKWEAVE_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
 ```
 
+The optional reverse execution group documented in [configuration](configuration.md) is
+profile-neutral and intentionally has no defaults. In standalone it augments the single embedded
+worker through the owner-authenticated Unix broker socket. In distributed deployments the API may
+remain reverse-HTTP-only without execution credentials, while each external worker that processes
+reverse jobs uses the complete mTLS broker profile. A partial execution group is rejected before
+storage or broker construction. Both profiles enforce the reverse-running ceiling in the database;
+the existing global admission count continues to include queued and running jobs from both
+families.
+
 Upload and decompressed-content limits are independent. A standalone Markdown upload can make the
 upload ceiling larger than the decompressed archive ceiling, while another approved policy may do
 the reverse. Configuration therefore validates each as positive without imposing an unsupported

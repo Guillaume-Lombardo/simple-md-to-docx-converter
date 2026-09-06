@@ -38,6 +38,19 @@ rows. The endpoint exposes:
 - `md_converter_reversion_proof_blocked_attempts`,
   `md_converter_reversion_proof_ack_backlog`, and
   `md_converter_reversion_reconciliation_pending` for content-free reverse safety backlogs;
+- `md_converter_reversion_runtime_enabled`, `md_converter_reversion_broker_ready`,
+  `md_converter_reversion_reconciliation_ready`, and `md_converter_reversion_degraded` for the
+  process-local reverse execution state;
+- `md_converter_reversion_broker_fault`, `md_converter_reversion_reconciliation_fault`, and
+  `md_converter_reversion_runtime_fault` as mutually exclusive content-free fault scopes;
+- `md_converter_reversion_job_failures_total` for terminal job failures and
+  `md_converter_reversion_runtime_faults_total` for retryable infrastructure/runtime faults;
+- `md_converter_reversion_worker_retries_total`, `md_converter_reversion_recoveries_total`, and
+  `md_converter_reversion_expirations_total`; recovery counts only jobs actually requeued, not
+  intermediate proof acknowledgements;
+- `md_converter_reversion_operation_duration_seconds_count` and `_sum`, labelled only by the
+  closed operations `reversion_reconciliation`, `reversion_recovery`, `reversion_claim`, and
+  `reversion_cleanup`;
 - `md_converter_job_step_duration_seconds_count` and `_sum`, labelled only by the fixed step;
 - `md_converter_job_failures_total`, labelled by stable safe error code;
 - `md_converter_job_saturation_total`, labelled `owner` or `global`;
@@ -123,6 +136,15 @@ connect/read budgets. These probe-only clients use the required positive finite
 `MARKWEAVE_READINESS_TIMEOUT_SECONDS`; S3 readiness disables retries so one probe remains one
 bounded provider operation. Any component failure returns the stable content-free `NOT_READY`
 response. Liveness remains independent at `GET /health/live`.
+
+Reverse execution is optional and does not change this global readiness contract:
+`/health/ready` remains ready while the forward database and object-store path is healthy. An
+enabled reverse worker starts degraded until authenticated broker reconciliation reaches a fixed
+point. Broker, reconciliation, and runtime faults are exposed separately by the process-local
+metrics above and by closed-vocabulary JSON state-change, failure, retry, recovery, expiration, and
+duration events. This keeps healthy forward capacity available during a reverse outage while making
+the degradation explicit. Distributed API-only processes report reverse runtime disabled; the
+external worker's independently scraped metrics surface is authoritative for its broker state.
 
 ## Operational verification
 

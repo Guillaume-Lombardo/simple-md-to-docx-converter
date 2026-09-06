@@ -25,6 +25,7 @@ from markweave.persistence.job_admission import (
     ACTIVE_JOB_STATES,
     global_active_job_count,
     lock_global_admission,
+    lock_reverse_claim,
 )
 from markweave.persistence.reversion_jobs.common import (
     _attempt,
@@ -59,6 +60,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
     ReversionSubmission,
     ReversionTraceMetadata,
     reversion_result_object_id,
@@ -291,6 +293,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
         principal: AuthenticatedPrincipal,
         now: datetime,
         lease_expires_at: datetime,
+        running_limit: int = 1,
     ) -> ReversionJob | None:
         """Append an attempt and allocate its per-principal sequence atomically.
 
@@ -298,14 +301,24 @@ class SqlReversionJobRepository(_SqlReversionStore):
         later runtime integration must reconcile that gap and must not infer completeness here.
         """
 
+        if type(running_limit) is not int or running_limit <= 0:
+            raise ValueError("Reverse running limit must be a positive integer")
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                lock_reverse_claim(database, self._engine.dialect.name)
                 principal_row = self._lock_principal(database, principal.principal_id)
                 if (
                     not principal_row.reconciliation_complete
                     or principal_row.reconciliation_token is not None
                 ):
+                    return None
+                running = database.scalar(
+                    select(func.count())
+                    .select_from(ReversionJobRow)
+                    .where(ReversionJobRow.state == ReversionJobState.RUNNING.value)
+                )
+                if int(running or 0) >= running_limit:
                     return None
                 unbound_attempt = database.scalar(
                     select(ReversionAttemptRow.attempt_id)
@@ -1278,8 +1291,14 @@ class SqlReversionJobRepository(_SqlReversionStore):
             raise ReversionJobRepositoryError from None
 
     def recover_expired_leases(
-        self, now: datetime, expires_at: datetime, incomplete_before: datetime
-    ) -> int:
+        self,
+        now: datetime,
+        expires_at: datetime,
+        incomplete_before: datetime,
+        limit: int | None = None,
+    ) -> ReversionLeaseRecoveryResult:
+        if limit is not None and (type(limit) is not int or limit <= 0):
+            raise ValueError("Reverse recovery limit must be a positive integer")
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
@@ -1300,9 +1319,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     )
                     .order_by(ReversionJobRow.id)
                 )
+                if limit is not None:
+                    statement = statement.limit(limit)
                 if self._engine.dialect.name == "postgresql":
                     statement = statement.with_for_update(skip_locked=True)
-                recovered = 0
+                requeued = 0
+                cancelled_count = 0
                 for job, attempt in database.execute(statement):
                     cancelled = job.cancel_requested
                     job.state = (
@@ -1318,10 +1340,35 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     attempt.recovery_owner = None
                     attempt.recovery_token = None
                     attempt.recovery_expires_at = None
-                    recovered += 1
+                    if cancelled:
+                        cancelled_count += 1
+                    else:
+                        requeued += 1
+                recovered = ReversionLeaseRecoveryResult(requeued, cancelled_count, 0)
+                remaining = None if limit is None else limit - recovered.progressed
+                if remaining == 0:
+                    return recovered
+                incomplete_ids = (
+                    select(ReversionJobRow.id)
+                    .where(
+                        ReversionJobRow.state == ReversionJobState.QUEUED.value,
+                        ReversionJobRow.source_ready.is_(False),
+                        ReversionJobRow.created_at <= incomplete_before,
+                    )
+                    .order_by(ReversionJobRow.id)
+                )
+                if remaining is not None:
+                    incomplete_ids = incomplete_ids.limit(remaining)
+                if self._engine.dialect.name == "postgresql":
+                    incomplete_ids = incomplete_ids.with_for_update(skip_locked=True)
+                candidates = tuple(database.scalars(incomplete_ids))
+                if not candidates:
+                    return recovered
+                self._after_incomplete_recovery_select()
                 incomplete_result = database.execute(
                     update(ReversionJobRow)
                     .where(
+                        ReversionJobRow.id.in_(candidates),
                         ReversionJobRow.state == ReversionJobState.QUEUED.value,
                         ReversionJobRow.source_ready.is_(False),
                         ReversionJobRow.created_at <= incomplete_before,
@@ -1334,9 +1381,16 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         expires_at=expires_at,
                     )
                 )
-                return recovered + int(getattr(incomplete_result, "rowcount", 0))
+                return ReversionLeaseRecoveryResult(
+                    recovered.requeued,
+                    recovered.cancelled,
+                    int(getattr(incomplete_result, "rowcount", 0)),
+                )
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
+
+    def _after_incomplete_recovery_select(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
 
     def succeed(  # noqa: PLR0913, PLR0917
         self,

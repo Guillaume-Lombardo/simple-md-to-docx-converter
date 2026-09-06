@@ -49,6 +49,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
@@ -391,7 +392,7 @@ def test_sqlite_reverse_recovery_without_create_intent_and_incomplete_upload(
     recovered = repository.recover_expired_leases(
         NOW + timedelta(seconds=2), RETENTION_END, NOW - timedelta(hours=1)
     )
-    assert recovered == 2
+    assert recovered == ReversionLeaseRecoveryResult(1, 0, 1)
     recovered_job = repository.get_internal(ready.id)
     assert recovered_job is not None and recovered_job.state is ReversionJobState.QUEUED
     incomplete = repository.get_internal(abandoned.id)
@@ -581,7 +582,7 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
 
     def claim(worker: str) -> ReversionJob | None:
         barrier.wait()
-        return repository.claim(worker, principal, NOW, LEASE_END)
+        return repository.claim(worker, principal, NOW, LEASE_END, running_limit=2)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         jobs = tuple(executor.map(claim, ("sequence-a", "sequence-b")))
@@ -591,7 +592,10 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
     assert first.current_attempt_id is not None and first.lease_token is not None
     first_attempt = repository.get_attempt(first.current_attempt_id)
     assert first_attempt is not None and first_attempt.create_sequence == 1
-    assert repository.claim("sequence-blocked", principal, NOW, LEASE_END) is None
+    assert (
+        repository.claim("sequence-blocked", principal, NOW, LEASE_END, running_limit=2)
+        is None
+    )
     intent = repository.reserve_create_intent(
         first.id,
         first_attempt.attempt_id,
@@ -613,7 +617,12 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
         )
         == intent
     )
-    assert repository.claim("sequence-still-blocked", principal, NOW, LEASE_END) is None
+    assert (
+        repository.claim(
+            "sequence-still-blocked", principal, NOW, LEASE_END, running_limit=2
+        )
+        is None
+    )
     unit_id = uuid4()
     repository.record_broker_unit(
         first.id,
@@ -623,7 +632,9 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
         unit_id,
         NOW,
     )
-    second = repository.claim("sequence-next", principal, NOW, LEASE_END)
+    second = repository.claim(
+        "sequence-next", principal, NOW, LEASE_END, running_limit=2
+    )
     assert second is not None
     assert second.current_attempt_id is not None and second.lease_token is not None
     second_attempt = repository.get_attempt(second.current_attempt_id)
@@ -651,6 +662,40 @@ def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> No
         second.lease_token,
         NOW,
         RETENTION_END,
+    )
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reverse_running_claim_cap_is_global(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    repository = SqlReversionJobRepository(engine)
+    first_principal = PRINCIPAL
+    second_principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, first_principal)
+    complete_empty_reconciliation(repository, second_principal)
+    for name in ("RunningCapOne", "RunningCapTwo"):
+        owner = _user(users, name)
+        job, _ = repository.create(submission(owner.id))
+        repository.activate_source(job.id, NOW)
+
+    first = repository.claim(
+        "running-cap-a", first_principal, NOW, LEASE_END, running_limit=1
+    )
+    assert first is not None
+    assert (
+        repository.claim(
+            "running-cap-b", second_principal, NOW, LEASE_END, running_limit=1
+        )
+        is None
+    )
+    assert (
+        repository.claim(
+            "running-cap-b", second_principal, NOW, LEASE_END, running_limit=2
+        )
+        is not None
     )
     engine.dispose()
 
@@ -807,7 +852,9 @@ def test_sqlite_recovery_proof_is_a_single_exact_cas(tmp_path: Path) -> None:
             persisted.termination_proof,
             recovery_now,
         )
-    assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
+    assert repository.recover_expired_leases(
+        recovery_now, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(1, 0, 0)
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()
 

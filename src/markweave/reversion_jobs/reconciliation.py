@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from markweave.broker.errors import BrokerError
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal
 from markweave.broker.protocol import (
     AcknowledgeRequest,
@@ -23,6 +23,7 @@ from markweave.broker.reconciliation_protocol import (
     ReconciliationResult,
     ReconciliationTombstone,
 )
+from markweave.reversion_jobs.errors import ReversionJobConflictError
 
 
 class ReconciliationBroker(Protocol):
@@ -99,40 +100,59 @@ class ReversionBrokerReconciler:
     ) -> None:
         """Reconcile outside DB transactions and publish readiness at fixed point."""
 
+        lease_duration = expires_at - now
+        while not self.reconcile_step(
+            principal,
+            owner,
+            token,
+            now,
+            now + lease_duration,
+            now_factory=now_factory,
+        ):
+            now = now_factory()
+
+    def reconcile_step(  # noqa: PLR0913 - explicit lease boundary
+        self,
+        principal: AuthenticatedPrincipal,
+        owner: str,
+        token: UUID,
+        now: datetime,
+        expires_at: datetime,
+        *,
+        now_factory: Callable[[], datetime],
+    ) -> bool:
+        """Process at most one configured ACK batch and one inventory page."""
+
         cursor = self._store.begin_reconciliation(
             principal, owner, token, now, expires_at
         )
-        while pending_batch := self._store.pending_reconciliation_acknowledgements(
+        pending = self._store.pending_reconciliation_acknowledgements(
             principal, token, now_factory(), self._ack_batch_limit
-        ):
-            for pending in pending_batch:
-                self._ack(principal, token, pending, now_factory())
+        )
+        for tombstone in pending:
+            self._ack(principal, token, tombstone, now_factory())
 
-        stable_high_water: int | None = None
-        while True:
-            request = ReconciliationRequest(self._request_id_factory(), cursor)
-            response = self._broker.reconcile(request)
-            if type(response) is ReconciliationErrorResponse:
-                if response.request_id != request.request_id:
-                    raise ValueError("Broker reconciliation response is misbound")
-                raise BrokerError(response.category)
-            if (
-                type(response) is not ReconciliationResponse
-                or response.request_id != request.request_id
-            ):
-                raise ValueError("Broker reconciliation response is invalid")
-            tombstone = self._store.record_reconciliation_page(
-                principal, token, response, now_factory()
-            )
-            if tombstone is not None:
-                self._ack(principal, token, tombstone, now_factory())
-                cursor = tombstone.create_sequence
-                stable_high_water = None
-                continue
-            if stable_high_water == response.create_sequence_high_water:
-                self._store.complete_reconciliation(principal, token, now_factory())
-                return
-            stable_high_water = response.create_sequence_high_water
+        request = ReconciliationRequest(self._request_id_factory(), cursor)
+        response = self._broker.reconcile(request)
+        if type(response) is ReconciliationErrorResponse:
+            if response.request_id != request.request_id:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            raise BrokerError(response.category)
+        if (
+            type(response) is not ReconciliationResponse
+            or response.request_id != request.request_id
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        tombstone = self._store.record_reconciliation_page(
+            principal, token, response, now_factory()
+        )
+        if tombstone is not None:
+            return False
+        try:
+            self._store.complete_reconciliation(principal, token, now_factory())
+        except ReversionJobConflictError:
+            return False
+        return True
 
     def _ack(
         self,
@@ -155,7 +175,7 @@ class ReversionBrokerReconciler:
                 response.request_id != request.request_id
                 or response.operation is not BrokerOperation.ACK
             ):
-                raise ValueError("Broker reconciliation acknowledgement is misbound")
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
             raise BrokerError(response.category)
         if (
             type(response) is not AcknowledgeResponse
@@ -164,5 +184,5 @@ class ReversionBrokerReconciler:
             or (response.attempt_id, response.unit_id, response.proof_id)
             != (proof.attempt_id, proof.unit_id, proof.proof_id)
         ):
-            raise ValueError("Broker reconciliation acknowledgement is invalid")
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         self._store.mark_reconciliation_acknowledged(principal, token, tombstone, now)

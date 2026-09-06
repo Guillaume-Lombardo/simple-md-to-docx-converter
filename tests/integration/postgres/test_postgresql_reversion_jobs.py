@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import Engine, inspect, text
 
 from markweave.auth.models import Role, User
+from markweave.broker.models import AuthenticatedPrincipal
 from markweave.broker.reconciliation_protocol import (
     ReconciliationResponse,
     ReconciliationTombstone,
@@ -23,7 +24,12 @@ from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
     ReversionJobLeaseLostError,
 )
-from markweave.reversion_jobs.models import ReversionAttempt, ReversionJob
+from markweave.reversion_jobs.models import (
+    ReversionAttempt,
+    ReversionJob,
+    ReversionJobState,
+    ReversionLeaseRecoveryResult,
+)
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
@@ -44,6 +50,15 @@ class _RecoveryRaceRepository(SqlReversionJobRepository):
         self._barrier = barrier
 
     def _before_recovery_proof_cas(self) -> None:
+        self._barrier.wait()
+
+
+class _IncompleteRecoveryRaceRepository(SqlReversionJobRepository):
+    def __init__(self, engine: Engine, barrier: Barrier) -> None:
+        super().__init__(engine)
+        self._barrier = barrier
+
+    def _after_incomplete_recovery_select(self) -> None:
         self._barrier.wait()
 
 
@@ -91,6 +106,98 @@ def test_postgresql_reversion_repository_contract() -> None:
     other = _user(users, "ReverseOther")
     exercise_reversion_job_repository_contract(
         SqlReversionJobRepository(engine), owner.id, other.id
+    )
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_enforces_configured_reverse_running_limit() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    owner = _user(SqlUserRepository(engine), "RunningLimit")
+    principals = (PRINCIPAL, type(PRINCIPAL)(uuid4()))
+    for principal in principals:
+        complete_empty_reconciliation(repository, principal)
+    jobs = [repository.create(submission(owner.id))[0] for _ in range(2)]
+    for job in jobs:
+        repository.activate_source(job.id, NOW)
+    barrier = Barrier(2)
+
+    def claim(candidate: tuple[str, AuthenticatedPrincipal]) -> ReversionJob | None:
+        worker, principal = candidate
+        barrier.wait()
+        return repository.claim(worker, principal, NOW, LEASE_END, 1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = tuple(
+            executor.map(claim, zip(("worker-1", "worker-2"), principals, strict=True))
+        )
+    retained = tuple(claimed for claimed in claims if claimed is not None)
+    assert len(retained) == 1
+    first = retained[0]
+    assert first is not None and first.current_attempt_id is not None
+    attempt = repository.get_attempt(first.current_attempt_id)
+    assert attempt is not None and first.lease_token is not None
+    repository.reserve_create_intent(
+        first.id,
+        attempt.attempt_id,
+        first.lease_owner or "",
+        first.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    repository.record_broker_unit(
+        first.id,
+        attempt.attempt_id,
+        first.lease_owner or "",
+        first.lease_token,
+        uuid4(),
+        NOW,
+    )
+
+    remaining_principal = (
+        principals[0] if first.lease_owner == "worker-2" else principals[1]
+    )
+    assert (
+        repository.claim("worker-remaining", remaining_principal, NOW, LEASE_END, 1)
+        is None
+    )
+    assert (
+        repository.claim("worker-remaining", remaining_principal, NOW, LEASE_END, 2)
+        is not None
+    )
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_incomplete_recovery_workers_claim_distinct_rows() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = _IncompleteRecoveryRaceRepository(engine, Barrier(2))
+    owner = _user(SqlUserRepository(engine), "IncompleteRecoveryRace")
+    job_ids = []
+    for _ in range(2):
+        job, _created = repository.create(submission(owner.id))
+        job_ids.append(job.id)
+
+    def recover() -> ReversionLeaseRecoveryResult:
+        return repository.recover_expired_leases(NOW, RETENTION_END, NOW, limit=1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        recovered = tuple(executor.map(lambda _value: recover(), range(2)))
+
+    assert sum(result.progressed for result in recovered) == 2
+    assert all(result == ReversionLeaseRecoveryResult(0, 0, 1) for result in recovered)
+    retained = tuple(repository.get_internal(job_id) for job_id in job_ids)
+    assert all(
+        job is not None
+        and job.state is ReversionJobState.FAILED
+        and job.error_code == "source_upload_incomplete"
+        for job in retained
     )
     engine.dispose()
 
@@ -334,7 +441,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
 
     def claim(worker: str) -> ReversionJob | None:
         barrier.wait()
-        return repository.claim(worker, principal, NOW, LEASE_END)
+        return repository.claim(worker, principal, NOW, LEASE_END, 2)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         jobs = tuple(executor.map(claim, ("sequence-a", "sequence-b")))
@@ -344,7 +451,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
     assert first.current_attempt_id is not None and first.lease_token is not None
     first_attempt = repository.get_attempt(first.current_attempt_id)
     assert first_attempt is not None and first_attempt.create_sequence == 1
-    assert repository.claim("sequence-blocked", principal, NOW, LEASE_END) is None
+    assert repository.claim("sequence-blocked", principal, NOW, LEASE_END, 2) is None
     intent = repository.reserve_create_intent(
         first.id,
         first_attempt.attempt_id,
@@ -366,7 +473,9 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
         )
         == intent
     )
-    assert repository.claim("sequence-still-blocked", principal, NOW, LEASE_END) is None
+    assert (
+        repository.claim("sequence-still-blocked", principal, NOW, LEASE_END, 2) is None
+    )
     unit_id = uuid4()
     repository.record_broker_unit(
         first.id,
@@ -376,7 +485,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
         unit_id,
         NOW,
     )
-    second = repository.claim("sequence-next", principal, NOW, LEASE_END)
+    second = repository.claim("sequence-next", principal, NOW, LEASE_END, 2)
     assert second is not None
     assert second.current_attempt_id is not None and second.lease_token is not None
     second_attempt = repository.get_attempt(second.current_attempt_id)
@@ -559,7 +668,9 @@ def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
             persisted.termination_proof,
             recovery_now,
         )
-    assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
+    assert repository.recover_expired_leases(
+        recovery_now, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(1, 0, 0)
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()
 

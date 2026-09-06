@@ -274,6 +274,30 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   Worker lifecycle logs/counters, readiness, runtime assembly, fairness, and production execution
   policy remain in the parallel T71 runtime slice; this observability slice does not claim T71
   completion.
+* 2026-09-06: Completed the production reverse-runtime assembly and hardening slice on the merged
+  queue-observability head `0b45de8`. Complete explicit execution settings now assemble Unix or
+  mutually authenticated TLS broker clients, policy/principal reconciliation, and one serial
+  forward/reverse worker loop in standalone and distributed external-worker profiles while keeping
+  HTTP-only deployments compatible. Forward work receives the first opportunity and is interleaved
+  between bounded reverse reconciliation, recovery, cleanup, and claim quanta; expected broker,
+  persistence, object-store, lease, and reverse-conversion failures degrade only the reverse family.
+  Database claims enforce the configured global reverse-running cap, and PostgreSQL incomplete
+  submission recovery now uses skip-locked selection plus compare-and-set predicates. Content-free
+  closed-vocabulary logs and metrics expose reverse broker, reconciliation, and runtime state plus
+  failures, retries, recoveries, expirations, and durations without making global forward readiness
+  fail solely because reverse execution is degraded. A real assembled standalone boundary test runs
+  `build_components` through the fair loop against a Unix broker, proving forward progress during a
+  broker outage and reconnection followed by two serial reverse jobs under a cap of one. Terminal
+  reverse-job failure categories are recorded only after the durable failed transition and remain
+  distinct from retryable scheduler/runtime faults. Proof recovery returns to reconciliation rather
+  than claiming early, and recovery metrics count only jobs actually requeued. Final review
+  hardening renews the original reconciliation lease duration on every compatibility-loop step and
+  returns separate requeued, cancelled, and incomplete-failed counts from durable lease recovery.
+  Targeted
+  unit, SQLite, and Unix transport coverage passes locally; PostgreSQL concurrency and the existing
+  mTLS transport contracts remain executable in hosted CI. The combined distributed
+  PostgreSQL/S3/mTLS final-image matrix belongs to the separate T73 delivery and does not block T71
+  acceptance. T71 remains In Progress until this runtime slice is published and verified on main.
 
 ## Synchronization
 
