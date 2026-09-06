@@ -28,4 +28,7 @@
   .primary-button {
     @apply rounded-control bg-accent px-4 py-2 font-semibold text-white hover:bg-accent-strong disabled:opacity-60;
   }
+  .experimental-stamp {
+    @apply inline-block -rotate-2 rounded-control border-2 border-current px-1.5 py-0.5 text-[0.65rem] font-bold tracking-wider uppercase;
+  }
 }
