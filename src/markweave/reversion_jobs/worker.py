@@ -77,13 +77,17 @@ class ReversionWorker:
         """Reconcile first, then recover only attempts with durable empty proof."""
 
         token = self._runtime.request_id_factory()
-        try:
-            self.reconcile(token)
-        except ReversionProofRequiredError:
-            recovered = self._maintenance.recover()
-            self.reconcile(token)
-            return recovered
-        return self._maintenance.recover()
+        recovered_total = 0
+        while True:
+            try:
+                self.reconcile(token)
+                break
+            except ReversionProofRequiredError:
+                recovered = self._maintenance.recover()
+                if not recovered:
+                    raise
+                recovered_total += recovered
+        return recovered_total + self._maintenance.recover()
 
     def cleanup(self) -> int:
         """Run one configured bounded reverse retention batch."""
