@@ -974,7 +974,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     )
                 if trace is not None and (
                     trace.source_family.value != job.source_family
-                    or trace.detected_format != job.detected_format
+                    or trace.detected_format != job.parser_format
                 ):
                     raise ReversionJobConflictError(
                         "Reverse result trace does not match source admission"

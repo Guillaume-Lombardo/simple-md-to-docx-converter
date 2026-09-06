@@ -58,10 +58,20 @@ def test_trace_metadata_is_closed_and_content_free() -> None:
         replace(trace, asset_count=1)
     with pytest.raises(TypeError):
         replace(trace, filename="private.docx")
-    with pytest.raises(ValueError):
-        replace(trace, source_family=FormatFamily.CSV, detected_format="csv")
+    csv_trace = replace(trace, source_family=FormatFamily.CSV, detected_format="csv")
+    assert csv_trace.detected_format == "csv"
     with pytest.raises(ValueError):
         replace(trace, detected_format=None)
+    with pytest.raises(ValueError):
+        replace(trace, source_family=FormatFamily.CSV, detected_format="docx")
+    mixed = replace(
+        trace,
+        result_mode=ReverseOutputMode.MARKDOWN_WITH_ASSETS,
+        asset_count=2,
+        asset_bytes=256,
+        unavailable_asset_count=1,
+    )
+    assert mixed.unavailable_asset_count == 1
     unavailable = replace(
         trace,
         result_mode=ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS,

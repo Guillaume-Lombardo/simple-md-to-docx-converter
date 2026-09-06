@@ -119,7 +119,7 @@ class ReversionTraceMetadata:
     engine_name: str
     engine_version: str
     source_family: FormatFamily
-    detected_format: str | None
+    detected_format: str
     result_mode: ReverseOutputMode
     asset_count: int
     asset_bytes: int
@@ -134,10 +134,8 @@ class ReversionTraceMetadata:
             or self.engine_name != ANYDOC_COMPONENT[0]
             or self.engine_version != ANYDOC_COMPONENT[1]
             or type(self.source_family) is not FormatFamily
-            or (
-                self.detected_format is not None
-                and type(self.detected_format) is not str
-            )
+            or type(self.detected_format) is not str
+            or not self.detected_format
             or type(self.result_mode) is not ReverseOutputMode
             or any(
                 type(value) is not int or value < 0
@@ -152,11 +150,8 @@ class ReversionTraceMetadata:
             or self.hosted_fallback is not False
         ):
             raise ValueError("Reverse trace metadata is invalid")
-        if self.source_family is FormatFamily.CSV:
-            if self.detected_format is not None:
-                raise ValueError("CSV reverse trace must remain signature-free")
-        elif not self.detected_format:
-            raise ValueError("Reverse trace requires a detected format")
+        if self.source_family is FormatFamily.CSV and self.detected_format != "csv":
+            raise ValueError("CSV reverse trace must record the selected parser")
         if self.result_mode is ReverseOutputMode.MARKDOWN:
             valid = (
                 self.asset_count == 0
@@ -164,11 +159,7 @@ class ReversionTraceMetadata:
                 and self.unavailable_asset_count == 0
             )
         elif self.result_mode is ReverseOutputMode.MARKDOWN_WITH_ASSETS:
-            valid = (
-                self.asset_count > 0
-                and self.asset_bytes > 0
-                and self.unavailable_asset_count == 0
-            )
+            valid = self.asset_count > 0 and self.asset_bytes > 0
         else:
             valid = (
                 self.asset_count == 0

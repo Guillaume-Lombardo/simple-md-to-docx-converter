@@ -176,6 +176,12 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   enforces the PostgreSQL schema bounds (255/128/1024 characters respectively), rejects non-string
   values, and normalizes its timestamps to UTC before persistence. The exact light selection passes 3,290 tests
   at 93.91% total and 90.09% application branch coverage; changed application coverage is 96.17%.
+* 2026-09-06: T69/T70 contract alignment allows `markdown_with_assets` traces to retain both
+  successfully packaged asset counters and a positive unavailable-asset count. CSV traces now
+  persist the selected parser format `csv` while the admission record correctly retains a null
+  content-detected format. Publication binds every trace to the job's source family and parser
+  format; in-process persistence tests round-trip both mixed-assets and CSV results and retain the
+  existing mismatch rejection.
 
 ## Synchronization
 

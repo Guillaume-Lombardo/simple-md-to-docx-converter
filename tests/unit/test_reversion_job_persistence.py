@@ -28,9 +28,12 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionTraceMetadata,
     reversion_result_object_id,
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
+from markweave.reversions.formats import FormatFamily, admit_format
+from markweave.reversions.models import ReverseOutputMode
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
     NOW,
@@ -392,6 +395,88 @@ def test_in_process_reverse_repository_rejects_invalid_result_metadata(
             NOW,
             RETENTION_END,
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("admission", "result_trace"),
+    (
+        (
+            admit_format(".docx", "docx"),
+            ReversionTraceMetadata(
+                1,
+                "firecrawl-anydoc",
+                "0.2.4",
+                FormatFamily.WORD,
+                "docx",
+                ReverseOutputMode.MARKDOWN_WITH_ASSETS,
+                2,
+                256,
+                1,
+            ),
+        ),
+        (
+            admit_format(".csv", None, csv_text_validated=True),
+            ReversionTraceMetadata(
+                1,
+                "firecrawl-anydoc",
+                "0.2.4",
+                FormatFamily.CSV,
+                "csv",
+                ReverseOutputMode.MARKDOWN,
+                0,
+                0,
+                0,
+            ),
+        ),
+    ),
+)
+def test_in_process_publication_persists_mixed_assets_and_csv_parser_trace(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+    admission,
+    result_trace: ReversionTraceMetadata,
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    source = replace(submission(owner.id), admission=admission)
+    job, _ = repository.create(source)
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    termination = proof(claimed.current_attempt_id, uuid4())
+    repository.record_active_termination_proof(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        termination,
+        NOW,
+    )
+    succeeded = repository.succeed(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        reversion_result_object_id(claimed.id, 1),
+        result_trace.result_mode,
+        "a" * 64,
+        1,
+        result_trace,
+        NOW,
+        RETENTION_END,
+    )
+    assert succeeded.trace == result_trace
+    persisted = repository.get_internal(claimed.id)
+    assert persisted is not None and persisted.trace == result_trace
 
 
 @pytest.mark.unit
