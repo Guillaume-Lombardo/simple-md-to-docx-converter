@@ -10,6 +10,7 @@ import pytest
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
+    MAX_SEQUENCE,
     AuthenticatedPrincipal,
     EvidenceDigest,
     ManagedUnit,
@@ -104,6 +105,132 @@ def test_response_model_binds_cursor_principal_and_high_water() -> None:
         ReconciliationResponse(REQUEST, PRINCIPAL.principal_id, 2, 2, TOMBSTONE, False)
     with pytest.raises(ValueError):
         ReconciliationResponse(REQUEST, PRINCIPAL.principal_id, 1, 1, TOMBSTONE, False)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: ReconciliationTombstone(0, INCARNATION.specification, PROOF),
+        lambda: ReconciliationTombstone(
+            cast(Any, True), INCARNATION.specification, PROOF
+        ),
+        lambda: ReconciliationTombstone(
+            MAX_SEQUENCE + 1, INCARNATION.specification, PROOF
+        ),
+        lambda: ReconciliationTombstone(1, cast(Any, "digest"), PROOF),
+        lambda: ReconciliationResponse(
+            cast(Any, str(REQUEST)), PRINCIPAL.principal_id, 0, 0, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, cast(Any, str(PRINCIPAL.principal_id)), 0, 0, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, cast(Any, True), 0, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, -1, 0, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, MAX_SEQUENCE + 1, 0, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, cast(Any, True), None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, MAX_SEQUENCE + 1, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 2, 1, None, True
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, 1, cast(Any, "proof"), False
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, 1, TOMBSTONE, False
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, 0, None, cast(Any, 1)
+        ),
+        lambda: ReconciliationResponse(
+            REQUEST, PRINCIPAL.principal_id, 0, 0, None, False
+        ),
+    ],
+)
+def test_protocol_models_reject_each_invalid_shape(build: Any) -> None:
+    with pytest.raises(ValueError):
+        build()
+
+
+def _raw_frame(value: object, *, canonical: bool = True) -> bytes:
+    separators = (",", ":") if canonical else None
+    payload = json.dumps(value, sort_keys=True, separators=separators).encode("ascii")
+    return len(payload).to_bytes(4, "big") + payload
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        cast(bytes, bytearray()),
+        b"\x00\x00\x00",
+        b"\x00\x00\x00\x00",
+        b"\x00\x00\x00\x02{}x",
+        b"\x00\x00\x00\x01\xff",
+        _raw_frame([]),
+        _raw_frame({"protocol": PROTOCOL_NAME, "version": 1}, canonical=False),
+        _raw_frame({"protocol": "wrong", "version": 1}),
+        _raw_frame({"protocol": PROTOCOL_NAME, "version": 2}),
+    ],
+)
+def test_protocol_rejects_malformed_envelopes(frame: bytes) -> None:
+    with pytest.raises(BrokerError):
+        decode_response(frame)
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        cast(ReconciliationRequest, object()),
+        ReconciliationRequest(cast(Any, str(REQUEST)), 0),
+        ReconciliationRequest(REQUEST, cast(Any, True)),
+        ReconciliationRequest(REQUEST, MAX_SEQUENCE + 1),
+    ],
+)
+def test_encode_request_rejects_invalid_values(
+    candidate: ReconciliationRequest,
+) -> None:
+    with pytest.raises(BrokerError):
+        encode_request(candidate)
+
+
+def test_request_decoder_rejects_wrong_operation_and_noncanonical_uuid() -> None:
+    valid = {
+        "after_create_sequence": 0,
+        "operation": "ack",
+        "protocol": PROTOCOL_NAME,
+        "request_id": str(REQUEST),
+        "version": 1,
+    }
+    with pytest.raises(BrokerError):
+        decode_request(_raw_frame(valid))
+    valid["operation"] = "query"
+    valid["request_id"] = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    with pytest.raises(BrokerError):
+        decode_request(_raw_frame(valid))
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        cast(Any, object()),
+        ReconciliationErrorResponse(
+            cast(Any, str(REQUEST)), BrokerErrorCategory.PROTOCOL_ERROR
+        ),
+        ReconciliationErrorResponse(REQUEST, cast(Any, "busy")),
+    ],
+)
+def test_encode_response_rejects_invalid_values(response: Any) -> None:
+    with pytest.raises(BrokerError):
+        encode_response(response)
 
 
 def test_inventory_pages_only_exact_principal_tombstones(tmp_path: Path) -> None:
