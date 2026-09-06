@@ -12,6 +12,7 @@ from markweave.broker.models import AuthenticatedPrincipal
 from markweave.broker.protocol import (
     AcknowledgeRequest,
     AcknowledgeResponse,
+    BrokerOperation,
     BrokerResponse,
     ErrorResponse,
 )
@@ -112,8 +113,13 @@ class ReversionBrokerReconciler:
             request = ReconciliationRequest(self._request_id_factory(), cursor)
             response = self._broker.reconcile(request)
             if type(response) is ReconciliationErrorResponse:
+                if response.request_id != request.request_id:
+                    raise ValueError("Broker reconciliation response is misbound")
                 raise BrokerError(response.category)
-            if type(response) is not ReconciliationResponse:
+            if (
+                type(response) is not ReconciliationResponse
+                or response.request_id != request.request_id
+            ):
                 raise ValueError("Broker reconciliation response is invalid")
             tombstone = self._store.record_reconciliation_page(
                 principal, token, response, now_factory()
@@ -136,19 +142,24 @@ class ReversionBrokerReconciler:
         now: datetime,
     ) -> None:
         proof = tombstone.proof
-        response = self._broker.request(
-            AcknowledgeRequest(
-                self._request_id_factory(),
-                tombstone.create_sequence,
-                proof.attempt_id,
-                proof.unit_id,
-                proof.proof_id,
-            )
+        request = AcknowledgeRequest(
+            self._request_id_factory(),
+            tombstone.create_sequence,
+            proof.attempt_id,
+            proof.unit_id,
+            proof.proof_id,
         )
+        response = self._broker.request(request)
         if type(response) is ErrorResponse:
+            if (
+                response.request_id != request.request_id
+                or response.operation is not BrokerOperation.ACK
+            ):
+                raise ValueError("Broker reconciliation acknowledgement is misbound")
             raise BrokerError(response.category)
         if (
             type(response) is not AcknowledgeResponse
+            or response.request_id != request.request_id
             or not response.acknowledged
             or (response.attempt_id, response.unit_id, response.proof_id)
             != (proof.attempt_id, proof.unit_id, proof.proof_id)
