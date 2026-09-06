@@ -2,7 +2,7 @@
 ticket: T72
 linear_id: G1L-540
 linear_url: https://linear.app/g1lom/issue/G1L-540/t72-build-the-experimental-revert-workspace
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -83,8 +83,13 @@ downloading their results.
   explicitly marked for PostgreSQL and S3 failed because those services were not available. The
   final-image browser run could not complete locally because the shared Podman image store exhausted
   the VM filesystem while committing the frontend image. No unrelated global images or volumes were
-  removed; the hosted exact-head CI remains the blocking browser validation, while T73 retains the
+  removed; the hosted exact-head CI remained the blocking browser validation, while T73 retains the
   complete successful two-profile final-image matrix.
+* 2026-09-06: PR #214 passed exact-head CI, including frontend and both rootless E2E profiles, and
+  CodeRabbit confirmed all three findings addressed with no unresolved review threads. It was
+  squash-merged as `2e54bdc3fa9a2125c75d7492ec7459f0f4bdbbb3`; exact-main CI run `34043478649`
+  then passed its light, frontend, standalone E2E, distributed E2E, and final gate jobs. T72 is
+  complete on verified `main`; the full successful cross-format release matrix remains with T73.
 
 ## Synchronization
 
