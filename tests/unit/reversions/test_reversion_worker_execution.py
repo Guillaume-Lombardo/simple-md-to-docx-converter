@@ -34,7 +34,9 @@ from markweave.broker.protocol import (
 )
 from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
+    WorkspaceErrorResponse,
     WorkspaceFailureResponse,
+    WorkspaceOperation,
     WorkspacePendingResponse,
     WorkspaceStageReceipt,
     WorkspaceStageRequest,
@@ -43,6 +45,10 @@ from markweave.broker.workspace_protocol import (
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
+from markweave.reversion_jobs.errors import (
+    ReversionJobLeaseLostError,
+    ReversionWorkerInterruptedError,
+)
 from markweave.reversion_jobs.models import (
     ReversionJob,
     ReversionJobState,
@@ -56,11 +62,17 @@ from markweave.reversion_jobs.worker_execution import (
     ClaimedReversion,
     ReversionAttemptExecutor,
     ReversionClaimService,
+    ReversionHeartbeat,
 )
 from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.models import ReverseOutputMode
-from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
+from markweave.storage import (
+    FilesystemObjectStore,
+    ObjectKey,
+    ObjectScope,
+    ObjectTooLargeError,
+)
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
     NOW,
@@ -109,7 +121,7 @@ def _runtime(
         POLICY,
         "reverse-worker",
         mocker.Mock(return_value=NOW),
-        lambda: 1.0,
+        mocker.Mock(return_value=1.0),
         mocker.Mock(return_value=False),
         lambda: False,
         uuid4,
@@ -567,3 +579,239 @@ def test_cleanup_deletes_reverse_objects_and_expires_job(
     assert not objects.exists(source_key) and not objects.exists(result_key)
     expired = repo.get_internal(job.id)
     assert expired is not None and expired.state is ReversionJobState.EXPIRED
+
+
+@pytest.mark.parametrize("boundary", ["create", "stage", "collect", "terminate"])
+def test_executor_rejects_misbound_broker_responses(
+    boundary: str,
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    broker = cast(Any, runtime.broker)
+    original_request = broker.request.side_effect
+    original_stage = broker.stage_workspace.side_effect
+    original_collect = broker.collect_workspace.side_effect
+
+    if boundary == "create":
+        broker.request.side_effect = lambda message: (
+            replace(original_request(message), request_id=uuid4())
+            if type(message) is CreateRequest
+            else original_request(message)
+        )
+    elif boundary == "stage":
+        broker.stage_workspace.side_effect = lambda message: replace(
+            original_stage(message), request_id=uuid4()
+        )
+    elif boundary == "collect":
+        broker.collect_workspace.side_effect = lambda message: replace(
+            original_collect(message), request_id=uuid4()
+        )
+    else:
+        broker.request.side_effect = lambda message: (
+            replace(original_request(message), request_id=uuid4())
+            if type(message) is TerminateRequest
+            else original_request(message)
+        )
+
+    with pytest.raises(ReverseConversionError) as captured:
+        ReversionAttemptExecutor(runtime).execute(claimed, mocker.Mock())
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None
+    if boundary in {"stage", "collect"}:
+        assert attempt.termination_proof is not None
+    else:
+        assert attempt.termination_proof is None
+
+
+def test_heartbeat_reports_duration_shutdown_cancellation_and_lease_loss(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    cast(Any, runtime.monotonic_clock).return_value = (
+        claimed.started_monotonic + POLICY.max_job_duration_seconds
+    )
+    with pytest.raises(ReverseConversionError) as timed_out:
+        ReversionHeartbeat(runtime, claimed).raise_if_interrupted()
+    assert timed_out.value.category is ReverseErrorCategory.TIMED_OUT
+
+    cast(Any, runtime.monotonic_clock).return_value = claimed.started_monotonic
+    shutdown_runtime = replace(runtime, shutdown_requested=lambda: True)
+    with pytest.raises(ReversionWorkerInterruptedError):
+        ReversionHeartbeat(shutdown_runtime, claimed).raise_if_interrupted()
+
+    repo.request_cancel(claimed.job.id, owner.id, NOW, RETENTION_END)
+    with pytest.raises(ReverseConversionError) as cancelled:
+        ReversionHeartbeat(runtime, claimed).raise_if_interrupted()
+    assert cancelled.value.category is ReverseErrorCategory.CANCELLED
+
+    mocker.patch.object(repo, "heartbeat", return_value=False)
+    with pytest.raises(ReversionJobLeaseLostError):
+        ReversionHeartbeat(runtime, claimed).progress(ReversionJobStep.CONVERTING)
+
+
+def test_worker_maps_child_failure_to_safe_terminal_state_and_acks(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    job = _queue(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    broker = cast(Any, runtime.broker)
+    receipt: WorkspaceStageReceipt | None = None
+
+    def stage(message: WorkspaceStageRequest) -> WorkspaceStageReceipt:
+        nonlocal receipt
+        receipt = WorkspaceStageReceipt(
+            message.request_id,
+            message.sequence,
+            message.attempt_id,
+            message.unit_id,
+            message.create_sequence,
+            uuid4(),
+        )
+        return receipt
+
+    def collect(message: WorkspaceCollectRequest) -> WorkspaceFailureResponse:
+        assert receipt is not None
+        return WorkspaceFailureResponse(
+            message.request_id, receipt, ReverseErrorCategory.MALFORMED
+        )
+
+    broker.stage_workspace.side_effect = stage
+    broker.collect_workspace.side_effect = collect
+
+    assert ReversionWorker(runtime).run_once()
+
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.state is ReversionJobState.FAILED
+    assert retained.error_code == ReverseErrorCategory.MALFORMED.value
+    attempts = repo.list_attempts(job.id)
+    assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == NOW
+
+
+def test_publication_retains_committed_result_when_ack_fails(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    heartbeat = mocker.Mock()
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, heartbeat)
+    result = validate_reverse_result(
+        claimed.job,
+        executed.result.mode,
+        executed.result.result,
+        CONTENT_LIMITS,
+    )
+    cast(Any, runtime.broker).request.side_effect = BrokerError(
+        BrokerErrorCategory.TRANSPORT_FAILURE
+    )
+
+    with pytest.raises(BrokerError):
+        ReversionPublicationService(runtime).publish(executed, result, heartbeat)
+
+    result_id = reversion_result_object_id(claimed.job.id, claimed.job.attempt)
+    assert objects.exists(ObjectKey(ObjectScope.REVERSION_RESULT, owner.id, result_id))
+    retained = repo.get_internal(claimed.job.id)
+    assert retained is not None and retained.state is ReversionJobState.SUCCEEDED
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None and attempt.proof_acknowledged_at is None
+
+
+def test_claim_identity_and_latched_lease_loss_fail_closed(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    with pytest.raises(ValueError):
+        replace(claimed, attempt_id=cast(Any, "invalid"))
+    mocker.patch.object(repo, "heartbeat", return_value=False)
+    heartbeat = ReversionHeartbeat(runtime, claimed)
+    with pytest.raises(ReversionJobLeaseLostError):
+        heartbeat.progress(ReversionJobStep.CONVERTING)
+    with pytest.raises(ReversionJobLeaseLostError):
+        heartbeat.raise_if_interrupted()
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected"),
+    [
+        ("source_limit", ReverseConversionError),
+        ("create_error", BrokerError),
+        ("stage_error", BrokerError),
+        ("collect_error", BrokerError),
+    ],
+)
+def test_executor_maps_bounded_storage_and_broker_errors(
+    boundary: str,
+    expected: type[BaseException],
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    broker = cast(Any, runtime.broker)
+    if boundary == "source_limit":
+        mocker.patch.object(
+            runtime.objects,
+            "get_bounded",
+            side_effect=ObjectTooLargeError("bounded"),
+        )
+    elif boundary == "create_error":
+        broker.request.side_effect = lambda message: (
+            ErrorResponse(
+                message.request_id,
+                BrokerOperation.CREATE,
+                BrokerErrorCategory.RUNTIME_FAILURE,
+            )
+            if type(message) is CreateRequest
+            else None
+        )
+    elif boundary == "stage_error":
+        broker.stage_workspace.side_effect = lambda message: WorkspaceErrorResponse(
+            message.request_id,
+            WorkspaceOperation.STAGE,
+            BrokerErrorCategory.RUNTIME_FAILURE,
+        )
+    else:
+        broker.collect_workspace.side_effect = lambda message: WorkspaceErrorResponse(
+            message.request_id,
+            WorkspaceOperation.COLLECT,
+            BrokerErrorCategory.RUNTIME_FAILURE,
+        )
+
+    with pytest.raises(expected) as captured:
+        ReversionAttemptExecutor(runtime).execute(claimed, mocker.Mock())
+
+    if boundary == "source_limit":
+        assert (
+            cast(ReverseConversionError, captured.value).category
+            is ReverseErrorCategory.RESOURCE_LIMIT
+        )
+        broker.request.assert_not_called()
+    elif boundary in {"stage_error", "collect_error"}:
+        attempt = repo.get_attempt(claimed.attempt_id)
+        assert attempt is not None and attempt.termination_proof is not None
