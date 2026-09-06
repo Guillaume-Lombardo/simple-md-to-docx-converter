@@ -180,10 +180,8 @@ def test_reconciler_rejects_broker_page_failures(
     reconciler = ReversionBrokerReconciler(
         store, broker, ack_batch_limit=1, request_id_factory=lambda: UUID(int=1)
     )
-    error = (
-        BrokerError if isinstance(response, ReconciliationErrorResponse) else ValueError
-    )
-    with pytest.raises(error):
+
+    def reconcile() -> None:
         reconciler.reconcile(
             PRINCIPAL,
             "reconciler",
@@ -192,6 +190,15 @@ def test_reconciler_rejects_broker_page_failures(
             NOW + timedelta(minutes=1),
             now_factory=lambda: NOW,
         )
+
+    if isinstance(response, ReconciliationErrorResponse):
+        with pytest.raises(BrokerError) as caught:
+            reconcile()
+        assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    else:
+        with pytest.raises(ValueError):
+            reconcile()
+    store.complete_reconciliation.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -224,7 +231,11 @@ def test_reconciler_rejects_invalid_acknowledgements(
     reconciler = ReversionBrokerReconciler(
         store, broker, ack_batch_limit=1, request_id_factory=lambda: UUID(int=1)
     )
-    error = BrokerError if isinstance(response, ErrorResponse) else ValueError
-    with pytest.raises(error):
-        reconciler._ack(PRINCIPAL, TOKEN, TOMBSTONE, NOW)
+    if isinstance(response, ErrorResponse):
+        with pytest.raises(BrokerError) as caught:
+            reconciler._ack(PRINCIPAL, TOKEN, TOMBSTONE, NOW)
+        assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    else:
+        with pytest.raises(ValueError):
+            reconciler._ack(PRINCIPAL, TOKEN, TOMBSTONE, NOW)
     store.mark_reconciliation_acknowledged.assert_not_called()
