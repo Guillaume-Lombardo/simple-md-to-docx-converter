@@ -11,7 +11,11 @@ from sqlalchemy import Engine, create_engine, text, update
 from sqlalchemy.exc import IntegrityError
 
 from markweave.auth.models import Role, User
-from markweave.broker.models import MAX_SEQUENCE, AuthenticatedPrincipal
+from markweave.broker.models import (
+    MAX_SEQUENCE,
+    AuthenticatedPrincipal,
+    TerminationProof,
+)
 from markweave.broker.reconciliation_protocol import (
     ReconciliationResponse,
     ReconciliationTombstone,
@@ -557,6 +561,76 @@ def test_reconciliation_hydrates_exact_pre_intent_attempt_from_broker_proof(
     assert attempt.policy_revision == retained.policy_revision
     assert attempt.policy_specification == POLICY_SPECIFICATION
     assert attempt.termination_proof == retained
+
+
+@pytest.mark.unit
+def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflicts(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", principal, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    attempt = repository.get_attempt(claimed.current_attempt_id)
+    assert attempt is not None
+    unit_id = uuid4()
+    retained = proof(attempt.attempt_id, unit_id, principal)
+    token = uuid4()
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+
+    def record(candidate: TerminationProof) -> None:
+        tombstone = ReconciliationTombstone(
+            attempt.create_sequence, POLICY_SPECIFICATION, candidate
+        )
+        repository.record_reconciliation_page(
+            principal,
+            token,
+            ReconciliationResponse(
+                uuid4(),
+                principal.principal_id,
+                0,
+                attempt.create_sequence,
+                tombstone,
+                False,
+            ),
+            NOW,
+        )
+
+    with pytest.raises(ReversionJobConflictError):
+        record(proof(uuid4(), unit_id, principal))
+    repository.reserve_create_intent(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained.policy_revision,
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    with pytest.raises(ReversionJobConflictError):
+        record(replace(retained, policy_revision="other-policy"))
+    repository.record_broker_unit(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit_id,
+        NOW,
+    )
+    repository.record_active_termination_proof(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained,
+        NOW,
+    )
+    with pytest.raises(ReversionJobConflictError):
+        record(replace(retained, proof_id=uuid4()))
 
 
 @pytest.mark.unit
