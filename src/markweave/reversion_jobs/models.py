@@ -498,6 +498,27 @@ class ReversionFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class ReversionLeaseRecoveryResult:
+    """Exact outcomes from one bounded expired-lease recovery transaction."""
+
+    requeued: int
+    cancelled: int
+    failed: int
+
+    def __post_init__(self) -> None:
+        if any(type(value) is not int or value < 0 for value in self.outcomes):
+            raise ValueError("Reverse recovery counts must be non-negative integers")
+
+    @property
+    def outcomes(self) -> tuple[int, int, int]:
+        return self.requeued, self.cancelled, self.failed
+
+    @property
+    def progressed(self) -> int:
+        return sum(self.outcomes)
+
+
+@dataclass(frozen=True, slots=True)
 class ExpiredReversionObjects:
     """Stable identifiers returned by a fenced expiration claim."""
 

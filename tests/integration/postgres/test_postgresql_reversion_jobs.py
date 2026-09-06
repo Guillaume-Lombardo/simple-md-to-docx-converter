@@ -28,6 +28,7 @@ from markweave.reversion_jobs.models import (
     ReversionAttempt,
     ReversionJob,
     ReversionJobState,
+    ReversionLeaseRecoveryResult,
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from tests.reversion_job_repository_contracts import (
@@ -183,13 +184,14 @@ def test_postgresql_incomplete_recovery_workers_claim_distinct_rows() -> None:
         job, _created = repository.create(submission(owner.id))
         job_ids.append(job.id)
 
-    def recover() -> int:
+    def recover() -> ReversionLeaseRecoveryResult:
         return repository.recover_expired_leases(NOW, RETENTION_END, NOW, limit=1)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         recovered = tuple(executor.map(lambda _value: recover(), range(2)))
 
-    assert sum(recovered) == 2
+    assert sum(result.progressed for result in recovered) == 2
+    assert all(result == ReversionLeaseRecoveryResult(0, 0, 1) for result in recovered)
     retained = tuple(repository.get_internal(job_id) for job_id in job_ids)
     assert all(
         job is not None
@@ -664,7 +666,9 @@ def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
             persisted.termination_proof,
             recovery_now,
         )
-    assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
+    assert repository.recover_expired_leases(
+        recovery_now, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(1, 0, 0)
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()
 

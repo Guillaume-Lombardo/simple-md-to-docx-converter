@@ -49,6 +49,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
 )
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
@@ -391,7 +392,7 @@ def test_sqlite_reverse_recovery_without_create_intent_and_incomplete_upload(
     recovered = repository.recover_expired_leases(
         NOW + timedelta(seconds=2), RETENTION_END, NOW - timedelta(hours=1)
     )
-    assert recovered == 2
+    assert recovered == ReversionLeaseRecoveryResult(1, 0, 1)
     recovered_job = repository.get_internal(ready.id)
     assert recovered_job is not None and recovered_job.state is ReversionJobState.QUEUED
     incomplete = repository.get_internal(abandoned.id)
@@ -851,7 +852,9 @@ def test_sqlite_recovery_proof_is_a_single_exact_cas(tmp_path: Path) -> None:
             persisted.termination_proof,
             recovery_now,
         )
-    assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
+    assert repository.recover_expired_leases(
+        recovery_now, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(1, 0, 0)
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()
 

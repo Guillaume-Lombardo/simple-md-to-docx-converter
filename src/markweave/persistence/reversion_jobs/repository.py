@@ -60,6 +60,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
     ReversionSubmission,
     ReversionTraceMetadata,
     reversion_result_object_id,
@@ -1295,7 +1296,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
         expires_at: datetime,
         incomplete_before: datetime,
         limit: int | None = None,
-    ) -> int:
+    ) -> ReversionLeaseRecoveryResult:
         if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("Reverse recovery limit must be a positive integer")
         try:
@@ -1322,7 +1323,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     statement = statement.limit(limit)
                 if self._engine.dialect.name == "postgresql":
                     statement = statement.with_for_update(skip_locked=True)
-                recovered = 0
+                requeued = 0
+                cancelled_count = 0
                 for job, attempt in database.execute(statement):
                     cancelled = job.cancel_requested
                     job.state = (
@@ -1338,8 +1340,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     attempt.recovery_owner = None
                     attempt.recovery_token = None
                     attempt.recovery_expires_at = None
-                    recovered += 1
-                remaining = None if limit is None else limit - recovered
+                    if cancelled:
+                        cancelled_count += 1
+                    else:
+                        requeued += 1
+                recovered = ReversionLeaseRecoveryResult(requeued, cancelled_count, 0)
+                remaining = None if limit is None else limit - recovered.progressed
                 if remaining == 0:
                     return recovered
                 incomplete_ids = (
@@ -1375,7 +1381,11 @@ class SqlReversionJobRepository(_SqlReversionStore):
                         expires_at=expires_at,
                     )
                 )
-                return recovered + int(getattr(incomplete_result, "rowcount", 0))
+                return ReversionLeaseRecoveryResult(
+                    recovered.requeued,
+                    recovered.cancelled,
+                    int(getattr(incomplete_result, "rowcount", 0)),
+                )
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
 

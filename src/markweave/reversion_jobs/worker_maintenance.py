@@ -55,13 +55,16 @@ class ReversionMaintenanceService:
         if not remaining:
             return ReversionRecoveryResult(len(attempts), 0)
         now = self._runtime.clock()
-        requeued = self._runtime.repository.recover_expired_leases(
+        lease_recovery = self._runtime.repository.recover_expired_leases(
             now,
             now + timedelta(seconds=self._runtime.policy.result_retention_seconds),
             now - timedelta(seconds=self._runtime.policy.incomplete_submission_seconds),
             remaining,
         )
-        return ReversionRecoveryResult(len(attempts) + requeued, requeued)
+        return ReversionRecoveryResult(
+            len(attempts) + lease_recovery.progressed,
+            lease_recovery.requeued,
+        )
 
     def _recover_attempt(self, attempt: ReversionAttempt) -> ReversionAttempt:
         unit_id = attempt.unit_id

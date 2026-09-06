@@ -100,12 +100,13 @@ class ReversionBrokerReconciler:
     ) -> None:
         """Reconcile outside DB transactions and publish readiness at fixed point."""
 
+        lease_duration = expires_at - now
         while not self.reconcile_step(
             principal,
             owner,
             token,
             now,
-            expires_at,
+            now + lease_duration,
             now_factory=now_factory,
         ):
             now = now_factory()

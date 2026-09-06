@@ -68,6 +68,7 @@ from markweave.reversion_jobs.worker_execution import (
     ReversionClaimService,
     ReversionHeartbeat,
 )
+from markweave.reversion_jobs.worker_maintenance import ReversionRecoveryResult
 from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 from markweave.reversions.models import ReverseOutputMode
@@ -563,6 +564,23 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
         AcknowledgeRequest,
     ]
     assert cast(Any, runtime.reconciler).reconcile.call_count == 2
+
+
+def test_recovery_progress_excludes_cancelled_and_failed_jobs_from_requeues(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    repo.request_cancel(claimed.job.id, owner.id, NOW, RETENTION_END)
+    repo.create(replace(submission(owner.id), created_at=NOW - timedelta(days=1)))
+    cast(Any, runtime.clock).return_value = LEASE_END + timedelta(seconds=1)
+
+    result = ReversionWorker(runtime).recover_step()
+
+    assert result == ReversionRecoveryResult(progressed=2, requeued=0)
 
 
 def test_cleanup_deletes_reverse_objects_and_expires_job(

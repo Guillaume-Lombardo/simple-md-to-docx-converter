@@ -23,6 +23,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
     ReversionSubmission,
     ReversionTraceMetadata,
     reversion_result_object_id,
@@ -210,7 +211,9 @@ def exercise_reversion_job_repository_contract(  # noqa: PLR0915
         )
 
     expired = LEASE_END + timedelta(seconds=2)
-    assert repository.recover_expired_leases(expired, RETENTION_END, NOW) == 0
+    assert repository.recover_expired_leases(
+        expired, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(0, 0, 0)
     blocked = repository.get_internal(first.id)
     assert blocked is not None and blocked.state is ReversionJobState.RUNNING
     recovery = repository.claim_recovery(
@@ -231,7 +234,9 @@ def exercise_reversion_job_repository_contract(  # noqa: PLR0915
         expired,
     )
     assert recovered_attempt.termination_proof == termination
-    assert repository.recover_expired_leases(expired, RETENTION_END, NOW) == 1
+    assert repository.recover_expired_leases(
+        expired, RETENTION_END, NOW
+    ) == ReversionLeaseRecoveryResult(1, 0, 0)
     recovered = repository.get_internal(first.id)
     assert recovered is not None and recovered.state is ReversionJobState.QUEUED
 

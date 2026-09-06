@@ -16,6 +16,7 @@ from markweave.reversion_jobs.models import (
     ReversionJob,
     ReversionJobPage,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
     ReversionSubmission,
     ReversionTraceMetadata,
 )
@@ -130,7 +131,7 @@ class ReversionWorkerRepository(Protocol):  # pragma: no cover - structural port
         expires_at: datetime,
         incomplete_before: datetime,
         limit: int,
-    ) -> int: ...
+    ) -> ReversionLeaseRecoveryResult: ...
 
     def succeed(  # noqa: PLR0913, PLR0917 - atomic publication contract
         self,

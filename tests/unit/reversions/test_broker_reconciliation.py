@@ -106,6 +106,35 @@ def test_reconciler_drains_ack_then_requires_stable_fixed_point(
     store.complete_reconciliation.assert_called_with(PRINCIPAL, TOKEN, NOW)
 
 
+def test_compatibility_loop_renews_the_original_lease_duration_each_step(
+    mocker: MockerFixture,
+) -> None:
+    reconciler = ReversionBrokerReconciler(
+        mocker.Mock(), mocker.Mock(), ack_batch_limit=1
+    )
+    step = mocker.patch.object(
+        reconciler, "reconcile_step", side_effect=(False, False, True)
+    )
+    now_factory = mocker.Mock(
+        side_effect=(NOW + timedelta(minutes=2), NOW + timedelta(minutes=4))
+    )
+
+    reconciler.reconcile(
+        PRINCIPAL,
+        "reconciler",
+        TOKEN,
+        NOW,
+        NOW + timedelta(minutes=1),
+        now_factory=now_factory,
+    )
+
+    assert [call.args[3:5] for call in step.call_args_list] == [
+        (NOW, NOW + timedelta(minutes=1)),
+        (NOW + timedelta(minutes=2), NOW + timedelta(minutes=3)),
+        (NOW + timedelta(minutes=4), NOW + timedelta(minutes=5)),
+    ]
+
+
 def test_reconcile_step_persists_one_page_and_defers_its_ack(
     mocker: MockerFixture,
 ) -> None:

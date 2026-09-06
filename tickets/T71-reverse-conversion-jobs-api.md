@@ -290,7 +290,10 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   broker outage and reconnection followed by two serial reverse jobs under a cap of one. Terminal
   reverse-job failure categories are recorded only after the durable failed transition and remain
   distinct from retryable scheduler/runtime faults. Proof recovery returns to reconciliation rather
-  than claiming early, and recovery metrics count only jobs actually requeued. Targeted
+  than claiming early, and recovery metrics count only jobs actually requeued. Final review
+  hardening renews the original reconciliation lease duration on every compatibility-loop step and
+  returns separate requeued, cancelled, and incomplete-failed counts from durable lease recovery.
+  Targeted
   unit, SQLite, and Unix transport coverage passes locally; PostgreSQL concurrency and the existing
   mTLS transport contracts remain executable in hosted CI. The combined distributed
   PostgreSQL/S3/mTLS final-image matrix belongs to the separate T73 delivery and does not block T71

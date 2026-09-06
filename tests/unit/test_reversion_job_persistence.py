@@ -42,6 +42,7 @@ from markweave.reversion_jobs.models import (
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
+    ReversionLeaseRecoveryResult,
     ReversionTraceMetadata,
     reversion_result_object_id,
 )
@@ -927,16 +928,33 @@ def test_in_process_reverse_repository_recovers_pre_intent_and_incomplete_jobs(
     incomplete, _ = repository.create(
         submission(owner.id, created_at=NOW - timedelta(days=1))
     )
-    assert (
-        repository.recover_expired_leases(
-            NOW + timedelta(seconds=2), RETENTION_END, NOW - timedelta(hours=1)
-        )
-        == 2
-    )
+    assert repository.recover_expired_leases(
+        NOW + timedelta(seconds=2), RETENTION_END, NOW - timedelta(hours=1)
+    ) == ReversionLeaseRecoveryResult(1, 0, 1)
     recovered = repository.get_internal(ready.id)
     abandoned = repository.get_internal(incomplete.id)
     assert recovered is not None and recovered.state is ReversionJobState.QUEUED
     assert abandoned is not None and abandoned.state is ReversionJobState.FAILED
+
+
+@pytest.mark.unit
+def test_in_process_reverse_repository_reports_expired_cancellation_separately(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    ready, _ = repository.create(submission(owner.id))
+    repository.activate_source(ready.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, NOW + timedelta(seconds=1))
+    assert claimed is not None
+    repository.request_cancel(claimed.id, owner.id, NOW, RETENTION_END)
+
+    result = repository.recover_expired_leases(
+        NOW + timedelta(seconds=2), RETENTION_END, NOW
+    )
+
+    assert result == ReversionLeaseRecoveryResult(0, 1, 0)
+    retained = repository.get_internal(claimed.id)
+    assert retained is not None and retained.state is ReversionJobState.CANCELLED
 
 
 @pytest.mark.unit
