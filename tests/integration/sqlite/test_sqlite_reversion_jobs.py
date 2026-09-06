@@ -1,0 +1,488 @@
+"""Real SQLite/filesystem reverse queue integration coverage."""
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from pathlib import Path
+from threading import Barrier
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import text
+
+from markweave.auth.models import Role, User
+from markweave.jobs.models import JobOutput, JobSubmission
+from markweave.jobs.policy import JobAdmissionPolicy
+from markweave.persistence.jobs import SqlJobRepository
+from markweave.persistence.migrations import downgrade_database, upgrade_database
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
+from markweave.persistence.sql import (
+    SqlUserRepository,
+    create_database_engine,
+    standalone_database_url,
+)
+from markweave.reversion_jobs.errors import (
+    ReversionJobConflictError,
+    ReversionJobLeaseLostError,
+    ReversionJobRepositoryError,
+    ReversionJobUserQuotaExceededError,
+    ReversionProofRequiredError,
+    ReversionQueueCapacityExceededError,
+)
+from markweave.reversion_jobs.models import (
+    ReversionFailure,
+    ReversionJob,
+    ReversionJobState,
+    ReversionJobStep,
+    ReversionLeaseHeartbeat,
+)
+from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
+from tests.reversion_job_repository_contracts import (
+    LEASE_END,
+    NOW,
+    POLICY_SPECIFICATION,
+    PRINCIPAL,
+    RETENTION_END,
+    exercise_reversion_job_repository_contract,
+    proof,
+    submission,
+    trace,
+)
+
+
+def _user(repository: SqlUserRepository, name: str) -> User:
+    user = User(uuid4(), name, f"{name.casefold()}-{uuid4()}", "hash:user", Role.USER)
+    repository.create(user)
+    return user
+
+
+@pytest.mark.integration
+def test_sqlite_reversion_repository_contract_and_restart(tmp_path: Path) -> None:
+    url = standalone_database_url(tmp_path)
+    engine = create_database_engine(url)
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "Owner")
+    other = _user(users, "Other")
+    exercise_reversion_job_repository_contract(
+        SqlReversionJobRepository(engine), owner.id, other.id
+    )
+    engine.dispose()
+
+    reopened = create_database_engine(url)
+    assert (
+        SqlReversionJobRepository(reopened)
+        .list_owner(owner.id, offset=0, limit=10)
+        .total
+        == 1
+    )
+    reopened.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reverse_owner_quota_and_replay_precede_global_capacity(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "Quota")
+    other = _user(users, "Capacity")
+    repository = SqlReversionJobRepository(engine, ReversionAdmissionPolicy(1, 1))
+    original = submission(owner.id, idempotency_digest="a" * 64)
+    created, _ = repository.create(original)
+    replay, replayed = repository.create(
+        submission(owner.id, idempotency_digest="a" * 64)
+    )
+    assert replayed and replay.id == created.id
+    with pytest.raises(ReversionJobUserQuotaExceededError):
+        repository.create(submission(owner.id))
+    with pytest.raises(ReversionQueueCapacityExceededError):
+        repository.create(submission(other.id))
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reverse_cancellation_failure_and_proof_fences(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "Lifecycle")
+    other = _user(users, "Outsider")
+    repository = SqlReversionJobRepository(engine)
+
+    queued, _ = repository.create(submission(owner.id))
+    assert repository.request_cancel(queued.id, other.id, NOW, RETENTION_END) is None
+    cancelled = repository.request_cancel(queued.id, owner.id, NOW, RETENTION_END)
+    assert cancelled is not None and cancelled.state is ReversionJobState.CANCELLED
+    assert (
+        repository.request_cancel(queued.id, owner.id, NOW, RETENTION_END) == cancelled
+    )
+    with pytest.raises(ReversionJobRepositoryError):
+        repository.activate_source(queued.id, NOW)
+    assert repository.claim("idle", PRINCIPAL, NOW, LEASE_END) is None
+
+    unproven, _ = repository.create(
+        submission(owner.id, created_at=NOW + timedelta(seconds=1))
+    )
+    repository.activate_source(unproven.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert claimed is not None and claimed.current_attempt_id and claimed.lease_token
+    assert not repository.cancellation_requested(
+        claimed.id, claimed.current_attempt_id, "wrong", claimed.lease_token
+    )
+    assert not repository.heartbeat(
+        ReversionLeaseHeartbeat(
+            claimed.id,
+            claimed.current_attempt_id,
+            "wrong",
+            claimed.lease_token,
+            NOW + timedelta(seconds=1),
+            LEASE_END,
+            claimed.step,
+        )
+    )
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW + timedelta(seconds=1),
+    )
+    with pytest.raises(ReversionProofRequiredError):
+        repository.fail(
+            ReversionFailure(
+                claimed.id,
+                claimed.current_attempt_id,
+                "worker",
+                claimed.lease_token,
+                "safe_failure",
+                "Reverse conversion failed safely.",
+                NOW + timedelta(seconds=2),
+                RETENTION_END,
+            )
+        )
+    unit_id = uuid4()
+    repository.record_broker_unit(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit_id,
+        NOW + timedelta(seconds=2),
+    )
+    assert (
+        repository.record_broker_unit(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            unit_id,
+            NOW + timedelta(seconds=2),
+        ).unit_id
+        == unit_id
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_broker_unit(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            uuid4(),
+            NOW + timedelta(seconds=2),
+        )
+    termination = proof(claimed.current_attempt_id, unit_id)
+    repository.record_active_termination_proof(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        termination,
+        NOW + timedelta(seconds=3),
+    )
+    assert (
+        repository.record_active_termination_proof(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            termination,
+            NOW + timedelta(seconds=3),
+        ).termination_proof
+        == termination
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_active_termination_proof(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            proof(claimed.current_attempt_id, unit_id),
+            NOW + timedelta(seconds=3),
+        )
+    repository.request_cancel(claimed.id, owner.id, NOW, RETENTION_END)
+    assert repository.cancellation_requested(
+        claimed.id, claimed.current_attempt_id, "worker", claimed.lease_token
+    )
+    failed = repository.fail(
+        ReversionFailure(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            "safe_failure",
+            "Reverse conversion failed safely.",
+            NOW + timedelta(seconds=4),
+            RETENTION_END,
+        )
+    )
+    assert failed.state is ReversionJobState.CANCELLED
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.finish_cancelled(
+            claimed.id,
+            claimed.current_attempt_id,
+            "worker",
+            claimed.lease_token,
+            NOW + timedelta(seconds=5),
+            RETENTION_END,
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.acknowledge_termination_proof(
+            claimed.current_attempt_id, uuid4(), NOW
+        )
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reverse_recovery_without_create_intent_and_incomplete_upload(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "Recovery")
+    repository = SqlReversionJobRepository(engine)
+    ready, _ = repository.create(submission(owner.id))
+    repository.activate_source(ready.id, NOW)
+    claim = repository.claim("worker", PRINCIPAL, NOW, NOW + timedelta(seconds=1))
+    assert claim is not None
+    abandoned, _ = repository.create(
+        submission(owner.id, created_at=NOW - timedelta(days=1))
+    )
+    recovered = repository.recover_expired_leases(
+        NOW + timedelta(seconds=2), RETENTION_END, NOW - timedelta(hours=1)
+    )
+    assert recovered == 2
+    recovered_job = repository.get_internal(ready.id)
+    assert recovered_job is not None and recovered_job.state is ReversionJobState.QUEUED
+    incomplete = repository.get_internal(abandoned.id)
+    assert incomplete is not None and incomplete.state is ReversionJobState.FAILED
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reverse_repository_sanitizes_database_failures(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    owner_id = uuid4()
+    job_id = uuid4()
+    attempt_id = uuid4()
+    lease_token = uuid4()
+    termination = proof(attempt_id, uuid4())
+    failure = ReversionFailure(
+        job_id,
+        attempt_id,
+        "worker",
+        lease_token,
+        "safe",
+        "Reverse conversion failed safely.",
+        NOW,
+        RETENTION_END,
+    )
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE reversion_attempts"))
+        connection.execute(text("DROP TABLE reversion_broker_principals"))
+        connection.execute(text("DROP TABLE reversion_jobs"))
+
+    operations = (
+        lambda: repository.create(submission(owner_id)),
+        lambda: repository.activate_source(job_id, NOW),
+        lambda: repository.get_owner(job_id, owner_id),
+        lambda: repository.list_owner(owner_id, offset=0, limit=10),
+        lambda: repository.get_internal(job_id),
+        lambda: repository.get_attempt(attempt_id),
+        lambda: repository.list_attempts(job_id),
+        lambda: repository.claim("worker", PRINCIPAL, NOW, LEASE_END),
+        lambda: repository.heartbeat(
+            ReversionLeaseHeartbeat(
+                job_id,
+                attempt_id,
+                "worker",
+                lease_token,
+                NOW,
+                LEASE_END,
+                ReversionJobStep.CONVERTING,
+            )
+        ),
+        lambda: repository.cancellation_requested(
+            job_id, attempt_id, "worker", lease_token
+        ),
+        lambda: repository.request_cancel(job_id, owner_id, NOW, RETENTION_END),
+        lambda: repository.reserve_create_intent(
+            job_id,
+            attempt_id,
+            "worker",
+            lease_token,
+            "reverse-policy-v1",
+            POLICY_SPECIFICATION,
+            NOW,
+        ),
+        lambda: repository.record_broker_unit(
+            job_id, attempt_id, "worker", lease_token, uuid4(), NOW
+        ),
+        lambda: repository.record_active_termination_proof(
+            job_id,
+            attempt_id,
+            "worker",
+            lease_token,
+            termination,
+            NOW,
+        ),
+        lambda: repository.claim_recovery("recovery", NOW, LEASE_END, 1),
+        lambda: repository.record_recovery_termination_proof(
+            attempt_id, uuid4(), termination, NOW
+        ),
+        lambda: repository.acknowledge_termination_proof(
+            attempt_id, termination.proof_id, NOW
+        ),
+        lambda: repository.recover_expired_leases(NOW, RETENTION_END, NOW),
+        lambda: repository.succeed(
+            job_id,
+            attempt_id,
+            "worker",
+            lease_token,
+            uuid4(),
+            trace().result_mode,
+            "a" * 64,
+            1,
+            trace(),
+            NOW,
+            RETENTION_END,
+        ),
+        lambda: repository.fail(failure),
+        lambda: repository.finish_cancelled(
+            job_id, attempt_id, "worker", lease_token, NOW, RETENTION_END
+        ),
+        lambda: repository.expire_terminal("cleanup", NOW, LEASE_END, 1),
+        lambda: repository.complete_cleanup(job_id, uuid4()),
+    )
+    for operation in operations:
+        with pytest.raises(ReversionJobRepositoryError):
+            operation()
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reversion_migration_round_trip(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    downgrade_database(engine, "20260901_15")
+    upgrade_database(engine)
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_mixed_family_global_capacity_is_atomic(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    forward_owner = _user(users, "Forward")
+    reverse_owner = _user(users, "Reverse")
+    forward = SqlJobRepository(engine, JobAdmissionPolicy(10, 1))
+    reverse = SqlReversionJobRepository(engine, ReversionAdmissionPolicy(10, 1))
+    barrier = Barrier(2)
+
+    def create_forward() -> str:
+        barrier.wait()
+        forward.create(
+            JobSubmission(
+                uuid4(),
+                forward_owner.id,
+                uuid4(),
+                None,
+                None,
+                JobOutput.DOCX,
+                (("markweave", "0.6.1"),),
+                "7" * 64,
+                None,
+                NOW,
+            )
+        )
+        return "forward"
+
+    def create_reverse() -> str:
+        barrier.wait()
+        reverse.create(submission(reverse_owner.id))
+        return "reverse"
+
+    outcomes: list[str] = []
+    failures: list[Exception] = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(create_forward), executor.submit(create_reverse)]
+        for future in futures:
+            try:
+                outcomes.append(future.result())
+            except Exception as error:
+                failures.append(error)
+    assert len(outcomes) == 1
+    assert len(failures) == 1
+    assert failures[0].__class__.__name__ in {
+        "JobQueueCapacityExceededError",
+        ReversionQueueCapacityExceededError.__name__,
+    }
+    engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_claims_allocate_unique_principal_sequences(tmp_path: Path) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    repository = SqlReversionJobRepository(engine)
+    for name in ("SequenceOne", "SequenceTwo"):
+        owner = _user(users, name)
+        job, _ = repository.create(submission(owner.id))
+        repository.activate_source(job.id, NOW)
+    principal = type(PRINCIPAL)(uuid4())
+    barrier = Barrier(2)
+
+    def claim(worker: str) -> ReversionJob | None:
+        barrier.wait()
+        return repository.claim(worker, principal, NOW, LEASE_END)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        jobs = tuple(executor.map(claim, ("sequence-a", "sequence-b")))
+    claimed_jobs = tuple(job for job in jobs if job is not None)
+    assert len(claimed_jobs) == 2
+    attempt_ids = [
+        job.current_attempt_id
+        for job in claimed_jobs
+        if job.current_attempt_id is not None
+    ]
+    assert len(attempt_ids) == 2
+    attempts = [repository.get_attempt(attempt_id) for attempt_id in attempt_ids]
+    assert sorted(attempt.create_sequence for attempt in attempts if attempt) == [1, 2]
+    for job in claimed_jobs:
+        assert job.current_attempt_id is not None
+        assert job.lease_token is not None
+        repository.finish_cancelled(
+            job.id,
+            job.current_attempt_id,
+            job.lease_owner or "",
+            job.lease_token,
+            NOW,
+            RETENTION_END,
+        )
+    engine.dispose()

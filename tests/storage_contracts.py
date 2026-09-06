@@ -217,6 +217,8 @@ def exercise_object_store_contract(store: ObjectStore) -> None:
     """Verify overwrite, missing-object, and idempotent-delete behavior."""
     key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
     other = ObjectKey(ObjectScope.RESULT, key.owner_id, uuid4())
+    reverse_upload = ObjectKey(ObjectScope.REVERSION_UPLOAD, key.owner_id, uuid4())
+    reverse_result = ObjectKey(ObjectScope.REVERSION_RESULT, key.owner_id, uuid4())
     assert key.as_posix().split("/") == [
         "uploads",
         str(key.owner_id),
@@ -227,14 +229,20 @@ def exercise_object_store_contract(store: ObjectStore) -> None:
         store.get(key)
     store.put(key, b"first")
     store.put(other, b"other")
+    store.put(reverse_upload, b"reverse-source")
+    store.put(reverse_result, b"reverse-result")
     assert store.exists(key)
     assert store.get(key) == b"first"
     store.put(key, b"replacement")
     assert store.get(key) == b"replacement"
     assert store.get(other) == b"other"
+    assert store.get(reverse_upload) == b"reverse-source"
+    assert store.get(reverse_result) == b"reverse-result"
     store.delete(key)
     store.delete(key)
     assert not store.exists(key)
+    store.delete(reverse_upload)
+    store.delete(reverse_result)
 
 
 def exercise_template_repository_contract(

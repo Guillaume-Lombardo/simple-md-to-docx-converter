@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -420,4 +421,238 @@ Index(
     ConversionJobRow.state,
     ConversionJobRow.cleanup_completed,
     ConversionJobRow.cleanup_expires_at,
+)
+
+
+class ReversionJobRow(Base):
+    """Distinct durable reverse-conversion queue row."""
+
+    __tablename__ = "reversion_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', "
+            "'expired')",
+            name="ck_reversion_jobs_state",
+        ),
+        CheckConstraint(
+            "step IN ('queued', 'isolating', 'converting', 'validating', "
+            "'publishing', 'complete')",
+            name="ck_reversion_jobs_step",
+        ),
+        CheckConstraint("attempt >= 0", name="ck_reversion_jobs_attempt"),
+        CheckConstraint("source_size > 0", name="ck_reversion_jobs_source_size"),
+        CheckConstraint(
+            "source_family IN ('word', 'powerpoint', 'excel', 'opendocument', "
+            "'rtf', 'epub', 'csv', 'pdf')",
+            name="ck_reversion_jobs_source_family",
+        ),
+        CheckConstraint(
+            "(state = 'running' AND lease_owner IS NOT NULL AND lease_token IS NOT "
+            "NULL AND lease_expires_at IS NOT NULL AND heartbeat_at IS NOT NULL "
+            "AND current_attempt_id IS NOT NULL) OR (state <> 'running' AND "
+            "lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS "
+            "NULL AND heartbeat_at IS NULL AND current_attempt_id IS NULL)",
+            name="ck_reversion_jobs_lease_bundle",
+        ),
+        CheckConstraint(
+            "(state = 'succeeded' AND result_mode IS NOT NULL AND result_object_id "
+            "IS NOT NULL AND result_sha256 IS NOT NULL AND result_size > 0 AND "
+            "trace_metadata IS NOT NULL) OR (state <> 'succeeded' AND result_mode "
+            "IS NULL AND result_object_id IS NULL AND result_sha256 IS NULL AND "
+            "result_size IS NULL AND trace_metadata IS NULL)",
+            name="ck_reversion_jobs_result_bundle",
+        ),
+        CheckConstraint(
+            "(state = 'failed' AND error_code IS NOT NULL AND error_message IS NOT "
+            "NULL) OR (state <> 'failed' AND error_code IS NULL AND error_message "
+            "IS NULL)",
+            name="ck_reversion_jobs_error_bundle",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "idempotency_digest",
+            name="uq_reversion_jobs_owner_idempotency",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_stem: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_extension: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_family: Mapped[str] = mapped_column(String(32), nullable=False)
+    detected_format: Mapped[str | None] = mapped_column(String(32))
+    parser_format: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    component_versions: Mapped[str] = mapped_column(String(), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_digest: Mapped[str | None] = mapped_column(String(64))
+    correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    step: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(255))
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_attempt_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    result_mode: Mapped[str | None] = mapped_column(String(48))
+    result_object_id: Mapped[str | None] = mapped_column(String(36))
+    result_sha256: Mapped[str | None] = mapped_column(String(64))
+    result_size: Mapped[int | None] = mapped_column(BigInteger)
+    trace_metadata: Mapped[str | None] = mapped_column(String())
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(String(1024))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_completed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    cleanup_owner: Mapped[str | None] = mapped_column(String(255))
+    cleanup_token: Mapped[str | None] = mapped_column(String(36))
+    cleanup_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReversionBrokerPrincipalRow(Base):
+    """Durable monotone create-sequence high-water mark per broker principal."""
+
+    __tablename__ = "reversion_broker_principals"
+    __table_args__ = (
+        CheckConstraint(
+            "create_sequence_high_water >= 0",
+            name="ck_reversion_broker_principals_high_water",
+        ),
+    )
+
+    principal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    create_sequence_high_water: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+
+
+class ReversionAttemptRow(Base):
+    """Retained mutable-current attempt row; a new row is appended per claim."""
+
+    __tablename__ = "reversion_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id", "attempt_number", name="uq_reversion_attempts_job_number"
+        ),
+        UniqueConstraint(
+            "principal_id",
+            "create_sequence",
+            name="uq_reversion_attempts_principal_sequence",
+        ),
+        UniqueConstraint("unit_id", name="uq_reversion_attempts_unit"),
+        UniqueConstraint("proof_id", name="uq_reversion_attempts_proof"),
+        CheckConstraint("attempt_number > 0", name="ck_reversion_attempts_number"),
+        CheckConstraint("create_sequence > 0", name="ck_reversion_attempts_sequence"),
+        CheckConstraint(
+            "(create_intent_at IS NULL AND policy_revision IS NULL AND "
+            "policy_specification IS NULL AND unit_id IS NULL) OR "
+            "(create_intent_at IS NOT NULL AND policy_revision IS NOT NULL AND "
+            "policy_specification IS NOT NULL)",
+            name="ck_reversion_attempts_create_intent",
+        ),
+        CheckConstraint(
+            "(proof_id IS NULL AND proof_unit_id IS NULL AND proof_principal_id IS "
+            "NULL AND proof_policy_revision IS NULL AND exit_evidence IS NULL AND "
+            "empty_evidence IS NULL AND removal_evidence IS NULL AND "
+            "proof_recorded_at IS NULL AND proof_acknowledged_at IS NULL) OR "
+            "(proof_id IS NOT NULL AND proof_unit_id IS NOT NULL AND "
+            "proof_principal_id IS NOT NULL AND proof_policy_revision IS NOT NULL "
+            "AND exit_evidence IS NOT NULL AND empty_evidence IS NOT NULL AND "
+            "removal_evidence IS NOT NULL AND proof_recorded_at IS NOT NULL)",
+            name="ck_reversion_attempts_proof_bundle",
+        ),
+        CheckConstraint(
+            "(recovery_owner IS NULL AND recovery_token IS NULL AND "
+            "recovery_expires_at IS NULL) OR (recovery_owner IS NOT NULL AND "
+            "recovery_token IS NOT NULL AND recovery_expires_at IS NOT NULL)",
+            name="ck_reversion_attempts_recovery_bundle",
+        ),
+    )
+
+    attempt_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("reversion_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    lease_token: Mapped[str] = mapped_column(String(36), nullable=False)
+    leased_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    lease_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    principal_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("reversion_broker_principals.principal_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    create_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_intent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unit_id: Mapped[str | None] = mapped_column(String(36))
+    policy_revision: Mapped[str | None] = mapped_column(String(64))
+    policy_specification: Mapped[str | None] = mapped_column(String(71))
+    proof_id: Mapped[str | None] = mapped_column(String(36))
+    proof_unit_id: Mapped[str | None] = mapped_column(String(36))
+    proof_principal_id: Mapped[str | None] = mapped_column(String(36))
+    proof_policy_revision: Mapped[str | None] = mapped_column(String(64))
+    exit_evidence: Mapped[str | None] = mapped_column(String(71))
+    empty_evidence: Mapped[str | None] = mapped_column(String(71))
+    removal_evidence: Mapped[str | None] = mapped_column(String(71))
+    proof_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    proof_acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    recovery_owner: Mapped[str | None] = mapped_column(String(255))
+    recovery_token: Mapped[str | None] = mapped_column(String(36))
+    recovery_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+Index(
+    "ix_reversion_jobs_queue",
+    ReversionJobRow.state,
+    ReversionJobRow.created_at,
+    ReversionJobRow.id,
+)
+Index(
+    "ix_reversion_jobs_owner_created",
+    ReversionJobRow.owner_id,
+    ReversionJobRow.created_at,
+    ReversionJobRow.id,
+)
+Index(
+    "ix_reversion_jobs_lease_expiry",
+    ReversionJobRow.state,
+    ReversionJobRow.lease_expires_at,
+)
+Index(
+    "ix_reversion_jobs_cleanup",
+    ReversionJobRow.state,
+    ReversionJobRow.cleanup_completed,
+    ReversionJobRow.cleanup_expires_at,
+)
+Index(
+    "ix_reversion_attempts_recovery",
+    ReversionAttemptRow.create_intent_at,
+    ReversionAttemptRow.proof_recorded_at,
+    ReversionAttemptRow.recovery_expires_at,
 )

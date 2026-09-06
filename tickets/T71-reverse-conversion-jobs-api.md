@@ -125,6 +125,33 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   route contract instead of being required to expose the new capabilities endpoint. Candidate-image
   final smoke validation continues to require the anonymous `401`, missing-configuration `503`, and
   configured deterministic `200` branches by default.
+* 2026-09-06: Started the durable reverse-queue foundation from verified main
+  `67ab391313b574af500e3f60b89540a42cc3d0d9`. This slice owns distinct reverse job and append-only
+  attempt persistence, owner-only public queries, internal worker leases, durable broker-create
+  identity and complete T70 termination-proof history, proof-gated recovery and publication,
+  reverse object namespaces, and atomic mixed-family global admission across SQLite and PostgreSQL.
+  HTTP, CLI, scanner orchestration, runtime wiring, broker transport, execution, fair claiming,
+  metrics, and production numeric budgets remain excluded.
+* 2026-09-06: Completed the durable reverse-queue foundation with SQLite/PostgreSQL parity. Reverse
+  submissions retain safe source admission and exact engine versions, including
+  `firecrawl-anydoc 0.2.4`; owner-facing SQL is owner-bound while internal worker lookup is a
+  separate port. Attempts retain per-principal transactionally allocated create sequences, durable
+  broker-create intent and unit identity, exact lease fencing, recovery leases, complete T70
+  termination proofs and replayable proof acknowledgements. Expired attempts with a committed
+  create intent cannot recover until that exact proof is durable, and result publication requires
+  the active unexpired attempt plus its proof. Stable reverse upload/result namespaces and fenced
+  expiration cleanup cover filesystem and S3 stores. Forward and reverse submissions now serialize
+  on the same PostgreSQL advisory lock (and SQLite immediate transaction), replay before capacity
+  rejection, and share one active-job capacity while retaining separate owner quotas. Real
+  PostgreSQL migration round-trip, same-principal sequence races, mixed-family capacity races and
+  RustFS contracts passed. The canonical non-engine selection reached 3,612 passes with one
+  unrelated process-group reap timing failure that passes in isolation; total coverage was 94.86%
+  and application branch coverage 91.14%. The full suite reached 3,622 passes; 35 document-engine
+  tests could not run because Pandoc, Mermaid/Chromium, LibreOffice and the pinned font inventory are
+  unavailable on this host, and the same unrelated loaded process-group timing test failed. Database
+  restore can rewind the local create-sequence high-water mark relative to retained broker state;
+  T70 exposes no broker high-water query, so later runtime integration must reconcile that gap and
+  this foundation does not claim post-restore completeness.
 
 ## Synchronization
 

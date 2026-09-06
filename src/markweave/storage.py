@@ -18,6 +18,8 @@ class ObjectScope(StrEnum):
     UPLOAD = "uploads"
     RESULT = "results"
     RESULT_MANIFEST = "result-manifests"
+    REVERSION_UPLOAD = "reversion-uploads"
+    REVERSION_RESULT = "reversion-results"
     TEMPLATE_VERSION = "template-versions"
 
 
