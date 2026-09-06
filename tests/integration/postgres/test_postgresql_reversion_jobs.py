@@ -112,6 +112,12 @@ def test_postgresql_reconciliation_advances_hwm_and_retains_orphan_before_ack() 
         ),
         NOW,
     )
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(uuid4(), PRINCIPAL.principal_id, 12, 14, None, True),
+        NOW,
+    )
     assert repository.pending_reconciliation_acknowledgements(
         PRINCIPAL, token, NOW
     ) == (tombstone,)

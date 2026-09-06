@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    false,
     true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -539,6 +540,10 @@ class ReversionBrokerPrincipalRow(Base):
             "reconciliation_cursor >= 0", name="ck_reversion_broker_principals_cursor"
         ),
         CheckConstraint(
+            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= 0",
+            name="ck_reversion_broker_principals_observed_head",
+        ),
+        CheckConstraint(
             "(reconciliation_owner IS NULL AND reconciliation_token IS NULL AND reconciliation_expires_at IS NULL) OR "
             "(reconciliation_owner IS NOT NULL AND reconciliation_token IS NOT NULL AND reconciliation_expires_at IS NOT NULL)",
             name="ck_reversion_broker_principals_reconciliation_lease",
@@ -559,6 +564,10 @@ class ReversionBrokerPrincipalRow(Base):
     )
     reconciliation_cursor: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
+    )
+    reconciliation_observed_head: Mapped[int | None] = mapped_column(BigInteger)
+    reconciliation_fixed_point: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
     )
 
 

@@ -63,6 +63,7 @@ class ReconciliationResponse:
         if (
             type(self.create_sequence_high_water) is not int
             or not 0 <= self.create_sequence_high_water <= MAX_SEQUENCE
+            or self.create_sequence_high_water < self.after_create_sequence
         ):
             raise ValueError("Reconciliation high-water mark is invalid")
         if self.tombstone is not None and (

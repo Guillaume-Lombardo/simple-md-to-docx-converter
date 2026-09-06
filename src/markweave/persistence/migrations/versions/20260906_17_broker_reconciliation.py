@@ -45,8 +45,23 @@ def upgrade() -> None:
                 server_default="0",
             )
         )
+        batch.add_column(
+            sa.Column("reconciliation_observed_head", sa.BigInteger(), nullable=True)
+        )
+        batch.add_column(
+            sa.Column(
+                "reconciliation_fixed_point",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
+            )
+        )
         batch.create_check_constraint(
             "ck_reversion_broker_principals_cursor", "reconciliation_cursor >= 0"
+        )
+        batch.create_check_constraint(
+            "ck_reversion_broker_principals_observed_head",
+            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= 0",
         )
         batch.create_check_constraint(
             "ck_reversion_broker_principals_reconciliation_lease",
@@ -100,7 +115,12 @@ def downgrade() -> None:
         batch.drop_constraint(
             "ck_reversion_broker_principals_reconciliation_lease", type_="check"
         )
+        batch.drop_constraint(
+            "ck_reversion_broker_principals_observed_head", type_="check"
+        )
         batch.drop_constraint("ck_reversion_broker_principals_cursor", type_="check")
+        batch.drop_column("reconciliation_fixed_point")
+        batch.drop_column("reconciliation_observed_head")
         batch.drop_column("reconciliation_cursor")
         batch.drop_column("reconciliation_expires_at")
         batch.drop_column("reconciliation_token")

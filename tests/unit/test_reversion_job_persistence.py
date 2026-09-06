@@ -91,6 +91,12 @@ def test_reconciliation_is_exclusive_monotone_and_retains_orphan_before_ack(
         ReconciliationResponse(uuid4(), principal.principal_id, 7, 8, None, True),
         NOW,
     )
+    repository.record_reconciliation_page(
+        principal,
+        token,
+        ReconciliationResponse(uuid4(), principal.principal_id, 7, 8, None, True),
+        NOW,
+    )
     repository.complete_reconciliation(principal, token, NOW)
     with engine.connect() as connection:
         row = connection.execute(
@@ -123,6 +129,13 @@ def test_reconciliation_takeover_and_unproven_restore_fail_closed(
     repository.begin_reconciliation(
         principal, "second", takeover, LEASE_END + timedelta(seconds=1), RETENTION_END
     )
+    for _ in range(2):
+        repository.record_reconciliation_page(
+            principal,
+            takeover,
+            ReconciliationResponse(uuid4(), principal.principal_id, 0, 0, None, True),
+            LEASE_END + timedelta(seconds=1),
+        )
     queued, _ = repository.create(submission(owner.id))
     repository.activate_source(queued.id, NOW)
     repository.complete_reconciliation(

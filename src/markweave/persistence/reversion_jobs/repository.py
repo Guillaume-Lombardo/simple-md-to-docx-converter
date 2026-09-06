@@ -427,6 +427,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     raise ReversionJobLeaseLostError
                 if not exact_replay:
                     row.reconciliation_cursor = 0
+                    row.reconciliation_observed_head = None
+                    row.reconciliation_fixed_point = False
                 row.reconciliation_complete = False
                 row.reconciliation_owner = owner
                 row.reconciliation_token = str(token)
@@ -468,6 +470,15 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 if tombstone is not None:
                     self._retain_reconciliation_tombstone(database, row, tombstone, now)
                     row.reconciliation_cursor = tombstone.create_sequence
+                    row.reconciliation_observed_head = None
+                    row.reconciliation_fixed_point = False
+                elif (
+                    row.reconciliation_observed_head == page.create_sequence_high_water
+                ):
+                    row.reconciliation_fixed_point = True
+                else:
+                    row.reconciliation_observed_head = page.create_sequence_high_water
+                    row.reconciliation_fixed_point = False
                 database.flush()
                 return tombstone
         except ReversionJobConflictError, ReversionJobLeaseLostError:
@@ -709,12 +720,18 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 )
                 if unproven is not None:
                     raise ReversionProofRequiredError
+                if not row.reconciliation_fixed_point:
+                    raise ReversionJobConflictError
                 row.reconciliation_complete = True
                 row.reconciliation_owner = None
                 row.reconciliation_token = None
                 row.reconciliation_expires_at = None
                 database.flush()
-        except ReversionJobLeaseLostError, ReversionProofRequiredError:
+        except (
+            ReversionJobConflictError,
+            ReversionJobLeaseLostError,
+            ReversionProofRequiredError,
+        ):
             raise
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
