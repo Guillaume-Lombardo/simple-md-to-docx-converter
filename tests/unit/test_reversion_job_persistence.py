@@ -18,7 +18,12 @@ from markweave.broker.reconciliation_protocol import (
 )
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.reversion_jobs.common import _trace, _trace_json, _versions
-from markweave.persistence.schema import Base, ReversionAttemptRow, ReversionJobRow
+from markweave.persistence.schema import (
+    Base,
+    ReversionAttemptRow,
+    ReversionJobRow,
+    ReversionOrphanProofRow,
+)
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -231,15 +236,23 @@ def test_reconciliation_drains_preexisting_unacknowledged_attempt_proof(
 @pytest.mark.parametrize(
     ("column", "value"),
     [
+        ("unit_id", str(uuid4())),
         ("proof_unit_id", str(uuid4())),
+        ("proof_id", str(uuid4())),
         ("proof_principal_id", str(uuid4())),
         ("policy_revision", "mutated-policy"),
+        ("policy_specification", "sha256:" + "9" * 64),
+        ("proof_policy_revision", "mutated-proof-policy"),
+        ("exit_evidence", "sha256:" + "8" * 64),
+        ("empty_evidence", "sha256:" + "7" * 64),
+        ("removal_evidence", "sha256:" + "6" * 64),
+        ("reconciliation_ack_intent_at", None),
     ],
 )
 def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
     reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
     column: str,
-    value: str,
+    value: object,
 ) -> None:
     repository, owner, _other, engine = reverse_repository
     job, _ = repository.create(submission(owner.id))
@@ -294,6 +307,61 @@ def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
                 "SELECT proof_acknowledged_at FROM reversion_attempts WHERE attempt_id = :attempt"
             ),
             {"attempt": str(claimed.current_attempt_id)},
+        ).scalar_one()
+    assert acknowledged_at is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("attempt_id", str(uuid4())),
+        ("unit_id", str(uuid4())),
+        ("proof_id", str(uuid4())),
+        ("policy_revision", "mutated-policy"),
+        ("policy_specification", "sha256:" + "9" * 64),
+        ("exit_evidence", "sha256:" + "8" * 64),
+        ("empty_evidence", "sha256:" + "7" * 64),
+        ("removal_evidence", "sha256:" + "6" * 64),
+    ],
+)
+def test_reconciliation_ack_rejects_mutated_orphan_proof_bundle(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+    column: str,
+    value: object,
+) -> None:
+    repository, _owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    token = uuid4()
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+    retained = proof(uuid4(), uuid4(), principal)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    repository.record_reconciliation_page(
+        principal,
+        token,
+        ReconciliationResponse(uuid4(), principal.principal_id, 0, 1, tombstone, False),
+        NOW,
+    )
+    assert repository.pending_reconciliation_acknowledgements(
+        principal, token, NOW, 8
+    ) == (tombstone,)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ReversionOrphanProofRow)
+            .where(
+                ReversionOrphanProofRow.principal_id == str(principal.principal_id),
+                ReversionOrphanProofRow.create_sequence == 1,
+            )
+            .values({column: value})
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(principal, token, tombstone, NOW)
+    with engine.connect() as connection:
+        acknowledged_at = connection.execute(
+            text(
+                "SELECT acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 1"
+            ),
+            {"principal": str(principal.principal_id)},
         ).scalar_one()
     assert acknowledged_at is None
 
