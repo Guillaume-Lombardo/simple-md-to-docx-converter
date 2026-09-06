@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import ClassVar
 from uuid import uuid4
@@ -501,6 +502,24 @@ def test_http_client_uses_reverse_paths_csrf_and_atomic_download(
     assert downloaded.bytes_written == 8
     assert destination.read_bytes() == b"markdown"
     assert stat_mode(destination) == 0o600
+
+
+def test_http_client_maps_truncated_json_response_to_network_error(mocker) -> None:
+    profile = mocker.Mock(
+        service_url="https://example.test", session_state="session", csrf_state="csrf"
+    )
+    client = conversion_http.ConversionHttpClient(profile, timeout=2)
+    response = mocker.Mock(status=202)
+    response.read.side_effect = IncompleteRead(b'{"id":', 42)
+    mocker.patch.object(client, "_open", return_value=response)
+
+    with pytest.raises(CliError) as raised:
+        client.submit_reversion(
+            b"doc", filename="source.docx", idempotency_key="stable-key"
+        )
+
+    assert raised.value.code == "network_error"
+    response.close.assert_called_once_with()
 
 
 def stat_mode(path: Path) -> int:

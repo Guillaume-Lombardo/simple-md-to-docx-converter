@@ -8,6 +8,7 @@ import ssl
 import stat
 import sys
 from dataclasses import dataclass, field
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -184,7 +185,12 @@ class ConversionHttpClient:
         """Return one bounded JSON response from an API-v1 endpoint."""
         response = self._open(method, path, csrf=csrf, headers=headers, body=body)
         try:
-            content = _read_bounded(response, _MAX_JSON_BYTES)
+            try:
+                content = _read_bounded(response, _MAX_JSON_BYTES)
+            except (IncompleteRead, TimeoutError, URLError, OSError) as error:
+                raise CliError(
+                    "network_error", "The service response was interrupted."
+                ) from error
             return ConversionHttpResponse(
                 response.status,
                 _decode_payload(content),
