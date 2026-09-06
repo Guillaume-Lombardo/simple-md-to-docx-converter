@@ -160,6 +160,28 @@ def test_postgresql_enforces_configured_reverse_running_limit() -> None:
 
 @pytest.mark.integration
 @pytest.mark.requires_postgres
+def test_postgresql_incomplete_recovery_workers_claim_distinct_rows() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    owner = _user(SqlUserRepository(engine), "IncompleteRecoveryRace")
+    for _ in range(2):
+        repository.create(submission(owner.id))
+    barrier = Barrier(2)
+
+    def recover() -> int:
+        barrier.wait()
+        return repository.recover_expired_leases(NOW, RETENTION_END, NOW, limit=1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        recovered = tuple(executor.map(lambda _value: recover(), range(2)))
+
+    assert sum(recovered) == 2
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
 def test_postgresql_reversion_migration_round_trip() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)

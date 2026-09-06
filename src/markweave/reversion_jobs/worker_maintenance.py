@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
@@ -22,6 +23,14 @@ from markweave.reversions.errors import ReverseErrorCategory, reject
 from markweave.storage import ObjectKey, ObjectScope
 
 
+@dataclass(frozen=True, slots=True)
+class ReversionRecoveryResult:
+    """Bounded recovery progress separated from newly claimable jobs."""
+
+    progressed: int
+    requeued: int
+
+
 class ReversionMaintenanceService:
     """Recover only proven-empty attempts and expire retry-safe object bundles."""
 
@@ -29,7 +38,7 @@ class ReversionMaintenanceService:
         self._runtime = runtime
         self._publication = ReversionPublicationService(runtime)
 
-    def recover(self) -> int:
+    def recover_step(self) -> ReversionRecoveryResult:
         """Run one recovery step bounded by the configured batch size."""
 
         now = self._runtime.clock()
@@ -44,14 +53,15 @@ class ReversionMaintenanceService:
             self._publication.acknowledge_attempt(recorded)
         remaining = self._runtime.policy.recovery_batch_size - len(attempts)
         if not remaining:
-            return 0
+            return ReversionRecoveryResult(len(attempts), 0)
         now = self._runtime.clock()
-        return self._runtime.repository.recover_expired_leases(
+        requeued = self._runtime.repository.recover_expired_leases(
             now,
             now + timedelta(seconds=self._runtime.policy.result_retention_seconds),
             now - timedelta(seconds=self._runtime.policy.incomplete_submission_seconds),
             remaining,
         )
+        return ReversionRecoveryResult(len(attempts) + requeued, requeued)
 
     def _recover_attempt(self, attempt: ReversionAttempt) -> ReversionAttempt:
         unit_id = attempt.unit_id

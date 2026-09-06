@@ -23,7 +23,10 @@ from markweave.reversion_jobs.worker_execution import (
     ReversionClaimService,
     ReversionHeartbeat,
 )
-from markweave.reversion_jobs.worker_maintenance import ReversionMaintenanceService
+from markweave.reversion_jobs.worker_maintenance import (
+    ReversionMaintenanceService,
+    ReversionRecoveryResult,
+)
 from markweave.reversion_jobs.worker_publication import ReversionPublicationService
 from markweave.reversions.errors import ReverseConversionError, ReverseErrorCategory
 
@@ -116,10 +119,10 @@ class ReversionWorker:
                 self._finish_rejection(claimed, error)
         return True
 
-    def recover_step(self) -> int:
+    def recover_step(self) -> ReversionRecoveryResult:
         """Run one recovery batch without starting another reconciliation drain."""
 
-        return self._maintenance.recover()
+        return self._maintenance.recover_step()
 
     def recover(self) -> int:
         """Reconcile first, then recover only attempts with durable empty proof."""
@@ -131,11 +134,11 @@ class ReversionWorker:
                 self.reconcile(token)
                 break
             except ReversionProofRequiredError:
-                recovered = self._maintenance.recover()
-                if not recovered:
+                result = self._maintenance.recover_step()
+                if not result.progressed:
                     raise
-                recovered_total += recovered
-        return recovered_total + self._maintenance.recover()
+                recovered_total += result.requeued
+        return recovered_total + self._maintenance.recover_step().requeued
 
     def cleanup(self) -> int:
         """Run one configured bounded reverse retention batch."""

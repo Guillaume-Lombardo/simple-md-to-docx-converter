@@ -46,7 +46,10 @@ class _StopAfterChecks(_StopAfter):
 
 
 def _loop(
-    mocker: MockerFixture, events: list[str]
+    mocker: MockerFixture,
+    events: list[str],
+    *,
+    reverse_schedule: ReversionSchedule | None = None,
 ) -> tuple[FairWorkerLoop, Any, Any, StopSignalBridge]:
     forward = mocker.Mock(spec=ConversionWorker)
     reverse = mocker.Mock(spec=ReversionWorker)
@@ -70,7 +73,7 @@ def _loop(
         cast(ConversionWorker, forward),
         cast(ReversionWorker, reverse),
         WorkerSchedule(0.1, 100, 5, 2),
-        ReversionSchedule(100, 3),
+        reverse_schedule or ReversionSchedule(100, 3),
         stop_bridge=bridge,
         monotonic_clock=clock,
     )
@@ -176,6 +179,22 @@ def test_multi_page_reconciliation_interleaves_forward_before_reverse_claim(
         "forward",
         "reverse",
     ]
+
+
+def test_due_reverse_cleanup_is_one_quantum_when_both_queues_are_empty(
+    mocker: MockerFixture,
+) -> None:
+    events: list[str] = []
+    loop, forward, reverse, _bridge = _loop(
+        mocker, events, reverse_schedule=ReversionSchedule(0.01, 3)
+    )
+    forward.run_once.side_effect = None
+    forward.run_once.return_value = False
+
+    loop.run(_StopAfterChecks(1))
+
+    reverse.cleanup.assert_called_once_with()
+    reverse.reconcile_step.assert_not_called()
 
 
 def test_stop_bridge_is_inert_until_bound_and_rejects_rebinding() -> None:

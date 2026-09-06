@@ -48,10 +48,26 @@ _LOG_EVENTS = frozenset(
         "insecure_evaluation_mode_enabled",
         "malware_scanning_delegated_to_trusted_upstream",
         "readiness_failed",
+        "reversion_job_expiration_completed",
+        "reversion_job_processing_failed",
+        "reversion_job_recovery_completed",
+        "reversion_runtime_status_changed",
+        "reversion_step_completed",
+        "reversion_worker_retry_scheduled",
         "worker_retry_scheduled",
     }
 )
-_LOG_OPERATIONS = frozenset({"lease_recovery", "retention_cleanup", "worker_loop"})
+_LOG_OPERATIONS = frozenset(
+    {
+        "lease_recovery",
+        "retention_cleanup",
+        "worker_loop",
+        "reversion_reconciliation",
+        "reversion_recovery",
+        "reversion_claim",
+        "reversion_cleanup",
+    }
+)
 _LOG_STATES = frozenset(
     {"queued", "running", "succeeded", "failed", "cancelled", "expired"}
 )
@@ -79,6 +95,45 @@ _LOG_ERROR_CODES = frozenset(
         "template_integrity",
         "source_integrity",
         "resource_budget_exceeded",
+        "authentication_failed",
+        "transport_failure",
+        "protocol_error",
+        "replay_rejected",
+        "inventory_full",
+        "inventory_failure",
+        "reconciliation_incomplete",
+        "termination_unproven",
+        "runtime_failure",
+        "unsupported",
+        "malformed",
+        "encrypted",
+        "resource_limit",
+        "needs_ocr",
+        "asset_invalid",
+        "cancelled",
+        "timed_out",
+        "lease_lost",
+        "persistence_failure",
+        "object_store_failure",
+    }
+)
+_REVERSION_OPERATIONS = frozenset(
+    {
+        "reversion_reconciliation",
+        "reversion_recovery",
+        "reversion_claim",
+        "reversion_cleanup",
+    }
+)
+_REVERSION_RUNTIME_STATES = frozenset(
+    {
+        "disabled",
+        "starting",
+        "reconciling",
+        "ready",
+        "degraded_broker",
+        "degraded_reconciliation",
+        "degraded_runtime",
     }
 )
 _LOG_UUID_FIELDS = frozenset({"job_id", "owner_id", "target_id", "version_id"})
@@ -101,6 +156,7 @@ _SAFE_LOG_FIELDS = frozenset(
         "target_id",
         "version_id",
         "worker_id",
+        "runtime_state",
     }
 )
 
@@ -378,6 +434,7 @@ class OperationalMetrics:
             defaultdict(float)
         )
         self._monotonic_clock = monotonic_clock
+        self._reversion_runtime_state = "disabled"
 
     def record_failure(self, code: str) -> None:
         self._increment("md_converter_job_failures_total", code=code)
@@ -415,6 +472,72 @@ class OperationalMetrics:
             status=status,
         )
 
+    def set_reversion_runtime_state(self, state: str) -> None:
+        """Publish one closed, process-local reverse-runtime health state."""
+
+        if state not in _REVERSION_RUNTIME_STATES:
+            raise ValueError("Reverse runtime state is invalid")
+        with self._lock:
+            changed = self._reversion_runtime_state != state
+            self._reversion_runtime_state = state
+        if changed:
+            log_event("reversion_runtime_status_changed", runtime_state=state)
+
+    def record_reversion_failure(self, code: str) -> None:
+        if code not in _LOG_ERROR_CODES:
+            raise ValueError("Reverse failure code is invalid")
+        self._increment("md_converter_reversion_failures_total", code=code)
+        log_event("reversion_job_processing_failed", error_code=code)
+
+    def record_reversion_retry(self, operation: str) -> None:
+        if operation not in _REVERSION_OPERATIONS:
+            raise ValueError("Reverse retry operation is invalid")
+        self._increment(
+            "md_converter_reversion_worker_retries_total", operation=operation
+        )
+        log_event("reversion_worker_retry_scheduled", operation=operation)
+
+    def record_reversion_recovery(self, count: int) -> None:
+        if type(count) is not int or count < 0:
+            raise ValueError("Reverse recovery count is invalid")
+        self._increment("md_converter_reversion_recoveries_total", amount=count)
+        if count:
+            log_event(
+                "reversion_job_recovery_completed", operation="reversion_recovery"
+            )
+
+    def record_reversion_expiration(self, count: int) -> None:
+        if type(count) is not int or count < 0:
+            raise ValueError("Reverse expiration count is invalid")
+        self._increment("md_converter_reversion_expirations_total", amount=count)
+        if count:
+            log_event(
+                "reversion_job_expiration_completed", operation="reversion_cleanup"
+            )
+
+    def record_reversion_duration(self, operation: str, seconds: float) -> None:
+        if (
+            operation not in _REVERSION_OPERATIONS
+            or type(seconds) not in {int, float}
+            or not math.isfinite(seconds)
+            or not 0 <= seconds <= MAX_LOG_DURATION_SECONDS
+        ):
+            raise ValueError("Reverse duration observation is invalid")
+        self._increment(
+            "md_converter_reversion_operation_duration_seconds_count",
+            operation=operation,
+        )
+        self._increment(
+            "md_converter_reversion_operation_duration_seconds_sum",
+            amount=seconds,
+            operation=operation,
+        )
+        log_event(
+            "reversion_step_completed",
+            operation=operation,
+            duration_seconds=seconds,
+        )
+
     def timer(self) -> float:
         return self._monotonic_clock()
 
@@ -450,6 +573,7 @@ class OperationalMetrics:
                 "md_converter_reversion_reconciliation_pending",
                 float(queue.reversion_reconciliation_pending),
             ),
+            *self._reversion_runtime_gauges(),
         )
         with self._lock:
             counters = tuple(sorted(self._counters.items()))
@@ -466,6 +590,29 @@ class OperationalMetrics:
                 )
             lines.append(f"{name}{rendered_labels} {value:g}")
         return "\n".join(lines) + "\n"
+
+    def _reversion_runtime_gauges(self) -> tuple[tuple[str, float], ...]:
+        with self._lock:
+            state = self._reversion_runtime_state
+        enabled = state != "disabled"
+        return (
+            ("md_converter_reversion_runtime_enabled", float(enabled)),
+            (
+                "md_converter_reversion_broker_ready",
+                float(state in {"reconciling", "ready"}),
+            ),
+            ("md_converter_reversion_reconciliation_ready", float(state == "ready")),
+            ("md_converter_reversion_broker_fault", float(state == "degraded_broker")),
+            (
+                "md_converter_reversion_reconciliation_fault",
+                float(state == "degraded_reconciliation"),
+            ),
+            (
+                "md_converter_reversion_runtime_fault",
+                float(state == "degraded_runtime"),
+            ),
+            ("md_converter_reversion_degraded", float(enabled and state != "ready")),
+        )
 
     def _increment(self, name: str, *, amount: float = 1.0, **labels: str) -> None:
         if amount < 0:
@@ -510,6 +657,10 @@ def _validate_log_field(name: str, value: object) -> object:
         if not isinstance(value, str):
             raise ValueError("Log worker identifier is invalid")
         return require_worker_id(value)
+    if name == "runtime_state":
+        if not isinstance(value, str) or value not in _REVERSION_RUNTIME_STATES:
+            raise ValueError("Reverse runtime state is invalid")
+        return value
     fixed_values = {
         "method": _LOG_METHODS,
         "operation": _LOG_OPERATIONS,

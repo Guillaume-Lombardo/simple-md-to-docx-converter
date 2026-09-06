@@ -1353,6 +1353,8 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 )
                 if remaining is not None:
                     incomplete_ids = incomplete_ids.limit(remaining)
+                if self._engine.dialect.name == "postgresql":
+                    incomplete_ids = incomplete_ids.with_for_update(skip_locked=True)
                 candidates = tuple(database.scalars(incomplete_ids))
                 if not candidates:
                     return recovered
@@ -1360,6 +1362,9 @@ class SqlReversionJobRepository(_SqlReversionStore):
                     update(ReversionJobRow)
                     .where(
                         ReversionJobRow.id.in_(candidates),
+                        ReversionJobRow.state == ReversionJobState.QUEUED.value,
+                        ReversionJobRow.source_ready.is_(False),
+                        ReversionJobRow.created_at <= incomplete_before,
                     )
                     .values(
                         state=ReversionJobState.FAILED.value,

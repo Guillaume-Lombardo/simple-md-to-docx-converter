@@ -504,7 +504,10 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
     mocker: MockerFixture,
 ) -> None:
     repo, owner, _engine = repository
-    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    runtime = replace(
+        _runtime(mocker, repo, FilesystemObjectStore(tmp_path)),
+        policy=replace(POLICY, recovery_batch_size=1),
+    )
     claimed = _claim(runtime, repo, owner, b"source")
     repo.reserve_create_intent(
         claimed.job.id,

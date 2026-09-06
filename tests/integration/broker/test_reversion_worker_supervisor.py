@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -27,6 +28,16 @@ from markweave.broker.unix_transport import (
     UnixBrokerServer,
     UnixTransportLimits,
 )
+from markweave.http.components import build_components
+from markweave.jobs.models import (
+    ConversionJob,
+    JobOutput,
+    JobProcessResult,
+    JobState,
+    JobStep,
+    JobSubmission,
+)
+from markweave.jobs.ports import CancellationProbe
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
@@ -35,13 +46,15 @@ from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
 from markweave.reversion_jobs.runtime import ReversionWorkerRuntime
 from markweave.reversion_jobs.worker import ReversionWorker
 from markweave.reversions.models import ReverseAttemptSuccess, ReverseOutputMode
-from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope
+from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope, ObjectStore
+from markweave.templates.models import TemplateVersion
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
     NOW,
     PRINCIPAL,
     submission,
 )
+from tests.unit.reversions.test_reversion_runtime_assembly import _settings
 from tests.unit.reversions.test_reversion_worker_runtime import (
     BROKER_POLICY,
     CONTENT_LIMITS,
@@ -65,6 +78,59 @@ class _SuccessfulRuntime(FakeIsolationRuntime):
         return created
 
 
+class _ResultProcessor:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def _result(self) -> JobProcessResult:
+        self._events.append("forward")
+        return JobProcessResult(b"forward-result")
+
+    def process_without_template(
+        self,
+        job: ConversionJob,
+        *,
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        assert job.state is JobState.RUNNING
+        assert not cancelled()
+        assert deadline_monotonic is not None
+        progress(JobStep.DOCX, 70)
+        return self._result()
+
+    def process_with_template(  # noqa: PLR0913 - production boundary contract
+        self,
+        job: ConversionJob,
+        template: TemplateVersion,
+        template_content: bytes,
+        *,
+        cancelled: CancellationProbe,
+        deadline_monotonic: float | None,
+        progress: Callable[[JobStep, int], None],
+    ) -> JobProcessResult:
+        assert job.state is JobState.RUNNING
+        assert template_content
+        assert template.id == job.template_version_id
+        assert not cancelled()
+        assert deadline_monotonic is not None
+        progress(JobStep.DOCX, 70)
+        return self._result()
+
+
+class _Until:
+    def __init__(self, predicate: Callable[[], bool]) -> None:
+        self._predicate = predicate
+
+    def is_set(self) -> bool:
+        return bool(self._predicate())
+
+    def wait(self, timeout: float) -> bool:
+        del timeout
+        return self.is_set()
+
+
 def _repository() -> tuple[SqlReversionJobRepository, User, Engine]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -76,7 +142,7 @@ def _repository() -> tuple[SqlReversionJobRepository, User, Engine]:
 
 def _queue(
     repository: SqlReversionJobRepository,
-    objects: FilesystemObjectStore,
+    objects: ObjectStore,
     owner: User,
 ) -> ReversionJob:
     source = b"source"
@@ -211,3 +277,102 @@ def test_real_reconciler_unblocks_crash_before_create_replay(tmp_path: Path) -> 
         assert len(attempts) == 1 and attempts[0].proof_acknowledged_at == clock[0]
     finally:
         engine.dispose()
+
+
+def test_production_components_keep_forward_live_across_unix_broker_reconnect(
+    tmp_path: Path,
+) -> None:
+    server, _client = _server(tmp_path)
+    settings = _settings(
+        tmp_path,
+        reversion_broker_socket_path=(tmp_path / "broker" / "broker.sock").resolve(),
+        reversion_broker_principal_id=PRINCIPAL.principal_id,
+        reversion_broker_policy_revision=BROKER_POLICY.revision,
+        reversion_broker_image_digest=BROKER_POLICY.image_digest,
+        reversion_cpu_quota_micros=BROKER_POLICY.limits.cpu_quota_micros,
+        reversion_cpu_period_micros=BROKER_POLICY.limits.cpu_period_micros,
+        reversion_memory_bytes=BROKER_POLICY.limits.memory_bytes,
+        reversion_pid_limit=BROKER_POLICY.limits.pid_limit,
+        reversion_workspace_bytes=BROKER_POLICY.limits.workspace_bytes,
+        reversion_wall_time_millis=BROKER_POLICY.limits.wall_time_millis,
+        reversion_running_limit=1,
+    )
+    components = build_components(settings)
+    engine = components.owned_engines[0]
+    owner = User(uuid4(), "Production", "production", "hash:user", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    reverse_repository = components.reversion_repository
+    forward_repository = components.job_repository
+    queue_observer = components.queue_observer
+    assert (
+        reverse_repository is not None
+        and forward_repository is not None
+        and queue_observer is not None
+    )
+    durable_reverse_repository: SqlReversionJobRepository = reverse_repository
+    reverse_jobs = tuple(
+        _queue(durable_reverse_repository, components.object_store, owner)
+        for _ in range(2)
+    )
+    source = b"forward-source"
+    source_object_id = uuid4()
+    forward, _ = forward_repository.create(
+        JobSubmission(
+            uuid4(),
+            owner.id,
+            source_object_id,
+            None,
+            None,
+            JobOutput.DOCX,
+            (("markweave", "0.6.1"),),
+            sha256(source).hexdigest(),
+            None,
+            NOW,
+        )
+    )
+    components.object_store.put(
+        ObjectKey(ObjectScope.UPLOAD, owner.id, source_object_id), source
+    )
+    forward_repository.activate_source(forward.id, NOW)
+    events: list[str] = []
+
+    def forward_finished_with_broker_fault() -> bool:
+        current = forward_repository.get(forward.id)
+        return (
+            current is not None
+            and current.state is JobState.SUCCEEDED
+            and "md_converter_reversion_broker_fault 1"
+            in components.metrics.render(queue_observer.observe_queue(NOW))
+        )
+
+    def reverse_finished() -> bool:
+        current = tuple(
+            durable_reverse_repository.get_internal(job.id) for job in reverse_jobs
+        )
+        return all(
+            job is not None and job.state is ReversionJobState.SUCCEEDED
+            for job in current
+        )
+
+    try:
+        unavailable_loop = components.build_external_worker_loop(
+            worker_id="production-worker",
+            processor=_ResultProcessor(events),
+            clock=lambda: NOW,
+        )
+        unavailable_loop.run(_Until(forward_finished_with_broker_fault))
+        assert events == ["forward"]
+
+        with server:
+            connected_loop = components.build_external_worker_loop(
+                worker_id="production-worker",
+                processor=_ResultProcessor(events),
+                clock=lambda: NOW,
+            )
+            connected_loop.run(_Until(reverse_finished))
+        assert reverse_finished()
+        assert "md_converter_reversion_reconciliation_ready 1" in (
+            components.metrics.render(queue_observer.observe_queue(NOW))
+        )
+    finally:
+        components.close()
