@@ -449,6 +449,14 @@ class ReversionFailure:
     now: datetime
     expires_at: datetime
 
+    def __post_init__(self) -> None:
+        if not self.worker_id.strip():
+            raise ValueError("Reverse failure worker identity must not be blank")
+        if not self.code.strip() or not self.message.strip():
+            raise ValueError("Reverse failure details must not be blank")
+        object.__setattr__(self, "now", _utc(self.now))
+        object.__setattr__(self, "expires_at", _utc(self.expires_at))
+
 
 @dataclass(frozen=True, slots=True)
 class ExpiredReversionObjects:

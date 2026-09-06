@@ -169,6 +169,12 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   compare-and-swap and both idempotent submissions after their initial replay miss; the latter also
   asserts that the losing transaction reaches the unique-collision compatibility path. Equivalent
   SQLite replay and conflict coverage remains in place.
+* 2026-09-06: Hosted light-gate follow-up adds in-process SQLite unit coverage for reverse queue
+  admission, owner access, leases, cancellation, broker identity, proof replay, recovery, terminal
+  cleanup, malformed rows, and sanitized database failures without reclassifying any real-boundary
+  integration test. `ReversionFailure` now rejects blank worker, code, or message values and
+  normalizes its timestamps to UTC before persistence. The exact light selection passes 3,290 tests
+  at 93.91% total and 90.09% application branch coverage; changed application coverage is 96.17%.
 
 ## Synchronization
 

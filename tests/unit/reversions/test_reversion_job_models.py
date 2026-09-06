@@ -58,6 +58,16 @@ def test_trace_metadata_is_closed_and_content_free() -> None:
         replace(trace, asset_count=1)
     with pytest.raises(TypeError):
         replace(trace, filename="private.docx")
+    with pytest.raises(ValueError):
+        replace(trace, source_family=FormatFamily.CSV, detected_format="csv")
+    with pytest.raises(ValueError):
+        replace(trace, detected_format=None)
+    unavailable = replace(
+        trace,
+        result_mode=ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS,
+        unavailable_asset_count=1,
+    )
+    assert unavailable.unavailable_asset_count == 1
 
 
 @pytest.mark.unit
@@ -66,6 +76,7 @@ def test_submission_and_result_identifier_reject_private_identity_lookalikes() -
     assert valid.created_at == NOW
     for changes in (
         {"source_stem": "../private"},
+        {"admission": "docx"},
         {"source_sha256": "A" * 64},
         {"source_size": 0},
         {"component_versions": (("markweave", "0.6.1"),)},
@@ -102,6 +113,7 @@ def test_attempt_validates_intent_proof_and_recovery_bundles() -> None:
         {"create_sequence": 0},
         {"leased_at": NOW.replace(tzinfo=None)},
         {"unit_id": uuid4()},
+        {"proof_recorded_at": NOW},
         {"recovery_owner": "worker"},
         {
             "recovery_owner": "",
@@ -129,6 +141,19 @@ def test_attempt_validates_intent_proof_and_recovery_bundles() -> None:
     assert proven.unit_id == termination.unit_id and not proven.recovery_blocked
     with pytest.raises(ValueError):
         replace(intent, termination_proof=termination)
+    with pytest.raises(ValueError):
+        replace(
+            intent,
+            termination_proof=replace(termination, attempt_id=uuid4()),
+            proof_recorded_at=NOW,
+        )
+    with pytest.raises(ValueError):
+        replace(
+            intent,
+            termination_proof=termination,
+            proof_recorded_at=NOW,
+            proof_recovery_token=str(uuid4()),
+        )
     with pytest.raises(ValueError):
         replace(
             proven,
@@ -159,6 +184,10 @@ def test_job_validates_state_bundles_and_exact_anydoc_version() -> None:
     assert not base.terminal
     with pytest.raises(ValueError):
         replace(base, attempt=-1)
+    with pytest.raises(ValueError):
+        replace(base, admission="docx")
+    with pytest.raises(ValueError):
+        replace(base, source_size=0)
     with pytest.raises(ValueError):
         replace(base, state=ReversionJobState.RUNNING)
     running = replace(
