@@ -40,6 +40,10 @@ from markweave.broker.protocol import (
     ReadyRequest,
     ReadyResponse,
 )
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationRequest,
+    ReconciliationResponse,
+)
 from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
     WorkspaceFailureResponse,
@@ -432,6 +436,26 @@ def test_real_paired_mtls_lifecycle_exchange(
     dispatcher.start.assert_called_once_with()
     dispatcher.dispatch.assert_called_once_with(
         CLIENT_PRINCIPAL, ReadyRequest(REQUEST_ID, 1)
+    )
+
+
+def test_real_paired_mtls_reconciliation_binds_certificate_principal(
+    certificates: CertificateSet, mocker: MockerFixture
+) -> None:
+    dispatcher = mocker.Mock(spec=BrokerDispatcher)
+    request = ReconciliationRequest(REQUEST_ID, 3)
+    expected = ReconciliationResponse(
+        REQUEST_ID, CLIENT_PRINCIPAL.principal_id, 3, 8, None, True
+    )
+    dispatcher.dispatch_reconciliation.return_value = expected
+    server, client_local, server_peer = _server(certificates, dispatcher)
+
+    with server:
+        response = _client(server, client_local, server_peer).reconcile(request)
+
+    assert response == expected
+    dispatcher.dispatch_reconciliation.assert_called_once_with(
+        CLIENT_PRINCIPAL, request
     )
 
 

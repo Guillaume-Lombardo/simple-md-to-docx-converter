@@ -21,6 +21,10 @@ from markweave.broker.models import (
     policy_specification_evidence,
 )
 from markweave.broker.ports import BrokerInventory, IsolationRuntime, RuntimeUnit
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationResponse,
+    ReconciliationTombstone,
+)
 from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
     WorkspaceResponse,
@@ -110,6 +114,44 @@ class IsolationBrokerService:
         """Clear readiness and repeat the complete reconciliation sweep."""
 
         self.start()
+
+    def reconciliation_page(
+        self,
+        principal: AuthenticatedPrincipal,
+        request_id: UUID,
+        after_create_sequence: int,
+    ) -> ReconciliationResponse:
+        """Expose one principal-isolated content-free reconciliation page."""
+
+        if (
+            type(principal) is not AuthenticatedPrincipal
+            or type(request_id) is not UUID
+            or type(after_create_sequence) is not int
+            or after_create_sequence < 0
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        with self._gate:
+            self._ready = False
+            self._reconcile()
+            self._ready = True
+            high_water, tombstone = self._inventory_call(
+                lambda: self._inventory.reconciliation_page(
+                    principal.principal_id, after_create_sequence
+                )
+            )
+            if tombstone is not None and (
+                type(tombstone) is not ReconciliationTombstone
+                or tombstone.proof.principal != principal
+            ):
+                raise BrokerError(BrokerErrorCategory.INVENTORY_FAILURE)
+            return ReconciliationResponse(
+                request_id,
+                principal.principal_id,
+                after_create_sequence,
+                high_water,
+                tombstone,
+                tombstone is None,
+            )
 
     def create(
         self,

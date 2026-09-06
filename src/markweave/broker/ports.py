@@ -14,6 +14,7 @@ from markweave.broker.models import (
     RuntimeIncarnation,
     TerminationProof,
 )
+from markweave.broker.reconciliation_protocol import ReconciliationTombstone
 from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
 
 
@@ -25,6 +26,11 @@ class BrokerInventory(Protocol):
 
     def create_sequence_high_watermark(self, principal_id: UUID) -> int:
         """Return durable create high water retained after tombstone deletion."""
+
+    def reconciliation_page(
+        self, principal_id: UUID, after_create_sequence: int
+    ) -> tuple[int, ReconciliationTombstone | None]:
+        """Return high water and at most the next principal-bound tombstone."""
 
     def discard_reserved(self, unit_id: UUID, *, expected_revision: int) -> bool:
         """Delete only a pre-create reservation while retaining create high water."""
