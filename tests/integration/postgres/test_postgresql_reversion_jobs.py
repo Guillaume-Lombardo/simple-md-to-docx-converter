@@ -441,7 +441,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
 
     def claim(worker: str) -> ReversionJob | None:
         barrier.wait()
-        return repository.claim(worker, principal, NOW, LEASE_END)
+        return repository.claim(worker, principal, NOW, LEASE_END, 2)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         jobs = tuple(executor.map(claim, ("sequence-a", "sequence-b")))
@@ -451,7 +451,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
     assert first.current_attempt_id is not None and first.lease_token is not None
     first_attempt = repository.get_attempt(first.current_attempt_id)
     assert first_attempt is not None and first_attempt.create_sequence == 1
-    assert repository.claim("sequence-blocked", principal, NOW, LEASE_END) is None
+    assert repository.claim("sequence-blocked", principal, NOW, LEASE_END, 2) is None
     intent = repository.reserve_create_intent(
         first.id,
         first_attempt.attempt_id,
@@ -473,7 +473,9 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
         )
         == intent
     )
-    assert repository.claim("sequence-still-blocked", principal, NOW, LEASE_END) is None
+    assert (
+        repository.claim("sequence-still-blocked", principal, NOW, LEASE_END, 2) is None
+    )
     unit_id = uuid4()
     repository.record_broker_unit(
         first.id,
@@ -483,7 +485,7 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
         unit_id,
         NOW,
     )
-    second = repository.claim("sequence-next", principal, NOW, LEASE_END)
+    second = repository.claim("sequence-next", principal, NOW, LEASE_END, 2)
     assert second is not None
     assert second.current_attempt_id is not None and second.lease_token is not None
     second_attempt = repository.get_attempt(second.current_attempt_id)
