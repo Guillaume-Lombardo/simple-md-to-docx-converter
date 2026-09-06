@@ -213,6 +213,19 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   application service without wiring a reverse worker runtime, which remains outside the current
   queue/persistence scope; the fail-closed claim gate prevents bypass until that future assembly
   performs reconciliation.
+* 2026-09-06: Added the reverse-attempt supervisor slice on the exact broker-reconciliation merge
+  `cc542b0c`. One injected runtime now performs mandatory principal reconciliation before claim or
+  recovery, bounded source reads with size/digest verification, durable create intent, exact
+  CREATE/STAGE/COLLECT fencing, continuous lease heartbeat, and unconditional TERMINATE after a
+  created unit. It persists the complete broker proof before independently validating any child
+  bytes, atomically publishes the deterministic attempt-scoped result with cancellation and
+  lease-loss compensation, then ACKs the exact tombstone and records the local receipt. Recovery
+  replays the same durable CREATE sequence when a crash precedes unit persistence, proves the unit
+  empty before requeue, and cleanup removes bounded reverse upload/result bundles. Every broker
+  response is rebound to its request, attempt, unit, principal, and policy revision. Runtime sizes,
+  timings, and batch counts remain caller-injected with no production defaults; HTTP/CLI wiring,
+  fairness, observability, production budgets, and final deployment assembly remain for later T71
+  slices.
 
 ## Synchronization
 
