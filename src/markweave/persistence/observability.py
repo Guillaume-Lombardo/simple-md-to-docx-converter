@@ -20,6 +20,7 @@ from sqlalchemy import (
     literal,
     select,
     text,
+    true,
     union_all,
 )
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,8 +34,13 @@ from markweave.persistence.schema import (
     AuthenticationAuditRow,
     ConversionJobRow,
     IdleSessionPolicyAuditRow,
+    ReversionAttemptRow,
+    ReversionBrokerPrincipalRow,
+    ReversionJobRow,
+    ReversionOrphanProofRow,
     TemplateAuditRow,
 )
+from markweave.reversion_jobs.models import ReversionJobState
 
 
 class SqlOperationalObserver:
@@ -78,43 +84,43 @@ class SqlOperationalObserver:
                 driver_connection = database.connection.driver_connection
                 self._register(driver_connection, cancelled)
                 self._configure_deadline(database, driver_connection, deadline)
-                row = database.execute(
-                    select(
-                        func.count(
-                            case(
-                                (
-                                    ConversionJobRow.state == JobState.QUEUED.value,
-                                    1,
-                                )
-                            )
-                        ),
-                        func.min(
-                            case(
-                                (
-                                    ConversionJobRow.state == JobState.QUEUED.value,
-                                    ConversionJobRow.created_at,
-                                )
-                            )
-                        ),
-                        func.count(
-                            case(
-                                (
-                                    ConversionJobRow.state == JobState.RUNNING.value,
-                                    1,
-                                )
-                            )
-                        ),
-                    )
-                ).one()
+                row = database.execute(_queue_observation(now)).one()
         except SQLAlchemyError, ValueError, TypeError:
             raise JobRepositoryError from None
         finally:
             if "driver_connection" in locals():
                 self._clear_deadline(driver_connection)
                 self._unregister(driver_connection)
-        oldest = _utc(row[1])
-        age = 0.0 if oldest is None else max(0.0, (now - oldest).total_seconds())
-        return QueueSnapshot(int(row[0] or 0), age, int(row[2] or 0))
+        forward_oldest = _utc(row[1])
+        reverse_oldest = _utc(row[4])
+        forward_age = (
+            0.0
+            if forward_oldest is None
+            else max(0.0, (now - forward_oldest).total_seconds())
+        )
+        reverse_age = (
+            0.0
+            if reverse_oldest is None
+            else max(0.0, (now - reverse_oldest).total_seconds())
+        )
+        forward_depth = int(row[0] or 0)
+        forward_active = int(row[2] or 0)
+        reverse_depth = int(row[3] or 0)
+        reverse_active = int(row[5] or 0)
+        return QueueSnapshot(
+            forward_depth,
+            forward_age,
+            forward_active,
+            reversion_depth=reverse_depth,
+            reversion_oldest_age_seconds=reverse_age,
+            reversion_active_jobs=reverse_active,
+            shared_capacity_used=(
+                forward_depth + forward_active + reverse_depth + reverse_active
+            ),
+            reversion_proof_blocked_attempts=int(row[6] or 0),
+            reversion_proof_ack_backlog=int(row[7] or 0) + int(row[8] or 0),
+            reversion_reconciliation_pending=int(row[9] or 0),
+        )
 
     def cancel_observations(self, *, timeout_seconds: float | None = None) -> None:
         """Interrupt active driver calls so listener shutdown remains bounded."""
@@ -163,6 +169,95 @@ class SqlOperationalObserver:
         if callable(progress):
             with suppress(Exception):
                 progress(None, 0)
+
+
+def _queue_observation(now: datetime):
+    """Build one snapshot statement without materializing durable job rows."""
+
+    forward = select(
+        func.count(case((ConversionJobRow.state == JobState.QUEUED.value, 1))).label(
+            "forward_depth"
+        ),
+        func.min(
+            case(
+                (
+                    ConversionJobRow.state == JobState.QUEUED.value,
+                    ConversionJobRow.created_at,
+                )
+            )
+        ).label("forward_oldest"),
+        func.count(case((ConversionJobRow.state == JobState.RUNNING.value, 1))).label(
+            "forward_active"
+        ),
+    ).subquery()
+    reverse = select(
+        func.count(
+            case((ReversionJobRow.state == ReversionJobState.QUEUED.value, 1))
+        ).label("reverse_depth"),
+        func.min(
+            case(
+                (
+                    ReversionJobRow.state == ReversionJobState.QUEUED.value,
+                    ReversionJobRow.created_at,
+                )
+            )
+        ).label("reverse_oldest"),
+        func.count(
+            case((ReversionJobRow.state == ReversionJobState.RUNNING.value, 1))
+        ).label("reverse_active"),
+    ).subquery()
+    proof_blocked = (
+        select(func.count())
+        .select_from(ReversionAttemptRow)
+        .join(
+            ReversionJobRow,
+            (ReversionJobRow.id == ReversionAttemptRow.job_id)
+            & (ReversionJobRow.current_attempt_id == ReversionAttemptRow.attempt_id),
+        )
+        .where(
+            ReversionJobRow.state == ReversionJobState.RUNNING.value,
+            ReversionJobRow.lease_expires_at < now,
+            ReversionAttemptRow.create_intent_at.is_not(None),
+            ReversionAttemptRow.proof_id.is_(None),
+        )
+        .scalar_subquery()
+    )
+    attempt_ack_backlog = (
+        select(func.count())
+        .select_from(ReversionAttemptRow)
+        .where(
+            ReversionAttemptRow.proof_id.is_not(None),
+            ReversionAttemptRow.proof_acknowledged_at.is_(None),
+        )
+        .scalar_subquery()
+    )
+    orphan_ack_backlog = (
+        select(func.count())
+        .select_from(ReversionOrphanProofRow)
+        .where(ReversionOrphanProofRow.acknowledged_at.is_(None))
+        .scalar_subquery()
+    )
+    reconciliation_pending = (
+        select(func.count())
+        .select_from(ReversionBrokerPrincipalRow)
+        .where(
+            (ReversionBrokerPrincipalRow.reconciliation_complete.is_(False))
+            | (ReversionBrokerPrincipalRow.reconciliation_token.is_not(None))
+        )
+        .scalar_subquery()
+    )
+    return select(
+        forward.c.forward_depth,
+        forward.c.forward_oldest,
+        forward.c.forward_active,
+        reverse.c.reverse_depth,
+        reverse.c.reverse_oldest,
+        reverse.c.reverse_active,
+        proof_blocked,
+        attempt_ack_backlog,
+        orphan_ack_backlog,
+        reconciliation_pending,
+    ).select_from(forward.join(reverse, true()))
 
 
 class SqlAuditReader:

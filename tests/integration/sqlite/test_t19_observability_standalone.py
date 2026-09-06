@@ -20,6 +20,7 @@ from markweave.persistence.observability import (
     SqlOperationalObserver,
 )
 from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import AuthenticationAuditRow, TemplateAuditRow
 from markweave.persistence.sql import (
     SqlUserRepository,
@@ -27,6 +28,9 @@ from markweave.persistence.sql import (
     standalone_database_url,
 )
 from markweave.storage import FilesystemObjectStore
+from tests.reversion_observability_contracts import (
+    exercise_reverse_observability_contract,
+)
 from tests.template_records import publish_template_pair
 
 pytestmark = pytest.mark.integration
@@ -119,6 +123,20 @@ def test_sqlite_observation_failure_is_sanitized() -> None:
         SqlAuditReader(engine).list_recent(offset=0, limit=10)
     with pytest.raises(ValueError, match="pagination"):
         SqlAuditReader(engine).list_recent(offset=-1, limit=10)
+    engine.dispose()
+
+
+def test_sqlite_reverse_queue_and_proof_backlogs_are_content_free(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(standalone_database_url(tmp_path))
+    upgrade_database(engine)
+    owner = User(uuid4(), "Owner", "owner", "hash:owner", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    repository = SqlReversionJobRepository(engine)
+    exercise_reverse_observability_contract(
+        repository, SqlOperationalObserver(engine), owner.id
+    )
     engine.dispose()
 
 

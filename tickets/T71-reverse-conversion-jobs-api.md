@@ -260,6 +260,20 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   remaining 41 PostgreSQL setup errors and three RustFS failures require the hosted service
   profiles, and the isolated process-group timeout passed on rerun. Publication and exact-head
   hosted validation are the next step; worker execution remains intentionally outside this slice.
+* 2026-09-06: Merged CLI parity as `f4db88d67389f73c4d0d9c6bfb934a537513f1c9`; its exact
+  main run `34027138174` passed the complete matrix and final gate. Completed the independent
+  reverse queue/storage observability slice from that main. It preserves the existing forward
+  gauges and adds content-free reverse depth, oldest age, active jobs, shared admission usage,
+  proof-blocked, proof-acknowledgement backlog, and reconciliation-pending gauges through one
+  bounded SQL observation. A shared real-database contract covers SQLite and PostgreSQL semantics,
+  including safety-backlog transitions to zero; final-image smoke requires all new series and a
+  real assembled Uvicorn/SQLite lifecycle observes nonzero reverse/shared capacity. The exact
+  implementation head passed 109 targeted tests, Ruff, `ty`, CI validation, 3,629 light tests,
+  90.21% application branch coverage, 100% changed application coverage, and independent review.
+  PostgreSQL execution remains delegated to hosted CI because the local service URL is unavailable.
+  Worker lifecycle logs/counters, readiness, runtime assembly, fairness, and production execution
+  policy remain in the parallel T71 runtime slice; this observability slice does not claim T71
+  completion.
 
 ## Synchronization
 

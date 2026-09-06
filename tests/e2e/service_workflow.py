@@ -43,6 +43,13 @@ REQUIRED_METRICS = frozenset(
         "md_converter_queue_depth",
         "md_converter_queue_oldest_age_seconds",
         "md_converter_active_jobs",
+        "md_converter_reversion_queue_depth",
+        "md_converter_reversion_queue_oldest_age_seconds",
+        "md_converter_reversion_active_jobs",
+        "md_converter_shared_capacity_used",
+        "md_converter_reversion_proof_blocked_attempts",
+        "md_converter_reversion_proof_ack_backlog",
+        "md_converter_reversion_reconciliation_pending",
     }
 )
 EXPECTED_FONTS = (
