@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from importlib import import_module
 from pathlib import Path
 from threading import Barrier
 from uuid import uuid4
@@ -48,11 +49,21 @@ from tests.reversion_job_repository_contracts import (
     trace,
 )
 
+REVERSION_MIGRATION = import_module(
+    "markweave.persistence.migrations.versions.20260906_16_reversion_queue"
+)
+
 
 def _user(repository: SqlUserRepository, name: str) -> User:
     user = User(uuid4(), name, f"{name.casefold()}-{uuid4()}", "hash:user", Role.USER)
     repository.create(user)
     return user
+
+
+@pytest.mark.integration
+def test_reversion_migration_has_the_verified_parent() -> None:
+    assert REVERSION_MIGRATION.revision == "20260906_16"
+    assert REVERSION_MIGRATION.down_revision == "20260901_15"
 
 
 @pytest.mark.integration
