@@ -32,14 +32,23 @@ def build_embedded_app(settings: Settings | None = None) -> FastAPI:
             processor=processor,
             thread_name="md-converter-embedded-worker",
         )
+        reverse_stop_seconds = (
+            resolved.reversion_worker_max_duration_seconds
+            + resolved.reversion_worker_heartbeat_seconds
+            if resolved.reversion_execution_configured
+            and resolved.reversion_worker_max_duration_seconds is not None
+            and resolved.reversion_worker_heartbeat_seconds is not None
+            else 0.0
+        )
         return create_app(
             resolved,
             components=components,
             embedded_worker=worker,
-            embedded_worker_stop_timeout_seconds=(
+            embedded_worker_stop_timeout_seconds=max(
                 resolved.job_max_duration_seconds
                 + resolved.template_engine_termination_grace_seconds
-                + resolved.worker_heartbeat_seconds
+                + resolved.worker_heartbeat_seconds,
+                reverse_stop_seconds,
             ),
             manage_components=True,
         )

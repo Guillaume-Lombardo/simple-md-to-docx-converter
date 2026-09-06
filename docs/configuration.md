@@ -134,6 +134,34 @@ reverse workflow; Markweave does not infer reverse values from forward-conversio
 and forward jobs share `MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY` atomically, while their per-user and
 retention settings remain independent.
 
+Reverse execution is a second optional all-or-none configuration group. Supplying any execution
+field requires every common field and exactly one transport profile; no value is copied from the
+forward worker and no production default is provided.
+
+| Environment variables | Requirement |
+| --- | --- |
+| `MARKWEAVE_REVERSION_BROKER_TRANSPORT`, `MARKWEAVE_REVERSION_BROKER_PRINCIPAL_ID`, `MARKWEAVE_REVERSION_BROKER_POLICY_REVISION`, `MARKWEAVE_REVERSION_BROKER_IMAGE_DIGEST`, `MARKWEAVE_REVERSION_BROKER_OPERATION_TIMEOUT_SECONDS` | Required broker identity, immutable image/policy, and bounded operation timeout |
+| `MARKWEAVE_REVERSION_CPU_QUOTA_MICROS`, `MARKWEAVE_REVERSION_CPU_PERIOD_MICROS`, `MARKWEAVE_REVERSION_MEMORY_BYTES`, `MARKWEAVE_REVERSION_PID_LIMIT`, `MARKWEAVE_REVERSION_WORKSPACE_BYTES`, `MARKWEAVE_REVERSION_WALL_TIME_MILLIS` | Required positive runtime/kernel ceilings |
+| `MARKWEAVE_REVERSION_OUTPUT_MAX_BYTES`, `MARKWEAVE_REVERSION_MARKDOWN_MAX_BYTES`, `MARKWEAVE_REVERSION_PACKAGE_MAX_BYTES` | Required positive result/channel ceilings with Markdown and package bounded by output |
+| `MARKWEAVE_REVERSION_IMAGE_MAX_SOURCE_BYTES`, `MARKWEAVE_REVERSION_IMAGE_MAX_WIDTH_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_HEIGHT_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_ELEMENTS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_DEPTH` | Required reverse-only image ceilings |
+| `MARKWEAVE_REVERSION_ASSET_MAX_COUNT`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_SOURCE_BYTES`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_OUTPUT_BYTES` | Required reverse-only aggregate asset ceilings |
+| `MARKWEAVE_REVERSION_RUNNING_LIMIT` | Required positive global reverse-running claim cap; it does not replace shared queue admission |
+| `MARKWEAVE_REVERSION_WORKER_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_HEARTBEAT_SECONDS`, `MARKWEAVE_REVERSION_WORKER_MAX_DURATION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_INCOMPLETE_SUBMISSION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_COLLECT_POLL_SECONDS` | Required positive attempt timings; heartbeat is shorter than lease and polling does not exceed heartbeat |
+| `MARKWEAVE_REVERSION_WORKER_RECOVERY_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_RECOVERY_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_RECONCILIATION_ACK_BATCH_SIZE` | Required positive recovery and reconciliation bounds |
+| `MARKWEAVE_REVERSION_WORKER_CLEANUP_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_INTERVAL_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_ERROR_BACKOFF_SECONDS` | Required positive maintenance and retry bounds |
+
+For `unix`, also set the absolute `MARKWEAVE_REVERSION_BROKER_SOCKET_PATH`; all mTLS fields must be
+absent. For `mtls`, set `MARKWEAVE_REVERSION_BROKER_ENDPOINT_HOST` to a canonical IPv4 address,
+`MARKWEAVE_REVERSION_BROKER_ENDPOINT_PORT`, absolute
+`MARKWEAVE_REVERSION_BROKER_CA_CERTIFICATE_PATH`,
+`MARKWEAVE_REVERSION_BROKER_CERTIFICATE_CHAIN_PATH`, and
+`MARKWEAVE_REVERSION_BROKER_PRIVATE_KEY_PATH`, distinct
+`MARKWEAVE_REVERSION_BROKER_WORKER_URI_SAN` and
+`MARKWEAVE_REVERSION_BROKER_SERVER_URI_SAN`,
+`MARKWEAVE_REVERSION_BROKER_SERVER_PRINCIPAL_ID`, and one or two exact
+`MARKWEAVE_REVERSION_BROKER_SERVER_LEAF_SHA256` pins; the Unix path must be
+absent. Pydantic settings encode the pin tuple as a JSON array in the environment.
+
 ## Jobs, workers, metrics, and retention
 
 | Environment variable | Requirement or default | Applies to / constraint |

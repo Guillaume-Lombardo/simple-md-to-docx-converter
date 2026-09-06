@@ -7,6 +7,15 @@ profile and runs the existing external-worker assembly until `SIGINT` or
 `SIGTERM` requests a clean stop. Both commands retain the configured host, port,
 health endpoints, worker metrics, and application lifecycle.
 
+When the complete reverse-execution group is configured, both worker modes add the authenticated
+reverse supervisor to the same serial loop. The loop tries forward work first, alternates after
+each successful claim, and immediately falls back when the preferred family is empty. Expected
+broker or persistence failures back off only the affected family, so an unavailable reverse broker
+cannot starve forward conversions. The database enforces the configured global reverse-running cap
+before a claim, independently of the shared mixed-family queue capacity. Before every reverse
+claim or recovery pass, the worker requires an authenticated positive broker `READY` response and
+completes durable reconciliation.
+
 `markweave doctor` is non-mutating. It validates configuration coherence and
 performs bounded checks for document-engine executables, the font manifest and
 Fontconfig, the selected scanner boundary, metadata and object storage,

@@ -72,6 +72,14 @@ opens its protected inventory, and completes orphan reconciliation before it lis
 systemd unit alone is not broker readiness; the authenticated worker must receive a positive `READY`
 response before creating an attempt.
 
+The worker configuration repeats the broker's principal, immutable image digest, policy revision,
+runtime ceilings, and channel ceilings. They are independently validated and become durable policy
+evidence; mismatches fail closed during reconciliation, proof validation, or publication. A
+co-located standalone worker selects `unix`. A separated external worker selects `mtls` and pins
+the broker certificate, URI identity, and principal separately from its own client certificate and
+principal. Never copy forward-conversion budgets into this group. See
+[configuration](configuration.md) for the complete variable set.
+
 The unit restarts unexpected runtime failures and uses `KillMode=control-group`. Configuration exit
 status `2` is excluded from restart, so an invalid owner-only configuration cannot create a restart
 loop. `TimeoutStopSec=infinity` prevents an ambient systemd manager default from replacing the

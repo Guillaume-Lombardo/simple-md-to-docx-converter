@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
 
+from markweave.broker.errors import BrokerError
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
     RuntimeChannelLimits,
     RuntimeLimits,
 )
+from markweave.broker.protocol import ReadyRequest, ReadyResponse
 from markweave.reversion_jobs.runtime import (
     ReversionWorkerPolicy,
     ReversionWorkerRuntime,
 )
+from markweave.reversion_jobs.worker import ReversionWorker
 from markweave.reversions.models import ReverseContentLimits
 
 pytestmark = pytest.mark.unit
@@ -63,7 +67,7 @@ def test_worker_policy_accepts_only_coherent_injected_values() -> None:
 
 
 def _runtime(mocker: MockerFixture, **changes: Any) -> ReversionWorkerRuntime:
-    values = {
+    values: dict[str, Any] = {
         "repository": mocker.Mock(),
         "objects": mocker.Mock(),
         "broker": mocker.Mock(),
@@ -94,6 +98,29 @@ def test_runtime_keeps_all_product_values_and_boundaries_injected(
     assert runtime.content_limits is CONTENT_LIMITS
     assert runtime.broker_policy is BROKER_POLICY
     assert runtime.worker_id == "reverse-worker"
+
+
+def test_production_worker_requires_bound_ready_response_before_reconciliation(
+    mocker: MockerFixture,
+) -> None:
+    runtime = _runtime(
+        mocker,
+        require_ready=True,
+        shutdown_requested=lambda: False,
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+    )
+    broker = cast(Any, runtime.broker)
+    repository = cast(Any, runtime.repository)
+    broker.request.side_effect = lambda request: ReadyResponse(request.request_id, True)
+    repository.claim.return_value = None
+
+    assert not ReversionWorker(runtime).run_once()
+    assert isinstance(broker.request.call_args.args[0], ReadyRequest)
+    cast(Any, runtime.reconciler).reconcile.assert_called_once()
+
+    broker.request.side_effect = lambda request: ReadyResponse(uuid4(), True)
+    with pytest.raises(BrokerError):
+        ReversionWorker(runtime).run_once()
 
 
 @pytest.mark.parametrize(

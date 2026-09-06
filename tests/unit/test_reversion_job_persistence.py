@@ -66,6 +66,45 @@ LOCAL_RETENTION_END = RETENTION_END.astimezone(timezone(timedelta(hours=-3)))
 
 
 @pytest.mark.unit
+def test_reverse_claim_limit_is_enforced_under_principal_lock(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    complete_empty_reconciliation(repository)
+    jobs = [repository.create(submission(owner.id))[0] for _ in range(2)]
+    for job in jobs:
+        repository.activate_source(job.id, NOW)
+
+    first = repository.claim("worker-1", PRINCIPAL, NOW, LEASE_END, 1)
+    assert first is not None and first.current_attempt_id is not None
+    attempt = repository.get_attempt(first.current_attempt_id)
+    assert attempt is not None and first.lease_token is not None
+    repository.reserve_create_intent(
+        first.id,
+        attempt.attempt_id,
+        "worker-1",
+        first.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    repository.record_broker_unit(
+        first.id,
+        attempt.attempt_id,
+        "worker-1",
+        first.lease_token,
+        uuid4(),
+        NOW,
+    )
+
+    assert repository.claim("worker-2", PRINCIPAL, NOW, LEASE_END, 1) is None
+    second = repository.claim("worker-2", PRINCIPAL, NOW, LEASE_END, 2)
+    assert second is not None and second.id != first.id
+    with pytest.raises(ValueError, match="running limit"):
+        repository.claim("worker-3", PRINCIPAL, NOW, LEASE_END, 0)
+
+
+@pytest.mark.unit
 def test_reconciliation_is_exclusive_monotone_and_retains_orphan_before_ack(
     reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
 ) -> None:

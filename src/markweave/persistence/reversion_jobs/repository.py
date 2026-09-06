@@ -25,6 +25,7 @@ from markweave.persistence.job_admission import (
     ACTIVE_JOB_STATES,
     global_active_job_count,
     lock_global_admission,
+    lock_reverse_claim,
 )
 from markweave.persistence.reversion_jobs.common import (
     _attempt,
@@ -291,6 +292,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
         principal: AuthenticatedPrincipal,
         now: datetime,
         lease_expires_at: datetime,
+        running_limit: int = 1,
     ) -> ReversionJob | None:
         """Append an attempt and allocate its per-principal sequence atomically.
 
@@ -298,14 +300,24 @@ class SqlReversionJobRepository(_SqlReversionStore):
         later runtime integration must reconcile that gap and must not infer completeness here.
         """
 
+        if type(running_limit) is not int or running_limit <= 0:
+            raise ValueError("Reverse running limit must be a positive integer")
         try:
             with DatabaseSession(self._engine) as database, database.begin():
                 serialize_sqlite_write(database, self._engine)
+                lock_reverse_claim(database, self._engine.dialect.name)
                 principal_row = self._lock_principal(database, principal.principal_id)
                 if (
                     not principal_row.reconciliation_complete
                     or principal_row.reconciliation_token is not None
                 ):
+                    return None
+                running = database.scalar(
+                    select(func.count())
+                    .select_from(ReversionJobRow)
+                    .where(ReversionJobRow.state == ReversionJobState.RUNNING.value)
+                )
+                if int(running or 0) >= running_limit:
                     return None
                 unbound_attempt = database.scalar(
                     select(ReversionAttemptRow.attempt_id)

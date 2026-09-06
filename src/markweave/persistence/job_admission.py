@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DatabaseSession
 from markweave.persistence.schema import ConversionJobRow, ReversionJobRow
 
 GLOBAL_ADMISSION_LOCK = 1_830_285_106
+REVERSE_CLAIM_LOCK = 1_830_285_107
 ACTIVE_JOB_STATES = ("queued", "running")
 
 
@@ -36,3 +37,13 @@ def global_active_job_count(database: DatabaseSession) -> int:
         .where(ReversionJobRow.state.in_(ACTIVE_JOB_STATES))
     )
     return int(forward or 0) + int(reverse or 0)
+
+
+def lock_reverse_claim(database: DatabaseSession, dialect_name: str) -> None:
+    """Serialize the global reverse-running limit across PostgreSQL principals."""
+
+    if dialect_name == "postgresql":
+        database.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": REVERSE_CLAIM_LOCK},
+        )

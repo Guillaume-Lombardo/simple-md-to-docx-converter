@@ -9,6 +9,7 @@ from importlib import import_module
 from threading import Event, Lock
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import Engine
 
@@ -26,7 +27,12 @@ from markweave.config import (
     StorageProfile,
 )
 from markweave.jobs.ports import JobRepository
-from markweave.jobs.runner import EmbeddedWorker, ExternalWorkerRuntime, WorkerLoop
+from markweave.jobs.runner import (
+    EmbeddedWorker,
+    ExternalWorkerRuntime,
+    RunnableWorkerLoop,
+    WorkerLoop,
+)
 from markweave.jobs.runtime import JobPolicies, build_job_policies
 from markweave.jobs.service import JobService
 from markweave.jobs.worker import ConversionWorker
@@ -62,10 +68,24 @@ from markweave.persistence.templates import (
 )
 from markweave.retention import DataRetentionPolicy, RetentionService
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
+from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
+from markweave.reversion_jobs.runner import (
+    FairWorkerLoop,
+    ReversionSchedule,
+    StopSignalBridge,
+)
+from markweave.reversion_jobs.runtime import (
+    ReversionBrokerClient,
+    ReversionExecutionPolicies,
+    ReversionWorkerRuntime,
+    build_reversion_broker_client,
+    build_reversion_execution_policies,
+)
 from markweave.reversion_jobs.service import (
     ReversionService,
     ReversionServicePolicy,
 )
+from markweave.reversion_jobs.worker import ReversionWorker
 from markweave.storage import BoundedObjectStore, FilesystemObjectStore, S3ObjectStore
 from markweave.templates.processor import (
     TemplateAwareProcessor,
@@ -89,6 +109,9 @@ class AppComponents:
     job_policies: JobPolicies | None = None
     retention: RetentionService | None = None
     job_repository: JobRepository | None = None
+    reversion_repository: SqlReversionJobRepository | None = None
+    reversion_policies: ReversionExecutionPolicies | None = None
+    reversion_broker: ReversionBrokerClient | None = None
     metrics: OperationalMetrics = field(default_factory=OperationalMetrics)
     queue_observer: QueueObserver | None = None
     audit_reader: AuditReader | None = None
@@ -165,7 +188,7 @@ class AppComponents:
         processor: TemplateAwareProcessor,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic_clock: Callable[[], float] = monotonic,
-    ) -> WorkerLoop:
+    ) -> RunnableWorkerLoop:
         """Assemble the shared production loop for an external worker process."""
 
         if self.job_policies is None:
@@ -176,12 +199,72 @@ class AppComponents:
             clock=clock,
             monotonic_clock=monotonic_clock,
         )
-        return WorkerLoop(
+        reverse = self._build_reversion_worker(
+            worker_id=worker_id,
+            clock=clock,
+            monotonic_clock=monotonic_clock,
+        )
+        if reverse is None:
+            return WorkerLoop(
+                worker,
+                self.job_policies.schedule,
+                monotonic_clock=monotonic_clock,
+                metrics=self.metrics,
+            )
+        reverse_worker, stop_bridge = reverse
+        policies = self.reversion_policies
+        if policies is None:  # pragma: no cover - narrowed by helper result
+            raise RuntimeError("Reverse production worker policies are incomplete")
+        return FairWorkerLoop(
             worker,
+            reverse_worker,
             self.job_policies.schedule,
+            ReversionSchedule(
+                policies.cleanup_interval_seconds,
+                policies.error_backoff_seconds,
+            ),
+            stop_bridge=stop_bridge,
             monotonic_clock=monotonic_clock,
             metrics=self.metrics,
         )
+
+    def _build_reversion_worker(
+        self,
+        *,
+        worker_id: str,
+        clock: Callable[[], datetime],
+        monotonic_clock: Callable[[], float],
+    ) -> tuple[ReversionWorker, StopSignalBridge] | None:
+        policies = self.reversion_policies
+        if policies is None:
+            return None
+        if self.reversion_repository is None or self.reversion_broker is None:
+            raise RuntimeError("Reverse production worker components are incomplete")
+        stop_bridge = StopSignalBridge()
+        reconciler = ReversionBrokerReconciler(
+            self.reversion_repository,
+            self.reversion_broker,
+            ack_batch_limit=policies.reconciliation_ack_batch_size,
+            request_id_factory=uuid4,
+        )
+        runtime = ReversionWorkerRuntime(
+            repository=self.reversion_repository,
+            objects=self.object_store,
+            broker=self.reversion_broker,
+            reconciler=reconciler,
+            principal=policies.principal,
+            broker_policy=policies.broker_policy,
+            content_limits=policies.content_limits,
+            policy=policies.worker,
+            worker_id=f"{worker_id}-reverse",
+            clock=clock,
+            monotonic_clock=monotonic_clock,
+            wait=stop_bridge.wait,
+            shutdown_requested=stop_bridge.is_set,
+            request_id_factory=uuid4,
+            require_ready=True,
+        )
+        return ReversionWorker(runtime), stop_bridge
 
     def build_embedded_worker(
         self,
@@ -360,6 +443,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         job_repository = SqlJobRepository(engine, job_policies.admission)
         jobs = JobService(job_repository, object_store, job_policies.service)
         reversions: ReversionService | None = None
+        reversion_repository: SqlReversionJobRepository | None = None
         reversion_retention = settings.reversion_result_retention_seconds
         reversion_owner_limit = settings.reversion_active_limit_per_user
         if (
@@ -383,6 +467,18 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
                     reversion_retention, settings.reversion_upload_max_bytes
                 ),
             )
+        reversion_policies = (
+            build_reversion_execution_policies(settings)
+            if settings.reversion_execution_configured
+            else None
+        )
+        if reversion_policies is not None and reversion_repository is None:
+            reversion_repository = SqlReversionJobRepository(engine)
+        reversion_broker = (
+            build_reversion_broker_client(settings, reversion_policies)
+            if reversion_policies is not None
+            else None
+        )
         templates = TemplateService(
             catalog=SqlTemplateCatalogRepository(engine),
             selections=SqlTemplateSelectionRepository(engine),
@@ -417,6 +513,9 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             job_policies=job_policies,
             retention=retention,
             job_repository=job_repository,
+            reversion_repository=reversion_repository,
+            reversion_policies=reversion_policies,
+            reversion_broker=reversion_broker,
             metrics=metrics,
             queue_observer=SqlOperationalObserver(
                 observation_engine,

@@ -63,6 +63,7 @@ class ReversionWorkerRepository(Protocol):  # pragma: no cover - structural port
         principal: AuthenticatedPrincipal,
         now: datetime,
         lease_expires_at: datetime,
+        running_limit: int,
     ) -> ReversionJob | None: ...
 
     def heartbeat(self, heartbeat: ReversionLeaseHeartbeat) -> bool: ...

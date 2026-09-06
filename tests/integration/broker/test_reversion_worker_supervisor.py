@@ -153,6 +153,7 @@ def _runtime(
         lambda _seconds: False,
         lambda: False,
         uuid4,
+        require_ready=True,
     )
 
 

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import Engine, inspect, text
 
 from markweave.auth.models import Role, User
+from markweave.broker.models import AuthenticatedPrincipal
 from markweave.broker.reconciliation_protocol import (
     ReconciliationResponse,
     ReconciliationTombstone,
@@ -91,6 +92,68 @@ def test_postgresql_reversion_repository_contract() -> None:
     other = _user(users, "ReverseOther")
     exercise_reversion_job_repository_contract(
         SqlReversionJobRepository(engine), owner.id, other.id
+    )
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_enforces_configured_reverse_running_limit() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    owner = _user(SqlUserRepository(engine), "RunningLimit")
+    principals = (PRINCIPAL, type(PRINCIPAL)(uuid4()))
+    for principal in principals:
+        complete_empty_reconciliation(repository, principal)
+    jobs = [repository.create(submission(owner.id))[0] for _ in range(2)]
+    for job in jobs:
+        repository.activate_source(job.id, NOW)
+    barrier = Barrier(2)
+
+    def claim(candidate: tuple[str, AuthenticatedPrincipal]) -> ReversionJob | None:
+        worker, principal = candidate
+        barrier.wait()
+        return repository.claim(worker, principal, NOW, LEASE_END, 1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = tuple(
+            executor.map(claim, zip(("worker-1", "worker-2"), principals, strict=True))
+        )
+    retained = tuple(claimed for claimed in claims if claimed is not None)
+    assert len(retained) == 1
+    first = retained[0]
+    assert first is not None and first.current_attempt_id is not None
+    attempt = repository.get_attempt(first.current_attempt_id)
+    assert attempt is not None and first.lease_token is not None
+    repository.reserve_create_intent(
+        first.id,
+        attempt.attempt_id,
+        first.lease_owner or "",
+        first.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    repository.record_broker_unit(
+        first.id,
+        attempt.attempt_id,
+        first.lease_owner or "",
+        first.lease_token,
+        uuid4(),
+        NOW,
+    )
+
+    remaining_principal = (
+        principals[0] if first.lease_owner == "worker-2" else principals[1]
+    )
+    assert (
+        repository.claim("worker-remaining", remaining_principal, NOW, LEASE_END, 1)
+        is None
+    )
+    assert (
+        repository.claim("worker-remaining", remaining_principal, NOW, LEASE_END, 2)
+        is not None
     )
     engine.dispose()
 
