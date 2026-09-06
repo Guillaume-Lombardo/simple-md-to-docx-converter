@@ -55,7 +55,8 @@ Reverse gauges use dedicated names rather than a user-controlled or content-deri
 is counted as blocked only after its durable attempt lease has expired with a create intent and no
 termination proof. The acknowledgement backlog combines durable attempt and orphan proofs that have
 not yet been acknowledged. Reconciliation pending counts only durable broker-principal rows that
-are incomplete or actively leased; zero principals therefore remains neutral for a forward-only
+are incomplete or retain a reconciliation lease token, including an expired token awaiting safe
+takeover; zero principals therefore remains neutral for a forward-only
 deployment and does not claim that a reverse broker is ready. These gauges contain no owner, job,
 attempt, unit, filename, format, digest, path, or document label.
 
@@ -129,3 +130,7 @@ Final-image tests run standalone and distributed deployments and verify API metr
 readiness success and failure, account audit mutations and authorization failures, and a separately
 scrapeable external-worker listener that stops with its worker. Recovery exercises must additionally
 verify readiness and preserve audit ordering and retention across backup and restore.
+The final-image metrics smoke requires every reverse/shared gauge name. T71's assembled
+SQLite/PostgreSQL integration contract exercises nonzero queue and safety transitions; T73 owns the
+complete final-image reverse fault-state and recovery matrix once the public reverse-attempt image
+is available.

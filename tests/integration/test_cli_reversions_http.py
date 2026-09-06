@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Thread
 from time import sleep
@@ -126,6 +127,13 @@ def test_cli_reverse_lifecycle_crosses_real_http_session_and_storage(
     assert first["source_stem"] == "private-quarterly-report"
     assert first["source_family"] == "rtf"
     assert first["poll_after_seconds"] == 2
+
+    observer = application.state.components.queue_observer
+    assert observer is not None
+    snapshot = observer.observe_queue(datetime.now(UTC))
+    rendered_metrics = application.state.components.metrics.render(snapshot)
+    assert "md_converter_reversion_queue_depth 1" in rendered_metrics
+    assert "md_converter_shared_capacity_used 1" in rendered_metrics
 
     assert main(arguments) == 0
     assert _last_json(capsys.readouterr().out)["id"] == job_id
