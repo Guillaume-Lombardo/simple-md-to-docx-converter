@@ -125,6 +125,68 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   route contract instead of being required to expose the new capabilities endpoint. Candidate-image
   final smoke validation continues to require the anonymous `401`, missing-configuration `503`, and
   configured deterministic `200` branches by default.
+* 2026-09-06: Started the durable reverse-queue foundation from verified main
+  `67ab391313b574af500e3f60b89540a42cc3d0d9`. This slice owns distinct reverse job and append-only
+  attempt persistence, owner-only public queries, internal worker leases, durable broker-create
+  identity and complete T70 termination-proof history, proof-gated recovery and publication,
+  reverse object namespaces, and atomic mixed-family global admission across SQLite and PostgreSQL.
+  HTTP, CLI, scanner orchestration, runtime wiring, broker transport, execution, fair claiming,
+  metrics, and production numeric budgets remain excluded.
+* 2026-09-06: Completed the durable reverse-queue foundation with SQLite/PostgreSQL parity. Reverse
+  submissions retain safe source admission and exact engine versions, including
+  `firecrawl-anydoc 0.2.4`; owner-facing SQL is owner-bound while internal worker lookup is a
+  separate port. Attempts retain per-principal transactionally allocated create sequences, durable
+  broker-create intent and unit identity, exact lease fencing, recovery leases, complete T70
+  termination proofs and replayable proof acknowledgements. Expired attempts with a committed
+  create intent cannot recover until that exact proof is durable, and result publication requires
+  the active unexpired attempt plus its proof. Stable reverse upload/result namespaces and fenced
+  expiration cleanup cover filesystem and S3 stores. Forward and reverse submissions now serialize
+  on the same PostgreSQL advisory lock (and SQLite immediate transaction), replay before capacity
+  rejection, and share one active-job capacity while retaining separate owner quotas. Real
+  PostgreSQL migration round-trip, same-principal sequence races, mixed-family capacity races and
+  RustFS contracts passed. The canonical non-engine selection reached 3,612 passes with one
+  unrelated process-group reap timing failure that passes in isolation; total coverage was 94.86%
+  and application branch coverage 91.14%. The full suite reached 3,622 passes; 35 document-engine
+  tests could not run because Pandoc, Mermaid/Chromium, LibreOffice and the pinned font inventory are
+  unavailable on this host, and the same unrelated loaded process-group timing test failed. Database
+  restore can rewind the local create-sequence high-water mark relative to retained broker state;
+  T70 exposes no broker high-water query, so later runtime integration must reconcile that gap and
+  this foundation does not claim post-restore completeness.
+* 2026-09-06: Independent-review hardening serializes claims on the durable principal high-water
+  row and refuses to allocate a later broker sequence while that principal still owns a current
+  unbound attempt. Replaying the exact create intent and binding its broker unit unlocks the next
+  sequence; completed or otherwise resolved attempts do not block later work. Recovery-proof
+  recording now locks and conditionally selects the exact running job, current attempt, unexpired
+  recovery token and empty proof bundle, so concurrent conflicting proofs have exactly one winner
+  and cannot overwrite durable evidence. The post-unique-collision idempotency path now applies the
+  same request-digest compatibility check as the ordinary replay path. Real PostgreSQL and SQLite
+  races cover all three findings.
+* 2026-09-06: Recovery-proof persistence now retains the exact recovery token separately from the
+  cleared live recovery lease. A retry after a committed proof and lost response succeeds only for
+  the same job, attempt, recovery token, and field-identical T70 proof, returns the original durable
+  record without reopening or overwriting it, and rejects stale identities or conflicting evidence.
+  Deterministic PostgreSQL test barriers place both proof contenders immediately before the locked
+  compare-and-swap and both idempotent submissions after their initial replay miss; the latter also
+  asserts that the losing transaction reaches the unique-collision compatibility path. Equivalent
+  SQLite replay and conflict coverage remains in place.
+* 2026-09-06: Hosted light-gate follow-up adds in-process SQLite unit coverage for reverse queue
+  admission, owner access, leases, cancellation, broker identity, proof replay, recovery, terminal
+  cleanup, malformed rows, and sanitized database failures without reclassifying any real-boundary
+  integration test. `ReversionFailure` now rejects blank worker, code, or message values and
+  enforces the PostgreSQL schema bounds (255/128/1024 characters respectively), rejects non-string
+  values, and normalizes its timestamps to UTC before persistence. The exact light selection passes 3,290 tests
+  at 93.91% total and 90.09% application branch coverage; changed application coverage is 96.17%.
+* 2026-09-06: T69/T70 contract alignment allows `markdown_with_assets` traces to retain both
+  successfully packaged asset counters and a positive unavailable-asset count. CSV traces now
+  persist the selected parser format `csv` while the admission record correctly retains a null
+  content-detected format. Publication binds every trace to the job's source family and parser
+  format; in-process persistence tests round-trip both mixed-assets and CSV results and retain the
+  existing mismatch rejection.
+* 2026-09-06: Reconstruction now independently enforces the same trace-to-admission binding as
+  publication: succeeded jobs require an exact trace object whose source family matches the admitted
+  family and whose trace format matches the selected parser. SQL row decoding translates malformed
+  or tampered trace state into the stable repository error instead of exposing an unchecked domain
+  value; direct-model and tampered-row tests cover the invariant.
 
 ## Synchronization
 
