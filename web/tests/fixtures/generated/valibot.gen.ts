@@ -34,6 +34,13 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
+ * Body_create_reversion_api_v1_reversions_post
+ */
+export const vBodyCreateReversionApiV1ReversionsPost = v.object({
+    source: v.string()
+});
+
+/**
  * Body_create_template_api_v1_templates_post
  */
 export const vBodyCreateTemplateApiV1TemplatesPost = v.object({
@@ -231,6 +238,34 @@ export const vReversionFormatCapabilityResponse = v.object({
 });
 
 /**
+ * ReversionJobState
+ *
+ * Persisted reverse-conversion lifecycle.
+ */
+export const vReversionJobState = v.picklist([
+    'queued',
+    'running',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'expired'
+]);
+
+/**
+ * ReversionJobStep
+ *
+ * Closed content-free reverse-job step vocabulary.
+ */
+export const vReversionJobStep = v.picklist([
+    'queued',
+    'isolating',
+    'converting',
+    'validating',
+    'publishing',
+    'complete'
+]);
+
+/**
  * ReversionPdfCapabilitiesResponse
  *
  * Client-visible limitations of the pinned PDF path.
@@ -257,6 +292,45 @@ export const vReversionCapabilitiesResponse = v.object({
     pdf: vReversionPdfCapabilitiesResponse,
     result_package_modes: v.array(vReverseOutputMode),
     schema_version: v.pipe(v.number(), v.integer(), v.minValue(1))
+});
+
+/**
+ * ReversionResponse
+ *
+ * Owner-only reverse job snapshot without source or result bytes.
+ */
+export const vReversionResponse = v.object({
+    attempt: v.pipe(v.number(), v.integer()),
+    cancel_requested: v.boolean(),
+    component_versions: v.array(v.tuple([v.string(), v.string()])),
+    correlation_id: v.string(),
+    created_at: v.pipe(v.string(), v.isoTimestamp()),
+    detected_format: v.nullable(v.string()),
+    error_code: v.nullable(v.string()),
+    error_message: v.nullable(v.string()),
+    expires_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
+    id: v.pipe(v.string(), v.uuid()),
+    owner_id: v.pipe(v.string(), v.uuid()),
+    result_mode: v.nullable(vReverseOutputMode),
+    result_size: v.nullable(v.pipe(v.number(), v.integer())),
+    source_extension: v.string(),
+    source_family: vFormatFamily,
+    source_stem: v.string(),
+    state: vReversionJobState,
+    step: vReversionJobStep,
+    updated_at: v.pipe(v.string(), v.isoTimestamp())
+});
+
+/**
+ * ReversionPageResponse
+ *
+ * Paginated owner-only reverse job response.
+ */
+export const vReversionPageResponse = v.object({
+    items: v.array(vReversionResponse),
+    limit: v.pipe(v.number(), v.integer()),
+    offset: v.pipe(v.number(), v.integer()),
+    total: v.pipe(v.number(), v.integer())
 });
 
 /**
@@ -624,10 +698,63 @@ export const vChangeOwnPasswordApiV1PasswordPostHeaders = v.object({
  */
 export const vChangeOwnPasswordApiV1PasswordPostResponse = v.void();
 
+export const vListReversionsApiV1ReversionsGetQuery = v.object({
+    offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50)
+});
+
+/**
+ * Successful Response
+ */
+export const vListReversionsApiV1ReversionsGetResponse = vReversionPageResponse;
+
+export const vCreateReversionApiV1ReversionsPostBody = vBodyCreateReversionApiV1ReversionsPost;
+
+export const vCreateReversionApiV1ReversionsPostHeaders = v.object({
+    'Idempotency-Key': v.nullish(v.string()),
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Reverse conversion accepted or idempotently replayed
+ */
+export const vCreateReversionApiV1ReversionsPostResponse = vReversionResponse;
+
 /**
  * Successful Response
  */
 export const vGetReversionCapabilitiesApiV1ReversionsCapabilitiesGetResponse = vReversionCapabilitiesResponse;
+
+export const vCancelReversionApiV1ReversionsJobIdDeleteHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+export const vCancelReversionApiV1ReversionsJobIdDeletePath = v.object({
+    job_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vCancelReversionApiV1ReversionsJobIdDeleteResponse = vReversionResponse;
+
+export const vGetReversionApiV1ReversionsJobIdGetPath = v.object({
+    job_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Successful Response
+ */
+export const vGetReversionApiV1ReversionsJobIdGetResponse = vReversionResponse;
+
+export const vDownloadReversionApiV1ReversionsJobIdResultGetPath = v.object({
+    job_id: v.pipe(v.string(), v.uuid())
+});
+
+/**
+ * Immutable reverse-conversion result
+ */
+export const vDownloadReversionApiV1ReversionsJobIdResultGetResponse = v.string();
 
 /**
  * Successful Response

@@ -121,11 +121,18 @@ row and its immutable audits in database backup, restore, and rollback procedure
 | Environment variable | Requirement | Applies to / constraint |
 | --- | --- | --- |
 | `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES` | Optional positive integer; no default | Both profiles; authoritative maximum exposed by the authenticated capabilities endpoint |
+| `MARKWEAVE_REVERSION_REQUEST_MAX_BYTES` | Optional positive integer; no default | Both profiles; bounds the complete multipart request before parsing |
+| `MARKWEAVE_REVERSION_RETRY_AFTER_SECONDS` | Optional positive integer; no default | Both profiles; reverse submission and saturation responses |
+| `MARKWEAVE_REVERSION_RESULT_RETENTION_SECONDS` | Optional positive integer; no default | Both profiles; reverse results only |
+| `MARKWEAVE_REVERSION_ACTIVE_LIMIT_PER_USER` | Optional positive integer; no default | Both profiles; reverse jobs only |
 
-When `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES` is absent, existing forward-conversion deployments
-continue to start, but `GET /api/v1/reversions/capabilities` fails safely with `503` and reverse
-submission remains unavailable. Operators must select a measured, reviewed value before enabling
-the reverse workflow; Markweave does not infer one from the forward-conversion upload limit.
+When any required reverse-lifecycle value is absent, existing forward-conversion deployments
+continue to start, but reverse submission and lifecycle operations fail safely with `503`.
+Capabilities require only `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES`, because they describe admission
+without enabling persistence. Operators must select measured, reviewed values before enabling the
+reverse workflow; Markweave does not infer reverse values from forward-conversion limits. Reverse
+and forward jobs share `MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY` atomically, while their per-user and
+retention settings remain independent.
 
 ## Jobs, workers, metrics, and retention
 

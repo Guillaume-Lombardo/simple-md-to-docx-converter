@@ -276,6 +276,56 @@
   {
     "include_in_schema": true,
     "methods": [
+      "POST"
+    ],
+    "name": "create_reversion",
+    "path": "/api/v1/reversions",
+    "response_class": "JSONResponse",
+    "status_code": 202
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "list_reversions",
+    "path": "/api/v1/reversions",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "get_reversion",
+    "path": "/api/v1/reversions/{job_id}",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "DELETE"
+    ],
+    "name": "cancel_reversion",
+    "path": "/api/v1/reversions/{job_id}",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_reversion",
+    "path": "/api/v1/reversions/{job_id}/result",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
       "GET"
     ],
     "name": "get_template_administration_context",

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from markweave.auth.ports import ReadinessProbe
     from markweave.auth.service import AuthenticationService
     from markweave.jobs.service import JobService
-    from markweave.storage import ObjectStore
+from markweave.storage import BoundedObjectStore
 
 ARTIFACT = Path("openapi/v1.json")
 HTTP_METHODS = frozenset(
@@ -50,6 +50,10 @@ def _contract_settings() -> Settings:
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
         reversion_upload_max_bytes=1_000_000,
+        reversion_request_max_bytes=1_100_000,
+        reversion_retry_after_seconds=2,
+        reversion_result_retention_seconds=3_600,
+        reversion_active_limit_per_user=1,
         conversion_retry_after_seconds=2,
         template_max_archive_bytes=1_000_000,
         template_request_max_bytes=1_100_000,
@@ -67,7 +71,7 @@ def build_contract_app() -> FastAPI:
     components = AppComponents(
         authentication=cast("AuthenticationService", _ContractAuthentication()),
         readiness=cast("ReadinessProbe", object()),
-        object_store=cast("ObjectStore", object()),
+        object_store=cast("BoundedObjectStore", object()),
         jobs=cast("JobService", object()),
     )
     return create_app(_contract_settings(), components=components)

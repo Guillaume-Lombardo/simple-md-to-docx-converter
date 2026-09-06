@@ -9,6 +9,10 @@ class ReversionJobConflictError(ReversionJobError):
     """An idempotency key or durable transition conflicts."""
 
 
+class ReversionJobNotFoundError(ReversionJobError):
+    """An owner-bound reverse job does not exist."""
+
+
 class ReversionJobRequestError(ReversionJobError, ValueError):
     """A reverse-job request violates the stable input contract."""
 
@@ -35,3 +39,11 @@ class ReversionProofRequiredError(ReversionJobError):
 
 class ReversionJobRepositoryError(ReversionJobError):
     """Sanitized reverse queue persistence failure."""
+
+
+class ReversionJobStorageError(ReversionJobError):
+    """Sanitized reverse source or result storage failure."""
+
+
+class ReversionServiceUnavailableError(ReversionJobError):
+    """Reverse HTTP lifecycle configuration is incomplete."""

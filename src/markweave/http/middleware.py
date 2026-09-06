@@ -12,11 +12,13 @@ class BoundedRequestBody:
         app: ASGIApp,
         *,
         conversion_maximum_bytes: int,
+        reversion_maximum_bytes: int | None,
         template_maximum_bytes: int,
         template_metadata_maximum_bytes: int,
     ) -> None:
         self._app = app
         self._conversion_maximum_bytes = conversion_maximum_bytes
+        self._reversion_maximum_bytes = reversion_maximum_bytes
         self._template_maximum_bytes = template_maximum_bytes
         self._template_metadata_maximum_bytes = template_metadata_maximum_bytes
 
@@ -34,6 +36,13 @@ class BoundedRequestBody:
             maximum_bytes = self._conversion_maximum_bytes
             error_code = "CONVERSION_REQUEST_TOO_LARGE"
             error_message = "The conversion request is too large."
+        elif method == "POST" and path == "/api/v1/reversions":
+            if self._reversion_maximum_bytes is None:
+                await self._reject_unavailable(send)
+                return
+            maximum_bytes = self._reversion_maximum_bytes
+            error_code = "REVERSION_REQUEST_TOO_LARGE"
+            error_message = "The reverse-conversion request is too large."
         elif template_upload:
             maximum_bytes = self._template_maximum_bytes
             error_code = "TEMPLATE_REQUEST_TOO_LARGE"
@@ -67,6 +76,26 @@ class BoundedRequestBody:
             return {"type": "http.request", "body": bytes(body), "more_body": False}
 
         await self._app(scope, replay, send)
+
+    @staticmethod
+    async def _reject_unavailable(send: Send) -> None:
+        content = (
+            b'{"error":{"code":"REVERSION_SERVICE_UNAVAILABLE",'
+            b'"message":"Reverse conversion is unavailable."}}'
+        )
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status.HTTP_503_SERVICE_UNAVAILABLE,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(content)).encode("ascii")),
+                    (b"cache-control", b"private, no-store"),
+                    (b"x-content-type-options", b"nosniff"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": content})
 
     @staticmethod
     async def _reject(send: Send, code: str, message: str) -> None:

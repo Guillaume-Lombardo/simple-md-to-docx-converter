@@ -22,7 +22,18 @@ from markweave.jobs.errors import (
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
 from markweave.persistence.errors import PersistenceError
+from markweave.reversion_jobs.errors import (
+    ReversionJobConflictError,
+    ReversionJobNotFoundError,
+    ReversionJobRepositoryError,
+    ReversionJobRequestError,
+    ReversionJobStorageError,
+    ReversionJobUserQuotaExceededError,
+    ReversionQueueCapacityExceededError,
+    ReversionServiceUnavailableError,
+)
 from markweave.reversions.capabilities import ReversionCapabilitiesUnavailableError
+from markweave.reversions.errors import ReverseConversionError
 from markweave.storage import ObjectStoreError
 from markweave.templates.errors import (
     TemplateConflictError,
@@ -277,6 +288,119 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "CONVERSION_STORAGE_UNAVAILABLE",
                     "message": "Conversion storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionServiceUnavailableError)
+    def reversion_unavailable_handler(
+        _request: Request, _error: ReversionServiceUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_SERVICE_UNAVAILABLE",
+                    "message": "Reverse conversion is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobNotFoundError)
+    def reversion_not_found_handler(
+        _request: Request, _error: ReversionJobNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "error": {
+                    "code": "REVERSION_NOT_FOUND",
+                    "message": "The reverse conversion was not found.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobConflictError)
+    def reversion_conflict_handler(
+        _request: Request, _error: ReversionJobConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": {
+                    "code": "REVERSION_CONFLICT",
+                    "message": "The reverse conversion conflicts with current state.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobRequestError)
+    @app.exception_handler(ReverseConversionError)
+    def reversion_request_handler(
+        _request: Request, _error: ReversionJobRequestError | ReverseConversionError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {
+                    "code": "REVERSION_REQUEST_INVALID",
+                    "message": "The reverse-conversion request is invalid.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobUserQuotaExceededError)
+    def reversion_quota_handler(
+        request: Request, _error: ReversionJobUserQuotaExceededError
+    ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("reversion_owner")
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={
+                "Retry-After": str(request.app.state.reversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_USER_QUOTA_EXCEEDED",
+                    "message": "The active reverse-conversion quota is exhausted.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionQueueCapacityExceededError)
+    def reversion_capacity_handler(
+        request: Request, _error: ReversionQueueCapacityExceededError
+    ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("global")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Retry-After": str(request.app.state.reversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_QUEUE_CAPACITY_EXCEEDED",
+                    "message": "The conversion queue is at capacity.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobRepositoryError)
+    @app.exception_handler(ReversionJobStorageError)
+    def reversion_storage_handler(
+        _request: Request,
+        _error: ReversionJobRepositoryError | ReversionJobStorageError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "REVERSION_STORAGE_UNAVAILABLE",
+                    "message": "Reverse-conversion storage is unavailable.",
                 }
             },
         )

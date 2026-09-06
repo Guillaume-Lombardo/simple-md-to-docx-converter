@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from markweave.auth.models import Role
 from markweave.jobs.models import JobOutput, TemplateMode
+from markweave.reversion_jobs.models import ReversionJobState, ReversionJobStep
 from markweave.reversions.formats import FormatFamily
 from markweave.reversions.models import ReverseOutputMode
 from markweave.templates.models import TemplateSelectionSource, TemplateStatus
@@ -237,6 +238,39 @@ class ReversionCapabilitiesResponse(BaseModel):
     result_package_modes: tuple[ReverseOutputMode, ...]
     pdf: ReversionPdfCapabilitiesResponse
     execution: ReversionExecutionCapabilitiesResponse
+
+
+class ReversionResponse(BaseModel):
+    """Owner-only reverse job snapshot without source or result bytes."""
+
+    id: UUID
+    owner_id: UUID
+    source_stem: str
+    source_family: FormatFamily
+    source_extension: str
+    detected_format: str | None
+    component_versions: tuple[tuple[str, str], ...]
+    correlation_id: str
+    state: ReversionJobState
+    step: ReversionJobStep
+    created_at: datetime
+    updated_at: datetime
+    attempt: int
+    cancel_requested: bool
+    result_mode: ReverseOutputMode | None
+    result_size: int | None
+    error_code: str | None
+    error_message: str | None
+    expires_at: datetime | None
+
+
+class ReversionPageResponse(BaseModel):
+    """Paginated owner-only reverse job response."""
+
+    items: tuple[ReversionResponse, ...]
+    total: int
+    offset: int
+    limit: int
 
 
 class TemplateAdministrationContextResponse(BaseModel):

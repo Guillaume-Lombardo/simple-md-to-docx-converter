@@ -47,6 +47,7 @@ from markweave.persistence.jobs import SqlJobRepository
 from markweave.persistence.migrations import upgrade_database
 from markweave.persistence.observability import SqlAuditReader, SqlOperationalObserver
 from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.sql import (
     DatabaseReadinessProbe,
     SqlIdleSessionPolicyRepository,
@@ -60,7 +61,12 @@ from markweave.persistence.templates import (
     SqlTemplateSelectionRepository,
 )
 from markweave.retention import DataRetentionPolicy, RetentionService
-from markweave.storage import FilesystemObjectStore, ObjectStore, S3ObjectStore
+from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
+from markweave.reversion_jobs.service import (
+    ReversionService,
+    ReversionServicePolicy,
+)
+from markweave.storage import BoundedObjectStore, FilesystemObjectStore, S3ObjectStore
 from markweave.templates.processor import (
     TemplateAwareProcessor,
     build_template_conversion_worker,
@@ -75,9 +81,10 @@ class AppComponents:
 
     authentication: AuthenticationService
     readiness: ReadinessProbe
-    object_store: ObjectStore
+    object_store: BoundedObjectStore
     jobs: JobService
     scanner: UploadScanner = field(default_factory=TrustingUploadScanner)
+    reversions: ReversionService | None = None
     templates: TemplateService | None = None
     job_policies: JobPolicies | None = None
     retention: RetentionService | None = None
@@ -271,7 +278,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         if data_directory is None:
             raise RuntimeError("Validated standalone settings are incomplete")
         database_url = standalone_database_url(data_directory)
-        object_store: ObjectStore = FilesystemObjectStore(data_directory)
+        object_store: BoundedObjectStore = FilesystemObjectStore(data_directory)
         object_readiness: ReadinessProbe = FilesystemObjectStore(data_directory)
     else:
         boto3, config_class = _load_distributed_dependencies()
@@ -352,6 +359,30 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
         )
         job_repository = SqlJobRepository(engine, job_policies.admission)
         jobs = JobService(job_repository, object_store, job_policies.service)
+        reversions: ReversionService | None = None
+        reversion_retention = settings.reversion_result_retention_seconds
+        reversion_owner_limit = settings.reversion_active_limit_per_user
+        if (
+            settings.reversion_upload_max_bytes is not None
+            and settings.reversion_request_max_bytes is not None
+            and settings.reversion_retry_after_seconds is not None
+            and reversion_retention is not None
+            and reversion_owner_limit is not None
+        ):
+            reversion_repository = SqlReversionJobRepository(
+                engine,
+                ReversionAdmissionPolicy(
+                    active_jobs_per_user=reversion_owner_limit,
+                    global_queue_capacity=settings.job_global_queue_capacity,
+                ),
+            )
+            reversions = ReversionService(
+                reversion_repository,
+                object_store,
+                ReversionServicePolicy(
+                    reversion_retention, settings.reversion_upload_max_bytes
+                ),
+            )
         templates = TemplateService(
             catalog=SqlTemplateCatalogRepository(engine),
             selections=SqlTemplateSelectionRepository(engine),
@@ -381,6 +412,7 @@ def build_components(  # noqa: PLR0915 - explicit resource ownership composition
             object_store=object_store,
             jobs=jobs,
             scanner=build_upload_scanner(settings),
+            reversions=reversions,
             templates=templates,
             job_policies=job_policies,
             retention=retention,
