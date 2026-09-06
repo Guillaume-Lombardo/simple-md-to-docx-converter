@@ -15,6 +15,7 @@ from markweave.broker.models import (
     policy_specification_evidence,
 )
 from markweave.broker.protocol import (
+    BrokerOperation,
     CreateRequest,
     CreateResponse,
     ErrorResponse,
@@ -25,6 +26,7 @@ from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
     WorkspaceErrorResponse,
     WorkspaceFailureResponse,
+    WorkspaceOperation,
     WorkspacePendingResponse,
     WorkspaceStageReceipt,
     WorkspaceStageRequest,
@@ -203,7 +205,7 @@ class ReversionAttemptExecutor:
             claimed.attempt_id,
         )
         response = self._runtime.broker.request(request)
-        self._raise_broker_error(response)
+        self._raise_broker_error(response, request.request_id, BrokerOperation.CREATE)
         if (
             type(response) is not CreateResponse
             or response.request_id != request.request_id
@@ -289,6 +291,11 @@ class ReversionAttemptExecutor:
         )
         response = self._runtime.broker.stage_workspace(request)
         if type(response) is WorkspaceErrorResponse:
+            if (
+                response.request_id != request.request_id
+                or response.operation is not WorkspaceOperation.STAGE
+            ):
+                reject(ReverseErrorCategory.PROTOCOL_ERROR)
             raise BrokerError(response.category)
         if type(response) is not WorkspaceStageReceipt or (
             response.request_id,
@@ -333,6 +340,8 @@ class ReversionAttemptExecutor:
                 self._runtime.wait(self._runtime.policy.collect_poll_seconds)
                 continue
             if type(response) is WorkspaceErrorResponse:
+                if response.operation is not WorkspaceOperation.COLLECT:
+                    reject(ReverseErrorCategory.PROTOCOL_ERROR)
                 raise BrokerError(response.category)
             if type(response) is WorkspaceFailureResponse:
                 if response.receipt != receipt:
@@ -358,7 +367,9 @@ class ReversionAttemptExecutor:
             unit_id,
         )
         response = self._runtime.broker.request(request)
-        self._raise_broker_error(response)
+        self._raise_broker_error(
+            response, request.request_id, BrokerOperation.TERMINATE
+        )
         if (
             type(response) is not TerminateResponse
             or response.request_id != request.request_id
@@ -371,6 +382,10 @@ class ReversionAttemptExecutor:
         return response.proof
 
     @staticmethod
-    def _raise_broker_error(response: object) -> None:
+    def _raise_broker_error(
+        response: object, request_id: UUID, operation: BrokerOperation
+    ) -> None:
         if type(response) is ErrorResponse:
+            if response.request_id != request_id or response.operation is not operation:
+                reject(ReverseErrorCategory.PROTOCOL_ERROR)
             raise BrokerError(response.category)

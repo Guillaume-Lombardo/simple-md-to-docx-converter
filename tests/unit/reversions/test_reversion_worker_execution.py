@@ -47,6 +47,8 @@ from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.errors import (
     ReversionJobLeaseLostError,
+    ReversionJobRepositoryError,
+    ReversionProofRequiredError,
     ReversionWorkerInterruptedError,
 )
 from markweave.reversion_jobs.models import (
@@ -535,6 +537,10 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
         )
 
     broker.request.side_effect = request
+    cast(Any, runtime.reconciler).reconcile.side_effect = [
+        ReversionProofRequiredError(),
+        None,
+    ]
     recovered_at = LEASE_END + timedelta(seconds=1)
     cast(Any, runtime.clock).return_value = recovered_at
 
@@ -549,6 +555,7 @@ def test_recovery_replays_create_and_requires_proof_before_requeue(
         TerminateRequest,
         AcknowledgeRequest,
     ]
+    assert cast(Any, runtime.reconciler).reconcile.call_count == 2
 
 
 def test_cleanup_deletes_reverse_objects_and_expires_job(
@@ -735,6 +742,60 @@ def test_publication_retains_committed_result_when_ack_fails(
     assert attempt is not None and attempt.proof_acknowledged_at is None
 
 
+def test_publication_recovers_exact_commit_after_lost_success_response(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    objects = FilesystemObjectStore(tmp_path)
+    runtime = _runtime(mocker, repo, objects)
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    heartbeat = mocker.Mock()
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, heartbeat)
+    result = validate_reverse_result(
+        claimed.job,
+        executed.result.mode,
+        executed.result.result,
+        CONTENT_LIMITS,
+    )
+    succeed = repo.succeed
+
+    def lose_response(*args: Any, **kwargs: Any) -> object:
+        succeed(*args, **kwargs)
+        raise ReversionJobRepositoryError("response lost after commit")
+
+    mocker.patch.object(repo, "succeed", side_effect=lose_response)
+
+    published = ReversionPublicationService(runtime).publish(
+        executed, result, heartbeat
+    )
+
+    result_id = reversion_result_object_id(claimed.job.id, claimed.job.attempt)
+    assert published.result_object_id == result_id
+    assert objects.exists(ObjectKey(ObjectScope.REVERSION_RESULT, owner.id, result_id))
+    retained = repo.get_internal(claimed.job.id)
+    assert retained is not None and retained.state is ReversionJobState.SUCCEEDED
+
+
+def test_worker_does_not_reconcile_or_claim_after_shutdown(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    job = _queue(runtime, repo, owner, b"source")
+    stopped = replace(runtime, shutdown_requested=lambda: True)
+
+    assert not ReversionWorker(stopped).run_once()
+
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.state is ReversionJobState.QUEUED
+    cast(Any, runtime.reconciler).reconcile.assert_not_called()
+
+
 def test_claim_identity_and_latched_lease_loss_fail_closed(
     tmp_path: Path,
     repository: tuple[SqlReversionJobRepository, User, Engine],
@@ -815,3 +876,34 @@ def test_executor_maps_bounded_storage_and_broker_errors(
     elif boundary in {"stage_error", "collect_error"}:
         attempt = repo.get_attempt(claimed.attempt_id)
         assert attempt is not None and attempt.termination_proof is not None
+
+
+@pytest.mark.parametrize("boundary", ["control", "workspace"])
+def test_executor_rejects_misbound_error_responses(
+    boundary: str,
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    _successful_broker(mocker, runtime)
+    broker = cast(Any, runtime.broker)
+    if boundary == "control":
+        broker.request.side_effect = lambda message: ErrorResponse(
+            message.request_id,
+            BrokerOperation.TERMINATE,
+            BrokerErrorCategory.RUNTIME_FAILURE,
+        )
+    else:
+        broker.stage_workspace.side_effect = lambda message: WorkspaceErrorResponse(
+            message.request_id,
+            WorkspaceOperation.COLLECT,
+            BrokerErrorCategory.RUNTIME_FAILURE,
+        )
+
+    with pytest.raises(ReverseConversionError) as captured:
+        ReversionAttemptExecutor(runtime).execute(claimed, mocker.Mock())
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR

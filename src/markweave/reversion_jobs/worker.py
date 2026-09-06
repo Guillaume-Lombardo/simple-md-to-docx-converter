@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import UUID
 
-from markweave.reversion_jobs.errors import ReversionJobLeaseLostError
+from markweave.reversion_jobs.errors import (
+    ReversionJobLeaseLostError,
+    ReversionProofRequiredError,
+)
 from markweave.reversion_jobs.models import (
     TERMINAL_REVERSION_STATES,
     ReversionFailure,
@@ -32,14 +36,15 @@ class ReversionWorker:
         self._publication = ReversionPublicationService(runtime)
         self._maintenance = ReversionMaintenanceService(runtime)
 
-    def reconcile(self) -> None:
+    def reconcile(self, token: UUID | None = None) -> None:
         """Reach the principal broker-inventory fixed point before queue work."""
 
         now = self._runtime.clock()
+        reconciliation_token = token or self._runtime.request_id_factory()
         self._runtime.reconciler.reconcile(
             self._runtime.principal,
             f"{self._runtime.worker_id}-reconciler",
-            self._runtime.request_id_factory(),
+            reconciliation_token,
             now,
             now + timedelta(seconds=self._runtime.policy.recovery_lease_seconds),
             now_factory=self._runtime.clock,
@@ -48,6 +53,8 @@ class ReversionWorker:
     def run_once(self) -> bool:
         """Run at most one exact reverse attempt after mandatory reconciliation."""
 
+        if self._runtime.shutdown_requested():
+            return False
         self.reconcile()
         claimed = self._claims.claim()
         if claimed is None:
@@ -69,7 +76,13 @@ class ReversionWorker:
     def recover(self) -> int:
         """Reconcile first, then recover only attempts with durable empty proof."""
 
-        self.reconcile()
+        token = self._runtime.request_id_factory()
+        try:
+            self.reconcile(token)
+        except ReversionProofRequiredError:
+            recovered = self._maintenance.recover()
+            self.reconcile(token)
+            return recovered
         return self._maintenance.recover()
 
     def cleanup(self) -> int:

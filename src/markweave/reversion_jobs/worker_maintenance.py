@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import UUID
 
 from markweave.broker.errors import BrokerError
+from markweave.broker.models import ManagedUnitState
 from markweave.broker.protocol import (
+    BrokerOperation,
     CreateRequest,
     CreateResponse,
     ErrorResponse,
@@ -55,11 +58,14 @@ class ReversionMaintenanceService:
                 attempt.attempt_id,
             )
             created = self._runtime.broker.request(create_request)
-            self._raise_broker_error(created)
+            self._raise_broker_error(
+                created, create_request.request_id, BrokerOperation.CREATE
+            )
             if (
                 type(created) is not CreateResponse
                 or created.request_id != create_request.request_id
                 or created.attempt_id != attempt.attempt_id
+                or created.state is not ManagedUnitState.CREATED
             ):
                 reject(ReverseErrorCategory.PROTOCOL_ERROR)
             unit_id = created.unit_id
@@ -70,7 +76,9 @@ class ReversionMaintenanceService:
             unit_id,
         )
         terminated = self._runtime.broker.request(terminate_request)
-        self._raise_broker_error(terminated)
+        self._raise_broker_error(
+            terminated, terminate_request.request_id, BrokerOperation.TERMINATE
+        )
         if (
             type(terminated) is not TerminateResponse
             or terminated.request_id != terminate_request.request_id
@@ -122,6 +130,10 @@ class ReversionMaintenanceService:
         return len(expired)
 
     @staticmethod
-    def _raise_broker_error(response: object) -> None:
+    def _raise_broker_error(
+        response: object, request_id: UUID, operation: BrokerOperation
+    ) -> None:
         if type(response) is ErrorResponse:
+            if response.request_id != request_id or response.operation is not operation:
+                reject(ReverseErrorCategory.PROTOCOL_ERROR)
             raise BrokerError(response.category)
