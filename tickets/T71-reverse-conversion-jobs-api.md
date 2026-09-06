@@ -161,6 +161,14 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   and cannot overwrite durable evidence. The post-unique-collision idempotency path now applies the
   same request-digest compatibility check as the ordinary replay path. Real PostgreSQL and SQLite
   races cover all three findings.
+* 2026-09-06: Recovery-proof persistence now retains the exact recovery token separately from the
+  cleared live recovery lease. A retry after a committed proof and lost response succeeds only for
+  the same job, attempt, recovery token, and field-identical T70 proof, returns the original durable
+  record without reopening or overwriting it, and rejects stale identities or conflicting evidence.
+  Deterministic PostgreSQL test barriers place both proof contenders immediately before the locked
+  compare-and-swap and both idempotent submissions after their initial replay miss; the latter also
+  asserts that the losing transaction reaches the unique-collision compatibility path. Equivalent
+  SQLite replay and conflict coverage remains in place.
 
 ## Synchronization
 

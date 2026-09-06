@@ -6,7 +6,7 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import Engine, inspect
 
 from markweave.auth.models import Role, User
 from markweave.jobs.models import JobOutput, JobSubmission
@@ -17,7 +17,6 @@ from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
-    ReversionJobLeaseLostError,
 )
 from markweave.reversion_jobs.models import ReversionJob
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
@@ -31,6 +30,28 @@ from tests.reversion_job_repository_contracts import (
     proof,
     submission,
 )
+
+
+class _RecoveryRaceRepository(SqlReversionJobRepository):
+    def __init__(self, engine: Engine, barrier: Barrier) -> None:
+        super().__init__(engine)
+        self._barrier = barrier
+
+    def _before_recovery_proof_cas(self) -> None:
+        self._barrier.wait()
+
+
+class _IdempotencyRaceRepository(SqlReversionJobRepository):
+    def __init__(self, engine: Engine, barrier: Barrier) -> None:
+        super().__init__(engine)
+        self._barrier = barrier
+        self.collision_count = 0
+
+    def _after_idempotency_miss(self) -> None:
+        self._barrier.wait()
+
+    def _after_idempotency_collision(self) -> None:
+        self.collision_count += 1
 
 
 def _user(repository: SqlUserRepository, name: str) -> User:
@@ -193,10 +214,10 @@ def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
         proof(recovery.attempt_id, uuid4(), principal),
     )
     barrier = Barrier(2)
+    race_repository = _RecoveryRaceRepository(engine, barrier)
 
     def record(candidate_index: int) -> object:
-        barrier.wait()
-        return repository.record_recovery_termination_proof(
+        return race_repository.record_recovery_termination_proof(
             claimed.id,
             recovery.attempt_id,
             recovery_token,
@@ -214,10 +235,38 @@ def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
             except Exception as error:
                 failures.append(error)
     assert len(successes) == 1
-    assert len(failures) == 1 and isinstance(failures[0], ReversionJobLeaseLostError)
+    assert len(failures) == 1 and isinstance(failures[0], ReversionJobConflictError)
     persisted = repository.get_attempt(recovery.attempt_id)
     assert persisted is not None
     assert persisted.termination_proof in competing
+    assert persisted.proof_recovery_token == recovery_token
+    replayed = repository.record_recovery_termination_proof(
+        claimed.id,
+        recovery.attempt_id,
+        recovery_token,
+        persisted.termination_proof,
+        recovery_now,
+    )
+    assert replayed == persisted
+    conflicting = next(
+        candidate for candidate in competing if candidate != persisted.termination_proof
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_recovery_termination_proof(
+            claimed.id,
+            recovery.attempt_id,
+            recovery_token,
+            conflicting,
+            recovery_now,
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_recovery_termination_proof(
+            claimed.id,
+            recovery.attempt_id,
+            uuid4(),
+            persisted.termination_proof,
+            recovery_now,
+        )
     assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()
@@ -229,12 +278,11 @@ def test_postgresql_conflicting_idempotent_submissions_never_replay() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     owner = _user(SqlUserRepository(engine), "IdempotencyRace")
-    repository = SqlReversionJobRepository(engine)
-    key = "9" * 64
     barrier = Barrier(2)
+    repository = _IdempotencyRaceRepository(engine, barrier)
+    key = "9" * 64
 
     def create(request_digest: str) -> object:
-        barrier.wait()
         return repository.create(
             submission(
                 owner.id,
@@ -254,6 +302,7 @@ def test_postgresql_conflicting_idempotent_submissions_never_replay() -> None:
                 failures.append(error)
     assert len(successes) == 1
     assert len(failures) == 1 and isinstance(failures[0], ReversionJobConflictError)
+    assert repository.collision_count == 1
     engine.dispose()
 
 

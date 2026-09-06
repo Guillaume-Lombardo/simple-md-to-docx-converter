@@ -229,6 +229,7 @@ class ReversionAttempt:
     termination_proof: TerminationProof | None = None
     proof_recorded_at: datetime | None = None
     proof_acknowledged_at: datetime | None = None
+    proof_recovery_token: UUID | None = None
     recovery_owner: str | None = None
     recovery_token: UUID | None = None
     recovery_expires_at: datetime | None = None
@@ -273,6 +274,7 @@ class ReversionAttempt:
             if (
                 self.proof_recorded_at is not None
                 or self.proof_acknowledged_at is not None
+                or self.proof_recovery_token is not None
             ):
                 raise ValueError("Reverse proof timestamps require a proof")
         else:
@@ -287,6 +289,11 @@ class ReversionAttempt:
                 raise ValueError("Reverse termination proof identity does not match")
             if self.unit_id is None:
                 object.__setattr__(self, "unit_id", proof.unit_id)
+            if (
+                self.proof_recovery_token is not None
+                and type(self.proof_recovery_token) is not UUID
+            ):
+                raise ValueError("Reverse proof recovery token must be a UUID")
         if (
             self.proof_acknowledged_at is not None
             and self.proof_recorded_at is not None

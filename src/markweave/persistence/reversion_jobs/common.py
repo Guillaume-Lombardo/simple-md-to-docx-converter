@@ -195,6 +195,9 @@ def _attempt(row: ReversionAttemptRow) -> ReversionAttempt:
         termination_proof=_proof(row),
         proof_recorded_at=_utc(row.proof_recorded_at),
         proof_acknowledged_at=_utc(row.proof_acknowledged_at),
+        proof_recovery_token=(
+            UUID(row.proof_recovery_token) if row.proof_recovery_token else None
+        ),
         recovery_owner=row.recovery_owner,
         recovery_token=UUID(row.recovery_token) if row.recovery_token else None,
         recovery_expires_at=_utc(row.recovery_expires_at),

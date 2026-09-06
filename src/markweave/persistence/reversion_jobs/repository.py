@@ -97,6 +97,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 replay = self._find_idempotent(database, submission)
                 if replay is not None:
                     return replay, True
+                self._after_idempotency_miss()
                 self._enforce_admission(database, submission.owner_id)
                 database.add(row)
                 database.flush()
@@ -106,6 +107,7 @@ class SqlReversionJobRepository(_SqlReversionStore):
         except IntegrityError:
             if submission.idempotency_digest is None:
                 raise ReversionJobRepositoryError from None
+            self._after_idempotency_collision()
             replay = self._get_idempotent(
                 submission.owner_id, submission.idempotency_digest
             )
@@ -118,6 +120,12 @@ class SqlReversionJobRepository(_SqlReversionStore):
             return replay, True
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
+
+    def _after_idempotency_miss(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
+
+    def _after_idempotency_collision(self) -> None:
+        """Private observation seam overridden only by concurrency tests."""
 
     @staticmethod
     def _find_idempotent(
@@ -673,10 +681,35 @@ class SqlReversionJobRepository(_SqlReversionStore):
                 )
                 if self._engine.dialect.name == "postgresql":
                     statement = statement.with_for_update()
+                self._before_recovery_proof_cas()
                 row = database.scalar(statement)
                 if row is None:
-                    raise ReversionJobLeaseLostError("Reverse recovery lease was lost")
-                self._store_proof(database, row, proof, now)
+                    persisted = database.scalar(
+                        select(ReversionAttemptRow)
+                        .join(
+                            ReversionJobRow,
+                            ReversionJobRow.id == ReversionAttemptRow.job_id,
+                        )
+                        .where(
+                            ReversionJobRow.id == str(job_id),
+                            ReversionAttemptRow.attempt_id == str(attempt_id),
+                        )
+                    )
+                    if persisted is None or persisted.proof_id is None:
+                        raise ReversionJobLeaseLostError(
+                            "Reverse recovery lease was lost"
+                        )
+                    if (
+                        persisted.proof_recovery_token != str(recovery_token)
+                        or _attempt(persisted).termination_proof != proof
+                    ):
+                        raise ReversionJobConflictError(
+                            "Reverse recovery proof replay conflicts"
+                        )
+                    return _attempt(persisted)
+                self._store_proof(
+                    database, row, proof, now, recovery_token=recovery_token
+                )
                 row.recovery_owner = None
                 row.recovery_token = None
                 row.recovery_expires_at = None
@@ -691,12 +724,17 @@ class SqlReversionJobRepository(_SqlReversionStore):
         except SQLAlchemyError:
             raise ReversionJobRepositoryError from None
 
+    def _before_recovery_proof_cas(self) -> None:
+        """Private synchronization seam overridden only by concurrency tests."""
+
     def _store_proof(
         self,
         database: DatabaseSession,
         row: ReversionAttemptRow,
         proof: TerminationProof,
         now: datetime,
+        *,
+        recovery_token: UUID | None = None,
     ) -> ReversionAttempt:
         expected_unit = row.unit_id
         if (
@@ -722,6 +760,9 @@ class SqlReversionJobRepository(_SqlReversionStore):
         row.empty_evidence = proof.empty_evidence.value
         row.removal_evidence = proof.removal_evidence.value
         row.proof_recorded_at = now
+        row.proof_recovery_token = (
+            str(recovery_token) if recovery_token is not None else None
+        )
         database.flush()
         return _attempt(row)
 

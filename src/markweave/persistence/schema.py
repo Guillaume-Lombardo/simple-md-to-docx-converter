@@ -578,6 +578,10 @@ class ReversionAttemptRow(Base):
             name="ck_reversion_attempts_proof_bundle",
         ),
         CheckConstraint(
+            "proof_recovery_token IS NULL OR proof_id IS NOT NULL",
+            name="ck_reversion_attempts_proof_recovery_token",
+        ),
+        CheckConstraint(
             "(recovery_owner IS NULL AND recovery_token IS NULL AND "
             "recovery_expires_at IS NULL) OR (recovery_owner IS NOT NULL AND "
             "recovery_token IS NOT NULL AND recovery_expires_at IS NOT NULL)",
@@ -620,6 +624,7 @@ class ReversionAttemptRow(Base):
     proof_acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    proof_recovery_token: Mapped[str | None] = mapped_column(String(36))
     recovery_owner: Mapped[str | None] = mapped_column(String(255))
     recovery_token: Mapped[str | None] = mapped_column(String(36))
     recovery_expires_at: Mapped[datetime | None] = mapped_column(

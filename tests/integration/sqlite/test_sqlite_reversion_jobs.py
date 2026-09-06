@@ -601,10 +601,38 @@ def test_sqlite_recovery_proof_is_a_single_exact_cas(tmp_path: Path) -> None:
             except Exception as error:
                 failures.append(error)
     assert len(successes) == 1
-    assert len(failures) == 1 and isinstance(failures[0], ReversionJobLeaseLostError)
+    assert len(failures) == 1 and isinstance(failures[0], ReversionJobConflictError)
     persisted = repository.get_attempt(recovery.attempt_id)
     assert persisted is not None
     assert persisted.termination_proof in competing
+    assert persisted.proof_recovery_token == recovery_token
+    replayed = repository.record_recovery_termination_proof(
+        claimed.id,
+        recovery.attempt_id,
+        recovery_token,
+        persisted.termination_proof,
+        recovery_now,
+    )
+    assert replayed == persisted
+    conflicting = next(
+        candidate for candidate in competing if candidate != persisted.termination_proof
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_recovery_termination_proof(
+            claimed.id,
+            recovery.attempt_id,
+            recovery_token,
+            conflicting,
+            recovery_now,
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_recovery_termination_proof(
+            claimed.id,
+            recovery.attempt_id,
+            uuid4(),
+            persisted.termination_proof,
+            recovery_now,
+        )
     assert repository.recover_expired_leases(recovery_now, RETENTION_END, NOW) == 1
     repository.request_cancel(claimed.id, owner.id, recovery_now, RETENTION_END)
     engine.dispose()

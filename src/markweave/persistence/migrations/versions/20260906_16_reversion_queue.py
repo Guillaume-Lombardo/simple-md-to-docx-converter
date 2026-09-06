@@ -134,6 +134,7 @@ def upgrade() -> None:
         sa.Column("removal_evidence", sa.String(length=71), nullable=True),
         sa.Column("proof_recorded_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("proof_acknowledged_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("proof_recovery_token", sa.String(length=36), nullable=True),
         sa.Column("recovery_owner", sa.String(length=255), nullable=True),
         sa.Column("recovery_token", sa.String(length=36), nullable=True),
         sa.Column("recovery_expires_at", sa.DateTime(timezone=True), nullable=True),
@@ -156,6 +157,10 @@ def upgrade() -> None:
             "NULL AND exit_evidence IS NOT NULL AND empty_evidence IS NOT NULL AND "
             "removal_evidence IS NOT NULL AND proof_recorded_at IS NOT NULL)",
             name="ck_reversion_attempts_proof_bundle",
+        ),
+        sa.CheckConstraint(
+            "proof_recovery_token IS NULL OR proof_id IS NOT NULL",
+            name="ck_reversion_attempts_proof_recovery_token",
         ),
         sa.CheckConstraint(
             "(recovery_owner IS NULL AND recovery_token IS NULL AND recovery_expires_at IS "
