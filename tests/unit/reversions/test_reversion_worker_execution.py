@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -781,6 +782,30 @@ def test_publication_recovers_exact_commit_after_lost_success_response(
     assert retained is not None and retained.state is ReversionJobState.SUCCEEDED
 
 
+def test_publication_rejects_missing_or_mismatched_durable_proof(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    publication = ReversionPublicationService(runtime)
+    attempt = repo.get_attempt(claimed.attempt_id)
+    assert attempt is not None
+
+    with pytest.raises(ReverseConversionError) as missing:
+        publication.acknowledge_attempt(attempt)
+    assert missing.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+    _successful_broker(mocker, runtime)
+    executed = ReversionAttemptExecutor(runtime).execute(claimed, mocker.Mock())
+    mismatched = replace(executed, proof=_proof(claimed.attempt_id, uuid4()))
+    with pytest.raises(ReverseConversionError) as mismatch:
+        publication.acknowledge(mismatched)
+    assert mismatch.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
 def test_worker_does_not_reconcile_or_claim_after_shutdown(
     tmp_path: Path,
     repository: tuple[SqlReversionJobRepository, User, Engine],
@@ -956,3 +981,102 @@ def test_executor_rejects_misbound_error_responses(
         ReversionAttemptExecutor(runtime).execute(claimed, mocker.Mock())
 
     assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "pending_receipt",
+        "error_operation",
+        "failure_receipt",
+        "unexpected_type",
+        "success_receipt",
+    ],
+)
+def test_collect_rejects_semantically_misbound_responses(
+    mutation: str,
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    receipt = WorkspaceStageReceipt(
+        uuid4(),
+        1,
+        claimed.attempt_id,
+        uuid4(),
+        1,
+        uuid4(),
+    )
+    mismatched = replace(receipt, incarnation_id=uuid4())
+
+    def collect(request: WorkspaceCollectRequest) -> object:
+        if mutation == "pending_receipt":
+            return WorkspacePendingResponse(request.request_id, mismatched)
+        if mutation == "error_operation":
+            return WorkspaceErrorResponse(
+                request.request_id,
+                WorkspaceOperation.STAGE,
+                BrokerErrorCategory.RUNTIME_FAILURE,
+            )
+        if mutation == "failure_receipt":
+            return WorkspaceFailureResponse(
+                request.request_id, mismatched, ReverseErrorCategory.MALFORMED
+            )
+        if mutation == "unexpected_type":
+            return SimpleNamespace(request_id=request.request_id)
+        return WorkspaceSuccessResponse(
+            request.request_id,
+            mismatched,
+            ReverseOutputMode.MARKDOWN,
+            b"# Result\n",
+        )
+
+    cast(Any, runtime.broker).collect_workspace.side_effect = collect
+
+    with pytest.raises(ReverseConversionError) as captured:
+        ReversionAttemptExecutor(runtime)._collect(claimed, receipt, mocker.Mock())
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+@pytest.mark.parametrize("boundary", ["stage", "terminate"])
+def test_executor_rejects_invalid_unit_identity_before_broker_call(
+    boundary: str,
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    claimed = _claim(runtime, repo, owner, b"source")
+    executor = ReversionAttemptExecutor(runtime)
+
+    with pytest.raises(ReverseConversionError) as captured:
+        if boundary == "stage":
+            executor._stage(claimed, cast(Any, "unit"), 1, b"source")
+        else:
+            executor._terminate(claimed, cast(Any, "unit"), 1)
+
+    assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+    cast(Any, runtime.broker).request.assert_not_called()
+    cast(Any, runtime.broker).stage_workspace.assert_not_called()
+
+
+def test_claim_service_returns_none_without_work_and_rejects_incomplete_claim(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    service = ReversionClaimService(runtime)
+
+    assert service.claim() is None
+
+    incomplete = _queue(runtime, repo, owner, b"source")
+    mocker.patch.object(repo, "claim", return_value=incomplete)
+    with pytest.raises(ReversionJobLeaseLostError):
+        service.claim()

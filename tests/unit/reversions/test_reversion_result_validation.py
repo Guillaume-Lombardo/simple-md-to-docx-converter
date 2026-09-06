@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -443,4 +444,82 @@ def test_rejects_archive_entry_limits() -> None:
             )
         )
         is ReverseErrorCategory.RESOURCE_LIMIT
+    )
+
+
+def test_rejects_duplicate_manifest_keys() -> None:
+    content = _package(unavailable=1)
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        manifest = archive.read("manifest.json")
+    duplicated = manifest.replace(
+        b'"schema_version":1', b'"schema_version":1,"schema_version":1'
+    )
+    malformed = _rewrite_zip(content, manifest_bytes=duplicated)
+
+    assert (
+        _category(
+            lambda: validate_reverse_result(
+                _job(),
+                ReverseOutputMode.MARKDOWN_WITH_UNAVAILABLE_ASSETS,
+                malformed,
+                LIMITS,
+            )
+        )
+        is ReverseErrorCategory.PROTOCOL_ERROR
+    )
+
+
+def test_rejects_markdown_larger_than_its_specific_limit() -> None:
+    constrained = replace(LIMITS, max_markdown_bytes=4)
+
+    assert (
+        _category(
+            lambda: validate_reverse_result(
+                _job(), ReverseOutputMode.MARKDOWN, b"12345", constrained
+            )
+        )
+        is ReverseErrorCategory.RESOURCE_LIMIT
+    )
+
+
+def test_rejects_noncanonical_asset_path_before_archive_layout() -> None:
+    asset = NormalizedAsset(PurePosixPath("assets/image-0001.png"), _png())
+    malformed = _rewrite_zip(
+        _package(assets=(asset,)),
+        names=("document.md", "other/image.png", "manifest.json"),
+    )
+
+    assert (
+        _category(
+            lambda: validate_reverse_result(
+                _job(), ReverseOutputMode.MARKDOWN_WITH_ASSETS, malformed, LIMITS
+            )
+        )
+        is ReverseErrorCategory.PROTOCOL_ERROR
+    )
+
+
+@pytest.mark.parametrize(
+    ("job", "mode", "content", "limits"),
+    [
+        (None, ReverseOutputMode.MARKDOWN, b"content", LIMITS),
+        (_job(), "markdown", b"content", LIMITS),
+        (_job(), ReverseOutputMode.MARKDOWN, bytearray(b"content"), LIMITS),
+        (_job(), ReverseOutputMode.MARKDOWN, b"", LIMITS),
+        (_job(), ReverseOutputMode.MARKDOWN, b"content", None),
+    ],
+)
+def test_rejects_invalid_validation_boundary_arguments(
+    job: object, mode: object, content: object, limits: object
+) -> None:
+    assert (
+        _category(
+            lambda: validate_reverse_result(
+                cast(Any, job),
+                cast(Any, mode),
+                cast(Any, content),
+                cast(Any, limits),
+            )
+        )
+        is ReverseErrorCategory.PROTOCOL_ERROR
     )
