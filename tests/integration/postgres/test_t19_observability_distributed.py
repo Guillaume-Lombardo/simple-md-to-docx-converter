@@ -30,6 +30,7 @@ from markweave.persistence.observability import (
     SqlOperationalObserver,
 )
 from markweave.persistence.retention import SqlRetentionRepository
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.schema import (
     AuthenticationAuditRow,
     RetentionCleanupRunRow,
@@ -37,6 +38,9 @@ from markweave.persistence.schema import (
 )
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.storage import FilesystemObjectStore
+from tests.reversion_observability_contracts import (
+    exercise_reverse_observability_contract,
+)
 from tests.settings import template_settings
 from tests.template_records import publish_template_pair
 
@@ -110,6 +114,10 @@ def test_postgresql_queue_observation_matches_standalone_contract(
         repository.claim("distributed-worker", now, now + timedelta(seconds=30))
         running = SqlOperationalObserver(engine).observe_queue(now)
         assert (running.depth, running.active_jobs) == (0, 1)
+
+        exercise_reverse_observability_contract(
+            SqlReversionJobRepository(engine), SqlOperationalObserver(engine), owner.id
+        )
     finally:
         engine.dispose()
 
@@ -131,6 +139,34 @@ def test_postgresql_queue_observation_statement_timeout_is_bounded() -> None:
             assert monotonic() - started < 1.0
             transaction.rollback()
     finally:
+        engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_reverse_observation_timeout_leaves_connection_reusable() -> None:
+    database_url = os.environ["MARKWEAVE_TEST_POSTGRES_URL"]
+    engine = create_database_engine(database_url)
+    observation_engine = create_database_engine(database_url, timeout_seconds=0.5)
+    try:
+        upgrade_database(engine)
+        observer = SqlOperationalObserver(observation_engine)
+        with engine.connect() as blocker:
+            transaction = blocker.begin()
+            blocker.execute(
+                text("LOCK TABLE reversion_attempts IN ACCESS EXCLUSIVE MODE")
+            )
+            started = monotonic()
+            with pytest.raises(JobRepositoryError):
+                observer.observe_queue(datetime.now(UTC), timeout_seconds=0.1)
+            assert monotonic() - started < 1.0
+            transaction.rollback()
+
+        recovered = observer.observe_queue(datetime.now(UTC), timeout_seconds=0.5)
+        assert recovered.reversion_proof_blocked_attempts == 0
+        assert recovered.reversion_proof_ack_backlog == 0
+    finally:
+        observation_engine.dispose()
         engine.dispose()
 
 

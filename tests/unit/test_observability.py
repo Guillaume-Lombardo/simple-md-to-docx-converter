@@ -204,10 +204,30 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     metrics.record_request("POST", 202, 0.5)
     metrics.record_request("ATTACKER-CONTROLLED-METHOD", 400, 0.1)
 
-    rendered = metrics.render(QueueSnapshot(4, 8.5, 2))
+    rendered = metrics.render(
+        QueueSnapshot(
+            4,
+            8.5,
+            2,
+            reversion_depth=3,
+            reversion_oldest_age_seconds=9.5,
+            reversion_active_jobs=1,
+            shared_capacity_used=10,
+            reversion_proof_blocked_attempts=2,
+            reversion_proof_ack_backlog=4,
+            reversion_reconciliation_pending=1,
+        )
+    )
     assert "md_converter_queue_depth 4" in rendered
     assert "md_converter_queue_oldest_age_seconds 8.5" in rendered
     assert "md_converter_active_jobs 2" in rendered
+    assert "md_converter_reversion_queue_depth 3" in rendered
+    assert "md_converter_reversion_queue_oldest_age_seconds 9.5" in rendered
+    assert "md_converter_reversion_active_jobs 1" in rendered
+    assert "md_converter_shared_capacity_used 10" in rendered
+    assert "md_converter_reversion_proof_blocked_attempts 2" in rendered
+    assert "md_converter_reversion_proof_ack_backlog 4" in rendered
+    assert "md_converter_reversion_reconciliation_pending 1" in rendered
     assert 'md_converter_job_failures_total{code="invalid_docx"} 1' in rendered
     assert 'md_converter_job_saturation_total{scope="owner"} 1' in rendered
     assert "md_converter_job_expirations_total 2" in rendered
@@ -222,6 +242,20 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
         metrics.record_step_duration("pdf", -1)
     with pytest.raises(ValueError, match="negative"):
         metrics.record_expiration(-1)
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        lambda: QueueSnapshot(-1, 0, 0),
+        lambda: QueueSnapshot(0, float("inf"), 0),
+        lambda: QueueSnapshot(0, 0, 0, reversion_depth=True),
+        lambda: QueueSnapshot(0, 0, 0, reversion_proof_ack_backlog=-1),
+    ],
+)
+def test_queue_snapshot_rejects_invalid_gauge_values(snapshot: Any) -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        snapshot()
 
 
 @pytest.mark.parametrize(
