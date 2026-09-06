@@ -796,6 +796,26 @@ def test_worker_does_not_reconcile_or_claim_after_shutdown(
     cast(Any, runtime.reconciler).reconcile.assert_not_called()
 
 
+def test_worker_does_not_claim_when_shutdown_arrives_during_reconciliation(
+    tmp_path: Path,
+    repository: tuple[SqlReversionJobRepository, User, Engine],
+    mocker: MockerFixture,
+) -> None:
+    repo, owner, _engine = repository
+    runtime = _runtime(mocker, repo, FilesystemObjectStore(tmp_path))
+    job = _queue(runtime, repo, owner, b"source")
+    shutdown_requested = mocker.Mock(side_effect=(False, True))
+    stopping = replace(runtime, shutdown_requested=shutdown_requested)
+    claim = mocker.patch.object(repo, "claim", wraps=repo.claim)
+
+    assert not ReversionWorker(stopping).run_once()
+
+    retained = repo.get_internal(job.id)
+    assert retained is not None and retained.state is ReversionJobState.QUEUED
+    cast(Any, runtime.reconciler).reconcile.assert_called_once()
+    claim.assert_not_called()
+
+
 def test_claim_identity_and_latched_lease_loss_fail_closed(
     tmp_path: Path,
     repository: tuple[SqlReversionJobRepository, User, Engine],

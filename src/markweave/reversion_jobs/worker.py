@@ -56,6 +56,8 @@ class ReversionWorker:
         if self._runtime.shutdown_requested():
             return False
         self.reconcile()
+        if self._runtime.shutdown_requested():
+            return False
         claimed = self._claims.claim()
         if claimed is None:
             return False

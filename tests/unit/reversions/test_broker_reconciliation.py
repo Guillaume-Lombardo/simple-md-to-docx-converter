@@ -163,14 +163,31 @@ def test_reconciler_rejects_invalid_configuration(
 
 
 @pytest.mark.parametrize(
-    "response",
+    ("response", "error_type"),
     [
-        ReconciliationErrorResponse(UUID(int=9), BrokerErrorCategory.INVENTORY_FAILURE),
-        object(),
+        (
+            ReconciliationErrorResponse(
+                UUID(int=1), BrokerErrorCategory.INVENTORY_FAILURE
+            ),
+            BrokerError,
+        ),
+        (
+            ReconciliationErrorResponse(
+                UUID(int=9), BrokerErrorCategory.INVENTORY_FAILURE
+            ),
+            ValueError,
+        ),
+        (
+            ReconciliationResponse(
+                UUID(int=9), PRINCIPAL.principal_id, 0, 0, None, True
+            ),
+            ValueError,
+        ),
+        (object(), ValueError),
     ],
 )
 def test_reconciler_rejects_broker_page_failures(
-    mocker: MockerFixture, response: object
+    mocker: MockerFixture, response: object, error_type: type[Exception]
 ) -> None:
     store = mocker.Mock()
     store.begin_reconciliation.return_value = 0
@@ -191,13 +208,14 @@ def test_reconciler_rejects_broker_page_failures(
             now_factory=lambda: NOW,
         )
 
-    if isinstance(response, ReconciliationErrorResponse):
+    if error_type is BrokerError:
         with pytest.raises(BrokerError) as caught:
             reconcile()
         assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
     else:
-        with pytest.raises(ValueError):
+        with pytest.raises(error_type):
             reconcile()
+    store.record_reconciliation_page.assert_not_called()
     store.complete_reconciliation.assert_not_called()
 
 
@@ -207,7 +225,16 @@ def test_reconciler_rejects_broker_page_failures(
         ErrorResponse(
             UUID(int=1), BrokerOperation.ACK, BrokerErrorCategory.INVENTORY_FAILURE
         ),
+        ErrorResponse(
+            UUID(int=9), BrokerOperation.ACK, BrokerErrorCategory.INVENTORY_FAILURE
+        ),
+        ErrorResponse(
+            UUID(int=1), BrokerOperation.CREATE, BrokerErrorCategory.INVENTORY_FAILURE
+        ),
         object(),
+        AcknowledgeResponse(
+            UUID(int=9), PROOF.attempt_id, PROOF.unit_id, PROOF.proof_id, True
+        ),
         AcknowledgeResponse(
             UUID(int=1), PROOF.attempt_id, PROOF.unit_id, PROOF.proof_id, False
         ),
@@ -231,7 +258,11 @@ def test_reconciler_rejects_invalid_acknowledgements(
     reconciler = ReversionBrokerReconciler(
         store, broker, ack_batch_limit=1, request_id_factory=lambda: UUID(int=1)
     )
-    if isinstance(response, ErrorResponse):
+    if (
+        isinstance(response, ErrorResponse)
+        and response.request_id == UUID(int=1)
+        and response.operation is BrokerOperation.ACK
+    ):
         with pytest.raises(BrokerError) as caught:
             reconciler._ack(PRINCIPAL, TOKEN, TOMBSTONE, NOW)
         assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
