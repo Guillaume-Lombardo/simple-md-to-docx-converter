@@ -98,7 +98,15 @@ def test_conversion_cli_e2e_exercises_reverse_http_lifecycle() -> None:
     source = Path("tests/e2e/conversion_cli_workflow.py").read_text(encoding="utf-8")
     settings = Path("scripts/e2e/runtime-settings.sh").read_text(encoding="utf-8")
 
-    for command in ("capabilities", "submit", "list", "show", "cancel", "download"):
+    for command in (
+        "capabilities",
+        "submit",
+        "list",
+        "show",
+        "wait",
+        "cancel",
+        "download",
+    ):
         assert re.search(rf'"reverse",\s*"{command}"', source)
     assert "reverse idempotent replay" in source
     assert "MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=1000000" in settings

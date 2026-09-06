@@ -231,6 +231,21 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if reverse_shown is None or reverse_shown.get("id") != reverse_job_id:
         return _failure("reverse job show", 1)
+    reverse_wait = _run(
+        [
+            *prefix,
+            "--timeout",
+            "1",
+            "jobs",
+            "reverse",
+            "wait",
+            reverse_job_id,
+            "--poll-interval",
+            "0.1",
+        ]
+    )
+    if reverse_wait.returncode != 1 or "did not finish" not in reverse_wait.stderr:
+        return _failure("reverse bounded wait", reverse_wait.returncode)
     reverse_cancelled = _json_result(
         _run([*prefix, "--json", "jobs", "reverse", "cancel", reverse_job_id])
     )
