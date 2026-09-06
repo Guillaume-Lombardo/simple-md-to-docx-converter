@@ -49,30 +49,36 @@ class ReversionMaintenanceService:
     def _recover_attempt(self, attempt: ReversionAttempt) -> ReversionAttempt:
         unit_id = attempt.unit_id
         if unit_id is None:
-            created = self._runtime.broker.request(
-                CreateRequest(
-                    self._runtime.request_id_factory(),
-                    attempt.create_sequence,
-                    attempt.attempt_id,
-                )
+            create_request = CreateRequest(
+                self._runtime.request_id_factory(),
+                attempt.create_sequence,
+                attempt.attempt_id,
             )
+            created = self._runtime.broker.request(create_request)
             self._raise_broker_error(created)
             if (
                 type(created) is not CreateResponse
+                or created.request_id != create_request.request_id
                 or created.attempt_id != attempt.attempt_id
             ):
                 reject(ReverseErrorCategory.PROTOCOL_ERROR)
             unit_id = created.unit_id
-        terminated = self._runtime.broker.request(
-            TerminateRequest(
-                self._runtime.request_id_factory(),
-                attempt.create_sequence,
-                attempt.attempt_id,
-                unit_id,
-            )
+        terminate_request = TerminateRequest(
+            self._runtime.request_id_factory(),
+            attempt.create_sequence,
+            attempt.attempt_id,
+            unit_id,
         )
+        terminated = self._runtime.broker.request(terminate_request)
         self._raise_broker_error(terminated)
-        if type(terminated) is not TerminateResponse:
+        if (
+            type(terminated) is not TerminateResponse
+            or terminated.request_id != terminate_request.request_id
+            or terminated.proof.attempt_id != attempt.attempt_id
+            or terminated.proof.unit_id != unit_id
+            or terminated.proof.principal != self._runtime.principal
+            or terminated.proof.policy_revision != self._runtime.broker_policy.revision
+        ):
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         if attempt.recovery_token is None:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)

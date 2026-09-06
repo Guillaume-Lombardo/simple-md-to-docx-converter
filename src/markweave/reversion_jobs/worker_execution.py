@@ -197,16 +197,16 @@ class ReversionAttemptExecutor:
             specification,
             self._runtime.clock(),
         )
-        response = self._runtime.broker.request(
-            CreateRequest(
-                self._runtime.request_id_factory(),
-                attempt.create_sequence,
-                claimed.attempt_id,
-            )
+        request = CreateRequest(
+            self._runtime.request_id_factory(),
+            attempt.create_sequence,
+            claimed.attempt_id,
         )
+        response = self._runtime.broker.request(request)
         self._raise_broker_error(response)
         if (
             type(response) is not CreateResponse
+            or response.request_id != request.request_id
             or response.attempt_id != claimed.attempt_id
             or response.state is not ManagedUnitState.CREATED
         ):
@@ -290,7 +290,19 @@ class ReversionAttemptExecutor:
         response = self._runtime.broker.stage_workspace(request)
         if type(response) is WorkspaceErrorResponse:
             raise BrokerError(response.category)
-        if type(response) is not WorkspaceStageReceipt:
+        if type(response) is not WorkspaceStageReceipt or (
+            response.request_id,
+            response.stage_sequence,
+            response.attempt_id,
+            response.unit_id,
+            response.create_sequence,
+        ) != (
+            request.request_id,
+            request.sequence,
+            request.attempt_id,
+            request.unit_id,
+            request.create_sequence,
+        ):
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         return response
 
@@ -313,14 +325,22 @@ class ReversionAttemptExecutor:
                 receipt.incarnation_id,
             )
             response = self._runtime.broker.collect_workspace(request)
+            if getattr(response, "request_id", None) != request.request_id:
+                reject(ReverseErrorCategory.PROTOCOL_ERROR)
             if type(response) is WorkspacePendingResponse:
+                if response.receipt != receipt:
+                    reject(ReverseErrorCategory.PROTOCOL_ERROR)
                 self._runtime.wait(self._runtime.policy.collect_poll_seconds)
                 continue
             if type(response) is WorkspaceErrorResponse:
                 raise BrokerError(response.category)
             if type(response) is WorkspaceFailureResponse:
+                if response.receipt != receipt:
+                    reject(ReverseErrorCategory.PROTOCOL_ERROR)
                 reject(response.category)
             if type(response) is not WorkspaceSuccessResponse:
+                reject(ReverseErrorCategory.PROTOCOL_ERROR)
+            if response.receipt != receipt:
                 reject(ReverseErrorCategory.PROTOCOL_ERROR)
             return ReverseAttemptSuccess(
                 claimed.attempt_id, response.mode, response.result
@@ -331,16 +351,22 @@ class ReversionAttemptExecutor:
     ) -> TerminationProof:
         if type(unit_id) is not UUID:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
-        response = self._runtime.broker.request(
-            TerminateRequest(
-                self._runtime.request_id_factory(),
-                create_sequence,
-                claimed.attempt_id,
-                unit_id,
-            )
+        request = TerminateRequest(
+            self._runtime.request_id_factory(),
+            create_sequence,
+            claimed.attempt_id,
+            unit_id,
         )
+        response = self._runtime.broker.request(request)
         self._raise_broker_error(response)
-        if type(response) is not TerminateResponse:
+        if (
+            type(response) is not TerminateResponse
+            or response.request_id != request.request_id
+            or response.proof.attempt_id != claimed.attempt_id
+            or response.proof.unit_id != unit_id
+            or response.proof.principal != self._runtime.principal
+            or response.proof.policy_revision != self._runtime.broker_policy.revision
+        ):
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
         return response.proof
 

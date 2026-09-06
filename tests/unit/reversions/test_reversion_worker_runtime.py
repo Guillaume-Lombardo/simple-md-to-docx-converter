@@ -52,6 +52,8 @@ def test_worker_policy_accepts_only_coherent_injected_values() -> None:
 
     for changes in (
         {"lease_seconds": 0},
+        {"lease_seconds": float("inf")},
+        {"lease_seconds": float("nan")},
         {"recovery_batch_size": 0},
         {"heartbeat_seconds": 30},
         {"collect_poll_seconds": 6},

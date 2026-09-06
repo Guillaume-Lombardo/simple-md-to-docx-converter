@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Protocol
 from uuid import UUID
 
@@ -69,7 +70,10 @@ class ReversionWorkerPolicy:
             self.recovery_lease_seconds,
             self.cleanup_lease_seconds,
         )
-        if any(type(value) not in {int, float} or value <= 0 for value in durations):
+        if any(
+            type(value) not in {int, float} or not isfinite(value) or value <= 0
+            for value in durations
+        ):
             raise ValueError("Reverse worker durations must be positive")
         if any(
             type(value) is not int or value <= 0

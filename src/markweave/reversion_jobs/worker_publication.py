@@ -107,19 +107,19 @@ class ReversionPublicationService:
         proof = attempt.termination_proof
         if proof is None or attempt.unit_id != proof.unit_id:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
-        response = self._runtime.broker.request(
-            AcknowledgeRequest(
-                self._runtime.request_id_factory(),
-                attempt.create_sequence,
-                attempt.attempt_id,
-                proof.unit_id,
-                proof.proof_id,
-            )
+        request = AcknowledgeRequest(
+            self._runtime.request_id_factory(),
+            attempt.create_sequence,
+            attempt.attempt_id,
+            proof.unit_id,
+            proof.proof_id,
         )
+        response = self._runtime.broker.request(request)
         if type(response) is ErrorResponse:
             raise BrokerError(response.category)
         if (
             type(response) is not AcknowledgeResponse
+            or response.request_id != request.request_id
             or not response.acknowledged
             or (response.attempt_id, response.unit_id, response.proof_id)
             != (attempt.attempt_id, proof.unit_id, proof.proof_id)
