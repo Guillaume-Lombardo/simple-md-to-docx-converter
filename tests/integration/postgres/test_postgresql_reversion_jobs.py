@@ -2,13 +2,17 @@
 
 import os
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, inspect, text
 
 from markweave.auth.models import Role, User
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationResponse,
+    ReconciliationTombstone,
+)
 from markweave.jobs.models import JobOutput, JobSubmission
 from markweave.jobs.policy import JobAdmissionPolicy
 from markweave.persistence.jobs import SqlJobRepository
@@ -17,8 +21,9 @@ from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.sql import SqlUserRepository, create_database_engine
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
+    ReversionJobLeaseLostError,
 )
-from markweave.reversion_jobs.models import ReversionJob
+from markweave.reversion_jobs.models import ReversionAttempt, ReversionJob
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from tests.reversion_job_repository_contracts import (
     LEASE_END,
@@ -26,6 +31,7 @@ from tests.reversion_job_repository_contracts import (
     POLICY_SPECIFICATION,
     PRINCIPAL,
     RETENTION_END,
+    complete_empty_reconciliation,
     exercise_reversion_job_repository_contract,
     proof,
     submission,
@@ -52,6 +58,21 @@ class _IdempotencyRaceRepository(SqlReversionJobRepository):
 
     def _after_idempotency_collision(self) -> None:
         self.collision_count += 1
+
+
+class _ReconciliationAttemptRaceRepository(SqlReversionJobRepository):
+    def __init__(self, engine: Engine) -> None:
+        super().__init__(engine)
+        self.reconciliation_locked = Event()
+        self.active_lock_requested = Event()
+        self.release_reconciliation = Event()
+
+    def _after_reconciliation_attempt_lock(self) -> None:
+        self.reconciliation_locked.set()
+        assert self.release_reconciliation.wait(timeout=10)
+
+    def _before_active_attempt_lock(self) -> None:
+        self.active_lock_requested.set()
 
 
 def _user(repository: SqlUserRepository, name: str) -> User:
@@ -90,16 +111,225 @@ def test_postgresql_reversion_migration_round_trip() -> None:
 
 @pytest.mark.integration
 @pytest.mark.requires_postgres
+def test_postgresql_reconciliation_advances_hwm_and_retains_orphan_before_ack() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
+    token = uuid4()
+    repository.begin_reconciliation(
+        PRINCIPAL, "postgres-reconciler", token, NOW, LEASE_END
+    )
+    recovered = proof(uuid4(), uuid4())
+    tombstone = ReconciliationTombstone(12, POLICY_SPECIFICATION, recovered)
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(
+            uuid4(), PRINCIPAL.principal_id, 0, 15, tombstone, False
+        ),
+        NOW,
+    )
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(uuid4(), PRINCIPAL.principal_id, 12, 14, None, True),
+        NOW,
+    )
+    assert repository.pending_reconciliation_acknowledgements(
+        PRINCIPAL, token, NOW, 8
+    ) == (tombstone,)
+    repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(uuid4(), PRINCIPAL.principal_id, 12, 14, None, True),
+        NOW,
+    )
+    repository.complete_reconciliation(PRINCIPAL, token, NOW)
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT create_sequence_high_water FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(PRINCIPAL.principal_id)},
+            ).scalar_one()
+            == 15
+        )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 12"
+                ),
+                {"principal": str(PRINCIPAL.principal_id)},
+            ).scalar_one()
+            is not None
+        )
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_reconciliation_hydration_serializes_with_create_intent() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "ReconciliationIntentRace")
+    repository = _ReconciliationAttemptRaceRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("intent-worker", principal, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    lease_token = claimed.lease_token
+    attempt = repository.get_attempt(claimed.current_attempt_id)
+    assert attempt is not None
+    retained = proof(attempt.attempt_id, uuid4(), principal)
+    tombstone = ReconciliationTombstone(
+        attempt.create_sequence, POLICY_SPECIFICATION, retained
+    )
+    token = uuid4()
+    assert (
+        repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+        == 0
+    )
+
+    def retain() -> ReconciliationTombstone | None:
+        return repository.record_reconciliation_page(
+            principal,
+            token,
+            ReconciliationResponse(
+                uuid4(),
+                principal.principal_id,
+                0,
+                attempt.create_sequence,
+                tombstone,
+                False,
+            ),
+            NOW,
+        )
+
+    def reserve() -> ReversionAttempt:
+        return repository.reserve_create_intent(
+            claimed.id,
+            attempt.attempt_id,
+            "intent-worker",
+            lease_token,
+            retained.policy_revision,
+            POLICY_SPECIFICATION,
+            NOW,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        retain_future = executor.submit(retain)
+        assert repository.reconciliation_locked.wait(timeout=10)
+        reserve_future = executor.submit(reserve)
+        assert repository.active_lock_requested.wait(timeout=10)
+        assert not reserve_future.done()
+        repository.release_reconciliation.set()
+        assert retain_future.result() == tombstone
+        reserved = reserve_future.result()
+    assert reserved.termination_proof == retained
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_reconciliation_proof_serializes_with_active_proof() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "ReconciliationProofRace")
+    repository = _ReconciliationAttemptRaceRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("proof-worker", principal, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    lease_token = claimed.lease_token
+    attempt = repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "proof-worker",
+        lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    unit_id = uuid4()
+    repository.record_broker_unit(
+        claimed.id,
+        attempt.attempt_id,
+        "proof-worker",
+        lease_token,
+        unit_id,
+        NOW,
+    )
+    retained = proof(attempt.attempt_id, unit_id, principal)
+    tombstone = ReconciliationTombstone(
+        attempt.create_sequence, POLICY_SPECIFICATION, retained
+    )
+    token = uuid4()
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+    repository.active_lock_requested.clear()
+
+    def retain() -> ReconciliationTombstone | None:
+        return repository.record_reconciliation_page(
+            principal,
+            token,
+            ReconciliationResponse(
+                uuid4(),
+                principal.principal_id,
+                0,
+                attempt.create_sequence,
+                tombstone,
+                False,
+            ),
+            NOW,
+        )
+
+    def record_active() -> ReversionAttempt:
+        return repository.record_active_termination_proof(
+            claimed.id,
+            attempt.attempt_id,
+            "proof-worker",
+            lease_token,
+            retained,
+            NOW,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        retain_future = executor.submit(retain)
+        assert repository.reconciliation_locked.wait(timeout=10)
+        proof_future = executor.submit(record_active)
+        assert repository.active_lock_requested.wait(timeout=10)
+        assert not proof_future.done()
+        repository.release_reconciliation.set()
+        assert retain_future.result() == tombstone
+        recorded = proof_future.result()
+    assert recorded.termination_proof == retained
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
 def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     for name in ("SequenceOne", "SequenceTwo"):
         owner = _user(users, name)
         job, _ = repository.create(submission(owner.id))
         repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     barrier = Barrier(2)
 
     def claim(worker: str) -> ReversionJob | None:
@@ -180,15 +410,77 @@ def test_postgresql_claims_allocate_unique_principal_sequences() -> None:
 
 @pytest.mark.integration
 @pytest.mark.requires_postgres
+def test_postgresql_begin_reconciliation_and_claim_are_linearized() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    users = SqlUserRepository(engine)
+    owner = _user(users, "ReconciliationClaimRace")
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    barrier = Barrier(2)
+    token = uuid4()
+
+    def begin() -> None:
+        barrier.wait()
+        repository.begin_reconciliation(principal, "racer", token, NOW, LEASE_END)
+
+    def claim() -> ReversionJob | None:
+        barrier.wait()
+        return repository.claim("racer", principal, NOW, LEASE_END)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        begin_future = executor.submit(begin)
+        claim_future = executor.submit(claim)
+        begin_future.result()
+        claimed = claim_future.result()
+    assert claimed is None or claimed.current_attempt_id is not None
+    assert repository.claim("after-begin", principal, NOW, LEASE_END) is None
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_expired_reconciliation_takeover_has_one_winner() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    repository = SqlReversionJobRepository(engine)
+    principal = type(PRINCIPAL)(uuid4())
+    repository.begin_reconciliation(
+        principal, "expired", uuid4(), NOW, NOW.replace(microsecond=1)
+    )
+    barrier = Barrier(2)
+
+    def takeover(owner: str) -> bool:
+        barrier.wait()
+        try:
+            repository.begin_reconciliation(
+                principal, owner, uuid4(), LEASE_END, RETENTION_END
+            )
+        except ReversionJobLeaseLostError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert sum(executor.map(takeover, ("takeover-a", "takeover-b"))) == 1
+    engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
 def test_postgresql_recovery_proof_is_a_single_exact_cas() -> None:
     engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
     upgrade_database(engine)
     users = SqlUserRepository(engine)
     owner = _user(users, "RecoveryProofRace")
     repository = SqlReversionJobRepository(engine)
+    complete_empty_reconciliation(repository)
     job, _ = repository.create(submission(owner.id))
     repository.activate_source(job.id, NOW)
     principal = type(PRINCIPAL)(uuid4())
+    complete_empty_reconciliation(repository, principal)
     claimed = repository.claim("proof-owner", principal, NOW, LEASE_END)
     assert claimed is not None
     assert claimed.current_attempt_id is not None and claimed.lease_token is not None

@@ -22,6 +22,7 @@ from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
 from markweave.broker.protocol import (
     LENGTH_PREFIX_BYTES,
+    PROTOCOL_NAME,
     AcknowledgeRequest,
     AcknowledgeResponse,
     BrokerRequest,
@@ -42,6 +43,27 @@ from markweave.broker.protocol import (
     decode_response,
     encode_request,
     encode_response,
+)
+from markweave.broker.reconciliation_protocol import (
+    PROTOCOL_NAME as RECONCILIATION_PROTOCOL_NAME,
+)
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationErrorResponse,
+    ReconciliationRequest,
+    ReconciliationResponse,
+    ReconciliationResult,
+)
+from markweave.broker.reconciliation_protocol import (
+    decode_request as decode_reconciliation_request,
+)
+from markweave.broker.reconciliation_protocol import (
+    decode_response as decode_reconciliation_response,
+)
+from markweave.broker.reconciliation_protocol import (
+    encode_request as encode_reconciliation_request,
+)
+from markweave.broker.reconciliation_protocol import (
+    encode_response as encode_reconciliation_response,
 )
 from markweave.broker.workspace_protocol import (
     WORKSPACE_PROTOCOL_NAME,
@@ -470,16 +492,23 @@ class UnixBrokerServer:
             if uid != self._expected_client_uid:
                 raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
             header = _receive_header(connection, deadline)
-            workspace = frame_protocol(header) == WORKSPACE_PROTOCOL_NAME
+            protocol_name = frame_protocol(header)
+            workspace = protocol_name == WORKSPACE_PROTOCOL_NAME
+            reconciliation = protocol_name == RECONCILIATION_PROTOCOL_NAME
             if workspace:
                 if self._workspace_limits is None:
                     raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
                 request = self._receive_workspace_request(
                     connection, header, deadline, self._workspace_limits
                 )
-            else:
+            elif reconciliation:
+                request = decode_reconciliation_request(header)
+                _require_eof(connection, deadline)
+            elif protocol_name == PROTOCOL_NAME:
                 request = decode_request(header)
                 _require_eof(connection, deadline)
+            else:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         except BrokerError, OSError, TimeoutError:
             return
         try:
@@ -499,6 +528,10 @@ class UnixBrokerServer:
                     frame = encode_workspace_response(
                         cast(WorkspaceResponse, response),
                         cast(RuntimeChannelLimits, self._workspace_limits),
+                    )
+                elif reconciliation:
+                    frame = encode_reconciliation_response(
+                        cast(ReconciliationResult, response)
                     )
                 else:
                     frame = encode_response(cast(BrokerResponse, response))
@@ -535,9 +568,12 @@ class UnixBrokerServer:
 
     def _dispatch_before_deadline(
         self,
-        request: BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest,
+        request: BrokerRequest
+        | WorkspaceStageRequest
+        | WorkspaceCollectRequest
+        | ReconciliationRequest,
         deadline: float,
-    ) -> BrokerResponse | WorkspaceResponse | None:
+    ) -> BrokerResponse | WorkspaceResponse | ReconciliationResult | None:
         if self._stopping.is_set():
             return None
         try:
@@ -553,10 +589,16 @@ class UnixBrokerServer:
         )
         watchdog.start()
         try:
-            if isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
+            if type(request) is ReconciliationRequest:
+                response = self._dispatcher.dispatch_reconciliation(
+                    self._principal, request
+                )
+            elif isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
                 response = self._dispatcher.dispatch_workspace(self._principal, request)
             else:
-                response = self._dispatcher.dispatch(self._principal, request)
+                response = self._dispatcher.dispatch(
+                    self._principal, cast(BrokerRequest, request)
+                )
         finally:
             completed.set()
             watchdog.join()
@@ -727,6 +769,45 @@ class UnixBrokerClient:
             )
             _validate_response_binding(request, response, self._expected_principal)
             return response
+        except BrokerError:
+            raise
+        except (OSError, TimeoutError) as error:
+            raise _transport_failure(error) from error
+        finally:
+            connection.close()
+
+    def reconcile(self, request: ReconciliationRequest) -> ReconciliationResult:
+        """Perform one principal-bound reconciliation query."""
+
+        deadline = monotonic() + self._operation_timeout_seconds
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self._verify_socket_leaf()
+            connection.settimeout(_remaining(deadline))
+            connection.connect(str(self._path))
+            _, uid, _ = _peer_credentials(connection)
+            if uid != self._expected_server_uid:
+                raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
+            _send_all(connection, encode_reconciliation_request(request), deadline)
+            connection.shutdown(socket.SHUT_WR)
+            response = decode_reconciliation_response(
+                _receive_frame(
+                    connection,
+                    deadline,
+                    eof_category=BrokerErrorCategory.TRANSPORT_FAILURE,
+                )
+            )
+            if response.request_id != request.request_id:
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            if type(response) is ReconciliationErrorResponse:
+                return response
+            success = cast(ReconciliationResponse, response)
+            if (
+                success.principal_id != self._expected_principal.principal_id
+                or success.after_create_sequence != request.after_create_sequence
+            ):
+                raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+            return success
         except BrokerError:
             raise
         except (OSError, TimeoutError) as error:

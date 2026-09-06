@@ -11,9 +11,23 @@ from sqlalchemy import Engine, create_engine, text, update
 from sqlalchemy.exc import IntegrityError
 
 from markweave.auth.models import Role, User
+from markweave.broker.models import (
+    MAX_SEQUENCE,
+    AuthenticatedPrincipal,
+    TerminationProof,
+)
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationResponse,
+    ReconciliationTombstone,
+)
 from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.persistence.reversion_jobs.common import _trace, _trace_json, _versions
-from markweave.persistence.schema import Base, ReversionJobRow
+from markweave.persistence.schema import (
+    Base,
+    ReversionAttemptRow,
+    ReversionJobRow,
+    ReversionOrphanProofRow,
+)
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
@@ -40,6 +54,7 @@ from tests.reversion_job_repository_contracts import (
     POLICY_SPECIFICATION,
     PRINCIPAL,
     RETENTION_END,
+    complete_empty_reconciliation,
     exercise_reversion_job_repository_contract,
     proof,
     submission,
@@ -48,6 +63,623 @@ from tests.reversion_job_repository_contracts import (
 
 LOCAL_NOW = NOW.astimezone(timezone(timedelta(hours=2)))
 LOCAL_RETENTION_END = RETENTION_END.astimezone(timezone(timedelta(hours=-3)))
+
+
+@pytest.mark.unit
+def test_reconciliation_is_exclusive_monotone_and_retains_orphan_before_ack(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    token = uuid4()
+    queued, _ = repository.create(submission(owner.id))
+    repository.activate_source(queued.id, NOW)
+    assert repository.claim("not-reconciled", principal, NOW, LEASE_END) is None
+    cursor = repository.begin_reconciliation(
+        principal, "reconciler", token, NOW, LEASE_END
+    )
+    assert cursor == 0
+    assert repository.claim("blocked", principal, NOW, LEASE_END) is None
+
+    orphan_proof = proof(uuid4(), uuid4(), principal=principal)
+    tombstone = ReconciliationTombstone(7, POLICY_SPECIFICATION, orphan_proof)
+    page = ReconciliationResponse(
+        uuid4(), principal.principal_id, 0, 9, tombstone, False
+    )
+    assert (
+        repository.record_reconciliation_page(principal, token, page, NOW) == tombstone
+    )
+    assert repository.pending_reconciliation_acknowledgements(
+        principal, token, NOW, 8
+    ) == (tombstone,)
+    substituted = replace(
+        tombstone,
+        proof=replace(tombstone.proof, principal=AuthenticatedPrincipal(uuid4())),
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(principal, token, substituted, NOW)
+    repository.record_reconciliation_page(
+        principal,
+        token,
+        ReconciliationResponse(uuid4(), principal.principal_id, 7, 8, None, True),
+        NOW,
+    )
+    repository.record_reconciliation_page(
+        principal,
+        token,
+        ReconciliationResponse(uuid4(), principal.principal_id, 7, 8, None, True),
+        NOW,
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.complete_reconciliation(principal, token, NOW)
+    repository.mark_reconciliation_acknowledged(principal, token, tombstone, NOW)
+    assert (
+        repository.pending_reconciliation_acknowledgements(principal, token, NOW, 8)
+        == ()
+    )
+    repository.complete_reconciliation(principal, token, NOW)
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT create_sequence_high_water, reconciliation_complete FROM reversion_broker_principals WHERE principal_id = :principal"
+            ),
+            {"principal": str(principal.principal_id)},
+        ).one()
+        orphan = connection.execute(
+            text(
+                "SELECT acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 7"
+            ),
+            {"principal": str(principal.principal_id)},
+        ).one()
+    assert row == (9, True)
+    assert orphan.acknowledged_at is not None
+
+
+@pytest.mark.unit
+def test_reconciliation_takeover_and_unproven_restore_fail_closed(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    token = uuid4()
+    repository.begin_reconciliation(principal, "first", token, NOW, LEASE_END)
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.begin_reconciliation(principal, "second", uuid4(), NOW, LEASE_END)
+    takeover = uuid4()
+    repository.begin_reconciliation(
+        principal, "second", takeover, LEASE_END + timedelta(seconds=1), RETENTION_END
+    )
+    for _ in range(2):
+        repository.record_reconciliation_page(
+            principal,
+            takeover,
+            ReconciliationResponse(uuid4(), principal.principal_id, 0, 0, None, True),
+            LEASE_END + timedelta(seconds=1),
+        )
+    queued, _ = repository.create(submission(owner.id))
+    repository.activate_source(queued.id, NOW)
+    repository.complete_reconciliation(
+        principal, takeover, LEASE_END + timedelta(seconds=1)
+    )
+    claimed = repository.claim("worker", principal, NOW, LEASE_END)
+    assert (
+        claimed is not None
+        and claimed.current_attempt_id is not None
+        and claimed.lease_token is not None
+    )
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    retry = uuid4()
+    repository.begin_reconciliation(principal, "restore", retry, NOW, LEASE_END)
+    with pytest.raises(ReversionProofRequiredError):
+        repository.complete_reconciliation(principal, retry, NOW)
+
+
+@pytest.mark.unit
+def test_reconciliation_rejects_invalid_inputs_and_stale_tokens(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, _owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    token = uuid4()
+    with pytest.raises(ValueError):
+        repository.begin_reconciliation(principal, "", token, NOW, LEASE_END)
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+    with engine.connect() as connection:
+        durable_lease = connection.execute(
+            text(
+                "SELECT reconciliation_token, reconciliation_cursor, reconciliation_fixed_point FROM reversion_broker_principals WHERE principal_id = :principal"
+            ),
+            {"principal": str(principal.principal_id)},
+        ).one()
+    page = ReconciliationResponse(uuid4(), principal.principal_id, 0, 0, None, True)
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_reconciliation_page(
+            AuthenticatedPrincipal(uuid4()), token, page, NOW
+        )
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.record_reconciliation_page(principal, uuid4(), page, NOW)
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.mark_reconciliation_acknowledged(
+            principal,
+            uuid4(),
+            ReconciliationTombstone(
+                1, POLICY_SPECIFICATION, proof(uuid4(), uuid4(), principal)
+            ),
+            NOW,
+        )
+    with pytest.raises(ValueError):
+        repository.pending_reconciliation_acknowledgements(principal, token, NOW, 0)
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.pending_reconciliation_acknowledgements(principal, uuid4(), NOW, 1)
+    with pytest.raises(ReversionJobLeaseLostError):
+        repository.complete_reconciliation(principal, uuid4(), NOW)
+    with pytest.raises(ReversionJobConflictError):
+        repository.complete_reconciliation(principal, token, NOW)
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT reconciliation_token, reconciliation_cursor, reconciliation_fixed_point FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).one()
+            == durable_lease
+        )
+
+
+@pytest.mark.unit
+def test_reconciliation_replays_and_rejects_conflicting_orphan_receipts(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, _owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    retained = proof(uuid4(), uuid4(), principal)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    moments = iter(NOW + timedelta(minutes=value) for value in range(4))
+
+    def snapshot() -> tuple[object, ...]:
+        with engine.connect() as connection:
+            receipt = connection.execute(
+                text(
+                    "SELECT attempt_id, unit_id, proof_id, policy_revision, policy_specification, exit_evidence, empty_evidence, removal_evidence, recorded_at, acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 1"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).one_or_none()
+            state = connection.execute(
+                text(
+                    "SELECT create_sequence_high_water, reconciliation_cursor FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).one()
+            sequence_two = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 2"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).scalar_one()
+        return receipt, state, sequence_two
+
+    def record(candidate: ReconciliationTombstone, *, conflict: bool = False) -> None:
+        token = uuid4()
+        moment = next(moments)
+        repository.begin_reconciliation(
+            principal, "reconciler", token, moment, moment + timedelta(seconds=30)
+        )
+        before = snapshot()
+
+        def persist() -> None:
+            repository.record_reconciliation_page(
+                principal,
+                token,
+                ReconciliationResponse(
+                    uuid4(), principal.principal_id, 0, 2, candidate, False
+                ),
+                moment,
+            )
+
+        if conflict:
+            with pytest.raises(ReversionJobConflictError):
+                persist()
+            assert snapshot() == before
+        else:
+            persist()
+
+    record(tombstone)
+    durable = snapshot()
+    record(tombstone)
+    assert snapshot() == durable
+    record(
+        ReconciliationTombstone(
+            1, POLICY_SPECIFICATION, proof(uuid4(), uuid4(), principal)
+        ),
+        conflict=True,
+    )
+    assert snapshot()[0] == durable[0]
+    record(ReconciliationTombstone(2, POLICY_SPECIFICATION, retained), conflict=True)
+    assert snapshot()[0] == durable[0]
+
+
+@pytest.mark.unit
+def test_reverse_claim_rejects_exhausted_principal_sequence(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, engine = reverse_repository
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE reversion_broker_principals SET create_sequence_high_water = :maximum WHERE principal_id = :principal"
+            ),
+            {"maximum": MAX_SEQUENCE, "principal": str(PRINCIPAL.principal_id)},
+        )
+    with pytest.raises(ReversionJobRepositoryError):
+        repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    persisted = repository.get_internal(job.id)
+    assert persisted is not None and persisted.state is ReversionJobState.QUEUED
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT create_sequence_high_water FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(PRINCIPAL.principal_id)},
+            ).scalar_one()
+            == MAX_SEQUENCE
+        )
+        assert (
+            connection.execute(
+                text("SELECT COUNT(*) FROM reversion_attempts")
+            ).scalar_one()
+            == 0
+        )
+
+
+@pytest.mark.unit
+def test_reconciliation_drains_preexisting_unacknowledged_attempt_proof(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert (
+        claimed is not None
+        and claimed.current_attempt_id is not None
+        and claimed.lease_token is not None
+    )
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    unit_id = uuid4()
+    repository.record_broker_unit(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit_id,
+        NOW,
+    )
+    retained = proof(claimed.current_attempt_id, unit_id)
+    repository.record_active_termination_proof(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained,
+        NOW,
+    )
+    token = uuid4()
+    repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
+    assert repository.pending_reconciliation_acknowledgements(
+        PRINCIPAL, token, NOW, 8
+    ) == (tombstone,)
+    substituted = replace(
+        tombstone,
+        proof=replace(retained, principal=AuthenticatedPrincipal(uuid4())),
+    )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, substituted, NOW)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("unit_id", str(uuid4())),
+        ("proof_unit_id", str(uuid4())),
+        ("proof_id", str(uuid4())),
+        ("proof_principal_id", str(uuid4())),
+        ("policy_revision", "mutated-policy"),
+        ("policy_specification", "sha256:" + "9" * 64),
+        ("proof_policy_revision", "mutated-proof-policy"),
+        ("exit_evidence", "sha256:" + "8" * 64),
+        ("empty_evidence", "sha256:" + "7" * 64),
+        ("removal_evidence", "sha256:" + "6" * 64),
+        ("reconciliation_ack_intent_at", None),
+    ],
+)
+def test_reconciliation_ack_rejects_mutated_attempt_proof_identity(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+    column: str,
+    value: object,
+) -> None:
+    repository, owner, _other, engine = reverse_repository
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    repository.reserve_create_intent(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        "reverse-policy-v1",
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    unit_id = uuid4()
+    repository.record_broker_unit(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit_id,
+        NOW,
+    )
+    retained = proof(claimed.current_attempt_id, unit_id)
+    repository.record_active_termination_proof(
+        claimed.id,
+        claimed.current_attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained,
+        NOW,
+    )
+    token = uuid4()
+    repository.begin_reconciliation(PRINCIPAL, "restart", token, NOW, LEASE_END)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    assert repository.pending_reconciliation_acknowledgements(
+        PRINCIPAL, token, NOW, 8
+    ) == (tombstone,)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ReversionAttemptRow)
+            .where(ReversionAttemptRow.attempt_id == str(claimed.current_attempt_id))
+            .values({column: value})
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(PRINCIPAL, token, tombstone, NOW)
+    with engine.connect() as connection:
+        acknowledged_at = connection.execute(
+            text(
+                "SELECT proof_acknowledged_at FROM reversion_attempts WHERE attempt_id = :attempt"
+            ),
+            {"attempt": str(claimed.current_attempt_id)},
+        ).scalar_one()
+    assert acknowledged_at is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("attempt_id", str(uuid4())),
+        ("unit_id", str(uuid4())),
+        ("proof_id", str(uuid4())),
+        ("policy_revision", "mutated-policy"),
+        ("policy_specification", "sha256:" + "9" * 64),
+        ("exit_evidence", "sha256:" + "8" * 64),
+        ("empty_evidence", "sha256:" + "7" * 64),
+        ("removal_evidence", "sha256:" + "6" * 64),
+    ],
+)
+def test_reconciliation_ack_rejects_mutated_orphan_proof_bundle(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+    column: str,
+    value: object,
+) -> None:
+    repository, _owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    token = uuid4()
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+
+    retained = proof(uuid4(), uuid4(), principal)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    repository.record_reconciliation_page(
+        principal,
+        token,
+        ReconciliationResponse(uuid4(), principal.principal_id, 0, 1, tombstone, False),
+        NOW,
+    )
+    assert repository.pending_reconciliation_acknowledgements(
+        principal, token, NOW, 8
+    ) == (tombstone,)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ReversionOrphanProofRow)
+            .where(
+                ReversionOrphanProofRow.principal_id == str(principal.principal_id),
+                ReversionOrphanProofRow.create_sequence == 1,
+            )
+            .values({column: value})
+        )
+    with pytest.raises(ReversionJobConflictError):
+        repository.mark_reconciliation_acknowledged(principal, token, tombstone, NOW)
+    with engine.connect() as connection:
+        acknowledged_at = connection.execute(
+            text(
+                "SELECT acknowledged_at FROM reversion_orphan_proofs WHERE principal_id = :principal AND create_sequence = 1"
+            ),
+            {"principal": str(principal.principal_id)},
+        ).scalar_one()
+    assert acknowledged_at is None
+
+
+@pytest.mark.unit
+def test_reconciliation_hydrates_exact_pre_intent_attempt_from_broker_proof(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert claimed is not None and claimed.current_attempt_id is not None
+    unit_id = uuid4()
+    retained = proof(claimed.current_attempt_id, unit_id)
+    tombstone = ReconciliationTombstone(1, POLICY_SPECIFICATION, retained)
+    token = uuid4()
+    repository.begin_reconciliation(PRINCIPAL, "restore", token, NOW, LEASE_END)
+
+    repository.record_reconciliation_page(
+        PRINCIPAL,
+        token,
+        ReconciliationResponse(uuid4(), PRINCIPAL.principal_id, 0, 1, tombstone, False),
+        NOW,
+    )
+
+    attempt = repository.get_attempt(claimed.current_attempt_id)
+    assert attempt is not None
+    assert attempt.unit_id == unit_id
+    assert attempt.policy_revision == retained.policy_revision
+    assert attempt.policy_specification == POLICY_SPECIFICATION
+    assert attempt.termination_proof == retained
+
+
+@pytest.mark.unit
+def test_reconciliation_rejects_known_attempt_identity_policy_and_proof_conflicts(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, engine = reverse_repository
+    principal = AuthenticatedPrincipal(uuid4())
+    complete_empty_reconciliation(repository, principal)
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", principal, NOW, LEASE_END)
+    assert claimed is not None
+    assert claimed.current_attempt_id is not None and claimed.lease_token is not None
+    attempt = repository.get_attempt(claimed.current_attempt_id)
+    assert attempt is not None
+    unit_id = uuid4()
+    retained = proof(attempt.attempt_id, unit_id, principal)
+    token = uuid4()
+    repository.begin_reconciliation(principal, "reconciler", token, NOW, LEASE_END)
+
+    def snapshot() -> tuple[object, object]:
+        with engine.connect() as connection:
+            durable_attempt = connection.execute(
+                text(
+                    "SELECT create_intent_at, policy_revision, policy_specification, unit_id, proof_id, proof_unit_id, proof_principal_id, proof_policy_revision, exit_evidence, empty_evidence, removal_evidence, proof_recorded_at, reconciliation_ack_intent_at, proof_acknowledged_at FROM reversion_attempts WHERE attempt_id = :attempt"
+                ),
+                {"attempt": str(attempt.attempt_id)},
+            ).one()
+            durable_principal = connection.execute(
+                text(
+                    "SELECT create_sequence_high_water, reconciliation_cursor FROM reversion_broker_principals WHERE principal_id = :principal"
+                ),
+                {"principal": str(principal.principal_id)},
+            ).one()
+        return durable_attempt, durable_principal
+
+    def record(candidate: TerminationProof) -> None:
+        tombstone = ReconciliationTombstone(
+            attempt.create_sequence, POLICY_SPECIFICATION, candidate
+        )
+        repository.record_reconciliation_page(
+            principal,
+            token,
+            ReconciliationResponse(
+                uuid4(),
+                principal.principal_id,
+                0,
+                attempt.create_sequence,
+                tombstone,
+                False,
+            ),
+            NOW,
+        )
+
+    def reject(candidate: TerminationProof) -> None:
+        before = snapshot()
+        with pytest.raises(ReversionJobConflictError):
+            record(candidate)
+        assert snapshot() == before
+
+    reject(replace(retained, attempt_id=uuid4()))
+    repository.reserve_create_intent(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained.policy_revision,
+        POLICY_SPECIFICATION,
+        NOW,
+    )
+    reject(replace(retained, policy_revision="other-policy"))
+    repository.record_broker_unit(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        unit_id,
+        NOW,
+    )
+    repository.record_active_termination_proof(
+        claimed.id,
+        attempt.attempt_id,
+        "worker",
+        claimed.lease_token,
+        retained,
+        NOW,
+    )
+    reject(replace(retained, proof_id=uuid4()))
+
+
+@pytest.mark.unit
+def test_reconciliation_rejects_cross_ledger_attempt_identity_collision(
+    reverse_repository: tuple[SqlReversionJobRepository, User, User, Engine],
+) -> None:
+    repository, owner, _other, _engine = reverse_repository
+    job, _ = repository.create(submission(owner.id))
+    repository.activate_source(job.id, NOW)
+    claimed = repository.claim("worker", PRINCIPAL, NOW, LEASE_END)
+    assert claimed is not None and claimed.current_attempt_id is not None
+    token = uuid4()
+    repository.begin_reconciliation(PRINCIPAL, "restore", token, NOW, LEASE_END)
+    conflicting = proof(claimed.current_attempt_id, uuid4())
+
+    with pytest.raises(ReversionJobConflictError):
+        repository.record_reconciliation_page(
+            PRINCIPAL,
+            token,
+            ReconciliationResponse(
+                uuid4(),
+                PRINCIPAL.principal_id,
+                0,
+                2,
+                ReconciliationTombstone(2, POLICY_SPECIFICATION, conflicting),
+                False,
+            ),
+            NOW,
+        )
 
 
 def _user(repository: SqlUserRepository, name: str) -> User:
@@ -66,7 +698,9 @@ def reverse_repository() -> Iterator[
     owner = _user(users, "ReverseOwner")
     other = _user(users, "ReverseOther")
     try:
-        yield SqlReversionJobRepository(engine), owner, other, engine
+        repository = SqlReversionJobRepository(engine)
+        complete_empty_reconciliation(repository)
+        yield repository, owner, other, engine
     finally:
         engine.dispose()
 

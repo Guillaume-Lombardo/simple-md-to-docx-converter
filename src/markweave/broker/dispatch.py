@@ -22,6 +22,11 @@ from markweave.broker.protocol import (
     TerminateRequest,
     TerminateResponse,
 )
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationErrorResponse,
+    ReconciliationRequest,
+    ReconciliationResult,
+)
 from markweave.broker.service import IsolationBrokerService
 from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
@@ -134,3 +139,22 @@ class BrokerDispatcher:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
         except BrokerError as error:
             return WorkspaceErrorResponse(request.request_id, operation, error.category)
+
+    def dispatch_reconciliation(
+        self,
+        principal: AuthenticatedPrincipal,
+        request: ReconciliationRequest,
+    ) -> ReconciliationResult:
+        """Dispatch the separately versioned inventory reconciliation query."""
+
+        if (
+            type(principal) is not AuthenticatedPrincipal
+            or type(request) is not ReconciliationRequest
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        try:
+            return self._service.reconciliation_page(
+                principal, request.request_id, request.after_create_sequence
+            )
+        except BrokerError as error:
+            return ReconciliationErrorResponse(request.request_id, error.category)

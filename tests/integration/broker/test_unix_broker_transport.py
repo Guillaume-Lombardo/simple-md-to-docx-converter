@@ -17,6 +17,10 @@ from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
 from markweave.broker.process import BrokerProcess
 from markweave.broker.protocol import ReadyRequest, ReadyResponse, encode_request
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationRequest,
+    ReconciliationResponse,
+)
 from markweave.broker.unix_transport import (
     UnixBrokerClient,
     UnixBrokerServer,
@@ -125,6 +129,28 @@ def test_real_unix_exchange_authenticates_both_peers_and_dispatches_once(
     assert response == ReadyResponse(REQUEST_ID, True)
     dispatcher.dispatch.assert_called_once_with(PRINCIPAL, request)
     assert not path.exists()
+
+
+def test_real_unix_reconciliation_exchange_binds_authenticated_principal(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    path, server, dispatcher = _server(tmp_path, mocker)
+    request = ReconciliationRequest(REQUEST_ID, 0)
+    expected = ReconciliationResponse(
+        REQUEST_ID, PRINCIPAL.principal_id, 0, 7, None, True
+    )
+    dispatcher.dispatch_reconciliation.return_value = expected
+
+    with server:
+        client = UnixBrokerClient(
+            path,
+            expected_server_uid=os.geteuid(),
+            expected_principal=PRINCIPAL,
+            operation_timeout_seconds=1,
+        )
+        assert client.reconcile(request) == expected
+
+    dispatcher.dispatch_reconciliation.assert_called_once_with(PRINCIPAL, request)
 
 
 def test_real_workspace_stage_collect_pending_and_success_exchange(

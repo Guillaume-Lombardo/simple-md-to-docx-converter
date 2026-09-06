@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from threading import Event, Thread
 from typing import cast
@@ -238,6 +239,79 @@ def test_runtime_reconnection_repeats_reconciliation(tmp_path: Path) -> None:
         "discover:before",
         "discover:after",
     )
+
+
+def test_reconciliation_page_sweeps_live_unit_before_returning_tombstone(
+    tmp_path: Path,
+) -> None:
+    broker, _, runtime = service(tmp_path)
+    broker.start()
+    created = broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+
+    response = broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert response.tombstone is not None
+    assert response.tombstone.proof.attempt_id == ATTEMPT_ID
+    assert response.tombstone.proof.unit_id == created.unit_id
+    assert response.create_sequence_high_water == 1
+    assert response.done is False
+    assert broker.ready
+    assert "hard_terminate:before" in runtime.calls
+
+
+def test_reconciliation_page_fault_never_returns_done_or_readiness(
+    tmp_path: Path,
+) -> None:
+    broker, _, runtime = service(tmp_path)
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    runtime.inject_fault("hard_terminate", point="before")
+
+    with pytest.raises(BrokerError):
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert not broker.ready
+
+
+def test_reconciliation_page_rejects_cursor_above_inventory_high_water(
+    tmp_path: Path,
+) -> None:
+    broker, _, _ = service(tmp_path)
+    broker.start()
+
+    with pytest.raises(BrokerError) as caught:
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 1)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
+
+
+def test_reconciliation_page_rejects_cross_principal_tombstone(
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    broker, broker_inventory, _ = service(tmp_path)
+    broker.start()
+    broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT_ID)
+    broker.runtime_reconnected()
+    high_water, tombstone = broker_inventory.reconciliation_page(
+        PRINCIPAL.principal_id, 0
+    )
+    assert tombstone is not None
+    mismatched = replace(
+        tombstone, proof=replace(tombstone.proof, principal=OTHER_PRINCIPAL)
+    )
+    mocker.patch.object(
+        broker_inventory,
+        "reconciliation_page",
+        return_value=(high_water, mismatched),
+    )
+
+    with pytest.raises(BrokerError) as caught:
+        broker.reconciliation_page(PRINCIPAL, UNIT_IDS[2], 0)
+
+    assert caught.value.category is BrokerErrorCategory.INVENTORY_FAILURE
+    assert not broker.ready
 
 
 def test_reconciliation_rejects_duplicate_runtime_discovery(

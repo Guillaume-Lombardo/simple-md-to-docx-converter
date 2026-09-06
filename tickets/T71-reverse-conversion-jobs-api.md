@@ -187,6 +187,32 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   family and whose trace format matches the selected parser. SQL row decoding translates malformed
   or tampered trace state into the stable repository error instead of exposing an unchecked domain
   value; direct-model and tampered-row tests cover the invariant.
+* 2026-09-06: Started the broker reconciliation slice from verified main `369b9c2c`. It adds the
+  separately versioned `markweave-reverse-broker-reconciliation` v1 protocol, authenticated
+  principal-isolated high-water/tombstone paging, durable per-principal reconciliation leases,
+  monotone local high-water repair, append-only orphan proof receipts, and replayable ACK intent.
+  Claims remain closed while reconciliation is incomplete or exclusively leased. The broker sweeps
+  live inventoried units before returning a page, and the database service rereads the head to a
+  fixed point before readiness. An exact restored create intent without a retained proof remains
+  blocked. This closes the retained non-ACK tombstone gap, but deliberately does not claim arbitrary
+  online-backup restore completeness: a proof ACKed and erased by the broker after an older database
+  snapshot cannot be reconstructed without a quiesced/drained backup contract or retained broker
+  ACK history. One principal therefore belongs to one durable database/broker inventory domain;
+  replacing or independently restoring the broker inventory requires a separate coordinated
+  recovery contract and is not inferred from high-water values alone.
+  The base is the exact #206 merge `369b9c2c19deb63ec575c5bf079d1a957cdd24ca`; main run
+  `34007228309` attempt 2 passed. Attempt 1 contained only the known distributed Playwright alert
+  timeout flake; the exact pull-request run and retry passed. T71 remains In Progress.
+* 2026-09-06: Hardened the reconciliation persistence contract before publication. Fresh principals
+  now start fail-closed, completion requires a persisted two-head fixed point and an empty bounded
+  ACK drain, and normal attempt proofs and orphan receipts share replayable acknowledgement handling.
+  Restored pre-intent attempts may be hydrated only by their exact broker tombstone; cross-ledger
+  attempt, sequence, unit, and proof collisions fail closed. Database constraints bind cursors to
+  monotone signed-64-bit high-water values, and SQLite/PostgreSQL races cover claim exclusion and
+  single-winner expired-lease takeover. This slice intentionally exposes the reconciler as an
+  application service without wiring a reverse worker runtime, which remains outside the current
+  queue/persistence scope; the fail-closed claim gate prevents bypass until that future assembly
+  performs reconciliation.
 
 ## Synchronization
 

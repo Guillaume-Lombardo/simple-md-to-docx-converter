@@ -23,6 +23,7 @@ from markweave.broker.models import (
     TerminationProof,
     is_next_unit_state,
 )
+from markweave.broker.reconciliation_protocol import ReconciliationTombstone
 
 _APPLICATION_ID = 0x4D574249  # MWBI
 _SCHEMA_VERSION = 2
@@ -261,6 +262,34 @@ class SQLiteBrokerInventory:
             _fail()
         with self._verified_connection() as connection:
             return self._principal_high_water(connection, str(principal_id))
+
+    def reconciliation_page(
+        self, principal_id: UUID, after_create_sequence: int
+    ) -> tuple[int, ReconciliationTombstone | None]:
+        """Return only the authenticated principal's next retained proof."""
+
+        if (
+            type(principal_id) is not UUID
+            or type(after_create_sequence) is not int
+            or not 0 <= after_create_sequence <= (1 << 63) - 1
+        ):
+            _fail()
+        principal = str(principal_id)
+        with self._verified_connection() as connection:
+            high_water = self._principal_high_water(connection, principal)
+            row = connection.execute(
+                _SELECT_UNITS + " WHERE principal_id = ? AND create_sequence > ? "
+                "AND state = ? AND proof_id IS NOT NULL "
+                "ORDER BY create_sequence, unit_id LIMIT 1",
+                (principal, after_create_sequence, ManagedUnitState.REMOVED.value),
+            ).fetchone()
+            if row is None:
+                return high_water, None
+            unit = self._unit_from_row(row)
+            proof = self._proof_from_row(row)
+            return high_water, ReconciliationTombstone(
+                unit.create_sequence, unit.policy_specification, proof
+            )
 
     def discard_reserved(self, unit_id: UUID, *, expected_revision: int) -> bool:
         """Discard only a proven pre-create reservation and retain replay state."""

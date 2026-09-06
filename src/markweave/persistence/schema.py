@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -531,14 +532,54 @@ class ReversionBrokerPrincipalRow(Base):
     __tablename__ = "reversion_broker_principals"
     __table_args__ = (
         CheckConstraint(
-            "create_sequence_high_water >= 0",
+            "create_sequence_high_water >= 0 AND create_sequence_high_water <= 9223372036854775807",
             name="ck_reversion_broker_principals_high_water",
+        ),
+        CheckConstraint(
+            "reconciliation_cursor >= 0 AND reconciliation_cursor <= 9223372036854775807",
+            name="ck_reversion_broker_principals_cursor",
+        ),
+        CheckConstraint(
+            "reconciliation_observed_head IS NULL OR (reconciliation_observed_head >= 0 AND reconciliation_observed_head <= 9223372036854775807)",
+            name="ck_reversion_broker_principals_observed_head",
+        ),
+        CheckConstraint(
+            "reconciliation_cursor <= create_sequence_high_water",
+            name="ck_reversion_broker_principals_cursor_high_water",
+        ),
+        CheckConstraint(
+            "reconciliation_observed_head IS NULL OR reconciliation_observed_head >= reconciliation_cursor",
+            name="ck_reversion_broker_principals_observed_cursor",
+        ),
+        CheckConstraint(
+            "NOT reconciliation_fixed_point OR reconciliation_observed_head IS NOT NULL",
+            name="ck_reversion_broker_principals_fixed_point",
+        ),
+        CheckConstraint(
+            "(reconciliation_owner IS NULL AND reconciliation_token IS NULL AND reconciliation_expires_at IS NULL) OR "
+            "(reconciliation_owner IS NOT NULL AND reconciliation_token IS NOT NULL AND reconciliation_expires_at IS NOT NULL)",
+            name="ck_reversion_broker_principals_reconciliation_lease",
         ),
     )
 
     principal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     create_sequence_high_water: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0
+    )
+    reconciliation_complete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    reconciliation_owner: Mapped[str | None] = mapped_column(String(255))
+    reconciliation_token: Mapped[str | None] = mapped_column(String(36))
+    reconciliation_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    reconciliation_cursor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    reconciliation_observed_head: Mapped[int | None] = mapped_column(BigInteger)
+    reconciliation_fixed_point: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
     )
 
 
@@ -624,12 +665,54 @@ class ReversionAttemptRow(Base):
     proof_acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    reconciliation_ack_intent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     proof_recovery_token: Mapped[str | None] = mapped_column(String(36))
     recovery_owner: Mapped[str | None] = mapped_column(String(255))
     recovery_token: Mapped[str | None] = mapped_column(String(36))
     recovery_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+
+
+class ReversionOrphanProofRow(Base):
+    """Append-only proof receipt recovered without a matching restored attempt."""
+
+    __tablename__ = "reversion_orphan_proofs"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id",
+            "create_sequence",
+            name="uq_reversion_orphan_principal_sequence",
+        ),
+        UniqueConstraint("proof_id", name="uq_reversion_orphan_proof"),
+        UniqueConstraint("unit_id", name="uq_reversion_orphan_unit"),
+        UniqueConstraint("attempt_id", name="uq_reversion_orphan_attempt"),
+        CheckConstraint("create_sequence > 0", name="ck_reversion_orphan_sequence"),
+    )
+
+    principal_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("reversion_broker_principals.principal_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    create_sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    attempt_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    unit_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    proof_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    policy_revision: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_specification: Mapped[str] = mapped_column(String(71), nullable=False)
+    exit_evidence: Mapped[str] = mapped_column(String(71), nullable=False)
+    empty_evidence: Mapped[str] = mapped_column(String(71), nullable=False)
+    removal_evidence: Mapped[str] = mapped_column(String(71), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ack_intent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 Index(
@@ -660,4 +743,16 @@ Index(
     ReversionAttemptRow.create_intent_at,
     ReversionAttemptRow.proof_recorded_at,
     ReversionAttemptRow.recovery_expires_at,
+)
+Index(
+    "ix_reversion_attempts_pending_ack",
+    ReversionAttemptRow.principal_id,
+    ReversionAttemptRow.proof_acknowledged_at,
+    ReversionAttemptRow.create_sequence,
+)
+Index(
+    "ix_reversion_orphans_pending_ack",
+    ReversionOrphanProofRow.principal_id,
+    ReversionOrphanProofRow.acknowledged_at,
+    ReversionOrphanProofRow.create_sequence,
 )

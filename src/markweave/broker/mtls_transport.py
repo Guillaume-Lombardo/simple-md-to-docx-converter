@@ -33,6 +33,27 @@ from markweave.broker.protocol import (
     encode_request,
     encode_response,
 )
+from markweave.broker.reconciliation_protocol import (
+    PROTOCOL_NAME as RECONCILIATION_PROTOCOL_NAME,
+)
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationErrorResponse,
+    ReconciliationRequest,
+    ReconciliationResponse,
+    ReconciliationResult,
+)
+from markweave.broker.reconciliation_protocol import (
+    decode_request as decode_reconciliation_request,
+)
+from markweave.broker.reconciliation_protocol import (
+    decode_response as decode_reconciliation_response,
+)
+from markweave.broker.reconciliation_protocol import (
+    encode_request as encode_reconciliation_request,
+)
+from markweave.broker.reconciliation_protocol import (
+    encode_response as encode_reconciliation_response,
+)
 from markweave.broker.unix_transport import (
     _validate_response_binding,
     _validate_workspace_response_binding,
@@ -531,7 +552,12 @@ def _response_frame_max(workspace_limits: RuntimeChannelLimits | None) -> int:
 
 def _decode_existing_request(
     frame: bytes, workspace_limits: RuntimeChannelLimits | None
-) -> BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest:
+) -> (
+    BrokerRequest
+    | WorkspaceStageRequest
+    | WorkspaceCollectRequest
+    | ReconciliationRequest
+):
     if len(frame) < LENGTH_PREFIX_BYTES:
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
     header_length = decode_length_prefix(frame[:LENGTH_PREFIX_BYTES])
@@ -539,7 +565,10 @@ def _decode_existing_request(
     if header_end > len(frame):
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
     header = frame[:header_end]
-    if frame_protocol(header) != WORKSPACE_PROTOCOL_NAME:
+    protocol_name = frame_protocol(header)
+    if protocol_name == RECONCILIATION_PROTOCOL_NAME:
+        return decode_reconciliation_request(frame)
+    if protocol_name != WORKSPACE_PROTOCOL_NAME:
         return decode_request(frame)
     if workspace_limits is None:
         raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -556,10 +585,26 @@ def _decode_existing_request(
 
 def _decode_existing_response(
     frame: bytes,
-    request: BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest,
+    request: BrokerRequest
+    | WorkspaceStageRequest
+    | WorkspaceCollectRequest
+    | ReconciliationRequest,
     workspace_limits: RuntimeChannelLimits | None,
     principal: AuthenticatedPrincipal,
-) -> BrokerResponse | WorkspaceResponse:
+) -> BrokerResponse | WorkspaceResponse | ReconciliationResult:
+    if type(request) is ReconciliationRequest:
+        response = decode_reconciliation_response(frame)
+        if response.request_id != request.request_id:
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        if type(response) is ReconciliationErrorResponse:
+            return response
+        success = cast(ReconciliationResponse, response)
+        if (
+            success.principal_id != principal.principal_id
+            or success.after_create_sequence != request.after_create_sequence
+        ):
+            raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        return success
     if isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
         if workspace_limits is None or len(frame) < LENGTH_PREFIX_BYTES:
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
@@ -576,7 +621,7 @@ def _decode_existing_response(
         _validate_workspace_response_binding(request, bound)
         return bound
     response = decode_response(frame)
-    _validate_response_binding(request, response, principal)
+    _validate_response_binding(cast(BrokerRequest, request), response, principal)
     return response
 
 
@@ -959,7 +1004,7 @@ class MtlsBrokerServer:
                         self._reservations.pop(exchange, None)
             self._exchanges.release()
 
-    def _handle_request_channel(
+    def _handle_request_channel(  # noqa: PLR0912 - closed protocol multiplexing
         self,
         connection: ssl.SSLSocket,
         value: dict[str, object],
@@ -1020,6 +1065,10 @@ class MtlsBrokerServer:
                         cast(WorkspaceResponse, response),
                         cast(RuntimeChannelLimits, self._workspace_limits),
                     )
+                elif type(request) is ReconciliationRequest:
+                    response_frame = encode_reconciliation_response(
+                        cast(ReconciliationResult, response)
+                    )
                 else:
                     response_frame = encode_response(cast(BrokerResponse, response))
                 if len(response_frame) > _response_frame_max(self._workspace_limits):
@@ -1034,10 +1083,13 @@ class MtlsBrokerServer:
 
     def _dispatch(
         self,
-        request: BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest,
+        request: BrokerRequest
+        | WorkspaceStageRequest
+        | WorkspaceCollectRequest
+        | ReconciliationRequest,
         principal: AuthenticatedPrincipal,
         deadline: float,
-    ) -> BrokerResponse | WorkspaceResponse | None:
+    ) -> BrokerResponse | WorkspaceResponse | ReconciliationResult | None:
         if not self._dispatch_gate.acquire(timeout=_remaining(deadline)):
             self._record_fatal(TimeoutError("Broker mTLS dispatch gate expired"))
             return None
@@ -1049,9 +1101,11 @@ class MtlsBrokerServer:
         )
         watchdog.start()
         try:
+            if type(request) is ReconciliationRequest:
+                return self._dispatcher.dispatch_reconciliation(principal, request)
             if isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
                 return self._dispatcher.dispatch_workspace(principal, request)
-            return self._dispatcher.dispatch(principal, request)
+            return self._dispatcher.dispatch(principal, cast(BrokerRequest, request))
         except BaseException as error:
             self._record_fatal(error)
             return None
@@ -1111,6 +1165,9 @@ class MtlsBrokerClient:
     def request(self, request: BrokerRequest) -> BrokerResponse:
         return cast(BrokerResponse, self._exchange(request))
 
+    def reconcile(self, request: ReconciliationRequest) -> ReconciliationResult:
+        return cast(ReconciliationResult, self._exchange(request))
+
     def stage_workspace(
         self, request: WorkspaceStageRequest
     ) -> WorkspaceStageReceipt | WorkspaceErrorResponse:
@@ -1146,17 +1203,23 @@ class MtlsBrokerClient:
             raise
 
     def _exchange(  # noqa: PLR0912, PLR0915
-        self, request: BrokerRequest | WorkspaceStageRequest | WorkspaceCollectRequest
-    ) -> BrokerResponse | WorkspaceResponse:
+        self,
+        request: BrokerRequest
+        | WorkspaceStageRequest
+        | WorkspaceCollectRequest
+        | ReconciliationRequest,
+    ) -> BrokerResponse | WorkspaceResponse | ReconciliationResult:
         deadline = monotonic() + self._operation_timeout_seconds
         try:
-            if isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
+            if type(request) is ReconciliationRequest:
+                frame = encode_reconciliation_request(request)
+            elif isinstance(request, (WorkspaceStageRequest, WorkspaceCollectRequest)):
                 limits = self._workspace_limits
                 if limits is None:
                     raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
                 frame = encode_workspace_request(request)
             else:
-                frame = encode_request(request)
+                frame = encode_request(cast(BrokerRequest, request))
             if len(frame) > _request_frame_max(self._workspace_limits):
                 raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
             _remaining(deadline)

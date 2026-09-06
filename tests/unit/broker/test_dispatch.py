@@ -31,6 +31,10 @@ from markweave.broker.protocol import (
     TerminateRequest,
     TerminateResponse,
 )
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationRequest,
+    ReconciliationResponse,
+)
 from markweave.broker.service import IsolationBrokerService
 from markweave.broker.workspace_protocol import (
     WorkspaceCollectRequest,
@@ -130,6 +134,20 @@ def test_dispatches_every_operation_with_authenticated_identity(
     assert replay.sequence == 1
     assert attempt_id == ATTEMPT_ID
     service.status.assert_called_once_with(PRINCIPAL, ATTEMPT_ID, UNIT_ID)
+
+
+def test_dispatches_separate_reconciliation_protocol_with_transport_principal(
+    mocker: MockerFixture,
+) -> None:
+    dispatcher, service = _dispatcher(mocker)
+    request = ReconciliationRequest(REQUEST_ID, 3)
+    expected = ReconciliationResponse(
+        REQUEST_ID, PRINCIPAL.principal_id, 3, 4, None, True
+    )
+    service.reconciliation_page.return_value = expected
+
+    assert dispatcher.dispatch_reconciliation(PRINCIPAL, request) == expected
+    service.reconciliation_page.assert_called_once_with(PRINCIPAL, REQUEST_ID, 3)
 
 
 @pytest.mark.parametrize(

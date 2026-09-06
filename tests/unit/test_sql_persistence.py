@@ -75,6 +75,9 @@ PASSWORD_CHANGE_REVISION: Any = importlib.import_module(
 IDLE_POLICY_REVISION: Any = importlib.import_module(
     "markweave.persistence.migrations.versions.20260901_15_idle_session_policy"
 )
+BROKER_RECONCILIATION_REVISION: Any = importlib.import_module(
+    "markweave.persistence.migrations.versions.20260906_17_broker_reconciliation"
+)
 
 
 @pytest.mark.unit
@@ -127,6 +130,7 @@ def test_inprocess_sql_repository_control_flow() -> None:
         "reversion_attempts",
         "reversion_broker_principals",
         "reversion_jobs",
+        "reversion_orphan_proofs",
         "sessions",
         "system_template_selection",
         "template_audit_records",
@@ -757,6 +761,23 @@ def test_idle_policy_migration_covers_both_immutability_dialects(
     IDLE_POLICY_REVISION.upgrade()
     IDLE_POLICY_REVISION.downgrade()
     assert idle_policy.execute.call_count == 4
+
+
+@pytest.mark.unit
+def test_broker_reconciliation_migration_operations(mocker: MockerFixture) -> None:
+    operations = mocker.patch.object(BROKER_RECONCILIATION_REVISION, "op")
+    batch = operations.batch_alter_table.return_value.__enter__.return_value
+
+    BROKER_RECONCILIATION_REVISION.upgrade()
+    assert operations.create_table.call_count == 1
+    assert operations.create_index.call_count == 2
+    assert batch.add_column.call_count == 8
+    assert batch.create_check_constraint.call_count == 7
+
+    BROKER_RECONCILIATION_REVISION.downgrade()
+    assert operations.drop_index.call_count == 2
+    operations.drop_table.assert_called_once_with("reversion_orphan_proofs")
+    assert batch.drop_column.call_count == 8
 
 
 @pytest.mark.unit
