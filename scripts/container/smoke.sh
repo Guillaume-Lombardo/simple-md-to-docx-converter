@@ -31,7 +31,7 @@ run_hardened --env "EXPECTED_APPLICATION_VERSION=$application_version" \
   /opt/md-converter/venv/bin/python -c \
     "import markweave, os; assert markweave.__version__ == os.environ[\"EXPECTED_APPLICATION_VERSION\"]"
   test "$(pandoc --version | head -1)" = "pandoc 3.10.2"
-  test "$(mmdc --version)" = "11.16.0"
+  test "$(mmdc --version)" = "11.17.0"
   test "$(google-chrome-stable --version | awk "{\$1=\$1; print}")" = "Google Chrome 151.0.7922.173"
   test "$(soffice --version | awk "{\$1=\$1; print}")" = "LibreOffice 26.2.5.2 cd7284b4cbbfeb507e630c1aac019f4157393acb"
   mkdir -p /work/home /work/xdg/cache /work/xdg/config /work/xdg/data /work/xdg/runtime /work/tmp

@@ -41,7 +41,7 @@ def test_lock_preserves_the_audited_npm_package_versions_and_integrities() -> No
     assert hashlib.sha256(
         Path("spikes/toolchain/package-lock.json").read_bytes()
     ).hexdigest() == (
-        "6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f"
+        "65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff"
     )
 
 
