@@ -4,12 +4,19 @@ kind: Namespace
 metadata:
   name: markweave-reverse
   labels:
-    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce: restricted
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata: {name: markweave-reverse-attempt, namespace: markweave-reverse}
 automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: markweave-attestation
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -39,26 +46,6 @@ subjects:
     name: markweave-reverse-broker
     namespace: markweave-reverse
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata: {name: markweave-reverse-broker-node-reader}
-rules:
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata: {name: markweave-reverse-broker-node-reader}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: markweave-reverse-broker-node-reader
-subjects:
-  - kind: ServiceAccount
-    name: markweave-reverse-broker
-    namespace: markweave-reverse
----
 # This RuntimeClass handler exists only on nodes whose CNI configuration creates
 # a loopback-only sandbox. A NetworkPolicy is intentionally not treated as proof.
 apiVersion: node.k8s.io/v1
@@ -77,12 +64,12 @@ scheduling:
 ---
 apiVersion: v1
 kind: ServiceAccount
-metadata: {name: markweave-node-attester, namespace: markweave-reverse}
+metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: DaemonSet
-metadata: {name: markweave-node-attester, namespace: markweave-reverse}
+metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 spec:
   selector:
     matchLabels: {app.kubernetes.io/name: markweave-node-attester}
@@ -132,7 +119,7 @@ spec:
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
-metadata: {name: markweave-node-attester, namespace: markweave-reverse}
+metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 spec:
   maxUnavailable: 0
   selector:

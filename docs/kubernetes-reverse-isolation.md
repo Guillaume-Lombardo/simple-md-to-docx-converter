@@ -8,14 +8,16 @@ crash-consistent inventory, reconciliation, tombstones, and proof acknowledgemen
 
 The application and external worker possess only a broker client identity. They have no Kubernetes,
 OCI, CRI, node, or workload-mutating credentials. The broker alone receives namespace-scoped Pod
-authority. It authors the immutable Pod specification and uses an exact Pod UID precondition for
-termination and deletion. The attempt service account has no RBAC and its token is not mounted.
+authority in the attempt namespace. It authors the immutable Pod specification and uses an exact
+Pod UID precondition for termination and deletion. The attempt service account has no RBAC and its
+token is not mounted.
 
-A separately deployed node attester is the only component that can query the CRI socket and stable
-cgroup. Its service account token is disabled. Its mTLS endpoint accepts only the broker identity
-and returns bounded, content-free evidence. The attester never accepts a command, argv, image,
-path, PID, cgroup, sandbox, or node chosen independently by the caller: it derives these identities
-from the Pod UID and verifies them against CRI metadata.
+A separately deployed node attester, in a different namespace outside the broker Role and
+`pods/exec` scope, is the only component that can query the CRI socket and stable cgroup. The
+broker has no Node-reading ClusterRole. The attester service account token is disabled. Its mTLS
+endpoint accepts only the broker identity and returns bounded, content-free evidence. The attester
+never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
+the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. A production adapter must
 collect the corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output
@@ -32,10 +34,16 @@ positive:
 - cgroup v2 is active;
 - kubelet `podPidsLimit` equals the broker policy PID ceiling;
 - kubelet's CPU CFS quota period equals the broker policy period;
-- the selected runtime handler and node CNI create a network namespace containing only `lo`, with
-  forwarding disabled;
 - the node carries the expected pool/fence labels and dedicated taint; and
-- the observed Pod manifest has the exact canonical broker-authored digest.
+- the sandbox network namespace contains only `lo`, with forwarding disabled; and
+- the observed, API-server-defaulted Pod projects to the exact canonical broker-owned contract.
+
+The canonical Pod contract contains every field authored by the broker. Observation drops fields
+added by API-server defaulting, normalizes equivalent CPU and byte quantities, and drops only the
+two standard automatically injected `NoExecute` tolerations. Extra containers, init containers,
+ephemeral containers, volumes, mounts, or changes to any broker-owned field fail attestation. The
+contract digest is carried in evidence; the full policy-specification digest is an annotation,
+because a 64-character digest is not a valid Kubernetes label value.
 
 The loopback-only CNI is mandatory. Kubernetes `NetworkPolicy` alone is not accepted as proof
 because implementations can exempt node traffic. The dedicated nodes must run no general workload.
@@ -49,9 +57,15 @@ Each attempt is one UID-bound Pod with a digest-only image, fixed Python module 
 arguments, arbitrary non-root UID/GID, read-only root, all capabilities dropped, runtime-default
 seccomp, no privilege escalation, no host namespaces, no service links, no service-account token,
 and no restart. CPU and memory requests equal limits. `/work` is a memory-backed `emptyDir` with the
-exact workspace size limit, and the same value is the ephemeral-storage request and limit. The Pod
+exact workspace size limit; Pod-level `fsGroup` ownership makes it writable by the arbitrary
+non-root attempt identity, and the same value is the ephemeral-storage request and limit. The Pod
 active deadline is the rounded-up broker deadline. CPU quota/period values that cannot be
 represented exactly in Kubernetes millicores are rejected.
+
+Readiness is based on observations from the sandbox and kernel, not the requested Pod resources.
+The attester reads and binds the sandbox cgroup's actual `cpu.max` quota and period, `memory.max`,
+and `pids.max`, plus the `/work` mount filesystem, path, size and exact `rw,nodev,noexec,nosuid`
+flags. Any mismatch with policy rejects the sandbox before request staging.
 
 Workspace transfer uses the exact attempt Pod identity and bounded T70 request/response channel.
 Document bytes never enter labels, inventory, evidence, diagnostics, or attester messages.

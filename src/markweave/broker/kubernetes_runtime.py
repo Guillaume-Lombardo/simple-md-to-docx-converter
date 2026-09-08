@@ -13,7 +13,8 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from decimal import Decimal, InvalidOperation
+from typing import Protocol, cast
 from uuid import UUID
 
 from markweave.broker.models import (
@@ -37,12 +38,13 @@ _UNIT_LABEL = "reverse.markweave.dev/unit-id"
 _ATTEMPT_LABEL = "reverse.markweave.dev/attempt-id"
 _PRINCIPAL_LABEL = "reverse.markweave.dev/principal-id"
 _POLICY_LABEL = "reverse.markweave.dev/policy-revision"
-_SPECIFICATION_LABEL = "reverse.markweave.dev/policy-specification"
+_SPECIFICATION_ANNOTATION = "reverse.markweave.dev/policy-specification"
 _POOL_LABEL = "reverse.markweave.dev/isolation-pool"
 _FENCE_LABEL = "reverse.markweave.dev/node-fence"
 _TAINT_KEY = "reverse.markweave.dev/dedicated"
 _MAX_DNS_NAME_BYTES = 253
 _MAX_IMAGE_REPOSITORY_BYTES = 255
+_RESOURCE_PATH_DEPTH = 2
 
 
 class KubernetesRuntimeError(RuntimeError):
@@ -57,7 +59,6 @@ class KubernetesPodIdentity:
     name: str
     pod_uid: UUID
     node_name: str
-    node_uid: UUID
     unit_id: UUID
     attempt_id: UUID
     principal_id: UUID
@@ -74,7 +75,6 @@ class KubernetesPodIdentity:
             or type(self.node_name) is not str
             or not self.node_name
             or len(self.node_name) > _MAX_DNS_NAME_BYTES
-            or type(self.node_uid) is not UUID
             or type(self.unit_id) is not UUID
             or type(self.attempt_id) is not UUID
             or type(self.principal_id) is not UUID
@@ -91,6 +91,7 @@ class KubernetesSandboxIdentity:
 
     sandbox_id: str
     cgroup_path: str
+    node_uid: UUID
     node_fence: EvidenceDigest
 
     def __post_init__(self) -> None:
@@ -99,6 +100,7 @@ class KubernetesSandboxIdentity:
             or _SANDBOX_ID.fullmatch(self.sandbox_id) is None
             or type(self.cgroup_path) is not str
             or _CGROUP_PATH.fullmatch(self.cgroup_path) is None
+            or type(self.node_uid) is not UUID
             or type(self.node_fence) is not EvidenceDigest
         ):
             raise ValueError("Kubernetes sandbox identity is invalid")
@@ -157,6 +159,17 @@ class KubernetesRuntimeConfig:
             raise ValueError("Kubernetes runtime configuration is invalid")
 
 
+@dataclass(frozen=True, slots=True)
+class KubernetesAttestationContract:
+    """Broker-authored values the node attester must prove exactly."""
+
+    pod_contract: Mapping[str, object]
+    manifest_digest: EvidenceDigest
+    policy: BrokerPolicy
+    pool: str
+    fence_revision: str
+
+
 class KubernetesControlPlane(Protocol):
     """Narrow Pod-only authority held exclusively by the trusted broker."""
 
@@ -187,11 +200,7 @@ class KubernetesNodeAttester(Protocol):
     def bind(
         self,
         pod: KubernetesPodIdentity,
-        *,
-        expected_manifest_digest: EvidenceDigest,
-        expected_policy: BrokerPolicy,
-        expected_pool: str,
-        expected_fence_revision: str,
+        contract: KubernetesAttestationContract,
     ) -> KubernetesSandboxIdentity: ...
 
     def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest: ...
@@ -219,6 +228,43 @@ def manifest_digest(manifest: Mapping[str, object]) -> EvidenceDigest:
     except (TypeError, ValueError, UnicodeEncodeError) as error:
         raise KubernetesRuntimeError("Kubernetes manifest is invalid") from error
     return EvidenceDigest(f"sha256:{hashlib.sha256(encoded).hexdigest()}")
+
+
+def pod_contract_projection(pod: Mapping[str, object]) -> dict[str, object]:
+    """Return the canonical broker-owned subset before API-server defaulting."""
+
+    if not isinstance(pod, Mapping):
+        raise KubernetesRuntimeError("Kubernetes Pod contract is invalid")
+    try:
+        projected = _project_like(pod, _pod_contract_template(pod), ())
+    except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+        raise KubernetesRuntimeError("Kubernetes Pod contract is invalid") from error
+    if type(projected) is not dict or any(type(key) is not str for key in projected):
+        raise KubernetesRuntimeError("Kubernetes Pod contract is invalid")
+    return cast(dict[str, object], projected)
+
+
+def project_observed_pod(
+    observed: Mapping[str, object], expected: Mapping[str, object]
+) -> dict[str, object]:
+    """Project an API-defaulted Pod through an exact expected contract shape."""
+
+    try:
+        if _extra_workload_containers(observed):
+            raise ValueError
+        prepared = _filter_default_tolerations(observed, expected)
+        projected = _project_like(prepared, expected, ())
+    except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+        raise KubernetesRuntimeError("Kubernetes observed Pod is invalid") from error
+    if type(projected) is not dict or any(type(key) is not str for key in projected):
+        raise KubernetesRuntimeError("Kubernetes observed Pod is invalid")
+    return cast(dict[str, object], projected)
+
+
+def pod_contract_digest(pod: Mapping[str, object]) -> EvidenceDigest:
+    """Digest one canonical Pod security contract."""
+
+    return manifest_digest(pod_contract_projection(pod))
 
 
 class KubernetesIsolationRuntime:
@@ -265,16 +311,11 @@ class KubernetesIsolationRuntime:
         ):
             raise KubernetesRuntimeError("Kubernetes create contract is invalid")
         manifest = self._manifest(unit, policy)
+        pod_contract = pod_contract_projection(manifest)
         try:
             pod = self._control.create(manifest)
             self._verify_pod_identity(unit, pod)
-            sandbox = self._attester.bind(
-                pod,
-                expected_manifest_digest=manifest_digest(manifest),
-                expected_policy=policy,
-                expected_pool=self._config.pool_name,
-                expected_fence_revision=self._config.node_fence_revision,
-            )
+            sandbox = self._attester.bind(pod, self._attestation(pod_contract, policy))
             result = KubernetesRuntimeUnit(
                 unit.unit_id,
                 RuntimeIncarnation(pod.pod_uid, unit.policy_specification),
@@ -406,14 +447,10 @@ class KubernetesIsolationRuntime:
                 != policy_specification_evidence(self._policy)
             ):
                 raise KubernetesRuntimeError("Kubernetes discovery policy is invalid")
+            manifest = self._manifest(managed, self._policy)
+            pod_contract = pod_contract_projection(manifest)
             sandbox = self._attester.bind(
-                pod,
-                expected_manifest_digest=manifest_digest(
-                    self._manifest(managed, self._policy)
-                ),
-                expected_policy=self._policy,
-                expected_pool=self._config.pool_name,
-                expected_fence_revision=self._config.node_fence_revision,
+                pod, self._attestation(pod_contract, self._policy)
             )
             runtime_unit = KubernetesRuntimeUnit(
                 pod.unit_id,
@@ -458,9 +495,6 @@ class KubernetesIsolationRuntime:
             _MANAGED_LABEL: "1",
             _POLICY_LABEL: policy.revision,
             _PRINCIPAL_LABEL: str(unit.principal.principal_id),
-            _SPECIFICATION_LABEL: unit.policy_specification.value.removeprefix(
-                "sha256:"
-            ),
             _UNIT_LABEL: str(unit.unit_id),
         }
         name = f"markweave-reverse-{unit.unit_id.hex}"
@@ -472,6 +506,9 @@ class KubernetesIsolationRuntime:
                 "name": name,
                 "namespace": config.namespace,
                 "labels": labels,
+                "annotations": {
+                    _SPECIFICATION_ANNOTATION: unit.policy_specification.value,
+                },
             },
             "spec": {
                 "activeDeadlineSeconds": seconds,
@@ -531,6 +568,14 @@ class KubernetesIsolationRuntime:
                 },
                 "restartPolicy": "Never",
                 "runtimeClassName": config.runtime_class,
+                "securityContext": {
+                    "fsGroup": config.run_as_gid,
+                    "fsGroupChangePolicy": "OnRootMismatch",
+                    "runAsGroup": config.run_as_gid,
+                    "runAsNonRoot": True,
+                    "runAsUser": config.run_as_uid,
+                    "seccompProfile": {"type": "RuntimeDefault"},
+                },
                 "serviceAccountName": config.service_account,
                 "setHostnameAsFQDN": False,
                 "shareProcessNamespace": False,
@@ -554,6 +599,17 @@ class KubernetesIsolationRuntime:
                 ],
             },
         }
+
+    def _attestation(
+        self, pod_contract: Mapping[str, object], policy: BrokerPolicy
+    ) -> KubernetesAttestationContract:
+        return KubernetesAttestationContract(
+            pod_contract,
+            manifest_digest(pod_contract),
+            policy,
+            self._config.pool_name,
+            self._config.node_fence_revision,
+        )
 
 
 def _require_evidence(value: object, message: str) -> EvidenceDigest:
@@ -595,3 +651,106 @@ def _cpu_millicores(policy: BrokerPolicy) -> int:
     if result <= 0:
         raise KubernetesRuntimeError("Kubernetes CPU policy is invalid")
     return result
+
+
+def _pod_contract_template(pod: Mapping[str, object]) -> dict[str, object]:
+    return dict(pod)
+
+
+def _project_like(value: object, template: object, path: tuple[str, ...]) -> object:
+    if isinstance(template, Mapping):
+        if not isinstance(value, Mapping):
+            raise TypeError
+        return {
+            key: _project_like(value[key], child, (*path, key))
+            for key, child in template.items()
+        }
+    if type(template) is list:
+        if type(value) is not list or len(value) != len(template):
+            raise TypeError
+        return [
+            _project_like(item, template[index], (*path, str(index)))
+            for index, item in enumerate(value)
+        ]
+    if len(path) >= _RESOURCE_PATH_DEPTH and path[-2] in {"limits", "requests"}:
+        if path[-1] == "cpu":
+            return _cpu_quantity(value)
+        if path[-1] in {"memory", "ephemeral-storage"}:
+            return _byte_quantity(value)
+    if path[-1:] == ("sizeLimit",):
+        return _byte_quantity(value)
+    if type(value) is not type(template):
+        raise TypeError
+    return value
+
+
+def _cpu_quantity(value: object) -> int:
+    if type(value) is not str or not value:
+        raise ValueError
+    amount = Decimal(value[:-1]) if value.endswith("m") else Decimal(value) * 1000
+    if amount != amount.to_integral_value() or amount <= 0:
+        raise ValueError
+    return int(amount)
+
+
+def _byte_quantity(value: object) -> int:
+    if type(value) is not str or not value:
+        raise ValueError
+    suffixes = {
+        "Ki": 1 << 10,
+        "Mi": 1 << 20,
+        "Gi": 1 << 30,
+        "Ti": 1 << 40,
+        "Pi": 1 << 50,
+        "Ei": 1 << 60,
+        "k": 1000,
+        "M": 1000**2,
+        "G": 1000**3,
+        "T": 1000**4,
+        "P": 1000**5,
+        "E": 1000**6,
+    }
+    suffix = next((item for item in suffixes if value.endswith(item)), "")
+    number = value[: -len(suffix)] if suffix else value
+    amount = Decimal(number) * suffixes.get(suffix, 1)
+    if amount != amount.to_integral_value() or amount <= 0:
+        raise ValueError
+    return int(amount)
+
+
+def _extra_workload_containers(pod: Mapping[str, object]) -> bool:
+    specification = pod.get("spec")
+    if not isinstance(specification, Mapping):
+        raise TypeError
+    values = (
+        specification.get("initContainers"),
+        specification.get("ephemeralContainers"),
+    )
+    return any(value is not None and value not in ((), []) for value in values)
+
+
+def _filter_default_tolerations(
+    observed: Mapping[str, object], expected: Mapping[str, object]
+) -> dict[str, object]:
+    observed_copy = dict(observed)
+    observed_specification = observed.get("spec")
+    expected_specification = expected.get("spec")
+    if not isinstance(observed_specification, Mapping) or not isinstance(
+        expected_specification, Mapping
+    ):
+        raise TypeError
+    expected_tolerations = expected_specification.get("tolerations")
+    observed_tolerations = observed_specification.get("tolerations")
+    if type(expected_tolerations) is not list or type(observed_tolerations) is not list:
+        raise TypeError
+    expected_keys = {
+        item.get("key") for item in expected_tolerations if isinstance(item, Mapping)
+    }
+    specification_copy = dict(observed_specification)
+    specification_copy["tolerations"] = [
+        item
+        for item in observed_tolerations
+        if isinstance(item, Mapping) and item.get("key") in expected_keys
+    ]
+    observed_copy["spec"] = specification_copy
+    return observed_copy

@@ -24,6 +24,8 @@ from markweave.broker.kubernetes_runtime import (
     KubernetesRuntimeUnit,
     KubernetesSandboxIdentity,
     manifest_digest,
+    pod_contract_projection,
+    project_observed_pod,
 )
 from markweave.broker.models import (
     AuthenticatedPrincipal,
@@ -128,7 +130,6 @@ class ControlPlaneDouble:
             f"markweave-reverse-{self.unit.unit_id.hex}",
             self.pod_uid,
             "reverse-node-1",
-            NODE_UID,
             self.unit.unit_id,
             self.unit.attempt_id,
             self.unit.principal.principal_id,
@@ -211,8 +212,6 @@ class InspectorDouble:
             "cgroup_version": 2,
             "pod_pids_limit": self.policy.limits.pid_limit,
             "cpu_quota_period_micros": self.policy.limits.cpu_period_micros,
-            "network_interfaces": ("lo",),
-            "forwarding_enabled": False,
         }
         values.update(self.override_node)
         return NodeFenceSnapshot(**values)
@@ -223,9 +222,9 @@ class InspectorDouble:
         running = not self.control.terminated
         states = ("RUNNING",) if running else ("EXITED",)
         assert self.control.manifest is not None
-        observed_manifest = deepcopy(self.control.manifest)
+        observed_pod = deepcopy(self.control.manifest)
         if self.control.tamper_manifest:
-            specification = observed_manifest["spec"]
+            specification = observed_pod["spec"]
             assert isinstance(specification, dict)
             specification["hostNetwork"] = True
         values: dict[str, Any] = {
@@ -233,10 +232,20 @@ class InspectorDouble:
             "node_uid": NODE_UID,
             "sandbox_id": SANDBOX_ID,
             "cgroup_path": CGROUP,
-            "observed_manifest": observed_manifest,
+            "observed_pod": observed_pod,
             "container_ids": ("9" * 64,),
             "container_states": states,
             "sandbox_ready": running,
+            "network_interfaces": ("lo",),
+            "forwarding_enabled": False,
+            "cpu_quota_micros": self.policy.limits.cpu_quota_micros,
+            "cpu_period_micros": self.policy.limits.cpu_period_micros,
+            "memory_max_bytes": self.policy.limits.memory_bytes,
+            "pids_max": self.policy.limits.pid_limit,
+            "workspace_filesystem": "tmpfs",
+            "workspace_mount_path": "/work",
+            "workspace_size_bytes": self.policy.limits.workspace_bytes,
+            "workspace_mount_flags": ("nodev", "noexec", "nosuid", "rw"),
             "cgroup_populated": running,
             "descendant_pids": (123,) if running else (),
         }
@@ -289,6 +298,14 @@ def test_kubernetes_manifest_enforces_every_fixed_boundary(
     assert result.unit_id == UNIT_ID
     manifest = control.manifest
     assert manifest is not None
+    metadata = manifest["metadata"]
+    assert isinstance(metadata, dict)
+    labels = metadata["labels"]
+    assert isinstance(labels, dict)
+    assert "reverse.markweave.dev/policy-specification" not in labels
+    assert metadata["annotations"] == {
+        "reverse.markweave.dev/policy-specification": unit.policy_specification.value
+    }
     specification = manifest["spec"]
     assert isinstance(specification, dict)
     assert specification["activeDeadlineSeconds"] == 3
@@ -299,6 +316,14 @@ def test_kubernetes_manifest_enforces_every_fixed_boundary(
     assert specification["hostPID"] is False
     assert specification["restartPolicy"] == "Never"
     assert specification["runtimeClassName"] == "markweave-reverse"
+    assert specification["securityContext"] == {
+        "fsGroup": 1001,
+        "fsGroupChangePolicy": "OnRootMismatch",
+        "runAsGroup": 1001,
+        "runAsNonRoot": True,
+        "runAsUser": 1001,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
     assert specification["terminationGracePeriodSeconds"] == 0
     assert specification["nodeSelector"] == {
         "reverse.markweave.dev/isolation-pool": "reverse",
@@ -339,6 +364,104 @@ def test_kubernetes_manifest_enforces_every_fixed_boundary(
 
 
 @pytest.mark.unit
+def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    expected = pod_contract_projection(control.manifest)
+    observed = deepcopy(control.manifest)
+    metadata = observed["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["creationTimestamp"] = "2026-09-08T00:00:00Z"
+    specification = observed["spec"]
+    assert isinstance(specification, dict)
+    specification["schedulerName"] = "default-scheduler"
+    tolerations = specification["tolerations"]
+    assert isinstance(tolerations, list)
+    tolerations.extend(
+        [
+            {
+                "effect": "NoExecute",
+                "key": "node.kubernetes.io/not-ready",
+                "operator": "Exists",
+                "tolerationSeconds": 300,
+            },
+            {
+                "effect": "NoExecute",
+                "key": "node.kubernetes.io/unreachable",
+                "operator": "Exists",
+                "tolerationSeconds": 300,
+            },
+        ]
+    )
+    container = specification["containers"][0]
+    assert isinstance(container, dict)
+    resources = container["resources"]
+    assert isinstance(resources, dict)
+    for section_name in ("limits", "requests"):
+        section = resources[section_name]
+        assert isinstance(section, dict)
+        section["cpu"] = "1"
+        section["memory"] = "256Mi"
+        section["ephemeral-storage"] = "16Mi"
+    volumes = specification["volumes"]
+    assert isinstance(volumes, list)
+    volume = volumes[0]
+    assert isinstance(volume, dict)
+    empty_dir = volume["emptyDir"]
+    assert isinstance(empty_dir, dict)
+    empty_dir["sizeLimit"] = "16Mi"
+
+    assert project_observed_pod(observed, expected) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cpu_quota_micros", 99_999),
+        ("cpu_period_micros", 99_999),
+        ("memory_max_bytes", 1),
+        ("pids_max", 32),
+        ("workspace_filesystem", "overlay"),
+        ("workspace_mount_path", "/unexpected-work"),
+        ("workspace_size_bytes", 1),
+        ("workspace_mount_flags", ("rw",)),
+        ("network_interfaces", ("eth0", "lo")),
+        ("forwarding_enabled", True),
+    ],
+)
+def test_sandbox_kernel_enforcement_must_match_exact_policy(
+    unit: ManagedUnit, policy: BrokerPolicy, field: str, value: object
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    inspector.override_sandbox = {field: value}
+
+    with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
+        runtime.create(unit, policy)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["initContainers", "ephemeralContainers"])
+def test_observed_pod_rejects_injected_workload_containers(
+    unit: ManagedUnit, policy: BrokerPolicy, field: str
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    observed = deepcopy(control.manifest)
+    specification = observed["spec"]
+    assert isinstance(specification, dict)
+    specification[field] = [{"name": "injected", "image": "attacker/image"}]
+    inspector.override_sandbox = {"observed_pod": observed}
+
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        runtime.discover(limit=1)
+
+
+@pytest.mark.unit
 def test_kubernetes_backend_satisfies_shared_lifecycle(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
@@ -350,7 +473,6 @@ def test_kubernetes_backend_satisfies_shared_lifecycle(
 @pytest.mark.parametrize(
     ("override", "message"),
     [
-        ({"network_interfaces": ("lo", "eth0")}, "node fence"),
         ({"pod_pids_limit": 32}, "node fence"),
         ({"ready": False}, "node fence"),
         ({"fence_revision": "other"}, "node fence"),
@@ -447,14 +569,13 @@ def test_restart_discovery_rebinds_cri_identity(
             "pod",
             POD_UID,
             "node",
-            NODE_UID,
             UNIT_ID,
             ATTEMPT_ID,
             PRINCIPAL_ID,
             "policy",
             EVIDENCE,
         ),
-        lambda: KubernetesSandboxIdentity("bad", CGROUP, EVIDENCE),
+        lambda: KubernetesSandboxIdentity("bad", CGROUP, NODE_UID, EVIDENCE),
         lambda: KubernetesRuntimeUnit(
             UNIT_ID,
             RuntimeIncarnation(UNIT_ID, EVIDENCE),
@@ -463,14 +584,13 @@ def test_restart_discovery_rebinds_cri_identity(
                 "pod",
                 POD_UID,
                 "node",
-                NODE_UID,
                 UNIT_ID,
                 ATTEMPT_ID,
                 PRINCIPAL_ID,
                 "policy",
                 EVIDENCE,
             ),
-            KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, EVIDENCE),
+            KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE),
         ),
     ],
 )

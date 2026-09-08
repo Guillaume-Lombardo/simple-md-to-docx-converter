@@ -32,6 +32,26 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     attester = by_kind_name[("ServiceAccount", "markweave-node-attester")]
     assert attempt["automountServiceAccountToken"] is False
     assert attester["automountServiceAccountToken"] is False
+    assert attempt["metadata"]["namespace"] == "markweave-reverse"
+    assert attester["metadata"]["namespace"] == "markweave-attestation"
+
+    namespaces = {
+        item["metadata"]["name"]: item
+        for item in resources
+        if item["kind"] == "Namespace"
+    }
+    assert (
+        namespaces["markweave-reverse"]["metadata"]["labels"][
+            "pod-security.kubernetes.io/enforce"
+        ]
+        == "restricted"
+    )
+    assert (
+        namespaces["markweave-attestation"]["metadata"]["labels"][
+            "pod-security.kubernetes.io/enforce"
+        ]
+        == "privileged"
+    )
 
     role = by_kind_name[("Role", "markweave-reverse-broker")]
     rules = role["rules"]
@@ -40,8 +60,11 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
         ("pods/exec",),
     }
     assert all("secrets" not in rule["resources"] for rule in rules)
+    assert not any(item["kind"] == "ClusterRole" for item in resources)
+    assert not any(item["kind"] == "ClusterRoleBinding" for item in resources)
 
     daemon = by_kind_name[("DaemonSet", "markweave-node-attester")]
+    assert daemon["metadata"]["namespace"] == "markweave-attestation"
     specification = daemon["spec"]["template"]["spec"]
     assert specification["automountServiceAccountToken"] is False
     assert specification["nodeSelector"] == {
