@@ -234,8 +234,7 @@ class NodeAttesterService:
             if existing.binding_payload != binding_payload:
                 raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
             stored_sandbox = _sandbox(_decode(existing.sandbox_payload))
-            if self._engine.bind(pod, contract) != stored_sandbox:
-                raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
+            self._restore_record(existing, pod, contract, stored_sandbox)
             return {"sandbox": _sandbox_mapping(stored_sandbox)}
         sandbox = self._engine.bind(pod, contract)
         unit = KubernetesRuntimeUnit(
@@ -247,21 +246,16 @@ class NodeAttesterService:
         previous = self._bound.setdefault(pod.pod_uid, unit)
         if previous != unit:
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
+        record = AttesterLifecycleRecord(
+            pod.pod_uid,
+            AttesterLifecycleState.BOUND,
+            binding_payload,
+            _encode(_sandbox_mapping(sandbox)),
+        )
         try:
-            self._ledger.reserve(
-                AttesterLifecycleRecord(
-                    pod.pod_uid,
-                    AttesterLifecycleState.BOUND,
-                    binding_payload,
-                    _encode(_sandbox_mapping(sandbox)),
-                )
-            )
+            self._ledger.reserve(record)
         except Exception:
-            if self._bound.get(pod.pod_uid) == unit:
-                self._bound.pop(pod.pod_uid)
-            self._engine.discard_uncommitted_binding(
-                pod.pod_uid, contract, sandbox.node_uid
-            )
+            self._reconcile_reservation_failure(record, pod, contract, sandbox, unit)
             raise
         return {"sandbox": _sandbox_mapping(sandbox)}
 
@@ -290,28 +284,26 @@ class NodeAttesterService:
                 "protocol": _PROTOCOL,
                 "version": _VERSION,
             }
-            try:
-                self._ledger.reserve(
-                    AttesterLifecycleRecord(
-                        pod.pod_uid,
-                        AttesterLifecycleState.BOUND,
-                        _encode(bind_request),
-                        _encode(_sandbox_mapping(sandbox)),
-                    )
-                )
-            except Exception:
-                if self._bound.get(pod.pod_uid) is not None:
-                    self._bound.pop(pod.pod_uid)
-                self._engine.discard_uncommitted_binding(
-                    pod.pod_uid, proposed_contract, sandbox.node_uid
-                )
-                raise
-            self._bound[pod.pod_uid] = KubernetesRuntimeUnit(
+            unit = KubernetesRuntimeUnit(
                 pod.unit_id,
                 RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
                 pod,
                 sandbox,
             )
+            record = AttesterLifecycleRecord(
+                pod.pod_uid,
+                AttesterLifecycleState.BOUND,
+                _encode(bind_request),
+                _encode(_sandbox_mapping(sandbox)),
+            )
+            try:
+                self._ledger.reserve(record)
+            except Exception:
+                self._reconcile_reservation_failure(
+                    record, pod, proposed_contract, sandbox, unit
+                )
+                raise
+            self._bound[pod.pod_uid] = unit
             return {
                 "contract": _contract_mapping(proposed_contract),
                 "sandbox": _sandbox_mapping(sandbox),
@@ -327,6 +319,7 @@ class NodeAttesterService:
             raise KubernetesRuntimeError("Kubernetes attester recovery conflicts")
         contract = _contract(stored["contract"])
         sandbox = _sandbox(_decode(record.sandbox_payload))
+        self._restore_record(record, pod, contract, sandbox)
         return {
             "contract": _contract_mapping(contract),
             "sandbox": _sandbox_mapping(sandbox),
@@ -431,34 +424,77 @@ class NodeAttesterService:
             pod = _pod(request["pod"])
             contract = _contract(request["contract"])
             sandbox = _sandbox(_decode(record.sandbox_payload))
-            unit = KubernetesRuntimeUnit(
-                pod.unit_id,
-                RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
-                pod,
-                sandbox,
-            )
             if pod.node_name != self._node_name:
                 raise KubernetesRuntimeError("Kubernetes attester ledger failed")
-            if record.state is not AttesterLifecycleState.REMOVED:
-                actual_state = {
-                    AttesterLifecycleState.BOUND: ManagedUnitState.CREATED,
-                    AttesterLifecycleState.EXIT: ManagedUnitState.EXIT_CONFIRMED,
-                    AttesterLifecycleState.EMPTY: ManagedUnitState.EMPTY_CONFIRMED,
-                }[record.state]
-                self._engine.recover(unit, contract, actual_state)
-            self._bound[pod.pod_uid] = unit
-            if record.exit_evidence is not None:
-                self._exit_evidence[pod.pod_uid] = record.exit_evidence
-            if record.empty_evidence is not None:
-                self._empty_evidence[pod.pod_uid] = record.empty_evidence
-            if (
-                record.removed_evidence is not None
-                and record.empty_evidence is not None
-            ):
-                self._removed_evidence[pod.pod_uid] = (
-                    record.empty_evidence,
-                    record.removed_evidence,
-                )
+            self._restore_record(record, pod, contract, sandbox)
+
+    def _reconcile_reservation_failure(
+        self,
+        expected: AttesterLifecycleRecord,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+        sandbox: KubernetesSandboxIdentity,
+        unit: KubernetesRuntimeUnit,
+    ) -> None:
+        persisted = self._ledger.get(pod.pod_uid)
+        if persisted is None:
+            if self._bound.get(pod.pod_uid) == unit:
+                self._bound.pop(pod.pod_uid)
+            self._engine.discard_uncommitted_binding(
+                pod.pod_uid, contract, sandbox.node_uid
+            )
+            return
+        if persisted != expected:
+            raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
+        self._restore_record(persisted, pod, contract, sandbox)
+
+    def _restore_record(
+        self,
+        record: AttesterLifecycleRecord,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+        sandbox: KubernetesSandboxIdentity,
+    ) -> None:
+        unit = KubernetesRuntimeUnit(
+            pod.unit_id,
+            RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+            pod,
+            sandbox,
+        )
+        previous = self._bound.get(pod.pod_uid)
+        if previous is not None and previous != unit:
+            raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
+        if record.state is not AttesterLifecycleState.REMOVED:
+            actual_state = {
+                AttesterLifecycleState.BOUND: ManagedUnitState.CREATED,
+                AttesterLifecycleState.EXIT: ManagedUnitState.EXIT_CONFIRMED,
+                AttesterLifecycleState.EMPTY: ManagedUnitState.EMPTY_CONFIRMED,
+            }[record.state]
+            try:
+                recovered = self._engine.recover(unit, contract, actual_state)
+            except KubernetesRuntimeError:
+                raise KubernetesRuntimeError(
+                    "Kubernetes attester binding conflicts"
+                ) from None
+            if recovered != sandbox:
+                raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
+        self._bound[pod.pod_uid] = unit
+        cached = (
+            (self._exit_evidence, record.exit_evidence),
+            (self._empty_evidence, record.empty_evidence),
+        )
+        for evidence_by_pod, evidence in cached:
+            if evidence is not None:
+                previous_evidence = evidence_by_pod.setdefault(pod.pod_uid, evidence)
+                if previous_evidence != evidence:
+                    raise KubernetesRuntimeError(
+                        "Kubernetes attester binding conflicts"
+                    )
+        if record.removed_evidence is not None and record.empty_evidence is not None:
+            removed = (record.empty_evidence, record.removed_evidence)
+            previous_removed = self._removed_evidence.setdefault(pod.pod_uid, removed)
+            if previous_removed != removed:
+                raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
 
     def _proof(  # noqa: PLR0912
         self, operation: str, request: Mapping[str, object]

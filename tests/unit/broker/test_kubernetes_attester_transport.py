@@ -10,6 +10,7 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker import kubernetes_attester_transport as transport
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
@@ -281,6 +282,109 @@ def test_bind_ledger_capacity_failure_discards_volatile_binding(
     assert tuple(record.pod_uid for record in ledger.records()) == (occupied_uid,)
     assert service._bound == {}
     assert service._engine._contracts == {}
+
+
+@pytest.mark.unit
+def test_bind_commit_then_failure_restores_exact_state_for_retry_and_proof(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    service, bind_request, _, control = _binding(unit, policy, tmp_path)
+    reserve = service._ledger.reserve
+
+    def commit_then_fail(record: AttesterLifecycleRecord) -> None:
+        reserve(record)
+        raise RuntimeError("ambiguous ledger commit")
+
+    mocker.patch.object(service._ledger, "reserve", side_effect=commit_then_fail)
+    with pytest.raises(KubernetesRuntimeError, match="request is invalid"):
+        _call(service, bind_request)
+
+    assert len(service._ledger.records()) == 1
+    assert len(service._bound) == 1
+    assert len(service._engine._contracts) == 1
+    retried = _call(service, bind_request)
+    control.terminated = True
+    pod_uid = cast(dict[str, object], bind_request["pod"])["pod_uid"]
+    exit_response = _call(
+        service,
+        {
+            "operation": "confirm_exit",
+            "pod_uid": pod_uid,
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+
+    assert retried["outcome"] == "ok"
+    assert exit_response["outcome"] == "ok"
+
+
+@pytest.mark.unit
+def test_adopt_commit_then_failure_restores_exact_state_for_retry_and_proof(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    service, bind_request, _, control = _binding(unit, policy, tmp_path)
+    adopt_request = {
+        "operation": "adopt_create_intent",
+        "pod": bind_request["pod"],
+        "proposed_contract": bind_request["contract"],
+        "protocol": "markweave-kubernetes-node-attester",
+        "version": 1,
+    }
+    reserve = service._ledger.reserve
+
+    def commit_then_fail(record: AttesterLifecycleRecord) -> None:
+        reserve(record)
+        raise RuntimeError("ambiguous ledger commit")
+
+    mocker.patch.object(service._ledger, "reserve", side_effect=commit_then_fail)
+    with pytest.raises(KubernetesRuntimeError, match="request is invalid"):
+        _call(service, adopt_request)
+
+    assert len(service._ledger.records()) == 1
+    assert len(service._bound) == 1
+    assert len(service._engine._contracts) == 1
+    retried = _call(service, adopt_request)
+    control.terminated = True
+    pod_uid = cast(dict[str, object], bind_request["pod"])["pod_uid"]
+    exit_response = _call(
+        service,
+        {
+            "operation": "confirm_exit",
+            "pod_uid": pod_uid,
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+
+    assert retried["outcome"] == "ok"
+    assert exit_response["outcome"] == "ok"
+
+
+@pytest.mark.unit
+def test_existing_binding_conflict_preserves_exact_volatile_state(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, bind_request, _, _ = _binding(unit, policy, tmp_path)
+    expected = _call(service, bind_request)
+    bound = dict(service._bound)
+    contracts = dict(service._engine._contracts)
+    conflicting = deepcopy(bind_request)
+    contract = cast(dict[str, object], conflicting["contract"])
+    contract["pool"] = "other-pool"
+
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        _call(service, conflicting)
+
+    assert service._bound == bound
+    assert service._engine._contracts == contracts
+    assert _call(service, bind_request) == expected
 
 
 @pytest.mark.unit
