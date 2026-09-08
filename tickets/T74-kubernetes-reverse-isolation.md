@@ -53,6 +53,15 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Hardened the reviewable foundation after independent security review. The policy
+  digest now uses an annotation instead of an invalid 64-character label; the attester runs in a
+  namespace outside the broker's `pods/exec` scope and the broker has no Node-reading ClusterRole;
+  Pod `fsGroup` ownership makes the memory-backed workspace usable by the non-root attempt; and
+  attestation now binds sandbox-netns isolation plus observed cgroup `cpu.max`, `memory.max`,
+  `pids.max`, and tmpfs path/size/mount flags. Canonical projection accepts Kubernetes API defaults
+  and equivalent resource quantities while rejecting injected workloads or authored-field drift.
+  Deterministic unit/integration checks pass, but the mandatory real-cluster and exact-image gates
+  remain blocked by the absence of an authorized Kubernetes context and are not claimed complete.
 * 2026-09-08: Added the runtime-neutral Kubernetes isolation proof core, a separately reviewable
   node-attestation policy engine, the dedicated fenced-pool reference topology, deployment and
   proof documentation, unit coverage, and SQLite broker restart/tombstone integration coverage.
