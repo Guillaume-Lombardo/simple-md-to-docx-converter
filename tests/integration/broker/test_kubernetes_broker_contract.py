@@ -46,6 +46,8 @@ from tests.unit.broker.test_kubernetes_runtime import (
     _runtime,
 )
 
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
+
 PRINCIPAL = AuthenticatedPrincipal(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 ATTEMPT = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 UNIT = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")

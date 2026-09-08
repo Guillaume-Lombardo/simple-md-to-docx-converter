@@ -302,6 +302,20 @@ def test_control_plane_fails_closed_at_api_and_channel_bounds() -> None:
     with pytest.raises(KubernetesRuntimeError, match="workspace request is invalid"):
         control.stage_request(pod, declared_over_adapter_limit)
 
+    adapter_input_limit = 8
+    tight_config = replace(
+        CONFIG,
+        channel_limits=RuntimeChannelLimits(
+            adapter_input_limit, CONFIG.channel_limits.max_output_bytes
+        ),
+    )
+    tight_control = KubernetesApiControlPlane(
+        api, tight_config, exec_factory=executions
+    )
+    valid_request_over_adapter_input = _request(b"x" * (adapter_input_limit + 1))
+    with pytest.raises(KubernetesRuntimeError, match="workspace request is invalid"):
+        tight_control.stage_request(pod, valid_request_over_adapter_input)
+
     class UnboundedApi(_Api):
         def list_namespaced_pod(self, namespace: str, **kwargs: object) -> object:
             del namespace, kwargs
@@ -494,6 +508,115 @@ def test_websocket_upgrade_receives_the_exact_connect_timeout(
         )
 
     assert observed["timeout"] == 0.25
+
+
+@pytest.mark.unit
+def test_websocket_upgrade_forwards_pinned_tls_headers_and_proxy_options(
+    mocker: MockerFixture,
+) -> None:
+    websocket = SimpleNamespace(connect=mocker.Mock())
+    constructor = mocker.patch.object(
+        kubernetes_api_module.ws_client, "WebSocket", return_value=websocket
+    )
+    mocker.patch.object(
+        kubernetes_api_module.ws_client.certifi,
+        "where",
+        return_value="default-ca.pem",
+    )
+    proxycare = mocker.patch.object(
+        kubernetes_api_module.ws_client,
+        "websocket_proxycare",
+        side_effect=lambda options, *_: {**options, "http_proxy_host": "proxy"},
+    )
+    configuration = SimpleNamespace(
+        verify_ssl=True,
+        ssl_ca_cert=None,
+        assert_hostname=False,
+        cert_file="client.crt",
+        key_file="client.key",
+        tls_server_name="kubelet.internal",
+        proxy="http://proxy",
+        proxy_headers=None,
+    )
+    headers = {
+        "authorization": "Bearer opaque",
+        "sec-websocket-protocol": "v5.channel.k8s.io",
+    }
+
+    result = kubernetes_api_module._bounded_create_websocket(
+        configuration, "wss://node/exec", headers, 0.25
+    )
+
+    assert result is websocket
+    ssl_options = constructor.call_args.kwargs["sslopt"]
+    assert ssl_options == {
+        "ca_certs": "default-ca.pem",
+        "cert_reqs": kubernetes_api_module.ssl.CERT_REQUIRED,
+        "certfile": "client.crt",
+        "check_hostname": False,
+        "keyfile": "client.key",
+        "server_hostname": "kubelet.internal",
+    }
+    proxycare.assert_called_once()
+    websocket.connect.assert_called_once_with(
+        "wss://node/exec",
+        header=[
+            "authorization: Bearer opaque",
+            "sec-websocket-protocol: v5.channel.k8s.io",
+        ],
+        timeout=0.25,
+        http_proxy_host="proxy",
+    )
+
+
+@pytest.mark.unit
+def test_bounded_websocket_call_handles_preload_tuple_and_invalid_timeouts(
+    mocker: MockerFixture,
+) -> None:
+    client = SimpleNamespace(
+        run_forever=mocker.Mock(),
+        read_all=mocker.Mock(return_value="output"),
+    )
+    constructor = mocker.patch.object(
+        kubernetes_api_module, "_BoundedWsClient", return_value=client
+    )
+    mocker.patch.object(
+        kubernetes_api_module.ws_client,
+        "get_websocket_url",
+        return_value="ws://node/exec",
+    )
+    response = object()
+    mocker.patch.object(
+        kubernetes_api_module.ws_client, "WSResponse", return_value=response
+    )
+
+    assert (
+        kubernetes_api_module._bounded_websocket_call(
+            SimpleNamespace(),
+            "GET",
+            "https://node/exec",
+            _request_timeout=(0.25, 1.0),
+            _preload_content=False,
+        )
+        is client
+    )
+    assert (
+        kubernetes_api_module._bounded_websocket_call(
+            SimpleNamespace(), "GET", "https://node/exec", _request_timeout=0.5
+        )
+        is response
+    )
+    client.run_forever.assert_called_once_with(timeout=0.5)
+    assert constructor.call_count == 2
+
+    for invalid in (None, (), 0, float("nan"), float("inf")):
+        with pytest.raises(ApiException):
+            kubernetes_api_module._bounded_websocket_call(
+                SimpleNamespace(),
+                "GET",
+                "https://node/exec",
+                _request_timeout=invalid,
+            )
 
 
 @pytest.mark.unit
@@ -769,3 +892,139 @@ def test_malformed_api_identity_and_exec_status_fail_closed() -> None:
     control = KubernetesApiControlPlane(api, CONFIG, exec_factory=factory)
     with pytest.raises(KubernetesRuntimeError, match="exec failed"):
         control.stage_request(pod, _request())
+
+
+@pytest.mark.unit
+def test_control_plane_rejects_lookup_delete_and_workspace_edge_failures() -> None:
+    class EdgeApi(_Api):
+        failure = ""
+
+        def read_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            if self.failure == "not-found":
+                raise ApiException(status=404)
+            if self.failure == "api":
+                raise ApiException(status=500)
+            if self.failure == "generic":
+                raise RuntimeError("private")
+            return super().read_namespaced_pod(name, namespace, **kwargs)
+
+        def delete_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            if self.failure == "delete-api":
+                raise ApiException(status=500)
+            return super().delete_namespaced_pod(name, namespace, **kwargs)
+
+    api = EdgeApi()
+    executions = _ExecFactory()
+    control = KubernetesApiControlPlane(api, CONFIG, exec_factory=executions)
+    pod = control.create(_manifest())
+    with pytest.raises(KubernetesRuntimeError, match="lookup is invalid"):
+        control.find("")
+    api.failure = "not-found"
+    assert control.find(pod.name) is None
+    api.failure = "api"
+    with pytest.raises(KubernetesRuntimeError, match="lookup failed"):
+        control.find(pod.name)
+    with pytest.raises(KubernetesRuntimeError, match="identity lookup failed"):
+        control._current_or_absent(pod)
+    api.failure = "delete-api"
+    with pytest.raises(KubernetesRuntimeError, match="deletion failed"):
+        control.delete(pod)
+    api.failure = "generic"
+    with pytest.raises(KubernetesRuntimeError, match="lookup failed"):
+        control.find(pod.name)
+
+    api.failure = "not-found"
+    with pytest.raises(KubernetesRuntimeError, match="identity lookup failed"):
+        control._require_current(pod)
+    with pytest.raises(KubernetesRuntimeError, match="workspace path is invalid"):
+        control._read_file(pod, "private", 1)
+
+    api.failure = ""
+    executions.workspace["result.bin"] = b"xx"
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        control._read_file(pod, "result.bin", 1)
+    executions.workspace["result.bin"] = b"x"
+
+    class InvalidBase64Session(_ExecSession):
+        def close_stdin(self) -> None:
+            self.output = "!!!!"
+
+    session = InvalidBase64Session(["python", "-c", "noop"], executions.workspace)
+    original_factory = control._exec_factory
+    control._exec_factory = lambda *args, **kwargs: session
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        control._read_file(pod, "result.bin", 1)
+    control._exec_factory = original_factory
+
+    with pytest.raises(TypeError):
+        kubernetes_api_module._mapping({"value": []}, "value")
+    with pytest.raises(ValueError):
+        kubernetes_api_module._text({"value": ""}, "value")
+
+    oversized = deepcopy(api.pod)
+    metadata = cast(dict[str, object], oversized["metadata"])
+    metadata["oversized"] = "x" * 2_000_000
+    with pytest.raises(KubernetesRuntimeError, match="identity is invalid"):
+        control._identity(oversized)
+
+
+@pytest.mark.unit
+def test_lookup_and_delete_deadlines_cover_delayed_and_stalled_api_state() -> None:
+    class DelayedApi(_Api):
+        reads = 0
+        deleting = False
+
+        def read_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            if self.deleting:
+                return super().read_namespaced_pod(name, namespace, **kwargs)
+            self.reads += 1
+            pod = deepcopy(self.pod)
+            specification = cast(dict[str, object], pod["spec"])
+            specification["nodeName"] = "" if self.reads == 1 else "reverse-node-1"
+            return pod
+
+        def delete_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            del name, namespace, kwargs
+            self.deleting = True
+            return object()
+
+    api = DelayedApi()
+    slept: list[float] = []
+    control = KubernetesApiControlPlane(
+        api,
+        CONFIG,
+        exec_factory=_ExecFactory(),
+        monotonic=lambda: 0.0,
+        sleep=slept.append,
+    )
+    assert control.find(_pod_name(api.pod)) is not None
+    assert slept == [CONFIG.poll_interval_seconds]
+
+    api.reads = 0
+    timeout = KubernetesApiControlPlane(
+        api,
+        CONFIG,
+        exec_factory=_ExecFactory(),
+        monotonic=iter((0.0, 6.0)).__next__,
+    )
+    with pytest.raises(KubernetesRuntimeError, match="lookup failed"):
+        timeout.find(_pod_name(api.pod))
+
+    pod = control.find(_pod_name(api.pod))
+    assert pod is not None
+    stalled_delete = KubernetesApiControlPlane(
+        api,
+        CONFIG,
+        exec_factory=_ExecFactory(),
+        monotonic=iter((0.0, 6.0)).__next__,
+    )
+    with pytest.raises(KubernetesRuntimeError, match="deletion timed out"):
+        stalled_delete.delete(pod)

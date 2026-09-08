@@ -1100,7 +1100,7 @@ def _encode(value: Mapping[str, object]) -> bytes:
             separators=(",", ":"),
             sort_keys=True,
         ).encode("ascii")
-    except TypeError, ValueError, UnicodeError:
+    except (TypeError, ValueError, UnicodeError):  # fmt: skip
         raise KubernetesRuntimeError("Kubernetes attester message is invalid") from None
 
 
@@ -1109,7 +1109,7 @@ def _decode(value: bytes) -> Mapping[str, object]:
         raise KubernetesRuntimeError("Kubernetes attester message is invalid")
     try:
         result = json.loads(value.decode("ascii"))
-    except UnicodeError, json.JSONDecodeError:
+    except (UnicodeError, json.JSONDecodeError):  # fmt: skip
         raise KubernetesRuntimeError("Kubernetes attester message is invalid") from None
     if not isinstance(result, Mapping) or any(type(key) is not str for key in result):
         raise KubernetesRuntimeError("Kubernetes attester message is invalid")

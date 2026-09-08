@@ -47,6 +47,8 @@ from tests.unit.broker.test_kubernetes_runtime import (
     _runtime,
 )
 
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
+
 
 def _run(*arguments: str) -> None:
     subprocess.run(

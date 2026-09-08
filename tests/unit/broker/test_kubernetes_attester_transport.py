@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from uuid import UUID
 
@@ -29,6 +30,7 @@ from markweave.broker.kubernetes_attester_transport import (
 )
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationContract,
+    KubernetesPodIdentity,
     KubernetesRuntimeError,
     KubernetesRuntimeUnit,
     manifest_digest,
@@ -37,6 +39,7 @@ from markweave.broker.kubernetes_runtime import (
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
+    EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
     RuntimeChannelLimits,
@@ -207,6 +210,17 @@ def test_service_keeps_sandbox_identity_server_side(
             "version": 1,
         },
     )
+    with pytest.raises(KubernetesRuntimeError, match="exit evidence"):
+        _call(
+            service,
+            {
+                "operation": "confirm_empty",
+                "pod_uid": pod_uid,
+                "prior_evidence": f"sha256:{'0' * 64}",
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
     with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
         _call(
             service,
@@ -229,6 +243,17 @@ def test_service_keeps_sandbox_identity_server_side(
         },
     )
     assert removed["outcome"] == "ok"
+    with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
+        _call(
+            service,
+            {
+                "operation": "confirm_removed",
+                "pod_uid": pod_uid,
+                "prior_evidence": f"sha256:{'0' * 64}",
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
     assert (
         _call(
             service,
@@ -612,6 +637,363 @@ def test_recovery_clients_normalize_malformed_success_payloads(
 
 
 @pytest.mark.unit
+def test_attester_client_rejects_each_invalid_recovery_and_proof_boundary(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    class ClientDouble(HttpsNodeAttesterClient):
+        response: Mapping[str, object]
+
+        def _exchange(
+            self, node_name: str, request: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            del node_name, request
+            return self.response
+
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    bound = _call(service, request)
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    sandbox = transport._sandbox(bound["sandbox"])
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    client = object.__new__(ClientDouble)
+    client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._monotonic = lambda: 0.0
+    client._sleep = lambda _: None
+    client._bound = {}
+
+    client.response = {"outcome": "wrong", "sandbox": bound["sandbox"]}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.bind(pod, contract)
+    with pytest.raises(KubernetesRuntimeError, match="recovery is invalid"):
+        client.recover_create_intent(cast(KubernetesPodIdentity, object()), contract)
+    with pytest.raises(KubernetesRuntimeError, match="recovery is invalid"):
+        client.recover(runtime_unit, contract, ManagedUnitState.REMOVED)
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        client.acknowledge(runtime_unit, cast(EvidenceDigest, object()))
+
+    client.response = {
+        "contract": transport._contract_mapping(replace(contract, pool="other-pool")),
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.adopt_create_intent(pod, contract)
+
+    client.response = {"acknowledged": False, "outcome": "ok"}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.acknowledge(runtime_unit, EVIDENCE)
+
+    client._bound[pod.pod_uid] = runtime_unit
+    with pytest.raises(KubernetesRuntimeError, match="proof request is invalid"):
+        client.confirm_empty(runtime_unit, cast(EvidenceDigest, None))
+    client.response = {"outcome": "wrong"}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.confirm_exit(runtime_unit)
+    client.response = {"evidence": "invalid", "outcome": "ok"}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.confirm_exit(runtime_unit)
+
+    other = replace(runtime_unit, unit_id=UUID(int=99))
+    client.response = {
+        "contract": request["contract"],
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        client.recover_create_intent(replace(pod, unit_id=other.unit_id), contract)
+    client.response = {"outcome": "ok", "sandbox": bound["sandbox"]}
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        client.recover(other, contract, ManagedUnitState.CREATED)
+
+
+@pytest.mark.unit
+def test_service_recovery_rejects_each_absent_conflicting_or_future_state(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    service, bind_request, _, _ = _binding(unit, policy, tmp_path)
+    pod_mapping = cast(dict[str, object], bind_request["pod"])
+    recovery_create = {
+        "operation": "recover_create_intent",
+        "pod": pod_mapping,
+        "proposed_contract": bind_request["contract"],
+        "protocol": "markweave-kubernetes-node-attester",
+        "version": 1,
+    }
+    recovery = {
+        "contract": bind_request["contract"],
+        "lifecycle_state": ManagedUnitState.CREATED.value,
+        "operation": "recover",
+        "pod": pod_mapping,
+        "protocol": "markweave-kubernetes-node-attester",
+        "sandbox": {
+            "cgroup_path": "/missing",
+            "container_ids": ["a" * 64],
+            "node_fence": EVIDENCE.value,
+            "node_uid": str(UUID(int=8)),
+            "sandbox_id": "b" * 64,
+        },
+        "version": 1,
+    }
+
+    with pytest.raises(ValueError):
+        service._recover_create_intent({})
+    wrong_node = deepcopy(recovery_create)
+    cast(dict[str, object], wrong_node["pod"])["node_name"] = "node-b"
+    with pytest.raises(KubernetesRuntimeError, match="node binding"):
+        service._recover_create_intent(wrong_node)
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        service._recover_create_intent(recovery_create)
+
+    with pytest.raises(ValueError):
+        service._recover({})
+    wrong_node = deepcopy(recovery)
+    cast(dict[str, object], wrong_node["pod"])["node_name"] = "node-b"
+    with pytest.raises(KubernetesRuntimeError, match="node binding"):
+        service._recover(wrong_node)
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        service._recover(recovery)
+    with pytest.raises(ValueError):
+        service._acknowledge({})
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        service._proof(
+            "confirm_exit",
+            {
+                "operation": "confirm_exit",
+                "pod_uid": str(UUID(int=99)),
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+
+    bound = _call(service, bind_request)
+    recovery["sandbox"] = bound["sandbox"]
+    record = service._ledger.records()[0]
+    get_record = mocker.patch.object(
+        service._ledger,
+        "get",
+        return_value=replace(record, binding_payload=b"{}"),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="recovery conflicts"):
+        service._recover_create_intent(recovery_create)
+    with pytest.raises(KubernetesRuntimeError, match="recovery conflicts"):
+        service._recover(recovery)
+
+    get_record.return_value = replace(
+        record,
+        state=AttesterLifecycleState.REMOVED,
+        exit_evidence=EVIDENCE,
+        empty_evidence=EVIDENCE,
+        removed_evidence=EVIDENCE,
+        revision=3,
+    )
+    recovery["lifecycle_state"] = ManagedUnitState.CREATED.value
+    with pytest.raises(KubernetesRuntimeError, match="recovery conflicts"):
+        service._recover(recovery)
+
+    get_record.return_value = replace(
+        record,
+        state=AttesterLifecycleState.EXIT,
+        exit_evidence=EVIDENCE,
+        revision=1,
+    )
+    recovery["lifecycle_state"] = ManagedUnitState.EMPTY_CONFIRMED.value
+    with pytest.raises(KubernetesRuntimeError, match="recovery conflicts"):
+        service._recover(recovery)
+    acknowledgement = {
+        "operation": "acknowledge",
+        "pod_uid": str(record.pod_uid),
+        "protocol": "markweave-kubernetes-node-attester",
+        "removed_evidence": EVIDENCE.value,
+        "version": 1,
+    }
+    with pytest.raises(KubernetesRuntimeError, match="acknowledgement conflicts"):
+        service._acknowledge(acknowledgement)
+
+
+@pytest.mark.unit
+def test_client_accepts_successful_adoption_recovery_and_acknowledgement(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    class ClientDouble(HttpsNodeAttesterClient):
+        response: Mapping[str, object]
+
+        def _exchange(
+            self, node_name: str, request: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            del node_name, request
+            return self.response
+
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    bound = _call(service, request)
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    sandbox = transport._sandbox(bound["sandbox"])
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    client = object.__new__(ClientDouble)
+    client._bound = {}
+    client.response = {
+        "contract": request["contract"],
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
+    assert client.adopt_create_intent(pod, contract) == sandbox
+
+    client.response = {"outcome": "ok", "sandbox": bound["sandbox"]}
+    assert client.recover(runtime_unit, contract, ManagedUnitState.CREATED) == sandbox
+    changed_sandbox = dict(cast(dict[str, object], bound["sandbox"]))
+    changed_sandbox["sandbox_id"] = "c" * 64
+    client.response = {"outcome": "ok", "sandbox": changed_sandbox}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.recover(runtime_unit, contract, ManagedUnitState.CREATED)
+
+    client.response = {"acknowledged": True, "outcome": "ok"}
+    client.acknowledge(runtime_unit, EVIDENCE)
+    assert client._bound == {}
+
+    client._limits = AttesterTransportLimits(1, 1, 1.0, 1)
+    with pytest.raises(KubernetesRuntimeError, match="request exceeds its limit"):
+        HttpsNodeAttesterClient._exchange(client, "node-a", {"operation": "oversized"})
+
+
+@pytest.mark.unit
+def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    class ClientDouble(HttpsNodeAttesterClient):
+        response: Mapping[str, object]
+
+        def _exchange(
+            self, node_name: str, request: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            del node_name, request
+            return self.response
+
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    sandbox = service._engine.bind(pod, contract)
+    expected = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    service._bound[pod.pod_uid] = replace(expected, unit_id=UUID(int=99))
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._bind(request)
+
+    client = object.__new__(ClientDouble)
+    client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._monotonic = lambda: 0.0
+    client._sleep = lambda _: None
+    client._bound = {pod.pod_uid: replace(expected, unit_id=UUID(int=98))}
+    client.response = {
+        "outcome": "ok",
+        "sandbox": transport._sandbox_mapping(sandbox),
+    }
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        client.bind(pod, contract)
+
+    client._bound = {}
+    client.response = {}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.recover_create_intent(pod, contract)
+    client.response = {
+        "contract": request["contract"],
+        "outcome": "ok",
+        "sandbox": {},
+    }
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.adopt_create_intent(pod, contract)
+
+    with pytest.raises(KubernetesRuntimeError, match="content length is invalid"):
+        transport._content_length("0")
+    with pytest.raises(ValueError, match="server is invalid"):
+        transport.AttesterHttpsServer(
+            cast(NodeAttesterService, object()),
+            cast(AttesterServerTlsConfig, object()),
+            cast(AttesterTransportLimits, object()),
+        )
+
+
+@pytest.mark.unit
+def test_service_reconciliation_rejects_each_volatile_identity_conflict(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    response = _call(service, request)
+    record = service._ledger.records()[0]
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    sandbox = transport._sandbox(response["sandbox"])
+    runtime_unit = service._bound[pod.pod_uid]
+
+    get_record = mocker.patch.object(service._ledger, "get", return_value=None)
+    discard = mocker.patch.object(service._engine, "discard_uncommitted_binding")
+    service._bound[pod.pod_uid] = replace(runtime_unit, unit_id=UUID(int=97))
+    service._reconcile_reservation_failure(record, pod, contract, sandbox, runtime_unit)
+    discard.assert_called_once()
+
+    get_record.return_value = replace(record, sandbox_payload=b'{"other":true}')
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._reconcile_reservation_failure(
+            record, pod, contract, sandbox, runtime_unit
+        )
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._restore_record(record, pod, contract, sandbox)
+
+    service._bound.clear()
+    recover = mocker.patch.object(
+        service._engine,
+        "recover",
+        return_value=replace(sandbox, sandbox_id="d" * 64),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._restore_record(record, pod, contract, sandbox)
+
+    recover.return_value = sandbox
+    other = EvidenceDigest(f"sha256:{'8' * 64}")
+    exited = replace(
+        record,
+        state=AttesterLifecycleState.EXIT,
+        exit_evidence=EVIDENCE,
+        revision=1,
+    )
+    service._exit_evidence[pod.pod_uid] = other
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._restore_record(exited, pod, contract, sandbox)
+
+    service._exit_evidence.clear()
+    removed = replace(
+        record,
+        state=AttesterLifecycleState.REMOVED,
+        exit_evidence=EVIDENCE,
+        empty_evidence=other,
+        removed_evidence=EvidenceDigest(f"sha256:{'9' * 64}"),
+        revision=3,
+    )
+    service._removed_evidence[pod.pod_uid] = (EVIDENCE, other)
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        service._restore_record(removed, pod, contract, sandbox)
+
+
+@pytest.mark.unit
 def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
     unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
@@ -820,3 +1202,70 @@ def test_wire_decoders_reject_ambiguous_or_unbounded_shapes() -> None:
 
     with pytest.raises(KubernetesRuntimeError, match="peer identity"):
         transport._certificate_digest(MissingCertificate())
+
+
+@pytest.mark.unit
+def test_wire_decoders_cover_each_closed_scalar_boundary(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    response = _call(service, request)
+    pod = transport._pod(request["pod"])
+    sandbox = transport._sandbox(response["sandbox"])
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+
+    invalid_sandboxes = (
+        {**cast(dict[str, object], response["sandbox"]), "container_ids": "bad"},
+        {**cast(dict[str, object], response["sandbox"]), "container_ids": [1]},
+    )
+    for invalid in invalid_sandboxes:
+        with pytest.raises(KubernetesRuntimeError, match="message is invalid"):
+            transport._sandbox(invalid)
+    invalid_contract = deepcopy(cast(dict[str, object], request["contract"]))
+    invalid_contract["pod_contract"] = []
+    with pytest.raises(ValueError):
+        transport._contract(invalid_contract)
+    for value in ("é", "not-a-number", "01", "-1"):
+        with pytest.raises(KubernetesRuntimeError, match="content length is invalid"):
+            transport._content_length(value)
+
+    candidates = (
+        None,
+        SimpleNamespace(
+            unit_id=UUID(int=99),
+            incarnation=runtime_unit.incarnation,
+            pod=runtime_unit.pod,
+            sandbox=runtime_unit.sandbox,
+        ),
+        SimpleNamespace(
+            unit_id=runtime_unit.unit_id,
+            incarnation=RuntimeIncarnation(UUID(int=99), pod.policy_specification),
+            pod=runtime_unit.pod,
+            sandbox=runtime_unit.sandbox,
+        ),
+        SimpleNamespace(
+            unit_id=runtime_unit.unit_id,
+            incarnation=runtime_unit.incarnation,
+            pod=replace(runtime_unit.pod, node_name="other-node"),
+            sandbox=runtime_unit.sandbox,
+        ),
+        SimpleNamespace(
+            unit_id=runtime_unit.unit_id,
+            incarnation=runtime_unit.incarnation,
+            pod=runtime_unit.pod,
+            sandbox=replace(runtime_unit.sandbox, sandbox_id="a" * 64),
+        ),
+    )
+    for candidate in candidates:
+        assert (
+            transport._same_runtime_identity(
+                cast(KubernetesRuntimeUnit | None, candidate), runtime_unit
+            )
+            is False
+        )
+    assert transport._same_runtime_identity(runtime_unit, runtime_unit) is True
