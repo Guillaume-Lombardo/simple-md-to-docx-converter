@@ -153,6 +153,11 @@ class ControlPlaneDouble:
         self.present = True
         return self.identity()
 
+    def find(self, name: str) -> KubernetesPodIdentity | None:
+        if name != f"markweave-reverse-{self.unit.unit_id.hex}":
+            raise KubernetesRuntimeError("Kubernetes Pod lookup is invalid")
+        return self.identity() if self.present else None
+
     def stage_request(
         self, pod: KubernetesPodIdentity, request: ReverseAttemptRequest
     ) -> None:
@@ -324,6 +329,14 @@ class UnexpectedAttester:
         del pod, proposed_contract
         raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
 
+    def adopt_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity:
+        del pod, contract
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
     def acknowledge(
         self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
     ) -> None:
@@ -358,6 +371,16 @@ class RecoveredIntentAttester:
         if pod != self.pod:
             raise KubernetesRuntimeError("Kubernetes recovery identity changed")
         return self.sandbox, self.contract
+
+    def adopt_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity:
+        del contract
+        if pod != self.pod:
+            raise KubernetesRuntimeError("Kubernetes recovery identity changed")
+        return self.sandbox
 
     def recover(
         self,
@@ -947,6 +970,51 @@ def test_hard_terminate_accepts_only_positive_exit_proof_when_exec_is_already_go
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "container_ids",
+    [(), ("9" * 64, "a" * 64), ("a" * 64,)],
+)
+def test_exit_rejects_missing_extra_or_substituted_container_identity(
+    unit: ManagedUnit, policy: BrokerPolicy, container_ids: tuple[str, ...]
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {"container_ids": container_ids}
+
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "container_ids",
+    [(), ("9" * 64, "a" * 64), ("a" * 64,)],
+)
+def test_created_terminal_recovery_rejects_changed_container_identity_set(
+    unit: ManagedUnit, policy: BrokerPolicy, container_ids: tuple[str, ...]
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = True
+    inspector.override_sandbox = {"container_ids": container_ids}
+
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation"):
+        NodeAttestationEngine(inspector).recover(
+            runtime_unit, contract, ManagedUnitState.CREATED
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "lifecycle_state",
     [ManagedUnitState.CREATED, ManagedUnitState.EXIT_CONFIRMED],
 )
@@ -1072,7 +1140,9 @@ def test_restart_discovery_neutralizes_unexpected_attester_failure(
             "policy",
             EVIDENCE,
         ),
-        lambda: KubernetesSandboxIdentity("bad", CGROUP, NODE_UID, EVIDENCE),
+        lambda: KubernetesSandboxIdentity(
+            "bad", CGROUP, NODE_UID, EVIDENCE, (SANDBOX_ID,)
+        ),
         pytest.param(
             lambda: KubernetesRuntimeUnit(
                 UNIT_ID,
@@ -1088,7 +1158,9 @@ def test_restart_discovery_neutralizes_unexpected_attester_failure(
                     "policy",
                     EVIDENCE,
                 ),
-                KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE),
+                KubernetesSandboxIdentity(
+                    SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE, (SANDBOX_ID,)
+                ),
             ),
             id="incarnation_id_must_match_pod_uid",
         ),
@@ -1228,6 +1300,37 @@ def test_configuration_and_manifest_validation_fail_closed(
     runtime, _, _ = _runtime(unit, policy)
     with pytest.raises(KubernetesRuntimeError, match="create contract"):
         runtime.create(replace(unit, state=ManagedUnitState.RESERVED), policy)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing", ["recover", "recover_create_intent", "acknowledge"])
+def test_runtime_rejects_attester_missing_recovery_capability(
+    unit: ManagedUnit, policy: BrokerPolicy, missing: str
+) -> None:
+    _, control, _ = _runtime(unit, policy)
+    methods = {
+        name: (lambda *args, **kwargs: None)
+        for name in (
+            "acknowledge",
+            "adopt_create_intent",
+            "bind",
+            "confirm_empty",
+            "confirm_exit",
+            "confirm_removed",
+            "recover",
+            "recover_create_intent",
+        )
+        if name != missing
+    }
+
+    with pytest.raises(ValueError, match="runtime configuration"):
+        KubernetesIsolationRuntime(
+            image_repository="registry.example/reverse",
+            policy=policy,
+            config=CONFIG,
+            control_plane=control,
+            node_attester=cast(Any, SimpleNamespace(**methods)),
+        )
 
 
 def json_repr(value: object) -> str:

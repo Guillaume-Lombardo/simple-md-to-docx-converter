@@ -24,7 +24,10 @@ from markweave.broker.kubernetes_attester_transport import (
     HttpsNodeAttesterClient,
     NodeAttesterService,
 )
-from markweave.broker.kubernetes_runtime import KubernetesIsolationRuntime
+from markweave.broker.kubernetes_runtime import (
+    KubernetesIsolationRuntime,
+    KubernetesPodIdentity,
+)
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
@@ -69,6 +72,12 @@ class _LocalAttesterClient(HttpsNodeAttesterClient):
         assert node_name == "reverse-node-1"
         response = self._service.handle(attester_transport._encode(request))
         return attester_transport._decode(response)
+
+
+class _LostCreateReplyControl(ControlPlaneDouble):
+    def create(self, manifest: Mapping[str, object]) -> KubernetesPodIdentity:
+        super().create(manifest)
+        raise RuntimeError("injected lost Kubernetes create reply")
 
 
 def _intent() -> ManagedUnit:
@@ -203,6 +212,73 @@ def test_restart_uses_creation_policy_binding_after_policy_rollover(
         rolled,
         max_discovered_units=4,
     )
+    restarted.start()
+
+    proof = restarted.proof(PRINCIPAL, ATTEMPT, UNIT)
+    assert proof is not None
+    assert proof.policy_revision == POLICY.revision
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "crash_point", ["before_api", "lost_create_reply", "before_bind"]
+)
+def test_prepared_create_recovers_exact_pod_across_policy_rollover(
+    tmp_path: Path, crash_point: str
+) -> None:
+    intent = _intent()
+    control = (
+        _LostCreateReplyControl(intent)
+        if crash_point == "lost_create_reply"
+        else ControlPlaneDouble(intent)
+    )
+    inspector = InspectorDouble(control, POLICY)
+    if crash_point == "before_api":
+        control.fail_operation = "create"
+    elif crash_point == "before_bind":
+        inspector.fail_operation = "sandbox"
+    runtime = KubernetesIsolationRuntime(
+        image_repository="registry.example/markweave-reverse-attempt",
+        policy=POLICY,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=NodeAttestationEngine(inspector),
+    )
+    path = tmp_path / f"prepared-{crash_point}.sqlite3"
+    inventory = SQLiteBrokerInventory(path, INVENTORY_KEY, max_records=4)
+    broker = IsolationBrokerService(
+        inventory,
+        runtime,
+        POLICY,
+        max_discovered_units=4,
+        unit_id_factory=lambda: UNIT,
+    )
+    broker.start()
+    with pytest.raises(BrokerError):
+        broker.create(ReplayPosition(PRINCIPAL, 1), ATTEMPT)
+    prepared = inventory.get(UNIT)
+    assert prepared is not None
+    assert prepared.state is ManagedUnitState.CREATE_INTENT
+    assert prepared.runtime_recovery is not None
+    assert control.present is (crash_point != "before_api")
+
+    inspector.fail_operation = None
+    control.fail_operation = None
+    rolled = replace(POLICY, revision="t74-after-lost-create")
+    restarted_runtime = KubernetesIsolationRuntime(
+        image_repository="registry.example/markweave-reverse-attempt",
+        policy=rolled,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=NodeAttestationEngine(inspector),
+    )
+    restarted = IsolationBrokerService(
+        SQLiteBrokerInventory(path, INVENTORY_KEY, max_records=4),
+        restarted_runtime,
+        rolled,
+        max_discovered_units=4,
+    )
+
     restarted.start()
 
     proof = restarted.proof(PRINCIPAL, ATTEMPT, UNIT)

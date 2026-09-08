@@ -110,6 +110,11 @@ class RuntimeUnit(Protocol):
 class IsolationRuntime(Protocol):
     """Backend contract requiring positive exit, emptiness and removal evidence."""
 
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Return recovery material that must be durable before runtime creation."""
+
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> RuntimeUnit:
         """Create only a CREATE_INTENT unit using the fixed image/argument policy."""
 
@@ -152,3 +157,8 @@ class IsolationRuntime(Protocol):
 
     def discover(self, *, limit: int) -> tuple[RuntimeUnit, ...]:
         """Discover broker-labelled units only as supplementary evidence."""
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> RuntimeUnit | None:
+        """Recover an exact create whose runtime reply was not committed."""

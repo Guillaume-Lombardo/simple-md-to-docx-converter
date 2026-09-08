@@ -119,6 +119,8 @@ class NodeAttestationEngine:
         self,
         pod: KubernetesPodIdentity,
         contract: KubernetesAttestationContract,
+        *,
+        _allow_exited: bool = False,
     ) -> KubernetesSandboxIdentity:
         """Bind the Pod UID to one fenced node, CRI sandbox and stable cgroup."""
 
@@ -150,12 +152,21 @@ class NodeAttestationEngine:
             or manifest_digest(contract.pod_contract) != contract.manifest_digest
             or project_observed_pod(sandbox.observed_pod, contract.pod_contract)
             != contract.pod_contract
-            or sandbox.sandbox_ready is not True
             or sandbox.network_interfaces != ("lo",)
             or sandbox.forwarding_enabled is not False
             or not sandbox.container_ids
             or len(sandbox.container_ids) != len(sandbox.container_states)
-            or any(state != "RUNNING" for state in sandbox.container_states)
+            or not (
+                (
+                    sandbox.sandbox_ready is True
+                    and all(state == "RUNNING" for state in sandbox.container_states)
+                )
+                or (
+                    _allow_exited
+                    and sandbox.sandbox_ready is False
+                    and all(state == "EXITED" for state in sandbox.container_states)
+                )
+            )
             or sandbox.cpu_quota_micros != contract.policy.limits.cpu_quota_micros
             or sandbox.cpu_period_micros != contract.policy.limits.cpu_period_micros
             or sandbox.memory_max_bytes != contract.policy.limits.memory_bytes
@@ -181,7 +192,7 @@ class NodeAttestationEngine:
             "sandbox-binding",
             {
                 "cgroup_path": sandbox.cgroup_path,
-                "container_ids": sandbox.container_ids,
+                "container_ids": tuple(sorted(sandbox.container_ids)),
                 "cpu_max": (
                     sandbox.cpu_quota_micros,
                     sandbox.cpu_period_micros,
@@ -203,7 +214,11 @@ class NodeAttestationEngine:
         )
         try:
             identity = KubernetesSandboxIdentity(
-                sandbox.sandbox_id, sandbox.cgroup_path, sandbox.node_uid, binding
+                sandbox.sandbox_id,
+                sandbox.cgroup_path,
+                sandbox.node_uid,
+                binding,
+                tuple(sorted(sandbox.container_ids)),
             )
         except ValueError:
             failure = KubernetesRuntimeError(
@@ -215,6 +230,15 @@ class NodeAttestationEngine:
             raise KubernetesRuntimeError("Kubernetes sandbox attestation is invalid")
         return identity
 
+    def adopt_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity:
+        """Bind a persisted create intent whether its exact Pod runs or exited."""
+
+        return self.bind(pod, contract, _allow_exited=True)
+
     def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
         """Prove all CRI containers exited; a Pod phase or API result is ignored."""
 
@@ -223,13 +247,17 @@ class NodeAttestationEngine:
         if (
             snapshot.sandbox_ready is not False
             or not snapshot.container_states
+            or not _same_container_ids(
+                snapshot.container_ids, unit.sandbox.container_ids
+            )
+            or len(snapshot.container_states) != len(unit.sandbox.container_ids)
             or any(state != "EXITED" for state in snapshot.container_states)
         ):
             raise KubernetesRuntimeError("Kubernetes exit is unconfirmed")
         return _evidence(
             "exit",
             {
-                "container_ids": snapshot.container_ids,
+                "container_ids": unit.sandbox.container_ids,
                 "container_states": snapshot.container_states,
                 "node_uid": str(snapshot.node_uid),
                 "pod_uid": str(snapshot.pod_uid),
@@ -277,6 +305,10 @@ class NodeAttestationEngine:
                     != contract.pod_contract
                     or snapshot.sandbox_ready is not False
                     or not snapshot.container_states
+                    or not _same_container_ids(
+                        snapshot.container_ids, unit.sandbox.container_ids
+                    )
+                    or len(snapshot.container_states) != len(unit.sandbox.container_ids)
                     or any(state != "EXITED" for state in snapshot.container_states)
                     or snapshot.network_interfaces != ("lo",)
                     or snapshot.forwarding_enabled is not False
@@ -316,6 +348,10 @@ class NodeAttestationEngine:
                 != contract.pod_contract
                 or snapshot.sandbox_ready is not False
                 or not snapshot.container_states
+                or not _same_container_ids(
+                    snapshot.container_ids, unit.sandbox.container_ids
+                )
+                or len(snapshot.container_states) != len(unit.sandbox.container_ids)
                 or any(state != "EXITED" for state in snapshot.container_states)
             ):
                 raise KubernetesRuntimeError(
@@ -458,6 +494,10 @@ def _observed_identity_matches(observed: object, pod: KubernetesPodIdentity) -> 
         and metadata.get("uid") == str(pod.pod_uid)
         and specification.get("nodeName") == pod.node_name
     )
+
+
+def _same_container_ids(observed: tuple[str, ...], retained: tuple[str, ...]) -> bool:
+    return len(observed) == len(retained) and frozenset(observed) == frozenset(retained)
 
 
 def _inspector_call[T](operation: Callable[[], T], message: str) -> T:

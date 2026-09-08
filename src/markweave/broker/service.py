@@ -204,11 +204,13 @@ class IsolationBrokerService:
             if reserved.state is not ManagedUnitState.RESERVED:
                 return reserved
             try:
+                prepared = self._runtime.prepare(reserved, self._policy)
                 intent = self._inventory_call(
                     lambda: self._inventory.transition(
                         reserved.unit_id,
                         expected_revision=reserved.revision,
                         target=ManagedUnitState.CREATE_INTENT,
+                        runtime_recovery=prepared,
                     )
                 )
                 runtime_unit = self._runtime.create(intent, self._policy)
@@ -500,7 +502,7 @@ class IsolationBrokerService:
             discovered[runtime_unit.unit_id] = runtime_unit
         return discovered
 
-    def _reconcile(self) -> None:
+    def _reconcile(self) -> None:  # noqa: PLR0912 - explicit durable state sweep
         units = self._inventory_call(
             lambda: self._inventory.unacknowledged(limit=self._max_discovered_units)
         )
@@ -525,6 +527,18 @@ class IsolationBrokerService:
                 runtime_unit = self._runtime.recover(unit, unit.runtime_recovery)
                 self._validate_runtime_unit(unit, runtime_unit, require_persisted=True)
                 recovered[unit.unit_id] = runtime_unit
+            elif (
+                unit.runtime_recovery is not None
+                and unit.state is ManagedUnitState.CREATE_INTENT
+            ):
+                runtime_unit = self._runtime.recover_create_intent(
+                    unit, unit.runtime_recovery
+                )
+                if runtime_unit is not None:
+                    self._validate_runtime_unit(
+                        unit, runtime_unit, require_persisted=False
+                    )
+                    recovered[unit.unit_id] = runtime_unit
 
         if any(unit.proof_acknowledged for unit in units):
             units = self._inventory_call(
@@ -580,7 +594,10 @@ class IsolationBrokerService:
             return
         if unit.state is ManagedUnitState.CREATE_INTENT:
             if runtime_unit is None:
-                self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+                if unit.runtime_recovery is None:
+                    self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+                runtime_unit = self._runtime.create(unit, self._policy)
+                self._validate_runtime_unit(unit, runtime_unit, require_persisted=False)
             created = self._inventory_call(
                 lambda: self._inventory.transition(
                     unit.unit_id,

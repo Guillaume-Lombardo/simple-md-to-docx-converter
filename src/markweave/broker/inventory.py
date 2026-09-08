@@ -972,7 +972,14 @@ class SQLiteBrokerInventory:
         }
         if requires_incarnation != (type(runtime_incarnation) is RuntimeIncarnation):
             _fail()
-        if target is not ManagedUnitState.CREATED and runtime_recovery is not None:
+        if (
+            target
+            not in {
+                ManagedUnitState.CREATE_INTENT,
+                ManagedUnitState.CREATED,
+            }
+            and runtime_recovery is not None
+        ):
             _fail()
         if (
             runtime_recovery is not None

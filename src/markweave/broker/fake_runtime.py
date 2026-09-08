@@ -153,6 +153,14 @@ class FakeIsolationRuntime:
             raise FakeRuntimeError("Unknown isolation runtime unit")
         return record
 
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Require no prepared binding for the deterministic fake backend."""
+
+        del unit, policy
+        return None
+
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> FakeRuntimeUnit:
         """Create one exact incarnation only after durable CREATE_INTENT."""
 
@@ -182,6 +190,14 @@ class FakeIsolationRuntime:
     def recover(
         self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
     ) -> FakeRuntimeUnit:
+        """Reject recovery material because the fake backend never emits it."""
+
+        del unit, binding
+        raise FakeRuntimeError("Fake runtime recovery binding is invalid")
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> FakeRuntimeUnit | None:
         """Reject recovery material because the fake backend never emits it."""
 
         del unit, binding

@@ -8,7 +8,9 @@ or path from a broker caller; those values are fixed by its configuration.
 from __future__ import annotations
 
 import base64
+import functools
 import json
+import ssl
 import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -19,7 +21,8 @@ from uuid import UUID
 from kubernetes import client
 from kubernetes import config as kubernetes_config
 from kubernetes.client.exceptions import ApiException
-from kubernetes.stream import stream
+from kubernetes.stream import ws_client
+from kubernetes.stream.stream import _websocket_request
 
 from markweave.broker.kubernetes_runtime import (
     KubernetesPodIdentity,
@@ -129,6 +132,111 @@ class ExecSession(Protocol):
 ExecFactory = Callable[..., ExecSession]
 
 
+def _bounded_create_websocket(
+    configuration: Any,
+    url: str,
+    headers: Mapping[str, str] | None,
+    timeout_seconds: float,
+) -> Any:
+    header: list[str] = []
+    if headers and "authorization" in headers:
+        header.append(f"authorization: {headers['authorization']}")
+    if headers and "sec-websocket-protocol" in headers:
+        header.append(f"sec-websocket-protocol: {headers['sec-websocket-protocol']}")
+    else:
+        header.append("sec-websocket-protocol: v4.channel.k8s.io")
+    if url.startswith("wss://") and configuration.verify_ssl:
+        ssl_options: dict[str, object] = {
+            "cert_reqs": ssl.CERT_REQUIRED,
+            "ca_certs": configuration.ssl_ca_cert or ws_client.certifi.where(),
+        }
+        if configuration.assert_hostname is not None:
+            ssl_options["check_hostname"] = configuration.assert_hostname
+    else:
+        ssl_options = {"cert_reqs": ssl.CERT_NONE}
+    if configuration.cert_file:
+        ssl_options["certfile"] = configuration.cert_file
+    if configuration.key_file:
+        ssl_options["keyfile"] = configuration.key_file
+    if configuration.tls_server_name:
+        ssl_options["server_hostname"] = configuration.tls_server_name
+    websocket = ws_client.WebSocket(sslopt=ssl_options, skip_utf8_validation=False)
+    connect_options: dict[str, object] = {
+        "header": header,
+        "timeout": timeout_seconds,
+    }
+    if configuration.proxy or configuration.proxy_headers:
+        connect_options = ws_client.websocket_proxycare(
+            connect_options, configuration, url, headers
+        )
+    websocket.connect(url, **connect_options)
+    return websocket
+
+
+class _BoundedWsClient(ws_client.WSClient):
+    def __init__(  # noqa: PLR0913 - mirrors pinned Kubernetes WSClient contract
+        self,
+        configuration: Any,
+        url: str,
+        headers: Mapping[str, str] | None,
+        capture_all: bool,
+        *,
+        binary: bool,
+        timeout_seconds: float,
+    ) -> None:
+        self._connected = False
+        self._channels = {}
+        self.binary = binary
+        self.newline = b"\n" if binary else "\n"
+        if capture_all:
+            self._all = ws_client.BytesIO() if binary else ws_client.StringIO()
+        else:
+            self._all = ws_client._IgnoredIO()
+        self.sock = _bounded_create_websocket(
+            configuration, url, headers, timeout_seconds
+        )
+        self._connected = True
+        self._returncode = None
+
+
+def _bounded_websocket_call(
+    configuration: Any, method: str, url: str, **kwargs: object
+) -> object:
+    del method
+    try:
+        request_timeout: object = kwargs.get("_request_timeout", 60)
+        timeout_value: object = (
+            request_timeout[0]
+            if isinstance(request_timeout, tuple) and request_timeout
+            else request_timeout
+        )
+        if type(timeout_value) not in {int, float}:
+            raise ValueError
+        timeout_seconds = float(cast(int | float, timeout_value))
+        if timeout_seconds <= 0:
+            raise ValueError
+        websocket_url = ws_client.get_websocket_url(url, kwargs.get("query_params"))
+        client = _BoundedWsClient(
+            configuration,
+            websocket_url,
+            cast(Mapping[str, str] | None, kwargs.get("headers")),
+            bool(kwargs.get("capture_all", True)),
+            binary=bool(kwargs.get("binary", False)),
+            timeout_seconds=timeout_seconds,
+        )
+        if not bool(kwargs.get("_preload_content", True)):
+            return client
+        client.run_forever(timeout=timeout_seconds)
+        return ws_client.WSResponse(client.read_all())
+    except (Exception, KeyboardInterrupt, SystemExit) as error:
+        raise ApiException(status=0, reason=str(error)) from None
+
+
+_BOUNDED_STREAM: ExecFactory = functools.partial(
+    _websocket_request, _bounded_websocket_call, None
+)
+
+
 @dataclass(frozen=True, slots=True)
 class KubernetesApiConfig:
     """Broker-owned namespace and bounded API timing policy."""
@@ -165,7 +273,7 @@ class KubernetesApiControlPlane:
         api: CoreV1ApiPort,
         config: KubernetesApiConfig,
         *,
-        exec_factory: ExecFactory = stream,
+        exec_factory: ExecFactory = _BOUNDED_STREAM,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -216,6 +324,35 @@ class KubernetesApiControlPlane:
             raise
         except Exception:
             raise KubernetesRuntimeError("Kubernetes Pod creation failed") from None
+
+    def find(self, name: str) -> KubernetesPodIdentity | None:
+        """Read one deterministic broker-authored Pod name without label discovery."""
+
+        if type(name) is not str or not name:
+            raise KubernetesRuntimeError("Kubernetes Pod lookup is invalid")
+        try:
+            current = self._api.read_namespaced_pod(
+                name,
+                self._config.namespace,
+                _request_timeout=self._config.scheduling_timeout_seconds,
+            )
+            deadline = self._monotonic() + self._config.scheduling_timeout_seconds
+            while not self._node_assigned(current):
+                if self._monotonic() >= deadline:
+                    raise KubernetesRuntimeError("Kubernetes Pod scheduling timed out")
+                self._sleep(self._config.poll_interval_seconds)
+                current = self._api.read_namespaced_pod(
+                    name,
+                    self._config.namespace,
+                    _request_timeout=self._config.scheduling_timeout_seconds,
+                )
+        except ApiException as error:
+            if error.status == _NOT_FOUND:
+                return None
+            raise KubernetesRuntimeError("Kubernetes Pod lookup failed") from None
+        except Exception:
+            raise KubernetesRuntimeError("Kubernetes Pod lookup failed") from None
+        return self._identity(current)
 
     def stage_request(
         self, pod: KubernetesPodIdentity, request: ReverseAttemptRequest

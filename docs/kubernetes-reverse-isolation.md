@@ -28,8 +28,8 @@ Kubernetes node name directly to that node's reachable address. The server certi
 those node names, the mounted CA trusts only broker client certificates, and the broker verifies
 both the server name, its configured exact leaf-certificate SHA-256, and the attested node identity.
 The server likewise verifies its client CA and an exact configured broker leaf-certificate SHA-256.
-The bounded protocol accepts only `bind`, `recover_create_intent`, `recover`, `confirm_exit`,
-`confirm_empty`, `confirm_removed`, and `acknowledge`; the server retains the bound sandbox identity and requires
+The bounded protocol accepts only `bind`, `adopt_create_intent`, `recover_create_intent`,
+`recover`, `confirm_exit`, `confirm_empty`, `confirm_removed`, and `acknowledge`; the server retains the bound sandbox identity and requires
 the exact evidence it issued at each proof transition. Its bounded HMAC-authenticated SQLite
 ledger persists `BOUND`, `EXIT`, `EMPTY`, and `REMOVED` before replying. It never expires or evicts
 an unacknowledged record; capacity, corruption, deletion, or authentication failure closes the
@@ -57,7 +57,8 @@ operation rereads and matches the complete Pod identity; deletion carries the ex
 precondition. Kubernetes exec has no UID precondition, so its fixed helper first blocks, the broker
 rechecks the API identity, and the helper checks a kubelet-projected Pod UID before accepting data.
 Workspace exec transfers canonical attempt-channel files with bounded base64 framing,
-and the kill exec acknowledgement is never considered termination evidence.
+and the pinned websocket client receives the exact broker timeout during connection establishment
+as well as stream polling. The kill exec acknowledgement is never considered termination evidence.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. A concrete bounded
 `CriCgroupInspector`, node-attester command/process assembly, durable volume and key wiring, and
@@ -136,11 +137,13 @@ evidence may the broker delete the exact Pod UID. Removal requires complete CRI 
 the sandbox is gone, cgroup lookup proving the previously emptied cgroup is gone, and bounded Pod
 API absence. The final evidence binds all identities and the prior emptiness digest.
 
-The broker inventory persists a bounded, versioned, content-free recovery binding alongside the
-creation transition. The authenticated v2-to-v3 migration verifies every row and manifest before
-an atomic schema rewrite and re-MAC. The binding carries the exact Pod, sandbox, creation-time
-policy, runtime configuration, image repository, and contract digest. Recovery validates those
-facts against the durable unit, so a current-policy rollover cannot reinterpret an existing unit.
+Before the first Pod API mutation, the broker inventory persists a bounded, versioned,
+content-free prepared binding on `CREATE_INTENT`. It fixes the unit identity, creation-time policy,
+runtime configuration, image repository, and Pod-contract digest. After attestation, the same
+authenticated row is atomically replaced with the exact Pod, sandbox, node fence, and complete
+container ID set. The authenticated v2-to-v3 migration verifies every row and manifest before an
+atomic schema rewrite and re-MAC. Recovery validates those facts against the durable unit, so a
+lost API/bind reply or current-policy rollover cannot reinterpret an existing unit.
 It performs exact Pod lookup rather than guessing a node or trusting labels, and it separately
 recovers a present `EXITED` unit without trying to recreate a running binding. If a create reply
 was lost before the broker persisted `CREATED`, `recover_create_intent` returns only the original

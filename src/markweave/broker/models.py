@@ -294,7 +294,14 @@ class ManagedUnit:
             raise ValueError("Managed unit runtime incarnation is inconsistent")
         if self.runtime_recovery is not None and (
             type(self.runtime_recovery) is not RuntimeRecoveryBinding
-            or not requires_incarnation
+            or self.state
+            not in {
+                ManagedUnitState.CREATE_INTENT,
+                ManagedUnitState.CREATED,
+                ManagedUnitState.EXIT_CONFIRMED,
+                ManagedUnitState.EMPTY_CONFIRMED,
+                ManagedUnitState.REMOVED,
+            }
         ):
             raise ValueError("Managed unit runtime recovery binding is inconsistent")
         if (

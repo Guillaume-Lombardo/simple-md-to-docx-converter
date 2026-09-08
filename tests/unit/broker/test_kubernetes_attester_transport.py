@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
@@ -12,7 +13,10 @@ import pytest
 
 from markweave.broker import kubernetes_attester_transport as transport
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
-from markweave.broker.kubernetes_attester_inventory import SQLiteNodeAttesterLedger
+from markweave.broker.kubernetes_attester_inventory import (
+    AttesterLifecycleState,
+    SQLiteNodeAttesterLedger,
+)
 from markweave.broker.kubernetes_attester_transport import (
     AttesterClientTlsConfig,
     AttesterReadinessPolicy,
@@ -34,6 +38,7 @@ from markweave.broker.models import (
     ManagedUnit,
     ManagedUnitState,
     RuntimeChannelLimits,
+    RuntimeIncarnation,
     RuntimeLimits,
     policy_specification_evidence,
 )
@@ -160,7 +165,13 @@ def test_service_keeps_sandbox_identity_server_side(
     response = _call(service, bind_request)
     assert set(response) == {"outcome", "sandbox"}
     sandbox = cast(dict[str, object], response["sandbox"])
-    assert set(sandbox) == {"cgroup_path", "node_fence", "node_uid", "sandbox_id"}
+    assert set(sandbox) == {
+        "cgroup_path",
+        "container_ids",
+        "node_fence",
+        "node_uid",
+        "sandbox_id",
+    }
 
     control.terminated = True
     pod_uid = cast(dict[str, object], bind_request["pod"])["pod_uid"]
@@ -229,6 +240,19 @@ def test_service_keeps_sandbox_identity_server_side(
         )
         == removed
     )
+    assert service._bound
+    assert service._engine._contracts
+    acknowledgement = {
+        "operation": "acknowledge",
+        "pod_uid": pod_uid,
+        "protocol": "markweave-kubernetes-node-attester",
+        "removed_evidence": removed["evidence"],
+        "version": 1,
+    }
+    assert _call(service, acknowledgement)["acknowledged"] is True
+    assert _call(service, acknowledgement)["acknowledged"] is True
+    assert service._bound == {}
+    assert service._engine._contracts == {}
 
 
 @pytest.mark.unit
@@ -397,6 +421,54 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
 
 
 @pytest.mark.unit
+def test_recovery_clients_normalize_malformed_success_payloads(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    class ClientDouble(HttpsNodeAttesterClient):
+        response: dict[str, object]
+
+        def _exchange(
+            self, node_name: str, request: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            del node_name, request
+            return self.response
+
+    service, request, _, _ = _binding(unit, policy, tmp_path)
+    bound = _call(service, request)
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    sandbox = transport._sandbox(bound["sandbox"])
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    client = object.__new__(ClientDouble)
+    client._bound = {}
+    malformed_sandbox = dict(cast(dict[str, object], bound["sandbox"]))
+    malformed_sandbox["node_uid"] = "private-malformed-uuid"
+    malformed_contract = deepcopy(cast(dict[str, object], request["contract"]))
+    malformed_policy = cast(dict[str, object], malformed_contract["policy"])
+    malformed_limits = cast(dict[str, object], malformed_policy["limits"])
+    malformed_limits["memory_bytes"] = True
+    client.response = {
+        "contract": malformed_contract,
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid") as raised:
+        client.recover_create_intent(pod, contract)
+    assert raised.value.__cause__ is None
+
+    client.response = {"outcome": "ok", "sandbox": malformed_sandbox}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid") as raised:
+        client.recover(runtime_unit, contract, ManagedUnitState.CREATED)
+    assert "private-malformed-uuid" not in str(raised.value)
+    assert raised.value.__cause__ is None
+
+
+@pytest.mark.unit
 def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
     unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
@@ -520,6 +592,34 @@ def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
         ).records()
         == ()
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("terminal", [False, True])
+def test_service_durably_adopts_prepared_create_before_bind_reply(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path, terminal: bool
+) -> None:
+    service, request, _, control = _binding(unit, policy, tmp_path)
+    control.terminated = terminal
+
+    adopted = _call(
+        service,
+        {
+            "operation": "adopt_create_intent",
+            "pod": request["pod"],
+            "proposed_contract": request["contract"],
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+
+    assert adopted["contract"] == request["contract"]
+    assert adopted["outcome"] == "ok"
+    records = SQLiteNodeAttesterLedger(
+        tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+    ).records()
+    assert len(records) == 1
+    assert records[0].state is AttesterLifecycleState.BOUND
 
 
 @pytest.mark.unit

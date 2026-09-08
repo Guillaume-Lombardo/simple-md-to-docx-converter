@@ -10,7 +10,9 @@ from uuid import UUID
 
 import pytest
 from kubernetes.client.exceptions import ApiException
+from pytest_mock import MockerFixture
 
+from markweave.broker import kubernetes_api as kubernetes_api_module
 from markweave.broker.kubernetes_api import (
     KubernetesApiConfig,
     KubernetesApiControlPlane,
@@ -448,6 +450,41 @@ def test_exec_timeout_and_output_bounds_fail_closed() -> None:
 
 
 @pytest.mark.unit
+def test_websocket_upgrade_receives_the_exact_connect_timeout(
+    mocker: MockerFixture,
+) -> None:
+    observed: dict[str, object] = {}
+
+    class StalledUpgrade:
+        def connect(self, url: str, **kwargs: object) -> None:
+            observed.update(url=url, **kwargs)
+            raise TimeoutError("stalled websocket upgrade")
+
+    mocker.patch.object(
+        kubernetes_api_module.ws_client,
+        "WebSocket",
+        return_value=StalledUpgrade(),
+    )
+    configuration = SimpleNamespace(
+        verify_ssl=False,
+        ssl_ca_cert=None,
+        assert_hostname=None,
+        cert_file=None,
+        key_file=None,
+        tls_server_name=None,
+        proxy=None,
+        proxy_headers=None,
+    )
+
+    with pytest.raises(TimeoutError, match="stalled websocket upgrade"):
+        kubernetes_api_module._bounded_create_websocket(
+            configuration, "ws://node/exec", None, 0.25
+        )
+
+    assert observed["timeout"] == 0.25
+
+
+@pytest.mark.unit
 def test_exec_rechecks_uid_after_helper_channel_is_established() -> None:
     api = _Api()
     initial = KubernetesApiControlPlane(api, CONFIG, exec_factory=_ExecFactory())
@@ -478,6 +515,7 @@ def test_adapter_validates_configuration_and_request_identities() -> None:
     api = _Api()
     control = KubernetesApiControlPlane(api, CONFIG, exec_factory=_ExecFactory())
     pod = control.create(_manifest())
+    assert control.find(pod.name) == pod
     wrong = UUID(int=42)
     with pytest.raises(KubernetesRuntimeError, match="workspace request"):
         control.stage_request(pod, replace(_request(), attempt_id=wrong))
@@ -485,6 +523,8 @@ def test_adapter_validates_configuration_and_request_identities() -> None:
         control.try_collect_response(pod, wrong)
     with pytest.raises(KubernetesRuntimeError, match="discovery request"):
         control.discover(namespace="other", labels={}, limit=0)
+    api.present = False
+    assert control.find(pod.name) is None
 
 
 @pytest.mark.unit

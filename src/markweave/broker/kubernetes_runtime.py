@@ -100,6 +100,7 @@ class KubernetesSandboxIdentity:
     cgroup_path: str
     node_uid: UUID
     node_fence: EvidenceDigest
+    container_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if (
@@ -109,6 +110,13 @@ class KubernetesSandboxIdentity:
             or _CGROUP_PATH.fullmatch(self.cgroup_path) is None
             or type(self.node_uid) is not UUID
             or type(self.node_fence) is not EvidenceDigest
+            or type(self.container_ids) is not tuple
+            or not self.container_ids
+            or len(set(self.container_ids)) != len(self.container_ids)
+            or any(
+                type(value) is not str or _SANDBOX_ID.fullmatch(value) is None
+                for value in self.container_ids
+            )
         ):
             raise ValueError("Kubernetes sandbox identity is invalid")
 
@@ -205,6 +213,8 @@ class KubernetesControlPlane(Protocol):
 
     def create(self, manifest: Mapping[str, object]) -> KubernetesPodIdentity: ...
 
+    def find(self, name: str) -> KubernetesPodIdentity | None: ...
+
     def stage_request(
         self, pod: KubernetesPodIdentity, request: ReverseAttemptRequest
     ) -> None: ...
@@ -228,6 +238,12 @@ class KubernetesNodeAttester(Protocol):
     """Separate node-local CRI/cgroup authority on the dedicated pool."""
 
     def bind(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity: ...
+
+    def adopt_create_intent(
         self,
         pod: KubernetesPodIdentity,
         contract: KubernetesAttestationContract,
@@ -348,6 +364,39 @@ class KubernetesIsolationRuntime:
         self._known: dict[UUID, KubernetesRuntimeUnit] = {}
         self._recovered: set[UUID] = set()
 
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Bind creation policy durably before the first Kubernetes API mutation."""
+
+        if (
+            type(unit) is not ManagedUnit
+            or unit.state is not ManagedUnitState.RESERVED
+            or type(policy) is not BrokerPolicy
+            or policy != self._policy
+            or unit.policy_revision != policy.revision
+            or unit.policy_specification != policy_specification_evidence(policy)
+        ):
+            raise KubernetesRuntimeError("Kubernetes create contract is invalid")
+        intent = ManagedUnit(
+            unit.attempt_id,
+            unit.unit_id,
+            unit.principal,
+            unit.create_sequence,
+            unit.policy_revision,
+            unit.policy_specification,
+            ManagedUnitState.CREATE_INTENT,
+            unit.revision + 1,
+        )
+        manifest = self._manifest(intent, policy)
+        return _prepared_recovery_binding(
+            intent,
+            policy,
+            self._config,
+            self._image_repository,
+            manifest_digest(pod_contract_projection(manifest)),
+        )
+
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> KubernetesRuntimeUnit:
         """Create and positively bind one exact immutable-policy Pod sandbox."""
 
@@ -356,16 +405,42 @@ class KubernetesIsolationRuntime:
             or unit.state is not ManagedUnitState.CREATE_INTENT
             or type(policy) is not BrokerPolicy
             or policy != self._policy
-            or unit.policy_revision != policy.revision
+        ):
+            raise KubernetesRuntimeError("Kubernetes create contract is invalid")
+        creation_policy = policy
+        creation_config = self._config
+        creation_repository = self._image_repository
+        if unit.runtime_recovery is not None:
+            creation_policy, creation_config, creation_repository, expected_digest = (
+                _decode_prepared_recovery_binding(unit, unit.runtime_recovery)
+            )
+        elif (
+            unit.policy_revision != policy.revision
             or unit.policy_specification != policy_specification_evidence(policy)
         ):
             raise KubernetesRuntimeError("Kubernetes create contract is invalid")
-        manifest = self._manifest(unit, policy)
+        manifest = self._manifest_for(
+            unit, creation_policy, creation_config, creation_repository
+        )
         pod_contract = pod_contract_projection(manifest)
+        if (
+            unit.runtime_recovery is not None
+            and manifest_digest(pod_contract) != expected_digest
+        ):
+            raise KubernetesRuntimeError("Kubernetes create contract is invalid")
         try:
             pod = self._control.create(manifest)
             self._verify_pod_identity(unit, pod)
-            sandbox = self._attester.bind(pod, self._attestation(pod_contract, policy))
+            sandbox = self._attester.bind(
+                pod,
+                KubernetesAttestationContract(
+                    pod_contract,
+                    manifest_digest(pod_contract),
+                    creation_policy,
+                    creation_config.pool_name,
+                    creation_config.node_fence_revision,
+                ),
+            )
             provisional = KubernetesRuntimeUnit(
                 unit.unit_id,
                 RuntimeIncarnation(pod.pod_uid, unit.policy_specification),
@@ -377,7 +452,12 @@ class KubernetesIsolationRuntime:
                 provisional.incarnation,
                 provisional.pod,
                 provisional.sandbox,
-                self._recovery_binding(provisional, policy, self._config),
+                self._recovery_binding(
+                    provisional,
+                    creation_policy,
+                    creation_config,
+                    image_repository=creation_repository,
+                ),
             )
             previous = self._known.setdefault(unit.unit_id, result)
             if previous != result:
@@ -388,6 +468,70 @@ class KubernetesIsolationRuntime:
         except Exception:
             failure = KubernetesRuntimeError("Kubernetes create failed")
         raise failure
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> KubernetesRuntimeUnit | None:
+        """Recover or adopt an exact Pod after a lost create/bind reply."""
+
+        if (
+            type(unit) is not ManagedUnit
+            or unit.state is not ManagedUnitState.CREATE_INTENT
+            or unit.runtime_recovery != binding
+            or unit.runtime_incarnation is not None
+        ):
+            raise KubernetesRuntimeError("Kubernetes recovery binding is invalid")
+        policy, config, repository, expected_digest = _decode_prepared_recovery_binding(
+            unit, binding
+        )
+        manifest = self._manifest_for(unit, policy, config, repository)
+        pod_contract = pod_contract_projection(manifest)
+        if manifest_digest(pod_contract) != expected_digest:
+            raise KubernetesRuntimeError("Kubernetes recovery binding is invalid")
+        pod = _external_call(
+            lambda: self._control.find(_runtime_name(unit.unit_id)),
+            "Kubernetes recovery discovery failed",
+            preserve_runtime_error=True,
+        )
+        if pod is None:
+            return None
+        self._verify_pod_identity(unit, pod)
+        contract = KubernetesAttestationContract(
+            pod_contract,
+            expected_digest,
+            policy,
+            config.pool_name,
+            config.node_fence_revision,
+        )
+        sandbox = _external_call(
+            lambda: self._attester.adopt_create_intent(pod, contract),
+            "Kubernetes recovery attestation failed",
+            preserve_runtime_error=True,
+        )
+        provisional = KubernetesRuntimeUnit(
+            unit.unit_id,
+            RuntimeIncarnation(pod.pod_uid, unit.policy_specification),
+            pod,
+            sandbox,
+        )
+        result = KubernetesRuntimeUnit(
+            provisional.unit_id,
+            provisional.incarnation,
+            provisional.pod,
+            provisional.sandbox,
+            self._recovery_binding(
+                provisional,
+                policy,
+                config,
+                expected_contract=contract,
+                image_repository=repository,
+            ),
+        )
+        previous = self._known.setdefault(unit.unit_id, result)
+        if previous != result:
+            raise KubernetesRuntimeError("Kubernetes recovery identity conflicts")
+        self._recovered.add(unit.unit_id)
+        return result
 
     def recover(
         self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
@@ -870,7 +1014,11 @@ class KubernetesIsolationRuntime:
         config: KubernetesRuntimeConfig,
         *,
         expected_contract: KubernetesAttestationContract | None = None,
+        image_repository: str | None = None,
     ) -> RuntimeRecoveryBinding:
+        repository = (
+            self._image_repository if image_repository is None else image_repository
+        )
         contract = pod_contract_projection(
             self._manifest_for(
                 ManagedUnit(
@@ -885,7 +1033,7 @@ class KubernetesIsolationRuntime:
                 ),
                 policy,
                 config,
-                self._image_repository,
+                repository,
             )
         )
         if expected_contract is not None and (
@@ -897,9 +1045,10 @@ class KubernetesIsolationRuntime:
         ):
             raise KubernetesRuntimeError("Kubernetes recovery binding is invalid")
         payload = {
+            "phase": "bound",
             "config": asdict(config),
             "contract_digest": manifest_digest(contract).value,
-            "image_repository": self._image_repository,
+            "image_repository": repository,
             "pod": _pod_recovery_mapping(unit.pod),
             "policy": _policy_recovery_mapping(policy),
             "sandbox": _sandbox_recovery_mapping(unit.sandbox),
@@ -946,6 +1095,7 @@ def _implements_control_plane(value: object) -> bool:
         callable(getattr(value, name, None))
         for name in (
             "create",
+            "find",
             "stage_request",
             "try_collect_response",
             "terminate",
@@ -959,7 +1109,16 @@ def _implements_control_plane(value: object) -> bool:
 def _implements_attester(value: object) -> bool:
     return all(
         callable(getattr(value, name, None))
-        for name in ("bind", "confirm_exit", "confirm_empty", "confirm_removed")
+        for name in (
+            "acknowledge",
+            "adopt_create_intent",
+            "bind",
+            "confirm_empty",
+            "confirm_exit",
+            "confirm_removed",
+            "recover",
+            "recover_create_intent",
+        )
     )
 
 
@@ -1162,6 +1321,10 @@ def _canonical_recovery(value: Mapping[str, object]) -> bytes:
         raise KubernetesRuntimeError("Kubernetes recovery binding is invalid") from None
 
 
+def _runtime_name(unit_id: UUID) -> str:
+    return f"markweave-reverse-{unit_id.hex}"
+
+
 def _pod_recovery_mapping(pod: KubernetesPodIdentity) -> dict[str, object]:
     return {
         "attempt_id": str(pod.attempt_id),
@@ -1184,11 +1347,47 @@ def _sandbox_recovery_mapping(
         "node_fence": sandbox.node_fence.value,
         "node_uid": str(sandbox.node_uid),
         "sandbox_id": sandbox.sandbox_id,
+        "container_ids": list(sandbox.container_ids),
     }
 
 
 def _policy_recovery_mapping(policy: BrokerPolicy) -> dict[str, object]:
     return asdict(policy)
+
+
+def _prepared_unit_mapping(unit: ManagedUnit) -> dict[str, object]:
+    return {
+        "attempt_id": str(unit.attempt_id),
+        "create_sequence": unit.create_sequence,
+        "policy_revision": unit.policy_revision,
+        "policy_specification": unit.policy_specification.value,
+        "principal_id": str(unit.principal.principal_id),
+        "runtime_name": _runtime_name(unit.unit_id),
+        "unit_id": str(unit.unit_id),
+    }
+
+
+def _prepared_recovery_binding(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    config: KubernetesRuntimeConfig,
+    repository: str,
+    contract_digest: EvidenceDigest,
+) -> RuntimeRecoveryBinding:
+    return RuntimeRecoveryBinding(
+        "kubernetes",
+        1,
+        _canonical_recovery(
+            {
+                "config": asdict(config),
+                "contract_digest": contract_digest.value,
+                "image_repository": repository,
+                "phase": "prepared",
+                "policy": _policy_recovery_mapping(policy),
+                "unit": _prepared_unit_mapping(unit),
+            }
+        ),
+    )
 
 
 def _closed_recovery(value: object, keys: set[str]) -> Mapping[str, object]:
@@ -1217,6 +1416,106 @@ def _recovery_ints(value: Mapping[str, object]) -> dict[str, int]:
     return cast(dict[str, int], dict(value))
 
 
+def _decode_recovery_policy(
+    root: Mapping[str, object],
+) -> tuple[BrokerPolicy, KubernetesRuntimeConfig, str, EvidenceDigest]:
+    policy_value = _closed_recovery(
+        root["policy"], {"channel_limits", "image_digest", "limits", "revision"}
+    )
+    limits = _closed_recovery(
+        policy_value["limits"], set(RuntimeLimits.__dataclass_fields__)
+    )
+    channel = _closed_recovery(
+        policy_value["channel_limits"],
+        set(RuntimeChannelLimits.__dataclass_fields__),
+    )
+    config_value = _closed_recovery(
+        root["config"], set(KubernetesRuntimeConfig.__dataclass_fields__)
+    )
+    policy = BrokerPolicy(
+        _recovery_text(policy_value, "revision"),
+        _recovery_text(policy_value, "image_digest"),
+        RuntimeLimits(**_recovery_ints(limits)),
+        RuntimeChannelLimits(**_recovery_ints(channel)),
+    )
+    config = KubernetesRuntimeConfig(
+        namespace=_recovery_text(config_value, "namespace"),
+        service_account=_recovery_text(config_value, "service_account"),
+        runtime_class=_recovery_text(config_value, "runtime_class"),
+        pool_name=_recovery_text(config_value, "pool_name"),
+        node_fence_revision=_recovery_text(config_value, "node_fence_revision"),
+        run_as_uid=_recovery_int(config_value, "run_as_uid"),
+        run_as_gid=_recovery_int(config_value, "run_as_gid"),
+        interpreter_memory_margin_bytes=_recovery_int(
+            config_value, "interpreter_memory_margin_bytes"
+        ),
+    )
+    repository = _recovery_text(root, "image_repository")
+    if (
+        len(repository) > _MAX_IMAGE_REPOSITORY_BYTES
+        or "@" in repository
+        or any(part in {"", ".", ".."} for part in repository.split("/"))
+    ):
+        raise ValueError
+    return (
+        policy,
+        config,
+        repository,
+        EvidenceDigest(_recovery_text(root, "contract_digest")),
+    )
+
+
+def _decode_prepared_recovery_binding(
+    unit: ManagedUnit, binding: RuntimeRecoveryBinding
+) -> tuple[BrokerPolicy, KubernetesRuntimeConfig, str, EvidenceDigest]:
+    if binding.backend != "kubernetes" or binding.schema_version != 1:
+        raise KubernetesRuntimeError("Kubernetes recovery binding is invalid")
+    try:
+        root = _closed_recovery(
+            json.loads(binding.payload.decode("ascii")),
+            {
+                "config",
+                "contract_digest",
+                "image_repository",
+                "phase",
+                "policy",
+                "unit",
+            },
+        )
+        unit_value = _closed_recovery(
+            root["unit"],
+            {
+                "attempt_id",
+                "create_sequence",
+                "policy_revision",
+                "policy_specification",
+                "principal_id",
+                "runtime_name",
+                "unit_id",
+            },
+        )
+        policy, config, repository, digest = _decode_recovery_policy(root)
+        if (
+            _canonical_recovery(root) != binding.payload
+            or root["phase"] != "prepared"
+            or UUID(_recovery_text(unit_value, "unit_id")) != unit.unit_id
+            or UUID(_recovery_text(unit_value, "attempt_id")) != unit.attempt_id
+            or _recovery_int(unit_value, "create_sequence") != unit.create_sequence
+            or UUID(_recovery_text(unit_value, "principal_id"))
+            != unit.principal.principal_id
+            or _recovery_text(unit_value, "runtime_name") != _runtime_name(unit.unit_id)
+            or _recovery_text(unit_value, "policy_revision") != unit.policy_revision
+            or EvidenceDigest(_recovery_text(unit_value, "policy_specification"))
+            != unit.policy_specification
+            or policy.revision != unit.policy_revision
+            or policy_specification_evidence(policy) != unit.policy_specification
+        ):
+            raise ValueError
+    except KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError:
+        raise KubernetesRuntimeError("Kubernetes recovery binding is invalid") from None
+    return policy, config, repository, digest
+
+
 def _decode_recovery_binding(
     binding: RuntimeRecoveryBinding,
 ) -> tuple[
@@ -1241,12 +1540,15 @@ def _decode_recovery_binding(
                 "config",
                 "contract_digest",
                 "image_repository",
+                "phase",
                 "pod",
                 "policy",
                 "sandbox",
             },
         )
         if _canonical_recovery(root) != binding.payload:
+            raise ValueError
+        if root["phase"] != "bound":
             raise ValueError
         pod_value = _closed_recovery(
             root["pod"],
@@ -1264,21 +1566,13 @@ def _decode_recovery_binding(
         )
         sandbox_value = _closed_recovery(
             root["sandbox"],
-            {"cgroup_path", "node_fence", "node_uid", "sandbox_id"},
-        )
-        policy_value = _closed_recovery(
-            root["policy"],
-            {"channel_limits", "image_digest", "limits", "revision"},
-        )
-        limits = _closed_recovery(
-            policy_value["limits"], set(RuntimeLimits.__dataclass_fields__)
-        )
-        channel = _closed_recovery(
-            policy_value["channel_limits"],
-            set(RuntimeChannelLimits.__dataclass_fields__),
-        )
-        config_value = _closed_recovery(
-            root["config"], set(KubernetesRuntimeConfig.__dataclass_fields__)
+            {
+                "cgroup_path",
+                "container_ids",
+                "node_fence",
+                "node_uid",
+                "sandbox_id",
+            },
         )
         pod = KubernetesPodIdentity(
             _recovery_text(pod_value, "namespace"),
@@ -1296,33 +1590,9 @@ def _decode_recovery_binding(
             _recovery_text(sandbox_value, "cgroup_path"),
             UUID(_recovery_text(sandbox_value, "node_uid")),
             EvidenceDigest(_recovery_text(sandbox_value, "node_fence")),
+            tuple(cast(list[str], sandbox_value["container_ids"])),
         )
-        policy = BrokerPolicy(
-            _recovery_text(policy_value, "revision"),
-            _recovery_text(policy_value, "image_digest"),
-            RuntimeLimits(**_recovery_ints(limits)),
-            RuntimeChannelLimits(**_recovery_ints(channel)),
-        )
-        config = KubernetesRuntimeConfig(
-            namespace=_recovery_text(config_value, "namespace"),
-            service_account=_recovery_text(config_value, "service_account"),
-            runtime_class=_recovery_text(config_value, "runtime_class"),
-            pool_name=_recovery_text(config_value, "pool_name"),
-            node_fence_revision=_recovery_text(config_value, "node_fence_revision"),
-            run_as_uid=_recovery_int(config_value, "run_as_uid"),
-            run_as_gid=_recovery_int(config_value, "run_as_gid"),
-            interpreter_memory_margin_bytes=_recovery_int(
-                config_value, "interpreter_memory_margin_bytes"
-            ),
-        )
-        repository = _recovery_text(root, "image_repository")
-        if (
-            len(repository) > _MAX_IMAGE_REPOSITORY_BYTES
-            or "@" in repository
-            or any(part in {"", ".", ".."} for part in repository.split("/"))
-        ):
-            raise ValueError
-        contract_digest = EvidenceDigest(_recovery_text(root, "contract_digest"))
+        policy, config, repository, contract_digest = _decode_recovery_policy(root)
     except KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError:
         raise KubernetesRuntimeError("Kubernetes recovery binding is invalid") from None
     return pod, sandbox, policy, config, repository, contract_digest

@@ -439,6 +439,14 @@ class PodmanIsolationRuntime:
         self._environment_verified = False
         self._runtime_capabilities: tuple[str, ...] = ()
 
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Require no prepared binding for label-recoverable Podman."""
+
+        del unit, policy
+        return None
+
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> PodmanRuntimeUnit:
         """Create or recover and start one exact immutable-policy container."""
 
@@ -1015,6 +1023,14 @@ class PodmanIsolationRuntime:
         self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
     ) -> PodmanRuntimeUnit:
         """Reject recovery material because Podman reconstructs from fixed labels."""
+
+        del unit, binding
+        raise PodmanRuntimeError("Podman recovery binding is invalid")
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> PodmanRuntimeUnit | None:
+        """Reject bindings because Podman recovers create intent from labels."""
 
         del unit, binding
         raise PodmanRuntimeError("Podman recovery binding is invalid")
