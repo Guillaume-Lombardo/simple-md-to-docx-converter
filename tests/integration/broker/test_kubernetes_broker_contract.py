@@ -56,9 +56,7 @@ def test_sqlite_inventory_preserves_kubernetes_proof_across_restart(
 ) -> None:
     runtime, control, inspector = _runtime(_intent(), POLICY)
     inventory_path = tmp_path / "kubernetes-broker.sqlite3"
-    inventory = SQLiteBrokerInventory(
-        inventory_path, INVENTORY_KEY, max_records=4
-    )
+    inventory = SQLiteBrokerInventory(inventory_path, INVENTORY_KEY, max_records=4)
     broker = IsolationBrokerService(
         inventory,
         runtime,

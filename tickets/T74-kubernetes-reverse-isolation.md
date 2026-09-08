@@ -53,6 +53,20 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Added the runtime-neutral Kubernetes isolation proof core, a separately reviewable
+  node-attestation policy engine, the dedicated fenced-pool reference topology, deployment and
+  proof documentation, unit coverage, and SQLite broker restart/tombstone integration coverage.
+  The focused suite passes 22 unit tests and one integration test; the two new Python modules reach
+  91% combined branch coverage. Ruff and `ty` pass. The canonical engine-excluded suite reaches
+  3,989 passes and 95% repository coverage; PostgreSQL/RustFS tests cannot start without their
+  required environment, and one process timeout test that failed under full-suite load passed on
+  immediate isolated rerun.
+* 2026-09-08: Mandatory production completion is blocked because no authorized Kubernetes context
+  or dedicated isolation pool is available. The remaining work needs the actual CRI/kubelet/CNI
+  schemas to implement and validate the read-only inspector, authenticated attester service,
+  namespace-scoped Pod/exec adapter, exact-image E2E, restart/recovery, deadline, OOM, PID,
+  workspace, egress, node-fencing, substitution, and proof-failure cases. Fake Pod API behavior is
+  explicitly not treated as acceptance evidence.
 * 2026-09-08: Resumed by product-manager decision. Implementation starts from the verified current
   `main` in an isolated worktree and retains the optional, non-blocking boundary.
 * 2026-09-05: Split from T70 by product-manager decision after feasibility proved that the standard
