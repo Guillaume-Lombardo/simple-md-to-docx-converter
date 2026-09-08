@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from uuid import UUID
 
@@ -170,6 +171,8 @@ def test_unknown_label_only_runtime_fails_closed(tmp_path: Path) -> None:
     runtime = FakeIsolationRuntime()
     runtime.seed(
         UNKNOWN_UNIT_ID,
+        ATTEMPT_ID,
+        PRINCIPAL.principal_id,
         RuntimeIncarnation(
             UUID("41000000-0000-4000-8000-000000000001"),
             policy_specification_evidence(POLICY),
@@ -190,6 +193,8 @@ def test_discovered_specification_mismatch_fails_closed(tmp_path: Path) -> None:
     runtime = FakeIsolationRuntime()
     runtime.seed(
         UNIT_ID,
+        ATTEMPT_ID,
+        PRINCIPAL.principal_id,
         RuntimeIncarnation(
             UUID("41000000-0000-4000-8000-000000000002"),
             EvidenceDigest("sha256:" + "c" * 64),
@@ -201,6 +206,60 @@ def test_discovered_specification_mismatch_fails_closed(tmp_path: Path) -> None:
         broker.start()
 
     assert intent.state is ManagedUnitState.CREATE_INTENT
+    assert caught.value.category is BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+    assert not broker.ready
+
+
+@pytest.mark.parametrize(
+    ("attempt_id", "principal_id"),
+    [
+        (UUID("21000000-0000-4000-8000-000000000099"), PRINCIPAL.principal_id),
+        (ATTEMPT_ID, UUID("11000000-0000-4000-8000-000000000099")),
+    ],
+)
+def test_discovered_owner_identity_mismatch_fails_closed(
+    tmp_path: Path, attempt_id: UUID, principal_id: UUID
+) -> None:
+    inventory = _inventory(tmp_path)
+    _intent(inventory)
+    runtime = FakeIsolationRuntime()
+    runtime.seed(
+        UNIT_ID,
+        attempt_id,
+        principal_id,
+        RuntimeIncarnation(
+            UUID("41000000-0000-4000-8000-000000000002"),
+            policy_specification_evidence(POLICY),
+        ),
+    )
+    broker = _service(inventory, runtime)
+
+    with pytest.raises(BrokerError) as caught:
+        broker.start()
+
+    assert caught.value.category is BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+    assert not broker.ready
+
+
+def test_discovered_runtime_without_owner_identity_fails_closed(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    inventory = _inventory(tmp_path)
+    intent = _intent(inventory)
+    runtime = FakeIsolationRuntime()
+    runtime_unit = SimpleNamespace(
+        unit_id=UNIT_ID,
+        incarnation=RuntimeIncarnation(
+            UUID("41000000-0000-4000-8000-000000000002"),
+            intent.policy_specification,
+        ),
+    )
+    mocker.patch.object(runtime, "discover", return_value=(runtime_unit,))
+    broker = _service(inventory, runtime)
+
+    with pytest.raises(BrokerError) as caught:
+        broker.start()
+
     assert caught.value.category is BrokerErrorCategory.RECONCILIATION_INCOMPLETE
     assert not broker.ready
 
@@ -540,6 +599,8 @@ def test_discovered_incarnation_must_match_durable_incarnation(
     runtime.forget(created.unit_id)
     runtime.seed(
         created.unit_id,
+        created.attempt_id,
+        created.principal.principal_id,
         RuntimeIncarnation(
             UUID("41000000-0000-4000-8000-000000000099"),
             policy_specification_evidence(POLICY),
@@ -594,7 +655,7 @@ def test_fake_runtime_rejects_invalid_faults_and_unknown_units() -> None:
         UUID("41000000-0000-4000-8000-000000000003"),
         policy_specification_evidence(POLICY),
     )
-    unknown = FakeRuntimeUnit(UNIT_ID, incarnation)
+    unknown = FakeRuntimeUnit(UNIT_ID, ATTEMPT_ID, PRINCIPAL.principal_id, incarnation)
 
     for operation, point, count in (
         ("", "before", 1),
@@ -606,7 +667,13 @@ def test_fake_runtime_rejects_invalid_faults_and_unknown_units() -> None:
     with pytest.raises(FakeRuntimeError):
         runtime.hard_terminate(unknown)
     with pytest.raises(ValueError):
-        runtime.seed(UNIT_ID, incarnation, cast(FakeRuntimeState, object()))
+        runtime.seed(
+            UNIT_ID,
+            ATTEMPT_ID,
+            PRINCIPAL.principal_id,
+            incarnation,
+            cast(FakeRuntimeState, object()),
+        )
 
     runtime.inject_fault("discover", count=2)
     with pytest.raises(FakeRuntimeError):
@@ -656,11 +723,24 @@ def test_fake_runtime_enforces_lifecycle_and_discovery_limits(
         runtime.hard_terminate(runtime_unit)
 
     runtime.forget(runtime_unit.unit_id)
-    replacement = runtime.seed(runtime_unit.unit_id, runtime_unit.incarnation)
+    replacement = runtime.seed(
+        runtime_unit.unit_id,
+        runtime_unit.attempt_id,
+        runtime_unit.principal_id,
+        runtime_unit.incarnation,
+    )
+    assert runtime.try_collect_response(replacement, replacement.attempt_id) is None
     with pytest.raises(ValueError):
-        runtime.seed(runtime_unit.unit_id, runtime_unit.incarnation)
+        runtime.seed(
+            runtime_unit.unit_id,
+            runtime_unit.attempt_id,
+            runtime_unit.principal_id,
+            runtime_unit.incarnation,
+        )
     second = runtime.seed(
         UNKNOWN_UNIT_ID,
+        ATTEMPT_ID,
+        PRINCIPAL.principal_id,
         RuntimeIncarnation(
             UUID("41000000-0000-4000-8000-000000000004"),
             policy_specification_evidence(POLICY),

@@ -149,6 +149,8 @@ def test_exact_stage_replay_revalidates_runtime_before_returning_receipt(
     if runtime_state == "substituted":
         runtime.seed(
             UNIT,
+            ATTEMPT,
+            PRINCIPAL.principal_id,
             RuntimeIncarnation(
                 UUID("70000000-0000-4000-8000-000000000001"),
                 EvidenceDigest(persisted.runtime_incarnation.specification.value),

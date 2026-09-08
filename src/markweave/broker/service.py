@@ -50,6 +50,8 @@ _PROOF_NAMESPACE = UUID("54bd5544-7973-41ae-a7fc-c56664411769")
 @dataclass(frozen=True, slots=True)
 class _StoredRuntimeUnit:
     unit_id: UUID
+    attempt_id: UUID
+    principal_id: UUID
     incarnation: RuntimeIncarnation
 
 
@@ -414,7 +416,12 @@ class IsolationBrokerService:
         if runtime_unit is None:
             if unit.state is not ManagedUnitState.EMPTY_CONFIRMED:
                 self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN)
-            return _StoredRuntimeUnit(unit.unit_id, unit.runtime_incarnation)
+            return _StoredRuntimeUnit(
+                unit.unit_id,
+                unit.attempt_id,
+                unit.principal.principal_id,
+                unit.runtime_incarnation,
+            )
         self._validate_runtime_unit(unit, runtime_unit, require_persisted=True)
         return runtime_unit
 
@@ -527,7 +534,12 @@ class IsolationBrokerService:
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
             if unit.runtime_incarnation is None:
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
-            runtime_unit = _StoredRuntimeUnit(unit.unit_id, unit.runtime_incarnation)
+            runtime_unit = _StoredRuntimeUnit(
+                unit.unit_id,
+                unit.attempt_id,
+                unit.principal.principal_id,
+                unit.runtime_incarnation,
+            )
         self._terminate_and_prove(unit, runtime_unit)
 
     def _terminate_and_prove(
@@ -627,12 +639,24 @@ class IsolationBrokerService:
     ) -> None:
         if runtime_unit.unit_id != unit.unit_id:
             self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
+        category = (
+            BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+            if require_persisted
+            else BrokerErrorCategory.RUNTIME_FAILURE
+        )
+        try:
+            attempt_id = runtime_unit.attempt_id
+            principal_id = runtime_unit.principal_id
+        except AttributeError, TypeError:
+            self._fail(category)
+        if (
+            type(attempt_id) is not UUID
+            or type(principal_id) is not UUID
+            or attempt_id != unit.attempt_id
+            or principal_id != unit.principal.principal_id
+        ):
+            self._fail(category)
         if runtime_unit.incarnation.specification != unit.policy_specification:
-            category = (
-                BrokerErrorCategory.RECONCILIATION_INCOMPLETE
-                if require_persisted
-                else BrokerErrorCategory.RUNTIME_FAILURE
-            )
             self._fail(category)
         if (
             require_persisted

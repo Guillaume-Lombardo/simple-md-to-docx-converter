@@ -136,6 +136,8 @@ class PodmanRuntimeUnit:
     """Verified opaque identity of one exact Podman container incarnation."""
 
     unit_id: UUID
+    attempt_id: UUID
+    principal_id: UUID
     incarnation: RuntimeIncarnation
     container_id: str
     name: str
@@ -143,6 +145,8 @@ class PodmanRuntimeUnit:
     def __post_init__(self) -> None:
         if (
             type(self.unit_id) is not UUID
+            or type(self.attempt_id) is not UUID
+            or type(self.principal_id) is not UUID
             or type(self.incarnation) is not RuntimeIncarnation
             or type(self.container_id) is not str
             or _CONTAINER_ID_PATTERN.fullmatch(self.container_id) is None
@@ -1012,8 +1016,8 @@ class PodmanIsolationRuntime:
         labels = _mapping(_mapping(inspected, "Config"), "Labels")
         try:
             unit_id = UUID(_label(labels, _UNIT_LABEL))
-            UUID(_label(labels, _ATTEMPT_LABEL))
-            UUID(_label(labels, _PRINCIPAL_LABEL))
+            attempt_id = UUID(_label(labels, _ATTEMPT_LABEL))
+            principal_id = UUID(_label(labels, _PRINCIPAL_LABEL))
             specification = EvidenceDigest(_label(labels, _SPECIFICATION_LABEL))
         except (ValueError, TypeError) as error:
             raise PodmanRuntimeError("Podman container labels are invalid") from error
@@ -1055,6 +1059,8 @@ class PodmanIsolationRuntime:
         self._verify_realized_specification(inspected, policy)
         runtime_unit = PodmanRuntimeUnit(
             unit_id,
+            attempt_id,
+            principal_id,
             RuntimeIncarnation(
                 uuid5(_INCARNATION_NAMESPACE, container_id), specification
             ),
@@ -1185,6 +1191,8 @@ class PodmanIsolationRuntime:
         }
         if (
             actual.unit_id != expected.unit_id
+            or actual.attempt_id != expected.attempt_id
+            or actual.principal_id != expected.principal_id
             or actual.incarnation != expected.incarnation
             or actual.name != expected.name
             or exact_container_mismatch
@@ -1208,16 +1216,25 @@ class PodmanIsolationRuntime:
     ) -> PodmanRuntimeUnit:
         if type(runtime_unit) is PodmanRuntimeUnit:
             return runtime_unit
-        unit_id = getattr(runtime_unit, "unit_id", None)
-        incarnation = getattr(runtime_unit, "incarnation", None)
+        try:
+            unit_id = runtime_unit.unit_id
+            attempt_id = runtime_unit.attempt_id
+            principal_id = runtime_unit.principal_id
+            incarnation = runtime_unit.incarnation
+        except AttributeError, TypeError:
+            raise PodmanRuntimeError("Podman runtime identity is invalid") from None
         if (
             allow_stored
             and type(unit_id) is UUID
+            and type(attempt_id) is UUID
+            and type(principal_id) is UUID
             and type(incarnation) is RuntimeIncarnation
         ):
             # The deterministic name and persisted incarnation allow post-removal event recovery.
             return PodmanRuntimeUnit(
                 unit_id,
+                attempt_id,
+                principal_id,
                 incarnation,
                 "0" * 64,
                 _container_name(unit_id),
