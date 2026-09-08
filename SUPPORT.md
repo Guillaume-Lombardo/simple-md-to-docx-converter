@@ -2,10 +2,11 @@
 
 ## Get help
 
-Use [GitHub Issues](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues)
-for installation, upgrades, the command-line client, API use, document conversion,
-templates, and reproducible product defects that are not security-sensitive.
-Search existing issues and the repository documentation before opening a new one.
+Use [GitHub Discussions](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/discussions)
+for installation, upgrade, configuration, command-line, API, document-conversion,
+and template questions. Use [GitHub Issues](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/issues)
+for reproducible product defects that are not security-sensitive. Search the
+repository documentation and existing Discussions or issues before posting.
 Include the Markweave version or container digest, operating system, selected
 storage profile, relevant command or endpoint, expected behavior, actual behavior,
 and a minimal sanitized reproduction.

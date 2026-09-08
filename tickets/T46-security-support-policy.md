@@ -2,7 +2,7 @@
 ticket: T46
 linear_id: G1L-421
 linear_url: https://linear.app/g1lom/issue/G1L-421/t46-add-security-reporting-and-support-policies
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,9 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Progress
 
+* 2026-09-08: Resumed by product-manager decision after GitHub private vulnerability reporting and Discussions were enabled. G1L-421 and this mirror are In Progress.
+* 2026-09-08: Reconciled normally with exact `main` `38ed74bdcd6692ae9235cc2f2190f7af4dab041e`; the preserved policy files required no conflict resolution. Refreshed `SUPPORT.md` so the T40-owned PyPI `Support` URL lands on the documented question channel while reproducible defects remain in GitHub Issues.
+* 2026-09-08: Verified the enabled private-reporting and Discussions settings through the GitHub API, all dedicated-policy local link targets, public repository/Issues/Discussions responses, and the unchanged PyPI `Support` metadata URL. `uv sync --all-groups`, Ruff format/lint, `ty`, and `git diff --check` pass. A proportional canonical Pytest run was stopped after 9m10s at 43%; PostgreSQL errors and S3 failures require the unavailable `MARKWEAVE_TEST_POSTGRES_URL` and `MARKWEAVE_TEST_S3_*` services, while one unrelated process-reaping test failed. Hosted exact-head CI remains the full-suite authority.
 * 2026-09-03: Deferred by the product manager. The completed policy implementation remains preserved on `docs/T46-security-support-policy`; resume only when private vulnerability reporting and a usable support channel are authorized.
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Audit follow-up serialized policy links after T40 and removed package metadata from T46 ownership.
@@ -45,7 +48,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Coordination
 
-* Status: Backlog; deferred by product-manager decision.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
