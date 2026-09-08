@@ -316,6 +316,17 @@ def test_transport_configuration_rejects_invalid_values() -> None:
 
 
 @pytest.mark.unit
+def test_transport_configuration_rejects_non_finite_timing_values() -> None:
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="transport limits"):
+            AttesterTransportLimits(1, 1, invalid, 1)
+        with pytest.raises(ValueError, match="readiness policy"):
+            AttesterReadinessPolicy(invalid, 0.1)
+        with pytest.raises(ValueError, match="readiness policy"):
+            AttesterReadinessPolicy(1.0, invalid)
+
+
+@pytest.mark.unit
 def test_service_rejects_changed_sandbox_binding(
     unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:

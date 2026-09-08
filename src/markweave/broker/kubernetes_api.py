@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -213,7 +214,7 @@ def _bounded_websocket_call(
         if type(timeout_value) not in {int, float}:
             raise ValueError
         timeout_seconds = float(cast(int | float, timeout_value))
-        if timeout_seconds <= 0:
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError
         websocket_url = ws_client.get_websocket_url(url, kwargs.get("query_params"))
         client = _BoundedWsClient(
@@ -252,7 +253,7 @@ class KubernetesApiConfig:
             type(self.namespace) is not str
             or not self.namespace
             or any(
-                type(value) not in {int, float} or value <= 0
+                type(value) not in {int, float} or not isfinite(value) or value <= 0
                 for value in (
                     self.scheduling_timeout_seconds,
                     self.exec_timeout_seconds,

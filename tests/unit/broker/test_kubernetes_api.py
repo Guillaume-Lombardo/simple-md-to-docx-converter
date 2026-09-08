@@ -528,6 +528,24 @@ def test_adapter_validates_configuration_and_request_identities() -> None:
 
 
 @pytest.mark.unit
+def test_api_configuration_rejects_non_finite_timing_values() -> None:
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        for scheduling, execution, poll in (
+            (invalid, 1.0, 0.1),
+            (1.0, invalid, 0.1),
+            (1.0, 1.0, invalid),
+        ):
+            with pytest.raises(ValueError, match="configuration"):
+                KubernetesApiConfig(
+                    "markweave-reverse",
+                    scheduling,
+                    execution,
+                    poll,
+                    RuntimeChannelLimits(1_000_000, 2_000_000),
+                )
+
+
+@pytest.mark.unit
 def test_api_operation_failures_are_normalized_without_causes() -> None:
     class FailingOperations(_Api):
         failure = ""

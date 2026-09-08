@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from math import isfinite
 from pathlib import Path
 from socketserver import ThreadingMixIn
 from threading import BoundedSemaphore, RLock
@@ -70,6 +71,7 @@ class AttesterTransportLimits:
             or type(self.max_response_bytes) is not int
             or self.max_response_bytes <= 0
             or type(self.timeout_seconds) not in {int, float}
+            or not isfinite(self.timeout_seconds)
             or self.timeout_seconds <= 0
             or type(self.max_concurrent_requests) is not int
             or self.max_concurrent_requests <= 0
@@ -87,8 +89,10 @@ class AttesterReadinessPolicy:
     def __post_init__(self) -> None:
         if (
             type(self.timeout_seconds) not in {int, float}
+            or not isfinite(self.timeout_seconds)
             or self.timeout_seconds <= 0
             or type(self.poll_interval_seconds) not in {int, float}
+            or not isfinite(self.poll_interval_seconds)
             or self.poll_interval_seconds <= 0
             or self.poll_interval_seconds > self.timeout_seconds
         ):
