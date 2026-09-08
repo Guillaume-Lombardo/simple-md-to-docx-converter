@@ -57,8 +57,9 @@ backend.
   mandatory fail-closed `RuntimeUnit` contract across Kubernetes, Podman, persisted recovery, and
   test runtimes; deletion grace metadata is now rejected without a deletion timestamp. The proposed
   host-port/mTLS topology is explicitly documented as non-operational pending its real-cluster
-  gates. The combined Kubernetes, reconciliation, Podman, and workspace regression selection passes
-  266 tests; Ruff, `ty`, and `git diff --check` pass.
+  gates. All 852 broker unit tests pass, as does the 268-test focused selection spanning Kubernetes
+  integration, reconciliation, Podman, and workspace behavior; Ruff, `ty`, and `git diff --check`
+  pass.
 * 2026-09-08: Addressed the locally testable findings and recorded a proposed, non-operational
   host-port mTLS contract from CodeRabbit review `5139760727`: node-specific topology and credential
   placeholders, malformed observation and

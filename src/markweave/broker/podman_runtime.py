@@ -1191,6 +1191,8 @@ class PodmanIsolationRuntime:
         }
         if (
             actual.unit_id != expected.unit_id
+            or actual.attempt_id != expected.attempt_id
+            or actual.principal_id != expected.principal_id
             or actual.incarnation != expected.incarnation
             or actual.name != expected.name
             or exact_container_mismatch
