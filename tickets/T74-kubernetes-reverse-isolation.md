@@ -53,6 +53,7 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Non-draft partial foundation PR [#222](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/222) was published at reviewed commit `1bcce038ed8e3a69934511610553390ebc66ef3e`. T74 remains In Progress; exact-head CI and CodeRabbit are pending, and the real-cluster/exact-image completion blocker is unchanged.
 * 2026-09-08: Hardened the reviewable foundation after independent security review. The policy
   digest now uses an annotation instead of an invalid 64-character label; the attester runs in a
   namespace outside the broker's `pods/exec` scope and the broker has no Node-reading ClusterRole;
