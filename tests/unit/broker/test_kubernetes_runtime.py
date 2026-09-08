@@ -466,6 +466,23 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
 
 
 @pytest.mark.unit
+def test_observed_pod_rejects_orphaned_deletion_grace_period(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    expected = pod_contract_projection(control.manifest)
+    observed = deepcopy(control.manifest)
+    metadata = observed["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["deletionGracePeriodSeconds"] = 0
+
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        project_observed_pod(observed, expected)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("field", "value"),
     [

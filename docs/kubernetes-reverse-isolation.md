@@ -19,8 +19,8 @@ endpoint accepts only the broker identity and returns bounded, content-free evid
 never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
 the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
-The reference DaemonSet exposes that mTLS endpoint through node-local TCP port `9443` using
-`hostPort`, not a cluster-wide Service. The broker derives the only allowed endpoint as
+The reference DaemonSet proposes a node-local mTLS transport on TCP port `9443` using `hostPort`,
+not a cluster-wide Service. A future broker adapter must derive the only allowed endpoint as
 `<attempt Pod spec.nodeName>:9443`; cluster DNS or the deployment network must resolve every
 Kubernetes node name directly to that node's reachable address. The server certificate must cover
 those node names, the mounted CA trusts only broker client certificates, and the broker verifies
@@ -29,7 +29,10 @@ client-certificate authentication, while the separate immutable Secret supplies 
 certificate, and private key. Deployments must render every `@REQUIRED_*@` placeholder without
 committing private material. The broker deployment must mount the separate
 `markweave-reverse-broker-attester-tls` Secret and use its client certificate, private key, and
-attester-server CA only for this node-specific connection.
+attester-server CA only for this node-specific connection. This repository does not yet implement
+the attester server or broker client. Node-name routing, CNI `hostPort` support, firewall policy,
+peer authorization, certificate coverage, exact-node binding, and failure behavior remain required
+real-cluster gates rather than supported deployment behavior.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. A production adapter must
 collect the corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output

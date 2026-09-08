@@ -363,6 +363,8 @@ def test_create_uses_exact_broker_owned_policy_argv(
 
     create = next(call[0] for call in command.calls if call[0][0] == "create")
     assert result.unit_id == UNIT_ID
+    assert result.attempt_id == ATTEMPT_ID
+    assert result.principal_id == PRINCIPAL_ID
     assert create[:18] == (
         "create",
         "--pull=never",
@@ -1219,6 +1221,8 @@ def test_removed_proof_reconstructs_from_persisted_incarnation(
 
     class StoredUnit:
         unit_id = UNIT_ID
+        attempt_id = ATTEMPT_ID
+        principal_id = PRINCIPAL_ID
         incarnation = runtime_unit.incarnation
 
     assert backend.confirm_removed(StoredUnit(), empty_evidence).value.startswith(
@@ -1874,7 +1878,14 @@ def test_runtime_unit_rejects_malformed_identity(policy: BrokerPolicy) -> None:
         policy_specification_evidence(policy),
     )
     with pytest.raises(ValueError):
-        PodmanRuntimeUnit(UNIT_ID, incarnation, "bad", NAME)
+        PodmanRuntimeUnit(
+            UNIT_ID,
+            ATTEMPT_ID,
+            PRINCIPAL_ID,
+            incarnation,
+            "bad",
+            NAME,
+        )
     with pytest.raises(PodmanRuntimeError, match="identity"):
         runtime(PodmanDouble()).remove(cast(Any, object()))
 

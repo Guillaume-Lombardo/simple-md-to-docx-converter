@@ -38,7 +38,18 @@ class FakeRuntimeUnit:
     """Opaque fake backend identity implementing the runtime-unit port."""
 
     unit_id: UUID
+    attempt_id: UUID
+    principal_id: UUID
     incarnation: RuntimeIncarnation
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.unit_id) is not UUID
+            or type(self.attempt_id) is not UUID
+            or type(self.principal_id) is not UUID
+            or type(self.incarnation) is not RuntimeIncarnation
+        ):
+            raise ValueError("Fake runtime unit identity is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +141,13 @@ class FakeIsolationRuntime:
 
     def _record(self, runtime_unit: RuntimeUnit) -> _RuntimeRecord:
         record = self._records.get(runtime_unit.unit_id)
-        if record is None or record.unit.incarnation != runtime_unit.incarnation:
+        if (
+            record is None
+            or record.unit.unit_id != runtime_unit.unit_id
+            or record.unit.attempt_id != runtime_unit.attempt_id
+            or record.unit.principal_id != runtime_unit.principal_id
+            or record.unit.incarnation != runtime_unit.incarnation
+        ):
             raise FakeRuntimeError("Unknown isolation runtime unit")
         return record
 
@@ -149,7 +166,9 @@ class FakeIsolationRuntime:
             uuid5(_INCARNATION_NAMESPACE, str(unit.unit_id)),
             policy_specification_evidence(policy),
         )
-        runtime_unit = FakeRuntimeUnit(unit.unit_id, incarnation)
+        runtime_unit = FakeRuntimeUnit(
+            unit.unit_id, unit.attempt_id, unit.principal.principal_id, incarnation
+        )
         self._records[unit.unit_id] = _RuntimeRecord(
             runtime_unit,
             attempt_id=unit.attempt_id,
@@ -287,6 +306,8 @@ class FakeIsolationRuntime:
     def seed(
         self,
         unit_id: UUID,
+        attempt_id: UUID,
+        principal_id: UUID,
         incarnation: RuntimeIncarnation,
         state: FakeRuntimeState = _INITIAL_RUNTIME_STATE,
     ) -> FakeRuntimeUnit:
@@ -294,11 +315,13 @@ class FakeIsolationRuntime:
 
         if (
             unit_id in self._records
+            or type(attempt_id) is not UUID
+            or type(principal_id) is not UUID
             or type(incarnation) is not RuntimeIncarnation
             or type(state) is not FakeRuntimeState
         ):
             raise ValueError("Fake runtime seed is invalid")
-        runtime_unit = FakeRuntimeUnit(unit_id, incarnation)
+        runtime_unit = FakeRuntimeUnit(unit_id, attempt_id, principal_id, incarnation)
         self._records[unit_id] = _RuntimeRecord(
             runtime_unit,
             terminated=state.terminated,

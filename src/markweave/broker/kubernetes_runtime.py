@@ -836,7 +836,13 @@ def _allowed_api_default(
         }:
             allowed = type(value) is str and bool(value)
         elif key == "deletionGracePeriodSeconds":
-            allowed = type(value) is int and value >= 0
+            deletion_timestamp = parent.get("deletionTimestamp")
+            allowed = (
+                type(value) is int
+                and value >= 0
+                and type(deletion_timestamp) is str
+                and bool(deletion_timestamp)
+            )
         elif key == "generation":
             allowed = type(value) is int and value >= 1
         else:
