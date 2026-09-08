@@ -292,5 +292,5 @@ def test_real_mermaid_versions_match_t00_artifacts() -> None:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert mmdc == "11.16.0"
+    assert mmdc == "11.17.0"
     assert chrome == "Google Chrome 151.0.7922.173"

@@ -415,7 +415,7 @@ jobs:
         env:
           CHROME_SHA256: 878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd
           CHROME_URL: https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_151.0.7922.173-1_amd64.deb
-          MERMAID_LOCK_SHA256: 6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f
+          MERMAID_LOCK_SHA256: 65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: |
           set -euo pipefail
@@ -430,7 +430,7 @@ jobs:
           npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
           echo "$GITHUB_WORKSPACE/spikes/toolchain/node_modules/.bin" >> "$GITHUB_PATH"
           test "$(node --version)" = "v22.23.1"
-          test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.16.0"
+          test "$(spikes/toolchain/node_modules/.bin/mmdc --version)" = "11.17.0"
           test "$(google-chrome-stable --version | awk '{$1=$1; print}')" \
             = "Google Chrome 151.0.7922.173"
       - name: Prepare the RustFS test bucket

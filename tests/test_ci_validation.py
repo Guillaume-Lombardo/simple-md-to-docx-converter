@@ -310,7 +310,7 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
         "878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd" in workflow
     )
     assert (
-        "6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f" in workflow
+        "65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff" in workflow
     )
     assert 'PUPPETEER_SKIP_DOWNLOAD: "true"' in workflow
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
