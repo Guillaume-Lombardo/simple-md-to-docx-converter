@@ -53,6 +53,19 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Added crash-consistent Kubernetes creation and lifecycle recovery. The broker now
+  persists an authenticated, bounded, content-free creation binding before any Kubernetes API
+  mutation, migrates authenticated inventory schema v2 to v3 atomically, and retains recovery
+  state until durable worker proof acknowledgement. The node attester now uses a bounded
+  HMAC-authenticated SQLite ledger with exact lifecycle replay, creation-time policy preservation,
+  pre-bind Pod adoption through full re-attestation, exact container identity continuity, and
+  idempotent acknowledgement cleanup. Kubernetes API and mTLS operations reject non-finite or
+  unbounded timeouts, and malformed responses remain content-free. Independent functional and
+  security reviews approved exact commit `43bcaf2`; 1,014 broker/Kubernetes tests, Ruff format and
+  lint, `ty`, and diff checks pass. The canonical suite still requires unavailable PostgreSQL and
+  S3 configuration. The concrete bounded CRI/cgroup inspector, attester process and durable-secret
+  deployment, loopback-only CNI, node routing and firewall proof, and exact-image real-k3s E2E
+  matrix remain mandatory before T74 can be completed.
 * 2026-09-08: Added the concrete namespace-scoped Kubernetes Pod/exec control adapter and the
   node-routed TLS 1.3 mTLS attester client/service transport. The adapters enforce fixed bounded
   commands and paths, identity revalidation, UID-preconditioned deletion, retry-safe staging,
