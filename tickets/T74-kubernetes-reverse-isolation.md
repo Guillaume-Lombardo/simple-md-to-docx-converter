@@ -2,7 +2,7 @@
 ticket: T74
 linear_id: G1L-571
 linear_url: https://linear.app/g1lom/issue/G1L-571/t74-design-and-implement-the-kubernetes-reverse-isolation-backend
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -53,6 +53,8 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Resumed by product-manager decision. Implementation starts from the verified current
+  `main` in an isolated worktree and retains the optional, non-blocking boundary.
 * 2026-09-05: Split from T70 by product-manager decision after feasibility proved that the standard
   Pod API and RuntimeClass cannot satisfy per-attempt PID containment, hard ephemeral-storage
   limits, node-local egress isolation, or proof that a sandbox is empty and removed. T70 proceeds
