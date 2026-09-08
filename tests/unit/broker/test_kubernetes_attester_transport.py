@@ -849,8 +849,12 @@ def test_client_accepts_successful_adoption_recovery_and_acknowledgement(
         "outcome": "ok",
         "sandbox": bound["sandbox"],
     }
+    assert client.recover_create_intent(pod, contract) == (sandbox, contract)
     assert client.adopt_create_intent(pod, contract) == sandbox
 
+    client.response = {"outcome": "wrong", "sandbox": bound["sandbox"]}
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        client.recover(runtime_unit, contract, ManagedUnitState.CREATED)
     client.response = {"outcome": "ok", "sandbox": bound["sandbox"]}
     assert client.recover(runtime_unit, contract, ManagedUnitState.CREATED) == sandbox
     changed_sandbox = dict(cast(dict[str, object], bound["sandbox"]))
@@ -943,6 +947,19 @@ def test_service_reconciliation_rejects_each_volatile_identity_conflict(
     contract = transport._contract(request["contract"])
     sandbox = transport._sandbox(response["sandbox"])
     runtime_unit = service._bound[pod.pod_uid]
+
+    service._bound.clear()
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        service._proof(
+            "confirm_exit",
+            {
+                "operation": "confirm_exit",
+                "pod_uid": str(pod.pod_uid),
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+    service._bound[pod.pod_uid] = runtime_unit
 
     get_record = mocker.patch.object(service._ledger, "get", return_value=None)
     discard = mocker.patch.object(service._engine, "discard_uncommitted_binding")

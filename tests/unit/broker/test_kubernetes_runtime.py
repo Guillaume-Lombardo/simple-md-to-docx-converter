@@ -9,6 +9,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
 from markweave.broker import kubernetes_runtime as kubernetes_runtime_module
 from markweave.broker.kubernetes_attester import (
@@ -1522,6 +1523,60 @@ def test_recovery_helpers_reject_each_closed_scalar_and_projection_boundary() ->
     ):
         with pytest.raises((TypeError, ValueError)):
             operation()
+
+
+@pytest.mark.unit
+def test_runtime_recovery_and_discovery_guards_reject_malformed_boundary_values(
+    unit: ManagedUnit, policy: BrokerPolicy, mocker: MockerFixture
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    with pytest.raises(KubernetesRuntimeError, match="create contract"):
+        runtime.prepare(unit, policy)
+    with pytest.raises(KubernetesRuntimeError, match="create contract"):
+        runtime.create(replace(unit, policy_revision="other-policy"), policy)
+
+    reserved = replace(unit, state=ManagedUnitState.RESERVED, revision=0)
+    binding = runtime.prepare(reserved, policy)
+    assert type(binding) is RuntimeRecoveryBinding
+    intent = replace(unit, runtime_recovery=binding)
+    with pytest.raises(KubernetesRuntimeError, match="recovery binding is invalid"):
+        runtime.recover_create_intent(intent, replace(binding, payload=b"{}"))
+
+    discover = mocker.patch.object(control, "discover", return_value=[])
+    with pytest.raises(KubernetesRuntimeError, match="discovery exceeds its limit"):
+        runtime.discover(limit=1)
+    discover.return_value = (object(),)
+    with pytest.raises(KubernetesRuntimeError, match="discovery identity is invalid"):
+        runtime.discover(limit=1)
+
+    created = runtime.create(unit, policy)
+    control.pod_uid = UUID(int=98)
+    with pytest.raises(KubernetesRuntimeError, match="incarnation conflicts"):
+        runtime.create(unit, policy)
+    control.pod_uid = created.pod.pod_uid
+    fresh = KubernetesIsolationRuntime(
+        image_repository="registry.example/reverse",
+        policy=policy,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=runtime._attester,
+    )
+    discover.return_value = (created.pod,)
+    mocker.patch.object(
+        runtime._attester,
+        "recover_create_intent",
+        return_value=(created.sandbox, object()),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="discovery policy is invalid"):
+        fresh.discover(limit=1)
+
+    mocker.patch.object(
+        runtime._attester,
+        "bind",
+        return_value=replace(created.sandbox, sandbox_id="f" * 64),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="pre-staging attestation failed"):
+        runtime.stage_request(created, _request())
 
 
 def json_repr(value: object) -> str:
