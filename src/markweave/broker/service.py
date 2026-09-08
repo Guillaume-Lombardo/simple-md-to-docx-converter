@@ -18,6 +18,7 @@ from markweave.broker.models import (
     ManagedUnitState,
     ReplayPosition,
     RuntimeIncarnation,
+    RuntimeRecoveryBinding,
     TerminationProof,
     policy_specification_evidence,
 )
@@ -53,6 +54,7 @@ class _StoredRuntimeUnit:
     attempt_id: UUID
     principal_id: UUID
     incarnation: RuntimeIncarnation
+    recovery_binding: RuntimeRecoveryBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,11 +204,13 @@ class IsolationBrokerService:
             if reserved.state is not ManagedUnitState.RESERVED:
                 return reserved
             try:
+                prepared = self._runtime.prepare(reserved, self._policy)
                 intent = self._inventory_call(
                     lambda: self._inventory.transition(
                         reserved.unit_id,
                         expected_revision=reserved.revision,
                         target=ManagedUnitState.CREATE_INTENT,
+                        runtime_recovery=prepared,
                     )
                 )
                 runtime_unit = self._runtime.create(intent, self._policy)
@@ -217,6 +221,7 @@ class IsolationBrokerService:
                         expected_revision=intent.revision,
                         target=ManagedUnitState.CREATED,
                         runtime_incarnation=runtime_unit.incarnation,
+                        runtime_recovery=runtime_unit.recovery_binding,
                     )
                 )
             except BrokerError as error:
@@ -371,11 +376,32 @@ class IsolationBrokerService:
         with self._gate:
             self._require_ready()
             self._validate_request(principal, attempt_id, unit_id, proof_id)
-            acknowledged = self._inventory_call(
-                lambda: self._inventory.acknowledge(
-                    principal.principal_id, attempt_id, unit_id, proof_id
+            unit = self._inventory_call(lambda: self._inventory.get(unit_id))
+            if unit is None:
+                return True
+            if unit.runtime_recovery is None:
+                acknowledged = self._inventory_call(
+                    lambda: self._inventory.acknowledge(
+                        principal.principal_id, attempt_id, unit_id, proof_id
+                    )
                 )
-            )
+            else:
+                marked = self._inventory_call(
+                    lambda: self._inventory.mark_acknowledged(
+                        principal.principal_id, attempt_id, unit_id, proof_id
+                    )
+                )
+                if marked is None:
+                    return False
+                try:
+                    self._cleanup_acknowledged(marked)
+                except BrokerError:
+                    raise
+                except Exception as error:
+                    self._fail(
+                        BrokerErrorCategory.RECONCILIATION_INCOMPLETE, cause=error
+                    )
+                acknowledged = True
             if acknowledged:
                 self._staged_workspaces.pop(unit_id, None)
             return acknowledged
@@ -411,6 +437,10 @@ class IsolationBrokerService:
     def _runtime_for(self, unit: ManagedUnit) -> RuntimeUnit:
         if unit.runtime_incarnation is None:
             self._fail(BrokerErrorCategory.TERMINATION_UNPROVEN)
+        if unit.runtime_recovery is not None:
+            recovered = self._runtime.recover(unit, unit.runtime_recovery)
+            self._validate_runtime_unit(unit, recovered, require_persisted=True)
+            return recovered
         discovered = self._discovered()
         runtime_unit = discovered.get(unit.unit_id)
         if runtime_unit is None:
@@ -470,7 +500,7 @@ class IsolationBrokerService:
             discovered[runtime_unit.unit_id] = runtime_unit
         return discovered
 
-    def _reconcile(self) -> None:
+    def _reconcile(self) -> None:  # noqa: PLR0912 - explicit durable state sweep
         units = self._inventory_call(
             lambda: self._inventory.unacknowledged(limit=self._max_discovered_units)
         )
@@ -481,6 +511,38 @@ class IsolationBrokerService:
             if unit.unit_id in by_id:
                 self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
             by_id[unit.unit_id] = unit
+
+        recovered: dict[UUID, RuntimeUnit] = {}
+        for unit in units:
+            if unit.proof_acknowledged:
+                self._cleanup_acknowledged(unit)
+                continue
+            if unit.runtime_recovery is not None and unit.state in {
+                ManagedUnitState.CREATED,
+                ManagedUnitState.EXIT_CONFIRMED,
+                ManagedUnitState.EMPTY_CONFIRMED,
+            }:
+                runtime_unit = self._runtime.recover(unit, unit.runtime_recovery)
+                self._validate_runtime_unit(unit, runtime_unit, require_persisted=True)
+                recovered[unit.unit_id] = runtime_unit
+            elif (
+                unit.runtime_recovery is not None
+                and unit.state is ManagedUnitState.CREATE_INTENT
+            ):
+                runtime_unit = self._runtime.recover_create_intent(
+                    unit, unit.runtime_recovery
+                )
+                if runtime_unit is not None:
+                    self._validate_runtime_unit(
+                        unit, runtime_unit, require_persisted=False
+                    )
+                    recovered[unit.unit_id] = runtime_unit
+
+        if any(unit.proof_acknowledged for unit in units):
+            units = self._inventory_call(
+                lambda: self._inventory.unacknowledged(limit=self._max_discovered_units)
+            )
+            by_id = {unit.unit_id: unit for unit in units}
 
         discovered = self._discovered()
         for unit_id, runtime_unit in discovered.items():
@@ -497,7 +559,24 @@ class IsolationBrokerService:
             )
 
         for unit in units:
-            self._reconcile_unit(unit, discovered.get(unit.unit_id))
+            self._reconcile_unit(
+                unit, recovered.get(unit.unit_id, discovered.get(unit.unit_id))
+            )
+
+    def _cleanup_acknowledged(self, unit: ManagedUnit) -> None:
+        if (
+            unit.state is not ManagedUnitState.REMOVED
+            or not unit.proof_acknowledged
+            or unit.runtime_recovery is None
+        ):
+            self._fail(BrokerErrorCategory.INVENTORY_FAILURE)
+        self._runtime.acknowledge_recovery(unit, unit.runtime_recovery)
+        if not self._inventory_call(
+            lambda: self._inventory.discard_acknowledged(
+                unit.unit_id, expected_revision=unit.revision
+            )
+        ):
+            self._fail(BrokerErrorCategory.INVENTORY_FAILURE)
 
     def _reconcile_unit(
         self, unit: ManagedUnit, runtime_unit: RuntimeUnit | None
@@ -513,13 +592,17 @@ class IsolationBrokerService:
             return
         if unit.state is ManagedUnitState.CREATE_INTENT:
             if runtime_unit is None:
-                self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+                if unit.runtime_recovery is None:
+                    self._fail(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+                runtime_unit = self._runtime.create(unit, self._policy)
+                self._validate_runtime_unit(unit, runtime_unit, require_persisted=False)
             created = self._inventory_call(
                 lambda: self._inventory.transition(
                     unit.unit_id,
                     expected_revision=unit.revision,
                     target=ManagedUnitState.CREATED,
                     runtime_incarnation=runtime_unit.incarnation,
+                    runtime_recovery=runtime_unit.recovery_binding,
                 )
             )
             self._terminate_and_prove(created, runtime_unit)
@@ -657,6 +740,12 @@ class IsolationBrokerService:
         ):
             self._fail(category)
         if runtime_unit.incarnation.specification != unit.policy_specification:
+            self._fail(category)
+        if (
+            require_persisted
+            and unit.state is not ManagedUnitState.CREATE_INTENT
+            and runtime_unit.recovery_binding != unit.runtime_recovery
+        ):
             self._fail(category)
         if (
             require_persisted

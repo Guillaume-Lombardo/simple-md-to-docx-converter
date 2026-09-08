@@ -53,6 +53,35 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Added crash-consistent Kubernetes creation and lifecycle recovery. The broker now
+  persists an authenticated, bounded, content-free creation binding before any Kubernetes API
+  mutation, migrates authenticated inventory schema v2 to v3 atomically, and retains recovery
+  state until durable worker proof acknowledgement. The node attester now uses a bounded
+  HMAC-authenticated SQLite ledger with exact lifecycle replay, creation-time policy preservation,
+  pre-bind Pod adoption through full re-attestation, exact container identity continuity, and
+  idempotent acknowledgement cleanup. Kubernetes API and mTLS operations reject non-finite or
+  unbounded timeouts, and malformed responses remain content-free. Independent functional and
+  security reviews approved exact commit `43bcaf2`; 1,014 broker/Kubernetes tests, Ruff format and
+  lint, `ty`, and diff checks pass. The canonical suite still requires unavailable PostgreSQL and
+  S3 configuration. The concrete bounded CRI/cgroup inspector, attester process and durable-secret
+  deployment, loopback-only CNI, node routing and firewall proof, and exact-image real-k3s E2E
+  matrix remain mandatory before T74 can be completed.
+* 2026-09-08: Added the concrete namespace-scoped Kubernetes Pod/exec control adapter and the
+  node-routed TLS 1.3 mTLS attester client/service transport. The adapters enforce fixed bounded
+  commands and paths, identity revalidation, UID-preconditioned deletion, retry-safe staging,
+  exact peer certificate pins, server-owned binding state, closed messages, sanitized failures,
+  and strict exit/empty/removal evidence chaining. The reference deployment, operator guide,
+  optional pinned `kubernetes==35.0.0` dependency, package matrix, and unit/real-loopback-mTLS tests
+  are updated. Ruff format/check, `ty`, and 81 focused tests pass with 92.49% focused branch
+  coverage. The canonical engine-excluded run reached 4,049 passes and 94.57% total coverage; its
+  remaining 44 PostgreSQL setup errors, three RustFS/S3 failures, and two release-integration
+  failures require unavailable external configuration or predate this slice. Real k3s validation
+  and the concrete CRI/cgroup inspector still require privileged cluster startup and inspection.
+* 2026-09-08: The product manager authorized the Kubernetes cluster on `codex-dev` for T74.
+  The host has k3s `v1.35.5+k3s1` installed with Traefik and ServiceLB disabled, but the service is
+  currently disabled and inactive and its kubeconfig is root-readable only. Implementation resumes
+  from verified `main`; starting and accessing the real cluster will require the separately guarded
+  privileged host operation before real-boundary validation can run.
 * 2026-09-08: Fixed the final incremental CodeRabbit finding by preserving the seeded fake
   runtime's attempt identity for restart-oriented workspace collection tests. The 268-test focused
   selection, Ruff, `ty`, and `git diff --check` pass.

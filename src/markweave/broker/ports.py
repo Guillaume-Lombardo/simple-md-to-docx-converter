@@ -12,6 +12,7 @@ from markweave.broker.models import (
     ManagedUnitState,
     ReplayPosition,
     RuntimeIncarnation,
+    RuntimeRecoveryBinding,
     TerminationProof,
 )
 from markweave.broker.reconciliation_protocol import ReconciliationTombstone
@@ -44,7 +45,7 @@ class BrokerInventory(Protocol):
     def unacknowledged(self, *, limit: int) -> tuple[ManagedUnit, ...]:
         """Return every verified unit including REMOVED proof tombstones."""
 
-    def transition(
+    def transition(  # noqa: PLR0913 - explicit persistence transition contract
         self,
         unit_id: UUID,
         *,
@@ -52,6 +53,7 @@ class BrokerInventory(Protocol):
         target: ManagedUnitState,
         evidence: EvidenceDigest | None = None,
         runtime_incarnation: RuntimeIncarnation | None = None,
+        runtime_recovery: RuntimeRecoveryBinding | None = None,
     ) -> ManagedUnit:
         """Persist one legal monotonic transition with compare-and-swap fencing."""
 
@@ -76,6 +78,18 @@ class BrokerInventory(Protocol):
     ) -> bool:
         """Idempotently acknowledge the exact principal-bound retained proof."""
 
+    def mark_acknowledged(
+        self,
+        principal_id: UUID,
+        attempt_id: UUID,
+        unit_id: UUID,
+        proof_id: UUID,
+    ) -> ManagedUnit | None:
+        """Durably record worker proof acknowledgement before runtime cleanup."""
+
+    def discard_acknowledged(self, unit_id: UUID, *, expected_revision: int) -> bool:
+        """Delete only a durably acknowledged proof tombstone."""
+
 
 class RuntimeUnit(Protocol):
     """Opaque backend identity for one exact broker-authored unit."""
@@ -92,12 +106,30 @@ class RuntimeUnit(Protocol):
     @property
     def incarnation(self) -> RuntimeIncarnation: ...
 
+    @property
+    def recovery_binding(self) -> RuntimeRecoveryBinding | None: ...
+
 
 class IsolationRuntime(Protocol):
     """Backend contract requiring positive exit, emptiness and removal evidence."""
 
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Return recovery material that must be durable before runtime creation."""
+
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> RuntimeUnit:
         """Create only a CREATE_INTENT unit using the fixed image/argument policy."""
+
+    def recover(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> RuntimeUnit:
+        """Recover one exact creation-time runtime incarnation without mutation."""
+
+    def acknowledge_recovery(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> None:
+        """Release runtime recovery state after durable worker proof acknowledgement."""
 
     def stage_request(
         self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
@@ -128,3 +160,8 @@ class IsolationRuntime(Protocol):
 
     def discover(self, *, limit: int) -> tuple[RuntimeUnit, ...]:
         """Discover broker-labelled units only as supplementary evidence."""
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> RuntimeUnit | None:
+        """Recover an exact create whose runtime reply was not committed."""

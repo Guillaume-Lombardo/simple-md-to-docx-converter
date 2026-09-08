@@ -79,7 +79,7 @@ jobs:
   light:
     name: CI / light
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: read

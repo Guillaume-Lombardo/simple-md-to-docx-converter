@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +18,17 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_NODE_FENCE_REVISION@", "fence-v1")
         .replace("@REQUIRED_ATTESTER_IMAGE_REPOSITORY@", "registry.example/attester")
         .replace("@REQUIRED_ATTESTER_IMAGE_DIGEST@", f"sha256:{'1' * 64}")
+        .replace("@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@", f"sha256:{'2' * 64}")
+        .replace("@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@", "262144")
+        .replace("@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@", "65536")
+        .replace("@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@", "5")
+        .replace("@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@", "8")
+        .replace("@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@", "30")
+        .replace("@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@", "0.1")
+        .replace("@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@", f"sha256:{'3' * 64}")
+        .replace("@REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@", "30")
+        .replace("@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@", "10")
+        .replace("@REQUIRED_POD_POLL_INTERVAL_SECONDS@", "0.1")
     )
     return cast(list[dict[str, Any]], list(yaml.safe_load_all(rendered)))
 
@@ -58,45 +70,40 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert {
         (tuple(rule["resources"]), tuple(sorted(rule["verbs"]))) for rule in rules
     } == {
-        (("pods",), ("create", "delete", "get", "list", "watch")),
+        (("pods",), ("create", "delete", "get", "list")),
         (("pods/exec",), ("create",)),
     }
     assert not any(item["kind"] == "ClusterRole" for item in resources)
     assert not any(item["kind"] == "ClusterRoleBinding" for item in resources)
     assert not any(item["kind"] == "Service" for item in resources)
 
-    daemon = by_kind_name[("DaemonSet", "markweave-node-attester")]
-    assert daemon["metadata"]["namespace"] == "markweave-attestation"
-    specification = daemon["spec"]["template"]["spec"]
-    assert specification["automountServiceAccountToken"] is False
-    assert specification["nodeSelector"] == {
-        "reverse.markweave.dev/isolation-pool": "reverse",
-        "reverse.markweave.dev/node-fence": "fence-v1",
-    }
-    mounts = {volume["name"]: volume for volume in specification["volumes"]}
-    assert mounts["cri"]["hostPath"]["type"] == "Socket"
-    assert mounts["cgroup"]["hostPath"]["path"] == "/sys/fs/cgroup"
-    assert mounts["config"]["configMap"]["name"] == ("markweave-node-attester-config")
-    container = specification["containers"][0]
-    assert container["ports"] == [
-        {
-            "name": "mtls-attester",
-            "containerPort": 9443,
-            "hostPort": 9443,
-            "protocol": "TCP",
-        }
-    ]
-    assert container["env"] == [
-        {
-            "name": "MARKWEAVE_ATTESTER_NODE_NAME",
-            "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}},
-        }
-    ]
+    assert not any(
+        item["kind"] in {"DaemonSet", "PodDisruptionBudget"} for item in resources
+    )
 
     config = by_kind_name[("ConfigMap", "markweave-node-attester-config")]
     assert config["immutable"] is True
+    attester_settings = json.loads(config["data"]["attester.json"])
+    assert {
+        key: type(attester_settings[key])
+        for key in (
+            "max_request_bytes",
+            "max_response_bytes",
+            "request_timeout_seconds",
+            "max_concurrent_requests",
+        )
+    } == {
+        "max_request_bytes": int,
+        "max_response_bytes": int,
+        "request_timeout_seconds": int,
+        "max_concurrent_requests": int,
+    }
     assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
     assert '"require_client_certificate": true' in config["data"]["attester.json"]
+    assert (
+        f'"expected_client_certificate_sha256": "sha256:{"2" * 64}"'
+        in (config["data"]["attester.json"])
+    )
     tls = by_kind_name[("Secret", "markweave-node-attester-tls")]
     assert tls["immutable"] is True
     assert set(tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
@@ -104,6 +111,38 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert broker_tls["metadata"]["namespace"] == "markweave-reverse"
     assert broker_tls["immutable"] is True
     assert set(broker_tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
+    broker_config = by_kind_name[("ConfigMap", "markweave-reverse-broker-kubernetes")]
+    assert broker_config["immutable"] is True
+    broker_settings = json.loads(broker_config["data"]["kubernetes.json"])
+    assert {
+        key: type(broker_settings[key])
+        for key in (
+            "pod_scheduling_timeout_seconds",
+            "pod_exec_timeout_seconds",
+            "pod_poll_interval_seconds",
+            "attester_max_request_bytes",
+            "attester_max_response_bytes",
+            "attester_request_timeout_seconds",
+            "attester_readiness_timeout_seconds",
+            "attester_readiness_poll_interval_seconds",
+        )
+    } == {
+        "pod_scheduling_timeout_seconds": int,
+        "pod_exec_timeout_seconds": int,
+        "pod_poll_interval_seconds": float,
+        "attester_max_request_bytes": int,
+        "attester_max_response_bytes": int,
+        "attester_request_timeout_seconds": int,
+        "attester_readiness_timeout_seconds": int,
+        "attester_readiness_poll_interval_seconds": float,
+    }
+    assert (
+        '"namespace": "markweave-reverse"' in broker_config["data"]["kubernetes.json"]
+    )
+    assert (
+        f'"expected_attester_server_certificate_sha256": "sha256:{"3" * 64}"'
+        in (broker_config["data"]["kubernetes.json"])
+    )
 
 
 @pytest.mark.unit

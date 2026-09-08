@@ -9,7 +9,7 @@ crash-consistent inventory, reconciliation, tombstones, and proof acknowledgemen
 The application and external worker possess only a broker client identity. They have no Kubernetes,
 OCI, CRI, node, or workload-mutating credentials. The broker alone receives namespace-scoped Pod
 authority in the attempt namespace. It authors the immutable Pod specification and uses an exact
-Pod UID precondition for termination and deletion. The attempt service account has no RBAC and its
+Pod UID precondition for deletion. The attempt service account has no RBAC and its
 token is not mounted.
 
 A separately deployed node attester, in a different namespace outside the broker Role and
@@ -19,25 +19,58 @@ endpoint accepts only the broker identity and returns bounded, content-free evid
 never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
 the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
-The reference DaemonSet proposes a node-local mTLS transport on TCP port `9443` using `hostPort`,
-not a cluster-wide Service. A future broker adapter must derive the only allowed endpoint as
+The reference file intentionally omits a DaemonSet: no node-attester command, concrete CRI/cgroup
+inspector, production process assembly, durable volume/key wiring, or certificate-rotation
+procedure exists yet.
+The intended node-local mTLS transport uses TCP port `9443` without a cluster-wide Service. The broker derives the allowed endpoint as
 `<attempt Pod spec.nodeName>:9443`; cluster DNS or the deployment network must resolve every
 Kubernetes node name directly to that node's reachable address. The server certificate must cover
 those node names, the mounted CA trusts only broker client certificates, and the broker verifies
-both the server name and the attested node identity. The immutable ConfigMap enables mandatory
-client-certificate authentication, while the separate immutable Secret supplies the CA,
-certificate, and private key. Deployments must render every `@REQUIRED_*@` placeholder without
-committing private material. The broker deployment must mount the separate
+both the server name, its configured exact leaf-certificate SHA-256, and the attested node identity.
+The server likewise verifies its client CA and an exact configured broker leaf-certificate SHA-256.
+The bounded protocol accepts only `bind`, `adopt_create_intent`, `recover_create_intent`,
+`recover`, `confirm_exit`, `confirm_empty`, `confirm_removed`, and `acknowledge`; the server retains the bound sandbox identity and requires
+the exact evidence it issued at each proof transition. Its bounded HMAC-authenticated SQLite
+ledger persists `BOUND`, `EXIT`, `EMPTY`, and `REMOVED` before replying. It never expires or evicts
+an unacknowledged record; capacity, corruption, deletion, or authentication failure closes the
+service. A `REMOVED` record is deleted only after the broker reports its own durable worker-proof
+acknowledgement, and both lost replies and repeated acknowledgements are idempotent. The protocol
+never returns raw CRI output, cgroup contents, process identifiers, or Pod content. The immutable
+ConfigMap enables mandatory client-certificate authentication and fixed
+request/response/time ceilings, while the separate immutable Secret supplies the CA, certificate,
+and private key. Deployments must render every `@REQUIRED_*@` placeholder without committing
+private material. The broker deployment must mount the separate
 `markweave-reverse-broker-attester-tls` Secret and use its client certificate, private key, and
-attester-server CA only for this node-specific connection. This repository does not yet implement
-the attester server or broker client. Node-name routing, CNI `hostPort` support, firewall policy,
-peer authorization, certificate coverage, exact-node binding, and failure behavior remain required
-real-cluster gates rather than supported deployment behavior.
+attester-server CA only for this node-specific connection. `HttpsNodeAttesterClient` derives its
+destination only from the scheduled Pod's API-bound `spec.nodeName`, and `AttesterHttpsServer`
+provides a concurrency-limited TLS 1.3 service with bounded handshake, header, and body handling.
+A production inspector must separately bound every synchronous CRI and cgroup operation.
+Node-name routing, CNI `hostPort`
+support, firewall policy, certificate coverage, and failure behavior still require real-cluster
+proof before this topology is supported.
 
-The committed `NodeAttestationEngine` is the fail-closed policy core. A production adapter must
-collect the corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output
-inside the attester process. Unknown fields, truncated CRI enumeration, lookup errors, identity
-changes, or an unavailable attester reject readiness or proof.
+The broker's `KubernetesApiControlPlane` uses the official Kubernetes 1.35 Python client under the
+optional `markweave[kubernetes]` extra. It loads only the broker Pod's in-cluster identity and fixes
+the namespace, attempt container, workspace paths, and exec commands in code. Pod creation waits a
+configured bounded interval for API-bound node assignment. Every later workspace or lifecycle
+operation rereads and matches the complete Pod identity; deletion carries the exact Pod UID
+precondition. Kubernetes exec has no UID precondition, so its fixed helper first blocks, the broker
+rechecks the API identity, and the helper checks a kubelet-projected Pod UID before accepting data.
+Workspace exec transfers canonical attempt-channel files with bounded base64 framing,
+and the pinned websocket client receives the exact broker timeout during connection establishment
+as well as stream polling. This bounded connection path intentionally mirrors private `WSClient`
+initialization from the pinned `kubernetes==35.0.0` dependency; upgrades must pass the compatibility
+test before changing that pin. The kill exec acknowledgement is never considered termination evidence.
+
+The committed `NodeAttestationEngine` is the fail-closed policy core. A concrete bounded
+`CriCgroupInspector`, node-attester command/process assembly, durable volume and key wiring, and
+certificate rotation remain deployment work. A production implementation must collect the
+corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output inside the
+attester process. Unknown fields, truncated CRI enumeration, lookup errors, identity
+changes, or an unavailable attester reject readiness or proof. Only an explicit trusted-inspector
+"sandbox not observable yet" result is retried, within a configured deadline; policy mismatches
+fail immediately. The node fence and complete runnable sandbox are re-attested before staging, and
+the node fence is revalidated at every proof transition.
 
 ## Dedicated pool contract
 
@@ -106,9 +139,25 @@ evidence may the broker delete the exact Pod UID. Removal requires complete CRI 
 the sandbox is gone, cgroup lookup proving the previously emptied cgroup is gone, and bounded Pod
 API absence. The final evidence binds all identities and the prior emptiness digest.
 
-The existing T70 inventory persists that proof as a tombstone. Startup and reconnect discovery
-rebind every labelled Pod through the attester before reconciliation; labels alone never establish
-identity. Failure at any stage keeps the broker unavailable and leaves the tombstone unacknowledged.
+Before the first Pod API mutation, the broker inventory persists a bounded, versioned,
+content-free prepared binding on `CREATE_INTENT`. It fixes the unit identity, creation-time policy,
+runtime configuration, image repository, and Pod-contract digest. After attestation, the same
+authenticated row is atomically replaced with the exact Pod, sandbox, node fence, and complete
+container ID set. The authenticated v2-to-v3 migration verifies every row and manifest before an
+atomic schema rewrite and re-MAC. Recovery validates those facts against the durable unit, so a
+lost API/bind reply or current-policy rollover cannot reinterpret an existing unit.
+It performs exact Pod lookup rather than guessing a node or trusting labels, and it separately
+recovers a present `EXITED` unit without trying to recreate a running binding. If a create reply
+was lost before the broker persisted `CREATED`, `recover_create_intent` returns only the original
+authenticated ledger contract and sandbox for the exact API-bound Pod; it does not reinterpret the
+Pod under the current policy. A failed kill against an already exited container is accepted only
+when the attester independently returns positive exit evidence.
+
+Broker and attester restart reconciliation replays the exact durable lifecycle. A worker proof ACK
+first becomes a durable broker marker, then releases the exact attester `REMOVED` record, then
+discards the broker tombstone. A crash between any of those steps resumes the same cleanup on
+startup. There is no pre-ACK TTL. Failure at any stage keeps the broker unavailable and retains the
+authenticated state needed for retry.
 
 ## Required deployment proof
 
@@ -119,6 +168,7 @@ cancellation, OOM, PID exhaustion, workspace exhaustion, attempted credential ac
 class including node-local destinations, Pod substitution, node relabeling, attester outage,
 incomplete CRI enumeration, descendant escape attempts, and proof retention/acknowledgement.
 
-No usable Kubernetes context was available in the development environment on 2026-09-08. The
-cluster and exact-image gates therefore remain required but unexecuted; unit or fake-control-plane
-results are not substitutes for that evidence.
+The authorized `codex-dev` k3s installation was inactive and its kubeconfig was root-readable only
+on 2026-09-08. No privileged service or credential change was made during this implementation.
+The cluster, inspector, CNI, dedicated-pool, and exact-image gates therefore remain required but unexecuted;
+unit, loopback-mTLS, or fake-control-plane results are not substitutes for that evidence.

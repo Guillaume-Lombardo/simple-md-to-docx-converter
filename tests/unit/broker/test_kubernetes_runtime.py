@@ -4,11 +4,14 @@ import json
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from pytest_mock import MockerFixture
 
+from markweave.broker import kubernetes_runtime as kubernetes_runtime_module
 from markweave.broker.kubernetes_attester import (
     CriCgroupInspector,
     NodeAttestationEngine,
@@ -18,6 +21,7 @@ from markweave.broker.kubernetes_attester import (
 )
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationContract,
+    KubernetesAttestationNotReady,
     KubernetesIsolationRuntime,
     KubernetesPodIdentity,
     KubernetesRuntimeConfig,
@@ -38,6 +42,7 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
+    RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
@@ -151,6 +156,11 @@ class ControlPlaneDouble:
         self.present = True
         return self.identity()
 
+    def find(self, name: str) -> KubernetesPodIdentity | None:
+        if name != f"markweave-reverse-{self.unit.unit_id.hex}":
+            raise KubernetesRuntimeError("Kubernetes Pod lookup is invalid")
+        return self.identity() if self.present else None
+
     def stage_request(
         self, pod: KubernetesPodIdentity, request: ReverseAttemptRequest
     ) -> None:
@@ -224,6 +234,8 @@ class InspectorDouble:
         return NodeFenceSnapshot(**values)
 
     def sandbox(self, pod_uid: UUID) -> SandboxSnapshot:
+        if self.fail_operation == "not_ready":
+            raise KubernetesAttestationNotReady("Kubernetes sandbox is not ready")
         if self.fail_operation == "sandbox":
             raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         running = not self.control.terminated
@@ -302,6 +314,102 @@ class UnexpectedAttester:
     ) -> EvidenceDigest:
         del unit, empty_evidence
         return EVIDENCE
+
+    def recover(
+        self,
+        unit: KubernetesRuntimeUnit,
+        contract: KubernetesAttestationContract,
+        lifecycle_state: ManagedUnitState,
+    ) -> KubernetesSandboxIdentity:
+        del unit, contract, lifecycle_state
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def recover_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        proposed_contract: KubernetesAttestationContract,
+    ) -> tuple[KubernetesSandboxIdentity, KubernetesAttestationContract]:
+        del pod, proposed_contract
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def adopt_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity:
+        del pod, contract
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def acknowledge(
+        self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
+    ) -> None:
+        del unit, removal_evidence
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+
+class RecoveredIntentAttester:
+    def __init__(
+        self,
+        engine: NodeAttestationEngine,
+        pod: KubernetesPodIdentity,
+        sandbox: KubernetesSandboxIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> None:
+        self.engine = engine
+        self.pod = pod
+        self.sandbox = sandbox
+        self.contract = contract
+
+    def bind(
+        self, pod: KubernetesPodIdentity, contract: KubernetesAttestationContract
+    ) -> KubernetesSandboxIdentity:
+        return self.engine.bind(pod, contract)
+
+    def recover_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        proposed_contract: KubernetesAttestationContract,
+    ) -> tuple[KubernetesSandboxIdentity, KubernetesAttestationContract]:
+        del proposed_contract
+        if pod != self.pod:
+            raise KubernetesRuntimeError("Kubernetes recovery identity changed")
+        return self.sandbox, self.contract
+
+    def adopt_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> KubernetesSandboxIdentity:
+        del contract
+        if pod != self.pod:
+            raise KubernetesRuntimeError("Kubernetes recovery identity changed")
+        return self.sandbox
+
+    def recover(
+        self,
+        unit: KubernetesRuntimeUnit,
+        contract: KubernetesAttestationContract,
+        lifecycle_state: ManagedUnitState,
+    ) -> KubernetesSandboxIdentity:
+        return self.engine.recover(unit, contract, lifecycle_state)
+
+    def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
+        return self.engine.confirm_exit(unit)
+
+    def confirm_empty(
+        self, unit: KubernetesRuntimeUnit, exit_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        return self.engine.confirm_empty(unit, exit_evidence)
+
+    def confirm_removed(
+        self, unit: KubernetesRuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        return self.engine.confirm_removed(unit, empty_evidence)
+
+    def acknowledge(
+        self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
+    ) -> None:
+        self.engine.acknowledge(unit, removal_evidence)
 
 
 def _runtime(
@@ -678,8 +786,8 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
         engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
 
     inspector.fail_operation = "sandbox"
-    with pytest.raises(KubernetesRuntimeError, match="sandbox lookup failed"):
-        engine.confirm_exit(runtime_unit)
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
 
 
 @pytest.mark.unit
@@ -691,6 +799,41 @@ def test_attester_rejects_invalid_cri_sandbox_identity(
 
     with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
         runtime.create(unit, policy)
+
+
+@pytest.mark.unit
+def test_stage_and_proofs_revalidate_the_bound_node_fence(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    inspector.override_node = {"node_uid": UUID(int=98)}
+    with pytest.raises(KubernetesRuntimeError, match="pre-staging attestation"):
+        runtime.stage_request(runtime_unit, _request())
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+def test_stored_identity_can_recover_only_an_exact_known_runtime_unit(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, _ = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    stored = SimpleNamespace(
+        unit_id=created.unit_id,
+        attempt_id=created.attempt_id,
+        principal_id=created.principal_id,
+        incarnation=created.incarnation,
+    )
+    runtime.hard_terminate(cast(RuntimeUnit, stored))
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        runtime.hard_terminate(
+            cast(
+                RuntimeUnit,
+                SimpleNamespace(**{**vars(stored), "principal_id": UUID(int=1)}),
+            )
+        )
 
 
 @pytest.mark.unit
@@ -815,6 +958,158 @@ def test_removal_needs_empty_cri_cgroup_and_api_evidence(
 
 
 @pytest.mark.unit
+def test_hard_terminate_accepts_only_positive_exit_proof_when_exec_is_already_gone(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    control.fail_operation = "terminate"
+
+    runtime.hard_terminate(runtime_unit)
+
+    assert runtime.confirm_exit(runtime_unit) == runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "container_ids",
+    [(), ("9" * 64, "a" * 64), ("a" * 64,)],
+)
+def test_exit_rejects_missing_extra_or_substituted_container_identity(
+    unit: ManagedUnit, policy: BrokerPolicy, container_ids: tuple[str, ...]
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {"container_ids": container_ids}
+
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "container_ids",
+    [(), ("9" * 64, "a" * 64), ("a" * 64,)],
+)
+def test_created_terminal_recovery_rejects_changed_container_identity_set(
+    unit: ManagedUnit, policy: BrokerPolicy, container_ids: tuple[str, ...]
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = True
+    inspector.override_sandbox = {"container_ids": container_ids}
+
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation"):
+        NodeAttestationEngine(inspector).recover(
+            runtime_unit, contract, ManagedUnitState.CREATED
+        )
+
+
+@pytest.mark.unit
+def test_attestation_engine_validates_volatile_cleanup_and_invalid_proof_inputs(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    engine = NodeAttestationEngine(inspector)
+    sandbox = engine.bind(runtime_unit.pod, contract)
+    conflicting_contract = replace(contract, pool="other-pool")
+
+    with pytest.raises(KubernetesRuntimeError, match="attestation is invalid"):
+        engine.discard_uncommitted_binding(
+            runtime_unit.pod.pod_uid,
+            conflicting_contract,
+            sandbox.node_uid,
+        )
+    engine.discard_uncommitted_binding(
+        runtime_unit.pod.pod_uid, contract, sandbox.node_uid
+    )
+    engine.discard_uncommitted_binding(
+        runtime_unit.pod.pod_uid, contract, sandbox.node_uid
+    )
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation is invalid"):
+        engine.recover(cast(KubernetesRuntimeUnit, object()), contract, unit.state)
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        engine.acknowledge(runtime_unit, cast(EvidenceDigest, object()))
+    with pytest.raises(KubernetesRuntimeError, match="exit evidence is invalid"):
+        engine.confirm_empty(runtime_unit, cast(EvidenceDigest, object()))
+
+    unbound = NodeAttestationEngine(inspector)
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        unbound._revalidate_fence(runtime_unit)
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        unbound._sandbox(cast(KubernetesRuntimeUnit, object()))
+
+    conflicting = NodeAttestationEngine(inspector)
+    conflicting._contracts[runtime_unit.pod.pod_uid] = (
+        conflicting_contract,
+        sandbox.node_uid,
+    )
+    with pytest.raises(KubernetesRuntimeError, match="attestation is invalid"):
+        conflicting.bind(runtime_unit.pod, contract)
+    control.terminated = True
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation is invalid"):
+        conflicting.recover(runtime_unit, contract, ManagedUnitState.CREATED)
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation is invalid"):
+        conflicting.recover(runtime_unit, contract, ManagedUnitState.EXIT_CONFIRMED)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "lifecycle_state",
+    [ManagedUnitState.CREATED, ManagedUnitState.EXIT_CONFIRMED],
+)
+def test_terminal_recovery_rejects_observed_pod_identity_substitution(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    lifecycle_state: ManagedUnitState,
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = True
+    observed = deepcopy(control.manifest)
+    metadata = cast(dict[str, object], observed["metadata"])
+    metadata["uid"] = str(UUID(int=99))
+    specification = cast(dict[str, object], observed["spec"])
+    specification["nodeName"] = created.pod.node_name
+    inspector.override_sandbox = {"observed_pod": observed}
+
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation"):
+        NodeAttestationEngine(inspector).recover(created, contract, lifecycle_state)
+
+
+@pytest.mark.unit
 def test_restart_discovery_rebinds_cri_identity(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
@@ -826,6 +1121,40 @@ def test_restart_discovery_rebinds_cri_identity(
         config=CONFIG,
         control_plane=control,
         node_attester=NodeAttestationEngine(inspector),
+    )
+
+    assert restarted.discover(limit=1) == (expected,)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("terminal", [False, True])
+def test_create_intent_discovery_recovers_original_contract_across_policy_rollover(
+    unit: ManagedUnit, policy: BrokerPolicy, terminal: bool
+) -> None:
+    first, control, inspector = _runtime(unit, policy)
+    expected = first.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = terminal
+    rolled = replace(policy, revision="t74-rolled")
+    restarted = KubernetesIsolationRuntime(
+        image_repository="registry.example/markweave-reverse-attempt",
+        policy=rolled,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=RecoveredIntentAttester(
+            NodeAttestationEngine(inspector),
+            expected.pod,
+            expected.sandbox,
+            contract,
+        ),
     )
 
     assert restarted.discover(limit=1) == (expected,)
@@ -874,7 +1203,9 @@ def test_restart_discovery_neutralizes_unexpected_attester_failure(
             "policy",
             EVIDENCE,
         ),
-        lambda: KubernetesSandboxIdentity("bad", CGROUP, NODE_UID, EVIDENCE),
+        lambda: KubernetesSandboxIdentity(
+            "bad", CGROUP, NODE_UID, EVIDENCE, (SANDBOX_ID,)
+        ),
         pytest.param(
             lambda: KubernetesRuntimeUnit(
                 UNIT_ID,
@@ -890,7 +1221,9 @@ def test_restart_discovery_neutralizes_unexpected_attester_failure(
                     "policy",
                     EVIDENCE,
                 ),
-                KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE),
+                KubernetesSandboxIdentity(
+                    SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE, (SANDBOX_ID,)
+                ),
             ),
             id="incarnation_id_must_match_pod_uid",
         ),
@@ -1030,6 +1363,220 @@ def test_configuration_and_manifest_validation_fail_closed(
     runtime, _, _ = _runtime(unit, policy)
     with pytest.raises(KubernetesRuntimeError, match="create contract"):
         runtime.create(replace(unit, state=ManagedUnitState.RESERVED), policy)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing", ["recover", "recover_create_intent", "acknowledge"])
+def test_runtime_rejects_attester_missing_recovery_capability(
+    unit: ManagedUnit, policy: BrokerPolicy, missing: str
+) -> None:
+    _, control, _ = _runtime(unit, policy)
+    methods = {
+        name: (lambda *args, **kwargs: None)
+        for name in (
+            "acknowledge",
+            "adopt_create_intent",
+            "bind",
+            "confirm_empty",
+            "confirm_exit",
+            "confirm_removed",
+            "recover",
+            "recover_create_intent",
+        )
+        if name != missing
+    }
+
+    with pytest.raises(ValueError, match="runtime configuration"):
+        KubernetesIsolationRuntime(
+            image_repository="registry.example/reverse",
+            policy=policy,
+            config=CONFIG,
+            control_plane=control,
+            node_attester=cast(Any, SimpleNamespace(**methods)),
+        )
+
+
+def _encoded_recovery(root: object) -> bytes:
+    return json.dumps(
+        root, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    ).encode("ascii")
+
+
+@pytest.mark.unit
+def test_prepared_recovery_decoder_checks_every_bound_identity(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, _ = _runtime(unit, policy)
+    reserved = replace(unit, state=ManagedUnitState.RESERVED, revision=0)
+    binding = runtime.prepare(reserved, policy)
+    assert type(binding) is RuntimeRecoveryBinding
+    intent = replace(unit, runtime_recovery=binding)
+    root = json.loads(binding.payload)
+    assert isinstance(root, dict)
+    invalid_roots: list[dict[str, object]] = []
+
+    def changed(section: str, key: str, value: object) -> None:
+        candidate = deepcopy(root)
+        nested = cast(dict[str, object], candidate[section])
+        nested[key] = value
+        invalid_roots.append(candidate)
+
+    invalid_phase = deepcopy(root)
+    invalid_phase["phase"] = "bound"
+    invalid_roots.append(invalid_phase)
+    for key, value in (
+        ("unit_id", str(UUID(int=91))),
+        ("attempt_id", str(UUID(int=92))),
+        ("create_sequence", 2),
+        ("principal_id", str(UUID(int=93))),
+        ("runtime_name", "markweave-reverse-wrong"),
+        ("policy_revision", "other-policy"),
+        ("policy_specification", f"sha256:{'9' * 64}"),
+    ):
+        changed("unit", key, value)
+    changed("policy", "revision", "other-policy")
+    changed("policy", "image_digest", f"sha256:{'8' * 64}")
+
+    invalid_bindings = [
+        replace(binding, backend="other"),
+        replace(binding, schema_version=2),
+        replace(binding, payload=json.dumps(root).encode("ascii")),
+        *(
+            replace(binding, payload=_encoded_recovery(value))
+            for value in invalid_roots
+        ),
+    ]
+    for invalid in invalid_bindings:
+        with pytest.raises(KubernetesRuntimeError, match="recovery binding is invalid"):
+            kubernetes_runtime_module._decode_prepared_recovery_binding(intent, invalid)
+
+
+@pytest.mark.unit
+def test_bound_recovery_decoder_rejects_noncanonical_phase_and_shapes(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, _ = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    binding = created.recovery_binding
+    assert type(binding) is RuntimeRecoveryBinding
+    root = json.loads(binding.payload)
+    assert isinstance(root, dict)
+    invalid_roots: list[dict[str, object]] = []
+    invalid_phase = deepcopy(root)
+    invalid_phase["phase"] = "prepared"
+    invalid_roots.append(invalid_phase)
+    invalid_sandbox = deepcopy(root)
+    cast(dict[str, object], invalid_sandbox["sandbox"])["container_ids"] = "bad"
+    invalid_roots.append(invalid_sandbox)
+    invalid_policy = deepcopy(root)
+    cast(dict[str, object], invalid_policy["policy"])["limits"] = []
+    invalid_roots.append(invalid_policy)
+
+    invalid_bindings = [
+        replace(binding, backend="other"),
+        replace(binding, schema_version=2),
+        replace(binding, payload=json.dumps(root).encode("ascii")),
+        *(
+            replace(binding, payload=_encoded_recovery(value))
+            for value in invalid_roots
+        ),
+    ]
+    for invalid in invalid_bindings:
+        with pytest.raises(KubernetesRuntimeError, match="recovery binding is invalid"):
+            kubernetes_runtime_module._decode_recovery_binding(invalid)
+
+
+@pytest.mark.unit
+def test_recovery_helpers_reject_each_closed_scalar_and_projection_boundary() -> None:
+    with pytest.raises(KubernetesRuntimeError, match="evidence"):
+        kubernetes_runtime_module._require_evidence(object(), "invalid evidence")
+    preserved = KubernetesRuntimeError("preserved")
+    with pytest.raises(KubernetesRuntimeError, match="preserved") as raised:
+        kubernetes_runtime_module._external_call(
+            lambda: (_ for _ in ()).throw(preserved),
+            "normalized",
+            preserve_runtime_error=True,
+        )
+    assert raised.value is preserved
+    zero_cpu_policy = SimpleNamespace(
+        limits=SimpleNamespace(cpu_quota_micros=0, cpu_period_micros=1)
+    )
+    with pytest.raises(KubernetesRuntimeError, match="CPU policy is invalid"):
+        kubernetes_runtime_module._cpu_millicores(cast(BrokerPolicy, zero_cpu_policy))
+    assert (
+        kubernetes_runtime_module._project_like(
+            "value", "value", ("resources", "limits", "other")
+        )
+        == "value"
+    )
+
+    for operation in (
+        lambda: kubernetes_runtime_module._project_like([], {}, ("root",)),
+        lambda: kubernetes_runtime_module._project_like(1, "value", ("root",)),
+        lambda: kubernetes_runtime_module._recovery_text({"value": ""}, "value"),
+        lambda: kubernetes_runtime_module._recovery_int({"value": True}, "value"),
+        lambda: kubernetes_runtime_module._recovery_ints({"value": True}),
+        lambda: kubernetes_runtime_module._filter_default_tolerations(
+            {"spec": {"tolerations": ["invalid"]}},
+            {"spec": {"tolerations": []}},
+        ),
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            operation()
+
+
+@pytest.mark.unit
+def test_runtime_recovery_and_discovery_guards_reject_malformed_boundary_values(
+    unit: ManagedUnit, policy: BrokerPolicy, mocker: MockerFixture
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    with pytest.raises(KubernetesRuntimeError, match="create contract"):
+        runtime.prepare(unit, policy)
+    with pytest.raises(KubernetesRuntimeError, match="create contract"):
+        runtime.create(replace(unit, policy_revision="other-policy"), policy)
+
+    reserved = replace(unit, state=ManagedUnitState.RESERVED, revision=0)
+    binding = runtime.prepare(reserved, policy)
+    assert type(binding) is RuntimeRecoveryBinding
+    intent = replace(unit, runtime_recovery=binding)
+    with pytest.raises(KubernetesRuntimeError, match="recovery binding is invalid"):
+        runtime.recover_create_intent(intent, replace(binding, payload=b"{}"))
+
+    discover = mocker.patch.object(control, "discover", return_value=[])
+    with pytest.raises(KubernetesRuntimeError, match="discovery exceeds its limit"):
+        runtime.discover(limit=1)
+    discover.return_value = (object(),)
+    with pytest.raises(KubernetesRuntimeError, match="discovery identity is invalid"):
+        runtime.discover(limit=1)
+
+    created = runtime.create(unit, policy)
+    control.pod_uid = UUID(int=98)
+    with pytest.raises(KubernetesRuntimeError, match="incarnation conflicts"):
+        runtime.create(unit, policy)
+    control.pod_uid = created.pod.pod_uid
+    fresh = KubernetesIsolationRuntime(
+        image_repository="registry.example/reverse",
+        policy=policy,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=runtime._attester,
+    )
+    discover.return_value = (created.pod,)
+    mocker.patch.object(
+        runtime._attester,
+        "recover_create_intent",
+        return_value=(created.sandbox, object()),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="discovery policy is invalid"):
+        fresh.discover(limit=1)
+
+    mocker.patch.object(
+        runtime._attester,
+        "bind",
+        return_value=replace(created.sandbox, sandbox_id="f" * 64),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="pre-staging attestation failed"):
+        runtime.stage_request(created, _request())
 
 
 def json_repr(value: object) -> str:

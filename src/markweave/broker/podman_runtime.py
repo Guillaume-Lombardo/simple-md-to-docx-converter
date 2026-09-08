@@ -29,6 +29,7 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
+    RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
@@ -141,6 +142,7 @@ class PodmanRuntimeUnit:
     incarnation: RuntimeIncarnation
     container_id: str
     name: str
+    recovery_binding: RuntimeRecoveryBinding | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -436,6 +438,14 @@ class PodmanIsolationRuntime:
         self._cgroup_root_validate = cgroup_root_validate or _validate_cgroup_root
         self._environment_verified = False
         self._runtime_capabilities: tuple[str, ...] = ()
+
+    def prepare(
+        self, unit: ManagedUnit, policy: BrokerPolicy
+    ) -> RuntimeRecoveryBinding | None:
+        """Require no prepared binding for label-recoverable Podman."""
+
+        del unit, policy
+        return None
 
     def create(self, unit: ManagedUnit, policy: BrokerPolicy) -> PodmanRuntimeUnit:
         """Create or recover and start one exact immutable-policy container."""
@@ -1008,6 +1018,30 @@ class PodmanIsolationRuntime:
         self._verify_realized_specification(inspected, policy)
         self._verify_cgroup_binding(inspected, runtime_unit)
         return runtime_unit
+
+    def recover(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> PodmanRuntimeUnit:
+        """Reject recovery material because Podman reconstructs from fixed labels."""
+
+        del unit, binding
+        raise PodmanRuntimeError("Podman recovery binding is invalid")
+
+    def recover_create_intent(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> PodmanRuntimeUnit | None:
+        """Reject bindings because Podman recovers create intent from labels."""
+
+        del unit, binding
+        raise PodmanRuntimeError("Podman recovery binding is invalid")
+
+    def acknowledge_recovery(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> None:
+        """Reject recovery material because Podman retains no recovery ledger."""
+
+        del unit, binding
+        raise PodmanRuntimeError("Podman recovery binding is invalid")
 
     def _unit_from_labels(self, inspected: Mapping[str, Any]) -> PodmanRuntimeUnit:
         container_id = _string(inspected, "Id")

@@ -1245,6 +1245,7 @@ def test_removed_proof_reconstructs_from_persisted_incarnation(
         attempt_id = ATTEMPT_ID
         principal_id = PRINCIPAL_ID
         incarnation = runtime_unit.incarnation
+        recovery_binding = runtime_unit.recovery_binding
 
     assert backend.confirm_removed(StoredUnit(), empty_evidence).value.startswith(
         "sha256:"
