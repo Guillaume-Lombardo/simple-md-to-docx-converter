@@ -17,6 +17,14 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_NODE_FENCE_REVISION@", "fence-v1")
         .replace("@REQUIRED_ATTESTER_IMAGE_REPOSITORY@", "registry.example/attester")
         .replace("@REQUIRED_ATTESTER_IMAGE_DIGEST@", f"sha256:{'1' * 64}")
+        .replace("@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@", f"sha256:{'2' * 64}")
+        .replace("@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@", "262144")
+        .replace("@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@", "65536")
+        .replace("@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@", "5")
+        .replace("@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@", f"sha256:{'3' * 64}")
+        .replace("@REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@", "30")
+        .replace("@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@", "10")
+        .replace("@REQUIRED_POD_POLL_INTERVAL_SECONDS@", "0.1")
     )
     return cast(list[dict[str, Any]], list(yaml.safe_load_all(rendered)))
 
@@ -97,6 +105,10 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert config["immutable"] is True
     assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
     assert '"require_client_certificate": true' in config["data"]["attester.json"]
+    assert (
+        f'"expected_client_certificate_sha256": "sha256:{"2" * 64}"'
+        in (config["data"]["attester.json"])
+    )
     tls = by_kind_name[("Secret", "markweave-node-attester-tls")]
     assert tls["immutable"] is True
     assert set(tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
@@ -104,6 +116,15 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert broker_tls["metadata"]["namespace"] == "markweave-reverse"
     assert broker_tls["immutable"] is True
     assert set(broker_tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
+    broker_config = by_kind_name[("ConfigMap", "markweave-reverse-broker-kubernetes")]
+    assert broker_config["immutable"] is True
+    assert (
+        '"namespace": "markweave-reverse"' in broker_config["data"]["kubernetes.json"]
+    )
+    assert (
+        f'"expected_attester_server_certificate_sha256": "sha256:{"3" * 64}"'
+        in (broker_config["data"]["kubernetes.json"])
+    )
 
 
 @pytest.mark.unit

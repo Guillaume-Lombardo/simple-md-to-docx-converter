@@ -19,22 +19,37 @@ endpoint accepts only the broker identity and returns bounded, content-free evid
 never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
 the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
-The reference DaemonSet proposes a node-local mTLS transport on TCP port `9443` using `hostPort`,
-not a cluster-wide Service. A future broker adapter must derive the only allowed endpoint as
+The reference DaemonSet uses the node-local mTLS transport on TCP port `9443` through `hostPort`,
+not a cluster-wide Service. The broker derives the only allowed endpoint as
 `<attempt Pod spec.nodeName>:9443`; cluster DNS or the deployment network must resolve every
 Kubernetes node name directly to that node's reachable address. The server certificate must cover
 those node names, the mounted CA trusts only broker client certificates, and the broker verifies
-both the server name and the attested node identity. The immutable ConfigMap enables mandatory
-client-certificate authentication, while the separate immutable Secret supplies the CA,
-certificate, and private key. Deployments must render every `@REQUIRED_*@` placeholder without
-committing private material. The broker deployment must mount the separate
+both the server name, its configured exact leaf-certificate SHA-256, and the attested node identity.
+The server likewise verifies its client CA and an exact configured broker leaf-certificate SHA-256.
+The bounded protocol accepts only `bind`, `confirm_exit`, `confirm_empty`, and `confirm_removed`;
+the server retains the bound sandbox identity and requires the exact evidence it issued at each
+proof transition. It never returns raw CRI output, cgroup contents, process identifiers, or Pod
+content. The immutable ConfigMap enables mandatory client-certificate authentication and fixed
+request/response/time ceilings, while the separate immutable Secret supplies the CA, certificate,
+and private key. Deployments must render every `@REQUIRED_*@` placeholder without committing
+private material. The broker deployment must mount the separate
 `markweave-reverse-broker-attester-tls` Secret and use its client certificate, private key, and
-attester-server CA only for this node-specific connection. This repository does not yet implement
-the attester server or broker client. Node-name routing, CNI `hostPort` support, firewall policy,
-peer authorization, certificate coverage, exact-node binding, and failure behavior remain required
-real-cluster gates rather than supported deployment behavior.
+attester-server CA only for this node-specific connection. `HttpsNodeAttesterClient` derives its
+destination only from the scheduled Pod's API-bound `spec.nodeName`, and `AttesterHttpsServer`
+provides the corresponding serial, bounded TLS 1.3 service. Node-name routing, CNI `hostPort`
+support, firewall policy, certificate coverage, and failure behavior still require real-cluster
+proof before this topology is supported.
 
-The committed `NodeAttestationEngine` is the fail-closed policy core. A production adapter must
+The broker's `KubernetesApiControlPlane` uses the official Kubernetes 1.35 Python client under the
+optional `markweave[kubernetes]` extra. It loads only the broker Pod's in-cluster identity and fixes
+the namespace, attempt container, workspace paths, and exec commands in code. Pod creation waits a
+configured bounded interval for API-bound node assignment. Every later workspace or lifecycle
+operation rereads and matches the complete Pod identity; deletion carries the exact Pod UID
+precondition. Workspace exec transfers canonical attempt-channel files with bounded base64 framing,
+and the kill exec acknowledgement is never considered termination evidence.
+
+The committed `NodeAttestationEngine` is the fail-closed policy core. Its `CriCgroupInspector`
+port remains the only missing node-side adapter. A production implementation must
 collect the corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output
 inside the attester process. Unknown fields, truncated CRI enumeration, lookup errors, identity
 changes, or an unavailable attester reject readiness or proof.
@@ -119,6 +134,7 @@ cancellation, OOM, PID exhaustion, workspace exhaustion, attempted credential ac
 class including node-local destinations, Pod substitution, node relabeling, attester outage,
 incomplete CRI enumeration, descendant escape attempts, and proof retention/acknowledgement.
 
-No usable Kubernetes context was available in the development environment on 2026-09-08. The
-cluster and exact-image gates therefore remain required but unexecuted; unit or fake-control-plane
-results are not substitutes for that evidence.
+The authorized `codex-dev` k3s installation was inactive and its kubeconfig was root-readable only
+on 2026-09-08. No privileged service or credential change was made during this implementation.
+The cluster, inspector, CNI, dedicated-pool, and exact-image gates therefore remain required but unexecuted;
+unit, loopback-mTLS, or fake-control-plane results are not substitutes for that evidence.

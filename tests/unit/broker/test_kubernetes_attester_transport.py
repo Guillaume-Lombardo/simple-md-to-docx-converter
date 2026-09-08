@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from dataclasses import replace
+from pathlib import Path
+from typing import cast
+from uuid import UUID
+
+import pytest
+
+from markweave.broker import kubernetes_attester_transport as transport
+from markweave.broker.kubernetes_attester import NodeAttestationEngine
+from markweave.broker.kubernetes_attester_transport import (
+    AttesterClientTlsConfig,
+    AttesterServerTlsConfig,
+    AttesterTransportLimits,
+    HttpsNodeAttesterClient,
+    NodeAttesterService,
+)
+from markweave.broker.kubernetes_runtime import (
+    KubernetesAttestationContract,
+    KubernetesRuntimeError,
+    KubernetesRuntimeUnit,
+    manifest_digest,
+    pod_contract_projection,
+)
+from markweave.broker.models import (
+    AuthenticatedPrincipal,
+    BrokerPolicy,
+    ManagedUnit,
+    ManagedUnitState,
+    RuntimeChannelLimits,
+    RuntimeLimits,
+    policy_specification_evidence,
+)
+from tests.unit.broker.test_kubernetes_runtime import (
+    ATTEMPT_ID,
+    EVIDENCE,
+    IMAGE_DIGEST,
+    PRINCIPAL_ID,
+    UNIT_ID,
+    ControlPlaneDouble,
+    InspectorDouble,
+    _runtime,
+)
+
+
+@pytest.fixture
+def policy() -> BrokerPolicy:
+    return BrokerPolicy(
+        "t74-transport",
+        IMAGE_DIGEST,
+        RuntimeLimits(100_000, 100_000, 268_435_456, 31, 16_777_216, 2_001),
+        RuntimeChannelLimits(1_000_000, 2_000_000),
+    )
+
+
+@pytest.fixture
+def unit(policy: BrokerPolicy) -> ManagedUnit:
+    return ManagedUnit(
+        ATTEMPT_ID,
+        UNIT_ID,
+        AuthenticatedPrincipal(PRINCIPAL_ID),
+        1,
+        policy.revision,
+        policy_specification_evidence(policy),
+        ManagedUnitState.CREATE_INTENT,
+        1,
+    )
+
+
+def _binding(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> tuple[NodeAttesterService, dict[str, object], InspectorDouble, ControlPlaneDouble]:
+    runtime, control, inspector = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod = replace(created.pod, node_name="node-a")
+    observed = deepcopy(control.manifest)
+    metadata = cast(dict[str, object], observed["metadata"])
+    specification = cast(dict[str, object], observed["spec"])
+    metadata["uid"] = str(pod.pod_uid)
+    specification["nodeName"] = pod.node_name
+    inspector.override_sandbox = {"observed_pod": observed}
+    contract_pod = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        contract_pod,
+        manifest_digest(contract_pod),
+        policy,
+        "reverse",
+        "fence-v1",
+    )
+    request = {
+        "contract": {
+            "fence_revision": contract.fence_revision,
+            "manifest_digest": contract.manifest_digest.value,
+            "pod_contract": contract.pod_contract,
+            "policy": {
+                "channel_limits": {
+                    "max_input_bytes": policy.channel_limits.max_input_bytes,
+                    "max_output_bytes": policy.channel_limits.max_output_bytes,
+                },
+                "image_digest": policy.image_digest,
+                "limits": {
+                    "cpu_period_micros": policy.limits.cpu_period_micros,
+                    "cpu_quota_micros": policy.limits.cpu_quota_micros,
+                    "memory_bytes": policy.limits.memory_bytes,
+                    "pid_limit": policy.limits.pid_limit,
+                    "wall_time_millis": policy.limits.wall_time_millis,
+                    "workspace_bytes": policy.limits.workspace_bytes,
+                },
+                "revision": policy.revision,
+            },
+            "pool": contract.pool,
+        },
+        "operation": "bind",
+        "pod": {
+            "attempt_id": str(pod.attempt_id),
+            "name": pod.name,
+            "namespace": pod.namespace,
+            "node_name": pod.node_name,
+            "pod_uid": str(pod.pod_uid),
+            "policy_revision": pod.policy_revision,
+            "policy_specification": pod.policy_specification.value,
+            "principal_id": str(pod.principal_id),
+            "unit_id": str(pod.unit_id),
+        },
+        "protocol": "markweave-kubernetes-node-attester",
+        "version": 1,
+    }
+    return (
+        NodeAttesterService(NodeAttestationEngine(inspector), node_name="node-a"),
+        request,
+        inspector,
+        control,
+    )
+
+
+def _call(
+    service: NodeAttesterService, request: dict[str, object]
+) -> dict[str, object]:
+    return json.loads(service.handle(json.dumps(request).encode("ascii")))
+
+
+@pytest.mark.unit
+def test_service_keeps_sandbox_identity_server_side(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, bind_request, _, control = _binding(unit, policy)
+    response = _call(service, bind_request)
+    assert set(response) == {"outcome", "sandbox"}
+    sandbox = cast(dict[str, object], response["sandbox"])
+    assert set(sandbox) == {"cgroup_path", "node_fence", "node_uid", "sandbox_id"}
+
+    control.terminated = True
+    pod_uid = cast(dict[str, object], bind_request["pod"])["pod_uid"]
+    exit_response = _call(
+        service,
+        {
+            "operation": "confirm_exit",
+            "pod_uid": pod_uid,
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+    with pytest.raises(KubernetesRuntimeError, match="exit evidence"):
+        _call(
+            service,
+            {
+                "operation": "confirm_empty",
+                "pod_uid": pod_uid,
+                "prior_evidence": f"sha256:{'0' * 64}",
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+    empty_response = _call(
+        service,
+        {
+            "operation": "confirm_empty",
+            "pod_uid": pod_uid,
+            "prior_evidence": exit_response["evidence"],
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+    with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
+        _call(
+            service,
+            {
+                "operation": "confirm_removed",
+                "pod_uid": pod_uid,
+                "prior_evidence": f"sha256:{'0' * 64}",
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+    removed = _call(
+        service,
+        {
+            "operation": "confirm_removed",
+            "pod_uid": pod_uid,
+            "prior_evidence": empty_response["evidence"],
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    )
+    assert removed["outcome"] == "ok"
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        _call(
+            service,
+            {
+                "operation": "confirm_exit",
+                "pod_uid": pod_uid,
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+
+
+@pytest.mark.unit
+def test_service_rejects_node_substitution_and_caller_chosen_runtime_identity(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, _, _ = _binding(unit, policy)
+    pod = cast(dict[str, object], request["pod"])
+    pod["node_name"] = "node-b"
+    with pytest.raises(KubernetesRuntimeError, match="node binding"):
+        _call(service, request)
+
+    request["operation"] = "confirm_exit"
+    request["pod_uid"] = str(UUID(int=9))
+    request.pop("contract")
+    request.pop("pod")
+    request["sandbox_id"] = "caller-chosen"
+    with pytest.raises(KubernetesRuntimeError, match="request is invalid"):
+        _call(service, request)
+
+
+@pytest.mark.unit
+def test_service_errors_are_content_free(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, inspector, _ = _binding(unit, policy)
+    inspector.fail_operation = "node"
+    with pytest.raises(
+        KubernetesRuntimeError, match="node attestation failed"
+    ) as raised:
+        _call(service, request)
+    assert "private-document-marker" not in str(raised.value)
+    assert raised.value.__cause__ is None
+
+
+@pytest.mark.unit
+def test_transport_configuration_rejects_invalid_values() -> None:
+    factories = (
+        lambda: AttesterTransportLimits(0, 1, 1),
+        lambda: AttesterClientTlsConfig(
+            0, Path("cert"), Path("key"), Path("ca"), EVIDENCE
+        ),
+        lambda: AttesterServerTlsConfig(
+            "", 9443, Path("cert"), Path("key"), Path("ca"), EVIDENCE
+        ),
+        lambda: HttpsNodeAttesterClient(
+            cast(AttesterClientTlsConfig, object()),
+            AttesterTransportLimits(1, 1, 1),
+        ),
+        lambda: NodeAttesterService(
+            cast(NodeAttestationEngine, object()), node_name="node-a"
+        ),
+    )
+    for factory in factories:
+        with pytest.raises(ValueError):
+            factory()
+
+
+@pytest.mark.unit
+def test_service_rejects_changed_sandbox_binding(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, inspector, _ = _binding(unit, policy)
+    _call(service, request)
+    inspector.override_sandbox["sandbox_id"] = "a" * 64
+    with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
+        _call(service, request)
+
+
+@pytest.mark.unit
+def test_service_rejects_malformed_closed_messages(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, _, _ = _binding(unit, policy)
+    malformed_values = (
+        b"not-json",
+        json.dumps({"protocol": "wrong", "version": 1}).encode("ascii"),
+        json.dumps(
+            {
+                "operation": "unknown",
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            }
+        ).encode("ascii"),
+    )
+    for malformed in malformed_values:
+        with pytest.raises(
+            KubernetesRuntimeError, match=r"attester (message|request) is invalid"
+        ):
+            service.handle(malformed)
+
+    request["extra"] = True
+    with pytest.raises(KubernetesRuntimeError, match="request is invalid"):
+        _call(service, request)
+
+
+@pytest.mark.unit
+def test_client_refuses_a_runtime_unit_that_it_did_not_bind() -> None:
+    client = object.__new__(HttpsNodeAttesterClient)
+    client._bound = {}
+    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+        client.confirm_exit(cast(KubernetesRuntimeUnit, object()))
+
+
+@pytest.mark.unit
+def test_wire_decoders_reject_ambiguous_or_unbounded_shapes() -> None:
+    invalid_calls = (
+        lambda: transport._decode(cast(bytes, "not-bytes")),
+        lambda: transport._decode(b"[]"),
+        lambda: transport._encode({"bad": object()}),
+        lambda: transport._closed_mapping({"unexpected": True}, {"expected"}),
+        lambda: transport._integers({"value": True}),
+        lambda: transport._required_text({"value": ""}, "value"),
+        lambda: transport._content_length(None),
+        lambda: transport._content_length("0"),
+    )
+    for call in invalid_calls:
+        with pytest.raises((KubernetesRuntimeError, ValueError)):
+            call()
+
+    class MissingCertificate:
+        @staticmethod
+        def getpeercert(*, binary_form: bool) -> None:
+            assert binary_form is True
+
+    with pytest.raises(KubernetesRuntimeError, match="peer identity"):
+        transport._certificate_digest(MissingCertificate())

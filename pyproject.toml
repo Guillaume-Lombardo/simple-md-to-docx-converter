@@ -60,6 +60,9 @@ reverse-attempt = [
     "pillow>=12,<13",
     "tinycss2>=1.5,<2",
 ]
+kubernetes = [
+    "kubernetes==35.0.0",
+]
 
 [project.scripts]
 markweave = "markweave.cli.main:main"
@@ -76,7 +79,7 @@ Support = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/dis
 build = ["hatchling==1.32.0"]
 dev = [
     "httpx>=0.28,<1",
-    "markweave[all,reverse-attempt]",
+    "markweave[all,kubernetes,reverse-attempt]",
     "mutmut==3.7.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",

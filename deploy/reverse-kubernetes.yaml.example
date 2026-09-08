@@ -33,6 +33,27 @@ stringData:
   tls.crt: "@REQUIRED_BROKER_CLIENT_CERTIFICATE_PEM@"
   tls.key: "@REQUIRED_BROKER_CLIENT_PRIVATE_KEY_PEM@"
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: markweave-reverse-broker-kubernetes, namespace: markweave-reverse}
+immutable: true
+data:
+  kubernetes.json: |
+    {
+      "namespace": "markweave-reverse",
+      "attester_port": 9443,
+      "attester_server_ca_file": "/run/markweave-attester-tls/ca.crt",
+      "attester_client_certificate_file": "/run/markweave-attester-tls/tls.crt",
+      "attester_client_private_key_file": "/run/markweave-attester-tls/tls.key",
+      "expected_attester_server_certificate_sha256": "@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@",
+      "pod_scheduling_timeout_seconds": "@REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@",
+      "pod_exec_timeout_seconds": "@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@",
+      "pod_poll_interval_seconds": "@REQUIRED_POD_POLL_INTERVAL_SECONDS@",
+      "attester_max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
+      "attester_max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
+      "attester_request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@"
+    }
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: {name: markweave-reverse-broker, namespace: markweave-reverse}
@@ -88,7 +109,11 @@ data:
       "client_ca_file": "/run/markweave-tls/ca.crt",
       "server_certificate_file": "/run/markweave-tls/tls.crt",
       "server_private_key_file": "/run/markweave-tls/tls.key",
-      "require_client_certificate": true
+      "require_client_certificate": true,
+      "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
+      "max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
+      "max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
+      "request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@"
     }
 ---
 apiVersion: v1
