@@ -106,6 +106,9 @@ class RuntimeUnit(Protocol):
     @property
     def incarnation(self) -> RuntimeIncarnation: ...
 
+    @property
+    def recovery_binding(self) -> RuntimeRecoveryBinding | None: ...
+
 
 class IsolationRuntime(Protocol):
     """Backend contract requiring positive exit, emptiness and removal evidence."""

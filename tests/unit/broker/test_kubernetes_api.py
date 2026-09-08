@@ -285,10 +285,22 @@ def test_control_plane_fails_closed_at_api_and_channel_bounds() -> None:
         control.create(manifest)
 
     pod = control.create(_manifest())
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match=r"^Reverse-attempt input exceeds its configured limit$"
+    ):
         control.stage_request(
             pod, _request(b"x" * (CONFIG.channel_limits.max_input_bytes + 1))
         )
+    declared_over_adapter_limit = replace(
+        _request(),
+        limits=replace(
+            _request().limits,
+            max_input_bytes=CONFIG.channel_limits.max_input_bytes + 1,
+            max_output_bytes=CONFIG.channel_limits.max_output_bytes + 1,
+        ),
+    )
+    with pytest.raises(KubernetesRuntimeError, match="workspace request is invalid"):
+        control.stage_request(pod, declared_over_adapter_limit)
 
     class UnboundedApi(_Api):
         def list_namespaced_pod(self, namespace: str, **kwargs: object) -> object:
@@ -482,6 +494,61 @@ def test_websocket_upgrade_receives_the_exact_connect_timeout(
         )
 
     assert observed["timeout"] == 0.25
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("capture_all", "binary"), [(True, False), (True, True), (False, False)]
+)
+def test_bounded_websocket_client_tracks_pinned_wsclient_initialization_contract(
+    mocker: MockerFixture, *, capture_all: bool, binary: bool
+) -> None:
+    socket = SimpleNamespace()
+    mocker.patch.object(
+        kubernetes_api_module.ws_client, "create_websocket", return_value=socket
+    )
+    mocker.patch.object(
+        kubernetes_api_module,
+        "_bounded_create_websocket",
+        return_value=socket,
+    )
+    configuration = SimpleNamespace()
+    upstream = kubernetes_api_module.ws_client.WSClient(
+        configuration,
+        "ws://node/exec",
+        None,
+        capture_all,
+        binary=binary,
+    )
+    bounded = kubernetes_api_module._BoundedWsClient(
+        configuration,
+        "ws://node/exec",
+        None,
+        capture_all,
+        binary=binary,
+        timeout_seconds=0.25,
+    )
+    required_attributes = {
+        "_all",
+        "_channels",
+        "_connected",
+        "_returncode",
+        "binary",
+        "newline",
+        "sock",
+    }
+
+    assert set(vars(upstream)) == set(vars(bounded)) == required_attributes
+    assert bounded.is_open() == upstream.is_open() is True
+    assert bounded.binary == upstream.binary == binary
+    assert bounded.newline == upstream.newline
+    assert type(bounded._all) is type(upstream._all)
+    if capture_all:
+        assert bounded.read_all() == upstream.read_all()
+    else:
+        for client in (bounded, upstream):
+            with pytest.raises(TypeError, match="configured to not capture"):
+                client.read_all()
 
 
 @pytest.mark.unit

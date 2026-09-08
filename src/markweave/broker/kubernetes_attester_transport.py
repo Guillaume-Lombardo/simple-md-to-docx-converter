@@ -247,14 +247,22 @@ class NodeAttesterService:
         previous = self._bound.setdefault(pod.pod_uid, unit)
         if previous != unit:
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
-        self._ledger.reserve(
-            AttesterLifecycleRecord(
-                pod.pod_uid,
-                AttesterLifecycleState.BOUND,
-                binding_payload,
-                _encode(_sandbox_mapping(sandbox)),
+        try:
+            self._ledger.reserve(
+                AttesterLifecycleRecord(
+                    pod.pod_uid,
+                    AttesterLifecycleState.BOUND,
+                    binding_payload,
+                    _encode(_sandbox_mapping(sandbox)),
+                )
             )
-        )
+        except Exception:
+            if self._bound.get(pod.pod_uid) == unit:
+                self._bound.pop(pod.pod_uid)
+            self._engine.discard_uncommitted_binding(
+                pod.pod_uid, contract, sandbox.node_uid
+            )
+            raise
         return {"sandbox": _sandbox_mapping(sandbox)}
 
     def _recover_create_intent(
@@ -282,14 +290,22 @@ class NodeAttesterService:
                 "protocol": _PROTOCOL,
                 "version": _VERSION,
             }
-            self._ledger.reserve(
-                AttesterLifecycleRecord(
-                    pod.pod_uid,
-                    AttesterLifecycleState.BOUND,
-                    _encode(bind_request),
-                    _encode(_sandbox_mapping(sandbox)),
+            try:
+                self._ledger.reserve(
+                    AttesterLifecycleRecord(
+                        pod.pod_uid,
+                        AttesterLifecycleState.BOUND,
+                        _encode(bind_request),
+                        _encode(_sandbox_mapping(sandbox)),
+                    )
                 )
-            )
+            except Exception:
+                if self._bound.get(pod.pod_uid) is not None:
+                    self._bound.pop(pod.pod_uid)
+                self._engine.discard_uncommitted_binding(
+                    pod.pod_uid, proposed_contract, sandbox.node_uid
+                )
+                raise
             self._bound[pod.pod_uid] = KubernetesRuntimeUnit(
                 pod.unit_id,
                 RuntimeIncarnation(pod.pod_uid, pod.policy_specification),

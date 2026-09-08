@@ -221,9 +221,7 @@ class IsolationBrokerService:
                         expected_revision=intent.revision,
                         target=ManagedUnitState.CREATED,
                         runtime_incarnation=runtime_unit.incarnation,
-                        runtime_recovery=getattr(
-                            runtime_unit, "recovery_binding", None
-                        ),
+                        runtime_recovery=runtime_unit.recovery_binding,
                     )
                 )
             except BrokerError as error:
@@ -604,7 +602,7 @@ class IsolationBrokerService:
                     expected_revision=unit.revision,
                     target=ManagedUnitState.CREATED,
                     runtime_incarnation=runtime_unit.incarnation,
-                    runtime_recovery=getattr(runtime_unit, "recovery_binding", None),
+                    runtime_recovery=runtime_unit.recovery_binding,
                 )
             )
             self._terminate_and_prove(created, runtime_unit)
@@ -746,7 +744,7 @@ class IsolationBrokerService:
         if (
             require_persisted
             and unit.state is not ManagedUnitState.CREATE_INTENT
-            and getattr(runtime_unit, "recovery_binding", None) != unit.runtime_recovery
+            and runtime_unit.recovery_binding != unit.runtime_recovery
         ):
             self._fail(category)
         if (

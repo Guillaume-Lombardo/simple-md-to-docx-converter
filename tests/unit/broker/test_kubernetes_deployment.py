@@ -83,7 +83,21 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
 
     config = by_kind_name[("ConfigMap", "markweave-node-attester-config")]
     assert config["immutable"] is True
-    json.loads(config["data"]["attester.json"])
+    attester_settings = json.loads(config["data"]["attester.json"])
+    assert {
+        key: type(attester_settings[key])
+        for key in (
+            "max_request_bytes",
+            "max_response_bytes",
+            "request_timeout_seconds",
+            "max_concurrent_requests",
+        )
+    } == {
+        "max_request_bytes": int,
+        "max_response_bytes": int,
+        "request_timeout_seconds": int,
+        "max_concurrent_requests": int,
+    }
     assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
     assert '"require_client_certificate": true' in config["data"]["attester.json"]
     assert (
@@ -99,7 +113,29 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert set(broker_tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
     broker_config = by_kind_name[("ConfigMap", "markweave-reverse-broker-kubernetes")]
     assert broker_config["immutable"] is True
-    json.loads(broker_config["data"]["kubernetes.json"])
+    broker_settings = json.loads(broker_config["data"]["kubernetes.json"])
+    assert {
+        key: type(broker_settings[key])
+        for key in (
+            "pod_scheduling_timeout_seconds",
+            "pod_exec_timeout_seconds",
+            "pod_poll_interval_seconds",
+            "attester_max_request_bytes",
+            "attester_max_response_bytes",
+            "attester_request_timeout_seconds",
+            "attester_readiness_timeout_seconds",
+            "attester_readiness_poll_interval_seconds",
+        )
+    } == {
+        "pod_scheduling_timeout_seconds": int,
+        "pod_exec_timeout_seconds": int,
+        "pod_poll_interval_seconds": float,
+        "attester_max_request_bytes": int,
+        "attester_max_response_bytes": int,
+        "attester_request_timeout_seconds": int,
+        "attester_readiness_timeout_seconds": int,
+        "attester_readiness_poll_interval_seconds": float,
+    }
     assert (
         '"namespace": "markweave-reverse"' in broker_config["data"]["kubernetes.json"]
     )

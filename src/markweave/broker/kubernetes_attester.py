@@ -239,6 +239,21 @@ class NodeAttestationEngine:
 
         return self.bind(pod, contract, _allow_exited=True)
 
+    def discard_uncommitted_binding(
+        self,
+        pod_uid: UUID,
+        contract: KubernetesAttestationContract,
+        node_uid: UUID,
+    ) -> None:
+        """Discard only the exact volatile binding whose ledger write failed."""
+
+        expected = (contract, node_uid)
+        current = self._contracts.get(pod_uid)
+        if current is not None and current != expected:
+            raise KubernetesRuntimeError("Kubernetes sandbox attestation is invalid")
+        if current == expected:
+            self._contracts.pop(pod_uid)
+
     def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
         """Prove all CRI containers exited; a Pod phase or API result is ignored."""
 

@@ -14,6 +14,7 @@ import pytest
 from markweave.broker import kubernetes_attester_transport as transport
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
 from markweave.broker.kubernetes_attester_inventory import (
+    AttesterLifecycleRecord,
     AttesterLifecycleState,
     SQLiteNodeAttesterLedger,
 )
@@ -251,6 +252,33 @@ def test_service_keeps_sandbox_identity_server_side(
     }
     assert _call(service, acknowledgement)["acknowledged"] is True
     assert _call(service, acknowledgement)["acknowledged"] is True
+    assert service._bound == {}
+    assert service._engine._contracts == {}
+
+
+@pytest.mark.unit
+def test_bind_ledger_capacity_failure_discards_volatile_binding(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, bind_request, _, _ = _binding(unit, policy, tmp_path)
+    ledger = SQLiteNodeAttesterLedger(
+        tmp_path / "full-attester.sqlite3", b"b" * 32, max_records=1
+    )
+    occupied_uid = UUID(int=99)
+    ledger.reserve(
+        AttesterLifecycleRecord(
+            occupied_uid,
+            AttesterLifecycleState.BOUND,
+            b"{}",
+            b"{}",
+        )
+    )
+    service._ledger = ledger
+
+    with pytest.raises(KubernetesRuntimeError, match="ledger is full"):
+        _call(service, bind_request)
+
+    assert tuple(record.pod_uid for record in ledger.records()) == (occupied_uid,)
     assert service._bound == {}
     assert service._engine._contracts == {}
 

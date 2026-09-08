@@ -46,14 +46,14 @@ data:
       "attester_client_certificate_file": "/run/markweave-attester-tls/tls.crt",
       "attester_client_private_key_file": "/run/markweave-attester-tls/tls.key",
       "expected_attester_server_certificate_sha256": "@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@",
-      "pod_scheduling_timeout_seconds": "@REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@",
-      "pod_exec_timeout_seconds": "@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@",
-      "pod_poll_interval_seconds": "@REQUIRED_POD_POLL_INTERVAL_SECONDS@",
-      "attester_max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
-      "attester_max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
-      "attester_request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@",
-      "attester_readiness_timeout_seconds": "@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@",
-      "attester_readiness_poll_interval_seconds": "@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@"
+      "pod_scheduling_timeout_seconds": @REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@,
+      "pod_exec_timeout_seconds": @REQUIRED_POD_EXEC_TIMEOUT_SECONDS@,
+      "pod_poll_interval_seconds": @REQUIRED_POD_POLL_INTERVAL_SECONDS@,
+      "attester_max_request_bytes": @REQUIRED_ATTESTER_MAX_REQUEST_BYTES@,
+      "attester_max_response_bytes": @REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@,
+      "attester_request_timeout_seconds": @REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@,
+      "attester_readiness_timeout_seconds": @REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@,
+      "attester_readiness_poll_interval_seconds": @REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@
     }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -113,10 +113,10 @@ data:
       "server_private_key_file": "/run/markweave-tls/tls.key",
       "require_client_certificate": true,
       "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
-      "max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
-      "max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
-      "request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@",
-      "max_concurrent_requests": "@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@"
+      "max_request_bytes": @REQUIRED_ATTESTER_MAX_REQUEST_BYTES@,
+      "max_response_bytes": @REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@,
+      "request_timeout_seconds": @REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@,
+      "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@
     }
 ---
 apiVersion: v1
