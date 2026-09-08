@@ -12,6 +12,7 @@ from uuid import UUID
 
 import pytest
 
+from markweave.broker import inventory as inventory_module
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
@@ -21,6 +22,7 @@ from markweave.broker.models import (
     ManagedUnitState,
     ReplayPosition,
     RuntimeIncarnation,
+    RuntimeRecoveryBinding,
     TerminationProof,
 )
 
@@ -137,6 +139,94 @@ def _assert_category(
     assert captured.value.category is category
 
 
+def _downgrade_to_authenticated_v2(path: Path) -> None:
+    mac = object.__new__(SQLiteBrokerInventory)
+    mac._key = KEY
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.row_factory = sqlite3.Row
+        principal = connection.execute(inventory_module._SELECT_PRINCIPALS).fetchone()
+        unit = connection.execute(inventory_module._SELECT_UNITS).fetchone()
+        assert principal is not None and unit is not None
+        connection.execute("ALTER TABLE units RENAME TO units_v3")
+        connection.execute(inventory_module._LEGACY_CREATE_UNITS)
+        old_unit_values = tuple(
+            unit[column] for column in inventory_module._LEGACY_UNIT_COLUMNS[:-1]
+        )
+        columns = ", ".join(inventory_module._LEGACY_UNIT_COLUMNS)
+        placeholders = ", ".join("?" for _ in inventory_module._LEGACY_UNIT_COLUMNS)
+        connection.execute(
+            f"INSERT INTO units ({columns}) VALUES ({placeholders})",  # noqa: S608
+            (
+                *old_unit_values,
+                mac._mac_for(2, "unit", old_unit_values),
+            ),
+        )
+        connection.execute("DROP TABLE units_v3")
+        principal_values = tuple(principal[:-1])
+        connection.execute(
+            "UPDATE principals SET mac = ? WHERE principal_id = ?",
+            (mac._mac_for(2, "principal", principal_values), principal[0]),
+        )
+        principals = connection.execute(
+            inventory_module._SELECT_PRINCIPALS + " ORDER BY principal_id"
+        ).fetchall()
+        units = connection.execute(
+            inventory_module._LEGACY_SELECT_UNITS + " ORDER BY unit_id"
+        ).fetchall()
+        manifest = connection.execute(inventory_module._SELECT_MANIFEST).fetchone()
+        assert manifest is not None
+        manifest_values = (
+            1,
+            manifest[1] + 1,
+            len(principals),
+            len(units),
+            mac._aggregate_digest("principals", principals),
+            mac._aggregate_digest("units", units),
+            1,
+        )
+        connection.execute(
+            "UPDATE inventory_manifest SET generation=?,principal_count=?,"
+            "unit_count=?,principals_digest=?,units_digest=?,mac_version=?,mac=? "
+            "WHERE singleton_id=1",
+            (*manifest_values[1:], mac._mac_for(2, "manifest", manifest_values)),
+        )
+        connection.execute("PRAGMA user_version = 2")
+
+
+def test_authenticated_v2_inventory_migrates_atomically_and_re_macs(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "inventory.sqlite3"
+    inventory = _inventory(path)
+    inventory.reserve(_reserved(), _replay())
+    _downgrade_to_authenticated_v2(path)
+
+    migrated = _inventory(path)
+
+    assert migrated.get(UNIT_ID) == _reserved()
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        columns = tuple(
+            row[1] for row in connection.execute("PRAGMA table_info(units)")
+        )
+    assert columns == inventory_module._UNIT_COLUMNS
+    _inventory(path)
+
+
+def test_v2_migration_rejects_tamper_before_schema_mutation(tmp_path: Path) -> None:
+    path = tmp_path / "inventory.sqlite3"
+    inventory = _inventory(path)
+    inventory.reserve(_reserved(), _replay())
+    _downgrade_to_authenticated_v2(path)
+    _raw(path, "UPDATE units SET attempt_id = ?", (str(SECOND_ATTEMPT_ID),))
+
+    with pytest.raises(BrokerError) as caught:
+        _inventory(path)
+    _assert_category(caught, BrokerErrorCategory.INVENTORY_FAILURE)
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
 def test_initialization_uses_wal_full_sync_closed_schema_and_never_stores_key(
     tmp_path: Path,
 ) -> None:
@@ -163,6 +253,35 @@ def test_initialization_uses_wal_full_sync_closed_schema_and_never_stores_key(
         )
     assert KEY not in path.read_bytes()
     _inventory(path)
+
+
+def test_runtime_recovery_binding_is_authenticated_and_round_trips(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "inventory.sqlite3"
+    inventory = _inventory(path)
+    reserved = inventory.reserve(_reserved(), _replay())
+    intent = inventory.transition(
+        UNIT_ID,
+        expected_revision=reserved.revision,
+        target=ManagedUnitState.CREATE_INTENT,
+    )
+    binding = RuntimeRecoveryBinding(
+        "kubernetes", 1, b'{"content_free":"runtime-identity"}'
+    )
+    created = inventory.transition(
+        UNIT_ID,
+        expected_revision=intent.revision,
+        target=ManagedUnitState.CREATED,
+        runtime_incarnation=INCARNATION,
+        runtime_recovery=binding,
+    )
+    assert created.runtime_recovery == binding
+    assert _inventory(path).get(UNIT_ID) == created
+    _raw(path, "UPDATE units SET recovery_version = 2")
+    with pytest.raises(BrokerError) as captured:
+        _inventory(path)
+    _assert_category(captured, BrokerErrorCategory.INVENTORY_FAILURE)
 
 
 def test_reservation_is_write_ahead_authenticated_and_lookups_are_scoped(
@@ -459,6 +578,31 @@ def test_acknowledgement_requires_exact_four_way_binding_and_retains_high_water(
     with pytest.raises(BrokerError) as captured:
         inventory.reserve(_reserved(), _replay())
     _assert_category(captured, BrokerErrorCategory.REPLAY_REJECTED)
+
+
+def test_durable_acknowledgement_marker_survives_restart_before_exact_discard(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "inventory.sqlite3"
+    inventory = _inventory(path)
+    _advance_to_empty(inventory)
+    removed = inventory.mark_removed(
+        UNIT_ID, expected_revision=4, removal_evidence=REMOVAL, proof=_proof()
+    )
+
+    marked = inventory.mark_acknowledged(PRINCIPAL_ID, ATTEMPT_ID, UNIT_ID, PROOF_ID)
+
+    assert marked is not None
+    assert marked.proof_acknowledged
+    assert marked.revision == removed.revision + 1
+    reopened = _inventory(path)
+    assert reopened.get(UNIT_ID) == marked
+    assert not reopened.discard_acknowledged(
+        UNIT_ID, expected_revision=removed.revision
+    )
+    assert reopened.discard_acknowledged(UNIT_ID, expected_revision=marked.revision)
+    assert not reopened.discard_acknowledged(UNIT_ID, expected_revision=marked.revision)
+    assert reopened.get(UNIT_ID) is None
 
 
 def test_missing_arbitrary_acknowledgement_is_a_state_free_success(

@@ -18,6 +18,7 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
+    RuntimeRecoveryBinding,
     TerminationProof,
     is_next_unit_state,
     policy_specification_evidence,
@@ -207,7 +208,9 @@ def test_managed_unit_requires_incarnation_exactly_after_runtime_create(
         state,
         0,
         value,
-        *evidence,
+        exit_evidence=evidence[0],
+        empty_evidence=evidence[1],
+        removal_evidence=evidence[2],
     )
     assert (unit.runtime_incarnation is not None) is expected
 
@@ -222,7 +225,9 @@ def test_managed_unit_requires_incarnation_exactly_after_runtime_create(
             state,
             0,
             None if expected else incarnation(),
-            *evidence,
+            exit_evidence=evidence[0],
+            empty_evidence=evidence[1],
+            removal_evidence=evidence[2],
         )
 
 
@@ -264,7 +269,9 @@ def test_managed_unit_requires_exact_state_evidence_prefix(
         state,
         0,
         value,
-        *evidence,
+        exit_evidence=evidence[0],
+        empty_evidence=evidence[1],
+        removal_evidence=evidence[2],
     )
     if required:
         evidence[required - 1] = None
@@ -281,7 +288,9 @@ def test_managed_unit_requires_exact_state_evidence_prefix(
             state,
             0,
             value,
-            *evidence,
+            exit_evidence=evidence[0],
+            empty_evidence=evidence[1],
+            removal_evidence=evidence[2],
         )
 
 
@@ -348,6 +357,26 @@ def test_managed_unit_rejects_identity_and_enum_lookalikes(
 def test_evidence_digest_is_strict_and_content_free(digest: object) -> None:
     with pytest.raises(ValueError, match="evidence digest"):
         EvidenceDigest(cast(Any, digest))
+
+
+def test_runtime_recovery_binding_is_versioned_ascii_and_bounded() -> None:
+    binding = RuntimeRecoveryBinding("kubernetes", 1, b'{"pod_uid":"content-free"}')
+    assert binding.schema_version == 1
+    assert "content-free" not in repr(binding)
+
+    invalid = (
+        ("Kubernetes", 1, b"{}"),
+        ("kubernetes", 0, b"{}"),
+        ("kubernetes", 1, b""),
+        ("kubernetes", 1, "{}"),
+        ("kubernetes", 1, b"\xff"),
+        ("kubernetes", 1, b"x" * (broker_models.MAX_RECOVERY_BINDING_BYTES + 1)),
+    )
+    for backend, version, payload in invalid:
+        with pytest.raises(ValueError, match="recovery binding"):
+            RuntimeRecoveryBinding(
+                cast(Any, backend), cast(Any, version), cast(Any, payload)
+            )
 
 
 def test_termination_proof_binds_all_stable_identities_and_positive_evidence() -> None:

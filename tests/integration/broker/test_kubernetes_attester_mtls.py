@@ -13,6 +13,7 @@ from typing import cast
 import pytest
 
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
+from markweave.broker.kubernetes_attester_inventory import SQLiteNodeAttesterLedger
 from markweave.broker.kubernetes_attester_transport import (
     AttesterClientTlsConfig,
     AttesterHttpsServer,
@@ -196,7 +197,11 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(  # noqa: PLR0915
     limits = AttesterTransportLimits(256 * 1024, 32 * 1024, 5.0, 8)
     readiness = AttesterReadinessPolicy(5.0, 0.01)
     service = NodeAttesterService(
-        NodeAttestationEngine(inspector), node_name="localhost"
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="localhost",
     )
     server = AttesterHttpsServer(
         service,

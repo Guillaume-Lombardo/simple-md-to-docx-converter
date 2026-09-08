@@ -15,6 +15,7 @@ from markweave.broker.models import (
     ManagedUnitState,
     RuntimeChannelLimits,
     RuntimeIncarnation,
+    RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
 from markweave.broker.ports import RuntimeUnit
@@ -41,6 +42,7 @@ class FakeRuntimeUnit:
     attempt_id: UUID
     principal_id: UUID
     incarnation: RuntimeIncarnation
+    recovery_binding: RuntimeRecoveryBinding | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -176,6 +178,22 @@ class FakeIsolationRuntime:
         )
         self._checkpoint("create", "after")
         return runtime_unit
+
+    def recover(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> FakeRuntimeUnit:
+        """Reject recovery material because the fake backend never emits it."""
+
+        del unit, binding
+        raise FakeRuntimeError("Fake runtime recovery binding is invalid")
+
+    def acknowledge_recovery(
+        self, unit: ManagedUnit, binding: RuntimeRecoveryBinding
+    ) -> None:
+        """Reject recovery material because the fake backend never emits it."""
+
+        del unit, binding
+        raise FakeRuntimeError("Fake runtime recovery binding is invalid")
 
     def hard_terminate(self, runtime_unit: RuntimeUnit) -> None:
         """Mark the complete stable unit terminated, idempotently."""

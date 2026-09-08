@@ -307,6 +307,84 @@ class UnexpectedAttester:
         del unit, empty_evidence
         return EVIDENCE
 
+    def recover(
+        self,
+        unit: KubernetesRuntimeUnit,
+        contract: KubernetesAttestationContract,
+        lifecycle_state: ManagedUnitState,
+    ) -> KubernetesSandboxIdentity:
+        del unit, contract, lifecycle_state
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def recover_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        proposed_contract: KubernetesAttestationContract,
+    ) -> tuple[KubernetesSandboxIdentity, KubernetesAttestationContract]:
+        del pod, proposed_contract
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def acknowledge(
+        self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
+    ) -> None:
+        del unit, removal_evidence
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+
+class RecoveredIntentAttester:
+    def __init__(
+        self,
+        engine: NodeAttestationEngine,
+        pod: KubernetesPodIdentity,
+        sandbox: KubernetesSandboxIdentity,
+        contract: KubernetesAttestationContract,
+    ) -> None:
+        self.engine = engine
+        self.pod = pod
+        self.sandbox = sandbox
+        self.contract = contract
+
+    def bind(
+        self, pod: KubernetesPodIdentity, contract: KubernetesAttestationContract
+    ) -> KubernetesSandboxIdentity:
+        return self.engine.bind(pod, contract)
+
+    def recover_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        proposed_contract: KubernetesAttestationContract,
+    ) -> tuple[KubernetesSandboxIdentity, KubernetesAttestationContract]:
+        del proposed_contract
+        if pod != self.pod:
+            raise KubernetesRuntimeError("Kubernetes recovery identity changed")
+        return self.sandbox, self.contract
+
+    def recover(
+        self,
+        unit: KubernetesRuntimeUnit,
+        contract: KubernetesAttestationContract,
+        lifecycle_state: ManagedUnitState,
+    ) -> KubernetesSandboxIdentity:
+        return self.engine.recover(unit, contract, lifecycle_state)
+
+    def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
+        return self.engine.confirm_exit(unit)
+
+    def confirm_empty(
+        self, unit: KubernetesRuntimeUnit, exit_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        return self.engine.confirm_empty(unit, exit_evidence)
+
+    def confirm_removed(
+        self, unit: KubernetesRuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        return self.engine.confirm_removed(unit, empty_evidence)
+
+    def acknowledge(
+        self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
+    ) -> None:
+        self.engine.acknowledge(unit, removal_evidence)
+
 
 def _runtime(
     unit: ManagedUnit,
@@ -854,6 +932,53 @@ def test_removal_needs_empty_cri_cgroup_and_api_evidence(
 
 
 @pytest.mark.unit
+def test_hard_terminate_accepts_only_positive_exit_proof_when_exec_is_already_gone(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    control.fail_operation = "terminate"
+
+    runtime.hard_terminate(runtime_unit)
+
+    assert runtime.confirm_exit(runtime_unit) == runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "lifecycle_state",
+    [ManagedUnitState.CREATED, ManagedUnitState.EXIT_CONFIRMED],
+)
+def test_terminal_recovery_rejects_observed_pod_identity_substitution(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    lifecycle_state: ManagedUnitState,
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = True
+    observed = deepcopy(control.manifest)
+    metadata = cast(dict[str, object], observed["metadata"])
+    metadata["uid"] = str(UUID(int=99))
+    specification = cast(dict[str, object], observed["spec"])
+    specification["nodeName"] = created.pod.node_name
+    inspector.override_sandbox = {"observed_pod": observed}
+
+    with pytest.raises(KubernetesRuntimeError, match="recovery attestation"):
+        NodeAttestationEngine(inspector).recover(created, contract, lifecycle_state)
+
+
+@pytest.mark.unit
 def test_restart_discovery_rebinds_cri_identity(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
@@ -865,6 +990,40 @@ def test_restart_discovery_rebinds_cri_identity(
         config=CONFIG,
         control_plane=control,
         node_attester=NodeAttestationEngine(inspector),
+    )
+
+    assert restarted.discover(limit=1) == (expected,)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("terminal", [False, True])
+def test_create_intent_discovery_recovers_original_contract_across_policy_rollover(
+    unit: ManagedUnit, policy: BrokerPolicy, terminal: bool
+) -> None:
+    first, control, inspector = _runtime(unit, policy)
+    expected = first.create(unit, policy)
+    assert control.manifest is not None
+    pod_contract = pod_contract_projection(control.manifest)
+    contract = KubernetesAttestationContract(
+        pod_contract,
+        manifest_digest(pod_contract),
+        policy,
+        CONFIG.pool_name,
+        CONFIG.node_fence_revision,
+    )
+    control.terminated = terminal
+    rolled = replace(policy, revision="t74-rolled")
+    restarted = KubernetesIsolationRuntime(
+        image_repository="registry.example/markweave-reverse-attempt",
+        policy=rolled,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=RecoveredIntentAttester(
+            NodeAttestationEngine(inspector),
+            expected.pod,
+            expected.sandbox,
+            contract,
+        ),
     )
 
     assert restarted.discover(limit=1) == (expected,)

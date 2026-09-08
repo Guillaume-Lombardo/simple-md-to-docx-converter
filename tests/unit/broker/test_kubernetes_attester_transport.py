@@ -12,6 +12,7 @@ import pytest
 
 from markweave.broker import kubernetes_attester_transport as transport
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
+from markweave.broker.kubernetes_attester_inventory import SQLiteNodeAttesterLedger
 from markweave.broker.kubernetes_attester_transport import (
     AttesterClientTlsConfig,
     AttesterReadinessPolicy,
@@ -73,7 +74,7 @@ def unit(policy: BrokerPolicy) -> ManagedUnit:
 
 
 def _binding(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> tuple[NodeAttesterService, dict[str, object], InspectorDouble, ControlPlaneDouble]:
     runtime, control, inspector = _runtime(unit, policy)
     created = runtime.create(unit, policy)
@@ -132,7 +133,13 @@ def _binding(
         "version": 1,
     }
     return (
-        NodeAttesterService(NodeAttestationEngine(inspector), node_name="node-a"),
+        NodeAttesterService(
+            NodeAttestationEngine(inspector),
+            SQLiteNodeAttesterLedger(
+                tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+            ),
+            node_name="node-a",
+        ),
         request,
         inspector,
         control,
@@ -147,9 +154,9 @@ def _call(
 
 @pytest.mark.unit
 def test_service_keeps_sandbox_identity_server_side(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, bind_request, _, control = _binding(unit, policy)
+    service, bind_request, _, control = _binding(unit, policy, tmp_path)
     response = _call(service, bind_request)
     assert set(response) == {"outcome", "sandbox"}
     sandbox = cast(dict[str, object], response["sandbox"])
@@ -226,9 +233,9 @@ def test_service_keeps_sandbox_identity_server_side(
 
 @pytest.mark.unit
 def test_service_rejects_node_substitution_and_caller_chosen_runtime_identity(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, _, _ = _binding(unit, policy)
+    service, request, _, _ = _binding(unit, policy, tmp_path)
     pod = cast(dict[str, object], request["pod"])
     pod["node_name"] = "node-b"
     with pytest.raises(KubernetesRuntimeError, match="node binding"):
@@ -245,9 +252,9 @@ def test_service_rejects_node_substitution_and_caller_chosen_runtime_identity(
 
 @pytest.mark.unit
 def test_service_errors_are_content_free(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, inspector, _ = _binding(unit, policy)
+    service, request, inspector, _ = _binding(unit, policy, tmp_path)
     inspector.fail_operation = "node"
     with pytest.raises(
         KubernetesRuntimeError, match="node attestation failed"
@@ -274,7 +281,9 @@ def test_transport_configuration_rejects_invalid_values() -> None:
             AttesterReadinessPolicy(1, 1),
         ),
         lambda: NodeAttesterService(
-            cast(NodeAttestationEngine, object()), node_name="node-a"
+            cast(NodeAttestationEngine, object()),
+            cast(SQLiteNodeAttesterLedger, object()),
+            node_name="node-a",
         ),
     )
     for factory in factories:
@@ -284,9 +293,9 @@ def test_transport_configuration_rejects_invalid_values() -> None:
 
 @pytest.mark.unit
 def test_service_rejects_changed_sandbox_binding(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, inspector, _ = _binding(unit, policy)
+    service, request, inspector, _ = _binding(unit, policy, tmp_path)
     _call(service, request)
     inspector.override_sandbox["sandbox_id"] = "a" * 64
     with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
@@ -295,9 +304,9 @@ def test_service_rejects_changed_sandbox_binding(
 
 @pytest.mark.unit
 def test_service_serializes_same_uid_state_transitions(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, _, _ = _binding(unit, policy)
+    service, request, _, _ = _binding(unit, policy, tmp_path)
     with ThreadPoolExecutor(max_workers=2) as executor:
         responses = tuple(executor.map(lambda _: _call(service, request), range(2)))
     assert responses[0] == responses[1]
@@ -305,9 +314,9 @@ def test_service_serializes_same_uid_state_transitions(
 
 @pytest.mark.unit
 def test_service_rejects_malformed_closed_messages(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, _, _ = _binding(unit, policy)
+    service, request, _, _ = _binding(unit, policy, tmp_path)
     malformed_values = (
         b"not-json",
         json.dumps({"protocol": "wrong", "version": 1}).encode("ascii"),
@@ -340,9 +349,9 @@ def test_client_refuses_a_runtime_unit_that_it_did_not_bind() -> None:
 
 @pytest.mark.unit
 def test_service_exposes_only_explicit_not_ready_as_retryable(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
-    service, request, inspector, _ = _binding(unit, policy)
+    service, request, inspector, _ = _binding(unit, policy, tmp_path)
     inspector.fail_operation = "not_ready"
     assert _call(service, request) == {"outcome": "not_ready"}
     inspector.fail_operation = "sandbox"
@@ -352,7 +361,7 @@ def test_service_exposes_only_explicit_not_ready_as_retryable(
 
 @pytest.mark.unit
 def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
-    unit: ManagedUnit, policy: BrokerPolicy
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
     class ClientDouble(HttpsNodeAttesterClient):
         responses: list[dict[str, object]]
@@ -367,7 +376,7 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
     slept: list[float] = []
     client._sleep = slept.append
     client._bound = {}
-    service, request, _, _ = _binding(unit, policy)
+    service, request, _, _ = _binding(unit, policy, tmp_path)
     pod = transport._pod(request["pod"])
     contract = transport._contract(request["contract"])
     good = _call(service, request)
@@ -385,6 +394,164 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
     with pytest.raises(KubernetesRuntimeError, match="response is invalid") as raised:
         client.bind(replace(pod, pod_uid=UUID(int=99)), contract)
     assert raised.value.__cause__ is None
+
+
+@pytest.mark.unit
+def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, request, inspector, control = _binding(unit, policy, tmp_path)
+    bound = _call(service, request)
+    pod_uid = cast(dict[str, object], request["pod"])["pod_uid"]
+
+    service = NodeAttesterService(
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="node-a",
+    )
+    assert _call(service, request) == bound
+    assert _call(
+        service,
+        {
+            "operation": "recover_create_intent",
+            "pod": request["pod"],
+            "proposed_contract": request["contract"],
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    ) == {
+        "contract": request["contract"],
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
+
+    control.terminated = True
+    exit_request = {
+        "operation": "confirm_exit",
+        "pod_uid": pod_uid,
+        "protocol": "markweave-kubernetes-node-attester",
+        "version": 1,
+    }
+    exited = _call(service, exit_request)
+    restarted = NodeAttesterService(
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="node-a",
+    )
+    assert _call(restarted, exit_request) == exited
+    assert (
+        _call(
+            restarted,
+            {
+                "contract": request["contract"],
+                "lifecycle_state": ManagedUnitState.CREATED.value,
+                "operation": "recover",
+                "pod": request["pod"],
+                "protocol": "markweave-kubernetes-node-attester",
+                "sandbox": bound["sandbox"],
+                "version": 1,
+            },
+        )
+        == bound
+    )
+
+    empty_request = {
+        **exit_request,
+        "operation": "confirm_empty",
+        "prior_evidence": exited["evidence"],
+    }
+    empty = _call(restarted, empty_request)
+    restarted = NodeAttesterService(
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="node-a",
+    )
+    assert _call(restarted, empty_request) == empty
+
+    control.present = False
+    removed_request = {
+        **exit_request,
+        "operation": "confirm_removed",
+        "prior_evidence": empty["evidence"],
+    }
+    removed = _call(restarted, removed_request)
+    restarted = NodeAttesterService(
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="node-a",
+    )
+    assert (
+        _call(
+            restarted,
+            {
+                "contract": request["contract"],
+                "lifecycle_state": ManagedUnitState.EMPTY_CONFIRMED.value,
+                "operation": "recover",
+                "pod": request["pod"],
+                "protocol": "markweave-kubernetes-node-attester",
+                "sandbox": bound["sandbox"],
+                "version": 1,
+            },
+        )
+        == bound
+    )
+    assert _call(restarted, removed_request) == removed
+    assert _call(
+        restarted,
+        {
+            "operation": "acknowledge",
+            "pod_uid": pod_uid,
+            "protocol": "markweave-kubernetes-node-attester",
+            "removed_evidence": removed["evidence"],
+            "version": 1,
+        },
+    ) == {"acknowledged": True, "outcome": "ok"}
+    assert (
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ).records()
+        == ()
+    )
+
+
+@pytest.mark.unit
+def test_service_recovers_bound_ledger_after_pod_exited_before_broker_commit(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, request, inspector, control = _binding(unit, policy, tmp_path)
+    bound = _call(service, request)
+    control.terminated = True
+
+    restarted = NodeAttesterService(
+        NodeAttestationEngine(inspector),
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ),
+        node_name="node-a",
+    )
+
+    assert _call(
+        restarted,
+        {
+            "operation": "recover_create_intent",
+            "pod": request["pod"],
+            "proposed_contract": request["contract"],
+            "protocol": "markweave-kubernetes-node-attester",
+            "version": 1,
+        },
+    ) == {
+        "contract": request["contract"],
+        "outcome": "ok",
+        "sandbox": bound["sandbox"],
+    }
 
 
 @pytest.mark.unit

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 from json import dumps
@@ -22,6 +22,8 @@ _FIXED_RUNTIME_CAPABILITIES: tuple[str, ...] = ()
 _FIXED_RUNTIME_NETWORK = "none"
 _FIXED_RUNTIME_RUN_AS = "arbitrary_non_root"
 _FIXED_RUNTIME_WORKSPACE = "/work"
+_RECOVERY_BACKEND_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
+MAX_RECOVERY_BINDING_BYTES = 32_768
 
 
 def _require_uuid(value: object, description: str) -> None:
@@ -213,6 +215,33 @@ class RuntimeIncarnation:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeRecoveryBinding:
+    """Versioned bounded broker-authored runtime recovery material.
+
+    The payload is an authenticated canonical ASCII document produced only by a
+    trusted runtime adapter. It contains runtime identities and policy facts,
+    never attempt input, output, credentials, or user metadata.
+    """
+
+    backend: str
+    schema_version: int
+    payload: bytes = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.backend) is not str
+            or _RECOVERY_BACKEND_PATTERN.fullmatch(self.backend) is None
+            or type(self.schema_version) is not int
+            or self.schema_version <= 0
+            or type(self.payload) is not bytes
+            or not self.payload
+            or len(self.payload) > MAX_RECOVERY_BINDING_BYTES
+            or not self.payload.isascii()
+        ):
+            raise ValueError("Runtime recovery binding is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class ManagedUnit:
     """The complete content-free durable identity of one managed unit."""
 
@@ -228,6 +257,8 @@ class ManagedUnit:
     exit_evidence: EvidenceDigest | None = None
     empty_evidence: EvidenceDigest | None = None
     removal_evidence: EvidenceDigest | None = None
+    runtime_recovery: RuntimeRecoveryBinding | None = None
+    proof_acknowledged: bool = False
 
     def __post_init__(self) -> None:
         _require_uuid(self.attempt_id, "Reverse attempt identity")
@@ -261,6 +292,11 @@ class ManagedUnit:
             and type(self.runtime_incarnation) is not RuntimeIncarnation
         ) or (not requires_incarnation and self.runtime_incarnation is not None):
             raise ValueError("Managed unit runtime incarnation is inconsistent")
+        if self.runtime_recovery is not None and (
+            type(self.runtime_recovery) is not RuntimeRecoveryBinding
+            or not requires_incarnation
+        ):
+            raise ValueError("Managed unit runtime recovery binding is inconsistent")
         if (
             self.runtime_incarnation is not None
             and self.runtime_incarnation.specification != self.policy_specification
@@ -287,6 +323,10 @@ class ManagedUnit:
             for index, value in enumerate(evidence_fields)
         ):
             raise ValueError("Managed unit evidence is inconsistent")
+        if type(self.proof_acknowledged) is not bool or (
+            self.proof_acknowledged and self.state is not ManagedUnitState.REMOVED
+        ):
+            raise ValueError("Managed unit proof acknowledgement is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)

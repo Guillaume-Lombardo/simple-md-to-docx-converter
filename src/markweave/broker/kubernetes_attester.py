@@ -19,7 +19,7 @@ from markweave.broker.kubernetes_runtime import (
     manifest_digest,
     project_observed_pod,
 )
-from markweave.broker.models import EvidenceDigest
+from markweave.broker.models import EvidenceDigest, ManagedUnitState
 
 _DEDICATED_TAINT = "reverse.markweave.dev/dedicated"
 _POOL_LABEL = "reverse.markweave.dev/isolation-pool"
@@ -236,6 +236,113 @@ class NodeAttestationEngine:
                 "sandbox_id": snapshot.sandbox_id,
             },
         )
+
+    def recover(
+        self,
+        unit: KubernetesRuntimeUnit,
+        contract: KubernetesAttestationContract,
+        lifecycle_state: ManagedUnitState,
+    ) -> KubernetesSandboxIdentity:
+        """Re-establish trusted engine state from an authenticated ledger binding."""
+
+        if (
+            type(unit) is not KubernetesRuntimeUnit
+            or type(contract) is not KubernetesAttestationContract
+            or lifecycle_state
+            not in {
+                ManagedUnitState.CREATED,
+                ManagedUnitState.EXIT_CONFIRMED,
+                ManagedUnitState.EMPTY_CONFIRMED,
+            }
+        ):
+            raise KubernetesRuntimeError("Kubernetes recovery attestation is invalid")
+        if lifecycle_state is ManagedUnitState.CREATED:
+            try:
+                rebound = self.bind(unit.pod, contract)
+            except KubernetesRuntimeError:
+                previous = self._contracts.setdefault(
+                    unit.pod.pod_uid, (contract, unit.sandbox.node_uid)
+                )
+                if previous != (contract, unit.sandbox.node_uid):
+                    raise KubernetesRuntimeError(
+                        "Kubernetes recovery attestation is invalid"
+                    ) from None
+                self._revalidate_fence(unit)
+                snapshot = self._sandbox(unit)
+                if (
+                    not _observed_identity_matches(snapshot.observed_pod, unit.pod)
+                    or project_observed_pod(
+                        snapshot.observed_pod, contract.pod_contract
+                    )
+                    != contract.pod_contract
+                    or snapshot.sandbox_ready is not False
+                    or not snapshot.container_states
+                    or any(state != "EXITED" for state in snapshot.container_states)
+                    or snapshot.network_interfaces != ("lo",)
+                    or snapshot.forwarding_enabled is not False
+                    or snapshot.cpu_quota_micros
+                    != contract.policy.limits.cpu_quota_micros
+                    or snapshot.cpu_period_micros
+                    != contract.policy.limits.cpu_period_micros
+                    or snapshot.memory_max_bytes != contract.policy.limits.memory_bytes
+                    or snapshot.pids_max != contract.policy.limits.pid_limit
+                    or snapshot.workspace_filesystem != "tmpfs"
+                    or snapshot.workspace_mount_path != "/work"
+                    or snapshot.workspace_size_bytes
+                    != contract.policy.limits.workspace_bytes
+                    or snapshot.workspace_mount_flags
+                    != ("nodev", "noexec", "nosuid", "rw")
+                ):
+                    raise KubernetesRuntimeError(
+                        "Kubernetes recovery attestation is invalid"
+                    ) from None
+                return unit.sandbox
+            if rebound != unit.sandbox:
+                raise KubernetesRuntimeError(
+                    "Kubernetes recovery attestation is invalid"
+                )
+            return rebound
+        previous = self._contracts.setdefault(
+            unit.pod.pod_uid, (contract, unit.sandbox.node_uid)
+        )
+        if previous != (contract, unit.sandbox.node_uid):
+            raise KubernetesRuntimeError("Kubernetes recovery attestation is invalid")
+        self._revalidate_fence(unit)
+        if lifecycle_state is ManagedUnitState.EXIT_CONFIRMED:
+            snapshot = self._sandbox(unit)
+            if (
+                not _observed_identity_matches(snapshot.observed_pod, unit.pod)
+                or project_observed_pod(snapshot.observed_pod, contract.pod_contract)
+                != contract.pod_contract
+                or snapshot.sandbox_ready is not False
+                or not snapshot.container_states
+                or any(state != "EXITED" for state in snapshot.container_states)
+            ):
+                raise KubernetesRuntimeError(
+                    "Kubernetes recovery attestation is invalid"
+                )
+        return unit.sandbox
+
+    def recover_create_intent(
+        self,
+        pod: KubernetesPodIdentity,
+        proposed_contract: KubernetesAttestationContract,
+    ) -> tuple[KubernetesSandboxIdentity, KubernetesAttestationContract]:
+        """Recover an uncommitted create using the proposed exact contract."""
+
+        return self.bind(pod, proposed_contract), proposed_contract
+
+    def acknowledge(
+        self, unit: KubernetesRuntimeUnit, removal_evidence: EvidenceDigest
+    ) -> None:
+        """Forget engine binding after durable proof acknowledgement."""
+
+        if (
+            type(unit) is not KubernetesRuntimeUnit
+            or type(removal_evidence) is not EvidenceDigest
+        ):
+            raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
+        self._contracts.pop(unit.pod.pod_uid, None)
 
     def confirm_empty(
         self, unit: KubernetesRuntimeUnit, exit_evidence: EvidenceDigest

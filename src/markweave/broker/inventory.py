@@ -20,13 +20,15 @@ from markweave.broker.models import (
     ManagedUnitState,
     ReplayPosition,
     RuntimeIncarnation,
+    RuntimeRecoveryBinding,
     TerminationProof,
     is_next_unit_state,
 )
 from markweave.broker.reconciliation_protocol import ReconciliationTombstone
 
 _APPLICATION_ID = 0x4D574249  # MWBI
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
+_LEGACY_SCHEMA_VERSION = 2
 _MAC_VERSION = 1
 _MINIMUM_HMAC_KEY_BYTES = 32
 _SQLITE_FULL_SYNCHRONOUS = 2
@@ -79,6 +81,10 @@ _UNIT_COLUMNS = (
     "empty_evidence",
     "removal_evidence",
     "proof_id",
+    "recovery_backend",
+    "recovery_version",
+    "recovery_payload",
+    "proof_acknowledged",
     "mac_version",
     "mac",
 )
@@ -111,6 +117,46 @@ _CREATE_PRINCIPALS = (
     ") STRICT"
 )
 _CREATE_UNITS = (
+    "CREATE TABLE units ("
+    "unit_id TEXT PRIMARY KEY NOT NULL,"
+    "attempt_id TEXT UNIQUE NOT NULL,"
+    "principal_id TEXT NOT NULL REFERENCES principals(principal_id),"
+    "create_sequence INTEGER NOT NULL CHECK (create_sequence > 0),"
+    "policy_revision TEXT NOT NULL,"
+    "policy_specification TEXT NOT NULL,"
+    "runtime_name TEXT UNIQUE NOT NULL,"
+    "state TEXT NOT NULL,"
+    "revision INTEGER NOT NULL CHECK (revision >= 0),"
+    "incarnation_id TEXT,"
+    "specification TEXT,"
+    "exit_evidence TEXT,"
+    "empty_evidence TEXT,"
+    "removal_evidence TEXT,"
+    "proof_id TEXT UNIQUE,"
+    "recovery_backend TEXT,"
+    "recovery_version INTEGER,"
+    "recovery_payload BLOB,"
+    "proof_acknowledged INTEGER NOT NULL CHECK (proof_acknowledged IN (0, 1)),"
+    "mac_version INTEGER NOT NULL,"
+    "mac BLOB NOT NULL,"
+    "UNIQUE (principal_id, create_sequence)"
+    ") STRICT"
+)
+_LEGACY_UNIT_COLUMNS = tuple(
+    column
+    for column in _UNIT_COLUMNS
+    if column
+    not in {
+        "recovery_backend",
+        "recovery_version",
+        "recovery_payload",
+        "proof_acknowledged",
+    }
+)
+_LEGACY_SELECT_UNITS = (
+    "SELECT " + ", ".join(_LEGACY_UNIT_COLUMNS) + " FROM units"  # noqa: S608
+)
+_LEGACY_CREATE_UNITS = (
     "CREATE TABLE units ("
     "unit_id TEXT PRIMARY KEY NOT NULL,"
     "attempt_id TEXT UNIQUE NOT NULL,"
@@ -248,6 +294,10 @@ class SQLiteBrokerInventory:
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
+                0,
                 _MAC_VERSION,
             )
             connection.execute(_INSERT_UNIT, (*values, self._mac("unit", values)))
@@ -346,7 +396,7 @@ class SQLiteBrokerInventory:
                 _fail(BrokerErrorCategory.INVENTORY_FULL)
             return tuple(self._unit_from_row(row) for row in rows)
 
-    def transition(
+    def transition(  # noqa: PLR0913 - protocol transition has explicit fenced fields
         self,
         unit_id: UUID,
         *,
@@ -354,6 +404,7 @@ class SQLiteBrokerInventory:
         target: ManagedUnitState,
         evidence: EvidenceDigest | None = None,
         runtime_incarnation: RuntimeIncarnation | None = None,
+        runtime_recovery: RuntimeRecoveryBinding | None = None,
     ) -> ManagedUnit:
         """Commit one legal pre-removal transition with revision fencing."""
 
@@ -375,7 +426,9 @@ class SQLiteBrokerInventory:
                 current.state, target
             ):
                 _fail(BrokerErrorCategory.REPLAY_REJECTED)
-            self._validate_transition_payload(target, evidence, runtime_incarnation)
+            self._validate_transition_payload(
+                target, evidence, runtime_incarnation, runtime_recovery
+            )
             updated = list(row[:-1])
             updated[_UNIT_COLUMNS.index("state")] = target.value
             updated[_UNIT_COLUMNS.index("revision")] = expected_revision + 1
@@ -385,6 +438,16 @@ class SQLiteBrokerInventory:
                 )
                 updated[_UNIT_COLUMNS.index("specification")] = (
                     runtime_incarnation.specification.value
+                )
+            if runtime_recovery is not None:
+                updated[_UNIT_COLUMNS.index("recovery_backend")] = (
+                    runtime_recovery.backend
+                )
+                updated[_UNIT_COLUMNS.index("recovery_version")] = (
+                    runtime_recovery.schema_version
+                )
+                updated[_UNIT_COLUMNS.index("recovery_payload")] = (
+                    runtime_recovery.payload
                 )
             evidence_column = self._evidence_column(target)
             if evidence_column is not None and evidence is not None:
@@ -480,6 +543,62 @@ class SQLiteBrokerInventory:
             self._refresh_manifest(connection)
             return True
 
+    def mark_acknowledged(
+        self,
+        principal_id: UUID,
+        attempt_id: UUID,
+        unit_id: UUID,
+        proof_id: UUID,
+    ) -> ManagedUnit | None:
+        """Durably mark an exact retained proof acknowledged, idempotently."""
+
+        if any(
+            type(value) is not UUID
+            for value in (principal_id, attempt_id, unit_id, proof_id)
+        ):
+            _fail()
+        with self._transaction() as connection:
+            self._verify_all(connection)
+            row = self._select_unit(connection, "unit_id", str(unit_id))
+            if row is None:
+                return None
+            unit = self._unit_from_row(row)
+            if unit.state is not ManagedUnitState.REMOVED:
+                return None
+            proof = self._proof_from_row(row)
+            if (
+                proof.principal.principal_id != principal_id
+                or proof.attempt_id != attempt_id
+                or proof.proof_id != proof_id
+            ):
+                return None
+            if unit.proof_acknowledged:
+                return unit
+            updated = list(row[:-1])
+            updated[_UNIT_COLUMNS.index("revision")] = unit.revision + 1
+            updated[_UNIT_COLUMNS.index("proof_acknowledged")] = 1
+            return self._write_updated_unit(connection, updated, unit_id, unit.revision)
+
+    def discard_acknowledged(self, unit_id: UUID, *, expected_revision: int) -> bool:
+        """Delete only an exact durably acknowledged proof tombstone."""
+
+        if (
+            type(unit_id) is not UUID
+            or type(expected_revision) is not int
+            or expected_revision < 0
+        ):
+            _fail()
+        with self._transaction() as connection:
+            self._verify_all(connection)
+            cursor = connection.execute(
+                "DELETE FROM units WHERE unit_id = ? AND state = ? "
+                "AND proof_acknowledged = 1 AND revision = ?",
+                (str(unit_id), ManagedUnitState.REMOVED.value, expected_revision),
+            )
+            if cursor.rowcount == 1:
+                self._refresh_manifest(connection)
+            return cursor.rowcount == 1
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._path, timeout=10, isolation_level=None)
@@ -533,6 +652,11 @@ class SQLiteBrokerInventory:
             except BaseException:
                 connection.rollback()
                 raise
+        elif (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == _LEGACY_SCHEMA_VERSION
+        ):
+            self._migrate_v2(connection)
         self._verify_schema(connection)
 
     def _verify_schema(self, connection: sqlite3.Connection) -> None:
@@ -550,6 +674,7 @@ class SQLiteBrokerInventory:
             }
         ):
             _inventory_fail()
+
         principal_columns = tuple(
             row[1] for row in connection.execute("PRAGMA table_info(principals)")
         )
@@ -568,8 +693,7 @@ class SQLiteBrokerInventory:
             _inventory_fail()
         schemas = dict(
             connection.execute(
-                "SELECT name, sql FROM sqlite_master "
-                "WHERE type = 'table' "
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
                 "AND name IN ('inventory_manifest', 'principals', 'units')"
             ).fetchall()
         )
@@ -578,6 +702,117 @@ class SQLiteBrokerInventory:
             "principals": _CREATE_PRINCIPALS,
             "units": _CREATE_UNITS,
         }:
+            _inventory_fail()
+
+    def _migrate_v2(self, connection: sqlite3.Connection) -> None:
+        """Authenticate the complete v2 inventory before one atomic v3 rewrite."""
+
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            if (
+                connection.execute("PRAGMA application_id").fetchone()[0]
+                != _APPLICATION_ID
+                or self._table_names(connection)
+                != {"inventory_manifest", "principals", "units"}
+                or tuple(
+                    row[1] for row in connection.execute("PRAGMA table_info(units)")
+                )
+                != _LEGACY_UNIT_COLUMNS
+            ):
+                _inventory_fail()
+            schemas = dict(
+                connection.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
+                    "AND name IN ('inventory_manifest', 'principals', 'units')"
+                ).fetchall()
+            )
+            if schemas != {
+                "inventory_manifest": _CREATE_MANIFEST,
+                "principals": _CREATE_PRINCIPALS,
+                "units": _LEGACY_CREATE_UNITS,
+            }:
+                _inventory_fail()
+            if [row[0] for row in connection.execute("PRAGMA integrity_check")] != [
+                "ok"
+            ] or connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                _inventory_fail()
+            principals = connection.execute(
+                _SELECT_PRINCIPALS + " ORDER BY principal_id"
+            ).fetchall()
+            units = connection.execute(
+                _LEGACY_SELECT_UNITS + " ORDER BY unit_id"
+            ).fetchall()
+            manifests = connection.execute(_SELECT_MANIFEST).fetchall()
+            if (
+                len(principals) > self._max_records
+                or len(units) > self._max_records
+                or len(manifests) != 1
+            ):
+                _inventory_fail()
+            for row in principals:
+                self._verify_legacy_row("principal", row)
+            for row in units:
+                self._verify_legacy_row("unit", row)
+            manifest = manifests[0]
+            self._verify_legacy_row("manifest", manifest)
+            if (
+                manifest[_MANIFEST_COLUMNS.index("principal_count")] != len(principals)
+                or manifest[_MANIFEST_COLUMNS.index("unit_count")] != len(units)
+                or manifest[_MANIFEST_COLUMNS.index("principals_digest")]
+                != self._aggregate_digest("principals", principals)
+                or manifest[_MANIFEST_COLUMNS.index("units_digest")]
+                != self._aggregate_digest("units", units)
+            ):
+                _inventory_fail()
+
+            connection.execute("ALTER TABLE units RENAME TO units_v2")
+            connection.execute(_CREATE_UNITS)
+            for row in units:
+                values = (*tuple(row[:15]), None, None, None, 0, _MAC_VERSION)
+                connection.execute(_INSERT_UNIT, (*values, self._mac("unit", values)))
+            for row in principals:
+                values = tuple(row[:-1])
+                connection.execute(
+                    "UPDATE principals SET mac = ? WHERE principal_id = ?",
+                    (self._mac("principal", values), row[0]),
+                )
+            connection.execute("DROP TABLE units_v2")
+            migrated_principals = connection.execute(
+                _SELECT_PRINCIPALS + " ORDER BY principal_id"
+            ).fetchall()
+            migrated_units = connection.execute(
+                _SELECT_UNITS + " ORDER BY unit_id"
+            ).fetchall()
+            manifest_values = (
+                1,
+                manifest[_MANIFEST_COLUMNS.index("generation")] + 1,
+                len(migrated_principals),
+                len(migrated_units),
+                self._aggregate_digest("principals", migrated_principals),
+                self._aggregate_digest("units", migrated_units),
+                _MAC_VERSION,
+            )
+            connection.execute(
+                "UPDATE inventory_manifest SET generation = ?, principal_count = ?, "
+                "unit_count = ?, principals_digest = ?, units_digest = ?, "
+                "mac_version = ?, mac = ? WHERE singleton_id = 1",
+                (*manifest_values[1:], self._mac("manifest", manifest_values)),
+            )
+            connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
+    def _verify_legacy_row(self, record_type: str, row: Sequence[Any]) -> None:
+        values = tuple(row[:-1])
+        if (
+            row[-2] != _MAC_VERSION
+            or type(row[-1]) is not bytes
+            or not hmac.compare_digest(
+                row[-1], self._mac_for(_LEGACY_SCHEMA_VERSION, record_type, values)
+            )
+        ):
             _inventory_fail()
 
     def _verify_all(self, connection: sqlite3.Connection) -> None:
@@ -648,6 +883,21 @@ class SQLiteBrokerInventory:
                     UUID(incarnation_id), EvidenceDigest(specification)
                 )
             )
+            recovery_backend = row[_UNIT_COLUMNS.index("recovery_backend")]
+            recovery_version = row[_UNIT_COLUMNS.index("recovery_version")]
+            recovery_payload = row[_UNIT_COLUMNS.index("recovery_payload")]
+            recovery = (
+                None
+                if recovery_backend is None
+                and recovery_version is None
+                and recovery_payload is None
+                else RuntimeRecoveryBinding(
+                    recovery_backend, recovery_version, recovery_payload
+                )
+            )
+            acknowledged = row[_UNIT_COLUMNS.index("proof_acknowledged")]
+            if type(acknowledged) is not int or acknowledged not in {0, 1}:
+                _inventory_fail()
             unit = ManagedUnit(
                 attempt_id=UUID(row[_UNIT_COLUMNS.index("attempt_id")]),
                 unit_id=unit_id,
@@ -662,9 +912,11 @@ class SQLiteBrokerInventory:
                 state=ManagedUnitState(row[_UNIT_COLUMNS.index("state")]),
                 revision=row[_UNIT_COLUMNS.index("revision")],
                 runtime_incarnation=incarnation,
+                runtime_recovery=recovery,
                 exit_evidence=self._optional_evidence(row, "exit_evidence"),
                 empty_evidence=self._optional_evidence(row, "empty_evidence"),
                 removal_evidence=self._optional_evidence(row, "removal_evidence"),
+                proof_acknowledged=bool(acknowledged),
             )
             self._validate_proof_shape(row, unit.state)
             return unit
@@ -711,6 +963,7 @@ class SQLiteBrokerInventory:
         target: ManagedUnitState,
         evidence: EvidenceDigest | None,
         runtime_incarnation: RuntimeIncarnation | None,
+        runtime_recovery: RuntimeRecoveryBinding | None,
     ) -> None:
         requires_incarnation = target is ManagedUnitState.CREATED
         requires_evidence = target in {
@@ -718,6 +971,13 @@ class SQLiteBrokerInventory:
             ManagedUnitState.EMPTY_CONFIRMED,
         }
         if requires_incarnation != (type(runtime_incarnation) is RuntimeIncarnation):
+            _fail()
+        if target is not ManagedUnitState.CREATED and runtime_recovery is not None:
+            _fail()
+        if (
+            runtime_recovery is not None
+            and type(runtime_recovery) is not RuntimeRecoveryBinding
+        ):
             _fail()
         if requires_evidence != (type(evidence) is EvidenceDigest):
             _fail()
@@ -871,8 +1131,17 @@ class SQLiteBrokerInventory:
         return None if value is None else EvidenceDigest(value)
 
     def _mac(self, record_type: str, values: Sequence[Any]) -> bytes:
+        return self._mac_for(_SCHEMA_VERSION, record_type, values)
+
+    def _mac_for(
+        self, schema_version: int, record_type: str, values: Sequence[Any]
+    ) -> bytes:
+        serializable = [
+            {"bytes": value.hex()} if type(value) is bytes else value
+            for value in values
+        ]
         canonical = json.dumps(
-            [_SCHEMA_VERSION, _MAC_VERSION, record_type, *values],
+            [schema_version, _MAC_VERSION, record_type, *serializable],
             ensure_ascii=True,
             separators=(",", ":"),
         ).encode("ascii")
