@@ -24,6 +24,7 @@ from markweave.broker.kubernetes_runtime import (
     KubernetesRuntimeUnit,
     KubernetesSandboxIdentity,
     manifest_digest,
+    pod_contract_digest,
     pod_contract_projection,
     project_observed_pod,
 )
@@ -38,7 +39,10 @@ from markweave.broker.models import (
     RuntimeLimits,
     policy_specification_evidence,
 )
+from markweave.broker.ports import RuntimeUnit
+from markweave.reversions.errors import ReverseErrorCategory
 from markweave.reversions.models import (
+    ReverseAttemptFailure,
     ReverseAttemptRequest,
     ReverseAttemptResponse,
     ReverseContentLimits,
@@ -462,6 +466,112 @@ def test_observed_pod_rejects_injected_workload_containers(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("spec",), []),
+        (("spec", "tolerations"), ()),
+        (("spec", "containers"), ()),
+        (("spec", "containers", 0, "command"), ()),
+        (("spec", "containers", 0, "resources", "limits", "cpu"), 1),
+        (("spec", "containers", 0, "resources", "limits", "cpu"), "0m"),
+        (("spec", "containers", 0, "resources", "limits", "memory"), 1),
+        (("spec", "containers", 0, "resources", "limits", "memory"), "0Mi"),
+    ],
+)
+def test_observed_pod_rejects_malformed_security_contract_values(
+    unit: ManagedUnit,
+    policy: BrokerPolicy,
+    path: tuple[str | int, ...],
+    value: object,
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    expected = pod_contract_projection(control.manifest)
+    observed = deepcopy(control.manifest)
+    target: object = observed
+    for segment in path[:-1]:
+        if isinstance(segment, int):
+            assert isinstance(target, list)
+            target = target[segment]
+        else:
+            assert isinstance(target, dict)
+            target = target[segment]
+    final = path[-1]
+    if isinstance(final, int):
+        assert isinstance(target, list)
+        target[final] = value
+    else:
+        assert isinstance(target, dict)
+        target[final] = value
+
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        project_observed_pod(observed, expected)
+
+
+@pytest.mark.unit
+def test_pod_contract_validation_rejects_invalid_top_level_shapes(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    expected = pod_contract_projection(control.manifest)
+    assert pod_contract_digest(control.manifest) == manifest_digest(expected)
+
+    with pytest.raises(KubernetesRuntimeError, match="Pod contract"):
+        pod_contract_projection(cast(Mapping[str, object], []))
+    with pytest.raises(KubernetesRuntimeError, match="Pod contract"):
+        pod_contract_projection(cast(Mapping[str, object], {1: "invalid"}))
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        project_observed_pod(
+            {"spec": {"tolerations": []}},
+            {"spec": cast(object, [])},
+        )
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        project_observed_pod(
+            cast(Mapping[str, object], {1: "invalid", "spec": {"tolerations": []}}),
+            cast(Mapping[str, object], {1: "invalid", "spec": {"tolerations": []}}),
+        )
+
+
+@pytest.mark.unit
+def test_attester_public_proof_operations_validate_inputs_and_inspector_failures(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    inspector.fail_operation = "node"
+    with pytest.raises(KubernetesRuntimeError, match="node attestation failed"):
+        runtime.create(unit, policy)
+
+    inspector.fail_operation = None
+    runtime_unit = runtime.create(unit, policy)
+    engine = NodeAttestationEngine(inspector)
+    with pytest.raises(KubernetesRuntimeError, match="exit evidence"):
+        engine.confirm_empty(runtime_unit, cast(EvidenceDigest, object()))
+    with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
+        engine.confirm_removed(runtime_unit, cast(EvidenceDigest, object()))
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit"):
+        engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
+
+    inspector.fail_operation = "sandbox"
+    with pytest.raises(KubernetesRuntimeError, match="sandbox lookup failed"):
+        engine.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+def test_attester_rejects_invalid_cri_sandbox_identity(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    inspector.override_sandbox = {"sandbox_id": "invalid"}
+
+    with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
+        runtime.create(unit, policy)
+
+
+@pytest.mark.unit
 def test_kubernetes_backend_satisfies_shared_lifecycle(
     unit: ManagedUnit, policy: BrokerPolicy
 ) -> None:
@@ -613,6 +723,13 @@ def test_workspace_delegation_and_identity_checks(
     assert control.staged == request
     assert runtime.try_collect_response(runtime_unit, ATTEMPT_ID) is None
 
+    control.response = ReverseAttemptFailure(
+        UUID(int=98), ReverseErrorCategory.PROTOCOL_ERROR
+    )
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
+        runtime.try_collect_response(runtime_unit, ATTEMPT_ID)
+    control.response = None
+
     unknown = replace(runtime_unit, unit_id=UUID(int=99))
     with pytest.raises(KubernetesRuntimeError, match="unknown"):
         runtime.hard_terminate(unknown)
@@ -620,6 +737,10 @@ def test_workspace_delegation_and_identity_checks(
         runtime.stage_request(runtime_unit, cast(ReverseAttemptRequest, object()))
     with pytest.raises(KubernetesRuntimeError, match="response"):
         runtime.try_collect_response(runtime_unit, cast(UUID, "not-a-uuid"))
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        runtime.hard_terminate(cast(RuntimeUnit, object()))
+    with pytest.raises(KubernetesRuntimeError, match="empty evidence is invalid"):
+        runtime.confirm_removed(runtime_unit, cast(EvidenceDigest, object()))
 
 
 @pytest.mark.unit
