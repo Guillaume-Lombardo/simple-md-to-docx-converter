@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ from markweave.broker import kubernetes_attester_transport as transport
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
 from markweave.broker.kubernetes_attester_transport import (
     AttesterClientTlsConfig,
+    AttesterReadinessPolicy,
     AttesterServerTlsConfig,
     AttesterTransportLimits,
     HttpsNodeAttesterClient,
@@ -207,16 +209,19 @@ def test_service_keeps_sandbox_identity_server_side(
         },
     )
     assert removed["outcome"] == "ok"
-    with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
+    assert (
         _call(
             service,
             {
-                "operation": "confirm_exit",
+                "operation": "confirm_removed",
                 "pod_uid": pod_uid,
+                "prior_evidence": empty_response["evidence"],
                 "protocol": "markweave-kubernetes-node-attester",
                 "version": 1,
             },
         )
+        == removed
+    )
 
 
 @pytest.mark.unit
@@ -255,7 +260,8 @@ def test_service_errors_are_content_free(
 @pytest.mark.unit
 def test_transport_configuration_rejects_invalid_values() -> None:
     factories = (
-        lambda: AttesterTransportLimits(0, 1, 1),
+        lambda: AttesterTransportLimits(0, 1, 1, 1),
+        lambda: AttesterReadinessPolicy(0, 1),
         lambda: AttesterClientTlsConfig(
             0, Path("cert"), Path("key"), Path("ca"), EVIDENCE
         ),
@@ -264,7 +270,8 @@ def test_transport_configuration_rejects_invalid_values() -> None:
         ),
         lambda: HttpsNodeAttesterClient(
             cast(AttesterClientTlsConfig, object()),
-            AttesterTransportLimits(1, 1, 1),
+            AttesterTransportLimits(1, 1, 1, 1),
+            AttesterReadinessPolicy(1, 1),
         ),
         lambda: NodeAttesterService(
             cast(NodeAttestationEngine, object()), node_name="node-a"
@@ -284,6 +291,16 @@ def test_service_rejects_changed_sandbox_binding(
     inspector.override_sandbox["sandbox_id"] = "a" * 64
     with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
         _call(service, request)
+
+
+@pytest.mark.unit
+def test_service_serializes_same_uid_state_transitions(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, _, _ = _binding(unit, policy)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = tuple(executor.map(lambda _: _call(service, request), range(2)))
+    assert responses[0] == responses[1]
 
 
 @pytest.mark.unit
@@ -319,6 +336,55 @@ def test_client_refuses_a_runtime_unit_that_it_did_not_bind() -> None:
     client._bound = {}
     with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
         client.confirm_exit(cast(KubernetesRuntimeUnit, object()))
+
+
+@pytest.mark.unit
+def test_service_exposes_only_explicit_not_ready_as_retryable(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    service, request, inspector, _ = _binding(unit, policy)
+    inspector.fail_operation = "not_ready"
+    assert _call(service, request) == {"outcome": "not_ready"}
+    inspector.fail_operation = "sandbox"
+    with pytest.raises(KubernetesRuntimeError, match="node attestation failed"):
+        _call(service, request)
+
+
+@pytest.mark.unit
+def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    class ClientDouble(HttpsNodeAttesterClient):
+        responses: list[dict[str, object]]
+
+        def _exchange(self, node_name: str, request: object) -> dict[str, object]:
+            del node_name, request
+            return self.responses.pop(0)
+
+    client = object.__new__(ClientDouble)
+    client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._monotonic = iter((0.0, 0.1)).__next__
+    slept: list[float] = []
+    client._sleep = slept.append
+    client._bound = {}
+    service, request, _, _ = _binding(unit, policy)
+    pod = transport._pod(request["pod"])
+    contract = transport._contract(request["contract"])
+    good = _call(service, request)
+    client.responses = [{"outcome": "not_ready"}, good]
+    client.bind(pod, contract)
+    assert slept == [0.1]
+
+    client.responses = [{"outcome": "not_ready"}]
+    client._monotonic = iter((0.0, 1.0)).__next__
+    with pytest.raises(KubernetesRuntimeError, match="readiness timed out"):
+        client.bind(replace(pod, pod_uid=UUID(int=98)), contract)
+
+    client.responses = [{"outcome": "ok", "sandbox": {"sandbox_id": "invalid"}}]
+    client._monotonic = lambda: 0.0
+    with pytest.raises(KubernetesRuntimeError, match="response is invalid") as raised:
+        client.bind(replace(pod, pod_uid=UUID(int=99)), contract)
+    assert raised.value.__cause__ is None
 
 
 @pytest.mark.unit

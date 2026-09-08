@@ -51,7 +51,9 @@ data:
       "pod_poll_interval_seconds": "@REQUIRED_POD_POLL_INTERVAL_SECONDS@",
       "attester_max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
       "attester_max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
-      "attester_request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@"
+      "attester_request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@",
+      "attester_readiness_timeout_seconds": "@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@",
+      "attester_readiness_poll_interval_seconds": "@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@"
     }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -60,7 +62,7 @@ metadata: {name: markweave-reverse-broker, namespace: markweave-reverse}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["create", "delete", "get", "list", "watch"]
+    verbs: ["create", "delete", "get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
@@ -113,7 +115,8 @@ data:
       "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
       "max_request_bytes": "@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@",
       "max_response_bytes": "@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@",
-      "request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@"
+      "request_timeout_seconds": "@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@",
+      "max_concurrent_requests": "@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@"
     }
 ---
 apiVersion: v1
@@ -125,69 +128,3 @@ stringData:
   ca.crt: "@REQUIRED_BROKER_CLIENT_CA_PEM@"
   tls.crt: "@REQUIRED_ATTESTER_CERTIFICATE_PEM@"
   tls.key: "@REQUIRED_ATTESTER_PRIVATE_KEY_PEM@"
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata: {name: markweave-node-attester, namespace: markweave-attestation}
-spec:
-  selector:
-    matchLabels: {app.kubernetes.io/name: markweave-node-attester}
-  template:
-    metadata:
-      labels: {app.kubernetes.io/name: markweave-node-attester}
-    spec:
-      automountServiceAccountToken: false
-      enableServiceLinks: false
-      hostNetwork: false
-      nodeSelector:
-        reverse.markweave.dev/isolation-pool: reverse
-        reverse.markweave.dev/node-fence: "@REQUIRED_NODE_FENCE_REVISION@"
-      serviceAccountName: markweave-node-attester
-      tolerations:
-        - effect: NoSchedule
-          key: reverse.markweave.dev/dedicated
-          operator: Equal
-          value: reverse
-      containers:
-        - name: attester
-          image: "@REQUIRED_ATTESTER_IMAGE_REPOSITORY@@@REQUIRED_ATTESTER_IMAGE_DIGEST@"
-          imagePullPolicy: IfNotPresent
-          args: ["node-attester", "--config", "/etc/markweave/attester.json"]
-          env:
-            - name: MARKWEAVE_ATTESTER_NODE_NAME
-              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
-          ports:
-            - name: mtls-attester
-              containerPort: 9443
-              hostPort: 9443
-              protocol: TCP
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities: {drop: ["ALL"]}
-            privileged: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: false
-            runAsUser: 0
-            seccompProfile: {type: RuntimeDefault}
-          volumeMounts:
-            - {name: cri, mountPath: /run/containerd/containerd.sock}
-            - {name: cgroup, mountPath: /sys/fs/cgroup, readOnly: true}
-            - {name: config, mountPath: /etc/markweave, readOnly: true}
-            - {name: tls, mountPath: /run/markweave-tls, readOnly: true}
-      volumes:
-        - name: cri
-          hostPath: {path: /run/containerd/containerd.sock, type: Socket}
-        - name: cgroup
-          hostPath: {path: /sys/fs/cgroup, type: Directory}
-        - name: config
-          configMap: {name: markweave-node-attester-config, defaultMode: 256}
-        - name: tls
-          secret: {secretName: markweave-node-attester-tls, defaultMode: 256}
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata: {name: markweave-node-attester, namespace: markweave-attestation}
-spec:
-  maxUnavailable: 0
-  selector:
-    matchLabels: {app.kubernetes.io/name: markweave-node-attester}

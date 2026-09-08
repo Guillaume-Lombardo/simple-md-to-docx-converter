@@ -6,16 +6,20 @@ import hashlib
 import http.client
 import json
 import ssl
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from socketserver import ThreadingMixIn
+from threading import BoundedSemaphore, RLock
 from typing import Any, cast
 from uuid import UUID
 
 from markweave.broker.kubernetes_attester import NodeAttestationEngine
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationContract,
+    KubernetesAttestationNotReady,
     KubernetesNodeAttester,
     KubernetesPodIdentity,
     KubernetesRuntimeError,
@@ -51,6 +55,7 @@ class AttesterTransportLimits:
     max_request_bytes: int
     max_response_bytes: int
     timeout_seconds: float
+    max_concurrent_requests: int
 
     def __post_init__(self) -> None:
         if (
@@ -60,8 +65,28 @@ class AttesterTransportLimits:
             or self.max_response_bytes <= 0
             or type(self.timeout_seconds) not in {int, float}
             or self.timeout_seconds <= 0
+            or type(self.max_concurrent_requests) is not int
+            or self.max_concurrent_requests <= 0
         ):
             raise ValueError("Kubernetes attester transport limits are invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class AttesterReadinessPolicy:
+    """Bound retries of the one explicit sandbox-not-yet-observable outcome."""
+
+    timeout_seconds: float
+    poll_interval_seconds: float
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.timeout_seconds) not in {int, float}
+            or self.timeout_seconds <= 0
+            or type(self.poll_interval_seconds) not in {int, float}
+            or self.poll_interval_seconds <= 0
+            or self.poll_interval_seconds > self.timeout_seconds
+        ):
+            raise ValueError("Kubernetes attester readiness policy is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,10 +162,16 @@ class NodeAttesterService:
         self._bound: dict[UUID, KubernetesRuntimeUnit] = {}
         self._exit_evidence: dict[UUID, EvidenceDigest] = {}
         self._empty_evidence: dict[UUID, EvidenceDigest] = {}
+        self._removed_evidence: dict[UUID, tuple[EvidenceDigest, EvidenceDigest]] = {}
+        self._state_lock = RLock()
 
     def handle(self, payload: bytes) -> bytes:
         """Validate one content-free request and return a canonical response."""
 
+        with self._state_lock:
+            return self._handle_locked(payload)
+
+    def _handle_locked(self, payload: bytes) -> bytes:
         try:
             request = _decode(payload)
             if (
@@ -156,6 +187,8 @@ class NodeAttesterService:
             else:
                 raise ValueError
             return _encode({"outcome": "ok", **response})
+        except KubernetesAttestationNotReady:
+            return _encode({"outcome": "not_ready"})
         except KubernetesRuntimeError:
             raise
         except Exception:
@@ -182,7 +215,7 @@ class NodeAttesterService:
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
         return {"sandbox": _sandbox_mapping(sandbox)}
 
-    def _proof(
+    def _proof(  # noqa: PLR0912
         self, operation: str, request: Mapping[str, object]
     ) -> dict[str, object]:
         expected = {"operation", "pod_uid", "protocol", "version"}
@@ -191,25 +224,40 @@ class NodeAttesterService:
         if set(request) != expected:
             raise ValueError
         pod_uid = UUID(_required_text(request, "pod_uid"))
+        prior = (
+            None
+            if operation == "confirm_exit"
+            else EvidenceDigest(_required_text(request, "prior_evidence"))
+        )
+        removed = self._removed_evidence.get(pod_uid)
+        if operation == "confirm_removed" and removed is not None:
+            if removed[0] != prior:
+                raise KubernetesRuntimeError(
+                    "Kubernetes attester empty evidence is invalid"
+                )
+            return {"evidence": removed[1].value}
         unit = self._bound.get(pod_uid)
         if unit is None:
             raise KubernetesRuntimeError("Kubernetes attester binding is unknown")
         if operation == "confirm_exit":
             evidence = self._engine.confirm_exit(unit)
         elif operation == "confirm_empty":
-            prior = EvidenceDigest(_required_text(request, "prior_evidence"))
+            if prior is None:
+                raise ValueError
             if self._exit_evidence.get(pod_uid) != prior:
                 raise KubernetesRuntimeError(
                     "Kubernetes attester exit evidence is invalid"
                 )
             evidence = self._engine.confirm_empty(unit, prior)
         else:
-            prior = EvidenceDigest(_required_text(request, "prior_evidence"))
+            if prior is None:
+                raise ValueError
             if self._empty_evidence.get(pod_uid) != prior:
                 raise KubernetesRuntimeError(
                     "Kubernetes attester empty evidence is invalid"
                 )
             evidence = self._engine.confirm_removed(unit, prior)
+            self._removed_evidence[pod_uid] = (prior, evidence)
             self._bound.pop(pod_uid, None)
             self._exit_evidence.pop(pod_uid, None)
             self._empty_evidence.pop(pod_uid, None)
@@ -232,15 +280,25 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
     """Route each request only to the node named by the scheduled Pod."""
 
     def __init__(
-        self, tls: AttesterClientTlsConfig, limits: AttesterTransportLimits
+        self,
+        tls: AttesterClientTlsConfig,
+        limits: AttesterTransportLimits,
+        readiness: AttesterReadinessPolicy,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if (
             type(tls) is not AttesterClientTlsConfig
             or type(limits) is not AttesterTransportLimits
+            or type(readiness) is not AttesterReadinessPolicy
         ):
             raise ValueError("Kubernetes attester client is invalid")
         self._tls = tls
         self._limits = limits
+        self._readiness = readiness
+        self._monotonic = monotonic
+        self._sleep = sleep
         self._context = _client_context(tls)
         self._bound: dict[UUID, KubernetesRuntimeUnit] = {}
 
@@ -254,10 +312,23 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
             "protocol": _PROTOCOL,
             "version": _VERSION,
         }
-        response = self._exchange(pod.node_name, request)
+        deadline = self._monotonic() + self._readiness.timeout_seconds
+        while True:
+            response = self._exchange(pod.node_name, request)
+            if response != {"outcome": "not_ready"}:
+                break
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                raise KubernetesRuntimeError("Kubernetes sandbox readiness timed out")
+            self._sleep(min(self._readiness.poll_interval_seconds, remaining))
         if set(response) != {"outcome", "sandbox"} or response["outcome"] != "ok":
             raise KubernetesRuntimeError("Kubernetes attester response is invalid")
-        sandbox = _sandbox(response["sandbox"])
+        try:
+            sandbox = _sandbox(response["sandbox"])
+        except KubernetesRuntimeError, TypeError, ValueError:
+            raise KubernetesRuntimeError(
+                "Kubernetes attester response is invalid"
+            ) from None
         unit = KubernetesRuntimeUnit(
             pod.unit_id,
             RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
@@ -280,9 +351,7 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
     def confirm_removed(
         self, unit: KubernetesRuntimeUnit, empty_evidence: EvidenceDigest
     ) -> EvidenceDigest:
-        evidence = self._proof("confirm_removed", unit, empty_evidence)
-        self._bound.pop(unit.pod.pod_uid, None)
-        return evidence
+        return self._proof("confirm_removed", unit, empty_evidence)
 
     def _proof(
         self,
@@ -383,9 +452,10 @@ class AttesterHttpsServer:
             or type(limits) is not AttesterTransportLimits
         ):
             raise ValueError("Kubernetes attester server is invalid")
-        server = _AttesterHttpServer((tls.listen_host, tls.port), service, tls, limits)
         context = _server_context(tls)
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server = _AttesterHttpServer(
+            (tls.listen_host, tls.port), service, tls, limits, context
+        )
         self._server = server
 
     @property
@@ -401,8 +471,10 @@ class AttesterHttpsServer:
         self._server.server_close()
 
 
-class _AttesterHttpServer(HTTPServer):
+class _AttesterHttpServer(ThreadingMixIn, HTTPServer):
     allow_reuse_address = False
+    daemon_threads = True
+    block_on_close = True
 
     def __init__(
         self,
@@ -410,11 +482,40 @@ class _AttesterHttpServer(HTTPServer):
         service: NodeAttesterService,
         tls: AttesterServerTlsConfig,
         limits: AttesterTransportLimits,
+        context: ssl.SSLContext,
     ) -> None:
         self.attester_service = service
         self.tls_config = tls
         self.attester_limits = limits
+        self.tls_context = context
+        self.request_queue_size = limits.max_concurrent_requests
+        self._admission = BoundedSemaphore(limits.max_concurrent_requests)
         super().__init__(address, _AttesterHandler)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._admission.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._admission.release()
+            raise
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        del request, client_address
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        connection = None
+        try:
+            request.settimeout(self.attester_limits.timeout_seconds)
+            connection = self.tls_context.wrap_socket(request, server_side=True)
+            self.finish_request(connection, client_address)
+        except Exception:
+            self.handle_error(connection or request, client_address)
+        finally:
+            self.shutdown_request(connection or request)
+            self._admission.release()
 
 
 class _AttesterHandler(BaseHTTPRequestHandler):

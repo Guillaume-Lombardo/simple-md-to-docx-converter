@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from markweave.broker.kubernetes_attester import (
 )
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationContract,
+    KubernetesAttestationNotReady,
     KubernetesIsolationRuntime,
     KubernetesPodIdentity,
     KubernetesRuntimeConfig,
@@ -224,6 +226,8 @@ class InspectorDouble:
         return NodeFenceSnapshot(**values)
 
     def sandbox(self, pod_uid: UUID) -> SandboxSnapshot:
+        if self.fail_operation == "not_ready":
+            raise KubernetesAttestationNotReady("Kubernetes sandbox is not ready")
         if self.fail_operation == "sandbox":
             raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         running = not self.control.terminated
@@ -678,8 +682,8 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
         engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
 
     inspector.fail_operation = "sandbox"
-    with pytest.raises(KubernetesRuntimeError, match="sandbox lookup failed"):
-        engine.confirm_exit(runtime_unit)
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
 
 
 @pytest.mark.unit
@@ -691,6 +695,41 @@ def test_attester_rejects_invalid_cri_sandbox_identity(
 
     with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
         runtime.create(unit, policy)
+
+
+@pytest.mark.unit
+def test_stage_and_proofs_revalidate_the_bound_node_fence(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    inspector.override_node = {"node_uid": UUID(int=98)}
+    with pytest.raises(KubernetesRuntimeError, match="pre-staging attestation"):
+        runtime.stage_request(runtime_unit, _request())
+    with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
+        runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+def test_stored_identity_can_recover_only_an_exact_known_runtime_unit(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, _, _ = _runtime(unit, policy)
+    created = runtime.create(unit, policy)
+    stored = SimpleNamespace(
+        unit_id=created.unit_id,
+        attempt_id=created.attempt_id,
+        principal_id=created.principal_id,
+        incarnation=created.incarnation,
+    )
+    runtime.hard_terminate(cast(RuntimeUnit, stored))
+    with pytest.raises(KubernetesRuntimeError, match="runtime unit is invalid"):
+        runtime.hard_terminate(
+            cast(
+                RuntimeUnit,
+                SimpleNamespace(**{**vars(stored), "principal_id": UUID(int=1)}),
+            )
+        )
 
 
 @pytest.mark.unit

@@ -47,6 +47,7 @@ _MAX_API_OBJECT_BYTES = 256 * 1024
 _MAX_EXEC_ERROR_BYTES = 4096
 _NOT_FOUND = 404
 _STAGE_SCRIPT = """import base64,json,os,sys
+if os.environ.get('MARKWEAVE_POD_UID')!=sys.argv[1]: raise SystemExit(3)
 p=json.loads(sys.stdin.buffer.read())
 if set(p)!={'request','source','state','commit'}: raise SystemExit(2)
 for n,k in (('request.json','request'),('source.bin','source'),('response.state','state'),('request.commit','commit')):
@@ -63,12 +64,17 @@ for n,k in (('request.json','request'),('source.bin','source'),('response.state'
  os.replace(q,'/work/'+n)
 """
 _READ_SCRIPT = """import base64,pathlib,sys
-n=sys.argv[1]; m=int(sys.argv[2]); p=pathlib.Path('/work')/n
+import os
+if os.environ.get('MARKWEAVE_POD_UID')!=sys.argv[1]: raise SystemExit(3)
+n=sys.argv[2]; m=int(sys.argv[3]); p=pathlib.Path('/work')/n
 d=p.read_bytes()
 if len(d)>m: raise SystemExit(2)
 sys.stdout.write(base64.b64encode(d).decode('ascii'))
 """
-_KILL_SCRIPT = "import os,signal; os.kill(1,signal.SIGKILL)"
+_KILL_SCRIPT = """import os,signal,sys
+if os.environ.get('MARKWEAVE_POD_UID')!=sys.argv[1]: raise SystemExit(3)
+os.kill(1,signal.SIGKILL)
+"""
 
 
 class CoreV1ApiPort(Protocol):
@@ -240,7 +246,7 @@ class KubernetesApiControlPlane:
             separators=(",", ":"),
             sort_keys=True,
         )
-        self._exec(pod, ("python", "-c", _STAGE_SCRIPT), payload)
+        self._exec(pod, ("python", "-c", _STAGE_SCRIPT, str(pod.pod_uid)), payload)
 
     def try_collect_response(
         self, pod: KubernetesPodIdentity, expected_attempt_id: UUID
@@ -276,7 +282,7 @@ class KubernetesApiControlPlane:
         # The connection commonly closes when PID 1 dies.  CRI evidence, not the
         # exec acknowledgement, proves the subsequent exit.
         with suppress(KubernetesRuntimeError):
-            self._exec(pod, ("python", "-c", _KILL_SCRIPT), "")
+            self._exec(pod, ("python", "-c", _KILL_SCRIPT, str(pod.pod_uid)), "")
 
     def delete(self, pod: KubernetesPodIdentity) -> None:
         if not self._current_or_absent(pod):
@@ -299,6 +305,11 @@ class KubernetesApiControlPlane:
             raise KubernetesRuntimeError("Kubernetes Pod deletion failed") from None
         except Exception:
             raise KubernetesRuntimeError("Kubernetes Pod deletion failed") from None
+        deadline = self._monotonic() + self._config.scheduling_timeout_seconds
+        while not self.absent(pod):
+            if self._monotonic() >= deadline:
+                raise KubernetesRuntimeError("Kubernetes Pod deletion timed out")
+            self._sleep(self._config.poll_interval_seconds)
 
     def absent(self, pod: KubernetesPodIdentity) -> bool:
         try:
@@ -339,7 +350,15 @@ class KubernetesApiControlPlane:
                 _request_timeout=self._config.scheduling_timeout_seconds,
             )
             items = getattr(result, "items", None)
-            if type(items) is not list or len(items) > limit:
+            metadata = getattr(result, "metadata", None)
+            continuation = getattr(metadata, "_continue", None)
+            remaining = getattr(metadata, "remaining_item_count", None)
+            if (
+                type(items) is not list
+                or len(items) > limit
+                or continuation not in {None, ""}
+                or remaining not in {None, 0}
+            ):
                 raise KubernetesRuntimeError("Kubernetes discovery exceeds its limit")
             return tuple(self._identity(item) for item in items)
         except KubernetesRuntimeError:
@@ -424,7 +443,7 @@ class KubernetesApiControlPlane:
             raise KubernetesRuntimeError("Kubernetes workspace path is invalid")
         encoded = self._exec(
             pod,
-            ("python", "-c", _READ_SCRIPT, leaf, str(maximum)),
+            ("python", "-c", _READ_SCRIPT, str(pod.pod_uid), leaf, str(maximum)),
             "",
             max_stdout=((maximum + 2) // 3) * 4,
         )
@@ -447,6 +466,7 @@ class KubernetesApiControlPlane:
         max_stdout: int = MAX_METADATA_BYTES * 2,
     ) -> str:
         session: ExecSession | None = None
+        deadline = self._monotonic() + self._config.exec_timeout_seconds
         try:
             session = self._exec_factory(
                 self._api.connect_get_namespaced_pod_exec,
@@ -459,11 +479,14 @@ class KubernetesApiControlPlane:
                 stdout=True,
                 tty=False,
                 _preload_content=False,
+                _request_timeout=self._config.exec_timeout_seconds,
             )
+            # The fixed helper is now blocked on stdin. Re-read the API identity
+            # before releasing any data or lifecycle action into that channel.
+            self._require_current(pod)
             if stdin:
                 session.write_stdin(stdin)
             session.close_stdin()
-            deadline = self._monotonic() + self._config.exec_timeout_seconds
             stdout: list[str] = []
             stdout_bytes = 0
             stderr_bytes = 0

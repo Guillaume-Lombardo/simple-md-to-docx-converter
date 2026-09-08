@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -21,6 +22,9 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@", "262144")
         .replace("@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@", "65536")
         .replace("@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@", "5")
+        .replace("@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@", "8")
+        .replace("@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@", "30")
+        .replace("@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@", "0.1")
         .replace("@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@", f"sha256:{'3' * 64}")
         .replace("@REQUIRED_POD_SCHEDULING_TIMEOUT_SECONDS@", "30")
         .replace("@REQUIRED_POD_EXEC_TIMEOUT_SECONDS@", "10")
@@ -66,43 +70,20 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert {
         (tuple(rule["resources"]), tuple(sorted(rule["verbs"]))) for rule in rules
     } == {
-        (("pods",), ("create", "delete", "get", "list", "watch")),
+        (("pods",), ("create", "delete", "get", "list")),
         (("pods/exec",), ("create",)),
     }
     assert not any(item["kind"] == "ClusterRole" for item in resources)
     assert not any(item["kind"] == "ClusterRoleBinding" for item in resources)
     assert not any(item["kind"] == "Service" for item in resources)
 
-    daemon = by_kind_name[("DaemonSet", "markweave-node-attester")]
-    assert daemon["metadata"]["namespace"] == "markweave-attestation"
-    specification = daemon["spec"]["template"]["spec"]
-    assert specification["automountServiceAccountToken"] is False
-    assert specification["nodeSelector"] == {
-        "reverse.markweave.dev/isolation-pool": "reverse",
-        "reverse.markweave.dev/node-fence": "fence-v1",
-    }
-    mounts = {volume["name"]: volume for volume in specification["volumes"]}
-    assert mounts["cri"]["hostPath"]["type"] == "Socket"
-    assert mounts["cgroup"]["hostPath"]["path"] == "/sys/fs/cgroup"
-    assert mounts["config"]["configMap"]["name"] == ("markweave-node-attester-config")
-    container = specification["containers"][0]
-    assert container["ports"] == [
-        {
-            "name": "mtls-attester",
-            "containerPort": 9443,
-            "hostPort": 9443,
-            "protocol": "TCP",
-        }
-    ]
-    assert container["env"] == [
-        {
-            "name": "MARKWEAVE_ATTESTER_NODE_NAME",
-            "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}},
-        }
-    ]
+    assert not any(
+        item["kind"] in {"DaemonSet", "PodDisruptionBudget"} for item in resources
+    )
 
     config = by_kind_name[("ConfigMap", "markweave-node-attester-config")]
     assert config["immutable"] is True
+    json.loads(config["data"]["attester.json"])
     assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
     assert '"require_client_certificate": true' in config["data"]["attester.json"]
     assert (
@@ -118,6 +99,7 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     assert set(broker_tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
     broker_config = by_kind_name[("ConfigMap", "markweave-reverse-broker-kubernetes")]
     assert broker_config["immutable"] is True
+    json.loads(broker_config["data"]["kubernetes.json"])
     assert (
         '"namespace": "markweave-reverse"' in broker_config["data"]["kubernetes.json"]
     )

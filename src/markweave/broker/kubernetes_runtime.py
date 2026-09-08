@@ -51,6 +51,10 @@ class KubernetesRuntimeError(RuntimeError):
     """Content-free Kubernetes isolation failure."""
 
 
+class KubernetesAttestationNotReady(KubernetesRuntimeError):
+    """Trusted inspector reports that a sandbox is not observable yet."""
+
+
 @dataclass(frozen=True, slots=True)
 class KubernetesPodIdentity:
     """Exact Kubernetes Pod incarnation returned by the control plane."""
@@ -355,6 +359,26 @@ class KubernetesIsolationRuntime:
         verified = self._coerce(runtime_unit)
         if type(request) is not ReverseAttemptRequest:
             raise KubernetesRuntimeError("Kubernetes workspace request is invalid")
+        managed = ManagedUnit(
+            verified.pod.attempt_id,
+            verified.unit_id,
+            AuthenticatedPrincipal(verified.pod.principal_id),
+            1,
+            verified.pod.policy_revision,
+            verified.pod.policy_specification,
+            ManagedUnitState.CREATE_INTENT,
+            1,
+        )
+        manifest = self._manifest(managed, self._policy)
+        rebound = _external_call(
+            lambda: self._attester.bind(
+                verified.pod,
+                self._attestation(pod_contract_projection(manifest), self._policy),
+            ),
+            "Kubernetes pre-staging attestation failed",
+        )
+        if rebound != verified.sandbox:
+            raise KubernetesRuntimeError("Kubernetes pre-staging attestation failed")
         _external_call(
             lambda: self._control.stage_request(verified.pod, request),
             "Kubernetes workspace staging failed",
@@ -485,11 +509,24 @@ class KubernetesIsolationRuntime:
         return tuple(sorted(discovered, key=lambda item: str(item.unit_id)))
 
     def _coerce(self, value: RuntimeUnit) -> KubernetesRuntimeUnit:
-        if type(value) is not KubernetesRuntimeUnit:
-            raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
-        if self._known.get(value.unit_id) != value:
+        if type(value) is KubernetesRuntimeUnit:
+            candidate = value
+        else:
+            try:
+                candidate = self._known[value.unit_id]
+                if (
+                    value.attempt_id != candidate.attempt_id
+                    or value.principal_id != candidate.principal_id
+                    or value.incarnation != candidate.incarnation
+                ):
+                    raise ValueError
+            except AttributeError, KeyError, ValueError:
+                raise KubernetesRuntimeError(
+                    "Kubernetes runtime unit is invalid"
+                ) from None
+        if self._known.get(candidate.unit_id) != candidate:
             raise KubernetesRuntimeError("Kubernetes runtime unit is unknown")
-        return value
+        return candidate
 
     def _verify_pod_identity(
         self, unit: ManagedUnit, pod: KubernetesPodIdentity
@@ -545,6 +582,12 @@ class KubernetesIsolationRuntime:
                         "command": list(_FIXED_ENTRYPOINT),
                         "args": [],
                         "env": [
+                            {
+                                "name": "MARKWEAVE_POD_UID",
+                                "valueFrom": {
+                                    "fieldRef": {"fieldPath": "metadata.uid"}
+                                },
+                            },
                             {
                                 "name": "MARKWEAVE_REVERSE_MAX_INPUT_BYTES",
                                 "value": str(policy.channel_limits.max_input_bytes),

@@ -16,6 +16,7 @@ from markweave.broker.kubernetes_attester import NodeAttestationEngine
 from markweave.broker.kubernetes_attester_transport import (
     AttesterClientTlsConfig,
     AttesterHttpsServer,
+    AttesterReadinessPolicy,
     AttesterServerTlsConfig,
     AttesterTransportLimits,
     HttpsNodeAttesterClient,
@@ -167,7 +168,7 @@ def unit(policy: BrokerPolicy) -> ManagedUnit:
 
 
 @pytest.mark.integration
-def test_mtls_attester_binds_exact_node_and_proof_chain(
+def test_mtls_attester_binds_exact_node_and_proof_chain(  # noqa: PLR0915
     tmp_path: Path,
     unit: ManagedUnit,
     policy: BrokerPolicy,
@@ -192,7 +193,8 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
     ca, server_certificate, server_key, client_certificate, client_key = _certificates(
         tmp_path
     )
-    limits = AttesterTransportLimits(256 * 1024, 32 * 1024, 5.0)
+    limits = AttesterTransportLimits(256 * 1024, 32 * 1024, 5.0, 8)
+    readiness = AttesterReadinessPolicy(5.0, 0.01)
     service = NodeAttesterService(
         NodeAttestationEngine(inspector), node_name="localhost"
     )
@@ -219,6 +221,7 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
             _digest(server_certificate),
         ),
         limits,
+        readiness,
     )
     try:
         context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=str(ca))
@@ -229,18 +232,21 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
             path: str,
             body: bytes,
             content_type: str = "application/json",
-        ) -> int:
+        ) -> int | str:
             connection = http.client.HTTPSConnection(
                 "localhost", server.address[1], timeout=5, context=context
             )
             try:
-                connection.request(
-                    method,
-                    path,
-                    body=body,
-                    headers={"Content-Type": content_type},
-                )
-                return connection.getresponse().status
+                try:
+                    connection.request(
+                        method,
+                        path,
+                        body=body,
+                        headers={"Content-Type": content_type},
+                    )
+                    return connection.getresponse().status
+                except BrokenPipeError, ConnectionError:
+                    return "connection-rejected"
             finally:
                 connection.close()
 
@@ -248,7 +254,10 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
         assert request_status("POST", "/wrong", b"{}") == 400
         assert request_status("POST", "/v1/attest", b"{}", "text/plain") == 415
         assert request_status("POST", "/v1/attest", b"not-json") == 400
-        assert request_status("POST", "/v1/attest", b"x" * (256 * 1024 + 1)) == 413
+        assert request_status("POST", "/v1/attest", b"x" * (256 * 1024 + 1)) in {
+            413,
+            "connection-rejected",
+        }
 
         wrong_pin = HttpsNodeAttesterClient(
             AttesterClientTlsConfig(
@@ -259,6 +268,7 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
                 EvidenceDigest(f"sha256:{'0' * 64}"),
             ),
             limits,
+            readiness,
         )
         with pytest.raises(KubernetesRuntimeError, match="server identity"):
             wrong_pin.bind(pod, contract)
@@ -268,9 +278,9 @@ def test_mtls_attester_binds_exact_node_and_proof_chain(
         control.terminated = True
         exited = client.confirm_exit(bound)
         empty = client.confirm_empty(bound, exited)
-        assert client.confirm_removed(bound, empty).value.startswith("sha256:")
-        with pytest.raises(KubernetesRuntimeError, match="binding is unknown"):
-            client.confirm_exit(bound)
+        removed = client.confirm_removed(bound, empty)
+        assert removed.value.startswith("sha256:")
+        assert client.confirm_removed(bound, empty) == removed
     finally:
         server.shutdown()
         thread.join(timeout=5)

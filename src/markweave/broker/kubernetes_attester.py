@@ -11,6 +11,7 @@ from uuid import UUID
 
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationContract,
+    KubernetesAttestationNotReady,
     KubernetesPodIdentity,
     KubernetesRuntimeError,
     KubernetesRuntimeUnit,
@@ -112,6 +113,7 @@ class NodeAttestationEngine:
         ):
             raise ValueError("Kubernetes node inspector is invalid")
         self._inspector = inspector
+        self._contracts: dict[UUID, tuple[KubernetesAttestationContract, UUID]] = {}
 
     def bind(
         self,
@@ -153,10 +155,7 @@ class NodeAttestationEngine:
             or sandbox.forwarding_enabled is not False
             or not sandbox.container_ids
             or len(sandbox.container_ids) != len(sandbox.container_states)
-            or any(
-                state not in {"CREATED", "RUNNING", "EXITED"}
-                for state in sandbox.container_states
-            )
+            or any(state != "RUNNING" for state in sandbox.container_states)
             or sandbox.cpu_quota_micros != contract.policy.limits.cpu_quota_micros
             or sandbox.cpu_period_micros != contract.policy.limits.cpu_period_micros
             or sandbox.memory_max_bytes != contract.policy.limits.memory_bytes
@@ -203,18 +202,23 @@ class NodeAttestationEngine:
             },
         )
         try:
-            return KubernetesSandboxIdentity(
+            identity = KubernetesSandboxIdentity(
                 sandbox.sandbox_id, sandbox.cgroup_path, sandbox.node_uid, binding
             )
         except ValueError:
             failure = KubernetesRuntimeError(
                 "Kubernetes sandbox attestation is invalid"
             )
-        raise failure
+            raise failure from None
+        previous = self._contracts.setdefault(pod.pod_uid, (contract, node.node_uid))
+        if previous != (contract, node.node_uid):
+            raise KubernetesRuntimeError("Kubernetes sandbox attestation is invalid")
+        return identity
 
     def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
         """Prove all CRI containers exited; a Pod phase or API result is ignored."""
 
+        self._revalidate_fence(unit)
         snapshot = self._sandbox(unit)
         if (
             snapshot.sandbox_ready is not False
@@ -240,6 +244,7 @@ class NodeAttestationEngine:
 
         if type(exit_evidence) is not EvidenceDigest:
             raise KubernetesRuntimeError("Kubernetes exit evidence is invalid")
+        self._revalidate_fence(unit)
         snapshot = self._sandbox(unit)
         if snapshot.cgroup_populated is not False or snapshot.descendant_pids != ():
             raise KubernetesRuntimeError("Kubernetes stable unit is not empty")
@@ -263,6 +268,7 @@ class NodeAttestationEngine:
 
         if type(empty_evidence) is not EvidenceDigest:
             raise KubernetesRuntimeError("Kubernetes empty evidence is invalid")
+        self._revalidate_fence(unit)
         snapshot = _inspector_call(
             lambda: self._inspector.removal(unit.pod.pod_uid),
             "Kubernetes removal is unconfirmed",
@@ -288,6 +294,31 @@ class NodeAttestationEngine:
                 "pod_uid": str(snapshot.pod_uid),
             },
         )
+
+    def _revalidate_fence(self, unit: KubernetesRuntimeUnit) -> None:
+        if type(unit) is not KubernetesRuntimeUnit:
+            raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
+        retained = self._contracts.get(unit.pod.pod_uid)
+        if retained is None:
+            raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
+        contract, expected_node_uid = retained
+        node = _inspector_call(
+            lambda: self._inspector.node_fence(unit.pod.node_name),
+            "Kubernetes node attestation failed",
+        )
+        if (
+            type(node) is not NodeFenceSnapshot
+            or node.node_uid != expected_node_uid
+            or node.node_name != unit.pod.node_name
+            or node.ready is not True
+            or node.pool_name != contract.pool
+            or node.fence_revision != contract.fence_revision
+            or node.dedicated_taint_value != contract.pool
+            or node.cgroup_version != _CGROUP_V2
+            or node.pod_pids_limit != contract.policy.limits.pid_limit
+            or node.cpu_quota_period_micros != contract.policy.limits.cpu_period_micros
+        ):
+            raise KubernetesRuntimeError("Kubernetes node fence is invalid")
 
     def _sandbox(self, unit: KubernetesRuntimeUnit) -> SandboxSnapshot:
         if type(unit) is not KubernetesRuntimeUnit:
@@ -325,6 +356,8 @@ def _observed_identity_matches(observed: object, pod: KubernetesPodIdentity) -> 
 def _inspector_call[T](operation: Callable[[], T], message: str) -> T:
     try:
         return operation()
+    except KubernetesAttestationNotReady:
+        raise
     except Exception:
         failure = KubernetesRuntimeError(message)
     raise failure

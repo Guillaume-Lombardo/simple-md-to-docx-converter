@@ -155,7 +155,7 @@ class _ExecSession:
         self.input += data
 
     def close_stdin(self) -> None:
-        if self.command[-1].endswith("SIGKILL)"):
+        if "SIGKILL" in self.command[2]:
             return
         if self.command[2].startswith("import base64,json,os,sys"):
             payload = json.loads(self.input)
@@ -168,7 +168,7 @@ class _ExecSession:
                 }
             )
         else:
-            leaf = self.command[3]
+            leaf = self.command[4]
             self.output = base64.b64encode(self.workspace[leaf]).decode("ascii")
 
     def is_open(self) -> bool:
@@ -249,7 +249,7 @@ def test_control_plane_uses_exact_namespace_identity_and_fixed_exec_contract() -
     assert api.deleted.preconditions.uid == str(POD_UID)
     assert control.absent(pod) is True
     control.delete(pod)
-    assert any(command[-1].endswith("SIGKILL)") for command in executions.commands)
+    assert any("SIGKILL" in command[2] for command in executions.commands)
 
 
 @pytest.mark.unit
@@ -294,6 +294,22 @@ def test_control_plane_fails_closed_at_api_and_channel_bounds() -> None:
             return SimpleNamespace(items=[self.pod, self.pod])
 
     control = KubernetesApiControlPlane(UnboundedApi(), CONFIG, exec_factory=executions)
+    with pytest.raises(KubernetesRuntimeError, match="limit"):
+        control.discover(
+            namespace=CONFIG.namespace,
+            labels={"reverse.markweave.dev/managed": "1"},
+            limit=1,
+        )
+
+    class ContinuedApi(_Api):
+        def list_namespaced_pod(self, namespace: str, **kwargs: object) -> object:
+            del namespace, kwargs
+            return SimpleNamespace(
+                items=[self.pod],
+                metadata=SimpleNamespace(_continue="opaque", remaining_item_count=1),
+            )
+
+    control = KubernetesApiControlPlane(ContinuedApi(), CONFIG, exec_factory=executions)
     with pytest.raises(KubernetesRuntimeError, match="limit"):
         control.discover(
             namespace=CONFIG.namespace,
@@ -432,6 +448,25 @@ def test_exec_timeout_and_output_bounds_fail_closed() -> None:
 
 
 @pytest.mark.unit
+def test_exec_rechecks_uid_after_helper_channel_is_established() -> None:
+    api = _Api()
+    initial = KubernetesApiControlPlane(api, CONFIG, exec_factory=_ExecFactory())
+    pod = initial.create(_manifest())
+    session = _ExecSession(["python", "-c", "noop"], {})
+
+    def substituting_factory(*args: object, **kwargs: object) -> _ExecSession:
+        del args
+        session.command = cast(list[str], kwargs["command"])
+        cast(dict[str, object], api.pod["metadata"])["uid"] = str(UUID(int=99))
+        return session
+
+    control = KubernetesApiControlPlane(api, CONFIG, exec_factory=substituting_factory)
+    with pytest.raises(KubernetesRuntimeError, match="identity changed"):
+        control.stage_request(pod, _request())
+    assert session.input == ""
+
+
+@pytest.mark.unit
 def test_adapter_validates_configuration_and_request_identities() -> None:
     with pytest.raises(ValueError, match="configuration"):
         KubernetesApiConfig(
@@ -521,6 +556,42 @@ def test_delete_treats_not_found_reply_as_idempotent_success() -> None:
     pod = control.create(_manifest())
     control.delete(pod)
     control.delete(pod)
+
+
+@pytest.mark.unit
+def test_delete_polls_for_api_absence_within_its_deadline() -> None:
+    class DelayedDeletionApi(_Api):
+        deleting = False
+        post_delete_reads = 0
+
+        def delete_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            del name, namespace, kwargs
+            self.deleting = True
+            return object()
+
+        def read_namespaced_pod(
+            self, name: str, namespace: str, **kwargs: object
+        ) -> object:
+            if self.deleting:
+                self.post_delete_reads += 1
+                if self.post_delete_reads > 1:
+                    raise ApiException(status=404)
+            return super().read_namespaced_pod(name, namespace, **kwargs)
+
+    api = DelayedDeletionApi()
+    slept: list[float] = []
+    control = KubernetesApiControlPlane(
+        api,
+        CONFIG,
+        exec_factory=_ExecFactory(),
+        monotonic=lambda: 0.0,
+        sleep=slept.append,
+    )
+    pod = control.create(_manifest())
+    control.delete(pod)
+    assert slept == [CONFIG.poll_interval_seconds]
 
 
 @pytest.mark.unit
