@@ -221,6 +221,7 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
     )
 
     assert workflow["on"]["schedule"] == [{"cron": "17 3 * * 0"}]
+    assert workflow["jobs"]["light"]["timeout-minutes"] == 20
     assert workflow["jobs"]["heavy"]["timeout-minutes"] == 45
     assert workflow["jobs"]["heavy"]["strategy"]["max-parallel"] == 2
 

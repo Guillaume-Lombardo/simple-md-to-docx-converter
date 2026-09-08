@@ -196,7 +196,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "schedule",
             }
         ),
-        jobs={"detect": 5, "light": 15, "domain-plan": 5, "heavy": 45, "gate": 5},
+        jobs={"detect": 5, "light": 20, "domain-plan": 5, "heavy": 45, "gate": 5},
         actions=frozenset(
             {
                 "actions/checkout",
@@ -381,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="a88b50587f9938b55ea5b405e318068bf85a11141982f95c7c440d7b902e5a69",
+        canonical_digest="b50e0259af2f199115a350f621f7c469e7ab204995b9335d6ad44dc17407f887",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
