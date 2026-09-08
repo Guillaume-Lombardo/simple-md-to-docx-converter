@@ -2,7 +2,7 @@
 ticket: T46
 linear_id: G1L-421
 linear_url: https://linear.app/g1lom/issue/G1L-421/t46-add-security-reporting-and-support-policies
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -34,6 +34,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Progress
 
+* 2026-09-08: PR [#220](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/220) passed independent review, CodeRabbit, and exact-head CI run `34198740596`, then squash-merged as `3038b069e7c4f3ddd21859bbd72abe9fee9bbbf3`. Exact-main CI run `34199987764` passed at that SHA; all acceptance criteria are verified with no remaining T46 limitation.
 * 2026-09-08: Non-draft pull request [#220](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/220) was published from reviewed commit `aee2afeae27c14d83c87a87c0871e14336c1ab26`; exact-head CI and CodeRabbit review are pending.
 * 2026-09-08: Resumed by product-manager decision after GitHub private vulnerability reporting and Discussions were enabled. G1L-421 and this mirror are In Progress.
 * 2026-09-08: Reconciled normally with exact `main` `38ed74bdcd6692ae9235cc2f2190f7af4dab041e`; the preserved policy files required no conflict resolution. Refreshed `SUPPORT.md` so the T40-owned PyPI `Support` URL lands on the documented question channel while reproducible defects remain in GitHub Issues.
@@ -49,7 +50,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done after exact-main verification.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
