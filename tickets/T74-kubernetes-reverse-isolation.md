@@ -53,6 +53,18 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Partial durable-recovery PR
+  [#224](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/224) was
+  squash-merged as `a8ac43abee44609860594fbbf40bbe781ddf2a5f` after independent functional
+  and security reviews, a completed incremental CodeRabbit review, and resolution of every review
+  thread. Exact-head CI
+  [run 34271382507](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/34271382507)
+  and exact-main CI
+  [run 34274314282](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/34274314282)
+  are green, including branch and changed-line coverage gates, both rootless exact-image E2E
+  variants, document engines, PostgreSQL, and S3/RustFS suites. T74 remains In Progress: the
+  concrete bounded CRI/cgroup inspector, attester process and deployment, dedicated-pool fencing,
+  loopback-only CNI and node-local egress proof, and real-k3s acceptance matrix remain mandatory.
 * 2026-09-08: Added crash-consistent Kubernetes creation and lifecycle recovery. The broker now
   persists an authenticated, bounded, content-free creation binding before any Kubernetes API
   mutation, migrates authenticated inventory schema v2 to v3 atomically, and retains recovery
