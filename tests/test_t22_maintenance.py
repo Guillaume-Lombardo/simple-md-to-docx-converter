@@ -32,13 +32,21 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
     config = load_strings(DEPENDABOT)
     updates = config["updates"]
     assert isinstance(updates, list)
-    by_ecosystem = {entry["package-ecosystem"]: entry for entry in updates}
+    by_ecosystem: dict[str, list[dict[str, Any]]] = {}
+    for entry in updates:
+        by_ecosystem.setdefault(entry["package-ecosystem"], []).append(entry)
     assert set(by_ecosystem) == {"uv", "npm", "docker", "github-actions"}
     assert "pip" not in by_ecosystem
-    assert by_ecosystem["uv"]["directory"] == "/"
-    assert by_ecosystem["github-actions"]["directory"] == "/"
-    assert by_ecosystem["npm"]["directories"] == ["/", "/spikes/toolchain"]
-    assert by_ecosystem["docker"]["directories"] == ["/", "/spikes/toolchain"]
+    assert by_ecosystem["uv"][0]["directory"] == "/"
+    assert by_ecosystem["github-actions"][0]["directory"] == "/"
+    assert [entry["directory"] for entry in by_ecosystem["npm"]] == [
+        "/",
+        "/spikes/toolchain",
+    ]
+    assert by_ecosystem["docker"][0]["directories"] == [
+        "/",
+        "/spikes/toolchain",
+    ]
     for update in updates:
         assert update["schedule"]["interval"] == "weekly"
         assert update["schedule"]["timezone"] == "Etc/UTC"

@@ -15,6 +15,7 @@ from markweave.http.responses import (
     template_response,
 )
 from markweave.http.schemas import (
+    TemplateAdministrationContextResponse,
     TemplateMetadataRequest,
     TemplatePageResponse,
     TemplateResponse,
@@ -33,6 +34,14 @@ from markweave.templates.models import (
 )
 
 
+def _expected_fonts_from_form(values: list[str]) -> tuple[str, ...]:
+    """Decode the explicit multipart sentinel used to clear a declaration."""
+
+    if values == [""]:
+        return ()
+    return tuple(values)
+
+
 def build_router(  # noqa: PLR0915 - route declarations are intentionally grouped
     dependencies: HttpDependencies,
 ) -> APIRouter:
@@ -42,6 +51,26 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
     settings = dependencies.settings
     components = dependencies.components
     auth = dependencies.authentication
+
+    @router.get(
+        "/api/v1/template-context",
+        response_model=TemplateAdministrationContextResponse,
+        tags=["templates"],
+        responses=error_responses(401, 503),
+    )
+    def get_template_administration_context(
+        response: Response,
+        actor: Annotated[User, Depends(dependencies.current_user)],
+    ) -> TemplateAdministrationContextResponse:
+        response.headers["Cache-Control"] = "no-store"
+        preferred_id, fallback_id = dependencies.template_runtime().selection_context(
+            actor
+        )
+        return TemplateAdministrationContextResponse(
+            preferred_template_id=preferred_id,
+            system_fallback_template_id=fallback_id,
+            template_max_archive_bytes=settings.template_max_archive_bytes,
+        )
 
     @router.get(
         "/api/v1/templates",
@@ -117,7 +146,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
                 actor,
                 TemplateCreate(uuid4(), name, description),
                 data,
-                tuple(expected_fonts),
+                _expected_fonts_from_form(expected_fonts),
             )
         except ValueError:
             raise TemplateRequestError from None
@@ -207,7 +236,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
             template_id,
             expected_revision=expected_revision(template_id, if_match),
             content=data,
-            expected_fonts=tuple(expected_fonts),
+            expected_fonts=_expected_fonts_from_form(expected_fonts),
         )
         response.headers["ETag"] = template_etag(template)
         return TemplateVersionResponse.model_validate(version)
@@ -243,6 +272,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
                     f'attachment; filename="template-{template_id}-v'
                     f'{version.number}.docx"'
                 ),
+                "Cache-Control": "private, no-store",
                 "ETag": f'"sha256-{version.sha256}"',
                 "X-Content-Type-Options": "nosniff",
             },

@@ -43,6 +43,13 @@ REQUIRED_METRICS = frozenset(
         "md_converter_queue_depth",
         "md_converter_queue_oldest_age_seconds",
         "md_converter_active_jobs",
+        "md_converter_reversion_queue_depth",
+        "md_converter_reversion_queue_oldest_age_seconds",
+        "md_converter_reversion_active_jobs",
+        "md_converter_shared_capacity_used",
+        "md_converter_reversion_proof_blocked_attempts",
+        "md_converter_reversion_proof_ack_backlog",
+        "md_converter_reversion_reconciliation_pending",
     }
 )
 EXPECTED_FONTS = (
@@ -233,6 +240,122 @@ def create_user(admin: ServiceClient, username: str, password: str) -> dict[str,
         operation=f"create {username}",
     )
     return decode_object(result, f"create {username}")
+
+
+def exercise_idle_session_policy(
+    admin: ServiceClient, standard_user: ServiceClient
+) -> None:
+    """Verify final-image authorization, concurrency, and atomic role policy state."""
+    forbidden = standard_user.request("GET", "/api/v1/admin/session-policy")
+    expect(forbidden, 403, "standard-user session policy denial")
+
+    current_result = admin.request("GET", "/api/v1/admin/session-policy")
+    expect(current_result, 200, "read idle-session policy")
+    current = decode_object(current_result, "read idle-session policy")
+    etag = current_result.headers.get("etag", "")
+    if not etag:
+        raise WorkflowFailure("read idle-session policy: ETag is missing")
+    if current.get("revision") == 0 and (
+        current.get("user_idle_minutes"),
+        current.get("admin_idle_minutes"),
+    ) != (30, 15):
+        raise WorkflowFailure("read idle-session policy: defaults mismatch")
+    if current.get("absolute_lifetime_seconds") != 28_800:
+        raise WorkflowFailure("read idle-session policy: absolute ceiling mismatch")
+    if (
+        current.get("user_idle_minutes_bounds")
+        != {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        }
+        or current.get("admin_idle_minutes_bounds")
+        != {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        }
+        or current.get("idle_minutes_granularity") != 1
+    ):
+        raise WorkflowFailure("read idle-session policy: authoritative bounds mismatch")
+
+    def race(payload: dict[str, int]) -> HttpResult:
+        return admin.request(
+            "PUT",
+            "/api/v1/admin/session-policy",
+            body=json.dumps(payload).encode(),
+            content_type="application/json",
+            mutate=True,
+            headers={"If-Match": etag},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = tuple(
+            pool.map(
+                race,
+                (
+                    {"user_idle_minutes": 300, "admin_idle_minutes": 60},
+                    {"user_idle_minutes": 299, "admin_idle_minutes": 59},
+                ),
+            )
+        )
+    if sorted(outcome.status for outcome in outcomes) != [200, 412]:
+        raise WorkflowFailure("concurrent idle-session policy update was not atomic")
+    updated_result = next(outcome for outcome in outcomes if outcome.status == 200)
+    updated = decode_object(updated_result, "update idle-session policy")
+    if updated.get("revision") != int(current.get("revision", -1)) + 1:
+        raise WorkflowFailure("update idle-session policy: revision mismatch")
+    final = admin.request("GET", "/api/v1/admin/session-policy")
+    expect(final, 200, "reread idle-session policy")
+    if decode_object(final, "reread idle-session policy") != updated:
+        raise WorkflowFailure("stale idle-session policy update changed state")
+    audit_result = admin.request("GET", "/api/v1/audit?limit=100")
+    expect(audit_result, 200, "idle-session policy audit")
+    audits = json.loads(audit_result.body)
+    if not isinstance(audits, list) or not any(
+        record.get("operation") == "idle_session_policy_update"
+        and record.get("target_version") == str(updated["revision"])
+        and record.get("old_user_idle_minutes") == current["user_idle_minutes"]
+        and record.get("new_user_idle_minutes") == updated["user_idle_minutes"]
+        for record in audits
+    ):
+        raise WorkflowFailure("idle-session policy audit evidence is missing")
+
+
+def require_runtime_metadata(  # noqa: PLR0913 - explicit expected metadata contract
+    client: ServiceClient,
+    *,
+    source: str,
+    template_id: str | None = None,
+    version_id: str | None = None,
+    preferred_id: str | None = None,
+    fallback_id: str | None = None,
+) -> None:
+    """Require exact final-image limits and one consistent template selection."""
+    options_result = client.request("GET", "/api/v1/conversion-options")
+    expect(options_result, 200, "conversion options")
+    options = decode_object(options_result, "conversion options")
+    resolved = options.get("resolved_template")
+    if (
+        options_result.headers.get("cache-control") != "no-store"
+        or options.get("conversion_upload_max_bytes") != 1_000_000
+        or options.get("selection_source") != source
+        or options.get("template_version_id") != version_id
+        or (resolved.get("id") if isinstance(resolved, dict) else None) != template_id
+        or (resolved.get("current_version_id") if isinstance(resolved, dict) else None)
+        != version_id
+    ):
+        raise WorkflowFailure("conversion options: runtime metadata mismatch")
+    context_result = client.request("GET", "/api/v1/template-context")
+    expect(context_result, 200, "template context")
+    context = decode_object(context_result, "template context")
+    if (
+        context_result.headers.get("cache-control") != "no-store"
+        or context.get("template_max_archive_bytes") != 1_000_000
+        or context.get("preferred_template_id") != preferred_id
+        or context.get("system_fallback_template_id") != fallback_id
+    ):
+        raise WorkflowFailure("template context: runtime metadata mismatch")
 
 
 def create_template(
@@ -694,12 +817,37 @@ def write_state(path: Path, state: dict[str, str]) -> None:
     temporary.replace(path)
 
 
+def validate_policy_state(state: dict[str, str]) -> None:
+    """Validate the additional evidence owned by the source-built T59 image."""
+    try:
+        uuid.UUID(state["policy_audit_id"])
+        uuid.UUID(state["policy_audit_actor_id"])
+    except ValueError as error:
+        raise WorkflowFailure("checkpoint: invalid identifier") from error
+    numeric_fields = (
+        "policy_user_idle_minutes",
+        "policy_admin_idle_minutes",
+        "policy_revision",
+        "policy_audit_old_user_idle_minutes",
+        "policy_audit_old_admin_idle_minutes",
+        "policy_audit_new_user_idle_minutes",
+        "policy_audit_new_admin_idle_minutes",
+        "policy_audit_revision",
+    )
+    if any(
+        not state[key].isascii() or not state[key].isdecimal() for key in numeric_fields
+    ):
+        raise WorkflowFailure("checkpoint: invalid policy evidence")
+    if state["policy_audit_operation"] != "idle_session_policy_update":
+        raise WorkflowFailure("checkpoint: invalid policy operation")
+
+
 def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
         raise WorkflowFailure("checkpoint: unreadable state") from error
-    keys = {
+    base_keys = {
         "schema",
         "profile",
         "owner",
@@ -711,12 +859,32 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         "template_version_id",
         "result_sha256",
     }
-    if not isinstance(raw, dict) or set(raw) != keys:
+    policy_keys = {
+        "policy_user_idle_minutes",
+        "policy_admin_idle_minutes",
+        "policy_revision",
+        "policy_audit_id",
+        "policy_audit_actor_id",
+        "policy_audit_operation",
+        "policy_audit_created_at",
+        "policy_audit_old_user_idle_minutes",
+        "policy_audit_old_admin_idle_minutes",
+        "policy_audit_new_user_idle_minutes",
+        "policy_audit_new_admin_idle_minutes",
+        "policy_audit_revision",
+    }
+    if not isinstance(raw, dict):
+        raise WorkflowFailure("checkpoint: invalid schema")
+    schema = raw.get("schema")
+    keys = (
+        base_keys | policy_keys if schema == "t59-service-checkpoint-v2" else base_keys
+    )
+    if set(raw) != keys:
         raise WorkflowFailure("checkpoint: invalid schema")
     if not all(isinstance(raw[key], str) and raw[key] for key in keys):
         raise WorkflowFailure("checkpoint: invalid values")
     if (
-        raw["schema"] != "t21-service-checkpoint-v1"
+        schema not in {"t21-service-checkpoint-v1", "t59-service-checkpoint-v2"}
         or raw["profile"] != expected_profile
     ):
         raise WorkflowFailure("checkpoint: profile or version mismatch")
@@ -733,6 +901,8 @@ def read_state(path: Path, *, expected_profile: str) -> dict[str, str]:
         raise WorkflowFailure("checkpoint: invalid identifier") from error
     if len(raw["result_sha256"]) != 64:
         raise WorkflowFailure("checkpoint: invalid result digest")
+    if schema == "t59-service-checkpoint-v2":
+        validate_policy_state(raw)
     return {key: raw[key] for key in keys}
 
 
@@ -826,16 +996,48 @@ def require_failed_conversion(
     source: bytes,
     *,
     label: str,
+    filename: str | None = None,
 ) -> None:
     """Require an invalid archive/image upload to fail without publishing a result."""
 
     _job, location = submit_conversion(
-        client, template, "docx", source, filename=f"{label}.zip"
+        client, template, "docx", source, filename=filename or f"{label}.zip"
     )
     terminal = wait_for_job(client, location)
     if terminal.get("state") != "failed" or terminal.get("error_code") != "validation":
         raise WorkflowFailure(f"{label}: deterministic validation failure missing")
     expect(client.request("GET", f"{location}/result"), 409, f"{label} result denial")
+
+
+def validate_external_hyperlinks(content: bytes) -> None:
+    """Require the anonymized fixture's external links in generated OpenXML."""
+
+    relationship_namespace = (
+        "http://schemas.openxmlformats.org/package/2006/relationships"
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as document:
+            relationships = ElementTree.fromstring(  # noqa: S314 - generated OpenXML
+                document.read("word/_rels/document.xml.rels")
+            )
+    except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as error:
+        raise WorkflowFailure(
+            "external hyperlinks: invalid OpenXML relationships"
+        ) from error
+    targets = {
+        relationship.attrib.get("Target")
+        for relationship in relationships.iter(
+            f"{{{relationship_namespace}}}Relationship"
+        )
+        if relationship.attrib.get("Type", "").endswith("/hyperlink")
+        and relationship.attrib.get("TargetMode") == "External"
+    }
+    expected = {
+        "http://packages.example.invalid/document-tool",
+        "https://documentation.example.invalid/document-tool",
+    }
+    if targets != expected:
+        raise WorkflowFailure("external hyperlinks: relationship targets differ")
 
 
 def exercise_security_boundaries(arguments: argparse.Namespace) -> None:
@@ -892,6 +1094,31 @@ def exercise_security_boundaries(arguments: argparse.Namespace) -> None:
         ]
     if len(media) != 1 or not media[0].startswith(b"\x89PNG\r\n\x1a\n"):
         raise WorkflowFailure("archive/image result: normalized PNG evidence missing")
+
+    hyperlink_source = (
+        REPOSITORY_ROOT / "tests/e2e/fixtures/external-hyperlinks.md"
+    ).read_bytes()
+    _job, location = submit_conversion(
+        client,
+        template,
+        "docx",
+        hyperlink_source,
+        filename="external-hyperlinks.md",
+    )
+    terminal = wait_for_job(client, location)
+    if terminal.get("state") != "succeeded":
+        raise WorkflowFailure("external hyperlinks: conversion did not succeed")
+    result = client.request("GET", f"{location}/result")
+    expect(result, 200, "external hyperlinks result")
+    validate_external_hyperlinks(result.body)
+
+    require_failed_conversion(
+        client,
+        template,
+        b"# Remote image\n\n![blocked](https://images.example.invalid/pixel.png)\n",
+        label="remote-image",
+        filename="remote-image.md",
+    )
 
     stored = _zip_fixture(
         [("document.md", b"sensitive archive marker")],
@@ -952,6 +1179,8 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     bob = ServiceClient(arguments.base_url)
     alice.login(alice_name, alice_password)
     bob.login(bob_name, bob_password)
+    require_runtime_metadata(alice, source="pandoc_default")
+    exercise_idle_session_policy(admin, alice)
 
     json_request(
         admin,
@@ -989,6 +1218,38 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
 
     template = create_template(alice, arguments.template, run_id=run_id)
     template_id = required_string(template, "id", "template")
+    version_id = required_string(template, "current_version_id", "template")
+    fallback = admin.request(
+        "PUT", f"/api/v1/templates/{template_id}/system-fallback", mutate=True
+    )
+    expect(fallback, 204, "set system fallback for runtime metadata")
+    require_runtime_metadata(
+        bob,
+        source="system_fallback",
+        template_id=template_id,
+        version_id=version_id,
+        fallback_id=template_id,
+    )
+    preferred = alice.request(
+        "PUT", f"/api/v1/templates/{template_id}/preferred", mutate=True
+    )
+    expect(preferred, 204, "set preferred template for runtime metadata")
+    require_runtime_metadata(
+        alice,
+        source="preferred",
+        template_id=template_id,
+        version_id=version_id,
+        preferred_id=template_id,
+        fallback_id=template_id,
+    )
+    context = decode_object(
+        alice.request("GET", "/api/v1/template-context"), "selected template context"
+    )
+    if (
+        context.get("preferred_template_id") != template_id
+        or context.get("system_fallback_template_id") != template_id
+    ):
+        raise WorkflowFailure("template context: selection identifiers mismatch")
     visible = bob.request("GET", f"/api/v1/templates/{template_id}")
     expect(visible, 200, "Bob template visibility")
     visible_etag = visible.headers.get("etag", "")
@@ -1190,7 +1451,6 @@ def exercise(arguments: argparse.Namespace) -> None:  # noqa: PLR0912, PLR0915
     if wait_for_job(expiring, expiring_location).get("state") != "succeeded":
         raise WorkflowFailure("expiration: prerequisite conversion did not succeed")
     time.sleep(61)
-    expect(expiring.request("GET", "/api/v1/session"), 401, "session expiration")
     observer = ServiceClient(arguments.base_url)
     observer.login(arguments.admin_username, arguments.admin_password)
     expired = observer.request("GET", expiring_location)
@@ -1229,6 +1489,71 @@ def require_template_audit(client: ServiceClient, template_id: str) -> None:
         raise WorkflowFailure("checkpoint audit: template creation record missing")
 
 
+def checkpoint_policy_evidence(client: ServiceClient) -> dict[str, str]:
+    """Persist one exact policy revision and return content-free audit evidence."""
+    current_result = client.request("GET", "/api/v1/admin/session-policy")
+    expect(current_result, 200, "checkpoint policy baseline")
+    current = decode_object(current_result, "checkpoint policy baseline")
+    etag = current_result.headers.get("etag")
+    if etag is None:
+        raise WorkflowFailure("checkpoint policy baseline: ETag is missing")
+    target = (
+        {"user_idle_minutes": 26, "admin_idle_minutes": 11}
+        if (current.get("user_idle_minutes"), current.get("admin_idle_minutes"))
+        == (25, 10)
+        else {"user_idle_minutes": 25, "admin_idle_minutes": 10}
+    )
+    updated_result = json_request(
+        client,
+        "PUT",
+        "/api/v1/admin/session-policy",
+        target,
+        expected=200,
+        operation="checkpoint policy update",
+        headers={"If-Match": etag},
+    )
+    updated = decode_object(updated_result, "checkpoint policy update")
+    audit_result = client.request("GET", "/api/v1/audit?limit=100")
+    expect(audit_result, 200, "checkpoint policy audit")
+    records = json.loads(audit_result.body)
+    matches = (
+        [
+            record
+            for record in records
+            if isinstance(record, dict)
+            and record.get("operation") == "idle_session_policy_update"
+            and record.get("target_version") == str(updated.get("revision"))
+            and record.get("old_user_idle_minutes") == current.get("user_idle_minutes")
+            and record.get("old_admin_idle_minutes")
+            == current.get("admin_idle_minutes")
+            and record.get("new_user_idle_minutes") == target["user_idle_minutes"]
+            and record.get("new_admin_idle_minutes") == target["admin_idle_minutes"]
+        ]
+        if isinstance(records, list)
+        else []
+    )
+    if len(matches) != 1:
+        raise WorkflowFailure("checkpoint policy audit evidence is not unique")
+    audit = matches[0]
+    required = ("id", "actor_id", "operation", "created_at")
+    if not all(isinstance(audit.get(key), str) and audit[key] for key in required):
+        raise WorkflowFailure("checkpoint policy audit evidence is incomplete")
+    return {
+        "policy_user_idle_minutes": str(target["user_idle_minutes"]),
+        "policy_admin_idle_minutes": str(target["admin_idle_minutes"]),
+        "policy_revision": str(updated["revision"]),
+        "policy_audit_id": audit["id"],
+        "policy_audit_actor_id": audit["actor_id"],
+        "policy_audit_operation": audit["operation"],
+        "policy_audit_created_at": audit["created_at"],
+        "policy_audit_old_user_idle_minutes": str(current["user_idle_minutes"]),
+        "policy_audit_old_admin_idle_minutes": str(current["admin_idle_minutes"]),
+        "policy_audit_new_user_idle_minutes": str(target["user_idle_minutes"]),
+        "policy_audit_new_admin_idle_minutes": str(target["admin_idle_minutes"]),
+        "policy_audit_revision": str(updated["revision"]),
+    }
+
+
 def checkpoint(arguments: argparse.Namespace) -> None:
     client = ServiceClient(arguments.base_url)
     client.login(arguments.admin_username, arguments.admin_password)
@@ -1240,17 +1565,21 @@ def checkpoint(arguments: argparse.Namespace) -> None:
         raise WorkflowFailure("checkpoint: conversion did not succeed")
     validate_result(client, terminal, arguments.output, arguments.artifact_dir)
     require_template_audit(client, str(template["id"]))
+    state = state_payload(
+        profile=arguments.profile,
+        owner=arguments.admin_username,
+        location=location,
+        output=arguments.output,
+        job=terminal,
+        template=template,
+        result_sha256=result_digest(client, terminal),
+    )
+    if arguments.policy_evidence:
+        state["schema"] = "t59-service-checkpoint-v2"
+        state.update(checkpoint_policy_evidence(client))
     write_state(
         arguments.state_file,
-        state_payload(
-            profile=arguments.profile,
-            owner=arguments.admin_username,
-            location=location,
-            output=arguments.output,
-            job=terminal,
-            template=template,
-            result_sha256=result_digest(client, terminal),
-        ),
+        state,
     )
 
 
@@ -1287,6 +1616,50 @@ def verify_checkpoint(arguments: argparse.Namespace) -> None:
     if result_digest(client, job) != state["result_sha256"]:
         raise WorkflowFailure("checkpoint recovery: result bytes changed")
     require_template_audit(client, state["template_id"])
+    if state["schema"] != "t59-service-checkpoint-v2":
+        return
+    policy_result = client.request("GET", "/api/v1/admin/session-policy")
+    expect(policy_result, 200, "checkpoint idle-session policy")
+    policy = decode_object(policy_result, "checkpoint idle-session policy")
+    expected_policy = {
+        "user_idle_minutes": int(state["policy_user_idle_minutes"]),
+        "admin_idle_minutes": int(state["policy_admin_idle_minutes"]),
+        "revision": int(state["policy_revision"]),
+        "absolute_lifetime_seconds": 28_800,
+        "user_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 30,
+            "maximum_minutes": 300,
+        },
+        "admin_idle_minutes_bounds": {
+            "minimum_minutes": 5,
+            "default_minutes": 15,
+            "maximum_minutes": 60,
+        },
+        "idle_minutes_granularity": 1,
+    }
+    if policy != expected_policy:
+        raise WorkflowFailure("checkpoint idle-session policy was not preserved")
+    audit = client.request("GET", "/api/v1/audit?limit=100")
+    expect(audit, 200, "checkpoint idle-session policy audit")
+    records = json.loads(audit.body)
+    expected_audit = {
+        "id": state["policy_audit_id"],
+        "actor_id": state["policy_audit_actor_id"],
+        "operation": state["policy_audit_operation"],
+        "created_at": state["policy_audit_created_at"],
+        "target_version": state["policy_audit_revision"],
+        "old_user_idle_minutes": int(state["policy_audit_old_user_idle_minutes"]),
+        "old_admin_idle_minutes": int(state["policy_audit_old_admin_idle_minutes"]),
+        "new_user_idle_minutes": int(state["policy_audit_new_user_idle_minutes"]),
+        "new_admin_idle_minutes": int(state["policy_audit_new_admin_idle_minutes"]),
+    }
+    if not isinstance(records, list) or not any(
+        isinstance(record, dict)
+        and all(record.get(key) == value for key, value in expected_audit.items())
+        for record in records
+    ):
+        raise WorkflowFailure("checkpoint idle-session policy audit was not preserved")
 
 
 def recovery_payload(
@@ -1427,6 +1800,18 @@ def verify_disabled_login_origin(arguments: argparse.Namespace) -> None:
             raise WorkflowFailure(f"disabled login origin ({origin}): auth not reached")
 
 
+def verify_session_expiration(arguments: argparse.Namespace) -> None:
+    """Prove real final-image absolute expiry in a short-lifetime deployment."""
+    client = ServiceClient(arguments.base_url)
+    client.login(arguments.admin_username, arguments.admin_password)
+    expect(client.request("GET", "/api/v1/session"), 200, "short session baseline")
+    time.sleep(3)
+    expired = client.request("GET", "/api/v1/session")
+    expect(expired, 401, "short absolute session expiration")
+    if error_payload(expired).get("code") != "AUTHENTICATION_REQUIRED":
+        raise WorkflowFailure("short absolute session expiration: stable error missing")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1437,6 +1822,7 @@ def build_parser() -> argparse.ArgumentParser:
             "exercise-mermaid",
             "verify-login-origin",
             "verify-disabled-login-origin",
+            "verify-session-expiration",
             "checkpoint",
             "verify-checkpoint",
             "submit-recovery",
@@ -1454,6 +1840,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-file", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--output", choices=("docx", "pdf", "both"), default="docx")
+    parser.add_argument(
+        "--policy-evidence",
+        action="store_true",
+        help="Persist T59 policy evidence in a source-built final-image checkpoint.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument(
         "--admin-username",
@@ -1546,6 +1937,8 @@ def main(argv: list[str] | None = None) -> int:
             verify_login_origin(arguments)
         elif arguments.command == "verify-disabled-login-origin":
             verify_disabled_login_origin(arguments)
+        elif arguments.command == "verify-session-expiration":
+            verify_session_expiration(arguments)
         elif arguments.command == "checkpoint":
             checkpoint(arguments)
         elif arguments.command == "verify-checkpoint":

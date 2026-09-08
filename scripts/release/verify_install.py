@@ -60,6 +60,21 @@ if not callable(markweave.app.create_app):
     raise SystemExit("server install does not expose its internal ASGI factory")
 """
 
+REVERSE_ATTEMPT_IMPORT_CHECK = """\
+from importlib.util import find_spec
+import sys
+
+for module in sys.argv[1:]:
+    if find_spec(module) is None:
+        raise SystemExit(f"missing required reverse-attempt dependency: {module}")
+from markweave.conversion.images import normalize_image
+import markweave.reversions.attempt_main
+if not callable(normalize_image):
+    raise SystemExit("reverse-attempt image normalization is unavailable")
+if find_spec("fastapi") is not None or find_spec("uvicorn") is not None:
+    raise SystemExit("reverse-attempt install contains HTTP server dependencies")
+"""
+
 BASE_ISOLATION_CHECK = """\
 from importlib.util import find_spec
 import sys
@@ -187,7 +202,25 @@ adapter = S3RecoveryAdapter(
 adapter.close()
 """
 
-BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg")
+BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg", "anydoc")
+
+BROKER_CONSOLE_CHECK = """\
+import subprocess
+import sys
+
+completed = subprocess.run(
+    [sys.executable, "-I", sys.argv[1]],
+    check=False,
+    capture_output=True,
+    timeout=5,
+)
+if (
+    completed.returncode != 2
+    or completed.stdout != b""
+    or completed.stderr != b"broker configuration failed\\n"
+):
+    raise SystemExit("broker console contract failed")
+"""
 
 
 @dataclass(frozen=True)
@@ -197,6 +230,7 @@ class InstallationProfile:
     name: str
     extra: str | None
     required_modules: tuple[str, ...]
+    import_check: str = EXTRA_IMPORT_CHECK
 
 
 _SERVER_MODULES = (
@@ -223,6 +257,12 @@ SUPPORTED_INSTALLATION_PROFILES = (
         "distributed", "distributed", (*_SERVER_MODULES, "boto3", "psycopg")
     ),
     InstallationProfile("all", "all", (*_SERVER_MODULES, "boto3", "psycopg")),
+    InstallationProfile(
+        "reverse-attempt",
+        "reverse-attempt",
+        ("anydoc", "cairosvg", "defusedxml", "PIL", "tinycss2"),
+        REVERSE_ATTEMPT_IMPORT_CHECK,
+    ),
 )
 
 
@@ -387,7 +427,7 @@ def verify_clean_install(
                         str(python),
                         "-I",
                         "-c",
-                        EXTRA_IMPORT_CHECK,
+                        profile.import_check,
                         *profile.required_modules,
                     ),
                     cwd=root,
@@ -409,6 +449,7 @@ def verify_clean_install(
                         timeout=CONSOLE_TIMEOUT_SECONDS,
                     )
             console = environment / "bin" / "markweave"
+            broker_console = environment / "bin" / "markweave-broker"
             for arguments, label in (
                 (
                     (str(python), "-I", str(console), "--version"),
@@ -425,6 +466,12 @@ def verify_clean_install(
                     label=label,
                     timeout=CONSOLE_TIMEOUT_SECONDS,
                 )
+            run_command(
+                (str(python), "-I", "-c", BROKER_CONSOLE_CHECK, str(broker_console)),
+                cwd=root,
+                label=f"isolated {profile.name} broker console check",
+                timeout=CONSOLE_TIMEOUT_SECONDS,
+            )
     return CleanInstallResult(wheel_name=artifacts.wheel.name, sha256=wheel_digest)
 
 

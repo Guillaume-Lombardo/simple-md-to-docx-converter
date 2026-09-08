@@ -1,5 +1,12 @@
 # Configuration reference
 
+The `0.6.1` deployment has separate backend, frontend, and public-router processes. Frontend and
+router origins, host allowlists, TLS key/certificate paths, request limits, and the positive bounded
+upstream inactivity timeout (`ROUTER_UPSTREAM_TIMEOUT_MS`) belong to
+their process configuration; they do not grant the frontend database, object-store, scanner, or
+authentication credentials. Loopback quickstarts remain HTTP and require a matched immutable image
+pair when testing an unpublished candidate.
+
 The application reads case-insensitive `MARKWEAVE_*` environment variables and fails startup with a
 content-free error when the assembled settings are invalid. "Required" below means there is
 deliberately no application default; operators must choose an approved value. Defaults are
@@ -18,10 +25,9 @@ database URLs, S3 credentials, and other secret or opaque values must match exac
 Any incompatible pair, including an invalid alias spelling, prevents startup without displaying
 either value. This fail-closed behavior avoids silently selecting a configuration source.
 
-The pinned 0.3.5 Compose image predates this migration. Until the Compose default is advanced to a
-T39-capable image, its evaluated environment carries an equal-value deprecated alias bridge so
-that both the current image and an upgraded image start safely. Operators continue to set only
-`MARKWEAVE_*` variables; do not set `MD_CONVERTER_*` separately.
+The public Compose quickstart uses a T39-capable image and supplies only `MARKWEAVE_*` variables.
+The deprecated aliases remain available only for operators migrating an older external deployment;
+do not define both prefixes in new deployments.
 
 The default cookie names remain `md_converter_session` and `__Host-md_converter_csrf` throughout
 0.x. Do not rename them during this environment-prefix migration; a deliberate session/cookie
@@ -50,8 +56,8 @@ deployment concerns; binding a socket does not authorize public exposure.
 | `MARKWEAVE_ARGON2_TIME_COST` | `2`, minimum 1 | Both profiles |
 | `MARKWEAVE_ARGON2_PARALLELISM` | `1`, minimum 1 | Both profiles |
 | `MARKWEAVE_SESSION_TOKEN_BYTES` | `32`, minimum 16 | Both profiles |
-| `MARKWEAVE_SESSION_IDLE_SECONDS` | `1800`, positive | Both profiles |
-| `MARKWEAVE_SESSION_ABSOLUTE_SECONDS` | `28800`, positive | Both profiles; at least the idle lifetime |
+| `MARKWEAVE_SESSION_IDLE_SECONDS` | Deprecated 0.x compatibility input | Accepted with a startup warning; persisted administrator policy is authoritative |
+| `MARKWEAVE_SESSION_ABSOLUTE_SECONDS` | `28800`, positive | Both profiles; operator hard ceiling for every role policy |
 | `MARKWEAVE_SESSION_COOKIE_NAME` | `md_converter_session`, nonblank | Both profiles |
 | `MARKWEAVE_PUBLIC_ORIGIN` | Optional | Both profiles; exact HTTP(S) scheme, host, optional port only |
 | `MARKWEAVE_INSECURE_EVALUATION_MODE` | `false` | Both profiles; explicit loopback-only test exception |
@@ -68,6 +74,13 @@ in every network-accessible deployment.
 bootstrap but before requests are served. See [local authentication](authentication.md) for the
 exact CSV contract, replacement behavior, concurrent-start serialization, and plaintext-secret
 handling requirements.
+
+Role-specific idle durations are application data, not deployment configuration. With no persisted
+override they are 30 minutes for standard users and 15 minutes for administrators. Administrators
+replace the pair through the versioned FastAPI policy endpoint within its documented bounds. The
+absolute lifetime can be shorter than the stored default, but an administrator update is rejected
+if either proposed duration exceeds it. Existing sessions remain capped by the absolute lifetime. Preserve the policy
+row and its immutable audits in database backup, restore, and rollback procedures.
 
 ## Conversion and engine limits
 
@@ -102,6 +115,52 @@ handling requirements.
 | `MARKWEAVE_CONVERSION_PDF_MAX_OBJECT_DEPTH` | Required positive integer | Both |
 | `MARKWEAVE_CONVERSION_FONT_MANIFEST_PATH` | Required path | Both; image's locked font manifest |
 | `MARKWEAVE_CONVERSION_RETRY_AFTER_SECONDS` | Required positive integer | API responses in both profiles |
+
+## Reverse-conversion admission
+
+| Environment variable | Requirement | Applies to / constraint |
+| --- | --- | --- |
+| `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES` | Optional positive integer; no default | Both profiles; authoritative maximum exposed by the authenticated capabilities endpoint |
+| `MARKWEAVE_REVERSION_REQUEST_MAX_BYTES` | Optional positive integer; no default | Both profiles; bounds the complete multipart request before parsing |
+| `MARKWEAVE_REVERSION_RETRY_AFTER_SECONDS` | Optional positive integer; no default | Both profiles; reverse submission and saturation responses |
+| `MARKWEAVE_REVERSION_RESULT_RETENTION_SECONDS` | Optional positive integer; no default | Both profiles; reverse results only |
+| `MARKWEAVE_REVERSION_ACTIVE_LIMIT_PER_USER` | Optional positive integer; no default | Both profiles; reverse jobs only |
+
+When any required reverse-lifecycle value is absent, existing forward-conversion deployments
+continue to start, but reverse submission and lifecycle operations fail safely with `503`.
+Capabilities require only `MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES`, because they describe admission
+without enabling persistence. Operators must select measured, reviewed values before enabling the
+reverse workflow; Markweave does not infer reverse values from forward-conversion limits. Reverse
+and forward jobs share `MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY` atomically, while their per-user and
+retention settings remain independent.
+
+Reverse execution is a second optional all-or-none configuration group. Supplying any execution
+field requires every common field and exactly one transport profile; no value is copied from the
+forward worker and no production default is provided.
+
+| Environment variables | Requirement |
+| --- | --- |
+| `MARKWEAVE_REVERSION_BROKER_TRANSPORT`, `MARKWEAVE_REVERSION_BROKER_PRINCIPAL_ID`, `MARKWEAVE_REVERSION_BROKER_POLICY_REVISION`, `MARKWEAVE_REVERSION_BROKER_IMAGE_DIGEST`, `MARKWEAVE_REVERSION_BROKER_OPERATION_TIMEOUT_SECONDS` | Required broker identity, immutable image/policy, and bounded operation timeout |
+| `MARKWEAVE_REVERSION_CPU_QUOTA_MICROS`, `MARKWEAVE_REVERSION_CPU_PERIOD_MICROS`, `MARKWEAVE_REVERSION_MEMORY_BYTES`, `MARKWEAVE_REVERSION_PID_LIMIT`, `MARKWEAVE_REVERSION_WORKSPACE_BYTES`, `MARKWEAVE_REVERSION_WALL_TIME_MILLIS` | Required positive runtime/kernel ceilings |
+| `MARKWEAVE_REVERSION_OUTPUT_MAX_BYTES`, `MARKWEAVE_REVERSION_MARKDOWN_MAX_BYTES`, `MARKWEAVE_REVERSION_PACKAGE_MAX_BYTES` | Required positive result/channel ceilings with Markdown and package bounded by output |
+| `MARKWEAVE_REVERSION_IMAGE_MAX_SOURCE_BYTES`, `MARKWEAVE_REVERSION_IMAGE_MAX_WIDTH_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_HEIGHT_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_PIXELS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_ELEMENTS`, `MARKWEAVE_REVERSION_IMAGE_MAX_SVG_DEPTH` | Required reverse-only image ceilings |
+| `MARKWEAVE_REVERSION_ASSET_MAX_COUNT`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_SOURCE_BYTES`, `MARKWEAVE_REVERSION_ASSET_MAX_TOTAL_OUTPUT_BYTES` | Required reverse-only aggregate asset ceilings |
+| `MARKWEAVE_REVERSION_RUNNING_LIMIT` | Required positive global reverse-running claim cap; it does not replace shared queue admission |
+| `MARKWEAVE_REVERSION_WORKER_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_HEARTBEAT_SECONDS`, `MARKWEAVE_REVERSION_WORKER_MAX_DURATION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_INCOMPLETE_SUBMISSION_SECONDS`, `MARKWEAVE_REVERSION_WORKER_COLLECT_POLL_SECONDS` | Required positive attempt timings; heartbeat is shorter than lease and polling does not exceed heartbeat |
+| `MARKWEAVE_REVERSION_WORKER_RECOVERY_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_RECOVERY_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_RECONCILIATION_ACK_BATCH_SIZE` | Required positive recovery and reconciliation bounds |
+| `MARKWEAVE_REVERSION_WORKER_CLEANUP_LEASE_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_INTERVAL_SECONDS`, `MARKWEAVE_REVERSION_WORKER_CLEANUP_BATCH_SIZE`, `MARKWEAVE_REVERSION_WORKER_ERROR_BACKOFF_SECONDS` | Required positive maintenance and retry bounds |
+
+For `unix`, also set the absolute `MARKWEAVE_REVERSION_BROKER_SOCKET_PATH`; all mTLS fields must be
+absent. For `mtls`, set `MARKWEAVE_REVERSION_BROKER_ENDPOINT_HOST` to a canonical IPv4 address,
+`MARKWEAVE_REVERSION_BROKER_ENDPOINT_PORT`, absolute
+`MARKWEAVE_REVERSION_BROKER_CA_CERTIFICATE_PATH`,
+`MARKWEAVE_REVERSION_BROKER_CERTIFICATE_CHAIN_PATH`, and
+`MARKWEAVE_REVERSION_BROKER_PRIVATE_KEY_PATH`, distinct
+`MARKWEAVE_REVERSION_BROKER_WORKER_URI_SAN` and
+`MARKWEAVE_REVERSION_BROKER_SERVER_URI_SAN`,
+`MARKWEAVE_REVERSION_BROKER_SERVER_PRINCIPAL_ID`, and one or two exact
+`MARKWEAVE_REVERSION_BROKER_SERVER_LEAF_SHA256` pins; the Unix path must be
+absent. Pydantic settings encode the pin tuple as a JSON array in the environment.
 
 ## Jobs, workers, metrics, and retention
 

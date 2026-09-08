@@ -1,0 +1,16 @@
+packages:
+  - "."
+  - "web"
+  - "!spikes/toolchain"
+
+strictPeerDependencies: true
+engineStrict: true
+ignoreScripts: true
+sharedWorkspaceLockfile: true
+
+overrides:
+  "@oxc-project/types": "0.147.0"
+  electron-to-chromium: "1.5.418"
+  "eslint-import-resolver-typescript>get-tsconfig": "4.14.0"
+  js-yaml: "4.3.1"
+  rolldown: "1.2.6"

@@ -10,7 +10,7 @@ their assigned tickets.
 markweave [--json] [--non-interactive] [--timeout SECONDS] COMMAND
 
 login | logout | whoami | password change
-convert | jobs {list,show,wait,cancel,download,manifest}
+convert | jobs {list,show,wait,cancel,download,manifest,reverse}
 templates {list,search,show,create,download,update,replace,archive,delete,versions,version-download,restore,preferred,fallback}
 users {list,create,activate,deactivate,reset-password,require-password-change}
 audit | health {live,ready,metrics}
@@ -18,8 +18,9 @@ serve | worker | doctor | migrate
 backup | restore
 ```
 
-`python -m markweave.runtime` remains the package-internal compatibility path for
-the existing container worker modes until T36 and T38 migrate them to this CLI.
+Final containers use this same registry directly: `serve` is the default image command and
+distributed worker containers select `worker`. Operational and remote-client command overrides are
+passed to `markweave` unchanged after the container runtime preflight.
 
 ## Process contract
 
@@ -46,6 +47,33 @@ Remote command families use only the documented HTTP API. Authentication uses
 non-echoing password prompts and owner-only XDG profile persistence; passwords are
 never command arguments. Runtime and recovery commands are the only families
 allowed to access runtime or storage services directly.
+
+## Reverse-conversion jobs
+
+Reverse conversion extends the stable `jobs` family without adding a backend or object-store
+shortcut to the installed client:
+
+```text
+markweave jobs reverse capabilities --profile work
+markweave jobs reverse submit report.docx --idempotency-key report-42 --profile work
+markweave jobs reverse list --limit 50 --profile work
+markweave jobs reverse show JOB_UUID --profile work
+markweave --timeout 300 jobs reverse wait JOB_UUID --poll-interval 2 --profile work
+markweave jobs reverse cancel JOB_UUID --profile work
+markweave jobs reverse download JOB_UUID ./report.md --profile work
+```
+
+Submission first reads the authenticated capabilities endpoint. The client accepts only an
+extension advertised by that response, rejects a non-regular, empty, symlinked, or oversized file
+before submission, and still leaves content detection and malware scanning to the server. It sends
+only the source basename, because the owner-visible job contract retains the safe original stem;
+it never sends a local directory path. `--retries` repeats only ambiguous network failures and
+requires the same explicit idempotency key.
+
+Reverse listing, status, cancellation, and result download remain owner-only even for global
+administrators. Waiting requires the global positive `--timeout`. Downloads use the same private,
+atomic, no-symlink destination boundary as forward results; the caller chooses `.md` or `.zip`
+from the job's `result_mode`, and existing files are preserved unless `--overwrite` is explicit.
 
 ## Authentication profiles
 
@@ -78,3 +106,80 @@ remote service has explicitly configured a different session-cookie name.
 prompts for the current password, new password, and confirmation, verifies the
 current password through a fresh restricted session, sends the CSRF-protected
 renewal request, removes the local profile, and requires a fresh login.
+
+## Templates, versions, and preferences
+
+Template commands use the authenticated HTTP API associated with `--profile`;
+they never open the service database, object store, or local runtime. Active
+templates are visible to every authenticated account. Archived identities and
+their immutable versions remain visible only to their owner and administrators,
+and the service remains authoritative for every owner or administrator mutation.
+
+Discovery and immutable downloads use explicit paths:
+
+```text
+markweave templates list --limit 50 --profile work
+markweave templates search --name finance --status active --profile work
+markweave --json templates show TEMPLATE_UUID --profile work
+markweave templates download TEMPLATE_UUID --output finance.docx --profile work
+markweave templates versions TEMPLATE_UUID --profile work
+markweave templates version-download TEMPLATE_UUID VERSION_UUID --output finance-v1.docx --profile work
+```
+
+Downloads require `--output`, validate the service's SHA-256 ETag before writing,
+and use an atomic same-directory replacement. An existing path is preserved unless
+`--force` is supplied. A local upload must be a non-empty regular file; symlinks
+and other special files are rejected, and its local filename is never included in
+the multipart request.
+
+Creation and replacement require every expected font as a repeated `--font`
+option:
+
+```text
+markweave templates create --name Finance --description Quarterly \
+  --file reference.docx --font Calibri --font Cambria --font "Courier New" --profile work
+markweave templates replace TEMPLATE_UUID --file reference-v2.docx \
+  --font Calibri --font Cambria --font "Courier New" --profile work
+```
+
+`show`, `create`, `update`, `replace`, `restore`, and `archive` include the current
+identity `etag` in JSON output. Conditional mutations accept that exact value with
+`--etag`. When it is omitted, the CLI performs a fresh visible-identity read and
+sends the returned ETag in `If-Match`; it never submits an unconditional mutation.
+A stale explicit ETag therefore produces the service's conflict response without
+silently retrying or overwriting another update.
+
+```text
+markweave templates update TEMPLATE_UUID --name "Finance 2027" \
+  --description "Approved 2027 styles" --etag '"template-TEMPLATE_UUID-3"' --profile work
+markweave templates restore TEMPLATE_UUID VERSION_UUID --etag '"template-TEMPLATE_UUID-4"' --profile work
+markweave templates archive TEMPLATE_UUID --etag '"template-TEMPLATE_UUID-5"' --profile work
+markweave templates delete TEMPLATE_UUID --etag '"template-TEMPLATE_UUID-6"' --profile work
+```
+
+Archive and permanent deletion prompt for confirmation. Automation must combine
+the global `--non-interactive` option with the command's `--force` flag. Deletion
+still requires an archived identity and is rejected by the service while a user
+preference, system fallback, or conversion job references any immutable version.
+
+Each user can set or clear their own preferred template. Only an administrator can
+set the singleton system fallback:
+
+```text
+markweave templates preferred --template-id TEMPLATE_UUID --profile work
+markweave templates preferred --clear --profile work
+markweave templates fallback TEMPLATE_UUID --profile admin
+```
+
+Authenticated read commands expose the same authoritative runtime metadata used by browser
+clients. `markweave conversion-options --profile work` reports the configured conversion upload
+limit and resolved immutable template/version/source. `markweave templates context --profile
+work` reports the current preference, system fallback, and configured template archive limit.
+Both support the global `--json` output for automation. `markweave session-policy get` and update
+output also includes the exact operator-configured absolute lifetime in seconds.
+
+These commands preserve the authenticated actor carried by the stored session, so
+audit attribution and administrator-intervention evidence are identical to the web
+and direct API workflows. HTTP authorization failures and validation failures use
+the service's safe error code and message; uploaded bytes, local filenames, session
+state, and CSRF state are never rendered.

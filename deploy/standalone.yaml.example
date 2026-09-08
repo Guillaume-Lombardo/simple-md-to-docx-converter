@@ -24,7 +24,7 @@ spec:
         - name: application
           image: ${MARKWEAVE_IMAGE}
           imagePullPolicy: IfNotPresent
-          args: [embedded-worker]
+          args: [serve]
           envFrom:
             - configMapRef:
                 name: md-converter
@@ -82,3 +82,13 @@ spec:
         resources:
           requests:
             storage: "${DATA_STORAGE_QUANTITY}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: md-converter-api
+spec:
+  selector:
+    app.kubernetes.io/name: md-converter
+  ports:
+    - {name: http, port: 8080, targetPort: http}

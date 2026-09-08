@@ -1,4 +1,4 @@
 interface:
   display_name: "Yeet GitHub"
-  short_description: "Publish current work in a draft GitHub PR"
-  default_prompt: "Use $yeet-github to validate and publish the current work in a draft GitHub pull request."
+  short_description: "Publish current work in a ready GitHub PR"
+  default_prompt: "Use $yeet-github to validate and publish the current work in a ready-for-review GitHub pull request."

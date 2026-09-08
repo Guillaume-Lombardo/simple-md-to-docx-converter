@@ -24,6 +24,12 @@ class StopSignal(Protocol):
     def wait(self, timeout: float) -> bool: ...
 
 
+class RunnableWorkerLoop(Protocol):
+    """Lifecycle loop accepted by embedded and external wrappers."""
+
+    def run(self, stop: StopSignal) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class WorkerSchedule:
     """Caller-owned polling and cleanup schedule whose values belong to T18."""
@@ -93,7 +99,7 @@ class WorkerLoop:
 class ExternalWorkerRuntime:
     """Run one worker loop with its independently scrapeable metrics lifecycle."""
 
-    def __init__(self, loop: WorkerLoop, metrics: MetricsHttpServer) -> None:
+    def __init__(self, loop: RunnableWorkerLoop, metrics: MetricsHttpServer) -> None:
         self._loop = loop
         self._metrics = metrics
 
@@ -108,7 +114,7 @@ class ExternalWorkerRuntime:
 class EmbeddedWorker:
     """Single lifecycle-owned worker thread for the standalone application profile."""
 
-    def __init__(self, loop: WorkerLoop, *, thread_name: str) -> None:
+    def __init__(self, loop: RunnableWorkerLoop, *, thread_name: str) -> None:
         if not thread_name:
             raise ValueError("Embedded worker thread name is required")
         self._loop = loop

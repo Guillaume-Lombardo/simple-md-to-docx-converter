@@ -14,10 +14,13 @@ passed to Podman as a read-only named build context, so it is not copied into an
 uses the same contract for separate checksum-keyed RPM and DEB caches; untrusted runs restore only,
 and only a trusted push to `main` may populate them.
 
-The entrypoint accepts exactly `api`, `embedded-worker`, or `external-worker`. `api` serves HTTP
-without a worker. `embedded-worker` is the one-replica standalone process. `external-worker` is a
-distributed worker without HTTP. Both worker modes use the package-native `markweave.runtime`
-assembly and the same production conversion processor.
+The entrypoint performs the hardened runtime preflight and then executes the installed `markweave`
+program without translating or restricting its arguments. The default command is `markweave serve`:
+it serves HTTP with the embedded worker for the one-replica standalone profile and without an
+embedded worker for the distributed profile. Distributed worker containers use `markweave worker`.
+Command overrides can invoke `doctor`, `migrate`, `backup`, `restore`, or any supported HTTP client
+command through the same entrypoint. Container-only `api`, `embedded-worker`, and `external-worker`
+commands are not part of this image contract.
 
 Every mode refuses UID 0, non-empty effective or bounding capabilities, absent
 `no-new-privileges`, a writable root, or missing dedicated `/tmp`, `/work`, and `/dev/shm` mounts.
@@ -28,10 +31,15 @@ deployment examples. `/data` is mounted only for standalone persistence.
 
 ## Profiles and resource policy
 
-`deploy/standalone.yaml.example` runs one `embedded-worker` replica with a ReadWriteOnce `/data`
-claim. `deploy/distributed.yaml.example` separates API and external-worker deployments and expects
+`deploy/standalone.yaml.example` runs one `serve` replica with a ReadWriteOnce `/data`
+claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` deployments and expects
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
+
+The repository's public Compose quickstart pins the matched `0.6.1` backend and Next.js frontend
+images by their verified registry digests. The backend starts its standalone role with
+`markweave serve`; the same-origin router exposes the browser and API routes. The deployment
+examples use `markweave serve` for API roles and `markweave worker` for distributed workers.
 
 The examples are workload fragments, not complete production stacks. They deliberately contain
 `${...}` placeholders. Render them only after supplying every
@@ -149,6 +157,64 @@ conditional update, and select the result in the same transaction; PostgreSQL ke
 `UPDATE ... RETURNING` and `SKIP LOCKED`. Tests install a SQLite 3.34 grammar guard so any emitted
 `UPDATE ... RETURNING` fails even on newer developer SQLite libraries.
 
-Build-only npm tooling and unused curl, OpenSSL, and Apache HTTPD command-line executables are
+Build-only Corepack/pnpm tooling and their store, plus unused curl, OpenSSL, and Apache HTTPD
+command-line executables, are
 absent from the runtime filesystem. Required shared libraries and the complete RPM inventory remain
 recorded. This reduces unused attack surface without altering the vulnerability threshold.
+
+## Approved Next.js cutover topology
+
+The repository's `0.6.1` continuation source no longer contains FastAPI browser pages. The public
+default remains on the last deployable release until both `0.6.1` image receipts are verified and a
+separate adoption pull request pins their digests. T64 implements the separate frontend image and the
+literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
+[the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
+
+The approved target uses a UBI 9 Node.js 24 builder and UBI 9 Node.js 24 minimal runtime pinned by
+the reviewed Linux/AMD64 digests. The process is stateless, arbitrary-UID, read-only-root, and
+capability-free, with only bounded memory-backed `/tmp`; it mounts neither `/data` nor `/work` and
+receives no backend service credentials. The standalone profile adds one frontend replica, while
+the distributed profile may scale frontend replicas independently. Both keep browser pages and
+FastAPI behind one TLS origin.
+
+The public `/health/live` and `/health/ready` paths continue to reach FastAPI. Platform probes reach
+the frontend's non-public `/_frontend/health/live` and `/_frontend/health/ready` paths on the
+Service-only probe port 3001; the public router reaches page port 3000 only. The public router must
+normalize the request target and order a content-free `404` denial for `/_frontend/health`, every
+descendant, and decoded or case-varied equivalents before its frontend catch-all. Network policy
+permits frontend ingress only from the public router and platform probe source. Never expose the
+probe port publicly or treat frontend readiness as backend/storage readiness. T64 verifies internal
+live/ready success and failure plus public denial of exact, descendant, encoded, and case-varied
+paths. Deployment manifests must apply the exact initial frontend budgets from the migration
+architecture and keep backend, worker, scanner, storage, and document budgets independent.
+
+The public router strips the complete `Cookie` header before forwarding any method on any
+frontend-owned route to port 3000, including named pages, `/_next/**` assets, and unknown catch-all
+paths. It strips every `Set-Cookie` field from every frontend response regardless of method, status,
+or content type. It preserves both directions unchanged when routing exact `/api/v1`, `/api/v1/**`,
+and public operational routes directly to FastAPI. T60's routing fixture and T64's
+production-router final-image tests must cover named pages, assets, unknown paths, non-GET requests,
+multiple response fields, exact API-base and descendant preservation, and a representative
+operational route.
+
+The frontend uses the T60-owned `web/server.mjs` supported custom-server entry point, not Next.js
+standalone output. Node rejects headers beyond 16 KiB; the server admits at most 128 simultaneous
+requests, emits a zero-length `431` for header overflow and zero-length `503` responses for
+saturation and drain races, and bounds SIGTERM draining to 30 seconds. The runtime therefore
+contains the `.next` production build and exact
+pruned production dependency graph. T60 proves the server contract in isolation and T64 repeats it
+against the final rootless image.
+
+The TLS router owns the response-wide minimum headers
+`Strict-Transport-Security: max-age=31536000` and
+`Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`. Do not add HSTS
+`includeSubDomains` or `preload` without a separate domain-ownership decision. T64 verifies exact,
+non-duplicated values across frontend, FastAPI, error, and download responses.
+It also applies the positive `ROUTER_UPSTREAM_TIMEOUT_MS` inactivity bound to backend and frontend
+relays and destroys upstream work when the downstream connection closes. The loopback Compose
+candidate uses 30 seconds; production manifests require the operator to supply the reviewed value.
+
+At release, deploy only a matched backend/frontend version pair pinned by both verified registry
+manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes
+fail is not deployable. Preserve the prior backend digest containing the legacy UI and its route
+manifest until the cutover rollback window and rehearsal are complete.

@@ -22,6 +22,10 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--artifacts", required=True, type=Path)
     parser.add_argument("--expected-image-id", required=True)
     parser.add_argument("--release", action="store_true")
+    parser.add_argument("--additional-artifact", action="append", default=[])
+    parser.add_argument(
+        "--additional-vulnerability-report", action="append", default=[]
+    )
     return parser.parse_args()
 
 
@@ -56,7 +60,9 @@ def _image_identity(artifacts: Path, expected_image_id: str) -> tuple[str, str, 
     return manifest_digest, config_digest, inspected
 
 
-def _artifact_digests(artifacts: Path) -> dict[str, str]:
+def _artifact_digests(
+    artifacts: Path, additional_artifacts: tuple[str, ...]
+) -> dict[str, str]:
     try:
         return {
             name: sha256_file(artifacts / name)
@@ -65,6 +71,7 @@ def _artifact_digests(artifacts: Path) -> dict[str, str]:
                 "sbom.cdx.json",
                 "sbom.spdx.json",
                 "vulnerabilities.json",
+                *additional_artifacts,
             )
         }
     except IntegrityError as error:
@@ -79,28 +86,45 @@ def main() -> int:
         manifest_digest, config_digest, inspected = _image_identity(
             arguments.artifacts, arguments.expected_image_id
         )
-        artifact_digests = _artifact_digests(arguments.artifacts)
+        additional_artifacts = tuple(arguments.additional_artifact)
+        additional_reports = tuple(arguments.additional_vulnerability_report)
+        if (
+            len(additional_artifacts) != len(set(additional_artifacts))
+            or len(additional_reports) != len(set(additional_reports))
+            or not set(additional_reports).issubset(additional_artifacts)
+        ):
+            raise EvidenceError(
+                "additional evidence names must be unique and every report must be bound"
+            )
+        artifact_digests = _artifact_digests(arguments.artifacts, additional_artifacts)
     except EvidenceError as error:
         print(f"error: {error}")
         return 1
-    report_path = arguments.artifacts / "vulnerabilities.json"
-    report: dict[str, Any] = json.loads(report_path.read_text(encoding="utf-8"))
     severities: Counter[str] = Counter()
     critical_fixed: list[dict[str, object]] = []
     critical_unfixed: list[dict[str, object]] = []
-    for match in report.get("matches", []):
-        vulnerability = match.get("vulnerability", {})
-        severity = vulnerability.get("severity", "Unknown")
-        severities[severity] += 1
-        if severity != "Critical":
-            continue
-        versions = vulnerability.get("fix", {}).get("versions", [])
-        item = {
-            "id": vulnerability.get("id", "unknown"),
-            "package": match.get("artifact", {}).get("name", "unknown"),
-            "fix_versions": versions,
-        }
-        (critical_fixed if versions else critical_unfixed).append(item)
+    report_names = (
+        "vulnerabilities.json",
+        *additional_reports,
+    )
+    for report_name in report_names:
+        report_path = arguments.artifacts / report_name
+        report: dict[str, Any] = json.loads(report_path.read_text(encoding="utf-8"))
+        for match in report.get("matches", []):
+            vulnerability = match.get("vulnerability", {})
+            severity = vulnerability.get("severity", "Unknown")
+            severities[severity] += 1
+            if severity != "Critical":
+                continue
+            versions = vulnerability.get("fix", {}).get("versions", [])
+            item = {
+                "id": vulnerability.get("id", "unknown"),
+                "package": match.get("artifact", {}).get("name", "unknown"),
+                "fix_versions": versions,
+            }
+            if len(report_names) > 1:
+                item["report"] = report_name
+            (critical_fixed if versions else critical_unfixed).append(item)
     evidence = {
         "image": {
             "id": inspected.get("Id"),

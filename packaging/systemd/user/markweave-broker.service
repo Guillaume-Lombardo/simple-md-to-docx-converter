@@ -1,0 +1,15 @@
+[Unit]
+Description=Markweave rootless Podman isolation broker
+Documentation=https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/reverse-broker-deployment.md
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/markweave-broker %h/.config/markweave-broker/broker.json
+Restart=on-failure
+RestartPreventExitStatus=2
+KillMode=control-group
+TimeoutStopSec=infinity
+UMask=0077
+
+[Install]
+WantedBy=default.target

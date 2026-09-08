@@ -1,6 +1,6 @@
 ---
 name: yeet-github
-description: Publish the current repository work in a draft GitHub pull request with gh.
+description: Publish the current repository work in a ready-for-review GitHub pull request with gh.
 ---
 
 # Yeet GitHub
@@ -54,9 +54,9 @@ Never use `git clean`, `git reset --hard`, `git checkout --`, or hook bypasses.
 
 1. Use `gh pr list --head <source-branch> --state all` to ensure no pull request already exists.
 2. Write an English title and body covering objective, tickets and acceptance criteria, changes, technical decisions, impacts, tests, documentation, limitations, both storage profiles, and references.
-3. Create a draft pull request with `gh pr create --draft --head <source-branch> --base <target-branch> --title '<title>' --body-file <temporary-file-outside-repository>`.
+3. Create a ready-for-review pull request with `gh pr create --head <source-branch> --base <target-branch> --title '<title>' --body-file <temporary-file-outside-repository>`. Do not create draft pull requests: draft-to-ready transitions cancel and duplicate CI runs and delay automated review.
 4. Remove the temporary file after the command and never track it.
-5. Verify number, URL, draft state, branches, SHA, and state with `gh pr view`.
+5. Verify number, URL, non-draft state, branches, SHA, and state with `gh pr view`.
 6. If creation has an ambiguous result, look for an existing pull request immediately and do not retry until side effects are known.
 
 ## Result

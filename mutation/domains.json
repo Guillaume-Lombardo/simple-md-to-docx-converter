@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "always_paths": [
+    ".github/workflows/mutation.yml",
+    "mutation/domains.json",
+    "pyproject.toml",
+    "scripts/ci/validate_ci.py",
+    "scripts/ci/run_mutation_campaign.py",
+    "tests/test_ci_validation.py",
+    "tests/test_t22_maintenance.py",
+    "tests/test_t48_mutation.py",
+    "uv.lock"
+  ],
+  "failure_statuses": [
+    "survived",
+    "no_tests",
+    "suspicious",
+    "timeout",
+    "check_was_interrupted_by_user",
+    "segfault"
+  ],
+  "domains": [
+    {
+      "name": "observability",
+      "priority": 1,
+      "paths": [
+        "src/markweave/observability.py",
+        "tests/unit/test_observability.py"
+      ],
+      "mutants": [
+        "markweave.observability.x__normalize_method__mutmut_1",
+        "markweave.observability.x__normalize_method__mutmut_2",
+        "markweave.observability.x__normalize_method__mutmut_3",
+        "markweave.observability.x__normalize_method__mutmut_4"
+      ],
+      "review_notes": [
+        "Preserves the pre-existing bounded observability target markweave.observability.x__normalize_method__mutmut_* with its dedicated unit suite."
+      ]
+    },
+    {
+      "name": "auth-session",
+      "priority": 2,
+      "paths": [
+        "src/markweave/auth/**",
+        "src/markweave/http/**",
+        "tests/unit/auth/**",
+        "tests/functional/test_auth_api.py",
+        "tests/integration/auth/**"
+      ],
+      "mutants": [
+        "markweave.auth.service.xǁAuthenticationServiceǁauthenticate__mutmut_1",
+        "markweave.auth.service.xǁAuthenticationServiceǁauthenticate__mutmut_8",
+        "markweave.auth.service.xǁAuthenticationServiceǁvalidate_csrf__mutmut_3",
+        "markweave.auth.service.xǁAuthenticationServiceǁ_active_session__mutmut_3",
+        "markweave.auth.service.xǁAuthenticationServiceǁ_active_session__mutmut_8"
+      ],
+      "review_notes": [
+        "Covers password-change enforcement, disabled/versioned accounts, session token binding, idle/absolute expiry, and session-bound CSRF validation.",
+        "HttpDependencies is a frozen slots dataclass that mutmut 3.7.0 does not transform. Origin enforcement remains covered by direct functional and integration tests; this tool limitation is not an equivalent-mutant waiver."
+      ]
+    },
+    {
+      "name": "archive-svg",
+      "priority": 3,
+      "paths": [
+        "src/markweave/conversion/archive.py",
+        "src/markweave/conversion/images.py",
+        "tests/unit/conversion/test_archive.py",
+        "tests/unit/conversion/test_images.py",
+        "tests/integration/document_engines/test_archive_images.py"
+      ],
+      "mutants": [
+        "markweave.conversion.archive.x__safe_member_path__mutmut_6",
+        "markweave.conversion.archive.x__safe_member_path__mutmut_20",
+        "markweave.conversion.images.x__has_external_css_reference__mutmut_3",
+        "markweave.conversion.images.x__sanitize_svg_tree__mutmut_10",
+        "markweave.conversion.images.x__sanitize_svg_tree__mutmut_40"
+      ],
+      "review_notes": [
+        "Covers archive absolute/backslash/traversal rejection and SVG resource, traversal-limit, and external-reference sanitization."
+      ]
+    },
+    {
+      "name": "job-integrity",
+      "priority": 4,
+      "paths": [
+        "src/markweave/jobs/**",
+        "src/markweave/persistence/jobs/**",
+        "tests/unit/jobs/**",
+        "tests/integration/sqlite/test_sqlite_jobs.py",
+        "tests/integration/postgres/**"
+      ],
+      "mutants": [
+        "markweave.jobs.service.x__request_digest__mutmut_25",
+        "markweave.jobs.service.xǁJobServiceǁ_idempotency_digest__mutmut_5",
+        "markweave.jobs.worker_publication.x__is_sha256__mutmut_1",
+        "markweave.persistence.jobs.claims.xǁ_JobClaimRepositoryǁheartbeat__mutmut_12",
+        "markweave.persistence.jobs.claims.xǁ_JobClaimRepositoryǁheartbeat__mutmut_30",
+        "markweave.persistence.jobs.claims.xǁ_JobClaimRepositoryǁrecover_expired_leases__mutmut_20"
+      ],
+      "review_notes": [
+        "Covers owner-scoped request identity, idempotency key bounds, publication digest validation, heartbeat monotonicity, lease renewal, fencing, and state-scoped recovery."
+      ]
+    },
+    {
+      "name": "retention-storage",
+      "priority": 5,
+      "paths": [
+        "src/markweave/retention.py",
+        "src/markweave/storage.py",
+        "tests/unit/test_retention.py",
+        "tests/unit/test_storage_adapters.py",
+        "tests/integration/sqlite/test_t18_data_retention.py",
+        "tests/integration/postgres/test_t18_data_retention_distributed.py"
+      ],
+      "mutants": [
+        "markweave.retention.xǁRetentionServiceǁcleanup__mutmut_1",
+        "markweave.retention.xǁRetentionServiceǁcleanup__mutmut_20",
+        "markweave.storage.xǁFilesystemObjectStoreǁput__mutmut_1",
+        "markweave.storage.xǁFilesystemObjectStoreǁput__mutmut_10",
+        "markweave.storage.xǁFilesystemObjectStoreǁget__mutmut_5"
+      ],
+      "review_notes": [
+        "Covers bounded cleanup, retained-version floors, stable object targeting, atomic staging, and provider-neutral missing-object errors."
+      ]
+    }
+  ]
+}

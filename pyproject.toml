@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "markweave"
 # A version change merged to main is the sole automatic publication trigger.
-version = "0.4.0"
+version = "0.6.1"
 description = "Secure Markdown-to-DOCX and PDF conversion service and HTTP CLI"
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,13 +49,21 @@ server = [
 standalone = ["markweave[server]"]
 distributed = [
     "markweave[server]",
-    "boto3>=1.40,<2",
-    "psycopg[binary]>=3.2,<4",
+    "boto3>=1.43.82,<2",
+    "psycopg[binary]>=3.3.4,<4",
 ]
 all = ["markweave[standalone,distributed]"]
+reverse-attempt = [
+    "cairosvg>=2.8,<3",
+    "defusedxml>=0.7,<1",
+    "firecrawl-anydoc==0.2.4",
+    "pillow>=12,<13",
+    "tinycss2>=1.5,<2",
+]
 
 [project.scripts]
 markweave = "markweave.cli.main:main"
+markweave-broker = "markweave.broker_process:main"
 
 [project.urls]
 Documentation = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/blob/main/docs/python-distribution.md"
@@ -68,14 +76,14 @@ Support = "https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/dis
 build = ["hatchling==1.32.0"]
 dev = [
     "httpx>=0.28,<1",
-    "markweave[all]",
+    "markweave[all,reverse-attempt]",
     "mutmut==3.7.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",
     "pytest-mock>=3.15,<4",
-    "ruff>=0.13,<1",
-    "ty>=0.0.1a20,<1",
+    "ruff>=0.16.5,<1",
+    "ty>=0.0.75,<1",
 ]
 
 [tool.markweave.release]
@@ -116,6 +124,7 @@ markers = [
     "unit: deterministic tests without external dependencies",
     "functional: application behavior through public interfaces",
     "integration: integration with a real component",
+    "light_coverage: integration tests included in the light coverage gate",
     "e2e: complete flow against the built container",
     "slow: excluded from explicitly fast checks",
     "requires_pandoc: requires Pandoc",
@@ -155,6 +164,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/ci/check_changed_coverage.py" = ["S603", "S607"]
+"scripts/ci/run_mutation_campaign.py" = ["PLR0913", "S603", "S607"]
 "scripts/ci/run_domain.py" = ["S603"]
 "tests/**/*.py" = ["PLR2004", "S101", "S603", "S607"]
 
@@ -179,6 +189,14 @@ pytest_add_cli_args = [
     "/dev/null",
     "-q",
     "tests/unit/test_observability.py",
+    "tests/unit/auth/test_service.py",
+    "tests/unit/conversion/test_archive.py",
+    "tests/unit/conversion/test_images.py",
+    "tests/unit/jobs/test_job_service.py",
+    "tests/unit/jobs/test_job_worker.py",
+    "tests/unit/test_retention.py",
+    "tests/unit/test_storage_adapters.py",
+    "tests/integration/sqlite/test_sqlite_jobs.py",
 ]
 timeout_constant = 5.0
 timeout_multiplier = 3.0

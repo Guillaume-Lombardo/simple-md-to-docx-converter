@@ -23,6 +23,7 @@ from markweave.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -68,7 +69,12 @@ def test_template_service_visibility_selection_and_audit_context(
     catalog.get.side_effect = {active.id: active, archived.id: archived}.get
     selections = mocker.Mock()
     selections.resolve.return_value = active
+    selections.resolve_with_source.return_value = (
+        active,
+        TemplateSelectionSource.PREFERRED,
+    )
     selections.preferred_id.return_value = active.id
+    selections.context.return_value = (active.id, None)
     service = TemplateService(catalog=catalog, selections=selections)
 
     assert service.get_visible(outsider, active.id) == active
@@ -88,6 +94,11 @@ def test_template_service_visibility_selection_and_audit_context(
     service.set_preferred(owner, active.id)
     service.clear_preferred(owner)
     assert service.resolve(owner) == active
+    assert service.resolve_with_source(owner) == (
+        active,
+        TemplateSelectionSource.PREFERRED,
+    )
+    assert service.selection_context(owner) == (active.id, None)
     assert service.selection_label(owner, active) == "Preferred template"
     selections.preferred_id.return_value = None
     assert service.selection_label(owner, active) == "System fallback template"

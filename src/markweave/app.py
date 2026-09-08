@@ -8,14 +8,14 @@ from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import install_error_handlers
 from markweave.http.lifecycle import build_lifespan, resolve_components
 from markweave.http.middleware import BoundedRequestBody
-from markweave.http.openapi import document_correlation_headers
+from markweave.http.openapi import document_openapi_contract
 from markweave.http.routers import (
     administration,
     audit_observability,
     authentication,
     conversions,
+    reversions,
     templates,
-    web,
 )
 from markweave.jobs.runner import EmbeddedWorker
 from markweave.malware import UploadScanner
@@ -58,6 +58,11 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     app.add_middleware(
         BoundedRequestBody,
         conversion_maximum_bytes=resolved_settings.conversion_request_max_bytes,
+        reversion_maximum_bytes=(
+            resolved_settings.reversion_request_max_bytes
+            if resolved_components.reversions is not None
+            else None
+        ),
         template_maximum_bytes=resolved_settings.template_request_max_bytes,
         template_metadata_maximum_bytes=(
             resolved_settings.template_metadata_request_max_bytes
@@ -70,6 +75,9 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     app.state.components = resolved_components
     app.state.conversion_retry_after_seconds = (
         resolved_settings.conversion_retry_after_seconds
+    )
+    app.state.reversion_retry_after_seconds = (
+        resolved_settings.reversion_retry_after_seconds
     )
     install_error_handlers(app)
 
@@ -86,13 +94,15 @@ def create_app(  # noqa: PLR0913 - explicit lifecycle composition inputs
     )
     routers = (
         audit_observability.build_router(dependencies, embedded_worker),
-        web.build_router(dependencies),
         authentication.build_router(dependencies),
         administration.build_router(dependencies),
         conversions.build_router(dependencies),
+        reversions.build_router(dependencies),
         templates.build_router(dependencies),
     )
     for router in routers:
         app.router.routes.extend(router.routes)
-    document_correlation_headers(app)
+    document_openapi_contract(
+        app, session_cookie_name=resolved_settings.session_cookie_name
+    )
     return app

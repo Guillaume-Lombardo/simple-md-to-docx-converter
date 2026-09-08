@@ -19,6 +19,14 @@ EXPECTED_FILES = frozenset(
         "vulnerabilities.json",
     }
 )
+REVERSE_ATTEMPT_FILES = EXPECTED_FILES | {
+    "anydoc-cargo.cdx.json",
+    "anydoc-cargo-vulnerabilities.json",
+}
+EVIDENCE_PROFILES = {
+    "standard": EXPECTED_FILES,
+    "reverse-attempt": REVERSE_ATTEMPT_FILES,
+}
 SHA256_LINE = re.compile(r"^([0-9a-f]{64})  ([a-z0-9][a-z0-9.-]*)$")
 
 
@@ -37,6 +45,7 @@ def _load_manifest(
     artifacts: Path,
     expected_manifest_sha256: str,
     *,
+    expected_files: frozenset[str] = EXPECTED_FILES,
     allowed_extra_files: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     manifest_path = artifacts / "release-bundle.sha256"
@@ -52,7 +61,7 @@ def _load_manifest(
         raise SupplyChainVerificationError(
             "release bundle directory is unavailable"
         ) from error
-    if actual_names != EXPECTED_FILES | {manifest_path.name} | allowed_extra_files:
+    if actual_names != expected_files | {manifest_path.name} | allowed_extra_files:
         raise SupplyChainVerificationError(
             "release bundle directory does not contain the exact artifact set"
         )
@@ -72,7 +81,7 @@ def _load_manifest(
         if name in recorded:
             raise SupplyChainVerificationError("checksum manifest contains duplicates")
         recorded[name] = digest
-    if set(recorded) != EXPECTED_FILES:
+    if set(recorded) != expected_files:
         raise SupplyChainVerificationError(
             "checksum manifest does not name the exact release artifact set"
         )
@@ -102,12 +111,14 @@ def _load_metadata(artifacts: Path) -> dict[str, Any]:
     return value
 
 
-def create_manifest(artifacts: Path) -> str:
+def create_manifest(
+    artifacts: Path, *, expected_files: frozenset[str] = EXPECTED_FILES
+) -> str:
     """Create the bundle manifest from producer-recorded streaming digests."""
 
     metadata = _load_metadata(artifacts)
     source_digests = metadata.get("artifacts")
-    expected_sources = EXPECTED_FILES - {"image-metadata.json"}
+    expected_sources = expected_files - {"image-metadata.json"}
     if not isinstance(source_digests, dict) or set(source_digests) != expected_sources:
         raise SupplyChainVerificationError(
             "image metadata does not bind the exact source artifact set"
@@ -134,6 +145,7 @@ def verify_bundle(
     artifacts: Path,
     *,
     expected_manifest_sha256: str,
+    expected_files: frozenset[str] = EXPECTED_FILES,
     allowed_extra_files: frozenset[str] = frozenset(),
 ) -> None:
     """Verify the closed artifact set, checksum manifest, and metadata bindings."""
@@ -143,12 +155,13 @@ def verify_bundle(
     recorded = _load_manifest(
         artifacts,
         expected_manifest_sha256,
+        expected_files=expected_files,
         allowed_extra_files=allowed_extra_files,
     )
     _verify_recorded_files(artifacts, recorded)
     metadata = _load_metadata(artifacts)
     metadata_artifacts = metadata.get("artifacts")
-    expected_metadata = EXPECTED_FILES - {"image-metadata.json"}
+    expected_metadata = expected_files - {"image-metadata.json"}
     if not isinstance(metadata_artifacts, dict) or set(metadata_artifacts) != (
         expected_metadata
     ):
@@ -167,6 +180,9 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("action", choices=("create", "verify"))
     parser.add_argument("--artifacts", required=True, type=Path)
     parser.add_argument("--expected-manifest-sha256")
+    parser.add_argument(
+        "--profile", choices=tuple(EVIDENCE_PROFILES), default="standard"
+    )
     return parser.parse_args()
 
 
@@ -174,13 +190,14 @@ def main() -> int:
     """Validate one release-image evidence bundle."""
 
     arguments = _arguments()
+    expected_files = EVIDENCE_PROFILES[arguments.profile]
     try:
         if arguments.action == "create":
             if arguments.expected_manifest_sha256 is not None:
                 raise SupplyChainVerificationError(
                     "manifest creation does not accept an expected digest"
                 )
-            print(create_manifest(arguments.artifacts))
+            print(create_manifest(arguments.artifacts, expected_files=expected_files))
         else:
             if arguments.expected_manifest_sha256 is None:
                 raise SupplyChainVerificationError(
@@ -189,6 +206,7 @@ def main() -> int:
             verify_bundle(
                 arguments.artifacts,
                 expected_manifest_sha256=arguments.expected_manifest_sha256,
+                expected_files=expected_files,
             )
     except SupplyChainVerificationError as error:
         print(f"error: {error}")

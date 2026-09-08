@@ -1,5 +1,10 @@
 # Local development
 
+Browser development now lives under `web/`; FastAPI serves only API, download, OpenAPI, health,
+readiness, and metrics routes. Run the frontend quality gates from `web/` and the root Python gates
+with `uv`. Production-bound testing must exercise the separate rootless frontend and backend images
+through `web/router.mjs`; the development server is not production evidence.
+
 ## Bootstrap
 
 Install `uv` using its supported installation method. From the repository root, synchronize every
@@ -35,7 +40,7 @@ start the standalone API and embedded worker with:
 ```bash
 export MARKWEAVE_HOST=127.0.0.1
 export MARKWEAVE_PORT=8000
-uv run python -m markweave.runtime embedded-worker
+uv run markweave serve
 ```
 
 The package runtime binds `MARKWEAVE_HOST` and `MARKWEAVE_PORT`, documented with the other
@@ -65,12 +70,21 @@ uv run ruff check .
 uv run ty check
 ```
 
-Verify the native browser module with the locked, dependency-free Node test package. Its command
-blocks below 90% line, branch, or function coverage:
+Verify the native final-image browser support module with the locked, dependency-free Node test
+package. Its command blocks below 90% line, branch, or function coverage:
+
+The [JavaScript package-management guide](package-management.md) records the reviewed bootstrap,
+workspace boundary, isolated Mermaid exception, cache policy, benchmark requirements, and rollback
+procedure.
 
 ```bash
-npm ci --ignore-scripts
-npm run test:web
+cd "$(git rev-parse --show-toplevel)"
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run workspace:check
+pnpm run test:web
 ```
 
 Run the default local suite, which excludes only tests requiring Pandoc, Mermaid/Chromium, or
@@ -112,6 +126,16 @@ provisional weekly schedule. Pull requests always run formatting, linting, type 
 browser-module tests with independent coverage gates, unit tests with blocking overall application
 coverage, an explicit branch-only JSON check, changed application line coverage, lock validation,
 and cheap workflow security checks. Draft pull requests do not run activated heavy domains.
+
+T48 phase 1 defines the reviewed, risk-ranked mutation manifest, runner, evidence format, and
+mutation-driven tests before activating the expanded gate. Its five bounded domains cover
+observability, authentication/session, archive/SVG, job integrity, and retention/storage. The
+observability domain preserves the original
+`markweave.observability.x__normalize_method__mutmut_*` target and
+`tests/unit/test_observability.py`. Its JSON evidence records the exact selected and killed counts;
+the phase-2 gate rejects every surviving, untested, suspicious, timed-out, interrupted, or
+crashing mutant. Phase 2 activates it only from a trusted `main` base revision and immediately
+restores `Mutation / critical gate` as a required check.
 
 For pull requests and merge-group candidates, CI writes `coverage.json` from the unit suite and
 compares the reviewed base and head commits with `scripts/ci/check_changed_coverage.py`. At least

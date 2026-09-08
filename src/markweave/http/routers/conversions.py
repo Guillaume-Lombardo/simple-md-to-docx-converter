@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import (
@@ -21,8 +22,12 @@ from starlette.concurrency import run_in_threadpool
 from markweave.auth.models import Role, User
 from markweave.http.dependencies import HttpDependencies
 from markweave.http.errors import error_responses
-from markweave.http.responses import conversion_response
-from markweave.http.schemas import ConversionPageResponse, ConversionResponse
+from markweave.http.responses import conversion_response, template_response
+from markweave.http.schemas import (
+    ConversionOptionsResponse,
+    ConversionPageResponse,
+    ConversionResponse,
+)
 from markweave.jobs.errors import JobRequestError
 from markweave.jobs.models import (
     JobOutput,
@@ -31,6 +36,7 @@ from markweave.jobs.models import (
     source_kind_for_filename,
 )
 from markweave.observability import CORRELATION_HEADER, CORRELATION_STATE_KEY
+from markweave.persistence.errors import PersistenceError
 from markweave.version import VERSION
 
 COMPONENT_VERSIONS = (
@@ -41,6 +47,32 @@ COMPONENT_VERSIONS = (
     ("pandoc", "3.10.2"),
 )
 
+_RESULT_EXTENSIONS = {
+    JobOutput.DOCX: "docx",
+    JobOutput.PDF: "pdf",
+    JobOutput.BOTH: "zip",
+}
+
+
+def _result_content_disposition(
+    source_filename: str | None,
+    output: JobOutput,
+    *,
+    fallback_stem: str,
+) -> str:
+    """Build a safe attachment header preserving the uploaded filename stem."""
+
+    stem = (
+        source_filename.rsplit(".", maxsplit=1)[0]
+        if source_filename is not None
+        else fallback_stem
+    )
+    filename = f"{stem}.{_RESULT_EXTENSIONS[output]}"
+    encoded_filename = quote(filename, safe="")
+    if encoded_filename != filename:
+        return f"attachment; filename*=UTF-8''{encoded_filename}"
+    return f'attachment; filename="{filename}"'
+
 
 def build_router(dependencies: HttpDependencies) -> APIRouter:
     """Build conversion routes bound to one application."""
@@ -48,6 +80,32 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     router = APIRouter()
     settings = dependencies.settings
     components = dependencies.components
+
+    @router.get(
+        "/api/v1/conversion-options",
+        response_model=ConversionOptionsResponse,
+        tags=["conversions"],
+        responses=error_responses(401, 503),
+    )
+    def get_conversion_options(
+        response: Response,
+        actor: Annotated[User, Depends(dependencies.current_user)],
+    ) -> ConversionOptionsResponse:
+        response.headers["Cache-Control"] = "no-store"
+        template, source = dependencies.template_runtime().resolve_with_source(actor)
+        version_id = template.current_version_id if template is not None else None
+        if template is not None and version_id is None:
+            raise PersistenceError
+        return ConversionOptionsResponse(
+            conversion_upload_max_bytes=settings.conversion_upload_max_bytes,
+            resolved_template=(
+                template_response(template, dependencies.authentication)
+                if template is not None
+                else None
+            ),
+            template_version_id=version_id,
+            selection_source=source,
+        )
 
     @router.post(
         "/api/v1/conversions",
@@ -188,18 +246,14 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
             actor_id=actor.id,
             actor_is_admin=actor.role is Role.ADMIN,
         )
-        extensions = {
-            JobOutput.DOCX: "docx",
-            JobOutput.PDF: "pdf",
-            JobOutput.BOTH: "zip",
-        }
         return Response(
             content,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": (
-                    f'attachment; filename="conversion-{job.id}.'
-                    f'{extensions[job.output]}"'
+                "Content-Disposition": _result_content_disposition(
+                    job.source_filename,
+                    job.output,
+                    fallback_stem=f"conversion-{job.id}",
                 ),
                 "Cache-Control": "private, no-store",
                 "X-Content-Type-Options": "nosniff",

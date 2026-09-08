@@ -15,6 +15,7 @@ from scripts.ci.validate_ci import (
     WorkflowLoader,
     discover_workflow_paths,
     main,
+    validate_container_publish_pair_text,
     validate_container_release_workflow_text,
     validate_production_release_workflow_text,
     validate_python_imports,
@@ -226,14 +227,14 @@ def test_approved_complete_suite_schedule_and_parallelism_are_fixed() -> None:
 
 @pytest.mark.unit
 def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
-    """Both retained-evidence uploads use the reviewed v7 pin without direct mode."""
+    """Every retained-evidence upload uses the reviewed v7 pin."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     upload_lines = [
         line.strip()
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 2
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 3
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -256,6 +257,44 @@ def test_ci_uses_only_github_hosted_runners() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("needle", "replacement", "message"),
+    [
+        (
+            "      packages: read",
+            "      packages: write",
+            "light job permissions must be exactly contents: read and packages: read",
+        ),
+        (
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.repository == github.repository",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_TOKEN: ${{ (github.event_name == 'push'",
+            "          GHCR_TOKEN: attacker-controlled",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+        (
+            "          GHCR_USERNAME: ${{ (github.event_name == 'push'",
+            "          GHCR_USERNAME: hard-coded",
+            "public alignment must receive only the ephemeral read-only GHCR credentials",
+        ),
+    ],
+)
+def test_ci_limits_public_alignment_registry_fallback_credentials(
+    needle: str, replacement: str, message: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    errors = validate_workflow_text(
+        workflow.replace(needle, replacement, 1), workflow_name="ci.yml"
+    )
+
+    assert message in errors
+
+
+@pytest.mark.unit
 def test_document_engine_job_installs_checksum_locked_document_engines() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "if: ${{ matrix.domain == 'document-engines' }}" in workflow
@@ -271,7 +310,7 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
         "878e5ab495b8a694980fca61bc09b37e651ccedce2291c73434d16e48a2646fd" in workflow
     )
     assert (
-        "6fc7bf6f32bd3f3108c0955e8994c019c04cd9964b9c50472aa28474e9d7e73f" in workflow
+        "65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff" in workflow
     )
     assert 'PUPPETEER_SKIP_DOWNLOAD: "true"' in workflow
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
@@ -280,17 +319,50 @@ def test_document_engine_job_installs_checksum_locked_document_engines() -> None
     assert "npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts" in workflow
     assert "mmdc --version" in workflow
     assert "google-chrome-stable --version" in workflow
-    assert "npm run test:web-browser" in workflow
+    assert 'apt-get install --yes --allow-downgrades "$chrome_deb"' in workflow
+    assert "npm run test:web-browser" not in workflow
     assert "awk '{$1=$1; print}'" in workflow
 
 
 @pytest.mark.unit
-def test_validator_rejects_removed_real_browser_workflow() -> None:
-    """Pinned module tests cannot stand in for the real Chrome acceptance workflow."""
+def test_native_browser_support_coverage_is_blocking() -> None:
+    package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    runner = Path("scripts/run-web-tests.mjs").read_text(encoding="utf-8")
+
+    assert package["scripts"]["test:web"] == "node scripts/run-web-tests.mjs"
+    for contract in (
+        "--experimental-test-coverage",
+        "--test-coverage-include=tests/e2e/browser-helpers.mjs",
+        "--test-coverage-lines=90",
+        "--test-coverage-branches=90",
+        "--test-coverage-functions=90",
+        "coverage does not meet threshold",
+    ):
+        assert contract in runner
+
+
+@pytest.mark.unit
+def test_validator_requires_pinned_chrome_downgrade_support() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    weakened = workflow.replace("npm run test:web-browser", "npm run test:web")
+    weakened = workflow.replace(" --allow-downgrades", "")
+
+    assert "pinned Chrome installation must permit an explicit downgrade" in (
+        validate_workflow_text(weakened)
+    )
+
+
+@pytest.mark.unit
+def test_validator_rejects_stale_legacy_browser_workflow() -> None:
+    """The deleted legacy browser suite cannot remain wired into CI."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    stale = workflow.replace(
+        "      - name: Prepare the RustFS test bucket",
+        "      - name: Run removed legacy browser workflow\n"
+        "        run: npm run test:web-browser\n"
+        "      - name: Prepare the RustFS test bucket",
+    )
     assert any(
-        "test:web-browser" in error for error in validate_workflow_text(weakened)
+        "legacy browser workflow" in error for error in validate_workflow_text(stale)
     )
 
 
@@ -299,16 +371,98 @@ def test_e2e_matrix_installs_rootless_runtime_and_retains_only_failures() -> Non
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert (
         "matrix.domain == 'compose' || matrix.domain == 'container' || "
-        "startsWith(matrix.domain, 'e2e-')" in workflow
+        "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-')" in workflow
     )
-    assert (
-        "matrix.domain == 'document-engines' || startsWith(matrix.domain, 'e2e-')"
-        in workflow
-    )
+    assert "matrix.domain == 'document-engines'" in workflow
+    assert "Set up pinned Node for rootless E2E" in workflow
     assert "failure() && startsWith(matrix.domain, 'e2e-')" in workflow
     assert (
         "artifacts/e2e/${{ matrix.domain == 'e2e-standalone' "
         "&& 'standalone' || 'distributed' }}" in workflow
+    )
+
+
+@pytest.mark.unit
+def test_frontend_heavy_domain_uses_the_exact_pinned_node_runtime() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "- name: Set up pinned Node for frontend smoke" in workflow
+    assert "if: ${{ matrix.domain == 'frontend' }}" in workflow
+    assert "node-version: 24.19.0" in workflow
+    assert "pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}" in workflow
+    assert "Rehearse the exact npm rollback candidate" in workflow
+    assert "1594128bc84290df3699390643c729ef9d5d6d30" in workflow
+    assert '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"' in workflow
+    assert "Collect the T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 benchmark metadata" in workflow
+    assert "Download the accepted T67 package-manager benchmark" in workflow
+    assert "Verify the accepted T67 package-manager benchmark" in workflow
+    assert "Retain the T67 package-manager benchmark" in workflow
+    assert "900 10 /dev/stderr t67/rollback --" in workflow
+    assert 900 + 10 < 45 * 60 / 2
+    assert "1620 20 /dev/stderr t67/benchmark --" in workflow
+    assert "PNPM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "actions: read" in workflow
+    assert (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
+    )
+    assert "run-id: 33799673333" in workflow
+    assert "artifact-ids: 9911803951" in workflow
+    assert "repository: Guillaume-Lombardo/simple-md-to-docx-converter" in workflow
+    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow
+    assert '"$RUNNER_TEMP/t67-benchmark-metadata.txt"' in workflow
+    assert "rerun_t67_benchmark:" in workflow
+    assert "artifacts/package-manager-benchmark" in workflow
+    rollback_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+        "github.head_ref == 'chore/T67-pnpm-workspace' && "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert f"if: {rollback_condition}" in workflow
+    wrong_artifact = workflow.replace(
+        "artifact-ids: 9911803951", "artifact-ids: 9911803952"
+    )
+    assert (
+        "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        in validate_workflow_text(wrong_artifact)
+    )
+    manual_condition = (
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+        "&& inputs.rerun_t67_benchmark && "
+        "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+    )
+    assert f"if: {manual_condition}" in workflow
+    weakened_manual = workflow.replace(
+        manual_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(weakened_manual)
+    )
+    future_frontend_pr = workflow.replace(
+        rollback_condition,
+        "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' }}",
+    )
+    assert any(
+        "condition does not match the explicit policy" in error
+        for error in validate_workflow_text(future_frontend_pr)
+    )
+    weakened = workflow.replace(
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24.19.0",
+        "- name: Set up pinned Node for frontend smoke\n"
+        "        if: ${{ matrix.domain == 'frontend' }}\n"
+        "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 "
+        "# v7.0.0\n"
+        "        with:\n"
+        "          node-version: 24",
+    )
+    assert "frontend smoke must use the reviewed pinned Node setup" in (
+        validate_workflow_text(weakened)
     )
 
 
@@ -412,11 +566,17 @@ def test_validator_rejects_removed_changed_line_coverage() -> None:
 @pytest.mark.parametrize(
     ("command", "replacement"),
     [
-        ("uv run pytest -m unit", "echo uv run pytest -m unit"),
-        ("uv run pytest -m unit", "true # uv run pytest -m unit"),
         (
-            "uv run pytest -m unit",
-            "COMMAND='uv run pytest -m unit'; $COMMAND",
+            'uv run pytest -m "unit or light_coverage"',
+            'echo uv run pytest -m "unit or light_coverage"',
+        ),
+        (
+            'uv run pytest -m "unit or light_coverage"',
+            'true # uv run pytest -m "unit or light_coverage"',
+        ),
+        (
+            'uv run pytest -m "unit or light_coverage"',
+            "COMMAND='uv run pytest -m \"unit or light_coverage\"'; $COMMAND",
         ),
         (
             "python -m scripts.ci.check_changed_coverage",
@@ -512,12 +672,24 @@ def test_container_release_policy_requires_recovery_final_image_smoke() -> None:
         encoding="utf-8"
     )
     weakened = workflow.replace(
-        '          bash scripts/container/recovery-cli-smoke.sh "$image"\n',
+        '          bash scripts/container/recovery-cli-smoke.sh "$backend_image"\n',
         "",
         1,
     )
     errors = validate_container_release_workflow_text(weakened)
     assert any("recovery-cli-smoke.sh" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_container_release_policy_requires_oci_frontend_build() -> None:
+    workflow = Path(".github/workflows/container-release.yml").read_text(
+        encoding="utf-8"
+    )
+    weakened = workflow.replace("podman build --format oci", "podman build")
+
+    errors = validate_container_release_workflow_text(weakened)
+
+    assert any("podman build --format oci" in error for error in errors)
 
 
 @pytest.mark.unit
@@ -563,7 +735,11 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
         "type": "string",
     }
     recovery = workflow["jobs"]["recover-evidence"]
-    assert recovery["permissions"] == {"actions": "read", "contents": "read"}
+    assert recovery["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "packages": "write",
+    }
     identity = next(
         step["run"]
         for step in recovery["steps"]
@@ -575,7 +751,7 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
     assert '.path == ".github/workflows/container-release.yml"' in identity
     assert 'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"' in identity
     assert 'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"' in identity
-    assert 'scope=repository:$registry_path:pull"' in identity
+    assert "container-stage-$RELEASE_TAG" in identity
     download = next(
         step
         for step in recovery["steps"]
@@ -589,7 +765,7 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
         "run-id": "${{ inputs.artifact-run-id }}",
         "path": "artifacts/container",
     }
-    assert "scripts.container.recover_release_evidence" in next(
+    assert "scripts.container.release_pair verify" in next(
         step["run"]
         for step in recovery["steps"]
         if step["name"] == "Verify retained bundle integrity and release identity"
@@ -621,9 +797,9 @@ def test_container_recovery_uses_exact_retained_artifact_and_public_digest() -> 
             "container release is missing dynamic contract: artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
         ),
         (
-            "scripts.container.recover_release_evidence",
+            "scripts.container.release_pair verify",
             "scripts.container.verify_supply_chain",
-            "container release is missing dynamic contract: scripts.container.recover_release_evidence",
+            "container release is missing dynamic contract: scripts.container.release_pair verify",
         ),
     ],
 )
@@ -644,7 +820,11 @@ def test_container_recovery_routes_exact_digest_to_existing_jobs() -> None:
         encoding="utf-8"
     )
     assert (
-        "subject-digest: ${{ needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest }}"
+        "subject-digest: ${{ needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest }}"
+        in workflow
+    )
+    assert (
+        "subject-digest: ${{ needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest }}"
         in workflow
     )
     assert "needs.recover-evidence.result == 'success'" in workflow
@@ -878,83 +1058,83 @@ def test_container_release_policy_requires_dynamic_exact_source_and_evidence() -
 
 @pytest.mark.unit
 def test_container_release_inspects_remote_version_before_push() -> None:
-    workflow = yaml.safe_load(
-        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+        encoding="utf-8"
     )
-    steps = workflow["jobs"]["build-and-publish"]["steps"]
-    [run] = [
-        step["run"]
-        for step in steps
-        if step["name"] == "Publish without overwriting a conflicting release image"
-    ]
-
-    stage = "podman push --format oci"
-    inspect = 'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
-    version_copy = 'copy_staged_tag "$RELEASE_VERSION"'
-    assert run.count(stage) == 1
-    assert run.index(stage) < run.index(inspect) < run.index(version_copy)
-    assert 'test "$staged_manifest_digest" = "$intended_digest"' in run
-    assert "skopeo copy --preserve-digests --retry-times 3" in run
-    assert '"docker://$registry_repository:$tag"; then' in run
-    assert "copy_status=0" in run
-    assert 'copy_status="$?"' in run
-    assert 'if copied_digest="$(inspect_remote_tag "$tag")"; then' in run
-    assert '[[ "$copied_digest" = "$intended_digest" ]]' in run
-    assert 'test "$remote_digest" = "$intended_digest"' in run
+    assert validate_container_publish_pair_text(publisher) == []
+    assert publisher.count("oci-archive:$artifacts/$role/image.oci.tar") == 1
+    first_loop = publisher.index("for role in backend frontend; do")
+    second_loop = publisher.index("for role in backend frontend; do", first_loop + 1)
+    stage = publisher.index("oci-archive:$artifacts/$role/image.oci.tar", first_loop)
+    inspect = publisher.index('inspect_remote_tag "$role" "$tag"', stage)
+    copy = publisher.index('copy_staged_tag "$role" "$tag"', second_loop)
+    assert first_loop < stage < inspect < second_loop < copy
 
 
 @pytest.mark.unit
 def test_container_release_rejects_unverified_skopeo_failure_tolerance() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '[[ "$copied_digest" = "$intended_digest" ]]',
+    weakened = publisher.replace(
+        '[[ "$copied_digest" = "${intended_digests[$role]}" ]]',
         '[[ "$copy_status" != 0 ]] # trust the tool failure without registry proof',
     )
-    errors = validate_container_release_workflow_text(weakened)
+    errors = validate_container_publish_pair_text(weakened)
     assert any("copied_digest" in error for error in errors)
 
 
 @pytest.mark.unit
-def test_container_release_rejects_errexit_toggle_around_skopeo() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+def test_container_release_authenticates_skopeo_with_an_isolated_authfile() -> None:
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '"docker://$registry_repository:$tag"; then',
-        '"docker://$registry_repository:$tag" # followed by a global errexit toggle',
+
+    assert validate_container_publish_pair_text(publisher) == []
+    assert publisher.index('readonly registry_auth_file="$staging_root/auth.json"') < (
+        publisher.index('skopeo login --authfile "$registry_auth_file"')
     )
-    errors = validate_container_release_workflow_text(weakened)
+    assert publisher.count('--authfile "$registry_auth_file"') == 2
+    weakened = publisher.replace('--authfile "$registry_auth_file"', "", 1)
     assert any(
-        '"docker://$registry_repository:$tag"; then' in error for error in errors
+        "skopeo login" in error
+        for error in validate_container_publish_pair_text(weakened)
     )
 
 
 @pytest.mark.unit
-def test_container_release_policy_rejects_conflict_guard_removal() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+def test_container_release_rejects_errexit_toggle_around_skopeo() -> None:
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        'test "$remote_digest" = "$intended_digest"',
+    errors = validate_container_publish_pair_text(publisher + "\nset +e\n")
+    assert "container pair publisher weakens the execution boundary" in errors
+
+
+@pytest.mark.unit
+def test_container_release_policy_rejects_conflict_guard_removal() -> None:
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+        encoding="utf-8"
+    )
+    weakened = publisher.replace(
+        'test "$remote_digest" = "${intended_digests[$role]}"',
         "true # permit overwrite",
     )
-    errors = validate_container_release_workflow_text(weakened)
+    errors = validate_container_publish_pair_text(weakened)
     assert any("remote_digest" in error for error in errors)
 
 
 @pytest.mark.unit
 def test_container_release_policy_rejects_remote_digest_derivation() -> None:
-    workflow = Path(".github/workflows/container-release.yml").read_text(
+    publisher = Path("scripts/container/publish-release-pair.sh").read_text(
         encoding="utf-8"
     )
-    weakened = workflow.replace(
-        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
-        '"localhost/md-converter:$RELEASE_VERSION" "docker://$registry_repository:unsafe"',
+    weakened = publisher.replace(
+        '"oci-archive:$artifacts/$role/image.oci.tar" "dir:$staging_root/$role"',
+        '"oci-archive:$artifacts/$role/image.oci.tar" "docker://${repositories[$role]}:unsafe"',
     )
-    errors = validate_container_release_workflow_text(weakened)
-    assert any("dir:$registry_stage" in error for error in errors)
+    errors = validate_container_publish_pair_text(weakened)
+    assert any("dir:$staging_root/$role" in error for error in errors)
 
 
 @pytest.mark.unit

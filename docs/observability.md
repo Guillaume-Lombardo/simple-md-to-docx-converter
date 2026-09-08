@@ -30,6 +30,27 @@ rows. The endpoint exposes:
 
 - `md_converter_queue_depth` and `md_converter_queue_oldest_age_seconds`;
 - `md_converter_active_jobs`;
+- `md_converter_reversion_queue_depth`,
+  `md_converter_reversion_queue_oldest_age_seconds`, and
+  `md_converter_reversion_active_jobs` for the distinct reverse queue;
+- `md_converter_shared_capacity_used`, the queued-plus-running admission usage across both job
+  families;
+- `md_converter_reversion_proof_blocked_attempts`,
+  `md_converter_reversion_proof_ack_backlog`, and
+  `md_converter_reversion_reconciliation_pending` for content-free reverse safety backlogs;
+- `md_converter_reversion_runtime_enabled`, `md_converter_reversion_broker_ready`,
+  `md_converter_reversion_reconciliation_ready`, and `md_converter_reversion_degraded` for the
+  process-local reverse execution state;
+- `md_converter_reversion_broker_fault`, `md_converter_reversion_reconciliation_fault`, and
+  `md_converter_reversion_runtime_fault` as mutually exclusive content-free fault scopes;
+- `md_converter_reversion_job_failures_total` for terminal job failures and
+  `md_converter_reversion_runtime_faults_total` for retryable infrastructure/runtime faults;
+- `md_converter_reversion_worker_retries_total`, `md_converter_reversion_recoveries_total`, and
+  `md_converter_reversion_expirations_total`; recovery counts only jobs actually requeued, not
+  intermediate proof acknowledgements;
+- `md_converter_reversion_operation_duration_seconds_count` and `_sum`, labelled only by the
+  closed operations `reversion_reconciliation`, `reversion_recovery`, `reversion_claim`, and
+  `reversion_cleanup`;
 - `md_converter_job_step_duration_seconds_count` and `_sum`, labelled only by the fixed step;
 - `md_converter_job_failures_total`, labelled by stable safe error code;
 - `md_converter_job_saturation_total`, labelled `owner` or `global`;
@@ -41,6 +62,16 @@ Counters are process-local and reset on process restart. Durable job state remai
 queue depth, age, and active-job gauges are recomputed from the selected SQLite or PostgreSQL
 profile for every scrape. Distributed deployments aggregate process-local counters in the metrics
 backend and must not sum the database-derived gauges across API replicas.
+
+The original queue gauge names retain their forward-conversion meaning for dashboard compatibility.
+Reverse gauges use dedicated names rather than a user-controlled or content-derived label. A proof
+is counted as blocked only after its durable attempt lease has expired with a create intent and no
+termination proof. The acknowledgement backlog combines durable attempt and orphan proofs that have
+not yet been acknowledged. Reconciliation pending counts only durable broker-principal rows that
+are incomplete or retain a reconciliation lease token, including an expired token awaiting safe
+takeover; zero principals therefore remains neutral for a forward-only
+deployment and does not claim that a reverse broker is ready. These gauges contain no owner, job,
+attempt, unit, filename, format, digest, path, or document label.
 
 Each external-worker process must run the lifecycle returned by
 `AppComponents.build_external_worker_runtime`, not the bare loop. It binds a process-local HTTP
@@ -106,9 +137,22 @@ connect/read budgets. These probe-only clients use the required positive finite
 bounded provider operation. Any component failure returns the stable content-free `NOT_READY`
 response. Liveness remains independent at `GET /health/live`.
 
+Reverse execution is optional and does not change this global readiness contract:
+`/health/ready` remains ready while the forward database and object-store path is healthy. An
+enabled reverse worker starts degraded until authenticated broker reconciliation reaches a fixed
+point. Broker, reconciliation, and runtime faults are exposed separately by the process-local
+metrics above and by closed-vocabulary JSON state-change, failure, retry, recovery, expiration, and
+duration events. This keeps healthy forward capacity available during a reverse outage while making
+the degradation explicit. Distributed API-only processes report reverse runtime disabled; the
+external worker's independently scraped metrics surface is authoritative for its broker state.
+
 ## Operational verification
 
 Final-image tests run standalone and distributed deployments and verify API metrics, isolated
 readiness success and failure, account audit mutations and authorization failures, and a separately
 scrapeable external-worker listener that stops with its worker. Recovery exercises must additionally
 verify readiness and preserve audit ordering and retention across backup and restore.
+The final-image metrics smoke requires every reverse/shared gauge name. T71's assembled
+SQLite/PostgreSQL integration contract exercises nonzero queue and safety transitions; T73 owns the
+complete final-image reverse fault-state and recovery matrix once the public reverse-attempt image
+is available.

@@ -59,13 +59,17 @@ SAFE_GITHUB_PROPERTIES = frozenset(
         "github.event.pull_request.base.sha",
         "github.event.pull_request.draft",
         "github.event.pull_request.head.sha",
+        "github.event.pull_request.head.repo.full_name",
         "github.event.pull_request.number",
         "github.event_name",
+        "github.actor",
+        "github.head_ref",
         "github.ref",
         "github.repository",
         "github.run_attempt",
         "github.run_id",
         "github.sha",
+        "github.token",
     }
 )
 RELEASE_FORBIDDEN_TRIGGERS = frozenset(
@@ -90,6 +94,8 @@ READ_ONLY_ENV_STEPS = frozenset(
     {
         ("detect", "Select affected domains"),
         ("light", "Enforce changed application line coverage"),
+        ("light", "Validate the canonical OpenAPI contract"),
+        ("light", "Verify public release alignment"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
         ("heavy", "Prepare verified LibreOffice DEB archive"),
         ("heavy", "Prepare verified LibreOffice RPM archive"),
@@ -99,6 +105,10 @@ READ_ONLY_ENV_STEPS = frozenset(
             "Install verified fonts and LibreOffice for document-engine tests",
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
+        ("heavy", "Rehearse the exact npm rollback candidate"),
+        ("heavy", "Verify the accepted T67 benchmark metadata"),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"),
+        ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
@@ -106,6 +116,24 @@ READ_ONLY_ENV_STEPS = frozenset(
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
+T67_ROLLBACK_REHEARSAL_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository }}"
+)
+T67_MANUAL_BENCHMARK_CONDITION = (
+    "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
+    "&& inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
+)
+T67_BENCHMARK_ARTIFACT_CONDITION = (
+    "${{ always() && matrix.domain == 'frontend' && "
+    "((github.event_name == 'pull_request' && "
+    "github.head_ref == 'chore/T67-pnpm-workspace' && "
+    "github.event.pull_request.head.repo.full_name == github.repository) || "
+    "(github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && "
+    "github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}"
+)
 
 
 @dataclass(frozen=True)
@@ -145,8 +173,12 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "2645ebf0f05beb703e8e86912041475895ba9087e3c3a42736a137981a448f91"
+    "6040a82045b49f57ca16a6e2bf1fd0b109b4e173107b1f117c0260fde4808891"
 )
+CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
+    "b180243d6fefbbbe9b4966e50cb5f42dea066cef48d419d0fb034e618758b3fe"
+)
+RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
 )
@@ -170,6 +202,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "actions/checkout",
                 "actions/cache/restore",
                 "actions/cache/save",
+                "actions/download-artifact",
                 "actions/setup-node",
                 "actions/setup-python",
                 "actions/upload-artifact",
@@ -188,7 +221,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "detect": frozenset(
                 {"name", "outputs", "runs-on", "steps", "timeout-minutes"}
             ),
-            "light": frozenset({"name", "runs-on", "steps", "timeout-minutes"}),
+            "light": frozenset(
+                {"name", "permissions", "runs-on", "steps", "timeout-minutes"}
+            ),
             "domain-plan": frozenset(
                 {"name", "needs", "runs-on", "steps", "timeout-minutes"}
             ),
@@ -198,6 +233,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                     "if",
                     "name",
                     "needs",
+                    "permissions",
                     "runs-on",
                     "services",
                     "steps",
@@ -220,6 +256,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): (
                 "${{ github.event_name == 'pull_request' || "
                 "github.event_name == 'merge_group' }}"
+            ),
+            (
+                "light",
+                "Save the exact pnpm store cache from trusted main",
+            ): (
+                "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+                "&& github.repository == "
+                "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
             ),
             (
                 "heavy",
@@ -256,8 +300,12 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Install rootless Podman for container validation",
             ): (
                 "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-                "startsWith(matrix.domain, 'e2e-') }}"
+                "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
             ),
+            (
+                "heavy",
+                "Set up pinned Node for frontend smoke",
+            ): "${{ matrix.domain == 'frontend' }}",
             (
                 "heavy",
                 "Install verified Pandoc for document-engine tests",
@@ -268,18 +316,53 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ): "${{ matrix.domain == 'document-engines' }}",
             (
                 "heavy",
-                "Set up the pinned Node runtime for browser and Mermaid tests",
+                "Set up the pinned Node runtime for Mermaid tests",
+            ): "${{ matrix.domain == 'document-engines' }}",
+            (
+                "heavy",
+                "Set up pinned Node for rootless E2E",
+            ): "${{ startsWith(matrix.domain, 'e2e-') }}",
+            (
+                "heavy",
+                "Bootstrap verified Corepack and pnpm for workspace domains",
             ): (
-                "${{ matrix.domain == 'document-engines' || "
+                "${{ matrix.domain == 'frontend' || "
                 "startsWith(matrix.domain, 'e2e-') }}"
             ),
             (
                 "heavy",
-                "Install verified Mermaid and Chrome for document-engine tests",
-            ): "${{ matrix.domain == 'document-engines' }}",
+                "Restore the exact pnpm store cache for workspace domains",
+            ): (
+                "${{ matrix.domain == 'frontend' || "
+                "startsWith(matrix.domain, 'e2e-') }}"
+            ),
             (
                 "heavy",
-                "Run authenticated conversion workflow in pinned Chrome",
+                "Rehearse the exact npm rollback candidate",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Verify the accepted T67 benchmark metadata",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Download the accepted T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Verify the accepted T67 package-manager benchmark",
+            ): T67_ROLLBACK_REHEARSAL_CONDITION,
+            (
+                "heavy",
+                "Collect the T67 package-manager benchmark",
+            ): T67_MANUAL_BENCHMARK_CONDITION,
+            (
+                "heavy",
+                "Retain the T67 package-manager benchmark",
+            ): T67_BENCHMARK_ARTIFACT_CONDITION,
+            (
+                "heavy",
+                "Install verified Mermaid and Chrome for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
                 "heavy",
@@ -298,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="699aa2513e22d562b48382cf45809ad4dd9f68cd7858851db34668ff8e963e56",
+        canonical_digest="a88b50587f9938b55ea5b405e318068bf85a11141982f95c7c440d7b902e5a69",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -523,6 +606,23 @@ def _validate_read_only_step(
     return errors
 
 
+def _validate_read_only_job_permissions(
+    job_name: str, job: Mapping[str, Any]
+) -> list[str]:
+    expected = {
+        "light": {"contents": "read", "packages": "read"},
+        "heavy": {"actions": "read", "contents": "read"},
+    }.get(job_name)
+    if expected is not None and job.get("permissions") != expected:
+        return [
+            f"{job_name} job permissions must be exactly "
+            + " and ".join(f"{key}: {value}" for key, value in expected.items())
+        ]
+    if expected is None and "permissions" in job:
+        return [f"read-only job {job_name!r} must not override workflow permissions"]
+    return []
+
+
 def _validate_read_only_job(
     job_name: str, job: Mapping[str, Any], *, policy: WorkflowPolicy
 ) -> list[str]:
@@ -546,10 +646,7 @@ def _validate_read_only_job(
         or timeout > maximum
     ):
         errors.append(f"job {job_name!r} must define an allowlisted bounded timeout")
-    if "permissions" in job:
-        errors.append(
-            f"read-only job {job_name!r} must not override workflow permissions"
-        )
+    errors.extend(_validate_read_only_job_permissions(job_name, job))
     if job.get("runs-on") != "ubuntu-24.04":
         errors.append(f"job {job_name!r} must use the allowlisted hosted runner")
     steps = job.get("steps")
@@ -667,6 +764,93 @@ def _job_steps(workflow: Mapping[str, Any], job_name: str) -> list[dict[str, Any
     return [step for value in steps if (step := _mapping(value)) is not None]
 
 
+def _validate_no_legacy_browser_command(workflow: Mapping[str, Any]) -> list[str]:
+    jobs = _mapping(workflow.get("jobs")) or {}
+    commands = (
+        str((_mapping(step) or {}).get("run", ""))
+        for job in jobs.values()
+        for step in (_mapping(job) or {}).get("steps", [])
+    )
+    return (
+        ["legacy browser workflow command must not remain in CI"]
+        if any("npm run test:web-browser" in command for command in commands)
+        else []
+    )
+
+
+def _validate_chrome_downgrade_install(workflow: Mapping[str, Any]) -> list[str]:
+    document_engine_install = [
+        step.get("run")
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name")
+        == "Install verified Mermaid and Chrome for document-engine tests"
+    ]
+    return (
+        ["pinned Chrome installation must permit an explicit downgrade"]
+        if len(document_engine_install) != 1
+        or 'apt-get install --yes --allow-downgrades "$chrome_deb"'
+        not in str(document_engine_install[0])
+        else []
+    )
+
+
+def _validate_public_alignment_credentials(
+    workflow: Mapping[str, Any],
+) -> list[str]:
+    alignment_steps = [
+        step
+        for step in _job_steps(workflow, "light")
+        if step.get("name") == "Verify public release alignment"
+    ]
+    expected = {
+        "BASE_SHA": (
+            "${{ github.event.pull_request.base.sha || "
+            "github.event.merge_group.base_sha || github.event.before }}"
+        ),
+        "EVENT_NAME": "${{ github.event_name }}",
+        "GHCR_TOKEN": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.token || '' }}"
+        ),
+        "GHCR_USERNAME": (
+            "${{ (github.event_name == 'push' || (github.event_name == "
+            "'pull_request' && github.event.pull_request.head.repo.full_name == "
+            "github.repository)) && github.actor || '' }}"
+        ),
+        "HEAD_SHA": (
+            "${{ github.event.pull_request.head.sha || "
+            "github.event.merge_group.head_sha || github.sha }}"
+        ),
+    }
+    if len(alignment_steps) != 1 or alignment_steps[0].get("env") != expected:
+        return [
+            "public alignment must receive only the ephemeral read-only GHCR "
+            "credentials"
+        ]
+    return []
+
+
+def _validate_t67_benchmark_download(workflow: Mapping[str, Any]) -> list[str]:
+    downloads = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Download the accepted T67 package-manager benchmark"
+    ]
+    expected = {
+        "artifact-ids": 9_911_803_951,
+        "path": "artifacts/package-manager-benchmark",
+        "github-token": "${{ github.token }}",
+        "repository": "Guillaume-Lombardo/simple-md-to-docx-converter",
+        "run-id": 33_799_673_333,
+    }
+    if len(downloads) != 1 or downloads[0].get("with") != expected:
+        return [
+            "accepted T67 benchmark download must use the exact reviewed artifact ID"
+        ]
+    return []
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -677,8 +861,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         errors.append("workflow must define exactly one CI / gate check")
 
     required_commands = {
-        ("light", "Run unit tests with branch coverage"): (
-            "uv run pytest -m unit --cov-report=json:coverage.json"
+        ("light", "Run light tests with branch coverage"): (
+            'uv run pytest -m "unit or light_coverage" --cov-report=json:coverage.json'
         ),
         ("light", "Enforce application branch-only coverage"): (
             "uv run python -m scripts.ci.check_branch_coverage "
@@ -689,10 +873,53 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
             "--source-root src/markweave --fail-under 90"
         ),
-        ("heavy", "Run authenticated conversion workflow in pinned Chrome"): (
-            "npm run test:web-browser"
+        ("light", "Validate the canonical OpenAPI contract"): (
+            "set -euo pipefail\n"
+            "uv run python -m scripts.openapi_contract check\n"
+            'if [[ -n "$BASE_SHA" && "$BASE_SHA" != '
+            '"0000000000000000000000000000000000000000" ]]; then\n'
+            "  uv run python -m scripts.openapi_contract compare "
+            '--baseline-git-ref "$BASE_SHA"\n'
+            "fi\n"
         ),
-        ("heavy", "Install the locked E2E browser driver"): ("npm ci --ignore-scripts"),
+        ("light", "Verify public release alignment"): (
+            "uv run python -m scripts.release.public_alignment "
+            '--event-name "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA"'
+        ),
+        ("light", "Verify the workspace frontend"): (
+            'test "$(node --version)" = "v24.19.0"\n'
+            'test "$(corepack --version)" = "0.36.0"\n'
+            'test "$(pnpm --version)" = "11.25.0"\n'
+            "pnpm --filter @markweave/web run check\n"
+            "pnpm --filter @markweave/web run build\n"
+            "pnpm --filter @markweave/web run test:production\n"
+        ),
+        ("heavy", "Install the locked E2E browser driver"): (
+            "pnpm install --frozen-lockfile --ignore-scripts "
+            "--filter md-converter-web-tests"
+        ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            "scripts/javascript/run_bounded_benchmark_command.py "
+            "900 10 /dev/stderr t67/rollback -- "
+            "bash scripts/javascript/rehearse-npm-rollback.sh "
+            '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
+        ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            "bash scripts/javascript/reuse-package-benchmark.sh "
+            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark '
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
+            "uv run python scripts/javascript/verify_benchmark_artifact_metadata.py "
+            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            "scripts/javascript/run_bounded_benchmark_command.py "
+            "1620 20 /dev/stderr t67/benchmark -- "
+            "bash scripts/javascript/benchmark-package-managers.sh "
+            '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
+            "artifacts/package-manager-benchmark"
+        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -711,6 +938,12 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
 
+    errors.extend(_validate_t67_benchmark_download(workflow))
+
+    errors.extend(_validate_no_legacy_browser_command(workflow))
+    errors.extend(_validate_chrome_downgrade_install(workflow))
+    errors.extend(_validate_public_alignment_credentials(workflow))
+
     required_conditions = {
         ("light", "Enforce changed application line coverage"): (
             "${{ github.event_name == 'pull_request' || "
@@ -718,11 +951,31 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Install rootless Podman for container validation"): (
             "${{ matrix.domain == 'compose' || matrix.domain == 'container' || "
-            "startsWith(matrix.domain, 'e2e-') }}"
+            "matrix.domain == 'frontend' || startsWith(matrix.domain, 'e2e-') }}"
         ),
-        ("heavy", "Set up the pinned Node runtime for browser and Mermaid tests"): (
-            "${{ matrix.domain == 'document-engines' || "
-            "startsWith(matrix.domain, 'e2e-') }}"
+        ("heavy", "Set up pinned Node for frontend smoke"): (
+            "${{ matrix.domain == 'frontend' }}"
+        ),
+        ("heavy", "Set up the pinned Node runtime for Mermaid tests"): (
+            "${{ matrix.domain == 'document-engines' }}"
+        ),
+        ("heavy", "Set up pinned Node for rootless E2E"): (
+            "${{ startsWith(matrix.domain, 'e2e-') }}"
+        ),
+        ("heavy", "Rehearse the exact npm rollback candidate"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 benchmark metadata"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Download the accepted T67 package-manager benchmark"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
+            T67_ROLLBACK_REHEARSAL_CONDITION
+        ),
+        ("heavy", "Collect the T67 package-manager benchmark"): (
+            T67_MANUAL_BENCHMARK_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
@@ -738,6 +991,28 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             errors.append(
                 f"missing required workflow condition: {expected_condition!r}"
             )
+
+    frontend_node_steps = [
+        step
+        for step in _job_steps(workflow, "heavy")
+        if step.get("name") == "Set up pinned Node for frontend smoke"
+    ]
+    frontend_node_options = (
+        _mapping(frontend_node_steps[0].get("with"))
+        if len(frontend_node_steps) == 1
+        else None
+    )
+    if (
+        len(frontend_node_steps) != 1
+        or frontend_node_steps[0].get("uses")
+        != "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+        or frontend_node_options
+        != {
+            "node-version": "24.19.0",
+            "check-latest": False,
+        }
+    ):
+        errors.append("frontend smoke must use the reviewed pinned Node setup")
 
     evidence_steps = [
         step
@@ -771,7 +1046,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         step.get("if")
         for job_name in jobs
         for step in _job_steps(workflow, job_name)
-        if isinstance(step.get("uses"), str)
+        if str(step.get("name", "")).startswith("Save verified LibreOffice")
+        and isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/cache/save@")
     ]
     if libreoffice_cache_writes != [
@@ -1389,6 +1665,52 @@ def validate_release_workflow_text(
     return errors
 
 
+def validate_container_publish_pair_text(text: str) -> list[str]:
+    """Validate the exact-byte, preflight-before-copy pair publisher."""
+    errors: list[str] = []
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != (
+        CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST
+    ):
+        errors.append("container pair publisher differs from the reviewed policy")
+    required_fragments = (
+        "set -euo pipefail",
+        "for role in backend frontend; do",
+        "scripts.container.verify_supply_chain verify",
+        '"oci-archive:$artifacts/$role/image.oci.tar" "dir:$staging_root/$role"',
+        "skopeo copy --preserve-digests",
+        'test "sha256:$(sha256sum "$staging_root/$role/manifest.json"',
+        "ghcr.io/guillaume-lombardo/md-converter-web",
+        'skopeo copy --authfile "$registry_auth_file" --preserve-digests --retry-times 3',
+        'skopeo login --authfile "$registry_auth_file"',
+        "--password-stdin ghcr.io",
+        'skopeo copy --authfile "$registry_auth_file"',
+        'chmod 0600 "$registry_auth_file"',
+        '[[ "$copied_digest" = "${intended_digests[$role]}" ]]',
+        'if remote_digest="$(inspect_remote_tag "$role" "$tag")"; then',
+        'test "$remote_digest" = "${intended_digests[$role]}"',
+        'test "$(inspect_remote_tag "$role" "$tag")" = "${intended_digests[$role]}"',
+        "scripts.container.release_pair create",
+        "backend-digest=%s\\nfrontend-digest=%s\\n",
+    )
+    errors.extend(
+        f"container pair publisher is missing: {required}"
+        for required in required_fragments
+        if required not in text
+    )
+    if "set +e" in text or "--privileged" in text.casefold():
+        errors.append("container pair publisher weakens the execution boundary")
+    stage_loop = text.find("for role in backend frontend; do")
+    copy_loop = text.find("for role in backend frontend; do", stage_loop + 1)
+    stage = text.find("oci-archive:$artifacts/$role/image.oci.tar", stage_loop)
+    preflight = text.find('inspect_remote_tag "$role" "$tag"', stage)
+    copy = text.find('copy_staged_tag "$role" "$tag"', copy_loop)
+    if not 0 <= stage_loop < stage < preflight < copy_loop < copy:
+        errors.append(
+            "container pair publisher must preflight both images before any copy"
+        )
+    return errors
+
+
 def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     text: str,
 ) -> list[str]:
@@ -1438,7 +1760,11 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release jobs do not match the exact contract")
     expected_permissions = {
         "build-and-publish": {"contents": "read", "packages": "write"},
-        "recover-evidence": {"actions": "read", "contents": "read"},
+        "recover-evidence": {
+            "actions": "read",
+            "contents": "read",
+            "packages": "write",
+        },
         "attest": {
             "attestations": "write",
             "contents": "read",
@@ -1499,10 +1825,13 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ):
             errors.append("automatic publication must not enter the recovery job")
         timeout = job.get("timeout-minutes")
+        maximum_timeout = (
+            120 if name == "build-and-publish" else MAX_RELEASE_TIMEOUT_MINUTES
+        )
         if (
             not isinstance(timeout, int)
             or isinstance(timeout, bool)
-            or not 0 < timeout <= MAX_RELEASE_TIMEOUT_MINUTES
+            or not 0 < timeout <= maximum_timeout
         ):
             errors.append(f"container release job {name!r} lacks a bounded timeout")
     errors.extend(
@@ -1513,6 +1842,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
                     "actions/attest-build-provenance",
                     "actions/checkout",
                     "actions/download-artifact",
+                    "actions/setup-node",
                     "actions/setup-python",
                     "actions/upload-artifact",
                     "astral-sh/setup-uv",
@@ -1526,32 +1856,30 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         errors.append("container release workflow must not access stored secrets")
     if "--privileged" in text.casefold():
         errors.append("container release workflow must not use privileged containers")
+    try:
+        pair_publisher = Path("scripts/container/publish-release-pair.sh").read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        errors.append("container release pair publisher is missing")
+        pair_publisher = ""
+    errors.extend(validate_container_publish_pair_text(pair_publisher))
     for required in (
         'test "$RELEASE_TAG" = "v$RELEASE_VERSION"',
         'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)" = "$SOURCE_SHA"',
         "[.tag_name, .target_commitish, .draft, .prerelease] | @tsv",
         '"localhost/md-converter:$RELEASE_VERSION"',
-        'bash scripts/container/recovery-cli-smoke.sh "$image"',
+        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
+        '"localhost/md-converter-web:$RELEASE_VERSION"',
+        'MARKWEAVE_E2E_LOCAL_IMAGE="localhost/md-converter:$RELEASE_VERSION"',
+        'MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE="localhost/md-converter-web:$RELEASE_VERSION"',
+        "bash scripts/e2e/run.sh standalone",
+        "bash scripts/e2e/run.sh distributed",
         "container-release-${{ inputs.tag }}",
         "sudo apt-get install --yes podman skopeo",
         "skopeo --version",
-        'source_tag="source-$SOURCE_SHA"',
-        'registry_stage="$(mktemp -d "$RUNNER_TEMP/registry-stage.XXXXXX")"',
-        '"localhost/md-converter:$RELEASE_VERSION" "dir:$registry_stage"',
-        'test "$staged_manifest_digest" = "$intended_digest"',
-        "skopeo copy --preserve-digests --retry-times 3",
-        '"docker://$registry_repository:$tag"; then',
-        "copy_status=0",
-        'copy_status="$?"',
-        'if copied_digest="$(inspect_remote_tag "$tag")"; then',
-        '[[ "$copied_digest" = "$intended_digest" ]]',
-        'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then',
-        'test "$remote_digest" = "$intended_digest"',
-        'test "$(inspect_remote_tag "$RELEASE_VERSION")" = "$intended_digest"',
-        'if [[ "$status" = 404 ]]; then',
-        "podman push --format oci",
-        "artifacts/container/registry-publication.json",
-        "scripts.container.recover_release_evidence",
+        "scripts/container/publish-release-pair.sh",
+        "scripts.container.release_pair verify",
         "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
         "run-id: ${{ inputs.artifact-run-id }}",
         "merge-multiple: true",
@@ -1563,12 +1891,13 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
         '.name == "build-and-publish"',
         '.conclusion == "success"',
-        ".total_count == 1",
-        ".size_in_bytes <= 2000000000",
+        "container-stage-$RELEASE_TAG",
+        ".size_in_bytes <= 4000000000",
         ".expired == false",
-        'scope=repository:$registry_path:pull"',
-        'test "$public_status" = 200',
-        "needs.build-and-publish.outputs.digest || needs.recover-evidence.outputs.digest",
+        "Retain staged pair before registry mutation",
+        "container-stage-${{ inputs.tag }}",
+        "needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest",
+        "needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest",
         '--repo "$GITHUB_REPOSITORY"',
         "--clobber",
     ):
@@ -1592,12 +1921,14 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     build_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")
-        if step.get("name") == "Build and validate the final rootless image"
+        if step.get("name") == "Build and validate the final rootless image pair once"
     ]
     build_run = build_steps[0].get("run") if len(build_steps) == 1 else None
     for required in (
-        'SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" bash scripts/container/build.sh "$image"',
-        'bash scripts/container/recovery-cli-smoke.sh "$image"',
+        'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build.sh "$backend_image"',
+        'podman build --format oci --timestamp "$source_date_epoch"',
+        'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
+        'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"automatic container build is missing: {required}")
@@ -1611,7 +1942,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         "Set up uv",
         "Synchronize locked recovery dependencies",
         "Validate release, source run, artifact, and public image identity",
+        "Install rootless Podman and Skopeo for exact-byte recovery",
         "Download the exact retained artifact by immutable ID",
+        "Recover or verify the exact retained pair publication",
         "Verify retained bundle integrity and release identity",
         "Transfer the exact verified evidence to this recovery run",
     ]
@@ -1634,11 +1967,10 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         ".head_repository.id == $repository_id",
         ".workflow_run.repository_id == $repository_id",
         ".workflow_run.head_repository_id == $repository_id",
-        ".total_count == 1",
+        "container-stage-$RELEASE_TAG",
         'git merge-base --is-ancestor "$SOURCE_SHA" "$run_sha"',
         'git merge-base --is-ancestor "$run_sha" "$GITHUB_SHA"',
-        'scope=repository:$registry_path:pull"',
-        "printf 'artifact-id=%s\\ndigest=%s\\n'",
+        "printf 'artifact-id=%s\\n'",
     ):
         if not isinstance(recovery_identity, str) or required not in recovery_identity:
             errors.append(
@@ -1660,13 +1992,17 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     provenance = [
         index
         for index, step in enumerate(attest_steps)
-        if step.get("name") == "Attest the published image identity"
+        if step.get("name")
+        in {
+            "Attest the published backend image identity",
+            "Attest the published frontend image identity",
+        }
         and step.get("uses", "").startswith("actions/attest-build-provenance@")
     ]
     if (
         len(attest_login) != 1
-        or len(provenance) != 1
-        or attest_login[0] >= provenance[0]
+        or len(provenance) != len(RELEASE_IMAGE_ROLES)
+        or any(attest_login[0] >= index for index in provenance)
     ):
         errors.append("container attestation must authenticate to GHCR before push")
     evidence_steps = _job_steps(workflow, "release-evidence")
@@ -1690,28 +2026,16 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
     publish_steps = [
         step
         for step in _job_steps(workflow, "build-and-publish")
-        if step.get("name") == "Publish without overwriting a conflicting release image"
+        if step.get("name")
+        == "Publish the bound pair without overwriting a conflicting image"
     ]
     publish_run = publish_steps[0].get("run") if len(publish_steps) == 1 else None
     if not isinstance(publish_run, str):
         errors.append("container release lacks the unique guarded publication step")
-    else:
-        inspect_marker = (
-            'if remote_digest="$(inspect_remote_tag "$RELEASE_VERSION")"; then'
+    elif "scripts/container/publish-release-pair.sh" not in publish_run:
+        errors.append(
+            "container release must invoke the reviewed pair publication boundary"
         )
-        stage_marker = "podman push --format oci"
-        copy_marker = 'copy_staged_tag "$RELEASE_VERSION"'
-        if (
-            inspect_marker not in publish_run
-            or stage_marker not in publish_run
-            or copy_marker not in publish_run
-            or publish_run.count(stage_marker) != 1
-            or publish_run.index(stage_marker) > publish_run.index(inspect_marker)
-            or publish_run.index(inspect_marker) > publish_run.index(copy_marker)
-        ):
-            errors.append(
-                "container release must stage exact bytes then inspect before registry copy"
-            )
     return errors
 
 

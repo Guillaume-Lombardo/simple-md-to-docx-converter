@@ -1,5 +1,12 @@
 # Local authentication
 
+Browser authentication is implemented by the separate Next.js runtime using relative same-origin
+calls to FastAPI. The production router strips cookies from every frontend request but preserves
+them unchanged on API routes; FastAPI remains the only session, CSRF, password, and authorization
+authority. The backend no longer serves `/login` or `/change-password` pages.
+Next.js owns the `/login`, `/change-password`, `/convert`, and `/templates` browser routes;
+FastAPI owns only their `/api/v1/**` authentication, conversion, and template operations.
+
 ## Provisioning and startup
 
 Public registration is not exposed. Startup requires the initial administrator through
@@ -66,11 +73,24 @@ check of the account security version. Successful current verification and succe
 verification plus rehash each perform one current-profile unit.
 
 Sessions use opaque CSPRNG tokens; `MARKWEAVE_SESSION_TOKEN_BYTES` defaults to 32 bytes and
-cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. Idle and absolute
-lifetimes default to 30 minutes and 8 hours and are configured with
-`MARKWEAVE_SESSION_IDLE_SECONDS` and `MARKWEAVE_SESSION_ABSOLUTE_SECONDS`. Login rotates any
-present session, logout revokes it, and account deactivation or password reset revokes every
-session for that account.
+cannot be lower than 16 bytes. Only SHA-256 token digests are stored server-side. With no persisted
+administrator override, standard users expire after 30 idle minutes and administrators after 15
+idle minutes. An administrator can atomically configure the system-wide pair through
+`/api/v1/admin/session-policy`: standard users accept whole minutes from 5 through 300 and
+administrators accept whole minutes from 5 through 60. `MARKWEAVE_SESSION_ABSOLUTE_SECONDS`
+defaults to 8 hours and remains an operator-owned hard ceiling regardless of the selected idle
+duration. Updates that exceed the configured absolute lifetime are rejected without changing the
+policy or audit. The deprecated `MARKWEAVE_SESSION_IDLE_SECONDS` input remains accepted for 0.x
+configuration compatibility, emits a startup warning, and does not control effective policy. Login rotates any present session, logout
+revokes it, and account deactivation or password reset revokes every session for that account.
+
+FastAPI reads the current policy and the account's current effective role during every session
+validation. It compares the resulting deadline with the session's last activity, its previously
+stored idle deadline, and its absolute deadline. Tightening a duration or changing a role therefore
+applies to already issued cookies immediately. Relaxing a duration can extend only a session that
+is still valid; expiry, logout, account security changes, password renewal, and absolute expiry are
+never reversed. Successful validation advances activity and stores a new deadline bounded by the
+absolute lifetime.
 
 Each account carries a monotonically increasing authentication version. Password reset,
 deactivation, and reactivation increment it atomically. Login verifies a snapshot and then uses a
@@ -110,11 +130,14 @@ browser into the attacker's account.
 - `PATCH /api/v1/admin/users/{id}/active`: activation and deactivation
 - `POST /api/v1/admin/users/{id}/password`: administrative password reset
 - `PATCH /api/v1/admin/users/{id}/password-change-required`: renewal requirement
+- `GET`, `PUT /api/v1/admin/session-policy`: read or atomically replace both role idle durations
 - `GET /health/live`, `GET /health/ready`: cheap liveness and readiness probes
 
-Every successful administrator account creation, deactivation, reactivation, and password reset is
-committed atomically with a content-free immutable audit record. `GET /api/v1/audit` merges those
-records deterministically with template audits; failed or unauthorized requests create no audit.
+Every successful administrator account creation, deactivation, reactivation, password reset, and
+idle-session policy update is committed atomically with a content-free immutable audit record.
+Policy evidence contains the actor, old pair, new pair, resulting revision, operation, and time;
+it contains no cookie, token, password, or credential. `GET /api/v1/audit` merges those records
+deterministically with template audits; failed, stale, or unauthorized requests create no audit.
 - `GET /docs`, `GET /openapi.json`: interactive and machine-readable API contracts
 - `GET /convert`: authenticated server-rendered conversion interface
 - `GET /templates`: authenticated template interface and administrator-only account tab
@@ -147,6 +170,33 @@ same-origin form origin without disclosing referrers cross-origin. The explicit 
 SSH-tunnel tests. It is not an authentication deployment option and must never be exposed to a
 network or used in production.
 
+## Next.js migration boundary
+
+The approved frontend migration does not change this authentication contract. After T64, browser
+pages come from the same-origin Next.js process, but login, session inspection, logout, password
+renewal, expiry, revocation, authorization, cookies, CSRF validation, and Origin validation remain
+direct FastAPI operations. Next.js application code may neither read nor forward the HttpOnly
+session cookie. The public router enforces this boundary by removing the complete `Cookie` header
+from every request selected for the frontend, for every method and including named pages, assets,
+and unknown catch-all paths. It removes every `Set-Cookie` field from every frontend response
+regardless of method, status, or content type. It applies neither transformation to exact
+`/api/v1`, `/api/v1/**`, or public operational routes, so FastAPI continues to receive browser
+cookies and issue or clear all session and CSRF cookies directly. Browser JavaScript continues to
+read only the `__Host-md_converter_csrf` cookie and copy it to `X-CSRF-Token` for mutations.
+
+The frontend renders no authoritative authenticated state on the server. It loads the principal
+from `/api/v1/session`, treats `401` and restricted-session responses as authoritative, and never
+extends a session with a client timer. HTML and authenticated data remain `no-store`. The complete
+login, renewal, expiry, navigation, race, accessibility, and safe-error parity inventory is in
+[the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
+
+Session inspection and the user nested in a successful login response include
+`effective_idle_minutes`. FastAPI computes this value from the current effective role and the
+persisted policy. The Next.js shell displays it as informational policy text; it does not derive a
+deadline, poll session inspection, or decide whether a cookie is valid. A protected request that
+receives `401` moves the browser to one fixed sign-in-again state. Login credential failures remain
+form errors, and failed mutations are never replayed after reauthentication.
+
 ## Verification inventory
 
 Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E cover:
@@ -163,3 +213,6 @@ Unit, functional ASGI, real Argon2id integration, and hardened final-image E2E c
   and forced relogin with the new password;
 - startup failure for absent or invalid bootstrap secrets without secret or hash leakage;
 - liveness and readiness behavior in both standalone and distributed profiles.
+- role-specific policy defaults, inclusive bounds, strict whole-minute HTTP validation, stale
+  writes, restart and backup/restore persistence, immediate tightening and role changes, and
+  non-revival after expiry or revocation.

@@ -33,7 +33,10 @@ def test_internal_runtime_factory_is_not_reexported_as_public_api() -> None:
 def test_package_declares_the_markweave_console_entry_point() -> None:
     """The installed executable resolves to the stable root registry."""
     metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert metadata["project"]["scripts"] == {"markweave": "markweave.cli.main:main"}
+    assert metadata["project"]["scripts"] == {
+        "markweave": "markweave.cli.main:main",
+        "markweave-broker": "markweave.broker_process:main",
+    }
 
 
 @pytest.mark.unit
@@ -47,13 +50,20 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
     assert extras["standalone"] == ["markweave[server]"]
     assert extras["distributed"] == [
         "markweave[server]",
-        "boto3>=1.40,<2",
-        "psycopg[binary]>=3.2,<4",
+        "boto3>=1.43.82,<2",
+        "psycopg[binary]>=3.3.4,<4",
     ]
     assert extras["all"] == ["markweave[standalone,distributed]"]
-    assert "boto3>=1.40,<2" not in extras["server"]
-    assert "psycopg[binary]>=3.2,<4" not in extras["server"]
-    assert "markweave[all]" in metadata["dependency-groups"]["dev"]
+    assert extras["reverse-attempt"] == [
+        "cairosvg>=2.8,<3",
+        "defusedxml>=0.7,<1",
+        "firecrawl-anydoc==0.2.4",
+        "pillow>=12,<13",
+        "tinycss2>=1.5,<2",
+    ]
+    assert "boto3>=1.43.82,<2" not in extras["server"]
+    assert "psycopg[binary]>=3.3.4,<4" not in extras["server"]
+    assert "markweave[all,reverse-attempt]" in metadata["dependency-groups"]["dev"]
 
 
 @pytest.mark.unit

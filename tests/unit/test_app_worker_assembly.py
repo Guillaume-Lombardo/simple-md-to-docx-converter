@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
+from uuid import UUID
 
 import pytest
 from pytest_mock import MockerFixture
@@ -10,6 +11,12 @@ from pytest_mock import MockerFixture
 from markweave.app import AppComponents
 from markweave.auth.ports import ReadinessProbe
 from markweave.auth.service import AuthenticationService
+from markweave.broker.models import (
+    AuthenticatedPrincipal,
+    BrokerPolicy,
+    RuntimeChannelLimits,
+    RuntimeLimits,
+)
 from markweave.jobs.ports import JobProcessor, JobRepository
 from markweave.jobs.runner import (
     EmbeddedWorker,
@@ -20,7 +27,15 @@ from markweave.jobs.runtime import JobPolicies
 from markweave.jobs.service import JobService
 from markweave.jobs.worker import WorkerPolicy
 from markweave.observability import QueueObserver
+from markweave.persistence.reversion_jobs import SqlReversionJobRepository
 from markweave.retention import RetentionService
+from markweave.reversion_jobs.runner import FairWorkerLoop
+from markweave.reversion_jobs.runtime import (
+    ReversionBrokerClient,
+    ReversionExecutionPolicies,
+    ReversionWorkerPolicy,
+)
+from markweave.reversions.models import ReverseContentLimits
 from markweave.storage import ObjectStore
 from markweave.templates.processor import TemplateAwareProcessor
 from markweave.templates.service import TemplateService
@@ -174,3 +189,52 @@ def test_embedded_worker_uses_the_same_complete_production_assembly(
             worker_id="external-metrics",
             processor=mocker.Mock(spec=TemplateAwareProcessor),
         )
+
+
+def test_complete_reverse_components_select_the_fair_production_loop(
+    mocker: MockerFixture,
+) -> None:
+    components, _retention = _components(mocker)
+    channel = RuntimeChannelLimits(10_000, 30_000)
+    content = ReverseContentLimits(
+        10_000,
+        30_000,
+        10_000,
+        100,
+        100,
+        10_000,
+        100,
+        16,
+        8,
+        20_000,
+        20_000,
+        10_000,
+        30_000,
+    )
+    policies = ReversionExecutionPolicies(
+        AuthenticatedPrincipal(UUID("10000000-0000-4000-8000-000000000001")),
+        BrokerPolicy(
+            "production-v1",
+            "sha256:" + "a" * 64,
+            RuntimeLimits(100_000, 100_000, 512_000_000, 32, 40_000, 30_000),
+            channel,
+        ),
+        content,
+        ReversionWorkerPolicy(30, 5, 120, 3_600, 300, 1, 30, 8, 30, 8, 1),
+        8,
+        60,
+        2,
+    )
+    complete = replace(
+        components,
+        reversion_repository=mocker.Mock(spec=SqlReversionJobRepository),
+        reversion_policies=policies,
+        reversion_broker=mocker.Mock(spec=ReversionBrokerClient),
+    )
+
+    loop = complete.build_external_worker_loop(
+        worker_id="external-1",
+        processor=mocker.Mock(spec=TemplateAwareProcessor),
+    )
+
+    assert isinstance(loop, FairWorkerLoop)

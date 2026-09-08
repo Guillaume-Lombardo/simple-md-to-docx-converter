@@ -44,7 +44,7 @@ test("authenticated browser state remains valid after forced restart", {
     step = "verify authenticated state after forced restart";
     await page.goto("/templates", { waitUntil: "networkidle" });
     assert.equal(page.url(), `${baseUrl}/templates`);
-    await waitForText(page, "body", "Local accounts");
+    await waitForText(page, "body", "Templates");
     assert.equal((await sessionRequest(page, "/api/v1/session")).status, 200);
     assert.equal(
       (await sessionRequest(page, "/api/v1/logout", { method: "POST", mutate: true })).status,

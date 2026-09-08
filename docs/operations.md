@@ -1,5 +1,13 @@
 # Operations guide
 
+## Frontend cutover operations
+
+The public router exposes one origin while keeping frontend page readiness and FastAPI service
+readiness independent. A frontend outage must leave direct API operations intact and produces a
+bounded router error for pages; a backend outage leaves static/frontend responses available but API
+requests fail safely. Drain and replace the router, frontend, API, and workers according to their
+own bounds, and never treat frontend readiness as proof that storage or workers are healthy.
+
 ## Health, metrics, and logs
 
 `/health/live` proves that the API process can answer. `/health/ready` checks the dependencies needed

@@ -101,6 +101,13 @@ export async function discardTrace(trace) {
   trace.started = false;
 }
 
+export async function closeCompletedBrowserPhases(contexts, traces) {
+  await Promise.allSettled(traces.map(({ trace }) => discardTrace(trace)));
+  const contextResults = await Promise.allSettled(contexts.map((context) => context.close()));
+  const failedContext = contextResults.find(({ status }) => status === "rejected");
+  if (failedContext) throw failedContext.reason;
+}
+
 async function safeScreenshot(page, destination) {
   if (!page || page.isClosed()) return;
   await page.screenshot({
@@ -150,13 +157,19 @@ export async function retainFailureArtifacts({
   await chmod(diagnostic, 0o600);
 }
 
-export function assertDownloadedResult(output, headers, content) {
+export function assertDownloadedResult(output, sourceStem, headers, content) {
   assert.ok(content.length > 0, `${output} download is empty`);
   const disposition = headers["content-disposition"] || "";
   const expectedExtension = output === "both" ? "zip" : output;
-  assert.match(
-    disposition,
-    new RegExp(`^attachment; filename="conversion-[0-9a-f-]+\\.${expectedExtension}"$`),
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const quotedFilename = disposition.match(/filename="([^"]+)"/i);
+  const downloadedFilename = encodedFilename
+    ? decodeURIComponent(encodedFilename[1])
+    : quotedFilename?.[1];
+  assert.match(disposition, /^attachment;/i, `${output} download is not an attachment`);
+  assert.equal(
+    downloadedFilename,
+    `${sourceStem}.${expectedExtension}`,
     `${output} download disposition is invalid`,
   );
   assert.equal(headers["cache-control"], "private, no-store");

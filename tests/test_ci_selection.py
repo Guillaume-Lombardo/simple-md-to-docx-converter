@@ -30,6 +30,8 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "README.md",
         "compose.simple.yaml",
         "compose.podman.yaml",
+        "compose.nextjs-podman.yaml",
+        "compose.nextjs-podman-trusted-upstream.yaml",
         "compose.yaml",
         "docs/local-development.md",
         "examples/quickstart-template.docx.base64",
@@ -38,6 +40,7 @@ def test_documentation_only_change_has_no_heavy_domain() -> None:
         "scripts/quickstart.sh",
         "scripts/e2e/run-compose-all.sh",
         "scripts/e2e/run-compose-simple.sh",
+        "scripts/e2e/run-compose-podman-insecure.sh",
         "tests/test_quickstart_compose.py",
     ],
 )
@@ -61,7 +64,7 @@ def test_source_change_selects_all_application_domains_except_container() -> Non
     """Shared Python behavior affects functional, storage, engine, and E2E suites."""
     selected = select_domains(["src/markweave/service.py"])
     assert selected == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
     )
 
 
@@ -107,6 +110,67 @@ def test_t20_asset_changes_select_container_domain(path: str) -> None:
     if path != "tests/container/test_container_assets.py":
         assert "e2e-distributed" in selected
         assert "e2e-standalone" in selected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/markweave/reversions/attempt_main.py",
+        "src/markweave/reversions/package.py",
+        "src/markweave/__init__.py",
+        "src/markweave/version.py",
+        "src/markweave/conversion/__init__.py",
+        "src/markweave/conversion/errors.py",
+        "src/markweave/conversion/images.py",
+        "src/markweave/broker/podman_runtime.py",
+        "src/markweave/broker_process.py",
+        "src/markweave/broker/service.py",
+        "src/markweave/broker/inventory.py",
+        "src/markweave/broker/models.py",
+        "src/markweave/broker/ports.py",
+        "src/markweave/broker/errors.py",
+        "src/markweave/broker/reconciliation.py",
+        "tests/integration/broker/fixtures/Containerfile",
+        "tests/integration/broker/fixtures/attempt_main.py",
+        "tests/integration/broker/test_podman_runtime_integration.py",
+        "tests/integration/broker/test_broker_process_integration.py",
+        "tests/integration/broker/test_unix_broker_transport.py",
+        "packaging/broker/broker-unix-v1.json.in",
+        "packaging/broker/broker-mtls-v2.json.in",
+        "packaging/systemd/user/markweave-broker.service",
+        "docs/reverse-broker-deployment.md",
+        "spikes/anydoc/LICENSE.anydoc",
+        "spikes/anydoc/corpus/docx/text.docx",
+        "LICENSE",
+        "README.md",
+    ],
+)
+def test_reverse_attempt_inputs_select_container_validation(path: str) -> None:
+    """Every input baked into or exercised against the attempt image rebuilds it."""
+
+    assert "container" in select_domains([path])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "packaging/broker/broker-unix-v1.json.in",
+        "packaging/broker/broker-mtls-v2.json.in",
+        "packaging/systemd/user/markweave-broker.service",
+        "docs/reverse-broker-deployment.md",
+    ],
+)
+def test_broker_service_deployment_selects_only_container_domain(path: str) -> None:
+    assert select_domains([path]) == ["container"]
+
+
+@pytest.mark.unit
+def test_anydoc_corpus_selects_real_library_integration() -> None:
+    """Changes to real anydoc inputs rerun the document-engine integration domain."""
+
+    assert "document-engines" in select_domains(["spikes/anydoc/corpus/docx/text.docx"])
 
 
 @pytest.mark.unit
@@ -188,6 +252,23 @@ def test_t06_functional_domain_is_active_and_runnable() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path", ["web/package.json", "web/server.mjs", "openapi/v1.json"]
+)
+def test_frontend_inputs_select_rootless_frontend_smoke(path: str) -> None:
+    registry = load_registry(Path(".github/ci/domains.json"))
+    selected = select_domains([path])
+    planned, runnable = classify_domains(selected, registry)
+    assert planned == []
+    assert "frontend" in runnable
+    assert registry["frontend"] == {
+        "activation_ticket": "T60",
+        "command": ["bash", "web/scripts/run-rootless-smoke.sh"],
+        "status": "active",
+    }
+
+
+@pytest.mark.unit
 def test_auth_integration_change_selects_functional_domain() -> None:
     """Real authentication boundary tests cannot bypass their hosted domain."""
     assert "functional" in select_domains(
@@ -205,6 +286,7 @@ def test_auth_integration_change_selects_functional_domain() -> None:
         "tests/golden/openxml.py",
         "tests/unit/test_golden_raster.py",
         "tests/integration/document_engines/test_reference_corpus.py",
+        "tests/integration/anydoc/test_compat_adapter.py",
     ],
 )
 def test_golden_infrastructure_selects_active_document_engine_domain(
@@ -222,17 +304,18 @@ def test_golden_infrastructure_selects_active_document_engine_domain(
     "path",
     [
         "package.json",
-        "tests/browser/conversion.browser.test.mjs",
-        "tests/browser/server.py",
+        "scripts/run-web-tests.mjs",
+        "tests/e2e/browser-next-conversion.test.mjs",
+        "tests/e2e/browser-next-admin.test.mjs",
     ],
 )
 def test_browser_workflow_changes_select_document_engine_domain(path: str) -> None:
     """Browser scripts and tests cannot skip the Chrome-provisioned heavy job."""
     selected = select_domains([path])
-    assert "document-engines" in selected
     if path == "package.json":
-        assert "e2e-distributed" in selected
-        assert "e2e-standalone" in selected
+        assert "document-engines" in selected
+    assert "e2e-distributed" in selected
+    assert "e2e-standalone" in selected
 
 
 @pytest.mark.unit
@@ -247,6 +330,7 @@ def test_t04_document_engine_domain_runs_current_integration_boundaries() -> Non
             "uv",
             "run",
             "pytest",
+            "tests/integration/anydoc",
             "tests/integration/document_engines",
             "-m",
             "integration",
@@ -279,7 +363,7 @@ def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
         ".containerignore",
         "Containerfile",
         "package.json",
-        "package-lock.json",
+        "pnpm-lock.yaml",
         "playwright.config.mjs",
         "container/entrypoint.sh",
         "scripts/container/build.sh",
@@ -398,6 +482,6 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         line.split("=", maxsplit=1) for line in output.read_text().splitlines()
     )
     assert json.loads(values["selected-domains"]) == sorted(
-        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container"}
+        set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
     )
     assert json.loads(values["runnable-domains"]) == []

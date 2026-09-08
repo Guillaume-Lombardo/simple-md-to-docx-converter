@@ -11,6 +11,7 @@ from pytest_mock import MockerFixture
 from sqlalchemy.exc import SQLAlchemyError
 
 from markweave.jobs.errors import JobRepositoryError
+from markweave.observability import QueueSnapshot
 from markweave.persistence.errors import PersistenceError
 from markweave.persistence.observability import (
     SqlAuditReader,
@@ -38,14 +39,37 @@ def test_queue_observer_maps_aggregate_rows_and_sanitizes_failure(
     now = datetime(2026, 8, 24, 20, tzinfo=UTC)
     database = _engine_connection(mocker, engine)
     database.execute.return_value.one.side_effect = (
-        (2, now - timedelta(seconds=5), 1),
-        (0, None, 0),
+        (
+            2,
+            now - timedelta(seconds=5),
+            1,
+            3,
+            now - timedelta(seconds=7),
+            2,
+            1,
+            2,
+            3,
+            4,
+        ),
+        (0, None, 0, 0, None, 0, 0, 0, 0, 0),
         SQLAlchemyError(),
     )
     observer = SqlOperationalObserver(engine)
 
-    assert observer.observe_queue(now).oldest_age_seconds == 5
-    assert observer.observe_queue(now).oldest_age_seconds == 0
+    first = observer.observe_queue(now)
+    assert first == QueueSnapshot(
+        2,
+        5,
+        1,
+        reversion_depth=3,
+        reversion_oldest_age_seconds=7,
+        reversion_active_jobs=2,
+        shared_capacity_used=8,
+        reversion_proof_blocked_attempts=1,
+        reversion_proof_ack_backlog=5,
+        reversion_reconciliation_pending=4,
+    )
+    assert observer.observe_queue(now) == QueueSnapshot(0, 0, 0)
     with pytest.raises(JobRepositoryError):
         observer.observe_queue(now)
 
@@ -59,7 +83,7 @@ def test_queue_observer_enforces_driver_deadline_and_cancels_active_calls(
     driver = database.connection.driver_connection
     observer = SqlOperationalObserver(engine)
     result = mocker.Mock()
-    result.one.return_value = (0, None, 0)
+    result.one.return_value = (0, None, 0, 0, None, 0, 0, 0, 0, 0)
 
     def execute_with_cancellation(_statement: object):
         observer.cancel_observations(timeout_seconds=0.25)
@@ -92,7 +116,7 @@ def test_queue_observer_applies_postgresql_timeout_and_driver_cancel(
     driver.interrupt = None
     observer = SqlOperationalObserver(engine, default_timeout_seconds=0.5)
     aggregate = mocker.Mock()
-    aggregate.one.return_value = (0, None, 0)
+    aggregate.one.return_value = (0, None, 0, 0, None, 0, 0, 0, 0, 0)
 
     def execute(statement: object, _parameters: object = None):
         if database.execute.call_count == 2:
@@ -142,7 +166,7 @@ def test_queue_observer_supports_driver_without_optional_interrupt_hooks(
     driver.set_progress_handler = None
     observer = SqlOperationalObserver(engine)
     result = mocker.Mock()
-    result.one.return_value = (0, None, 0)
+    result.one.return_value = (0, None, 0, 0, None, 0, 0, 0, 0, 0)
 
     def execute(_statement: object):
         observer.cancel_observations(timeout_seconds=0.25)

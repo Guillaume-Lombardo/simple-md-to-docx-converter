@@ -9,6 +9,8 @@ from markweave.auth.errors import LOGIN_ORIGIN_INVALID
 from markweave.auth.models import User
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
+from markweave.reversion_jobs.errors import ReversionServiceUnavailableError
+from markweave.reversion_jobs.service import ReversionService
 from markweave.templates.service import TemplateService
 
 from .components import AppComponents
@@ -68,3 +70,8 @@ class HttpDependencies:
         if self.components.templates is None:
             raise RuntimeError("Template API runtime is not configured")
         return self.components.templates
+
+    def reversion_runtime(self) -> ReversionService:
+        if self.components.reversions is None:
+            raise ReversionServiceUnavailableError
+        return self.components.reversions

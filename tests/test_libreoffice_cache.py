@@ -128,8 +128,8 @@ def test_ci_uses_exact_restore_only_caches_and_trusted_saves() -> None:
     )
     steps = workflow["jobs"]["heavy"]["steps"]
     by_name = {step["name"]: step for step in steps}
-    restore_pin = "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25"
-    save_pin = "actions/cache/save@caa296126883cff596d87d8935842f9db880ef25"
+    restore_pin = "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+    save_pin = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 
     for variant, digest in (("RPM", RPM_SHA256), ("DEB", DEB_SHA256)):
         restore = by_name[f"Restore verified LibreOffice {variant} archive"]

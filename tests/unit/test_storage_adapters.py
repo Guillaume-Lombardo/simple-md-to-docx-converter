@@ -3,6 +3,7 @@
 import logging
 from io import BytesIO
 from pathlib import Path
+from tempfile import mkstemp
 from typing import Any, cast
 from uuid import uuid4
 
@@ -29,6 +30,7 @@ from markweave.storage import (
     ObjectNotFoundError,
     ObjectScope,
     ObjectStoreError,
+    ObjectTooLargeError,
     S3ObjectStore,
 )
 from tests.settings import template_settings
@@ -63,6 +65,39 @@ def test_filesystem_reads_deletes_and_readiness_delegate_without_raw_names(
     sync_directory.assert_called_once_with(target.parent)
     ensure_directory.assert_called_once_with(Path("/data/objects"))
     access.assert_called_once()
+
+
+@pytest.mark.unit
+def test_filesystem_put_uses_hidden_atomic_stage_and_missing_error_is_stable(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    staged = mocker.patch("markweave.storage.mkstemp", wraps=mkstemp)
+    store = FilesystemObjectStore(tmp_path)
+    key = ObjectKey(ObjectScope.UPLOAD, uuid4(), uuid4())
+
+    store.put(key, b"content")
+
+    assert store.get(key) == b"content"
+    assert staged.call_args.kwargs["prefix"] == ".pending-"
+    missing = ObjectKey(ObjectScope.UPLOAD, key.owner_id, uuid4())
+    with pytest.raises(ObjectNotFoundError) as captured:
+        store.get(missing)
+    assert str(captured.value) == "Object does not exist"
+
+
+@pytest.mark.unit
+def test_filesystem_bounded_read_never_returns_an_oversized_object(
+    tmp_path: Path,
+) -> None:
+    store = FilesystemObjectStore(tmp_path)
+    key = ObjectKey(ObjectScope.REVERSION_UPLOAD, uuid4(), uuid4())
+    store.put(key, b"12345")
+
+    assert store.get_bounded(key, 5) == b"12345"
+    with pytest.raises(ObjectTooLargeError, match="configured read limit"):
+        store.get_bounded(key, 4)
+    with pytest.raises(ValueError, match="positive integer"):
+        store.get_bounded(key, 0)
 
 
 @pytest.mark.unit
@@ -136,6 +171,38 @@ def test_s3_success_uses_only_the_stable_identifier_key(
     client.delete_object.assert_called_once_with(Bucket="bucket", Key=expected)
     body.close.assert_called_once_with()
     client.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_s3_bounded_read_uses_length_and_limit_plus_one(mocker: MockerFixture) -> None:
+    client = mocker.Mock()
+    exact = mocker.Mock(spec=BytesIO)
+    exact.read.return_value = b"12345"
+    streamed_too_large = mocker.Mock(spec=BytesIO)
+    streamed_too_large.read.return_value = b"12345"
+    declared_too_large = mocker.Mock(spec=BytesIO)
+    client.get_object.side_effect = (
+        {"Body": exact, "ContentLength": 5},
+        {"Body": streamed_too_large},
+        {"Body": declared_too_large, "ContentLength": 6},
+    )
+    store = S3ObjectStore(client, "bucket")
+    key = ObjectKey(ObjectScope.REVERSION_UPLOAD, uuid4(), uuid4())
+    try:
+        assert store.get_bounded(key, 5) == b"12345"
+        with pytest.raises(ObjectTooLargeError, match="configured read limit"):
+            store.get_bounded(key, 4)
+        with pytest.raises(ObjectTooLargeError, match="configured read limit"):
+            store.get_bounded(key, 5)
+    finally:
+        store.close()
+
+    exact.read.assert_called_once_with(6)
+    streamed_too_large.read.assert_called_once_with(5)
+    declared_too_large.read.assert_not_called()
+    exact.close.assert_called_once_with()
+    streamed_too_large.close.assert_called_once_with()
+    declared_too_large.close.assert_not_called()
 
 
 @pytest.mark.unit

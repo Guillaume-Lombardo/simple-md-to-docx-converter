@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import warnings
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self, get_args
+from uuid import UUID
 
 from pydantic import (
     AnyHttpUrl,
@@ -36,6 +38,13 @@ class MalwareScanningMode(StrEnum):
     TRUSTED_UPSTREAM = "trusted-upstream"
 
 
+class ReversionBrokerTransport(StrEnum):
+    """Authenticated transport used by a production reverse worker."""
+
+    UNIX = "unix"
+    MTLS = "mtls"
+
+
 class Settings(BaseSettings):
     """Security-sensitive application settings."""
 
@@ -61,6 +70,83 @@ class Settings(BaseSettings):
     insecure_evaluation_mode: bool = False
     conversion_upload_max_bytes: int = Field(gt=0)
     conversion_request_max_bytes: int = Field(gt=0)
+    reversion_upload_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_request_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_retry_after_seconds: int | None = Field(default=None, gt=0)
+    reversion_result_retention_seconds: int | None = Field(default=None, gt=0)
+    reversion_active_limit_per_user: int | None = Field(default=None, gt=0)
+    reversion_broker_transport: ReversionBrokerTransport | None = None
+    reversion_broker_principal_id: UUID | None = None
+    reversion_broker_policy_revision: str | None = Field(
+        default=None, pattern=r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?"
+    )
+    reversion_broker_image_digest: str | None = Field(
+        default=None, pattern=r"sha256:[0-9a-f]{64}"
+    )
+    reversion_broker_operation_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_broker_socket_path: Path | None = None
+    reversion_broker_endpoint_host: str | None = None
+    reversion_broker_endpoint_port: int | None = Field(default=None, ge=1, le=65_535)
+    reversion_broker_ca_certificate_path: Path | None = None
+    reversion_broker_certificate_chain_path: Path | None = None
+    reversion_broker_private_key_path: Path | None = None
+    reversion_broker_worker_uri_san: str | None = None
+    reversion_broker_server_uri_san: str | None = None
+    reversion_broker_server_principal_id: UUID | None = None
+    reversion_broker_server_leaf_sha256: tuple[str, ...] | None = None
+    reversion_cpu_quota_micros: int | None = Field(default=None, gt=0)
+    reversion_cpu_period_micros: int | None = Field(default=None, gt=0)
+    reversion_memory_bytes: int | None = Field(default=None, gt=0)
+    reversion_pid_limit: int | None = Field(default=None, gt=0)
+    reversion_workspace_bytes: int | None = Field(default=None, gt=0)
+    reversion_wall_time_millis: int | None = Field(default=None, gt=0)
+    reversion_output_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_image_max_source_bytes: int | None = Field(default=None, gt=0)
+    reversion_image_max_width_pixels: int | None = Field(default=None, gt=0)
+    reversion_image_max_height_pixels: int | None = Field(default=None, gt=0)
+    reversion_image_max_pixels: int | None = Field(default=None, gt=0)
+    reversion_image_max_svg_elements: int | None = Field(default=None, gt=0)
+    reversion_image_max_svg_depth: int | None = Field(default=None, gt=0, le=64)
+    reversion_asset_max_count: int | None = Field(default=None, gt=0)
+    reversion_asset_max_total_source_bytes: int | None = Field(default=None, gt=0)
+    reversion_asset_max_total_output_bytes: int | None = Field(default=None, gt=0)
+    reversion_markdown_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_package_max_bytes: int | None = Field(default=None, gt=0)
+    reversion_running_limit: int | None = Field(default=None, gt=0)
+    reversion_worker_lease_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_heartbeat_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_max_duration_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_incomplete_submission_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_collect_poll_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_recovery_lease_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_recovery_batch_size: int | None = Field(default=None, gt=0)
+    reversion_worker_cleanup_lease_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_cleanup_interval_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_error_backoff_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    reversion_worker_cleanup_batch_size: int | None = Field(default=None, gt=0)
+    reversion_worker_reconciliation_ack_batch_size: int | None = Field(
+        default=None, gt=0
+    )
     conversion_max_decompressed_bytes: int = Field(gt=0)
     conversion_max_files: int = Field(gt=0)
     conversion_max_images: int = Field(gt=0)
@@ -119,7 +205,7 @@ class Settings(BaseSettings):
     template_max_entries: int = Field(gt=0)
     template_max_member_bytes: int = Field(gt=0)
     template_max_total_bytes: int = Field(gt=0)
-    template_max_compression_ratio: float = Field(ge=1.0)
+    template_max_compression_ratio: float = Field(ge=1.0, allow_inf_nan=False)
     template_max_xml_elements: int = Field(gt=0)
     template_max_xml_depth: int = Field(gt=0)
     template_max_xml_attributes: int = Field(gt=0)
@@ -201,19 +287,24 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:
-        """Require an absolute lifetime at least as long as the idle lifetime."""
-        if self.session_absolute_seconds < self.session_idle_seconds:
-            raise ValueError("absolute session lifetime must not be shorter than idle")
+        """Validate cross-field security and resource invariants."""
         if not self.initial_admin_username.strip():
             raise ValueError("initial administrator username must not be blank")
         if not self.initial_admin_password.get_secret_value():
             raise ValueError("initial administrator password must not be blank")
         if self.conversion_request_max_bytes <= self.conversion_upload_max_bytes:
             raise ValueError("conversion request limit must exceed the source limit")
+        if (
+            self.reversion_request_max_bytes is not None
+            and self.reversion_upload_max_bytes is not None
+            and self.reversion_request_max_bytes <= self.reversion_upload_max_bytes
+        ):
+            raise ValueError("reversion request limit must exceed the source limit")
         if self.template_request_max_bytes <= self.template_max_archive_bytes:
             raise ValueError("template request limit must exceed the archive limit")
         if self.worker_heartbeat_seconds >= self.worker_lease_seconds:
             raise ValueError("worker heartbeat must be shorter than its lease")
+        self._validate_reversion_execution()
         if (
             self.conversion_mermaid_max_total_source_bytes
             < self.conversion_mermaid_max_source_bytes
@@ -235,6 +326,133 @@ class Settings(BaseSettings):
             )
         self._validate_storage_profile()
         return self
+
+    @property
+    def reversion_execution_configured(self) -> bool:
+        """Return whether the complete optional reverse-worker contract is present."""
+
+        return self.reversion_broker_transport is not None
+
+    def _validate_reversion_execution(self) -> None:
+        common = (
+            self.reversion_broker_transport,
+            self.reversion_broker_principal_id,
+            self.reversion_broker_policy_revision,
+            self.reversion_broker_image_digest,
+            self.reversion_broker_operation_timeout_seconds,
+            self.reversion_upload_max_bytes,
+            self.reversion_result_retention_seconds,
+            self.reversion_cpu_quota_micros,
+            self.reversion_cpu_period_micros,
+            self.reversion_memory_bytes,
+            self.reversion_pid_limit,
+            self.reversion_workspace_bytes,
+            self.reversion_wall_time_millis,
+            self.reversion_output_max_bytes,
+            self.reversion_image_max_source_bytes,
+            self.reversion_image_max_width_pixels,
+            self.reversion_image_max_height_pixels,
+            self.reversion_image_max_pixels,
+            self.reversion_image_max_svg_elements,
+            self.reversion_image_max_svg_depth,
+            self.reversion_asset_max_count,
+            self.reversion_asset_max_total_source_bytes,
+            self.reversion_asset_max_total_output_bytes,
+            self.reversion_markdown_max_bytes,
+            self.reversion_package_max_bytes,
+            self.reversion_running_limit,
+            self.reversion_worker_lease_seconds,
+            self.reversion_worker_heartbeat_seconds,
+            self.reversion_worker_max_duration_seconds,
+            self.reversion_worker_incomplete_submission_seconds,
+            self.reversion_worker_collect_poll_seconds,
+            self.reversion_worker_recovery_lease_seconds,
+            self.reversion_worker_recovery_batch_size,
+            self.reversion_worker_cleanup_lease_seconds,
+            self.reversion_worker_cleanup_interval_seconds,
+            self.reversion_worker_error_backoff_seconds,
+            self.reversion_worker_cleanup_batch_size,
+            self.reversion_worker_reconciliation_ack_batch_size,
+        )
+        unix = (self.reversion_broker_socket_path,)
+        mtls = (
+            self.reversion_broker_endpoint_host,
+            self.reversion_broker_endpoint_port,
+            self.reversion_broker_ca_certificate_path,
+            self.reversion_broker_certificate_chain_path,
+            self.reversion_broker_private_key_path,
+            self.reversion_broker_worker_uri_san,
+            self.reversion_broker_server_uri_san,
+            self.reversion_broker_server_principal_id,
+            self.reversion_broker_server_leaf_sha256,
+        )
+        execution_only = common[:5] + common[7:]
+        supplied = any(value is not None for value in execution_only + unix + mtls)
+        if not supplied:
+            return
+        if any(value is None for value in common):
+            raise ValueError("reverse worker configuration must be complete")
+        if self.reversion_broker_transport is ReversionBrokerTransport.UNIX:
+            if any(value is None for value in unix) or any(
+                value is not None for value in mtls
+            ):
+                raise ValueError("reverse Unix broker configuration is invalid")
+            socket_path = self.reversion_broker_socket_path
+            if socket_path is None or not socket_path.is_absolute():
+                raise ValueError("reverse Unix broker configuration is invalid")
+        elif (
+            any(value is None for value in mtls)
+            or any(value is not None for value in unix)
+            or any(
+                path is None or not path.is_absolute()
+                for path in (
+                    self.reversion_broker_ca_certificate_path,
+                    self.reversion_broker_certificate_chain_path,
+                    self.reversion_broker_private_key_path,
+                )
+            )
+            or self.reversion_broker_worker_uri_san
+            == self.reversion_broker_server_uri_san
+            or self.reversion_broker_principal_id
+            == self.reversion_broker_server_principal_id
+        ):
+            raise ValueError("reverse mTLS broker configuration is invalid")
+        heartbeat = self.reversion_worker_heartbeat_seconds
+        lease = self.reversion_worker_lease_seconds
+        poll = self.reversion_worker_collect_poll_seconds
+        if heartbeat is None or lease is None or poll is None:
+            raise ValueError("reverse worker configuration must be complete")
+        if heartbeat >= lease:
+            raise ValueError("reverse worker heartbeat must be shorter than its lease")
+        if poll > heartbeat:
+            raise ValueError("reverse worker polling must not exceed its heartbeat")
+        pins = self.reversion_broker_server_leaf_sha256
+        if pins is not None and (
+            not 1 <= len(pins) <= _MAX_BROKER_CERTIFICATE_PINS
+            or len(set(pins)) != len(pins)
+            or any(
+                len(pin) != _SHA256_DIGEST_CHARACTERS
+                or not pin.startswith("sha256:")
+                or any(character not in "0123456789abcdef" for character in pin[7:])
+                for pin in pins
+            )
+        ):
+            raise ValueError("reverse mTLS broker pins are invalid")
+        output = self.reversion_output_max_bytes
+        markdown = self.reversion_markdown_max_bytes
+        package = self.reversion_package_max_bytes
+        asset_output = self.reversion_asset_max_total_output_bytes
+        if (
+            output is None
+            or markdown is None
+            or package is None
+            or asset_output is None
+            or markdown > output
+            or package > output
+            or markdown > package
+            or asset_output > package
+        ):
+            raise ValueError("reverse result limits are invalid")
 
     def _validate_storage_profile(self) -> None:
         s3_values = (
@@ -287,6 +505,19 @@ class Settings(BaseSettings):
                     legacy_settings, field_name
                 ):
                     raise ConfigurationError("Invalid application configuration")
+            if (
+                "session_idle_seconds" in canonical_values
+                or "session_idle_seconds" in legacy_values
+            ):
+                warnings.warn(
+                    "SESSION_IDLE_SECONDS is deprecated and does not control the persisted role policy.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
             return canonical_settings
         except ConfigurationError, ValidationError:
             raise ConfigurationError("Invalid application configuration") from None
+
+
+_MAX_BROKER_CERTIFICATE_PINS = 2
+_SHA256_DIGEST_CHARACTERS = 71

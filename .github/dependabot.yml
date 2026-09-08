@@ -14,9 +14,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
-    directories:
-      - "/"
-      - "/spikes/toolchain"
+    directory: "/"
     schedule:
       interval: weekly
       day: monday
@@ -24,7 +22,19 @@ updates:
       timezone: Etc/UTC
     open-pull-requests-limit: 5
     groups:
-      javascript-dependencies:
+      pnpm-workspace-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: "/spikes/toolchain"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:26"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      isolated-mermaid-toolchain-dependencies:
         patterns: ["*"]
 
   - package-ecosystem: docker

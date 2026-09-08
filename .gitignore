@@ -16,10 +16,12 @@ __pycache__/
 coverage.json
 htmlcov/
 mutants/
+mutation-results/
 dist/
 build/
 artifacts/
 node_modules/
+.pnpm-tools/
 *.egg-info/
 
 # Legacy quickstart output; current quickstart state lives outside the checkout.

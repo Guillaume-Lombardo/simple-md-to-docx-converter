@@ -18,6 +18,8 @@ class ObjectScope(StrEnum):
     UPLOAD = "uploads"
     RESULT = "results"
     RESULT_MANIFEST = "result-manifests"
+    REVERSION_UPLOAD = "reversion-uploads"
+    REVERSION_RESULT = "reversion-results"
     TEMPLATE_VERSION = "template-versions"
 
 
@@ -41,6 +43,10 @@ class ObjectStoreError(RuntimeError):
     """Sanitized object-store boundary failure."""
 
 
+class ObjectTooLargeError(ObjectStoreError):
+    """Requested object exceeds an explicit caller-supplied read bound."""
+
+
 class ObjectStore(Protocol):
     """Atomic object contract shared by both runtime profiles."""
 
@@ -53,6 +59,12 @@ class ObjectStore(Protocol):
     def exists(self, key: ObjectKey) -> bool: ...
 
     def is_ready(self) -> bool: ...
+
+
+class BoundedObjectStore(ObjectStore, Protocol):
+    """Object storage with a read that never buffers past a caller bound."""
+
+    def get_bounded(self, key: ObjectKey, max_bytes: int) -> bytes: ...
 
 
 class FilesystemObjectStore:
@@ -90,6 +102,20 @@ class FilesystemObjectStore:
             raise ObjectNotFoundError("Object does not exist") from None
         except OSError:
             raise ObjectStoreError("Object storage operation failed") from None
+
+    def get_bounded(self, key: ObjectKey, max_bytes: int) -> bytes:
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("Object read bound must be a positive integer")
+        try:
+            with self._path(key).open("rb") as source:
+                content = source.read(max_bytes + 1)
+        except FileNotFoundError:
+            raise ObjectNotFoundError("Object does not exist") from None
+        except OSError:
+            raise ObjectStoreError("Object storage operation failed") from None
+        if len(content) > max_bytes:
+            raise ObjectTooLargeError("Object exceeds configured read limit")
+        return content
 
     def delete(self, key: ObjectKey) -> None:
         target = self._path(key)
@@ -172,6 +198,38 @@ class S3ObjectStore:
             response = self._client.get_object(Bucket=self._bucket, Key=key.as_posix())
             body = response["Body"]
             return body.read()
+        except self._client_error as error:
+            if error.response.get("Error", {}).get("Code") in {
+                "404",
+                "NoSuchKey",
+                "NotFound",
+            }:
+                raise ObjectNotFoundError("Object does not exist") from None
+            raise ObjectStoreError("Object storage operation failed") from error
+        except self._boto_core_error as error:
+            raise ObjectStoreError("Object storage operation failed") from error
+        finally:
+            if body is not None:
+                body.close()
+
+    def get_bounded(self, key: ObjectKey, max_bytes: int) -> bytes:
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("Object read bound must be a positive integer")
+        body: Any | None = None
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=key.as_posix())
+            length = response.get("ContentLength")
+            if length is not None and (type(length) is not int or length < 0):
+                raise ObjectStoreError("Object storage operation failed")
+            if length is not None and length > max_bytes:
+                raise ObjectTooLargeError("Object exceeds configured read limit")
+            body = response["Body"]
+            content = body.read(max_bytes + 1)
+            if type(content) is not bytes:
+                raise ObjectStoreError("Object storage operation failed")
+            if len(content) > max_bytes:
+                raise ObjectTooLargeError("Object exceeds configured read limit")
+            return content
         except self._client_error as error:
             if error.response.get("Error", {}).get("Code") in {
                 "404",

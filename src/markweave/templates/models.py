@@ -26,6 +26,14 @@ class TemplatePublicationState(StrEnum):
     DELETING = "deleting"
 
 
+class TemplateSelectionSource(StrEnum):
+    """Authoritative source of the template selected for a conversion."""
+
+    PANDOC_DEFAULT = "pandoc_default"
+    PREFERRED = "preferred"
+    SYSTEM_FALLBACK = "system_fallback"
+
+
 def normalize_template_text(value: str) -> str:
     """Normalize searchable text consistently across SQLite and PostgreSQL."""
     return unicodedata.normalize("NFKC", value).strip().casefold()

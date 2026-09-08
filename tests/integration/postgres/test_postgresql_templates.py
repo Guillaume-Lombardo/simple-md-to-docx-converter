@@ -41,6 +41,7 @@ from markweave.templates.models import (
     TemplateCreate,
     TemplateIdentity,
     TemplatePublicationState,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -61,6 +62,53 @@ def clear_template_test_data(engine: Engine) -> None:
         connection.execute(delete(TemplateRow))
         connection.execute(delete(SessionRow))
         connection.execute(delete(UserRow))
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_resolution_is_one_snapshot_during_selection_interleaving() -> None:
+    engine = create_database_engine(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
+    upgrade_database(engine)
+    clear_template_test_data(engine)
+    owner = User(uuid4(), "Owner", f"snapshot-{uuid4()}", "hash", Role.USER)
+    SqlUserRepository(engine).create(owner)
+    catalog = SqlTemplateCatalogRepository(engine)
+    original_fallback = TemplateIdentity(
+        uuid4(), owner.id, "Original fallback", "Before race", TemplateStatus.ACTIVE
+    )
+    concurrent_selection = TemplateIdentity(
+        uuid4(), owner.id, "Concurrent", "After race", TemplateStatus.ACTIVE
+    )
+    catalog.add(original_fallback)
+    catalog.add(concurrent_selection)
+    selections = SqlTemplateSelectionRepository(engine)
+    selections.set_system_fallback(original_fallback.id)
+    interleaved = False
+
+    def change_selection(_connection, _cursor, statement, _parameters, _context, _many):
+        nonlocal interleaved
+        if interleaved or "template_preferences" not in statement.casefold():
+            return
+        interleaved = True
+        concurrent = SqlTemplateSelectionRepository(engine)
+        concurrent.set_preferred(owner.id, concurrent_selection.id)
+        concurrent.set_system_fallback(concurrent_selection.id)
+
+    event.listen(engine, "after_cursor_execute", change_selection)
+    try:
+        assert selections.resolve_with_source(owner.id) == (
+            original_fallback,
+            TemplateSelectionSource.SYSTEM_FALLBACK,
+        )
+        assert interleaved
+        assert selections.resolve_with_source(owner.id) == (
+            concurrent_selection,
+            TemplateSelectionSource.PREFERRED,
+        )
+    finally:
+        event.remove(engine, "after_cursor_execute", change_selection)
+        clear_template_test_data(engine)
+        engine.dispose()
 
 
 @pytest.mark.integration

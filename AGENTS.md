@@ -76,6 +76,12 @@
 - Keep pull requests cohesive and reviewable. Use squash merge only after required checks and an independent review.
 - Before any push or pull-request publication, present the branch, changed files, concise diff summary, checks run, and known limitations, then obtain explicit approval.
 - Never force-push, merge, delete a branch, or bypass a protection without explicit approval.
+- After a protected merge changes `project.version`, the orchestrator must monitor the automatic
+  release on `main` through a terminal result. When PyPI and GHCR publication succeeds, it must
+  immediately start the follow-up pull request that adopts the exact published GHCR receipt digest
+  in Compose and completes any release-owned quickstart command migration. Do not integrate
+  unrelated work while the published PyPI version and public Compose pin differ. Never pre-pin an
+  unpublished image or infer its registry digest before publication evidence exists.
 
 ## Agent coordination
 

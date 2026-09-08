@@ -17,6 +17,7 @@ from scripts.release.verify_install import (
     BASE_FORBIDDEN_MODULES,
     BASE_ISOLATION_CHECK,
     BASE_RECOVERY_CHECK,
+    BROKER_CONSOLE_CHECK,
     CONSOLE_TIMEOUT_SECONDS,
     DISTRIBUTED_RECOVERY_CHECK,
     ENVIRONMENT_TIMEOUT_SECONDS,
@@ -59,7 +60,7 @@ def test_public_import_check_rejects_legacy_import_after_install(
     monkeypatch.setattr(
         importlib.util, "find_spec", lambda name: ModuleSpec(name, loader=None)
     )
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.4.0"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.1"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"
@@ -72,7 +73,7 @@ def test_public_import_check_rejects_application_version_mismatch(
 ) -> None:
     """Distribution and public application versions must identify one release."""
     monkeypatch.setattr(markweave, "__version__", "9.9.9")
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.4.0"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.1"])
 
     with pytest.raises(SystemExit, match=r"unexpected markweave\.__version__"):
         exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
@@ -191,6 +192,7 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
                 ),
                 f"isolated {profile.name} console version check",
                 f"isolated {profile.name} console help check",
+                f"isolated {profile.name} broker console check",
             ]
         )
     assert events == expected_events
@@ -259,13 +261,19 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
+    broker_console = environment / "bin" / "markweave-broker"
+    assert calls[7] == (
+        (str(python), "-I", "-c", BROKER_CONSOLE_CHECK, str(broker_console)),
+        root,
+        CONSOLE_TIMEOUT_SECONDS,
+    )
     standalone_python = root / "venv-standalone" / "bin" / "python"
-    assert calls[17] == (
+    assert calls[19] == (
         (str(standalone_python), "-I", "-c", STANDALONE_RECOVERY_CHECK),
         root,
         CONSOLE_TIMEOUT_SECONDS,
     )
-    distributed_install = calls[21]
+    distributed_install = calls[24]
     assert distributed_install[0][-1] == f"{private_wheel}[distributed]"
     assert distributed_install[2] == INSTALL_TIMEOUT_SECONDS
     assert all(cwd == root for _, cwd, _ in calls)
@@ -327,7 +335,7 @@ def test_wheel_change_after_verification_fails_before_uv(
     run.assert_not_called()
 
 
-@pytest.mark.parametrize("failing_call", range(1, 35))
+@pytest.mark.parametrize("failing_call", range(1, 41))
 def test_subprocess_failure_stops_later_steps_and_cleans_up(
     artifacts: ArtifactSet, mocker: MockerFixture, failing_call: int
 ) -> None:

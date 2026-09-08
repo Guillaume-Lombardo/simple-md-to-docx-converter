@@ -31,6 +31,7 @@ from markweave.templates.models import (
     TemplatePage,
     TemplatePublicationState,
     TemplateSearch,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -404,6 +405,16 @@ class TemplateService:
 
     def resolve(self, actor: User) -> TemplateIdentity | None:
         return self._selections.resolve(actor.id)
+
+    def resolve_with_source(
+        self, actor: User
+    ) -> tuple[TemplateIdentity | None, TemplateSelectionSource]:
+        """Resolve the current immutable template and its authoritative source."""
+        return self._selections.resolve_with_source(actor.id)
+
+    def selection_context(self, actor: User) -> tuple[UUID | None, UUID | None]:
+        """Return the actor preference and system fallback identifiers together."""
+        return self._selections.context(actor.id)
 
     def selection_label(self, actor: User, template: TemplateIdentity) -> str:
         """Describe whether the resolved active template is personal or system-wide."""

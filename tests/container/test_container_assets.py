@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -18,6 +19,7 @@ from scripts.container import (
     api_workflow_smoke,
     integrity,
     summarize_supply_chain,
+    verify_oci_export,
     verify_supply_chain,
 )
 from tests.e2e.recovery_cli_setup import _listed_object_count
@@ -110,11 +112,14 @@ def test_container_workflow_rejects_mixed_v1_v2_manifest(mocker) -> None:
         "scripts/container/build.sh",
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
+        "scripts/container/assert-legacy-route-manifest.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
+        "scripts/container/wait-for-fake-clamav.sh",
+        "scripts/e2e/rollback-rehearsal.sh",
     ],
 )
 def test_container_shell_assets_are_syntactically_valid(script: str) -> None:
@@ -134,16 +139,16 @@ def test_final_image_pins_all_downloaded_artifacts() -> None:
 def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
     """Both reviewed final-image paths execute the complete recovery contract."""
 
-    command = 'bash scripts/container/recovery-cli-smoke.sh "$image"'
+    ci_command = 'bash scripts/container/recovery-cli-smoke.sh "$final_image"'
+    release_command = 'bash scripts/container/recovery-cli-smoke.sh "$backend_image"'
     run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
-    ci_command = command.replace('"$image"', '"$final_image"')
     release = yaml.safe_load(
         Path(".github/workflows/container-release.yml").read_text(encoding="utf-8")
     )
     release_run = next(
         step["run"]
         for step in release["jobs"]["build-and-publish"]["steps"]
-        if step["name"] == "Build and validate the final rootless image"
+        if step["name"] == "Build and validate the final rootless image pair once"
     )
 
     assert run_ci.count(ci_command) == 1
@@ -154,10 +159,10 @@ def test_recovery_smoke_is_a_required_ci_and_release_final_image_gate() -> None:
             'bash scripts/container/supply-chain.sh "$final_image" artifacts/container'
         )
     )
-    assert release_run.count(command) == 1
+    assert release_run.count(release_command) == 1
     assert release_run.index(
-        'bash scripts/container/build.sh "$image"'
-    ) < release_run.index(command)
+        'bash scripts/container/build.sh "$backend_image"'
+    ) < release_run.index(release_command)
 
 
 def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
@@ -165,6 +170,17 @@ def test_recovery_smoke_uses_private_volume_and_real_rollback() -> None:
 
     assert 'chmod 0777 "$workspace"' not in smoke
     assert smoke.count('"$workspace:/e2e:U,Z"') == 2
+    assert "--entrypoint markweave" not in smoke
+    assert '"$image" "$@"' in smoke
+    for boundary in (
+        '--user "$runtime_uid:0"',
+        "--read-only",
+        "--cap-drop=all",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=256",
+        "--tmpfs /work:",
+    ):
+        assert boundary in smoke
     assert '.error.message == "Distributed restore target is not isolated"' in smoke
     assert 'run_setup "${common_s3[@]}" -- distributed-cleanup-verify' in smoke
 
@@ -190,6 +206,203 @@ def test_final_image_does_not_bake_canonical_runtime_aliases() -> None:
     assert (
         '(Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)' in smoke
     )
+
+
+def test_final_image_smoke_covers_reversion_capability_auth_and_configuration() -> None:
+    smoke = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+
+    assert smoke.count("--expect-reversion-capabilities-unavailable") == 1
+    assert smoke.count("--expect-reversion-upload-max-bytes 4194304") == 1
+    assert smoke.count("MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304") == 1
+    assert smoke.index("legacy_settings=()") < smoke.index(
+        "MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304"
+    )
+    assert '"$legacy_container_name:/work/api_workflow_smoke.py"' in smoke
+    assert "/work/api_workflow_smoke.py" in smoke
+    assert '"${MARKWEAVE_EXPECT_REVERSION_CAPABILITIES:-true}"' in smoke
+    assert 'if [[ "$expect_reversion_capabilities" == true ]]' in smoke
+
+
+def test_immutable_rollback_image_does_not_expect_new_reversion_routes() -> None:
+    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
+
+    assert rollback.count("MARKWEAVE_EXPECT_REVERSION_CAPABILITIES=false") == 1
+    assert rollback.index(
+        "MARKWEAVE_EXPECT_REVERSION_CAPABILITIES=false"
+    ) < rollback.index('api-smoke.sh" "$released_image"')
+
+
+def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
+    readiness = Path("scripts/container/wait-for-fake-clamav.sh").read_text(
+        encoding="utf-8"
+    )
+    standalone = Path("scripts/container/api-smoke.sh").read_text(encoding="utf-8")
+    distributed = Path("scripts/container/distributed-api-smoke.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'readonly probe_container="${3:-$container_name}"' in readiness
+    assert 'readonly probe_host="${4:-127.0.0.1}"' in readiness
+    assert 'podman exec "$probe_container"' in readiness
+    assert "socket.create_connection((sys.argv[1], 3310), timeout=1)" in readiness
+    assert 'scanner.sendall(b"zINSTREAM\\0\\0\\0\\0\\0")' in readiness
+    assert 'expected = b"stream: OK\\0"' in readiness
+    assert "while len(response) < len(expected):" in readiness
+    assert "scanner.recv(len(expected) - len(response))" in readiness
+    assert "assert response == expected" in readiness
+    assert "scanner.recv(64)" not in readiness
+    assert "for _ in $(seq 1 60)" in readiness
+    assert "scanner did not become ready within 15 seconds" in readiness
+    assert 'podman logs --tail 50 "$container_name"' in readiness
+    assert 'podman logs --tail 50 "$probe_container"' in readiness
+    assert standalone.index("wait-for-fake-clamav.sh") < standalone.index("settings=(")
+    assert distributed.index("wait-for-fake-clamav.sh") < distributed.index(
+        'podman run --detach --name "$postgres_name"'
+    )
+    assert '"$clamav_name" standalone-network "$container_name" clamav' in standalone
+    alias_probe = '"$clamav_name" distributed-alias "$clamav_probe_name" clamav'
+    mapped_probe = '"$clamav_name" distributed-mapped "$application_name" clamav'
+    assert alias_probe in distributed
+    assert mapped_probe in distributed
+    assert distributed.index(alias_probe) < distributed.index(
+        'scanner_host_mapping=(--add-host "clamav:$clamav_address")'
+    )
+    assert (
+        "--format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'"
+        in distributed
+    )
+    assert 'scanner_host_mapping=(--add-host "clamav:$clamav_address")' in distributed
+    assert distributed.count('"${scanner_host_mapping[@]}"') == 4
+    assert standalone.index("standalone-network") < standalone.index(
+        '"${reversion_capability_arguments[@]}"'
+    )
+    assert distributed.index("distributed-mapped") < distributed.index(
+        "scripts.container.api_workflow_smoke"
+    )
+
+
+def test_final_e2e_proves_scanner_network_path_before_user_workflows() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+
+    alias_probe = '"$clamav_name" "$profile-alias" "$clamav_probe_name" e2e-clamav'
+    mapped_probe = '"$clamav_name" "$profile-mapped" "$application_name" e2e-clamav'
+    assert alias_probe in runner
+    assert mapped_probe in runner
+    assert (
+        "--format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'" in runner
+    )
+    mapping = 'scanner_host_mapping=(--add-host "e2e-clamav:$clamav_address")'
+    assert mapping in runner
+    hardened_runtime = runner[
+        runner.index("hardened_runtime=(") : runner.index("start_production_router()")
+    ]
+    assert "--add-host" not in hardened_runtime
+    assert (
+        runner.index(alias_probe) < runner.index(mapping) < runner.index(mapped_probe)
+    )
+    assert '"${scanner_host_mapping[@]}"' in runner
+    assert runner.index(mapped_probe) < runner.index(
+        "tests.e2e.service_workflow exercise-security-boundaries"
+    )
+
+
+def test_scanner_readiness_runs_exact_protocol_probe_from_network_peer(
+    tmp_path: Path,
+) -> None:
+    commands = tmp_path / "commands"
+    podman = tmp_path / "podman"
+    podman.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf \'%s\\n\' "$*" >>"$COMMANDS"\n'
+        'if [[ "$1" == exec ]]; then exit 0; fi\n'
+        "if [[ \"$1 $2\" == 'container exists' ]]; then exit 0; fi\n"
+        'if [[ "$1" == inspect ]]; then printf true; exit 0; fi\n'
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    podman.chmod(0o755)
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "scripts/container/wait-for-fake-clamav.sh",
+            "scanner",
+            "network",
+            "application",
+            "clamav",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "COMMANDS": str(commands),
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        },
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    invoked = commands.read_text(encoding="utf-8")
+    assert "exec application /opt/md-converter/venv/bin/python -c" in invoked
+    assert invoked.rstrip().endswith("clamav")
+
+
+def test_container_ci_always_stages_bounded_status_evidence() -> None:
+    run_ci = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+
+    assert "printf 'Final-image validation started.\\n'" in run_ci
+    assert "trap record_ci_status EXIT" in run_ci
+    assert "Final-image validation failed with exit code %s." in run_ci
+    assert "MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY" in run_ci
+
+
+def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
+    route_manifest = Path(
+        "scripts/container/assert-legacy-route-manifest.sh"
+    ).read_text(encoding="utf-8")
+    evidence = json.loads(
+        Path("docs/evidence/t64-cutover-gates.json").read_text(encoding="utf-8")
+    )
+
+    assert 'bash scripts/e2e/rollback-rehearsal.sh "$profile"' in runner
+    assert "curl --connect-timeout 2 --max-time 5" in route_manifest
+    assert "0.5.2@$released_digest" in rollback
+    assert (
+        "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+        in rollback
+    )
+    assert "MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST=true" in rollback
+    assert 'scripts/container/api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/distributed-api-smoke.sh" "$released_image"' in rollback
+    assert 'scripts/container/recovery-cli-smoke.sh" "$released_image"' in rollback
+    assert 'cd "$runtime_directory"' in rollback
+    assert 'MARKWEAVE_REPOSITORY_ROOT="$repository"' in rollback
+    for path in ("/login", "/convert", "/templates", "/static/conversion.js"):
+        assert path in route_manifest
+    assert evidence["schema"] == "t64-cutover-gates-v2"
+    assert evidence["pre_removal"] == {
+        "conclusion": "success",
+        "run_id": 33686251439,
+        "source_sha": "30c11b4f109bba147e8cc7685d0ba2a1b44ec579",
+    }
+    assert evidence["rollback"]["profiles"] == ["standalone", "distributed"]
+    assert evidence["publication"] == {
+        "backend_image": (
+            "ghcr.io/guillaume-lombardo/md-converter:0.6.1@"
+            "sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea"
+        ),
+        "conclusion": "success",
+        "frontend_image": (
+            "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@"
+            "sha256:800e16eaf00f7e258466f77b789f58554fd9e55f228e2d5ea10f3de1b5ab042e"
+        ),
+        "run_id": 33725900729,
+        "source_sha": "78cb86d450e940a3190591de62ee0ebade216d8b",
+        "version": "0.6.1",
+    }
 
 
 def test_final_image_version_comes_from_project_metadata() -> None:
@@ -224,14 +437,48 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
     assert script.index(pull) < script.index(verification) < script.index(build)
 
 
-def test_entrypoint_contract_has_only_the_three_approved_modes() -> None:
+def test_final_image_e2e_accepts_only_an_immutable_published_image_override() -> None:
+    script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    assert 'readonly published_image="${MARKWEAVE_E2E_IMAGE:-}"' in script
+    assert "ghcr\\.io/guillaume-lombardo/md-converter:" in script
+    assert "@sha256:[0-9a-f]{64}" in script
+    assert 'podman pull --quiet "$image"' in script
+    assert (
+        'test "$(podman image inspect "$image" --format \'{{.Digest}}\')" '
+        '= "${image##*@}"'
+    ) in script
+
+
+def test_entrypoint_delegates_every_supported_command_to_markweave() -> None:
     entrypoint = Path("container/entrypoint.sh").read_text(encoding="utf-8")
-    assert "api|embedded-worker|external-worker" in entrypoint
-    assert "markweave.runtime" in entrypoint
     assert "md-converter-preflight" in entrypoint
-    assert "exec uvicorn markweave.app:create_app" in entrypoint
-    assert "uvicorn markweave:create_app" not in entrypoint
-    assert "--factory" in entrypoint
+    assert 'exec /opt/md-converter/venv/bin/markweave "$@"' in entrypoint
+    assert "api|embedded-worker|external-worker" not in entrypoint
+    assert "markweave.runtime" not in entrypoint
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    assert 'ENTRYPOINT ["md-converter-entrypoint"]' in containerfile
+    assert 'CMD ["serve"]' in containerfile
+
+
+def test_final_image_e2e_uses_cli_roles_and_default_remote_client_entrypoint() -> None:
+    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
+    assert "application_mode=serve" in runner
+    assert '"$image" worker' in runner
+    assert 'arguments[-1] == b"serve"' in runner
+    assert 'arguments[-1] == b"worker"' in runner
+    assert runner.count('"$image" --json health') == 2
+    for legacy_mode in ("application_mode=api", "application_mode=embedded-worker"):
+        assert legacy_mode not in runner
+
+
+def test_distributed_api_deployment_uses_cli_serve_role() -> None:
+    documents = tuple(
+        yaml.safe_load_all(
+            Path("deploy/distributed.yaml.example").read_text(encoding="utf-8")
+        )
+    )
+    application = documents[0]["spec"]["template"]["spec"]["containers"][0]
+    assert application["args"] == ["serve"]
 
 
 def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:
@@ -252,8 +499,8 @@ def test_smoke_enforces_rootless_read_only_bounded_runtime() -> None:
 @pytest.mark.parametrize(
     ("manifest", "mode"),
     [
-        ("deploy/standalone.yaml.example", "embedded-worker"),
-        ("deploy/distributed.yaml.example", "external-worker"),
+        ("deploy/standalone.yaml.example", "serve"),
+        ("deploy/distributed.yaml.example", "worker"),
     ],
 )
 def test_deployment_examples_apply_worker_security_and_t18_limits(
@@ -263,8 +510,9 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
     worker = next(
         container
         for document in documents
+        if document.get("kind") in {"Deployment", "StatefulSet"}
         for container in document["spec"]["template"]["spec"]["containers"]
-        if container["args"] == [mode]
+        if container.get("args") == [mode]
     )
     security = worker["securityContext"]
     assert security == {
@@ -277,6 +525,63 @@ def test_deployment_examples_apply_worker_security_and_t18_limits(
         "memory": "${WORKER_MEMORY_BUDGET_BYTES}",
         "ephemeral-storage": "${WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES}",
     }
+
+
+def test_frontend_deployment_separates_pages_probes_router_and_credentials() -> None:
+    documents = tuple(
+        yaml.safe_load_all(
+            Path("deploy/frontend.yaml.example").read_text(encoding="utf-8")
+        )
+    )
+    workloads = {
+        document["metadata"]["name"]: document
+        for document in documents
+        if document["kind"] == "Deployment"
+    }
+    frontend = workloads["md-converter-frontend"]["spec"]["template"]["spec"]
+    container = frontend["containers"][0]
+    assert frontend["automountServiceAccountToken"] is False
+    assert frontend["terminationGracePeriodSeconds"] == 30
+    assert container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert container["resources"] == {
+        "requests": {
+            "cpu": "100m",
+            "memory": "128Mi",
+            "ephemeral-storage": "32Mi",
+        },
+        "limits": {
+            "cpu": "500m",
+            "memory": "256Mi",
+            "ephemeral-storage": "64Mi",
+        },
+    }
+    assert container["livenessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/live",
+        "port": "probe",
+    }
+    assert container["readinessProbe"]["httpGet"] == {
+        "path": "/_frontend/health/ready",
+        "port": "probe",
+    }
+    assert "env" not in container and "envFrom" not in container
+    assert {mount["mountPath"] for mount in container["volumeMounts"]} == {"/tmp"}  # noqa: S108
+
+    router = workloads["md-converter-router"]["spec"]["template"]["spec"]
+    router_container = router["containers"][0]
+    assert router_container["image"] == "${MARKWEAVE_FRONTEND_IMAGE}"
+    assert router_container["command"] == ["node", "router.mjs"]
+    environment = {item["name"]: item["value"] for item in router_container["env"]}
+    assert environment["BACKEND_ORIGIN"] == "http://md-converter-api:8080"
+    assert environment["FRONTEND_ORIGIN"] == "http://md-converter-frontend:3000"
+    assert environment["ROUTER_TLS_CERT_FILE"] == "/run/tls/tls.crt"
+    assert environment["ROUTER_TLS_KEY_FILE"] == "/run/tls/tls.key"
+    assert environment["ROUTER_REQUEST_MAX_BYTES"] == "${MARKWEAVE_REQUEST_MAX_BYTES}"
+    assert environment["ROUTER_UPSTREAM_TIMEOUT_MS"] == (
+        "${MARKWEAVE_ROUTER_UPSTREAM_TIMEOUT_MS}"
+    )
+    assert "includeSubDomains" not in Path("deploy/frontend.yaml.example").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_distributed_test_profile_is_provider_neutral_rustfs() -> None:
@@ -321,6 +626,9 @@ def test_supply_chain_retains_complete_scan_and_ci_evidence() -> None:
         "sbom.spdx.json",
         "vulnerabilities.json",
         "image-metadata.json",
+        "container-diagnostics/ci-status.txt",
+        "container-diagnostics/frontend-oci-identity.txt",
+        "container-diagnostics/scanner-readiness.txt",
     ):
         assert artifact in upload["with"]["path"]
     assert workflow["permissions"] == {"contents": "read"}
@@ -344,6 +652,76 @@ def test_supply_chain_produces_in_private_staging_before_atomic_publication() ->
         < script.index("podman save")
         < script.index("mv --no-target-directory")
     )
+
+
+def test_every_frontend_image_build_command_requests_oci_format() -> None:
+    sources = (
+        Path(".github/workflows/container-release.yml").read_text(encoding="utf-8"),
+        Path("scripts/e2e/run.sh").read_text(encoding="utf-8"),
+        Path("web/scripts/run-rootless-smoke.sh").read_text(encoding="utf-8"),
+    )
+
+    for source in sources:
+        assert "podman build --format oci" in source
+        assert "podman build --format docker" not in source
+
+
+def test_container_ci_exports_and_verifies_real_frontend_oci_identity() -> None:
+    script = Path("scripts/container/run-ci.sh").read_text(encoding="utf-8")
+    build = 'podman build --format oci --timestamp "$source_date_epoch"'
+    resolve = "podman image inspect \"$frontend_image\" --format '{{.Id}}'"
+    export = (
+        'podman save --format oci-archive --output "$frontend_archive" '
+        '"$frontend_image_id"'
+    )
+    verify = "uv run python -m scripts.container.verify_oci_export"
+
+    assert script.count(build) == 1
+    assert script.count(resolve) == 1
+    assert script.count(export) == 1
+    assert script.count(verify) == 1
+    assert script.index(build) < script.index(resolve) < script.index(export)
+    assert script.index(export) < script.index(verify)
+    assert '| tee "$evidence_directory/frontend-oci-identity.txt"' in script
+
+
+def test_oci_export_verifier_accepts_only_the_expected_config_digest(
+    mocker, tmp_path: Path, capsys
+) -> None:
+    archive = tmp_path / "frontend.oci.tar"
+    expected = f"sha256:{'a' * 64}"
+    inspected = mocker.patch(
+        "scripts.container.verify_oci_export.oci_identity",
+        return_value=(f"sha256:{'b' * 64}", expected),
+    )
+
+    assert (
+        verify_oci_export.main(
+            ["--archive", str(archive), "--expected-image-id", expected]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == f"verified_oci_config_digest={expected}\n"
+    inspected.assert_called_once_with(archive)
+
+    inspected.return_value = (f"sha256:{'b' * 64}", f"sha256:{'c' * 64}")
+    assert (
+        verify_oci_export.main(
+            ["--archive", str(archive), "--expected-image-id", expected]
+        )
+        == 1
+    )
+    assert "does not match" in capsys.readouterr().out
+
+
+def test_oci_export_verifier_rejects_invalid_expected_identity(capsys) -> None:
+    assert (
+        verify_oci_export.main(
+            ["--archive", "unused.oci.tar", "--expected-image-id", "latest"]
+        )
+        == 1
+    )
+    assert "not a sha256 digest" in capsys.readouterr().out
 
 
 def test_supply_chain_summary_gates_fixable_and_records_unfixed_critical(
@@ -450,6 +828,83 @@ def test_release_summary_rejects_unfixed_critical_and_archive_identity_mismatch(
 
     identity.return_value = (f"sha256:{'1' * 64}", f"sha256:{'3' * 64}")
     assert summarize_supply_chain.main() == 1
+
+
+def test_summary_binds_and_gates_an_additional_cargo_report(
+    mocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in (
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "anydoc-cargo.cdx.json",
+    ):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    (tmp_path / "vulnerabilities.json").write_text(
+        json.dumps({"matches": []}), encoding="utf-8"
+    )
+    cargo_report = "anydoc-cargo-vulnerabilities.json"
+    (tmp_path / cargo_report).write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "artifact": {"name": "cargo-component"},
+                        "vulnerability": {
+                            "id": "CVE-CARGO-FIXED",
+                            "severity": "Critical",
+                            "fix": {"versions": ["2"]},
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    inspect = mocker.patch("scripts.container.summarize_supply_chain.subprocess.run")
+    inspect.return_value.stdout = json.dumps([{"Id": "2" * 64, "Size": 123}])
+    mocker.patch(
+        "scripts.container.summarize_supply_chain.oci_identity",
+        return_value=(f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "summary",
+            "--image",
+            "image:test",
+            "--artifacts",
+            str(tmp_path),
+            "--expected-image-id",
+            f"sha256:{'2' * 64}",
+            "--additional-artifact",
+            "anydoc-cargo.cdx.json",
+            "--additional-artifact",
+            cargo_report,
+            "--additional-vulnerability-report",
+            cargo_report,
+        ],
+    )
+
+    assert summarize_supply_chain.main() == 1
+    evidence = json.loads((tmp_path / "image-metadata.json").read_text())
+    assert set(evidence["artifacts"]) == {
+        "image.oci.tar",
+        "sbom.cdx.json",
+        "sbom.spdx.json",
+        "vulnerabilities.json",
+        "anydoc-cargo.cdx.json",
+        cargo_report,
+    }
+    assert evidence["vulnerabilities"]["critical_with_fix"] == [
+        {
+            "fix_versions": ["2"],
+            "id": "CVE-CARGO-FIXED",
+            "package": "cargo-component",
+            "report": cargo_report,
+        }
+    ]
 
 
 def _write_release_bundle(path: Path) -> str:

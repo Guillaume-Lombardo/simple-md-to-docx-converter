@@ -1,5 +1,11 @@
 # Backup and recovery
 
+The `0.6.1` release identity is a matched backend/frontend digest pair plus its route manifest and
+evidence checksum. Rollback restores the prior backend containing the legacy UI and its matching
+route manifest as one release-level operation; never combine either image across releases. Storage
+restore requirements remain profile-specific and are determined by schema/data compatibility, not
+by the stateless frontend.
+
 The recovery targets are profile-specific:
 
 | Profile | Maximum RPO | Maximum RTO |
@@ -104,7 +110,10 @@ it against a production bucket or cite it as recovery evidence.
 ## Return to service
 
 Before reopening ingress, verify readiness, schema compatibility, object retrieval, template
-fallback, authentication, queue state, and the exact restored image/configuration identity. In
+fallback, the role-specific idle-session policy and revision, authentication, queue state, and the
+exact restored image/configuration identity. A missing policy row intentionally resolves to the
+30-minute standard-user and 15-minute administrator defaults; a present row and all immutable
+policy audit evidence must survive restore unchanged. In
 distributed mode, start API and workers in a controlled order and confirm worker-local metrics are
 being scraped. Preserve the exercise report without alteration, together with platform backup logs,
 according to the approved evidence-retention policy. Exercise each production profile at least

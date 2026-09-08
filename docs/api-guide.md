@@ -49,8 +49,10 @@ default mode.
 Use `GET /api/v1/conversions` for the current user's paginated list and
 `GET /api/v1/conversions/{job_id}` for one job. `DELETE` on the job requests cancellation.
 Completed output is available from `/result`; `/result/manifest` returns its traceability manifest.
-The result media type depends on the requested output. Poll no faster than `Retry-After`, handle
-terminal failed/cancelled states, and download before retention expires.
+The result download filename preserves the uploaded source stem and uses `.docx`, `.pdf`, or `.zip`
+for the requested output. Jobs without persisted source metadata use `conversion-<job-id>` as the
+filename stem. Result downloads use the `application/octet-stream` media type. Poll no faster than
+`Retry-After`, handle terminal failed/cancelled states, and download before retention expires.
 
 ## Templates
 
@@ -72,6 +74,14 @@ on a conflict, fetch current state and reconcile. Content replacement and restor
 version atomically. See [versioned template API](templates.md) for authorization, audit, archive,
 retention, and exact endpoint behavior.
 
+`GET /api/v1/conversion-options` is an authenticated, non-cacheable read of the configured
+`conversion_upload_max_bytes` and the resolved immutable template selection. It returns the
+selected template and exact `template_version_id`, or a strict null pair, plus one stable
+`selection_source`: `pandoc_default`, `preferred`, or `system_fallback`. `GET
+/api/v1/template-context` similarly returns the current user's `preferred_template_id`, the
+`system_fallback_template_id`, and configured `template_max_archive_bytes`. Neither response
+contains storage paths, credentials, or deployment secrets.
+
 ## Administration and audit
 
 Administrators can list and create users, change active state, reset a password, and set or cancel
@@ -81,6 +91,27 @@ the next-login renewal requirement under `/api/v1/admin/users`. Creation and res
 version. `GET /api/v1/audit` exposes paginated audit records to authorized
 administrators; records contain identifiers and action metadata, not document bodies or passwords.
 
+`GET /api/v1/admin/session-policy` returns `user_idle_minutes`, `admin_idle_minutes`, the exact
+positive `absolute_lifetime_seconds` operator ceiling, current `revision`, and an `ETag`. Its
+authoritative `user_idle_minutes_bounds` and `admin_idle_minutes_bounds` objects each provide
+`minimum_minutes`, `default_minutes`, and `maximum_minutes`; `idle_minutes_granularity` is `1`.
+Clients, including the frontend, consume those values rather than duplicating policy bounds.
+`PUT` on the same path requires the session CSRF header plus that
+validator in `If-Match` and atomically replaces both values. Standard-user values must be whole
+minutes from 5 through 300 inclusive; administrator values must be whole minutes from 5 through 60
+inclusive. Missing preconditions return `428`; malformed or stale validators return `412`, leave
+both values unchanged, and append no audit. A successful update returns the next revision and ETag
+and records actor, old/new pairs, revision, and operation without credentials. If either duration
+exceeds the operator-configured absolute session lifetime, the update returns `422` and does not
+change policy or audit state.
+The supported CLI mirrors these operations with `markweave session-policy get` and
+`markweave session-policy update --user-idle-minutes N --admin-idle-minutes N`. The update
+command reads the current ETag immediately before sending the CSRF-protected replacement.
+
 The generated OpenAPI document is the exact source for request schemas, response status codes,
 field names, and header names. Pin or regenerate a client against the deployed release rather than
 assuming an undocumented compatibility contract.
+
+The repository commits the normalized v1 artifact and validates compatible evolution in CI. See
+[OpenAPI contract maintenance](openapi-contract.md) for regeneration, review, and intentional
+major-version change procedures.

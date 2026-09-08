@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session as DatabaseSession
 
@@ -21,6 +21,10 @@ from markweave.jobs.models import (
     JobState,
     JobStep,
     JobSubmission,
+)
+from markweave.persistence.job_admission import (
+    global_active_job_count,
+    lock_global_admission,
 )
 from markweave.persistence.jobs.common import _job, _SqlJobStore
 from markweave.persistence.schema import (
@@ -120,12 +124,8 @@ class _JobSubmissionRepository(_SqlJobStore):
             raise JobRepositoryError from None
 
     def _lock_admission(self, database: DatabaseSession) -> None:
-        if (
-            self._admission_policy is not None
-            and self._engine.dialect.name == "postgresql"
-        ):
-            # One transaction-scoped lock serializes the two coupled capacity counts.
-            database.execute(text("SELECT pg_advisory_xact_lock(1830285106)"))
+        if self._admission_policy is not None:
+            lock_global_admission(database, self._engine.dialect.name)
 
     @staticmethod
     def _find_idempotent(
@@ -156,12 +156,7 @@ class _JobSubmissionRepository(_SqlJobStore):
         )
         if int(owner_active or 0) >= policy.active_jobs_per_user:
             raise JobUserQuotaExceededError("Active conversion-job quota exceeded")
-        queue_depth = database.scalar(
-            select(func.count())
-            .select_from(ConversionJobRow)
-            .where(ConversionJobRow.state.in_(active_states))
-        )
-        if int(queue_depth or 0) >= policy.global_queue_capacity:
+        if global_active_job_count(database) >= policy.global_queue_capacity:
             raise JobQueueCapacityExceededError("Conversion queue capacity exceeded")
 
     def activate_source(self, job_id: UUID, now: datetime) -> ConversionJob:

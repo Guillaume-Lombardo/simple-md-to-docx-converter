@@ -178,6 +178,29 @@ def test_valid_template_returns_immutable_font_and_package_observations(
     )
 
 
+def test_empty_font_declaration_disables_only_declaration_enforcement(
+    limits: TemplateLimits, font_policy: FontPolicy
+) -> None:
+    validated = validate_template(
+        _docx(), TemplateFontDeclaration(()), limits, font_policy
+    )
+
+    assert validated.declared_fonts == ()
+    assert validated.referenced_fonts == ("Calibri", "Cambria", "Courier New")
+    assert validated.resolved_fonts == ()
+
+    unknown_font = _base_entries()["word/document.xml"].replace(
+        b' w:ascii="Courier New"', b' w:ascii="Unknown Font"'
+    )
+    _assert_code(
+        _docx({"word/document.xml": unknown_font}),
+        TemplateValidationErrorCode.FONT_CONTRACT,
+        limits,
+        TemplateFontDeclaration(()),
+        font_policy,
+    )
+
+
 @pytest.mark.parametrize(
     "required", PANDOC_REQUIRED_STYLES, ids=lambda item: item.style_id
 )
@@ -500,7 +523,6 @@ def test_font_policy_resolves_exact_family_and_rejects_duplicate_alias() -> None
 @pytest.mark.parametrize(
     "families",
     (
-        (),
         ("Calibri",) * 21,
         cast("tuple[str, ...]", (123,)),
         (" ",),

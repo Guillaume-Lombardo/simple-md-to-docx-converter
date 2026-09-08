@@ -73,6 +73,15 @@ MARKWEAVE_WORKER_CLEANUP_INTERVAL_SECONDS=<approved positive finite value>
 MARKWEAVE_WORKER_CLEANUP_BATCH_SIZE=<approved positive value>
 ```
 
+The optional reverse execution group documented in [configuration](configuration.md) is
+profile-neutral and intentionally has no defaults. In standalone it augments the single embedded
+worker through the owner-authenticated Unix broker socket. In distributed deployments the API may
+remain reverse-HTTP-only without execution credentials, while each external worker that processes
+reverse jobs uses the complete mTLS broker profile. A partial execution group is rejected before
+storage or broker construction. Both profiles enforce the reverse-running ceiling in the database;
+the existing global admission count continues to include queued and running jobs from both
+families.
+
 Upload and decompressed-content limits are independent. A standalone Markdown upload can make the
 upload ceiling larger than the decompressed archive ceiling, while another approved policy may do
 the reverse. Configuration therefore validates each as positive without imposing an unsupported
@@ -94,8 +103,9 @@ destination directory, synchronize its content, replace the destination, and syn
 directory. One application replica must have exclusive ownership of this PVC; never mount the
 SQLite database from multiple pods.
 
-Template identities, immutable owners, search fields, preferences, the system fallback, immutable
-version metadata, and audit records are in the same database. Template bytes use the
+Template identities, immutable owners, search fields, preferences, the system fallback, the
+versioned role-specific idle-session policy, immutable version metadata, and audit records are in
+the same database. Template bytes use the
 `template-versions/<owner UUID>/<version UUID>` object namespace; visible names and uploaded
 filenames never influence a key.
 Conversion inputs and results use the `uploads` and `results` namespaces. Durable queue state,
@@ -130,8 +140,9 @@ stable S3-compatible inventory and requires a named quiescence/provider-consiste
 requires an isolated empty database/schema and bucket, verifies all stable references, applies the
 application migration, and emits readiness evidence without switching traffic.
 Do not rewrite object keys from usernames, filenames, or template names during backup or restore.
-Template identities, versions, audit, preferences, and fallback selection are part of the
-PostgreSQL recovery set. Immutable template bytes use the same stable key layout in S3 as on the
+Template identities, versions, audit, preferences, fallback selection, and the versioned
+role-specific idle-session policy are part of the PostgreSQL recovery set. Immutable template
+bytes use the same stable key layout in S3 as on the
 standalone filesystem.
 Conversion queue rows and their referenced upload/result objects are also one recovery unit.
 External workers must be stopped or drained during a coordinated backup unless the database and

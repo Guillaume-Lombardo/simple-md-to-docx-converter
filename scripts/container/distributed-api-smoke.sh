@@ -8,8 +8,10 @@ readonly rustfs_name=md-converter-t20-rustfs-smoke
 readonly application_name=md-converter-t20-distributed-api-smoke
 readonly worker_name=md-converter-t20-distributed-worker-smoke
 readonly clamav_name=md-converter-t20-distributed-clamav-smoke
+readonly clamav_probe_name=md-converter-t20-distributed-clamav-probe-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
-seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
+readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
+seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=()
 template_directory="$(mktemp -d)"
@@ -30,7 +32,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name" "$clamav_name"; do
+for name in "$postgres_name" "$rustfs_name" "$application_name" "$worker_name" \
+  "$clamav_name" "$clamav_probe_name"; do
   if podman container exists "$name"; then
     echo "Refusing to replace pre-existing container $name." >&2
     exit 1
@@ -47,10 +50,29 @@ podman run --detach --name "$clamav_name" --network "$network_name" \
   --network-alias clamav --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
-  --volume "$(pwd)/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
+  --volume "$repository/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
   --entrypoint /opt/md-converter/venv/bin/python \
   "$image" /fake-clamav.py >/dev/null
 created=("$clamav_name" "${created[@]}")
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed
+podman run --detach --name "$clamav_probe_name" --network "$network_name" \
+  --read-only --cap-drop=all --security-opt=no-new-privileges \
+  --pids-limit=16 --memory=64m --tmpfs /tmp:rw,nosuid,nodev,noexec,size=4m \
+  --entrypoint /opt/md-converter/venv/bin/python \
+  "$image" -c 'import time; time.sleep(30)' >/dev/null
+created=("$clamav_probe_name" "${created[@]}")
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed-alias "$clamav_probe_name" clamav
+podman kill --signal KILL "$clamav_probe_name" >/dev/null
+podman rm "$clamav_probe_name" >/dev/null
+clamav_address="$(podman inspect "$clamav_name" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+if [[ -z "$clamav_address" ]]; then
+  echo "Fake ClamAV has no address on the smoke-test network." >&2
+  exit 1
+fi
+scanner_host_mapping=(--add-host "clamav:$clamav_address")
 podman run --detach --name "$postgres_name" --network "$network_name" \
   --network-alias postgres \
   --env POSTGRES_DB=md_converter_test \
@@ -167,25 +189,27 @@ settings=(
 )
 
 podman run --detach --name "$application_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m --publish 127.0.0.1::8080 \
-  "${settings[@]}" "$image" api >/dev/null
+  "${settings[@]}" "$image" serve >/dev/null
 created=("$application_name" "${created[@]}")
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m \
-  "${settings[@]}" "$image" external-worker >/dev/null
+  "${settings[@]}" "$image" worker >/dev/null
 created=("$worker_name" "${created[@]}")
 application_port="$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
-for _ in $(seq 1 80); do
+for _ in $(seq 1 240); do
   if curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
       | grep -Fq '"status":"ready"'; then
     break
@@ -200,6 +224,12 @@ for _ in $(seq 1 80); do
 done
 curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
   | grep -Fq '"status":"ready"'
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" distributed-mapped "$application_name" clamav
+if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
+  bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
+    "http://127.0.0.1:$application_port"
+fi
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
 podman exec "$application_name" pandoc /tmp/t20-template.md \
@@ -217,6 +247,7 @@ test "$(podman inspect "$worker_name" --format '{{.State.ExitCode}}')" = 0
 podman rm "$worker_name" >/dev/null
 
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
@@ -225,9 +256,9 @@ podman run --detach --name "$worker_name" --network "$network_name" \
   --shm-size=128m \
   "${settings[@]}" \
   --env MARKWEAVE_CONVERSION_MERMAID_EXECUTABLE=/blocking-mmdc.sh \
-  --volume "$(pwd)/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
+  --volume "$repository/scripts/container/blocking-mmdc.sh:/blocking-mmdc.sh:ro,Z" \
   --volume "$blocking_evidence_directory:/evidence:rw,Z" \
-  "$image" external-worker >/dev/null
+  "$image" worker >/dev/null
 test "$(podman inspect "$worker_name" --format '{{.State.Running}}')" = true
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$application_port" \
@@ -257,13 +288,14 @@ uv run python -m scripts.container.api_workflow_smoke \
 podman rm "$worker_name" >/dev/null
 
 podman run --detach --name "$worker_name" --network "$network_name" \
+  "${scanner_host_mapping[@]}" \
   --user "$runtime_uid:0" --read-only --cap-drop=all \
   --security-opt=no-new-privileges --security-opt="seccomp=$seccomp_profile" \
   --memory=768m --cpus=2 --pids-limit=256 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --shm-size=128m \
-  "${settings[@]}" "$image" external-worker >/dev/null
+  "${settings[@]}" "$image" worker >/dev/null
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$application_port" \
   --recover-job "$blocking_job_file"

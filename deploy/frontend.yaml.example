@@ -1,0 +1,163 @@
+# Apply with either storage-profile manifest after replacing every placeholder.
+# The router terminates operator-provided TLS; loopback Compose intentionally uses HTTP instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: md-converter-frontend
+spec:
+  replicas: ${FRONTEND_REPLICAS}
+  selector:
+    matchLabels: {app.kubernetes.io/name: md-converter-frontend}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: md-converter-frontend}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 0
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: frontend
+          image: ${MARKWEAVE_FRONTEND_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: page, containerPort: 3000}
+            - {name: probe, containerPort: 3001}
+          livenessProbe:
+            httpGet: {path: /_frontend/health/live, port: probe}
+          readinessProbe:
+            httpGet: {path: /_frontend/health/ready, port: probe}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - {name: temporary, mountPath: /tmp}
+      volumes:
+        - name: temporary
+          emptyDir: {medium: Memory, sizeLimit: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: md-converter-frontend
+spec:
+  selector: {app.kubernetes.io/name: md-converter-frontend}
+  ports:
+    - {name: page, port: 3000, targetPort: page}
+    - {name: probe, port: 3001, targetPort: probe}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: md-converter-frontend-ingress
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: md-converter-frontend}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: md-converter-router}
+      ports:
+        - {port: 3000, protocol: TCP}
+    - from:
+        - namespaceSelector:
+            matchLabels: {markweave.g1lom.xyz/probe-access: "true"}
+          podSelector:
+            matchLabels: {markweave.g1lom.xyz/probe-client: "true"}
+      ports:
+        - {port: 3001, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: md-converter-router
+spec:
+  replicas: ${ROUTER_REPLICAS}
+  selector:
+    matchLabels: {app.kubernetes.io/name: md-converter-router}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: md-converter-router}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 0
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: router
+          image: ${MARKWEAVE_FRONTEND_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: [node, router.mjs]
+          env:
+            - {name: BACKEND_ORIGIN, value: "http://md-converter-api:8080"}
+            - {name: FRONTEND_ORIGIN, value: "http://md-converter-frontend:3000"}
+            - {name: PUBLIC_HOSTS, value: "${MARKWEAVE_PUBLIC_HOSTS}"}
+            - {name: ROUTER_HOST, value: "0.0.0.0"}
+            - {name: ROUTER_PORT, value: "8443"}
+            - {name: ROUTER_REQUEST_MAX_BYTES, value: "${MARKWEAVE_REQUEST_MAX_BYTES}"}
+            - {name: ROUTER_UPSTREAM_TIMEOUT_MS, value: "${MARKWEAVE_ROUTER_UPSTREAM_TIMEOUT_MS}"}
+            - {name: ROUTER_TLS_CERT_FILE, value: /run/tls/tls.crt}
+            - {name: ROUTER_TLS_KEY_FILE, value: /run/tls/tls.key}
+          ports:
+            - {name: https, containerPort: 8443}
+          livenessProbe:
+            tcpSocket: {port: https}
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - >-
+                  import('node:https').then(({request}) => {
+                  const call=request({host:'127.0.0.1',port:8443,path:'/login',
+                  rejectUnauthorized:false,headers:{Host:process.env.PUBLIC_HOSTS.split(',')[0]}},
+                  response=>process.exit(response.statusCode===200?0:1));
+                  call.on('error',()=>process.exit(1));call.end()})
+          resources:
+            requests:
+              cpu: "${ROUTER_CPU_REQUEST}"
+              memory: "${ROUTER_MEMORY_REQUEST}"
+              ephemeral-storage: "${ROUTER_EPHEMERAL_STORAGE_REQUEST}"
+            limits:
+              cpu: "${ROUTER_CPU_LIMIT}"
+              memory: "${ROUTER_MEMORY_LIMIT}"
+              ephemeral-storage: "${ROUTER_EPHEMERAL_STORAGE_LIMIT}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - {name: tls, mountPath: /run/tls, readOnly: true}
+            - {name: temporary, mountPath: /tmp}
+      volumes:
+        - name: tls
+          secret:
+            secretName: ${MARKWEAVE_ROUTER_TLS_SECRET}
+        - name: temporary
+          emptyDir: {medium: Memory, sizeLimit: "${ROUTER_TMP_LIMIT}"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: md-converter-router
+spec:
+  selector: {app.kubernetes.io/name: md-converter-router}
+  ports:
+    - {name: https, port: 443, targetPort: https}

@@ -35,6 +35,7 @@
       "uv",
       "run",
       "pytest",
+      "tests/integration/anydoc",
       "tests/integration/document_engines",
       "-m",
       "integration",
@@ -71,6 +72,14 @@
       "-m",
       "functional or integration",
       "--no-cov"
+    ],
+    "status": "active"
+  },
+  "frontend": {
+    "activation_ticket": "T60",
+    "command": [
+      "bash",
+      "web/scripts/run-rootless-smoke.sh"
     ],
     "status": "active"
   },

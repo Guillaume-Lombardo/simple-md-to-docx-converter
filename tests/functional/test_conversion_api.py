@@ -42,6 +42,7 @@ def submit(  # noqa: PLR0913 - explicit HTTP form helper
     content: bytes = b"# Durable conversion",
     idempotency_key: str | None = None,
     correlation_id: str | None = None,
+    filename: str = "source.md",
     template_id: UUID,
     template_version_id: UUID,
 ) -> Any:
@@ -53,7 +54,7 @@ def submit(  # noqa: PLR0913 - explicit HTTP form helper
     return client.post(
         "/api/v1/conversions",
         headers=headers,
-        files={"source": ("source.md", content, "text/markdown")},
+        files={"source": (filename, content, "text/markdown")},
         data={
             "template_id": str(template_id),
             "template_version_id": str(template_version_id),
@@ -258,6 +259,7 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         successful = submit(
             client,
             csrf,
+            filename="fichier1.md",
             template_id=template_id,
             template_version_id=template_version_id,
         )
@@ -286,8 +288,8 @@ def test_conversion_api_idempotency_authorization_cancellation_and_result(  # no
         result = client.get(f"/api/v1/conversions/{successful_id}/result")
         assert result.status_code == 200
         assert result.content == b"docx-result"
-        assert (
-            f"conversion-{successful_id}.docx" in result.headers["Content-Disposition"]
+        assert result.headers["Content-Disposition"] == (
+            'attachment; filename="fichier1.docx"'
         )
 
         assert (

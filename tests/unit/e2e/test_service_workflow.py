@@ -37,7 +37,7 @@ def identifier() -> str:
 def checkpoint() -> dict[str, str]:
     job_id = identifier()
     return {
-        "schema": "t21-service-checkpoint-v1",
+        "schema": "t59-service-checkpoint-v2",
         "profile": "standalone",
         "owner": "e2e-admin",
         "location": f"/api/v1/conversions/{job_id}",
@@ -47,7 +47,26 @@ def checkpoint() -> dict[str, str]:
         "template_id": identifier(),
         "template_version_id": identifier(),
         "result_sha256": "a" * 64,
+        "policy_user_idle_minutes": "25",
+        "policy_admin_idle_minutes": "10",
+        "policy_revision": "2",
+        "policy_audit_id": identifier(),
+        "policy_audit_actor_id": identifier(),
+        "policy_audit_operation": "idle_session_policy_update",
+        "policy_audit_created_at": "2026-09-01T12:00:00+00:00",
+        "policy_audit_old_user_idle_minutes": "30",
+        "policy_audit_old_admin_idle_minutes": "15",
+        "policy_audit_new_user_idle_minutes": "25",
+        "policy_audit_new_admin_idle_minutes": "10",
+        "policy_audit_revision": "2",
     }
+
+
+def legacy_checkpoint() -> dict[str, str]:
+    payload = checkpoint()
+    return {
+        key: value for key, value in payload.items() if not key.startswith("policy_")
+    } | {"schema": "t21-service-checkpoint-v1"}
 
 
 @pytest.mark.unit
@@ -59,6 +78,37 @@ def test_service_client_requires_safe_absolute_http_url() -> None:
             workflow.ServiceClient(invalid)
     with pytest.raises(ValueError, match="query or fragment"):
         workflow.ServiceClient("https://example.test/?secret=no")
+
+
+@pytest.mark.unit
+def test_short_absolute_final_image_scenario_performs_no_policy_update(mocker) -> None:
+    client = mocker.Mock()
+    client.request.side_effect = (
+        workflow.HttpResult(200, {}, b"{}", ()),
+        workflow.HttpResult(
+            401,
+            {},
+            b'{"error":{"code":"AUTHENTICATION_REQUIRED","message":"required"}}',
+            (),
+        ),
+    )
+    constructor = mocker.patch.object(workflow, "ServiceClient", return_value=client)
+    sleep = mocker.patch.object(workflow.time, "sleep")
+    arguments = argparse.Namespace(
+        base_url="http://service.test",
+        admin_username="admin",
+        admin_password="password",  # noqa: S106 - test-only credential
+    )
+
+    workflow.verify_session_expiration(arguments)
+
+    constructor.assert_called_once_with("http://service.test")
+    client.login.assert_called_once_with("admin", "password")
+    assert [call.args for call in client.request.call_args_list] == [
+        ("GET", "/api/v1/session"),
+        ("GET", "/api/v1/session"),
+    ]
+    sleep.assert_called_once_with(3)
 
 
 @pytest.mark.unit
@@ -227,6 +277,10 @@ def test_checkpoint_round_trip_is_content_free_and_owner_only(tmp_path: Path) ->
     rendered = path.read_text(encoding="utf-8")
     assert "password" not in rendered
     assert "source content" not in rendered
+
+    legacy = legacy_checkpoint()
+    workflow.write_state(path, legacy)
+    assert workflow.read_state(path, expected_profile="standalone") == legacy
 
 
 @pytest.mark.unit

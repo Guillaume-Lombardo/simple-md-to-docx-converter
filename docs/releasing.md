@@ -16,6 +16,36 @@ numbers, and stale attempts on a new version fail closed. Pull requests, forks, 
 Release events cannot start publication. Manual dispatch cannot publish Python artifacts; it is
 reserved for the container-only recovery described below.
 
+The read-only CI workflow also verifies the public release identity through fixed HTTPS endpoints.
+In the normal state, `project.version`, the latest PyPI version, the Compose image tag, the
+published GitHub tag and Release receipt, and the anonymous GHCR manifest digest must all agree;
+the Compose reference must include that immutable digest. The only exception is an exact version
+transition on a pull request, merge-group candidate, or trusted `main` push: the base project,
+PyPI, and Compose versions must still agree, the new project version must be higher, and all public
+evidence for the base version must remain valid. Scheduled, Release, and manual runs never receive
+this exception. A later revision at the unchanged new version also fails until the published image
+has been adopted.
+
+The sole historical skipped-container exception covers the failed `0.6.0` cutover publication:
+PyPI and the exact GitHub tag/Release exist at the reviewed `0.6.0` base source, Compose remains on
+the `0.5.2` digest verified against its publication receipt and anonymous GHCR manifest bytes, and
+no container staging artifact was created. Both backend and frontend repositories must return the
+exact bounded structured `MANIFEST_UNKNOWN` response for the requested `0.6.0` tag. The check uses
+anonymous pull first. Only an exact anonymous `DENIED` response from the historical frontend
+repository may fall back to the ephemeral GitHub Actions identity with `packages: read`; backend
+denial never does. Credentials are populated only for a trusted push or a pull request whose head
+repository exactly matches this repository. Fork and merge-group validation therefore fail closed
+when this one-time exception is needed and require successful trusted same-repository pull-request
+validation. A missing credential, authenticated denial, existing private tag, malformed, oversized,
+or unrelated response does not prove absence. Only the normal protected `0.6.1` pending transition
+may pass that state. It performs a new ordinary paired release; it does not rebuild or recover
+`0.6.0`.
+
+That exception is now historical: protected release run `33725900729` published the paired `0.6.1`
+images from source `78cb86d450e940a3190591de62ee0ebade216d8b`, and the separate adoption change pins both verified
+registry digests in Compose, the quickstarts, and the durable cutover evidence. Normal fully aligned
+public-release checks apply after adoption.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
@@ -39,8 +69,12 @@ repositories.
 1. Change only the intended release version in `project.version` and the matching application
    version source. Use canonical final public PEP 440 syntax. Pre-releases, development releases,
    local versions, epochs, invalid spellings, version downgrades, and mismatched application
-   versions fail closed. A more explicit canonical spelling such as `0.3` to `0.3.0` remains a
-   valid transition even though the two parsed PEP 440 versions have equal precedence.
+   versions and transitions with equal PEP 440 precedence fail closed. Reset
+   `tool.markweave.release.attempt` to `1`. For the `0.5.0` transition, Compose also catches up
+   from `0.3.5` to the already-published immutable `0.4.0` image while retaining its existing
+   `embedded-worker` command. This bounded correction restores the required base/PyPI/Compose
+   alignment before publication. The completed post-publication phase pins `0.5.0` from its
+   retained receipt and advances the public role to `markweave serve`.
 2. Open a pull request and require the complete `CI / gate`, independent review, and protected
    merge to `main`. Release versions are derived dynamically and are not hardcoded in the
    workflows.
@@ -55,15 +89,27 @@ repositories.
    Release only after verifying its exact SHA, tag, target, draft, and prerelease state. The PyPI
    job then rechecks that the version is still unpublished and uploads the verified files with
    PEP 740 attestations through OIDC.
-6. The reusable container workflow checks out the same SHA, derives the image tag from the detected
-   version, and runs the rootless final-image and Critical-vulnerability gates. It serializes the
-   image once into a private `dir:` transport, verifies the registry manifest bytes against
-   Podman's digest file, and uses Skopeo to copy those exact staged bytes to the `source-<SHA>` and
-   version tags. Authenticated preflight accepts only an absent tag or that same digest, and each
-   copy is followed by an exact remote digest check. It then generates provenance and attaches the
-   SBOM, publication receipt, and evidence to the verified Release identity. Because job
+6. The reusable container workflow checks out the same SHA, derives both image tags from the
+   detected version, and runs the rootless final-image, paired E2E, and Critical-vulnerability
+   gates. It serializes each image once into a private `dir:` transport and uploads the complete
+   backend/frontend staging artifact before any registry mutation. Authenticated preflight checks
+   every source and version tag for both roles before the first copy, accepting only an absent tag
+   or the exact intended digest. Skopeo then copies those exact staged bytes and verifies every
+   remote digest. A later copy failure may leave a partial pair, but the retained staging artifact
+   is sufficient for the bounded recovery path below; neither normal publication nor recovery
+   rebuilds an image. The workflow then generates provenance and attaches both SBOM sets,
+   publication receipts, and paired evidence to the verified Release identity. Because job
    credentials are isolated, the attestation job performs its own ephemeral GHCR login immediately
    before pushing provenance; it does not reuse or persist the publication job's credentials.
+
+After the version pull request is merged, suspend unrelated integrations and monitor the automatic
+release workflow on `main` to a terminal result. If publication succeeds, immediately open the
+follow-up pull request from the resulting evidence: copy the exact `registry_manifest_digest` from
+`registry-publication.json` into the Compose `version@sha256:...` reference, verify it anonymously
+against GHCR, perform any release-owned public command migration, and run the documented
+standalone and distributed quickstarts against that exact digest. The follow-up must restore full
+alignment before unrelated work is integrated. If publication fails, investigate or use the
+bounded recovery path below; never infer a digest or point Compose at an unpublished tag.
 
 If GitHub loses a run before creating any job, first prove that every external release surface is
 absent and attempt the normal, forced, and platform-advised cancellation or rerun paths. Record the
@@ -78,23 +124,25 @@ not depend on a Release event. Tags and Releases created with `GITHUB_TOKEN` the
 a duplicate publication run. Container evidence attachment verifies the tag and Release SHA before
 using `--clobber`, making a retry of that attachment idempotent. Any pre-existing tag, Release, or
 PyPI version blocks a fresh run rather than being silently reused. Investigate partial external
-state before authorizing any manual recovery. Recovery must not rebuild the container: registry
+state before authorizing any manual recovery. Recovery must not rebuild either container: registry
 serialization is not guaranteed to be byte-reproducible across hosted Podman versions. Run
 `container-release.yml` from `main` with the exact existing version, `v<version>` tag, reviewed
-source SHA, and the ID of a failed source run whose `build-and-publish` job succeeded and retained
-the exact evidence artifact.
+source SHA, and the ID of a failed source run whose `build-and-publish` job successfully retained
+the exact pre-mutation staging artifact before the job failed.
 
 Before download, recovery verifies the source run belongs to this upstream repository and exact
 workflow, ran from trusted `main` at a descendant of the release source and an ancestor of the
-current trusted `main` workflow SHA, completed with a successful build job, and has one bounded
-non-expired artifact with matching repository/run metadata. It downloads by immutable artifact ID,
-not name alone. It then validates the exact regular-file set,
-closed checksum bundle, OCI archive and metadata relationship, publication receipt, release
-version/tag/source, and the anonymously readable public GHCR digest. Only after those checks does
-it transfer the unchanged evidence into the recovery run, attest that exact public digest, and
-attach the SBOM and evidence to the already verified Release. The recovery job has no package-write
-or OIDC permission, never enters the PyPI environment, and cannot invoke either build or Python
-publication.
+current trusted `main` workflow SHA, reached the successful pre-mutation staging step, and has one
+bounded non-expired artifact with matching repository/run metadata. It downloads by immutable
+artifact ID, not name alone. It then validates the exact regular-file set, closed checksum bundle,
+OCI archives and metadata relationships, publication receipts, release version/tag/source, and the
+state of both public GHCR digests. The recovery job has scoped `packages: write` permission because
+it may need to publish the missing role from the retained bytes; it preflights both roles before
+copying, accepts an already-correct role idempotently, and rejects any conflicting digest. Only
+after both exact digests are public does it transfer the unchanged evidence into the recovery run.
+Separate jobs attest those exact public digests and attach the evidence to the already verified
+Release. Recovery has no OIDC permission, never enters the PyPI environment, and cannot invoke
+either build or Python publication.
 
 The dispatch shape is:
 
@@ -137,3 +185,28 @@ For released version `<version>`:
 
 Preserve workflow URLs and immutable digests in the release record. Do not publish, replace, or
 delete external release state outside this protected automation without explicit approval.
+
+## Frontend publication after T64
+
+The release workflow publishes the backend and frontend as one evidence-bound pair without
+replacing the established trust model. The frontend package identity is
+`ghcr.io/guillaume-lombardo/md-converter-web`; it shares the Markweave version, source SHA,
+`v<version>` tag, GitHub Release, and protected human gate with the backend but has its own registry
+manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance.
+
+One release is deployable only when the PyPI artifact and both image receipts agree on version and
+source SHA, both public digests are anonymously readable, and the release evidence manifest binds
+the pair plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
+removing the legacy renderer from candidate source. The `0.6.1` continuation source satisfies that
+gate; the release workflow builds and serializes each final image once, runs the complete rootless acceptance matrix
+against those exact staged bytes, and publish the same bytes. It must not test one image and rebuild
+another after legacy removal. If publication is partial, recover the missing image/evidence from
+the retained exact staged bytes without rebuilding, or fail the release. Never pair an older
+frontend with a newer backend, infer a digest, or use a mutable tag as rollback identity.
+
+The post-publication adoption pull request pins both exact public manifest digests in Compose,
+quickstarts, and deployment evidence before unrelated integration resumes. The existing GHCR
+preflight, exact-copy verification, narrow external-writer race disclosure, permissions,
+concurrency, provenance, attachment, and anonymous verification rules apply separately to each
+package. See [the reviewed migration architecture](nextjs-migration-architecture.md) for the image
+baseline, staged cutover, and release-level rollback contract.

@@ -7,6 +7,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from markweave.auth.errors import AuthenticationError
+from markweave.auth.policy_errors import (
+    IdleSessionPolicyAbsoluteLimitError,
+    IdleSessionPolicyConflictError,
+    IdleSessionPolicyPreconditionRequiredError,
+)
 from markweave.jobs.errors import (
     JobConflictError,
     JobNotFoundError,
@@ -17,6 +22,18 @@ from markweave.jobs.errors import (
 )
 from markweave.malware import MalwareDetectedError, MalwareScannerUnavailableError
 from markweave.persistence.errors import PersistenceError
+from markweave.reversion_jobs.errors import (
+    ReversionJobConflictError,
+    ReversionJobNotFoundError,
+    ReversionJobRepositoryError,
+    ReversionJobRequestError,
+    ReversionJobStorageError,
+    ReversionJobUserQuotaExceededError,
+    ReversionQueueCapacityExceededError,
+    ReversionServiceUnavailableError,
+)
+from markweave.reversions.capabilities import ReversionCapabilitiesUnavailableError
+from markweave.reversions.errors import ReverseConversionError
 from markweave.storage import ObjectStoreError
 from markweave.templates.errors import (
     TemplateConflictError,
@@ -92,6 +109,66 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "PERSISTENCE_UNAVAILABLE",
                     "message": "Persistent storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionCapabilitiesUnavailableError)
+    def reversion_capabilities_unavailable_handler(
+        _request: Request, _error: ReversionCapabilitiesUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+                    "message": "Reverse-conversion capabilities are unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyPreconditionRequiredError)
+    def idle_policy_precondition_handler(
+        _request: Request, _error: IdleSessionPolicyPreconditionRequiredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=428,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_PRECONDITION_REQUIRED",
+                    "message": "If-Match is required.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyConflictError)
+    def idle_policy_conflict_handler(
+        _request: Request, _error: IdleSessionPolicyConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=412,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_PRECONDITION_FAILED",
+                    "message": "The idle-session policy has changed.",
+                }
+            },
+        )
+
+    @app.exception_handler(IdleSessionPolicyAbsoluteLimitError)
+    def idle_policy_absolute_limit_handler(
+        _request: Request, _error: IdleSessionPolicyAbsoluteLimitError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "IDLE_SESSION_POLICY_EXCEEDS_ABSOLUTE_LIFETIME",
+                    "message": "Idle-session durations cannot exceed the absolute lifetime.",
                 }
             },
         )
@@ -211,6 +288,119 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "CONVERSION_STORAGE_UNAVAILABLE",
                     "message": "Conversion storage is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionServiceUnavailableError)
+    def reversion_unavailable_handler(
+        _request: Request, _error: ReversionServiceUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_SERVICE_UNAVAILABLE",
+                    "message": "Reverse conversion is unavailable.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobNotFoundError)
+    def reversion_not_found_handler(
+        _request: Request, _error: ReversionJobNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "error": {
+                    "code": "REVERSION_NOT_FOUND",
+                    "message": "The reverse conversion was not found.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobConflictError)
+    def reversion_conflict_handler(
+        _request: Request, _error: ReversionJobConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": {
+                    "code": "REVERSION_CONFLICT",
+                    "message": "The reverse conversion conflicts with current state.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobRequestError)
+    @app.exception_handler(ReverseConversionError)
+    def reversion_request_handler(
+        _request: Request, _error: ReversionJobRequestError | ReverseConversionError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {
+                    "code": "REVERSION_REQUEST_INVALID",
+                    "message": "The reverse-conversion request is invalid.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobUserQuotaExceededError)
+    def reversion_quota_handler(
+        request: Request, _error: ReversionJobUserQuotaExceededError
+    ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("reversion_owner")
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={
+                "Retry-After": str(request.app.state.reversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_USER_QUOTA_EXCEEDED",
+                    "message": "The active reverse-conversion quota is exhausted.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionQueueCapacityExceededError)
+    def reversion_capacity_handler(
+        request: Request, _error: ReversionQueueCapacityExceededError
+    ) -> JSONResponse:
+        request.app.state.components.metrics.record_saturation("global")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={
+                "Retry-After": str(request.app.state.reversion_retry_after_seconds)
+            },
+            content={
+                "error": {
+                    "code": "REVERSION_QUEUE_CAPACITY_EXCEEDED",
+                    "message": "The conversion queue is at capacity.",
+                }
+            },
+        )
+
+    @app.exception_handler(ReversionJobRepositoryError)
+    @app.exception_handler(ReversionJobStorageError)
+    def reversion_storage_handler(
+        _request: Request,
+        _error: ReversionJobRepositoryError | ReversionJobStorageError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": {
+                    "code": "REVERSION_STORAGE_UNAVAILABLE",
+                    "message": "Reverse-conversion storage is unavailable.",
                 }
             },
         )

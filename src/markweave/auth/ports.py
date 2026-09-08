@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
     from markweave.auth.models import (
         AuthenticationAuditContext,
+        IdleSessionPolicy,
+        IdleSessionPolicyAudit,
         ProvisionedUser,
         Session,
         User,
@@ -84,6 +86,22 @@ class SessionRepository(Protocol):
     def revoke(self, token_digest: str) -> None: ...
 
     def revoke_user(self, user_id: UUID) -> None: ...
+
+
+class IdleSessionPolicyRepository(Protocol):
+    """Singleton role-specific idle-session policy persistence contract."""
+
+    def get(self) -> IdleSessionPolicy: ...
+
+    def update(
+        self,
+        policy: IdleSessionPolicy,
+        *,
+        expected_revision: int,
+        audit: IdleSessionPolicyAudit,
+    ) -> IdleSessionPolicy | None:
+        """Atomically compare, update, revise, and append immutable audit."""
+        ...
 
 
 class PasswordHasher(Protocol):

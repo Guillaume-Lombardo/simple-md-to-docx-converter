@@ -14,20 +14,23 @@ commonmark_x+pipe_tables+footnotes+attributes+yaml_metadata_block-raw_html
 Before Pandoc starts, the service parses CommonMark together with front-matter and footnote
 extensions. YAML is composed with a safe, non-object-constructing loader and its decoded scalar
 nodes are traversed once, so quoted escapes and aliases cannot bypass the checks. Invalid YAML is
-rejected. The validator rejects raw HTML and every link or image destination that uses a URI scheme,
-protocol-relative form, or encoded equivalent. The same conservative checks apply inside YAML
-front matter and footnote continuations, where extension syntax could otherwise hide content from
-a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual code spans and code
-blocks. Standalone Markdown still rejects every image token. Archive inputs may bind a safe
-relative image destination to a normalized PNG in an immutable approved-resource manifest; missing,
-escaping, ambiguous, absolute, and remote destinations fail before the engine. Pandoc raw-code
+rejected. Ordinary links and autolinks may use absolute HTTP(S) destinations with a valid host, no
+embedded credentials, and no control characters. Other URI schemes, malformed destinations,
+protocol-relative forms, and encoded-scheme equivalents are rejected. The same conservative checks
+apply inside YAML front matter and footnote continuations, where extension syntax could otherwise
+hide content from a plain CommonMark parse. Literal HTML and URLs remain permitted inside actual
+code spans and code blocks. Standalone Markdown still rejects every image token. Archive inputs may
+bind a safe relative image destination to a normalized PNG in an immutable approved-resource
+manifest; missing, escaping, ambiguous, absolute, and remote destinations fail before the engine.
+Pandoc raw-code
 attributes such as `{=html}` and `{=tex}` are also rejected when attached to inline code or used as
 a fence info string. The same characters remain valid as literal code content.
 
-This validation prevents Pandoc from fetching a remote destination supplied by a document. The
-adapter does not claim operating-system network isolation; deployment network policy supplies that
-boundary. Pandoc's `--sandbox` option is not enabled because it also prevents the approved local
-resource behavior.
+HTTP(S) hyperlinks become inert external relationships in the DOCX; the service does not resolve
+or fetch their destinations. Remote images and every other remotely loaded document resource remain
+forbidden. The adapter does not claim operating-system network isolation; deployment network policy
+supplies that boundary. Pandoc's `--sandbox` option is not enabled because it also prevents the
+approved local resource behavior.
 
 ## Process boundary
 

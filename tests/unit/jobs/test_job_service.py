@@ -12,7 +12,12 @@ from pytest_mock import MockerFixture
 from markweave.jobs.errors import JobConflictError, JobNotFoundError
 from markweave.jobs.models import JobOutput, JobRequest, JobState, JobStep
 from markweave.jobs.ports import JobRepository
-from markweave.jobs.service import JobService, JobServicePolicy
+from markweave.jobs.service import (
+    MAX_IDEMPOTENCY_KEY_CHARACTERS,
+    JobService,
+    JobServicePolicy,
+    _request_digest,
+)
 from markweave.storage import ObjectNotFoundError, ObjectStore
 from tests.unit.jobs.test_job_models import job
 
@@ -27,6 +32,50 @@ def service(repository: JobRepository, objects: ObjectStore) -> JobService:
         repository,
         objects,
         JobServicePolicy(result_retention_seconds=RETENTION_SECONDS),
+    )
+
+
+def test_request_identity_includes_template_version_and_full_key_boundary(
+    mocker: MockerFixture,
+) -> None:
+    repository = mocker.Mock(spec=JobRepository)
+    objects = mocker.Mock(spec=ObjectStore)
+    instance = service(repository, objects)
+    template_id = uuid4()
+    first = JobRequest(
+        owner_id=uuid4(),
+        source=b"source",
+        template_id=template_id,
+        template_version_id=uuid4(),
+        output=JobOutput.DOCX,
+        component_versions=COMPONENT_VERSIONS,
+        now=NOW,
+    )
+    second = JobRequest(
+        owner_id=first.owner_id,
+        source=first.source,
+        template_id=template_id,
+        template_version_id=uuid4(),
+        output=first.output,
+        component_versions=first.component_versions,
+        now=first.now,
+    )
+    source_sha256 = hashlib.sha256(first.source).hexdigest()
+    assert _request_digest(
+        first,
+        source_sha256=source_sha256,
+        source_size=len(first.source),
+        include_template_mode=True,
+    ) != _request_digest(
+        second,
+        source_sha256=source_sha256,
+        source_size=len(second.source),
+        include_template_mode=True,
+    )
+    boundary_key = "k" * MAX_IDEMPOTENCY_KEY_CHARACTERS
+    assert (
+        instance._idempotency_digest(boundary_key)
+        == hashlib.sha256(boundary_key.encode()).hexdigest()
     )
 
 

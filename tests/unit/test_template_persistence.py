@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from pytest_mock import MockerFixture
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from markweave.templates.models import (
     TemplateIdentity,
     TemplatePublicationState,
     TemplateSearch,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -48,7 +49,50 @@ LEASE_REVISION: Any = importlib.import_module(
 
 
 @pytest.mark.unit
-def test_inprocess_template_repository_control_flow() -> None:
+def test_template_resolution_uses_one_statement_and_prefers_user_selection() -> None:
+    engine = create_database_engine("sqlite+pysqlite://")
+    upgrade_database(engine)
+    owner_id = uuid4()
+    SqlUserRepository(engine).create(
+        User(owner_id, "Owner", "snapshot-owner", "hash", Role.USER)
+    )
+    catalog = SqlTemplateCatalogRepository(engine)
+    preferred = TemplateIdentity(
+        uuid4(), owner_id, "Preferred", "Personal", TemplateStatus.ACTIVE
+    )
+    fallback = TemplateIdentity(
+        uuid4(), owner_id, "Fallback", "System", TemplateStatus.ACTIVE
+    )
+    catalog.add(preferred)
+    catalog.add(fallback)
+    selections = SqlTemplateSelectionRepository(engine)
+    selections.set_preferred(owner_id, preferred.id)
+    selections.set_system_fallback(fallback.id)
+    statements: list[str] = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        assert selections.resolve_with_source(owner_id) == (
+            preferred,
+            TemplateSelectionSource.PREFERRED,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+        engine.dispose()
+
+    assert len(statements) == 1
+    normalized = statements[0].casefold()
+    assert "case" in normalized
+    assert "template_preferences" in normalized
+    assert "system_template_selection" in normalized
+
+
+@pytest.mark.unit
+def test_inprocess_template_repository_control_flow() -> None:  # noqa: PLR0915
     engine = create_database_engine("sqlite+pysqlite://")
     upgrade_database(engine)
     users = SqlUserRepository(engine)
@@ -95,13 +139,28 @@ def test_inprocess_template_repository_control_flow() -> None:
     assert selections.preferred_id(owner.id) is None
     assert selections.system_fallback_id() is None
     assert selections.resolve(owner.id) is None
+    assert selections.resolve_with_source(owner.id) == (
+        None,
+        TemplateSelectionSource.PANDOC_DEFAULT,
+    )
+    assert selections.context(owner.id) == (None, None)
     selections.set_system_fallback(other.id)
     assert selections.system_fallback_id() == other.id
     assert selections.resolve(owner.id) == other
+    assert selections.resolve_with_source(owner.id) == (
+        other,
+        TemplateSelectionSource.SYSTEM_FALLBACK,
+    )
+    assert selections.context(owner.id) == (None, other.id)
     selections.set_preferred(owner.id, active.id)
     selections.set_preferred(owner.id, other.id)
     assert selections.preferred_id(owner.id) == other.id
     assert selections.resolve(owner.id) == other
+    assert selections.resolve_with_source(owner.id) == (
+        other,
+        TemplateSelectionSource.PREFERRED,
+    )
+    assert selections.context(owner.id) == (other.id, other.id)
     preferred_audit = TemplateAuditRecord(
         uuid4(),
         owner.id,
@@ -613,6 +672,8 @@ def test_template_repositories_sanitize_every_sqlalchemy_failure(
         lambda: selections.set_system_fallback(template.id),
         selections.system_fallback_id,
         lambda: selections.resolve(owner_id),
+        lambda: selections.resolve_with_source(owner_id),
+        lambda: selections.context(owner_id),
     )
     for operation in operations:
         with pytest.raises(PersistenceError) as caught:

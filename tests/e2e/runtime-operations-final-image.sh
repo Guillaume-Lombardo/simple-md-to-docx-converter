@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly image="${1:-localhost/md-converter:t20-ci}"
 readonly runtime_uid="${T36_RUNTIME_UID:-53000}"
+readonly application_version="$(uv version --short --locked)"
 seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 
@@ -10,20 +11,34 @@ readonly seccomp_profile
 source scripts/e2e/runtime-settings.sh
 e2e_runtime_settings
 
-podman run --rm \
+hardened_runtime=(
   --user "$runtime_uid:0" \
   --read-only \
   --cap-drop=all \
   --security-opt=no-new-privileges \
   --security-opt="seccomp=$seccomp_profile" \
-  --network=none \
   --memory=768m \
   --cpus=2 \
   --pids-limit=256 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
   --tmpfs /work:rw,nosuid,nodev,size=256m,mode=0770 \
   --tmpfs /data:rw,nosuid,nodev,noexec,size=64m,mode=0770 \
-  --shm-size=128m \
+  --shm-size=128m
+)
+
+help_output="$(podman run --rm \
+  "${hardened_runtime[@]}" \
+  --network=none \
+  "$image" --help)"
+for command in serve worker doctor migrate backup restore login convert templates users audit health; do
+  grep -Eq "(^|[,{[:space:]])$command([,}[:space:]]|$)" <<<"$help_output"
+done
+podman run --rm "${hardened_runtime[@]}" --network=none "$image" --version \
+  | grep -Fxq "markweave $application_version"
+
+podman run --rm \
+  "${hardened_runtime[@]}" \
+  --network=none \
   "${E2E_SETTINGS[@]}" \
   --env MARKWEAVE_STORAGE_PROFILE=standalone \
   --env MARKWEAVE_STANDALONE_DATA_DIRECTORY=/data \

@@ -47,7 +47,10 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         set_session_cookie(response, settings, result.session_token)
         set_csrf_cookie(response, settings, result.csrf_token)
         return LoginResponse(
-            user=UserResponse.model_validate(result.user),
+            user=UserResponse(
+                **UserResponse.model_validate(result.user).model_dump(),
+                effective_idle_minutes=auth.effective_idle_minutes(result.user.role),
+            ),
             csrf_token=result.csrf_token,
         )
 
@@ -74,7 +77,10 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     def api_session(
         user: Annotated[User, Depends(dependencies.authenticated_user)],
     ) -> UserResponse:
-        return UserResponse.model_validate(user)
+        return UserResponse(
+            **UserResponse.model_validate(user).model_dump(),
+            effective_idle_minutes=auth.effective_idle_minutes(user.role),
+        )
 
     @router.post(
         "/api/v1/password",

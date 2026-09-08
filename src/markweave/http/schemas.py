@@ -1,13 +1,17 @@
 """Stable request and response schemas for the HTTP contract."""
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from markweave.auth.models import Role
 from markweave.jobs.models import JobOutput, TemplateMode
-from markweave.templates.models import TemplateStatus
+from markweave.reversion_jobs.models import ReversionJobState, ReversionJobStep
+from markweave.reversions.formats import FormatFamily
+from markweave.reversions.models import ReverseOutputMode
+from markweave.templates.models import TemplateSelectionSource, TemplateStatus
 
 
 class LoginRequest(BaseModel):
@@ -51,6 +55,35 @@ class PasswordChangeRequest(BaseModel):
     confirmation: str
 
 
+class IdleSessionPolicyUpdateRequest(BaseModel):
+    """Atomic administrator update for both role-specific durations."""
+
+    user_idle_minutes: Annotated[int, Field(strict=True, ge=5, le=300)]
+    admin_idle_minutes: Annotated[int, Field(strict=True, ge=5, le=60)]
+
+
+class IdleSessionPolicyDurationBoundsResponse(BaseModel):
+    """Authoritative whole-minute bounds and default for one session role."""
+
+    minimum_minutes: Annotated[int, Field(strict=True, ge=1)]
+    default_minutes: Annotated[int, Field(strict=True, ge=1)]
+    maximum_minutes: Annotated[int, Field(strict=True, ge=1)]
+
+
+class IdleSessionPolicyResponse(BaseModel):
+    """Effective singleton policy and optimistic-concurrency revision."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_idle_minutes: int
+    admin_idle_minutes: int
+    revision: int
+    absolute_lifetime_seconds: Annotated[int, Field(strict=True, gt=0)]
+    user_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse
+    admin_idle_minutes_bounds: IdleSessionPolicyDurationBoundsResponse
+    idle_minutes_granularity: Annotated[int, Field(strict=True, ge=1)]
+
+
 class UserResponse(BaseModel):
     """Public local-account representation without password material."""
 
@@ -61,6 +94,14 @@ class UserResponse(BaseModel):
     role: Role
     active: bool
     password_change_required: bool
+    effective_idle_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Current server-enforced inactivity duration. Present on login and "
+            "session inspection responses."
+        ),
+        exclude_if=lambda value: value is None,
+    )
 
 
 class LoginResponse(BaseModel):
@@ -125,6 +166,121 @@ class TemplateResponse(BaseModel):
     owner_username: str
 
 
+class ConversionOptionsResponse(BaseModel):
+    """Authoritative limits and immutable template selection for conversion."""
+
+    conversion_upload_max_bytes: Annotated[int, Field(strict=True, gt=0)]
+    resolved_template: TemplateResponse | None
+    template_version_id: UUID | None
+    selection_source: TemplateSelectionSource
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> ConversionOptionsResponse:
+        has_template = self.resolved_template is not None
+        has_version = self.template_version_id is not None
+        is_default = self.selection_source is TemplateSelectionSource.PANDOC_DEFAULT
+        if has_template != has_version or is_default == has_template:
+            raise ValueError("Template selection fields are inconsistent")
+        if (
+            self.resolved_template is not None
+            and self.resolved_template.current_version_id != self.template_version_id
+        ):
+            raise ValueError("Template version fields are inconsistent")
+        return self
+
+
+class ReversionFormatCapabilityResponse(BaseModel):
+    """One ordered reverse-conversion format family and detection contract."""
+
+    family: FormatFamily
+    extensions: tuple[str, ...]
+    detected_formats: tuple[str, ...]
+    content_detection: str
+    selected_parser_format: str | None
+
+
+class ReversionAdmissionPolicyResponse(BaseModel):
+    """Client-visible rules that preserve authoritative server admission."""
+
+    extension_is_hint: bool
+    mismatch_policy: str
+    undetected_policy: str
+    csv_policy: str
+    scanner_order: str
+
+
+class ReversionPdfCapabilitiesResponse(BaseModel):
+    """Client-visible limitations of the pinned PDF path."""
+
+    contract: str
+    document_model_available: bool
+    embedded_assets_available: bool
+    image_preservation: bool
+    mixed_or_image_only_pages: str
+    warning: str
+
+
+class ReversionExecutionCapabilitiesResponse(BaseModel):
+    """Client-visible reverse execution guarantees."""
+
+    local: bool
+    ocr: bool
+    hosted_fallback: bool
+
+
+class ReversionCapabilitiesResponse(BaseModel):
+    """Versioned authoritative reverse-conversion runtime contract."""
+
+    schema_version: Annotated[int, Field(strict=True, ge=1)]
+    format_families: tuple[ReversionFormatCapabilityResponse, ...]
+    admission: ReversionAdmissionPolicyResponse
+    maximum_upload_bytes: Annotated[int, Field(strict=True, gt=0)]
+    result_package_modes: tuple[ReverseOutputMode, ...]
+    pdf: ReversionPdfCapabilitiesResponse
+    execution: ReversionExecutionCapabilitiesResponse
+
+
+class ReversionResponse(BaseModel):
+    """Owner-only reverse job snapshot without source or result bytes."""
+
+    id: UUID
+    owner_id: UUID
+    source_stem: str
+    source_family: FormatFamily
+    source_extension: str
+    detected_format: str | None
+    component_versions: tuple[tuple[str, str], ...]
+    correlation_id: str
+    state: ReversionJobState
+    step: ReversionJobStep
+    created_at: datetime
+    updated_at: datetime
+    attempt: int
+    cancel_requested: bool
+    result_mode: ReverseOutputMode | None
+    result_size: int | None
+    error_code: str | None
+    error_message: str | None
+    expires_at: datetime | None
+
+
+class ReversionPageResponse(BaseModel):
+    """Paginated owner-only reverse job response."""
+
+    items: tuple[ReversionResponse, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+class TemplateAdministrationContextResponse(BaseModel):
+    """Authoritative template selection identifiers and upload limit."""
+
+    preferred_template_id: UUID | None
+    system_fallback_template_id: UUID | None
+    template_max_archive_bytes: Annotated[int, Field(strict=True, gt=0)]
+
+
 class TemplatePageResponse(BaseModel):
     items: tuple[TemplateResponse, ...]
     total: int
@@ -163,6 +319,18 @@ class AuditRecordResponse(BaseModel):
     version_id: UUID | None
     administrator_intervention: bool
     created_at: datetime
+    old_user_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    old_admin_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    new_user_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    new_admin_idle_minutes: int | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class TemplateMetadataRequest(BaseModel):

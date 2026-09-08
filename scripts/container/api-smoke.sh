@@ -7,7 +7,9 @@ readonly legacy_container_name=md-converter-t20-legacy-api-smoke
 readonly clamav_name=md-converter-t20-api-smoke-clamav
 readonly network_name=md-converter-t20-api-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
-seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
+readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
+readonly expect_reversion_capabilities="${MARKWEAVE_EXPECT_REVERSION_CAPABILITIES:-true}"
+seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
 readonly seccomp_profile
 created=false
 legacy_created=false
@@ -48,10 +50,12 @@ podman run --detach --name "$clamav_name" --network "$network_name" \
   --network-alias clamav --read-only --cap-drop=all \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
-  --volume "$(pwd)/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
+  --volume "$repository/scripts/container/fake-clamav.py:/fake-clamav.py:ro,Z" \
   --entrypoint /opt/md-converter/venv/bin/python \
   "$image" /fake-clamav.py >/dev/null
 clamav_created=true
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" standalone
 
 settings=(
   --env MARKWEAVE_INITIAL_ADMIN_USERNAME=admin
@@ -146,10 +150,10 @@ podman run --detach \
   "${legacy_settings[@]}" \
   --env MD_CONVERTER_HOST=127.0.0.1 \
   --env MD_CONVERTER_PORT=18080 \
-  "$image" embedded-worker >/dev/null
+  "$image" serve >/dev/null
 legacy_created=true
 
-for _ in $(seq 1 60); do
+for _ in $(seq 1 240); do
   if podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
       'import urllib.request; assert b"\"status\":\"ok\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/live", timeout=1).read()' \
       >/dev/null 2>&1; then
@@ -166,9 +170,26 @@ podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'import urllib.request; assert b"\"status\":\"ready\"" in urllib.request.urlopen("http://127.0.0.1:18080/health/ready", timeout=2).read()'
 podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python -c \
   'from markweave.config import Settings; assert (Settings.load().host, Settings.load().port) == ("127.0.0.1", 18080)'
+if [[ "$expect_reversion_capabilities" == true ]]; then
+  podman cp "$repository/scripts/container/api_workflow_smoke.py" \
+    "$legacy_container_name:/work/api_workflow_smoke.py"
+  podman exec "$legacy_container_name" /opt/md-converter/venv/bin/python \
+    /work/api_workflow_smoke.py \
+    --base-url http://127.0.0.1:18080 \
+    --expect-reversion-capabilities-unavailable
+elif [[ "$expect_reversion_capabilities" != false ]]; then
+  echo "MARKWEAVE_EXPECT_REVERSION_CAPABILITIES must be true or false." >&2
+  exit 2
+fi
 podman rm --force "$legacy_container_name" >/dev/null
 legacy_created=false
 echo "Final-image legacy configuration smoke passed for $image."
+
+reversion_capability_arguments=()
+if [[ "$expect_reversion_capabilities" == true ]]; then
+  settings+=(--env MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=4194304)
+  reversion_capability_arguments+=(--expect-reversion-upload-max-bytes 4194304)
+fi
 
 podman run --detach \
   --name "$container_name" \
@@ -187,11 +208,11 @@ podman run --detach \
   --shm-size=128m \
   --publish 127.0.0.1::8080 \
   "${settings[@]}" \
-  "$image" embedded-worker >/dev/null
+  "$image" serve >/dev/null
 created=true
 
 port="$(podman port "$container_name" 8080/tcp | sed 's/.*://')"
-for _ in $(seq 1 60); do
+for _ in $(seq 1 240); do
   if curl --fail --silent --show-error "http://127.0.0.1:$port/health/live" \
       | grep -Fq '"status":"ok"'; then
     break
@@ -205,6 +226,12 @@ for _ in $(seq 1 60); do
 done
 curl --fail --silent --show-error "http://127.0.0.1:$port/health/ready" \
   | grep -Fq '"status":"ready"'
+bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
+  "$clamav_name" standalone-network "$container_name" clamav
+if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
+  bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
+    "http://127.0.0.1:$port"
+fi
 podman exec "$container_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
 podman exec "$container_name" pandoc /tmp/t20-template.md \
@@ -213,6 +240,7 @@ podman cp "$container_name:/tmp/t20-template.docx" \
   "$template_directory/template.docx"
 uv run python -m scripts.container.api_workflow_smoke \
   --base-url "http://127.0.0.1:$port" \
-  --template "$template_directory/template.docx"
+  --template "$template_directory/template.docx" \
+  "${reversion_capability_arguments[@]}"
 
 echo "Final-image standalone conversion workflow smoke passed for $image."

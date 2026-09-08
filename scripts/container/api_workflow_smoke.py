@@ -17,6 +17,19 @@ from xml.etree import ElementTree
 
 TRACEABILITY_SCHEMA_VERSION = 2
 SHA256_CHARACTERS = 64
+REVERSION_FORMAT_EXTENSIONS = (
+    ("word", (".doc", ".docx", ".docm")),
+    (
+        "powerpoint",
+        (".ppt", ".pps", ".pot", ".pptx", ".pptm", ".ppsx", ".ppsm"),
+    ),
+    ("excel", (".xls", ".xlsx", ".xlsm", ".xlsb")),
+    ("opendocument", (".odt", ".ods", ".odp")),
+    ("rtf", (".rtf",)),
+    ("epub", (".epub",)),
+    ("csv", (".csv",)),
+    ("pdf", (".pdf",)),
+)
 
 
 class Client:
@@ -130,6 +143,93 @@ def candidate_reference(content: bytes) -> bytes:
 def require(status: int, expected: int, content: bytes) -> None:
     if status != expected:
         raise RuntimeError(f"HTTP {status}, expected {expected}: {content[:500]!r}")
+
+
+def validate_anonymous_reversion_capabilities(client: Client) -> None:
+    """Prove the final image rejects an unauthenticated capability read."""
+
+    status, _, content = client.request("GET", "/api/v1/reversions/capabilities")
+    require(status, 401, content)
+    if json.loads(content).get("error", {}).get("code") != "AUTHENTICATION_REQUIRED":
+        raise RuntimeError("anonymous reversion capabilities failure is unstable")
+
+
+def validate_reversion_capabilities(
+    client: Client, expected_upload_bytes: int | None
+) -> None:
+    """Validate configured or deliberately unavailable final-image capabilities."""
+
+    first = client.request("GET", "/api/v1/reversions/capabilities")
+    expected_status = 503 if expected_upload_bytes is None else 200
+    require(first[0], expected_status, first[2])
+    for name, value in (
+        ("cache-control", "private, no-store"),
+        ("x-content-type-options", "nosniff"),
+    ):
+        if first[1].get(name) != value:
+            raise RuntimeError(f"reversion capabilities {name} contract is invalid")
+    if expected_upload_bytes is None:
+        if json.loads(first[2]) != {
+            "error": {
+                "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+                "message": "Reverse-conversion capabilities are unavailable.",
+            }
+        }:
+            raise RuntimeError(
+                "unavailable reversion capabilities response is unstable"
+            )
+        return
+
+    second = client.request("GET", "/api/v1/reversions/capabilities")
+    require(second[0], 200, second[2])
+    if first[2] != second[2]:
+        raise RuntimeError("reversion capabilities bytes are not deterministic")
+    payload = json.loads(first[2])
+    if set(payload) != {
+        "schema_version",
+        "format_families",
+        "admission",
+        "maximum_upload_bytes",
+        "result_package_modes",
+        "pdf",
+        "execution",
+    }:
+        raise RuntimeError("reversion capabilities top-level schema is invalid")
+    if (
+        payload["schema_version"] != 1
+        or payload["maximum_upload_bytes"] != expected_upload_bytes
+        or payload["result_package_modes"]
+        != [
+            "markdown",
+            "markdown_with_assets",
+            "markdown_with_unavailable_assets",
+        ]
+        or payload["execution"]
+        != {"local": True, "ocr": False, "hosted_fallback": False}
+    ):
+        raise RuntimeError("reversion capabilities runtime contract is invalid")
+    formats = payload["format_families"]
+    if [
+        (entry.get("family"), tuple(entry.get("extensions", ()))) for entry in formats
+    ] != list(REVERSION_FORMAT_EXTENSIONS):
+        raise RuntimeError("reversion capability format ordering is invalid")
+    if any(
+        not isinstance(entry.get("content_detection"), str)
+        or not entry["content_detection"]
+        for entry in formats
+    ):
+        raise RuntimeError("reversion content-detection contract is invalid")
+    admission = payload["admission"]
+    pdf = payload["pdf"]
+    if (
+        admission.get("extension_is_hint") is not True
+        or "CSV" not in admission.get("undetected_policy", "")
+        or admission.get("scanner_order")
+        != "malware scan before format parsing or durable persistence"
+        or pdf.get("contract") != "text extraction only"
+        or pdf.get("image_preservation") is not False
+    ):
+        raise RuntimeError("reversion admission or PDF capability contract is invalid")
 
 
 def submit(
@@ -288,7 +388,7 @@ def validate_result(  # noqa: PLR0912,PLR0915 - one assertion workflow covers al
         raise RuntimeError("combined and sidecar manifests differ")
 
 
-def main() -> int:
+def main() -> int:  # noqa: PLR0912, PLR0915 - explicit final-image workflow
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--template", type=Path)
@@ -296,8 +396,17 @@ def main() -> int:
     mode.add_argument("--submit-blocking-job", type=Path)
     mode.add_argument("--assert-running-job", type=Path)
     mode.add_argument("--recover-job", type=Path)
+    mode.add_argument(
+        "--expect-reversion-capabilities-unavailable", action="store_true"
+    )
+    parser.add_argument("--expect-reversion-upload-max-bytes", type=int)
     arguments = parser.parse_args()
     client = Client(arguments.base_url)
+    if (
+        arguments.expect_reversion_upload_max_bytes is not None
+        or arguments.expect_reversion_capabilities_unavailable
+    ):
+        validate_anonymous_reversion_capabilities(client)
     status, _, content = client.request(
         "POST",
         "/api/v1/login",
@@ -308,6 +417,15 @@ def main() -> int:
     )
     require(status, 200, content)
     client.csrf = json.loads(content)["csrf_token"]
+    if arguments.expect_reversion_capabilities_unavailable:
+        validate_reversion_capabilities(client, None)
+        return 0
+    if arguments.expect_reversion_upload_max_bytes is not None:
+        if arguments.expect_reversion_upload_max_bytes <= 0:
+            parser.error("--expect-reversion-upload-max-bytes must be positive")
+        validate_reversion_capabilities(
+            client, arguments.expect_reversion_upload_max_bytes
+        )
     location_file = arguments.assert_running_job or arguments.recover_job
     if location_file is not None:
         location = location_file.read_text(encoding="utf-8").strip()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,25 +13,36 @@ import pytest
 from fastapi import FastAPI
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.testclient import TestClient
+from httpx import Response as HttpxResponse
+from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
 from markweave.app import AppComponents, create_app
 from markweave.auth.errors import (
+    AUTHENTICATION_REQUIRED,
     INVALID_CREDENTIALS,
-    PASSWORD_CHANGE_REQUIRED,
-    PASSWORD_CONFIRMATION_INVALID,
 )
 from markweave.auth.memory import MemoryReadinessProbe
 from markweave.auth.models import LoginResult, Role, User
+from markweave.auth.policy_errors import (
+    IdleSessionPolicyConflictError,
+    IdleSessionPolicyPreconditionRequiredError,
+)
 from markweave.auth.service import AuthenticationService
 from markweave.config import Settings
 from markweave.http.errors import error_responses
-from markweave.http.schemas import ErrorResponse
+from markweave.http.responses import (
+    expected_idle_session_policy_revision,
+    idle_session_policy_etag,
+)
+from markweave.http.routers.conversions import _result_content_disposition
+from markweave.http.routers.templates import _expected_fonts_from_form
+from markweave.http.schemas import ConversionOptionsResponse, ErrorResponse
 from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep
+from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep, SourceKind
 from markweave.jobs.runner import EmbeddedWorker
 from markweave.jobs.service import JobService
 from markweave.malware import (
@@ -40,9 +52,11 @@ from markweave.malware import (
 )
 from markweave.observability import QueueObserver
 from markweave.persistence.errors import PersistenceError
+from markweave.reversions.formats import REVERSE_ADMISSION_POLICY
 from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
+    TemplateSelectionSource,
     TemplateStatus,
     TemplateVersion,
 )
@@ -51,6 +65,109 @@ from tests.settings import template_settings
 from tests.unit.jobs.test_job_models import job
 
 _HTTP_CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "t41_http_contract"
+
+
+def _assert_template_download_response(
+    download: HttpxResponse,
+    template: TemplateIdentity,
+    version: TemplateVersion,
+) -> None:
+    assert download.content == b"docx"
+    assert download.headers["Cache-Control"] == "private, no-store"
+    assert download.headers["Content-Type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert download.headers["Content-Disposition"] == (
+        f'attachment; filename="template-{template.id}-v{version.number}.docx"'
+    )
+    assert download.headers["ETag"] == f'"sha256-{version.sha256}"'
+    assert download.headers["X-Content-Type-Options"] == "nosniff"
+
+
+@pytest.mark.unit
+def test_template_form_font_sentinel_is_exact_and_order_preserving() -> None:
+    assert _expected_fonts_from_form([""]) == ()
+    assert _expected_fonts_from_form(["   "]) == ("   ",)
+    assert _expected_fonts_from_form(["Calibri", ""]) == ("Calibri", "")
+    assert _expected_fonts_from_form(["", "Calibri"]) == ("", "Calibri")
+    assert _expected_fonts_from_form(["Cambria", "Calibri"]) == (
+        "Cambria",
+        "Calibri",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("template", "version", "source"),
+    (
+        (None, uuid4(), TemplateSelectionSource.PANDOC_DEFAULT),
+        (None, None, TemplateSelectionSource.PREFERRED),
+    ),
+)
+def test_conversion_options_rejects_inconsistent_selection_pairs(
+    template, version, source
+) -> None:
+    with pytest.raises(ValidationError):
+        ConversionOptionsResponse(
+            conversion_upload_max_bytes=1,
+            resolved_template=template,
+            template_version_id=version,
+            selection_source=source,
+        )
+
+
+@pytest.mark.unit
+def test_conversion_options_rejects_a_mismatched_immutable_version() -> None:
+    selected_version = uuid4()
+    with pytest.raises(ValidationError):
+        ConversionOptionsResponse(
+            conversion_upload_max_bytes=1,
+            resolved_template={
+                "id": uuid4(),
+                "owner_id": uuid4(),
+                "name": "Selected",
+                "description": "Runtime selection",
+                "status": "active",
+                "revision": 1,
+                "current_version_id": selected_version,
+                "owner_username": "owner",
+            },
+            template_version_id=uuid4(),
+            selection_source=TemplateSelectionSource.PREFERRED,
+        )
+
+
+@pytest.mark.unit
+def test_conversion_options_accepts_a_consistent_default_selection() -> None:
+    response = ConversionOptionsResponse(
+        conversion_upload_max_bytes=1,
+        resolved_template=None,
+        template_version_id=None,
+        selection_source=TemplateSelectionSource.PANDOC_DEFAULT,
+    )
+
+    assert response.selection_source is TemplateSelectionSource.PANDOC_DEFAULT
+
+
+@pytest.mark.unit
+def test_idle_session_policy_validator_accepts_only_canonical_etags() -> None:
+    assert idle_session_policy_etag(0) == '"idle-session-policy-0"'
+    assert expected_idle_session_policy_revision('"idle-session-policy-0"') == 0
+    assert expected_idle_session_policy_revision('"idle-session-policy-42"') == 42
+
+    with pytest.raises(IdleSessionPolicyPreconditionRequiredError):
+        expected_idle_session_policy_revision(None)
+    for validator in (
+        "idle-session-policy-0",
+        '"other-0"',
+        '"idle-session-policy-+0"',
+        '"idle-session-policy- 0"',
+        '"idle-session-policy-00"',
+        '"idle-session-policy-\N{ARABIC-INDIC DIGIT ZERO}"',
+        f'"idle-session-policy-{"9" * 65}"',
+    ):
+        with pytest.raises(IdleSessionPolicyConflictError):
+            expected_idle_session_policy_revision(validator)
 
 
 def _load_http_contract_fixture(filename: str) -> Any:
@@ -111,13 +228,14 @@ def _route_manifest(app: FastAPI) -> list[dict[str, Any]]:
     return manifest
 
 
-def isolated_client(
+def isolated_client(  # noqa: PLR0913 - explicit adapter configuration
     mocker: MockerFixture,
     *,
     ready: bool = True,
     scanner: UploadScanner | None = None,
     public_origin: str | None = None,
     insecure_evaluation_mode: bool = False,
+    reversion_upload_max_bytes: int | None = None,
 ) -> tuple[TestClient, Any, User, User]:
     """Assemble only the HTTP adapter while replacing all application ports."""
     password = "admin-" + "password"
@@ -132,6 +250,7 @@ def isolated_client(
         standalone_data_directory="/data",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=reversion_upload_max_bytes,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
         public_origin=public_origin,
@@ -143,6 +262,9 @@ def isolated_client(
     auth.bootstrap_admin.return_value = admin
     auth.login.return_value = LoginResult(admin, "session-token", "csrf-token")
     auth.authenticate.return_value = admin
+    auth.effective_idle_minutes.side_effect = lambda role: (
+        15 if role is Role.ADMIN else 30
+    )
     auth.list_users.return_value = [admin, alice]
     auth.create_user.return_value = alice
     auth.set_active.return_value = alice
@@ -169,6 +291,7 @@ def _lifecycle_settings() -> Settings:
         standalone_data_directory="/data",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=1_000_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
@@ -184,16 +307,144 @@ def _distributed_http_settings() -> Settings:
         s3_bucket="objects",
         conversion_upload_max_bytes=1_000_000,
         conversion_request_max_bytes=1_100_000,
+        reversion_upload_max_bytes=1_000_000,
         conversion_retry_after_seconds=1,
         job_result_retention_seconds=3_600,
     )
 
 
+@pytest.mark.unit
+def test_reversion_capabilities_are_authenticated_content_free_and_deterministic(
+    mocker: MockerFixture,
+) -> None:
+    client, auth, admin, alice = isolated_client(
+        mocker, reversion_upload_max_bytes=4_194_304
+    )
+    auth.authenticate.side_effect = (alice, admin)
+    before_anydoc_modules = {
+        name for name in sys.modules if name == "anydoc" or name.startswith("anydoc.")
+    }
+
+    with client:
+        regular = client.get(
+            "/api/v1/reversions/capabilities",
+            headers={"Cookie": "md_converter_session=regular-session"},
+        )
+        administrator = client.get(
+            "/api/v1/reversions/capabilities",
+            headers={"Cookie": "md_converter_session=admin-session"},
+        )
+
+    assert regular.status_code == administrator.status_code == 200
+    assert regular.content == administrator.content
+    assert regular.headers["Cache-Control"] == "private, no-store"
+    assert regular.headers["X-Content-Type-Options"] == "nosniff"
+    payload = regular.json()
+    assert payload == {
+        "schema_version": 1,
+        "format_families": [
+            {
+                "family": approved.family.value,
+                "extensions": list(approved.extensions),
+                "detected_formats": list(approved.detected_formats),
+                "content_detection": approved.content_detection,
+                "selected_parser_format": approved.selected_parser_format,
+            }
+            for approved in REVERSE_ADMISSION_POLICY.formats
+        ],
+        "admission": {
+            "extension_is_hint": True,
+            "mismatch_policy": REVERSE_ADMISSION_POLICY.mismatch_policy,
+            "undetected_policy": REVERSE_ADMISSION_POLICY.undetected_policy,
+            "csv_policy": REVERSE_ADMISSION_POLICY.csv_policy,
+            "scanner_order": REVERSE_ADMISSION_POLICY.scanner_order,
+        },
+        "maximum_upload_bytes": 4_194_304,
+        "result_package_modes": [
+            "markdown",
+            "markdown_with_assets",
+            "markdown_with_unavailable_assets",
+        ],
+        "pdf": {
+            "contract": "text extraction only",
+            "document_model_available": False,
+            "embedded_assets_available": False,
+            "image_preservation": False,
+            "mixed_or_image_only_pages": (
+                "reject the complete input as needs_ocr when any page yields no text"
+            ),
+            "warning": (
+                "PDF images, layout, and source-position image links are not preserved"
+            ),
+        },
+        "execution": {"local": True, "ocr": False, "hosted_fallback": False},
+    }
+    assert {
+        name for name in sys.modules if name == "anydoc" or name.startswith("anydoc.")
+    } == before_anydoc_modules
+    forbidden_keys = {
+        "source_bytes",
+        "result_bytes",
+        "original_filename",
+        "markdown",
+        "asset_names",
+        "asset_bytes",
+        "content_digest",
+        "download_capability",
+    }
+
+    def keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | {key for item in value.values() for key in keys(item)}
+        if isinstance(value, list):
+            return {key for item in value for key in keys(item)}
+        return set()
+
+    assert keys(payload).isdisjoint(forbidden_keys)
+
+
+@pytest.mark.unit
+def test_reversion_capabilities_reject_anonymous_access(mocker: MockerFixture) -> None:
+    client, auth, _, _ = isolated_client(mocker, reversion_upload_max_bytes=4_194_304)
+    auth.authenticate.side_effect = AUTHENTICATION_REQUIRED.new()
+
+    with client:
+        response = client.get("/api/v1/reversions/capabilities")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "error": {
+            "code": "AUTHENTICATION_REQUIRED",
+            "message": "Authentication is required.",
+        }
+    }
+
+
+@pytest.mark.unit
+def test_reversion_capabilities_fail_safely_without_upload_configuration(
+    mocker: MockerFixture,
+) -> None:
+    client, _, _, _ = isolated_client(mocker)
+
+    with client:
+        response = client.get("/api/v1/reversions/capabilities")
+
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.json() == {
+        "error": {
+            "code": "REVERSION_CAPABILITIES_UNAVAILABLE",
+            "message": "Reverse-conversion capabilities are unavailable.",
+        }
+    }
+
+
 def _lifecycle_components(mocker: MockerFixture, engine: Any) -> AppComponents:
     auth = mocker.Mock(spec=AuthenticationService)
-    auth.bootstrap_admin.return_value = User(
-        uuid4(), "Admin", "admin", "hash", Role.ADMIN
-    )
+    actor = User(uuid4(), "Admin", "admin", "hash", Role.ADMIN)
+    auth.bootstrap_admin.return_value = actor
+    auth.authenticate.return_value = actor
     return AppComponents(
         authentication=auth,
         readiness=MemoryReadinessProbe(),
@@ -342,21 +593,6 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
     with client:
         assert client.get("/health/live").json() == {"status": "ok"}
         assert client.get("/health/ready").json() == {"status": "ready"}
-        assert "Sign in" in client.get("/login").text
-
-        browser = client.post(
-            "/login",
-            data={"username": "admin", "password": "admin-password"},
-            follow_redirects=False,
-        )
-        assert browser.status_code == 303
-        assert browser.headers["location"] == "/convert"
-        browser_cookies = browser.headers.get_list("set-cookie")
-        assert "__Host-md_converter_csrf=csrf-token" in browser_cookies[-1]
-        assert "Secure" in browser_cookies[-1]
-        assert "SameSite=lax" in browser_cookies[-1]
-        assert "HttpOnly" not in browser_cookies[-1]
-        assert any("HttpOnly" in cookie for cookie in browser_cookies)
 
         logged_in = client.post(
             "/api/v1/login",
@@ -421,7 +657,7 @@ def test_http_adapter_happy_paths_delegate_without_exposing_hashes(
 
 
 @pytest.mark.unit
-def test_password_change_required_browser_and_api_routes_are_isolated(
+def test_password_change_required_api_clears_session(
     mocker: MockerFixture,
 ) -> None:
     client, auth, admin, _alice = isolated_client(mocker)
@@ -433,179 +669,50 @@ def test_password_change_required_browser_and_api_routes_are_isolated(
         admin.role,
         password_change_required=True,
     )
-    auth.login.return_value = LoginResult(required, "session-token", "csrf-token")
     auth.authenticate.return_value = required
 
     with client:
-        login_response = client.post(
-            "/login",
-            data={"username": "admin", "password": "admin-password"},
-            follow_redirects=False,
-        )
-        assert login_response.headers["location"] == "/change-password"
-        page = client.get("/change-password")
-        assert page.status_code == 200
-        assert "current password was accepted" in page.text
-
-        auth.change_password.side_effect = PASSWORD_CONFIRMATION_INVALID.new()
-        rejected = client.post(
-            "/change-password",
-            data={
-                "password": "new-password",
-                "confirmation": "different",
-                "csrf_token": "csrf-token",
-            },
-        )
-        assert rejected.status_code == 422
-        assert "do not match" in rejected.text
-
-        auth.change_password.side_effect = None
         changed = client.post(
             "/api/v1/password",
             headers={"X-CSRF-Token": "csrf-token"},
-            json={
-                "password": "new-password",
-                "confirmation": "new-password",
-            },
-        )
-        assert changed.status_code == 204
-        assert any(
-            "md_converter_session=" in cookie and "Max-Age=0" in cookie
-            for cookie in changed.headers.get_list("set-cookie")
+            json={"password": "new-password", "confirmation": "new-password"},
         )
 
-        def restricted_authenticate(
-            _token: str | None, *, allow_password_change: bool = False
-        ) -> User:
-            if allow_password_change:
-                return required
-            raise PASSWORD_CHANGE_REQUIRED.new()
-
-        auth.authenticate.side_effect = restricted_authenticate
-        conversion = client.get("/convert", follow_redirects=False)
-        assert conversion.status_code == 303
-        assert conversion.headers["location"] == "/change-password"
-        templates = client.get("/templates", follow_redirects=False)
-        assert templates.status_code == 303
-        assert templates.headers["location"] == "/change-password"
-
-        auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-        unauthenticated = client.get("/change-password", follow_redirects=False)
-        assert unauthenticated.status_code == 303
-        assert unauthenticated.headers["location"] == "/login"
-
-
-@pytest.mark.unit
-def test_authenticated_conversion_page_and_assets_are_hardened(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, admin, _alice = isolated_client(mocker)
-    templates = mocker.Mock(spec=TemplateService)
-    template = TemplateIdentity(
-        uuid4(),
-        admin.id,
-        "Default",
-        "Shared",
-        TemplateStatus.ACTIVE,
-        current_version_id=uuid4(),
+    assert changed.status_code == 204
+    assert any(
+        "md_converter_session=" in cookie and "Max-Age=0" in cookie
+        for cookie in changed.headers.get_list("set-cookie")
     )
-    templates.resolve.return_value = template
-    templates.selection_label.return_value = "System fallback template"
-    object.__setattr__(client.app.state.components, "templates", templates)
-    client.app.state.components.jobs.list_owner.return_value = JobPage((), 0, 0, 10)
-
-    with client:
-        root = client.get("/", follow_redirects=False)
-        page = client.get("/convert")
-        script = client.get("/static/conversion.js")
-        stylesheet = client.get("/static/conversion.css")
-    assert page.status_code == 200
-    assert root.status_code == 303 and root.headers["location"] == "/convert"
-    assert "System fallback template" in page.text
-    assert str(template.current_version_id) in page.text
-    assert "default-src 'none'" in page.headers["Content-Security-Policy"]
-    assert page.headers["Cache-Control"] == "no-store"
-    assert script.headers["X-Content-Type-Options"] == "nosniff"
-    assert script.headers["Content-Type"].startswith("text/javascript")
-    assert stylesheet.headers["Content-Type"].startswith("text/css")
-    templates.resolve.assert_called_once_with(admin)
-    auth.authenticate.assert_called()
-
-
-@pytest.mark.unit
-def test_authenticated_administration_page_and_assets_are_hardened(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, admin, _alice = isolated_client(mocker)
-    templates = mocker.Mock(spec=TemplateService)
-    template = TemplateIdentity(
-        uuid4(),
-        admin.id,
-        "Preferred",
-        "Private description",
-        TemplateStatus.ACTIVE,
-        current_version_id=uuid4(),
+    auth.change_password.assert_called_once_with(
+        required, "new-password", "new-password"
     )
-    templates.resolve.return_value = template
-    templates.selection_label.return_value = "Preferred template"
-    object.__setattr__(client.app.state.components, "templates", templates)
-
-    with client:
-        page = client.get("/templates")
-        script = client.get("/static/administration.js")
-        stylesheet = client.get("/static/administration.css")
-
-    assert page.status_code == 200
-    assert str(template.id) in page.text
-    assert 'data-user-role="admin"' in page.text
-    assert page.headers["Cache-Control"] == "no-store"
-    assert script.headers["X-Content-Type-Options"] == "nosniff"
-    assert script.headers["Content-Type"].startswith("text/javascript")
-    assert stylesheet.headers["Content-Type"].startswith("text/css")
-    templates.resolve.assert_called_once_with(admin)
-    templates.selection_label.assert_called_once_with(admin, template)
-
-    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        anonymous = client.get("/templates", follow_redirects=False)
-    assert anonymous.status_code == 303
-    assert anonymous.headers["location"] == "/login"
 
 
 @pytest.mark.unit
-def test_conversion_page_redirects_when_session_is_absent(
-    mocker: MockerFixture,
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("get", "/"),
+        ("get", "/login"),
+        ("post", "/login"),
+        ("get", "/change-password"),
+        ("post", "/change-password"),
+        ("get", "/convert"),
+        ("get", "/templates"),
+        ("post", "/logout"),
+        ("get", "/static/conversion.js"),
+        ("get", "/static/administration.css"),
+    ),
+)
+def test_removed_legacy_browser_routes_are_absent(
+    mocker: MockerFixture, method: str, path: str
 ) -> None:
-    client, auth, _admin, _alice = isolated_client(mocker)
-    auth.authenticate.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        response = client.get("/convert", follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/login"
-
-
-@pytest.mark.unit
-def test_http_adapter_handles_browser_authentication_failure(
-    mocker: MockerFixture,
-) -> None:
-    client, auth, _, _ = isolated_client(mocker)
-    auth.login.side_effect = INVALID_CREDENTIALS.new()
-    with client:
-        response = client.post(
-            "/login", data={"username": "admin", "password": "wrong"}
-        )
-    assert response.status_code == 401
-    assert "The username or password is incorrect." in response.text
-
-
-@pytest.mark.unit
-def test_login_page_preserves_same_origin_form_origin(mocker: MockerFixture) -> None:
-    client, _, _, _ = isolated_client(mocker)
+    client, _auth, _admin, _alice = isolated_client(mocker)
 
     with client:
-        response = client.get("/login")
+        response = getattr(client, method)(path)
 
-    assert response.headers["Referrer-Policy"] == "same-origin"
+    assert response.status_code == 404
 
 
 @pytest.mark.unit
@@ -765,6 +872,18 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
 
     assert readiness.json()["error"]["code"] == "NOT_READY"
     paths = schema["paths"]
+    schemas = schema["components"]["schemas"]
+    for body_schema in (
+        "Body_create_template_api_v1_templates_post",
+        "Body_replace_template_api_v1_templates__template_id__content_put",
+    ):
+        expected_fonts = schemas[body_schema]["properties"]["expected_fonts"]
+        assert expected_fonts == {
+            "items": {"type": "string"},
+            "title": "Expected Fonts",
+            "type": "array",
+        }
+        assert "expected_fonts" in schemas[body_schema]["required"]
     for path in paths.values():
         for operation_name, operation in path.items():
             if operation_name not in {
@@ -838,6 +957,7 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "422",
             "503",
         },
+        ("/api/v1/reversions/capabilities", "get"): {"200", "401", "503"},
     }
     for (path, method), statuses in expected.items():
         responses = paths[path][method]["responses"]
@@ -848,6 +968,17 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             ]
             assert reference.endswith("/ErrorResponse")
     assert error_responses(422)[422]["model"] is ErrorResponse
+    capability_responses = paths["/api/v1/reversions/capabilities"]["get"]["responses"]
+    for status_code in ("200", "503"):
+        capability_headers = capability_responses[status_code]["headers"]
+        assert capability_headers["Cache-Control"]["schema"] == {
+            "type": "string",
+            "const": "private, no-store",
+        }
+        assert capability_headers["X-Content-Type-Options"]["schema"] == {
+            "type": "string",
+            "const": "nosniff",
+        }
     result_schema = paths["/api/v1/conversions/{job_id}/result"]["get"]["responses"][
         "200"
     ]["content"]["application/octet-stream"]["schema"]
@@ -864,6 +995,20 @@ def test_openapi_declares_stable_error_contracts_and_actual_readiness_503(
             "type": "string",
             "format": "binary",
         }
+        headers = responses["200"]["headers"]
+        assert headers["Cache-Control"] == {
+            "description": "Prevents shared and private caching of template content.",
+            "schema": {"type": "string", "const": "private, no-store"},
+        }
+        assert headers["Content-Disposition"] == {
+            "description": "Safe attachment filename derived from immutable identifiers.",
+            "schema": {"type": "string"},
+        }
+        assert headers["ETag"]["schema"] == {"type": "string"}
+        assert headers["X-Content-Type-Options"] == {
+            "description": "Prevents content-type sniffing.",
+            "schema": {"type": "string", "const": "nosniff"},
+        }
         assert {"401", "404", "422", "503"} <= responses.keys()
 
 
@@ -878,14 +1023,7 @@ def test_route_manifest_records_effective_default_response_class(
 
     routes_by_name = {route["name"]: route for route in _route_manifest(app)}
     assert routes_by_name["live"]["response_class"] == "JSONResponse"
-    assert routes_by_name["browser_root"] == {
-        "path": "/",
-        "methods": ["GET"],
-        "name": "browser_root",
-        "include_in_schema": False,
-        "status_code": None,
-        "response_class": "JSONResponse",
-    }
+    assert not any(name.startswith("browser_") for name in routes_by_name)
     assert all(
         route["response_class"] != "DefaultPlaceholder"
         for route in routes_by_name.values()
@@ -930,6 +1068,28 @@ def test_http_contract_is_unchanged_for_both_storage_profiles(
             expected_routes,
             location=f"{profile}/routes",
         )
+
+
+@pytest.mark.unit
+def test_reversion_capability_bytes_match_across_storage_profiles(
+    mocker: MockerFixture,
+) -> None:
+    standalone = create_app(
+        _lifecycle_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+    distributed = create_app(
+        _distributed_http_settings(),
+        components=_lifecycle_components(mocker, mocker.Mock()),
+    )
+
+    responses = []
+    for app in (standalone, distributed):
+        with TestClient(app, base_url="https://testserver") as client:
+            responses.append(client.get("/api/v1/reversions/capabilities"))
+
+    assert all(response.status_code == 200 for response in responses)
+    assert responses[0].content == responses[1].content
 
 
 @pytest.mark.unit
@@ -988,6 +1148,10 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         progress=100,
         result_object_id=uuid4(),
         result_manifest_object_id=uuid4(),
+        source_filename="source.md",
+        source_kind=SourceKind.MARKDOWN,
+        source_sha256="1" * 64,
+        source_size=1,
     )
     jobs.submit.return_value = (queued, False)
     jobs.list_owner.return_value = JobPage((queued,), 1, 0, 50)
@@ -1020,7 +1184,9 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         )
         result = client.get(f"/api/v1/conversions/{queued.id}/result")
         assert result.content == b"result"
-        assert f".{succeeded.output.value}" in result.headers["Content-Disposition"]
+        assert result.headers["Content-Disposition"] == (
+            'attachment; filename="source.pdf"'
+        )
         assert result.headers["Cache-Control"] == "private, no-store"
         assert result.headers["X-Content-Type-Options"] == "nosniff"
         manifest = client.get(f"/api/v1/conversions/{queued.id}/result/manifest")
@@ -1091,6 +1257,50 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
             ).status_code
             == 422
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_filename", "output", "fallback_stem", "expected"),
+    [
+        (
+            "fichier1.md",
+            JobOutput.DOCX,
+            "unused",
+            'attachment; filename="fichier1.docx"',
+        ),
+        (
+            "rapport.final.ZIP",
+            JobOutput.PDF,
+            "unused",
+            'attachment; filename="rapport.final.pdf"',
+        ),
+        (
+            'résumé "final".md',
+            JobOutput.BOTH,
+            "unused",
+            "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.zip",
+        ),
+        (
+            None,
+            JobOutput.DOCX,
+            "conversion-legacy-id",
+            'attachment; filename="conversion-legacy-id.docx"',
+        ),
+    ],
+)
+def test_result_content_disposition_preserves_safe_source_stem(
+    source_filename: str | None,
+    output: JobOutput,
+    fallback_stem: str,
+    expected: str,
+) -> None:
+    assert (
+        _result_content_disposition(
+            source_filename, output, fallback_stem=fallback_stem
+        )
+        == expected
+    )
 
 
 @pytest.mark.unit
@@ -1320,13 +1530,11 @@ def test_template_http_adapter_delegates_contract_and_rejects_bad_etags(
         assert (
             client.get(f"/api/v1/templates/{template.id}/versions").status_code == 200
         )
-        assert client.get(f"/api/v1/templates/{template.id}/content").content == b"docx"
-        assert (
-            client.get(
-                f"/api/v1/templates/{template.id}/versions/{version.id}/content"
-            ).content
-            == b"docx"
-        )
+        for path in (
+            f"/api/v1/templates/{template.id}/content",
+            f"/api/v1/templates/{template.id}/versions/{version.id}/content",
+        ):
+            _assert_template_download_response(client.get(path), template, version)
         assert (
             client.post(
                 f"/api/v1/templates/{template.id}/versions/{version.id}/restore",

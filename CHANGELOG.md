@@ -8,11 +8,79 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-1"></a>
+
+## [0.6.1] - 2026-09-03
+
+### Fixed
+
+- Frontend release images now retain their exact OCI config identity through staging, allowing the
+  paired backend/frontend supply-chain evidence to be verified before registry publication.
+- Final-image admission and simple Podman Compose lifecycle checks now use deterministic dedicated
+  connections and private-socket teardown behavior.
+
+<a id="release-0-6-0"></a>
+
+## [0.6.0] - 2026-09-03
+
+### Added
+
+- A separate rootless Next.js frontend image and same-origin production router now serve the
+  complete browser workflow while FastAPI remains the sole API and operational authority.
+- Release evidence binds the exact tested backend and frontend image bytes, SBOMs, scans,
+  provenance, publication receipts, source revision, version, and frontend lockfile.
+
 ### Changed
 
-- The installed `markweave` command now provides the stable root command
-  registry, machine-readable output, safe errors, and clean-package entry point
-  for the supported CLI families.
+- Browser pages, framework assets, and unknown browser paths route to Next.js; exact API,
+  download, OpenAPI, health, readiness, and metrics paths route directly to FastAPI.
+- Standalone and distributed deployment examples and quickstarts accept only a matched immutable
+  backend/frontend pair. Public defaults remain on the last published pair until the
+  post-publication digest-adoption pull request.
+
+### Removed
+
+- The legacy FastAPI-rendered pages and their static browser assets. The backend no longer serves
+  `/`, `/login`, `/change-password`, `/convert`, `/templates`, `/logout`, or `/static/**`.
+
+<a id="release-0-5-2"></a>
+
+## [0.5.2] - 2026-09-01
+
+### Changed
+
+- Completed DOCX, PDF, and combined ZIP downloads now preserve the uploaded source filename stem,
+  including safe RFC 5987 encoding for non-ASCII names. Retained legacy jobs without source
+  metadata continue to use the `conversion-<job-id>` fallback.
+
+<a id="release-0-5-1"></a>
+
+## [0.5.1] - 2026-08-31
+
+### Security
+
+- Markdown conversions now accept strictly validated absolute HTTP(S) hyperlink destinations
+  without permitting Pandoc or the document to load remote resources. Remote images and unsafe,
+  malformed, credential-bearing, or non-HTTP(S) destinations remain rejected.
+
+<a id="release-0-5-0"></a>
+
+## [0.5.0] - 2026-08-31
+
+### Added
+
+- The installed `markweave` CLI now covers authentication and session profiles,
+  conversion and job lifecycles, template administration, user administration,
+  audit and health operations, and the local runtime and recovery commands.
+- Python installations can select the supported server, standalone, distributed,
+  or complete dependency extras without changing the public import surface.
+
+### Changed
+
+- Final source-built containers and their deployment, recovery, smoke, and E2E
+  workflows now enter through the supported `markweave` commands.
+- The reviewed final-image RPM inventory now includes the UBI `tar` maintenance
+  update from `1.34-11.el9` to `1.34-13.el9_8`.
 - `MARKWEAVE_*` is now the canonical configuration namespace. During 0.x,
   matching validated `MD_CONVERTER_*` aliases remain compatible; conflicting
   dual definitions fail closed.
@@ -115,6 +183,11 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.1](#release-0-6-1)
+- [0.6.0](#release-0-6-0)
+- [0.5.2](#release-0-5-2)
+- [0.5.1](#release-0-5-1)
+- [0.5.0](#release-0-5-0)
 - [0.4.0](#release-0-4-0)
 - [0.3.5](#release-0-3-5)
 - [0.3.4](#release-0-3-4)

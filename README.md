@@ -4,9 +4,10 @@ Markweave turns a Markdown file into DOCX, PDF, or both from a small browser int
 your Word templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
-The project is licensed under [Apache-2.0](LICENSE). Version `0.4.0` is the Python package and
-container release. The quickstart pins that published container image by its immutable registry
-digest.
+The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.6.1`.
+The default public quickstart uses the matched published `0.6.1` backend and Next.js frontend pair,
+pinned to the immutable digests recorded in the release evidence. Candidate testing may override
+both image references together with another matched immutable pair.
 
 The [documentation index](docs/index.md) provides longer guides organized by role. You do not need
 to read them before trying the local profile.
@@ -104,7 +105,9 @@ an operator-asserted external security boundary. Never use the option merely to 
 unavailable scanner. Under rootless Podman, this explicit mode requires `slirp4netns` and uses it
 directly instead of creating CNI bridge networks. This permits the loopback-only published port on
 hosts whose CNI `portmap` plugin cannot use nftables; the default ClamAV topology still requires
-Podman's normal container-network support.
+Podman's normal container-network support. The router listens on the shared namespace interface so
+`slirp4netns` can deliver the forwarded connection, while Podman still publishes that port only on
+host `127.0.0.1`.
 
 This uses an ordinary engine-managed named volume for disposable `/work` data. The application
 still runs as a non-root user with a read-only root filesystem, no Linux capabilities,
@@ -249,8 +252,11 @@ uv sync --all-groups
 uv run ruff format --check .
 uv run ruff check .
 uv run ty check
-npm ci --ignore-scripts
-npm run test:web
+scripts/javascript/bootstrap-pnpm.sh "$PWD/.pnpm-tools"
+export PATH="$PWD/.pnpm-tools/bin:$PATH"
+export COREPACK_HOME="$PWD/.pnpm-tools/corepack-home" COREPACK_ENABLE_NETWORK=0
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run test:web
 uv run pytest -m "not requires_pandoc and not requires_mermaid and not requires_libreoffice"
 uv run pytest
 ```

@@ -29,28 +29,30 @@ def test_root_help_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
         "Command-line interface for Markweave.\n\n"
         "positional arguments:\n"
         "  COMMAND\n"
-        "    login            Sign in to a remote service.\n"
-        "    logout           Sign out of a remote service.\n"
-        "    whoami           Show the active remote session.\n"
-        "    password         Manage the current account password.\n"
-        "    convert          Submit a conversion.\n"
-        "    jobs             Inspect and manage conversion jobs.\n"
-        "    templates        Discover and manage document templates.\n"
-        "    users            Administer local users.\n"
-        "    audit            Inspect audit records.\n"
-        "    health           Inspect service health.\n"
-        "    serve            Run the local HTTP service.\n"
-        "    worker           Run a local worker.\n"
-        "    doctor           Check local prerequisites.\n"
-        "    migrate          Apply database migrations.\n"
-        "    backup           Create a local backup.\n"
-        "    restore          Restore a local backup.\n\n"
+        "    login               Sign in to a remote service.\n"
+        "    logout              Sign out of a remote service.\n"
+        "    whoami              Show the active remote session.\n"
+        "    password            Manage the current account password.\n"
+        "    conversion-options  Show authoritative conversion options.\n"
+        "    convert             Submit a conversion.\n"
+        "    jobs                Inspect and manage conversion jobs.\n"
+        "    templates           Discover and manage document templates.\n"
+        "    users               Administer local users.\n"
+        "    session-policy      Inspect or update role-specific idle sessions.\n"
+        "    audit               Inspect audit records.\n"
+        "    health              Inspect service health.\n"
+        "    serve               Run the local HTTP service.\n"
+        "    worker              Run a local worker.\n"
+        "    doctor              Check local prerequisites.\n"
+        "    migrate             Apply database migrations.\n"
+        "    backup              Create a local backup.\n"
+        "    restore             Restore a local backup.\n\n"
         "options:\n"
-        "  -h, --help         show this help message and exit\n"
-        "  --version          Show version.\n"
-        "  --json             Write machine-readable output.\n"
-        "  --non-interactive  Fail instead of prompting for input.\n"
-        "  --timeout SECONDS  Bound this command's network or operational wait.\n"
+        "  -h, --help            show this help message and exit\n"
+        "  --version             Show version.\n"
+        "  --json                Write machine-readable output.\n"
+        "  --non-interactive     Fail instead of prompting for input.\n"
+        "  --timeout SECONDS     Bound this command's network or operational wait.\n"
     )
 
 
@@ -69,29 +71,16 @@ def test_version_and_missing_command_use_the_documented_streams(
     assert captured.err.startswith("usage: markweave")
 
 
-@pytest.mark.parametrize(
-    ("arguments", "expected_command"),
-    (
-        (("convert",), "convert"),
-        (("jobs", "wait"), "jobs wait"),
-        (("templates", "restore"), "templates restore"),
-        (("users", "deactivate"), "users deactivate"),
-        (("health", "metrics"), "health metrics"),
-        (("backup",), "backup"),
-    ),
-)
-def test_pre_registered_commands_fail_stably(
-    arguments: tuple[str, ...],
-    expected_command: str,
+def test_remaining_recovery_placeholder_fails_stably(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Family placeholders never accidentally execute a backend."""
-    assert main(arguments) is ExitCode.UNAVAILABLE
+    """The remaining family placeholder never accidentally executes a backend."""
+    assert main(("backup",)) is ExitCode.UNAVAILABLE
     captured = capsys.readouterr()
     assert captured.out == ""
     assert (
         captured.err
-        == f"error: The '{expected_command}' command is not available in this release.\n"
+        == "error: The 'backup' command is not available in this release.\n"
     )
 
 

@@ -11,6 +11,7 @@ from markweave.templates.models import (
     TemplateIdentity,
     TemplatePage,
     TemplateSearch,
+    TemplateSelectionSource,
     TemplateVersion,
 )
 
@@ -186,3 +187,9 @@ class TemplateSelectionRepository(Protocol):
     def system_fallback_id(self) -> UUID | None: ...
 
     def resolve(self, user_id: UUID) -> TemplateIdentity | None: ...
+
+    def resolve_with_source(
+        self, user_id: UUID
+    ) -> tuple[TemplateIdentity | None, TemplateSelectionSource]: ...
+
+    def context(self, user_id: UUID) -> tuple[UUID | None, UUID | None]: ...
