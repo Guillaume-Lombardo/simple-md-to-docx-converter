@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Protocol
 from uuid import UUID
@@ -142,6 +143,7 @@ class NodeAttestationEngine:
             type(sandbox) is not SandboxSnapshot
             or sandbox.pod_uid != pod.pod_uid
             or sandbox.node_uid != node.node_uid
+            or not _observed_identity_matches(sandbox.observed_pod, pod)
             or manifest_digest(contract.pod_contract) != contract.manifest_digest
             or project_observed_pod(sandbox.observed_pod, contract.pod_contract)
             != contract.pod_contract
@@ -301,3 +303,18 @@ class NodeAttestationEngine:
         ):
             raise KubernetesRuntimeError("Kubernetes sandbox identity changed")
         return snapshot
+
+
+def _observed_identity_matches(
+    observed: Mapping[str, object], pod: KubernetesPodIdentity
+) -> bool:
+    metadata = observed.get("metadata")
+    specification = observed.get("spec")
+    return (
+        isinstance(metadata, Mapping)
+        and isinstance(specification, Mapping)
+        and metadata.get("name") == pod.name
+        and metadata.get("namespace") == pod.namespace
+        and metadata.get("uid") == str(pod.pod_uid)
+        and specification.get("nodeName") == pod.node_name
+    )

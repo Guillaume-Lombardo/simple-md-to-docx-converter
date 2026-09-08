@@ -227,9 +227,13 @@ class InspectorDouble:
         states = ("RUNNING",) if running else ("EXITED",)
         assert self.control.manifest is not None
         observed_pod = deepcopy(self.control.manifest)
+        metadata = observed_pod["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["uid"] = str(pod_uid)
+        specification = observed_pod["spec"]
+        assert isinstance(specification, dict)
+        specification["nodeName"] = "reverse-node-1"
         if self.control.tamper_manifest:
-            specification = observed_pod["spec"]
-            assert isinstance(specification, dict)
             specification["hostNetwork"] = True
         values: dict[str, Any] = {
             "pod_uid": pod_uid,
@@ -379,9 +383,17 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     metadata = observed["metadata"]
     assert isinstance(metadata, dict)
     metadata["creationTimestamp"] = "2026-09-08T00:00:00Z"
+    metadata["generation"] = 1
+    metadata["managedFields"] = []
+    metadata["resourceVersion"] = "123"
+    metadata["uid"] = str(POD_UID)
     specification = observed["spec"]
     assert isinstance(specification, dict)
+    specification["nodeName"] = "reverse-node-1"
+    specification["preemptionPolicy"] = "PreemptLowerPriority"
+    specification["priority"] = 0
     specification["schedulerName"] = "default-scheduler"
+    specification["serviceAccount"] = "markweave-reverse-attempt"
     tolerations = specification["tolerations"]
     assert isinstance(tolerations, list)
     tolerations.extend(
@@ -402,6 +414,8 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     )
     container = specification["containers"][0]
     assert isinstance(container, dict)
+    container["terminationMessagePath"] = "/dev/termination-log"
+    container["terminationMessagePolicy"] = "File"
     resources = container["resources"]
     assert isinstance(resources, dict)
     for section_name in ("limits", "requests"):
@@ -417,6 +431,7 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     empty_dir = volume["emptyDir"]
     assert isinstance(empty_dir, dict)
     empty_dir["sizeLimit"] = "16Mi"
+    observed["status"] = {"phase": "Pending"}
 
     assert project_observed_pod(observed, expected) == expected
 
@@ -452,17 +467,16 @@ def test_sandbox_kernel_enforcement_must_match_exact_policy(
 def test_observed_pod_rejects_injected_workload_containers(
     unit: ManagedUnit, policy: BrokerPolicy, field: str
 ) -> None:
-    runtime, control, inspector = _runtime(unit, policy)
+    runtime, control, _ = _runtime(unit, policy)
     runtime.create(unit, policy)
     assert control.manifest is not None
     observed = deepcopy(control.manifest)
     specification = observed["spec"]
     assert isinstance(specification, dict)
     specification[field] = [{"name": "injected", "image": "attacker/image"}]
-    inspector.override_sandbox = {"observed_pod": observed}
 
     with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
-        runtime.discover(limit=1)
+        project_observed_pod(observed, pod_contract_projection(control.manifest))
 
 
 @pytest.mark.unit
@@ -477,6 +491,14 @@ def test_observed_pod_rejects_injected_workload_containers(
         (("spec", "containers", 0, "resources", "limits", "cpu"), "0m"),
         (("spec", "containers", 0, "resources", "limits", "memory"), 1),
         (("spec", "containers", 0, "resources", "limits", "memory"), "0Mi"),
+        (
+            ("spec", "containers", 0, "securityContext", "procMount"),
+            "Unmasked",
+        ),
+        (
+            ("spec", "containers", 0, "volumeMounts", 0, "mountPropagation"),
+            "Bidirectional",
+        ),
     ],
 )
 def test_observed_pod_rejects_malformed_security_contract_values(
@@ -508,6 +530,54 @@ def test_observed_pod_rejects_malformed_security_contract_values(
 
     with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
         project_observed_pod(observed, expected)
+
+
+@pytest.mark.unit
+def test_observed_pod_rejects_arbitrary_tolerations(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, _ = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    expected = pod_contract_projection(control.manifest)
+    observed = deepcopy(control.manifest)
+    specification = observed["spec"]
+    assert isinstance(specification, dict)
+    tolerations = specification["tolerations"]
+    assert isinstance(tolerations, list)
+    tolerations.append(
+        {
+            "effect": "NoSchedule",
+            "key": "tenant.example/bypass",
+            "operator": "Exists",
+        }
+    )
+
+    with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+        project_observed_pod(observed, expected)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("identity_field", ["pod_uid", "node_name"])
+def test_attester_rejects_observed_api_identity_substitution(
+    unit: ManagedUnit, policy: BrokerPolicy, identity_field: str
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime.create(unit, policy)
+    assert control.manifest is not None
+    observed = deepcopy(control.manifest)
+    metadata = observed["metadata"]
+    specification = observed["spec"]
+    assert isinstance(metadata, dict)
+    assert isinstance(specification, dict)
+    metadata["uid"] = str(POD_UID if identity_field != "pod_uid" else UUID(int=97))
+    specification["nodeName"] = (
+        "reverse-node-1" if identity_field != "node_name" else "substituted-node"
+    )
+    inspector.override_sandbox = {"observed_pod": observed}
+
+    with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
+        runtime.discover(limit=1)
 
 
 @pytest.mark.unit

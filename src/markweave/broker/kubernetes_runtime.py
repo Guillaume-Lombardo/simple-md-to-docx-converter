@@ -661,6 +661,11 @@ def _project_like(value: object, template: object, path: tuple[str, ...]) -> obj
     if isinstance(template, Mapping):
         if not isinstance(value, Mapping):
             raise TypeError
+        for key in value.keys() - template.keys():
+            if type(key) is not str or not _allowed_api_default(
+                path, key, value[key], value
+            ):
+                raise ValueError
         return {
             key: _project_like(value[key], child, (*path, key))
             for key, child in template.items()
@@ -746,6 +751,25 @@ def _filter_default_tolerations(
     expected_keys = {
         item.get("key") for item in expected_tolerations if isinstance(item, Mapping)
     }
+    defaults = (
+        {
+            "effect": "NoExecute",
+            "key": "node.kubernetes.io/not-ready",
+            "operator": "Exists",
+            "tolerationSeconds": 300,
+        },
+        {
+            "effect": "NoExecute",
+            "key": "node.kubernetes.io/unreachable",
+            "operator": "Exists",
+            "tolerationSeconds": 300,
+        },
+    )
+    for item in observed_tolerations:
+        if not isinstance(item, Mapping):
+            raise TypeError
+        if item.get("key") not in expected_keys and dict(item) not in defaults:
+            raise ValueError
     specification_copy = dict(observed_specification)
     specification_copy["tolerations"] = [
         item
@@ -754,3 +778,35 @@ def _filter_default_tolerations(
     ]
     observed_copy["spec"] = specification_copy
     return observed_copy
+
+
+def _allowed_api_default(
+    path: tuple[str, ...], key: str, value: object, parent: Mapping[object, object]
+) -> bool:
+    allowed = False
+    if path == ():
+        allowed = key == "status" and isinstance(value, Mapping)
+    elif path == ("metadata",):
+        if key in {"creationTimestamp", "resourceVersion", "uid"}:
+            allowed = type(value) is str and bool(value)
+        elif key == "generation":
+            allowed = type(value) is int and value >= 1
+        else:
+            allowed = key == "managedFields" and type(value) is list
+    elif path == ("spec",):
+        if key == "nodeName":
+            allowed = type(value) is str and bool(value)
+        elif key == "serviceAccount":
+            allowed = value == parent.get("serviceAccountName")
+        else:
+            allowed = (key, value) in {
+                ("preemptionPolicy", "PreemptLowerPriority"),
+                ("priority", 0),
+                ("schedulerName", "default-scheduler"),
+            }
+    elif path == ("spec", "containers", "0"):
+        allowed = (key, value) in {
+            ("terminationMessagePath", "/dev/termination-log"),
+            ("terminationMessagePolicy", "File"),
+        }
+    return allowed

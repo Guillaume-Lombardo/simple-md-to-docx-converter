@@ -60,8 +60,10 @@ backend.
   attestation now binds sandbox-netns isolation plus observed cgroup `cpu.max`, `memory.max`,
   `pids.max`, and tmpfs path/size/mount flags. Canonical projection accepts Kubernetes API defaults
   and equivalent resource quantities while rejecting injected workloads or authored-field drift.
-  The focused correction suite passes 46 unit/integration tests and the two new modules reach
-  97.01% line and 90.74% branch coverage. The mandatory real-cluster and exact-image gates remain
+  A follow-up hardening pass now rejects every unrecognized observed Pod field or toleration,
+  permits only explicitly validated Kubernetes defaults, and binds the observed Pod UID/node name.
+  The focused correction suite passes 51 unit/integration tests and the two new modules reach
+  97.01% line and 91.79% branch coverage. The mandatory real-cluster and exact-image gates remain
   blocked by the absence of an authorized Kubernetes context and are not claimed complete.
 * 2026-09-08: Added the runtime-neutral Kubernetes isolation proof core, a separately reviewable
   node-attestation policy engine, the dedicated fenced-pool reference topology, deployment and

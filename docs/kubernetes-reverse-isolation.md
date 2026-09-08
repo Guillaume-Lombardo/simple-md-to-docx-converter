@@ -38,12 +38,17 @@ positive:
 - the sandbox network namespace contains only `lo`, with forwarding disabled; and
 - the observed, API-server-defaulted Pod projects to the exact canonical broker-owned contract.
 
-The canonical Pod contract contains every field authored by the broker. Observation drops fields
-added by API-server defaulting, normalizes equivalent CPU and byte quantities, and drops only the
-two standard automatically injected `NoExecute` tolerations. Extra containers, init containers,
-ephemeral containers, volumes, mounts, or changes to any broker-owned field fail attestation. The
-contract digest is carried in evidence; the full policy-specification digest is an annotation,
-because a 64-character digest is not a valid Kubernetes label value.
+The canonical Pod contract contains every field authored by the broker. Observation accepts only
+the documented API fields `status`, server-owned identity/version metadata, assigned `nodeName`,
+the service-account alias, default scheduler/priority values, and default container termination
+message settings. Their types and fixed values are validated. Equivalent CPU and byte quantities
+are normalized, and only the two exact standard automatically injected `NoExecute` tolerations are
+dropped. Every other extra field or toleration—including security-context and mount options—fails
+attestation, as do extra containers, init containers, ephemeral containers, volumes, mounts, or
+changes to any broker-owned field. The observed Pod UID and node name must match the identities
+bound by the API and node attester. The contract digest is carried in evidence; the full
+policy-specification digest is an annotation, because a 64-character digest is not a valid
+Kubernetes label value.
 
 The loopback-only CNI is mandatory. Kubernetes `NetworkPolicy` alone is not accepted as proof
 because implementations can exempt node traffic. The dedicated nodes must run no general workload.
