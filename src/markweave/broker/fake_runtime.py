@@ -324,6 +324,7 @@ class FakeIsolationRuntime:
         runtime_unit = FakeRuntimeUnit(unit_id, attempt_id, principal_id, incarnation)
         self._records[unit_id] = _RuntimeRecord(
             runtime_unit,
+            attempt_id=attempt_id,
             terminated=state.terminated,
             exit_confirmed=state.exit_confirmed,
             empty_confirmed=state.empty_confirmed,

@@ -729,6 +729,7 @@ def test_fake_runtime_enforces_lifecycle_and_discovery_limits(
         runtime_unit.principal_id,
         runtime_unit.incarnation,
     )
+    assert runtime.try_collect_response(replacement, replacement.attempt_id) is None
     with pytest.raises(ValueError):
         runtime.seed(
             runtime_unit.unit_id,

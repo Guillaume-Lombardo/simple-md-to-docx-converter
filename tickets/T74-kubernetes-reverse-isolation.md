@@ -53,6 +53,9 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Fixed the final incremental CodeRabbit finding by preserving the seeded fake
+  runtime's attempt identity for restart-oriented workspace collection tests. The 268-test focused
+  selection, Ruff, `ty`, and `git diff --check` pass.
 * 2026-09-08: Closed the independent follow-up review by making attempt and principal identities a
   mandatory fail-closed `RuntimeUnit` contract across Kubernetes, Podman, persisted recovery, and
   test runtimes; deletion grace metadata is now rejected without a deletion timestamp. The proposed
