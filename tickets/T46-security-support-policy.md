@@ -34,6 +34,7 @@ Publish clear security-reporting, supported-version, response, disclosure, and o
 
 ## Progress
 
+* 2026-09-08: Non-draft pull request [#220](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/220) was published from reviewed commit `aee2afeae27c14d83c87a87c0871e14336c1ab26`; exact-head CI and CodeRabbit review are pending.
 * 2026-09-08: Resumed by product-manager decision after GitHub private vulnerability reporting and Discussions were enabled. G1L-421 and this mirror are In Progress.
 * 2026-09-08: Reconciled normally with exact `main` `38ed74bdcd6692ae9235cc2f2190f7af4dab041e`; the preserved policy files required no conflict resolution. Refreshed `SUPPORT.md` so the T40-owned PyPI `Support` URL lands on the documented question channel while reproducible defects remain in GitHub Issues.
 * 2026-09-08: Verified the enabled private-reporting and Discussions settings through the GitHub API, all dedicated-policy local link targets, public repository/Issues/Discussions responses, and the unchanged PyPI `Support` metadata URL. `uv sync --all-groups`, Ruff format/lint, `ty`, and `git diff --check` pass. A proportional canonical Pytest run was stopped after 9m10s at 43%; PostgreSQL errors and S3 failures require the unavailable `MARKWEAVE_TEST_POSTGRES_URL` and `MARKWEAVE_TEST_S3_*` services, while one unrelated process-reaping test failed. Hosted exact-head CI remains the full-suite authority.
