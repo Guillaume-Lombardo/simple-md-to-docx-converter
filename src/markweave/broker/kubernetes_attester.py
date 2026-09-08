@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Protocol
 from uuid import UUID
@@ -120,13 +120,14 @@ class NodeAttestationEngine:
     ) -> KubernetesSandboxIdentity:
         """Bind the Pod UID to one fenced node, CRI sandbox and stable cgroup."""
 
-        try:
-            node = self._inspector.node_fence(pod.node_name)
-            sandbox = self._inspector.sandbox(pod.pod_uid)
-        except Exception as error:
-            raise KubernetesRuntimeError(
-                "Kubernetes node attestation failed"
-            ) from error
+        node = _inspector_call(
+            lambda: self._inspector.node_fence(pod.node_name),
+            "Kubernetes node attestation failed",
+        )
+        sandbox = _inspector_call(
+            lambda: self._inspector.sandbox(pod.pod_uid),
+            "Kubernetes node attestation failed",
+        )
         if (
             type(node) is not NodeFenceSnapshot
             or node.node_name != pod.node_name
@@ -205,10 +206,11 @@ class NodeAttestationEngine:
             return KubernetesSandboxIdentity(
                 sandbox.sandbox_id, sandbox.cgroup_path, sandbox.node_uid, binding
             )
-        except ValueError as error:
-            raise KubernetesRuntimeError(
+        except ValueError:
+            failure = KubernetesRuntimeError(
                 "Kubernetes sandbox attestation is invalid"
-            ) from error
+            )
+        raise failure
 
     def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
         """Prove all CRI containers exited; a Pod phase or API result is ignored."""
@@ -261,10 +263,10 @@ class NodeAttestationEngine:
 
         if type(empty_evidence) is not EvidenceDigest:
             raise KubernetesRuntimeError("Kubernetes empty evidence is invalid")
-        try:
-            snapshot = self._inspector.removal(unit.pod.pod_uid)
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes removal is unconfirmed") from error
+        snapshot = _inspector_call(
+            lambda: self._inspector.removal(unit.pod.pod_uid),
+            "Kubernetes removal is unconfirmed",
+        )
         if (
             type(snapshot) is not RemovalSnapshot
             or snapshot.pod_uid != unit.pod.pod_uid
@@ -290,10 +292,10 @@ class NodeAttestationEngine:
     def _sandbox(self, unit: KubernetesRuntimeUnit) -> SandboxSnapshot:
         if type(unit) is not KubernetesRuntimeUnit:
             raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
-        try:
-            snapshot = self._inspector.sandbox(unit.pod.pod_uid)
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes sandbox lookup failed") from error
+        snapshot = _inspector_call(
+            lambda: self._inspector.sandbox(unit.pod.pod_uid),
+            "Kubernetes sandbox lookup failed",
+        )
         if (
             type(snapshot) is not SandboxSnapshot
             or snapshot.pod_uid != unit.pod.pod_uid
@@ -305,9 +307,9 @@ class NodeAttestationEngine:
         return snapshot
 
 
-def _observed_identity_matches(
-    observed: Mapping[str, object], pod: KubernetesPodIdentity
-) -> bool:
+def _observed_identity_matches(observed: object, pod: KubernetesPodIdentity) -> bool:
+    if not isinstance(observed, Mapping):
+        return False
     metadata = observed.get("metadata")
     specification = observed.get("spec")
     return (
@@ -318,3 +320,11 @@ def _observed_identity_matches(
         and metadata.get("uid") == str(pod.pod_uid)
         and specification.get("nodeName") == pod.node_name
     )
+
+
+def _inspector_call[T](operation: Callable[[], T], message: str) -> T:
+    try:
+        return operation()
+    except Exception:
+        failure = KubernetesRuntimeError(message)
+    raise failure

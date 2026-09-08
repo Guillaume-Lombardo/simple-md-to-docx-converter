@@ -627,6 +627,17 @@ class IsolationBrokerService:
     ) -> None:
         if runtime_unit.unit_id != unit.unit_id:
             self._fail(BrokerErrorCategory.RUNTIME_FAILURE)
+        attempt_id = getattr(runtime_unit, "attempt_id", unit.attempt_id)
+        principal_id = getattr(
+            runtime_unit, "principal_id", unit.principal.principal_id
+        )
+        if attempt_id != unit.attempt_id or principal_id != unit.principal.principal_id:
+            category = (
+                BrokerErrorCategory.RECONCILIATION_INCOMPLETE
+                if require_persisted
+                else BrokerErrorCategory.RUNTIME_FAILURE
+            )
+            self._fail(category)
         if runtime_unit.incarnation.specification != unit.policy_specification:
             category = (
                 BrokerErrorCategory.RECONCILIATION_INCOMPLETE

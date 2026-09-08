@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Protocol, cast
@@ -125,6 +125,18 @@ class KubernetesRuntimeUnit:
         ):
             raise ValueError("Kubernetes runtime unit identity is invalid")
 
+    @property
+    def attempt_id(self) -> UUID:
+        """Return the attempt identity bound into the discovered Pod."""
+
+        return self.pod.attempt_id
+
+    @property
+    def principal_id(self) -> UUID:
+        """Return the principal identity bound into the discovered Pod."""
+
+        return self.pod.principal_id
+
 
 @dataclass(frozen=True, slots=True)
 class KubernetesRuntimeConfig:
@@ -137,6 +149,7 @@ class KubernetesRuntimeConfig:
     node_fence_revision: str
     run_as_uid: int
     run_as_gid: int
+    interpreter_memory_margin_bytes: int
 
     def __post_init__(self) -> None:
         strings = (
@@ -155,6 +168,8 @@ class KubernetesRuntimeConfig:
             or self.run_as_uid <= 0
             or type(self.run_as_gid) is not int
             or self.run_as_gid <= 0
+            or type(self.interpreter_memory_margin_bytes) is not int
+            or self.interpreter_memory_margin_bytes <= 0
         ):
             raise ValueError("Kubernetes runtime configuration is invalid")
 
@@ -249,6 +264,8 @@ def project_observed_pod(
 ) -> dict[str, object]:
     """Project an API-defaulted Pod through an exact expected contract shape."""
 
+    if not isinstance(observed, Mapping) or not isinstance(expected, Mapping):
+        raise KubernetesRuntimeError("Kubernetes observed Pod is invalid")
     try:
         if _extra_workload_containers(observed):
             raise ValueError
@@ -328,8 +345,9 @@ class KubernetesIsolationRuntime:
             return result
         except KubernetesRuntimeError:
             raise
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes create failed") from error
+        except Exception:
+            failure = KubernetesRuntimeError("Kubernetes create failed")
+        raise failure
 
     def stage_request(
         self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
@@ -337,12 +355,10 @@ class KubernetesIsolationRuntime:
         verified = self._coerce(runtime_unit)
         if type(request) is not ReverseAttemptRequest:
             raise KubernetesRuntimeError("Kubernetes workspace request is invalid")
-        try:
-            self._control.stage_request(verified.pod, request)
-        except Exception as error:
-            raise KubernetesRuntimeError(
-                "Kubernetes workspace staging failed"
-            ) from error
+        _external_call(
+            lambda: self._control.stage_request(verified.pod, request),
+            "Kubernetes workspace staging failed",
+        )
 
     def try_collect_response(
         self, runtime_unit: RuntimeUnit, expected_attempt_id: UUID
@@ -350,50 +366,46 @@ class KubernetesIsolationRuntime:
         verified = self._coerce(runtime_unit)
         if type(expected_attempt_id) is not UUID:
             raise KubernetesRuntimeError("Kubernetes workspace response is invalid")
-        try:
-            response = self._control.try_collect_response(
+        response = _external_call(
+            lambda: self._control.try_collect_response(
                 verified.pod, expected_attempt_id
-            )
-        except Exception as error:
-            raise KubernetesRuntimeError(
-                "Kubernetes workspace collection failed"
-            ) from error
+            ),
+            "Kubernetes workspace collection failed",
+        )
         if response is not None and response.attempt_id != expected_attempt_id:
             raise KubernetesRuntimeError("Kubernetes workspace response is invalid")
         return response
 
     def hard_terminate(self, runtime_unit: RuntimeUnit) -> None:
         verified = self._coerce(runtime_unit)
-        try:
-            self._control.terminate(verified.pod)
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes termination failed") from error
+        _external_call(
+            lambda: self._control.terminate(verified.pod),
+            "Kubernetes termination failed",
+        )
 
     def confirm_exit(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
         verified = self._coerce(runtime_unit)
-        try:
-            evidence = self._attester.confirm_exit(verified)
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes exit is unconfirmed") from error
+        evidence = _external_call(
+            lambda: self._attester.confirm_exit(verified),
+            "Kubernetes exit is unconfirmed",
+        )
         return _require_evidence(evidence, "Kubernetes exit is unconfirmed")
 
     def confirm_empty(self, runtime_unit: RuntimeUnit) -> EvidenceDigest:
         verified = self._coerce(runtime_unit)
         exit_evidence = self.confirm_exit(verified)
-        try:
-            evidence = self._attester.confirm_empty(verified, exit_evidence)
-        except Exception as error:
-            raise KubernetesRuntimeError(
-                "Kubernetes stable unit is not empty"
-            ) from error
+        evidence = _external_call(
+            lambda: self._attester.confirm_empty(verified, exit_evidence),
+            "Kubernetes stable unit is not empty",
+        )
         return _require_evidence(evidence, "Kubernetes stable unit is not empty")
 
     def remove(self, runtime_unit: RuntimeUnit) -> None:
         verified = self._coerce(runtime_unit)
-        try:
-            self._control.delete(verified.pod)
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes removal failed") from error
+        _external_call(
+            lambda: self._control.delete(verified.pod),
+            "Kubernetes removal failed",
+        )
 
     def confirm_removed(
         self, runtime_unit: RuntimeUnit, empty_evidence: EvidenceDigest
@@ -401,28 +413,30 @@ class KubernetesIsolationRuntime:
         verified = self._coerce(runtime_unit)
         if type(empty_evidence) is not EvidenceDigest:
             raise KubernetesRuntimeError("Kubernetes empty evidence is invalid")
-        try:
-            cri_evidence = self._attester.confirm_removed(verified, empty_evidence)
-            if self._control.absent(verified.pod) is not True:
-                raise KubernetesRuntimeError("Kubernetes removal is unconfirmed")
-        except KubernetesRuntimeError:
-            raise
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes removal is unconfirmed") from error
+        cri_evidence = _external_call(
+            lambda: self._attester.confirm_removed(verified, empty_evidence),
+            "Kubernetes removal is unconfirmed",
+        )
+        absent = _external_call(
+            lambda: self._control.absent(verified.pod),
+            "Kubernetes removal is unconfirmed",
+        )
+        if absent is not True:
+            raise KubernetesRuntimeError("Kubernetes removal is unconfirmed")
         self._known.pop(verified.unit_id, None)
         return _require_evidence(cri_evidence, "Kubernetes removal is unconfirmed")
 
     def discover(self, *, limit: int) -> tuple[KubernetesRuntimeUnit, ...]:
         if type(limit) is not int or limit <= 0:
             raise KubernetesRuntimeError("Kubernetes discovery limit is invalid")
-        try:
-            pods = self._control.discover(
+        pods = _external_call(
+            lambda: self._control.discover(
                 namespace=self._config.namespace,
                 labels={_MANAGED_LABEL: "1"},
                 limit=limit,
-            )
-        except Exception as error:
-            raise KubernetesRuntimeError("Kubernetes discovery failed") from error
+            ),
+            "Kubernetes discovery failed",
+        )
         if type(pods) is not tuple or len(pods) > limit:
             raise KubernetesRuntimeError("Kubernetes discovery exceeds its limit")
         discovered: list[KubernetesRuntimeUnit] = []
@@ -449,8 +463,13 @@ class KubernetesIsolationRuntime:
                 raise KubernetesRuntimeError("Kubernetes discovery policy is invalid")
             manifest = self._manifest(managed, self._policy)
             pod_contract = pod_contract_projection(manifest)
-            sandbox = self._attester.bind(
-                pod, self._attestation(pod_contract, self._policy)
+            attestation = self._attestation(pod_contract, self._policy)
+            sandbox = _external_call(
+                lambda pod=pod, contract=attestation: self._attester.bind(
+                    pod, contract
+                ),
+                "Kubernetes discovery failed",
+                preserve_runtime_error=True,
             )
             runtime_unit = KubernetesRuntimeUnit(
                 pod.unit_id,
@@ -489,6 +508,11 @@ class KubernetesIsolationRuntime:
 
     def _manifest(self, unit: ManagedUnit, policy: BrokerPolicy) -> dict[str, object]:
         config = self._config
+        if (
+            policy.limits.memory_bytes - policy.limits.workspace_bytes
+            < config.interpreter_memory_margin_bytes
+        ):
+            raise KubernetesRuntimeError("Kubernetes memory policy is invalid")
         cpu_millicores = _cpu_millicores(policy)
         labels = {
             _ATTEMPT_LABEL: str(unit.attempt_id),
@@ -616,6 +640,23 @@ def _require_evidence(value: object, message: str) -> EvidenceDigest:
     if type(value) is not EvidenceDigest:
         raise KubernetesRuntimeError(message)
     return value
+
+
+def _external_call[T](
+    operation: Callable[[], T],
+    message: str,
+    *,
+    preserve_runtime_error: bool = False,
+) -> T:
+    try:
+        return operation()
+    except KubernetesRuntimeError:
+        if preserve_runtime_error:
+            raise
+        failure = KubernetesRuntimeError(message)
+    except Exception:
+        failure = KubernetesRuntimeError(message)
+    raise failure
 
 
 def _implements_control_plane(value: object) -> bool:
@@ -787,8 +828,15 @@ def _allowed_api_default(
     if path == ():
         allowed = key == "status" and isinstance(value, Mapping)
     elif path == ("metadata",):
-        if key in {"creationTimestamp", "resourceVersion", "uid"}:
+        if key in {
+            "creationTimestamp",
+            "deletionTimestamp",
+            "resourceVersion",
+            "uid",
+        }:
             allowed = type(value) is str and bool(value)
+        elif key == "deletionGracePeriodSeconds":
+            allowed = type(value) is int and value >= 0
         elif key == "generation":
             allowed = type(value) is int and value >= 1
         else:

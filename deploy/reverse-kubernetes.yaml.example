@@ -23,6 +23,16 @@ kind: ServiceAccount
 metadata: {name: markweave-reverse-broker, namespace: markweave-reverse}
 automountServiceAccountToken: true
 ---
+apiVersion: v1
+kind: Secret
+metadata: {name: markweave-reverse-broker-attester-tls, namespace: markweave-reverse}
+type: kubernetes.io/tls
+immutable: true
+stringData:
+  ca.crt: "@REQUIRED_ATTESTER_SERVER_CA_PEM@"
+  tls.crt: "@REQUIRED_BROKER_CLIENT_CERTIFICATE_PEM@"
+  tls.key: "@REQUIRED_BROKER_CLIENT_PRIVATE_KEY_PEM@"
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: {name: markweave-reverse-broker, namespace: markweave-reverse}
@@ -67,6 +77,30 @@ kind: ServiceAccount
 metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 automountServiceAccountToken: false
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: markweave-node-attester-config, namespace: markweave-attestation}
+immutable: true
+data:
+  attester.json: |
+    {
+      "listen_address": "0.0.0.0:9443",
+      "client_ca_file": "/run/markweave-tls/ca.crt",
+      "server_certificate_file": "/run/markweave-tls/tls.crt",
+      "server_private_key_file": "/run/markweave-tls/tls.key",
+      "require_client_certificate": true
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: markweave-node-attester-tls, namespace: markweave-attestation}
+type: kubernetes.io/tls
+immutable: true
+stringData:
+  ca.crt: "@REQUIRED_BROKER_CLIENT_CA_PEM@"
+  tls.crt: "@REQUIRED_ATTESTER_CERTIFICATE_PEM@"
+  tls.key: "@REQUIRED_ATTESTER_PRIVATE_KEY_PEM@"
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata: {name: markweave-node-attester, namespace: markweave-attestation}
@@ -94,6 +128,14 @@ spec:
           image: "@REQUIRED_ATTESTER_IMAGE_REPOSITORY@@@REQUIRED_ATTESTER_IMAGE_DIGEST@"
           imagePullPolicy: IfNotPresent
           args: ["node-attester", "--config", "/etc/markweave/attester.json"]
+          env:
+            - name: MARKWEAVE_ATTESTER_NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - name: mtls-attester
+              containerPort: 9443
+              hostPort: 9443
+              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
@@ -113,7 +155,7 @@ spec:
         - name: cgroup
           hostPath: {path: /sys/fs/cgroup, type: Directory}
         - name: config
-          secret: {secretName: markweave-node-attester-config, defaultMode: 256}
+          configMap: {name: markweave-node-attester-config, defaultMode: 256}
         - name: tls
           secret: {secretName: markweave-node-attester-tls, defaultMode: 256}
 ---

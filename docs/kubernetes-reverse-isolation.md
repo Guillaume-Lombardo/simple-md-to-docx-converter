@@ -19,6 +19,18 @@ endpoint accepts only the broker identity and returns bounded, content-free evid
 never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
 the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
+The reference DaemonSet exposes that mTLS endpoint through node-local TCP port `9443` using
+`hostPort`, not a cluster-wide Service. The broker derives the only allowed endpoint as
+`<attempt Pod spec.nodeName>:9443`; cluster DNS or the deployment network must resolve every
+Kubernetes node name directly to that node's reachable address. The server certificate must cover
+those node names, the mounted CA trusts only broker client certificates, and the broker verifies
+both the server name and the attested node identity. The immutable ConfigMap enables mandatory
+client-certificate authentication, while the separate immutable Secret supplies the CA,
+certificate, and private key. Deployments must render every `@REQUIRED_*@` placeholder without
+committing private material. The broker deployment must mount the separate
+`markweave-reverse-broker-attester-tls` Secret and use its client certificate, private key, and
+attester-server CA only for this node-specific connection.
+
 The committed `NodeAttestationEngine` is the fail-closed policy core. A production adapter must
 collect the corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output
 inside the attester process. Unknown fields, truncated CRI enumeration, lookup errors, identity
@@ -66,6 +78,13 @@ exact workspace size limit; Pod-level `fsGroup` ownership makes it writable by t
 non-root attempt identity, and the same value is the ephemeral-storage request and limit. The Pod
 active deadline is the rounded-up broker deadline. CPU quota/period values that cannot be
 represented exactly in Kubernetes millicores are rejected.
+
+Because Kubernetes charges memory-backed `emptyDir` pages to the container memory limit, the
+Kubernetes runtime configuration includes a positive `interpreter_memory_margin_bytes`. It rejects
+any policy where `memory_bytes - workspace_bytes` is smaller than that configured margin. Operators
+must size the margin from exact-image measurements and validate OOM and workspace exhaustion
+separately on the dedicated pool; the reference tests use 64 MiB and do not make that value a
+portable production default.
 
 Readiness is based on observations from the sandbox and kernel, not the requested Pod resources.
 The attester reads and binds the sandbox cgroup's actual `cpu.max` quota and period, `memory.max`,

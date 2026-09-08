@@ -53,6 +53,13 @@ backend.
 
 ## Progress
 
+* 2026-09-08: Addressed all seven actionable findings and both nitpicks from CodeRabbit review
+  `5139760727`: node-specific host-port mTLS topology and credentials, malformed observation and
+  discovery error normalization, persisted attempt/principal reconciliation, terminating-Pod
+  metadata, a configurable positive interpreter-memory margin, exception-chain leakage checks,
+  explicit identity-invariant naming, and exact RBAC assertions. The focused Kubernetes suite
+  passes 58 tests with 97.44% line and 92.36% branch coverage across the runtime and attester.
+  T74 remains In Progress and the mandatory real-cluster/exact-image blocker is unchanged.
 * 2026-09-08: Non-draft partial foundation PR [#222](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/222) was published at reviewed commit `1bcce038ed8e3a69934511610553390ebc66ef3e`. T74 remains In Progress; exact-head CI and CodeRabbit are pending, and the real-cluster/exact-image completion blocker is unchanged.
 * 2026-09-08: Hardened the reviewable foundation after independent security review. The policy
   digest now uses an annotation instead of an invalid 64-character label; the attester runs in a

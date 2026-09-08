@@ -17,6 +17,7 @@ from markweave.broker.kubernetes_attester import (
     SandboxSnapshot,
 )
 from markweave.broker.kubernetes_runtime import (
+    KubernetesAttestationContract,
     KubernetesIsolationRuntime,
     KubernetesPodIdentity,
     KubernetesRuntimeConfig,
@@ -58,6 +59,7 @@ IMAGE_DIGEST = f"sha256:{'6' * 64}"
 EVIDENCE = EvidenceDigest(f"sha256:{'7' * 64}")
 SANDBOX_ID = "8" * 64
 CGROUP = f"/kubepods.slice/pod{POD_UID}/sandbox.scope"
+SENSITIVE_MARKER = "private-document-marker"
 CONFIG = KubernetesRuntimeConfig(
     "markweave-reverse",
     "markweave-reverse-attempt",
@@ -66,6 +68,7 @@ CONFIG = KubernetesRuntimeConfig(
     "fence-v1",
     1001,
     1001,
+    67_108_864,
 )
 
 
@@ -143,7 +146,7 @@ class ControlPlaneDouble:
 
     def create(self, manifest: Mapping[str, object]) -> KubernetesPodIdentity:
         if self.fail_operation == "create":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         self.manifest = deepcopy(dict(manifest))
         self.present = True
         return self.identity()
@@ -152,7 +155,7 @@ class ControlPlaneDouble:
         self, pod: KubernetesPodIdentity, request: ReverseAttemptRequest
     ) -> None:
         if self.fail_operation == "stage":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         assert pod == self.identity()
         self.staged = request
 
@@ -160,20 +163,20 @@ class ControlPlaneDouble:
         self, pod: KubernetesPodIdentity, expected_attempt_id: UUID
     ) -> ReverseAttemptResponse | None:
         if self.fail_operation == "collect":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         assert pod == self.identity()
         assert expected_attempt_id == ATTEMPT_ID
         return self.response
 
     def terminate(self, pod: KubernetesPodIdentity) -> None:
         if self.fail_operation == "terminate":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         assert pod == self.identity()
         self.terminated = True
 
     def delete(self, pod: KubernetesPodIdentity) -> None:
         if self.fail_operation == "delete":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         assert pod == self.identity()
         self.present = False
 
@@ -185,7 +188,7 @@ class ControlPlaneDouble:
         self, *, namespace: str, labels: Mapping[str, str], limit: int
     ) -> tuple[KubernetesPodIdentity, ...]:
         if self.fail_operation == "discover":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         if self.fail_operation == "discover":
             raise RuntimeError("content-free injected failure")
         assert namespace == "markweave-reverse"
@@ -205,7 +208,7 @@ class InspectorDouble:
 
     def node_fence(self, node_name: str) -> NodeFenceSnapshot:
         if self.fail_operation == "node":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         values: dict[str, Any] = {
             "node_name": node_name,
             "node_uid": NODE_UID,
@@ -222,7 +225,7 @@ class InspectorDouble:
 
     def sandbox(self, pod_uid: UUID) -> SandboxSnapshot:
         if self.fail_operation == "sandbox":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         running = not self.control.terminated
         states = ("RUNNING",) if running else ("EXITED",)
         assert self.control.manifest is not None
@@ -262,7 +265,7 @@ class InspectorDouble:
 
     def removal(self, pod_uid: UUID) -> RemovalSnapshot:
         if self.fail_operation == "removal":
-            raise RuntimeError("content-free injected failure")
+            raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         values: dict[str, Any] = {
             "pod_uid": pod_uid,
             "node_uid": NODE_UID,
@@ -275,6 +278,30 @@ class InspectorDouble:
         }
         values.update(self.override_removal)
         return RemovalSnapshot(**values)
+
+
+class UnexpectedAttester:
+    def bind(
+        self, pod: KubernetesPodIdentity, contract: KubernetesAttestationContract
+    ) -> KubernetesSandboxIdentity:
+        del pod, contract
+        raise RuntimeError(f"unexpected attester failure: {SENSITIVE_MARKER}")
+
+    def confirm_exit(self, unit: KubernetesRuntimeUnit) -> EvidenceDigest:
+        del unit
+        return EVIDENCE
+
+    def confirm_empty(
+        self, unit: KubernetesRuntimeUnit, exit_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        del unit, exit_evidence
+        return EVIDENCE
+
+    def confirm_removed(
+        self, unit: KubernetesRuntimeUnit, empty_evidence: EvidenceDigest
+    ) -> EvidenceDigest:
+        del unit, empty_evidence
+        return EVIDENCE
 
 
 def _runtime(
@@ -383,6 +410,8 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     metadata = observed["metadata"]
     assert isinstance(metadata, dict)
     metadata["creationTimestamp"] = "2026-09-08T00:00:00Z"
+    metadata["deletionTimestamp"] = "2026-09-08T00:01:00Z"
+    metadata["deletionGracePeriodSeconds"] = 0
     metadata["generation"] = 1
     metadata["managedFields"] = []
     metadata["resourceVersion"] = "123"
@@ -599,6 +628,12 @@ def test_pod_contract_validation_rejects_invalid_top_level_shapes(
             {"spec": {"tolerations": []}},
             {"spec": cast(object, [])},
         )
+    for malformed in (None, []):
+        with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
+            project_observed_pod(
+                cast(Mapping[str, object], malformed),
+                {"spec": {"tolerations": []}},
+            )
     with pytest.raises(KubernetesRuntimeError, match="observed Pod"):
         project_observed_pod(
             cast(Mapping[str, object], {1: "invalid", "spec": {"tolerations": []}}),
@@ -639,6 +674,51 @@ def test_attester_rejects_invalid_cri_sandbox_identity(
 
     with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
         runtime.create(unit, policy)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("observed_pod", [None, []])
+def test_attester_rejects_non_mapping_observed_pod(
+    unit: ManagedUnit, policy: BrokerPolicy, observed_pod: object
+) -> None:
+    runtime, _, inspector = _runtime(unit, policy)
+    inspector.override_sandbox = {"observed_pod": observed_pod}
+
+    with pytest.raises(KubernetesRuntimeError, match="sandbox attestation"):
+        runtime.create(unit, policy)
+
+
+@pytest.mark.unit
+def test_kubernetes_memory_budget_reserves_interpreter_margin(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    insufficient = replace(
+        policy,
+        limits=replace(
+            policy.limits,
+            memory_bytes=policy.limits.workspace_bytes
+            + CONFIG.interpreter_memory_margin_bytes
+            - 1,
+        ),
+    )
+    runtime, _, _ = _runtime(
+        replace(
+            unit,
+            policy_revision=insufficient.revision,
+            policy_specification=policy_specification_evidence(insufficient),
+        ),
+        insufficient,
+    )
+
+    with pytest.raises(KubernetesRuntimeError, match="memory policy"):
+        runtime.create(
+            replace(
+                unit,
+                policy_revision=insufficient.revision,
+                policy_specification=policy_specification_evidence(insufficient),
+            ),
+            insufficient,
+        )
 
 
 @pytest.mark.unit
@@ -735,14 +815,36 @@ def test_restart_discovery_rebinds_cri_identity(
 
 
 @pytest.mark.unit
+def test_restart_discovery_neutralizes_unexpected_attester_failure(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    first, control, _ = _runtime(unit, policy)
+    first.create(unit, policy)
+    restarted = KubernetesIsolationRuntime(
+        image_repository="registry.example/markweave-reverse-attempt",
+        policy=policy,
+        config=CONFIG,
+        control_plane=control,
+        node_attester=UnexpectedAttester(),
+    )
+
+    with pytest.raises(KubernetesRuntimeError, match="discovery failed") as raised:
+        restarted.discover(limit=1)
+    _assert_sensitive_marker_absent(raised.value)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "factory",
     [
         lambda: KubernetesRuntimeConfig(
-            "Bad", "attempt", "runtime", "pool", "fence", 1001, 1001
+            "Bad", "attempt", "runtime", "pool", "fence", 1001, 1001, 67_108_864
         ),
         lambda: KubernetesRuntimeConfig(
-            "valid", "attempt", "runtime", "pool", "fence", 0, 1001
+            "valid", "attempt", "runtime", "pool", "fence", 0, 1001, 67_108_864
+        ),
+        lambda: KubernetesRuntimeConfig(
+            "valid", "attempt", "runtime", "pool", "fence", 1001, 1001, 0
         ),
         lambda: KubernetesPodIdentity(
             "Bad",
@@ -756,21 +858,24 @@ def test_restart_discovery_rebinds_cri_identity(
             EVIDENCE,
         ),
         lambda: KubernetesSandboxIdentity("bad", CGROUP, NODE_UID, EVIDENCE),
-        lambda: KubernetesRuntimeUnit(
-            UNIT_ID,
-            RuntimeIncarnation(UNIT_ID, EVIDENCE),
-            KubernetesPodIdentity(
-                "valid",
-                "pod",
-                POD_UID,
-                "node",
+        pytest.param(
+            lambda: KubernetesRuntimeUnit(
                 UNIT_ID,
-                ATTEMPT_ID,
-                PRINCIPAL_ID,
-                "policy",
-                EVIDENCE,
+                RuntimeIncarnation(UNIT_ID, EVIDENCE),
+                KubernetesPodIdentity(
+                    "valid",
+                    "pod",
+                    POD_UID,
+                    "node",
+                    UNIT_ID,
+                    ATTEMPT_ID,
+                    PRINCIPAL_ID,
+                    "policy",
+                    EVIDENCE,
+                ),
+                KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE),
             ),
-            KubernetesSandboxIdentity(SANDBOX_ID, CGROUP, NODE_UID, EVIDENCE),
+            id="incarnation_id_must_match_pod_uid",
         ),
     ],
 )
@@ -851,8 +956,9 @@ def test_boundary_failures_are_content_free(
 ) -> None:
     runtime, control, inspector = _runtime(unit, policy)
     control.fail_operation = "create"
-    with pytest.raises(KubernetesRuntimeError, match="create failed"):
+    with pytest.raises(KubernetesRuntimeError, match="create failed") as raised:
         runtime.create(unit, policy)
+    _assert_sensitive_marker_absent(raised.value)
     control.fail_operation = None
     runtime_unit = runtime.create(unit, policy)
 
@@ -864,7 +970,7 @@ def test_boundary_failures_are_content_free(
         ("discover", "discovery failed"),
     ):
         control.fail_operation = operation
-        with pytest.raises(KubernetesRuntimeError, match=expected):
+        with pytest.raises(KubernetesRuntimeError, match=expected) as raised:
             if operation == "stage":
                 runtime.stage_request(runtime_unit, _request())
             elif operation == "collect":
@@ -875,12 +981,16 @@ def test_boundary_failures_are_content_free(
                 runtime.remove(runtime_unit)
             else:
                 runtime.discover(limit=1)
+        _assert_sensitive_marker_absent(raised.value)
     control.fail_operation = None
     control.terminated = True
     empty = runtime.confirm_empty(runtime_unit)
     inspector.fail_operation = "removal"
-    with pytest.raises(KubernetesRuntimeError, match="removal is unconfirmed"):
+    with pytest.raises(
+        KubernetesRuntimeError, match="removal is unconfirmed"
+    ) as raised:
         runtime.confirm_removed(runtime_unit, empty)
+    _assert_sensitive_marker_absent(raised.value)
 
 
 @pytest.mark.unit
@@ -907,3 +1017,8 @@ def test_configuration_and_manifest_validation_fail_closed(
 
 def json_repr(value: object) -> str:
     return json.dumps(value, sort_keys=True)
+
+
+def _assert_sensitive_marker_absent(error: BaseException) -> None:
+    for candidate in (error, error.__cause__, error.__context__):
+        assert SENSITIVE_MARKER not in str(candidate)

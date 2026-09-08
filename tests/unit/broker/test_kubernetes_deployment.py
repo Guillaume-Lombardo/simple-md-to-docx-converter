@@ -55,13 +55,15 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
 
     role = by_kind_name[("Role", "markweave-reverse-broker")]
     rules = role["rules"]
-    assert {tuple(rule["resources"]) for rule in rules} == {
-        ("pods",),
-        ("pods/exec",),
+    assert {
+        (tuple(rule["resources"]), tuple(sorted(rule["verbs"]))) for rule in rules
+    } == {
+        (("pods",), ("create", "delete", "get", "list", "watch")),
+        (("pods/exec",), ("create",)),
     }
-    assert all("secrets" not in rule["resources"] for rule in rules)
     assert not any(item["kind"] == "ClusterRole" for item in resources)
     assert not any(item["kind"] == "ClusterRoleBinding" for item in resources)
+    assert not any(item["kind"] == "Service" for item in resources)
 
     daemon = by_kind_name[("DaemonSet", "markweave-node-attester")]
     assert daemon["metadata"]["namespace"] == "markweave-attestation"
@@ -74,6 +76,34 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     mounts = {volume["name"]: volume for volume in specification["volumes"]}
     assert mounts["cri"]["hostPath"]["type"] == "Socket"
     assert mounts["cgroup"]["hostPath"]["path"] == "/sys/fs/cgroup"
+    assert mounts["config"]["configMap"]["name"] == ("markweave-node-attester-config")
+    container = specification["containers"][0]
+    assert container["ports"] == [
+        {
+            "name": "mtls-attester",
+            "containerPort": 9443,
+            "hostPort": 9443,
+            "protocol": "TCP",
+        }
+    ]
+    assert container["env"] == [
+        {
+            "name": "MARKWEAVE_ATTESTER_NODE_NAME",
+            "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}},
+        }
+    ]
+
+    config = by_kind_name[("ConfigMap", "markweave-node-attester-config")]
+    assert config["immutable"] is True
+    assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
+    assert '"require_client_certificate": true' in config["data"]["attester.json"]
+    tls = by_kind_name[("Secret", "markweave-node-attester-tls")]
+    assert tls["immutable"] is True
+    assert set(tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
+    broker_tls = by_kind_name[("Secret", "markweave-reverse-broker-attester-tls")]
+    assert broker_tls["metadata"]["namespace"] == "markweave-reverse"
+    assert broker_tls["immutable"] is True
+    assert set(broker_tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
 
 
 @pytest.mark.unit
