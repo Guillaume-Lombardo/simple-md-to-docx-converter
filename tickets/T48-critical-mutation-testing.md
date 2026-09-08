@@ -42,8 +42,10 @@ Extend bounded mutation testing from observability to the security, authenticati
   organization rulesets can target only organization-owned repositories, and required workflows
   require GitHub Enterprise Cloud. Resuming implementation therefore requires an Enterprise Cloud
   organization, repository transfer, and a separately owned policy-workflow repository. The
-  preserved phase-two workflow must also replace `cancel-in-progress`, which required workflows do
-  not support. T48 remains Backlog until those external prerequisites are authorized and available.
+  preserved phase-two workflow must remove `cancel-in-progress`, which required workflows do not
+  support; phase two must also update `scripts/ci/validate_ci.py` and its policy tests, which
+  currently require that field. T48 remains Backlog until those external prerequisites are
+  authorized and available.
 * 2026-08-30: Implemented the reviewed four-domain campaign with 21 exact mutants, pull-request affected-domain selection, the full scheduled/manual campaign, one stable read-only gate, and always-retained JSON evidence. A fresh real mutmut 3.7.0 run killed all 21 selected mutants with every failure status at zero. Mutation-driven tests now lock session/authentication/CSRF, archive/SVG, request identity/idempotency, lease recovery/fencing, retention, and filesystem storage behavior; the frozen-slots origin dependency that mutmut cannot transform is documented in the evidence with its direct functional/integration coverage retained. No production code was refactored.
 * 2026-08-30: Verification passed `uv sync --all-groups`, Ruff formatting and linting, `ty check`, the real 21/21 mutation campaign, CI policy validation, and a 327-test targeted unit/integration suite. The canonical engine-excluded suite reached 1,999 passing tests and 95.68% coverage; its only failures were 3 RustFS tests and 32 PostgreSQL setup errors because `MARKWEAVE_TEST_S3_ENDPOINT_URL` and `MARKWEAVE_TEST_POSTGRES_URL` are not configured. Pandoc, Mermaid/Chromium, and LibreOffice are also unavailable locally, so the external-engine/full-suite paths remain for CI.
 * 2026-08-30: Started implementation on `chore/T48-critical-mutation-testing` from exact verified `main` SHA `8f3b792ec41b10467c771c543a292929b0fa985a`. T05, T22, T41, T42, and T43 are all `Done`; scope remains limited to risk-ranked mutation configuration, CI scheduling and evidence, and mutation-driven tests without production refactoring.
