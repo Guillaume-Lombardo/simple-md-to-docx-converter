@@ -56,6 +56,28 @@ backend.
 
 ## Progress
 
+* 2026-09-10: The simulated-dedicated exact-image run exposed and fixed two deployment-only
+  failures: UBI 9's SQLite does not support `STRICT` tables, so the attester ledger now uses
+  equivalent explicit `typeof(...)` constraints, and the DaemonSet mounts k3s' already extracted
+  multicall binary because its `/usr/local/bin/crictl` bootstrap symlink cannot run from a lone
+  read-only file mount. The rebuilt exact attester image reached `2/2 Running`, strict TLS 1.3 mTLS
+  succeeded, and an exact attempt Pod reached `Running` with RuntimeClass `markweave-reverse`, Pod
+  IP `192.0.2.1`, and the fixed resource contract. Recovery then failed closed at the CRI proxy:
+  k3s' embedded `crictl` always performs `ImageService/ImageFsInfo` connection validation before
+  `ps`, but the approved proxy permits only five RuntimeService methods. There is no command-line
+  switch to disable that validation. Completing the exact-image lifecycle therefore requires a
+  security decision between adding this sixth read method or replacing `crictl` with a minimal
+  RuntimeService-only client. No success or termination proof is claimed for this failed run.
+  Both namespaces, the RuntimeClass, RBAC, node labels and taint, imported images, five host assets,
+  ledger, generated certificates, token, and rendered Secret manifest were removed; k3s is again
+  inactive/disabled.
+* 2026-09-10: The product manager approved option 1 for development acceptance: during a bounded
+  T74 validation window, the single `codex-dev` k3s worker may be treated as logically dedicated
+  when the exact isolation labels and taint are installed and no other T74 workload is admitted.
+  This is an explicit development substitution, not evidence of physical worker isolation; normal
+  k3s system Pods may remain. Every run must verify the fence, avoid concurrent T74 workloads, and
+  restore the initially inactive/disabled cluster and remove all temporary host assets afterward.
+  The exact-image real-cluster matrix resumes under that constraint.
 * 2026-09-10: Implemented and validated the selected RuntimeClass-scoped runc wrapper on the local
   k3s 1.35/containerd 2.2 boundary. A real workload reached `Running`; kernel mountinfo and the
   concrete inspector independently reported `/work` as a 32 MiB tmpfs with exact

@@ -111,6 +111,38 @@ def test_ledger_rejects_wrong_authentication_key(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_ledger_schema_enforces_types_without_sqlite_strict_tables(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "attester.sqlite3"
+    SQLiteNodeAttesterLedger(path, KEY, max_records=2)
+
+    with closing(sqlite3.connect(path)) as connection:
+        schema = dict(
+            connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table'"
+            )
+        )
+        assert all(" STRICT" not in statement for statement in schema.values())
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO lifecycle VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(POD),
+                    AttesterLifecycleState.BOUND,
+                    "not-a-blob",
+                    b"sandbox",
+                    None,
+                    None,
+                    None,
+                    0,
+                    1,
+                    b"mac",
+                ),
+            )
+
+
+@pytest.mark.unit
 def test_lifecycle_record_validates_every_bounded_field() -> None:
     record = _record()
     invalid_factories = (

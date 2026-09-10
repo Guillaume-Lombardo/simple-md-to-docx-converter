@@ -82,6 +82,13 @@ changes, or an unavailable attester reject readiness or proof. Only an explicit 
 fail immediately. The node fence and complete runnable sandbox are re-attested before staging, and
 the node fence is revalidated at every proof transition.
 
+On k3s, `/usr/local/bin/crictl` is a bootstrap symlink whose target extracts runtime data before
+dispatch. The reference DaemonSet instead mounts the already extracted
+`/var/lib/rancher/k3s/data/current/bin/k3s` multicall binary at the fixed in-container basename
+`/host/usr/local/bin/crictl`; that basename selects its CRI client without writable extraction
+state. The `current` link must resolve to the exact active k3s data revision while the node fence is
+unavailable.
+
 ## Dedicated pool contract
 
 Every isolation node must have both exact labels and the matching taint shown in
@@ -216,8 +223,13 @@ authenticated state needed for retry.
 
 ## Required deployment proof
 
-Do not claim this backend supported after rendering the example YAML. Acceptance requires a real
-dedicated cluster run against the exact broker, attester, and reverse-attempt image digests. The run
+Do not claim this backend supported after rendering the example YAML. Production acceptance
+requires a real dedicated cluster run against the exact broker, attester, and reverse-attempt image digests.
+For development acceptance only, the product manager approved a bounded run on the single
+`codex-dev` worker while the exact labels and taint are installed and no concurrent T74 workload is
+admitted. Normal k3s system Pods may remain. This logical-dedication substitution is not evidence of
+physical worker isolation, and every run must restore the initially inactive/disabled cluster and
+remove its temporary host assets. The run
 must cover successful conversion, restart reconciliation, lost create/delete replies, deadline,
 cancellation, OOM, PID exhaustion, workspace exhaustion, attempted credential access, every egress
 class including node-local destinations, Pod substitution, node relabeling, attester outage,
@@ -230,8 +242,9 @@ succeeded and a mutating `StopPodSandbox` was denied), and ran a Pod through the
 the accepted Pod IP `192.0.2.1`. Kernel inspection of that live sandbox observed only `lo` and
 `eth0`, only `127.0.0.1` and `192.0.2.1`, no IPv4 route, no non-loopback IPv6 route, and no ARP
 neighbor. Every probe namespace and host asset was removed and k3s was restored to its initial
-inactive/disabled state. This single general-purpose node is not the required dedicated fenced
-pool. The attester image now builds and passes minimal-import and closed-failure smoke probes. The
+inactive/disabled state. This single general-purpose node is not a physically dedicated fenced
+pool. It may provide the explicitly approved bounded development evidence above, but not production
+isolation evidence. The attester image now builds and passes minimal-import and closed-failure smoke probes. The
 exact broker/attester/attempt image deployment and complete acceptance matrix are still pending.
 These gates remain required but unexecuted; unit, loopback-mTLS, fake-control-plane, or general-node
 results are not substitutes for that evidence.

@@ -357,7 +357,9 @@ spec:
         - {name: state, hostPath: {path: /var/lib/markweave-attester, type: Directory}}
         - {name: cri-proxy-socket, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
         - {name: cri-socket, hostPath: {path: /run/k3s/containerd/containerd.sock, type: Socket}}
-        - {name: crictl, hostPath: {path: /usr/local/bin/crictl, type: File}}
+        # k3s' /usr/local/bin/crictl is a bootstrap symlink that requires writable extraction
+        # state. Mount the already extracted multicall binary at a basename that selects crictl.
+        - {name: crictl, hostPath: {path: /var/lib/rancher/k3s/data/current/bin/k3s, type: File}}
         - {name: cgroup, hostPath: {path: /sys/fs/cgroup, type: Directory}}
         - {name: proc, hostPath: {path: /proc, type: Directory}}
         - {name: kubelet-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, type: File}}
