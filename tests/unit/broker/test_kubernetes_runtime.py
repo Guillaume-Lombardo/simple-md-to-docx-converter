@@ -229,6 +229,10 @@ class InspectorDouble:
             "cgroup_version": 2,
             "pod_pids_limit": self.policy.limits.pid_limit,
             "cpu_quota_period_micros": self.policy.limits.cpu_period_micros,
+            "cni_config_digest": f"sha256:{'7' * 64}",
+            "cni_plugin_digest": f"sha256:{'8' * 64}",
+            "runtime_config_digest": f"sha256:{'9' * 64}",
+            "runtime_wrapper_digest": f"sha256:{'a' * 64}",
         }
         values.update(self.override_node)
         return NodeFenceSnapshot(**values)
@@ -260,8 +264,10 @@ class InspectorDouble:
             "container_ids": ("9" * 64,),
             "container_states": states,
             "sandbox_ready": running,
-            "network_interfaces": ("lo",),
-            "forwarding_enabled": False,
+            "network_interfaces": ("eth0", "lo"),
+            "network_addresses": ("127.0.0.1", "192.0.2.1"),
+            "network_routes": (),
+            "network_neighbors": (),
             "cpu_quota_micros": self.policy.limits.cpu_quota_micros,
             "cpu_period_micros": self.policy.limits.cpu_period_micros,
             "memory_max_bytes": self.policy.limits.memory_bytes,
@@ -609,8 +615,10 @@ def test_observed_pod_rejects_orphaned_deletion_grace_period(
         ("workspace_mount_path", "/unexpected-work"),
         ("workspace_size_bytes", 1),
         ("workspace_mount_flags", ("rw",)),
-        ("network_interfaces", ("eth0", "lo")),
-        ("forwarding_enabled", True),
+        ("network_interfaces", ("lo", "veth0")),
+        ("network_addresses", ("127.0.0.1", "192.0.2.2")),
+        ("network_routes", ("default",)),
+        ("network_neighbors", ("192.0.2.2",)),
     ],
 )
 def test_sandbox_kernel_enforcement_must_match_exact_policy(

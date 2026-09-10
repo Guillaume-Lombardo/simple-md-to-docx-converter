@@ -38,6 +38,10 @@ _STATE_DIRECTORY_MODE = 0o700
 _EXPECTED_KEYS = frozenset(
     {
         "cgroup_root",
+        "cni_config",
+        "cni_config_sha256",
+        "cni_plugin",
+        "cni_plugin_sha256",
         "client_ca_file",
         "cri_endpoint",
         "cri_executable",
@@ -59,6 +63,10 @@ _EXPECTED_KEYS = frozenset(
         "operation_timeout_seconds",
         "proc_root",
         "request_timeout_seconds",
+        "runtime_config",
+        "runtime_config_sha256",
+        "runtime_wrapper",
+        "runtime_wrapper_sha256",
         "server_certificate_file",
         "server_private_key_file",
     }
@@ -132,6 +140,14 @@ def load_config(path: Path, *, node_name: str) -> AttesterProcessConfig:
                 node_name,
                 _text(settings, "cri_endpoint"),
                 _path(settings, "kubelet_config"),
+                _path(settings, "cni_config"),
+                _text(settings, "cni_config_sha256"),
+                _path(settings, "cni_plugin"),
+                _text(settings, "cni_plugin_sha256"),
+                _path(settings, "runtime_config"),
+                _text(settings, "runtime_config_sha256"),
+                _path(settings, "runtime_wrapper"),
+                _text(settings, "runtime_wrapper_sha256"),
                 _path(settings, "cgroup_root"),
                 _path(settings, "proc_root"),
             ),
@@ -171,7 +187,9 @@ def build_server(config: AttesterProcessConfig) -> AttesterHttpsServer:
         )
     key = _private_key(config.inventory_authentication_key_file)
     _state_directory(config.inventory_path.parent)
-    api = KubernetesReadApi.in_cluster()
+    api = KubernetesReadApi.in_cluster(
+        operation_seconds=config.inspector_limits.operation_seconds
+    )
     inspector = BoundedCriCgroupInspector(
         config.inspector,
         config.inspector_limits,

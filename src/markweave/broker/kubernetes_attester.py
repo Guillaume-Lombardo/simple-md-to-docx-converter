@@ -29,7 +29,7 @@ _CGROUP_V2 = 2
 
 @dataclass(frozen=True, slots=True)
 class NodeFenceSnapshot:
-    """Content-free node facts collected from kubelet, CNI and cgroup v2."""
+    """Content-free node facts collected from kubelet, CNI, runtime and cgroup v2."""
 
     node_name: str
     node_uid: UUID
@@ -40,6 +40,10 @@ class NodeFenceSnapshot:
     cgroup_version: int
     pod_pids_limit: int
     cpu_quota_period_micros: int
+    cni_config_digest: str
+    cni_plugin_digest: str
+    runtime_config_digest: str
+    runtime_wrapper_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +59,9 @@ class SandboxSnapshot:
     container_states: tuple[str, ...]
     sandbox_ready: bool
     network_interfaces: tuple[str, ...]
-    forwarding_enabled: bool
+    network_addresses: tuple[str, ...]
+    network_routes: tuple[str, ...]
+    network_neighbors: tuple[str, ...]
     cpu_quota_micros: int
     cpu_period_micros: int
     memory_max_bytes: int
@@ -158,8 +164,10 @@ class NodeAttestationEngine:
             or manifest_digest(contract.pod_contract) != contract.manifest_digest
             or project_observed_pod(sandbox.observed_pod, contract.pod_contract)
             != contract.pod_contract
-            or sandbox.network_interfaces != ("lo",)
-            or sandbox.forwarding_enabled is not False
+            or sandbox.network_interfaces != ("eth0", "lo")
+            or sandbox.network_addresses != ("127.0.0.1", "192.0.2.1")
+            or sandbox.network_routes
+            or sandbox.network_neighbors
             or not sandbox.container_ids
             or len(sandbox.container_ids) != len(sandbox.container_states)
             or not (
@@ -189,11 +197,15 @@ class NodeAttestationEngine:
             "node-fence",
             {
                 "cpu_quota_period_micros": node.cpu_quota_period_micros,
+                "cni_config_digest": node.cni_config_digest,
+                "cni_plugin_digest": node.cni_plugin_digest,
                 "dedicated_taint": {_DEDICATED_TAINT: node.dedicated_taint_value},
                 "fence_label": {_FENCE_LABEL: node.fence_revision},
                 "node_uid": str(node.node_uid),
                 "pod_pids_limit": node.pod_pids_limit,
                 "pool_label": {_POOL_LABEL: node.pool_name},
+                "runtime_config_digest": node.runtime_config_digest,
+                "runtime_wrapper_digest": node.runtime_wrapper_digest,
             },
         )
         binding = _evidence(
@@ -208,11 +220,13 @@ class NodeAttestationEngine:
                 "manifest": contract.manifest_digest.value,
                 "memory_max": sandbox.memory_max_bytes,
                 "network_interfaces": sandbox.network_interfaces,
+                "network_addresses": sandbox.network_addresses,
+                "network_routes": sandbox.network_routes,
+                "network_neighbors": sandbox.network_neighbors,
                 "node_fence": fence.value,
                 "node_uid": str(sandbox.node_uid),
                 "pids_max": sandbox.pids_max,
                 "pod_uid": str(sandbox.pod_uid),
-                "sandbox_forwarding_enabled": sandbox.forwarding_enabled,
                 "sandbox_id": sandbox.sandbox_id,
                 "workspace_filesystem": sandbox.workspace_filesystem,
                 "workspace_mount_flags": sandbox.workspace_mount_flags,
@@ -331,8 +345,10 @@ class NodeAttestationEngine:
                     )
                     or len(snapshot.container_states) != len(unit.sandbox.container_ids)
                     or any(state != "EXITED" for state in snapshot.container_states)
-                    or snapshot.network_interfaces != ("lo",)
-                    or snapshot.forwarding_enabled is not False
+                    or snapshot.network_interfaces != ("eth0", "lo")
+                    or snapshot.network_addresses != ("127.0.0.1", "192.0.2.1")
+                    or snapshot.network_routes
+                    or snapshot.network_neighbors
                     or snapshot.cpu_quota_micros
                     != contract.policy.limits.cpu_quota_micros
                     or snapshot.cpu_period_micros

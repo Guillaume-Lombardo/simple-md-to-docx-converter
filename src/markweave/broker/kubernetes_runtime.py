@@ -14,7 +14,8 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Protocol, cast
+from importlib import import_module
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
 from markweave.broker.models import (
@@ -29,8 +30,13 @@ from markweave.broker.models import (
     RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
-from markweave.broker.ports import RuntimeUnit
-from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
+
+if TYPE_CHECKING:
+    from markweave.broker.ports import RuntimeUnit
+    from markweave.reversions.models import (
+        ReverseAttemptRequest,
+        ReverseAttemptResponse,
+    )
 
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?\Z")
 _SANDBOX_ID = re.compile(r"[0-9a-f]{32,128}\Z")
@@ -639,7 +645,10 @@ class KubernetesIsolationRuntime:
         self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
     ) -> None:
         verified = self._coerce(runtime_unit)
-        if type(request) is not ReverseAttemptRequest:
+        request_model = import_module(
+            "markweave.reversions.models"
+        ).ReverseAttemptRequest
+        if type(request) is not request_model:
             raise KubernetesRuntimeError("Kubernetes workspace request is invalid")
         managed = ManagedUnit(
             verified.pod.attempt_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -87,10 +88,14 @@ class CommandDouble:
         self.container_state = "CONTAINER_RUNNING"
         self.routes: object = []
         self.interfaces: object = {
+            "eth0": {
+                "Sandbox": "/var/run/netns/markweave",
+                "IPConfigs": [{"IP": "192.0.2.1"}],
+            },
             "lo": {
                 "Sandbox": "/var/run/netns/markweave",
-                "IPConfigs": [{"IP": "127.0.0.1"}],
-            }
+                "IPConfigs": [{"IP": "127.0.0.1"}, {"IP": "::1"}],
+            },
         }
         self.sandboxes: object = [
             {
@@ -113,6 +118,7 @@ class CommandDouble:
             }
         ]
         self.fail = False
+        self.cgroup_parent = CGROUP_PARENT
 
     def __call__(
         self, arguments: Sequence[str], *, max_output_bytes: int | None = None
@@ -143,7 +149,7 @@ class CommandDouble:
                     },
                     "config": {
                         "linux": {
-                            "cgroup_parent": CGROUP_PARENT,
+                            "cgroup_parent": self.cgroup_parent,
                             "resources": {
                                 "cpu_quota": 50000,
                                 "cpu_period": 100000,
@@ -194,6 +200,28 @@ def inspector(
     (cgroup / "cgroup.procs").write_text("41\n", encoding="ascii")
     (child / "cgroup.procs").write_text("42\n", encoding="ascii")
     proc_root = tmp_path / "proc"
+    sandbox = proc_root / "4321"
+    (sandbox / "net").mkdir(parents=True)
+    (sandbox / "net/dev").write_text(
+        "Inter-| Receive | Transmit\n face |bytes |bytes\n"
+        " lo: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+        " eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        encoding="ascii",
+    )
+    (sandbox / "net/fib_trie").write_text(
+        "Main:\n  +-- 0.0.0.0/0\nLocal:\n"
+        "  |-- 127.0.0.1\n     /32 host LOCAL\n"
+        "  |-- 192.0.2.1\n     /32 host LOCAL\n",
+        encoding="ascii",
+    )
+    (sandbox / "net/route").write_text(
+        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n",
+        encoding="ascii",
+    )
+    (sandbox / "net/ipv6_route").write_text("", encoding="ascii")
+    (sandbox / "net/arp").write_text(
+        "IP address HW type Flags HW address Mask Device\n", encoding="ascii"
+    )
     process = proc_root / "4322"
     (process / "root" / "work").mkdir(parents=True)
     (process / "mountinfo").write_text(
@@ -202,11 +230,27 @@ def inspector(
     )
     api = ApiDouble()
     command = CommandDouble()
+    cni_config = tmp_path / "00-markweave-isolated.conflist"
+    cni_plugin = tmp_path / "markweave-isolated"
+    runtime_config = tmp_path / "20-markweave-reverse-runtime.toml"
+    runtime_wrapper = tmp_path / "markweave-runc-wrapper"
+    cni_config.write_bytes(b"cni-config")
+    cni_plugin.write_bytes(b"cni-plugin")
+    runtime_config.write_bytes(b"runtime-config")
+    runtime_wrapper.write_bytes(b"runtime-wrapper")
     instance = BoundedCriCgroupInspector(
         InspectorConfig(
             "reverse-node-1",
             "unix:///run/containerd.sock",
             kubelet,
+            cni_config,
+            f"sha256:{hashlib.sha256(b'cni-config').hexdigest()}",
+            cni_plugin,
+            f"sha256:{hashlib.sha256(b'cni-plugin').hexdigest()}",
+            runtime_config,
+            f"sha256:{hashlib.sha256(b'runtime-config').hexdigest()}",
+            runtime_wrapper,
+            f"sha256:{hashlib.sha256(b'runtime-wrapper').hexdigest()}",
             cgroup_root,
             proc_root,
         ),
@@ -231,6 +275,12 @@ def test_node_fence_reads_exact_api_and_kubelet_facts(
     assert snapshot.cgroup_version == 2
     assert snapshot.pod_pids_limit == 64
     assert snapshot.cpu_quota_period_micros == 100000
+    assert snapshot.runtime_config_digest == (
+        f"sha256:{hashlib.sha256(b'runtime-config').hexdigest()}"
+    )
+    assert snapshot.runtime_wrapper_digest == (
+        f"sha256:{hashlib.sha256(b'runtime-wrapper').hexdigest()}"
+    )
 
 
 @pytest.mark.unit
@@ -241,8 +291,10 @@ def test_sandbox_reads_positive_cri_network_workspace_and_cgroup_facts(
     assert snapshot.sandbox_id == SANDBOX_ID
     assert snapshot.container_ids == (CONTAINER_ID,)
     assert snapshot.container_states == ("RUNNING",)
-    assert snapshot.network_interfaces == ("lo",)
-    assert snapshot.forwarding_enabled is False
+    assert snapshot.network_interfaces == ("eth0", "lo")
+    assert snapshot.network_addresses == ("127.0.0.1", "192.0.2.1")
+    assert snapshot.network_routes == ()
+    assert snapshot.network_neighbors == ()
     assert snapshot.cgroup_path == CGROUP
     assert snapshot.cgroup_lookup_complete is True
     assert snapshot.cgroup_present is True
@@ -307,6 +359,23 @@ def test_removal_binds_complete_negative_lookups_to_retained_identity(
 
 
 @pytest.mark.unit
+def test_sandbox_and_removal_reject_cgroup_traversal(
+    inspector: tuple[BoundedCriCgroupInspector, ApiDouble, CommandDouble, Path],
+) -> None:
+    instance, _, command, _ = inspector
+    command.cgroup_parent = "/kubepods.slice/../escaped"
+
+    with pytest.raises(KubernetesRuntimeError, match="cgroup identity"):
+        instance.sandbox(POD_UID)
+    with pytest.raises(KubernetesRuntimeError, match="cgroup identity"):
+        instance.removal(
+            POD_UID,
+            SANDBOX_ID,
+            "/sys/fs/cgroup/kubepods.slice/../escaped",
+        )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -320,7 +389,7 @@ def test_removal_binds_complete_negative_lookups_to_retained_identity(
                 "interfaces",
                 {
                     **cast(dict[str, object], command.interfaces),
-                    "eth0": {"Sandbox": "/net"},
+                    "veth0": {"Sandbox": "/net"},
                 },
             ),
             "network",
@@ -344,6 +413,76 @@ def test_sandbox_fails_closed_on_incomplete_or_unsafe_observation(
     mutation(api, command)
     with pytest.raises(KubernetesRuntimeError, match=message):
         instance.sandbox(POD_UID)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("relative_path", "content"),
+    [
+        (
+            "net/dev",
+            "Inter-| Receive | Transmit\n face |bytes |bytes\n"
+            " lo: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            " eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            " veth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        ),
+        (
+            "net/fib_trie",
+            "Main:\n  +-- 0.0.0.0/0\nLocal:\n"
+            "  |-- 127.0.0.1\n     /32 host LOCAL\n"
+            "  |-- 192.0.2.2\n     /32 host LOCAL\n",
+        ),
+        (
+            "net/route",
+            "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+            "eth0 00000000 00000000 0001 0 0 0 00000000 0 0 0\n",
+        ),
+        (
+            "net/ipv6_route",
+            "00000000000000000000000000000000 00 "
+            "00000000000000000000000000000000 00 "
+            "00000000000000000000000000000000 00000000 00000000 "
+            "00000000 00000001 eth0\n",
+        ),
+        (
+            "net/arp",
+            "IP address HW type Flags HW address Mask Device\n"
+            "192.0.2.2 0x1 0x2 00:00:00:00:00:01 * eth0\n",
+        ),
+    ],
+)
+def test_sandbox_rejects_kernel_network_escape_facts(
+    inspector: tuple[BoundedCriCgroupInspector, ApiDouble, CommandDouble, Path],
+    relative_path: str,
+    content: str,
+) -> None:
+    instance, _, _, cgroup = inspector
+    sandbox = cgroup.parents[1].parent / "proc/4321"
+    (sandbox / relative_path).write_text(content, encoding="ascii")
+
+    with pytest.raises(KubernetesRuntimeError, match="network"):
+        instance.sandbox(POD_UID)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "asset",
+    [
+        "00-markweave-isolated.conflist",
+        "markweave-isolated",
+        "20-markweave-reverse-runtime.toml",
+        "markweave-runc-wrapper",
+    ],
+)
+def test_node_fence_rejects_changed_node_asset(
+    inspector: tuple[BoundedCriCgroupInspector, ApiDouble, CommandDouble, Path],
+    asset: str,
+) -> None:
+    instance, _, _, cgroup = inspector
+    (cgroup.parents[1].parent / asset).write_bytes(b"changed")
+
+    with pytest.raises(KubernetesRuntimeError, match="node fence"):
+        instance.node_fence("reverse-node-1")
 
 
 @pytest.mark.unit
@@ -382,10 +521,50 @@ def test_node_fence_reports_not_ready_without_treating_it_as_ready(
     [
         lambda path: InspectorLimits(0, 65536, 1, 1, 1, 1),
         lambda path: InspectorLimits(1, 1, 1, 1, 1, 1),
-        lambda path: InspectorConfig("", "unix:///run/c.sock", path, path, path),
-        lambda path: InspectorConfig("node", "tcp://runtime", path, path, path),
         lambda path: InspectorConfig(
-            "node", "unix:///run/c.sock", Path("x"), path, path
+            "",
+            "unix:///run/c.sock",
+            path,
+            path,
+            f"sha256:{'1' * 64}",
+            path,
+            f"sha256:{'2' * 64}",
+            path,
+            f"sha256:{'3' * 64}",
+            path,
+            f"sha256:{'4' * 64}",
+            path,
+            path,
+        ),
+        lambda path: InspectorConfig(
+            "node",
+            "tcp://runtime",
+            path,
+            path,
+            f"sha256:{'1' * 64}",
+            path,
+            f"sha256:{'2' * 64}",
+            path,
+            f"sha256:{'3' * 64}",
+            path,
+            f"sha256:{'4' * 64}",
+            path,
+            path,
+        ),
+        lambda path: InspectorConfig(
+            "node",
+            "unix:///run/c.sock",
+            Path("x"),
+            path,
+            f"sha256:{'1' * 64}",
+            path,
+            f"sha256:{'2' * 64}",
+            path,
+            f"sha256:{'3' * 64}",
+            path,
+            f"sha256:{'4' * 64}",
+            path,
+            path,
         ),
     ],
 )
@@ -399,16 +578,25 @@ def test_inspector_configuration_rejects_unbounded_or_ambiguous_values(
 @pytest.mark.unit
 def test_kubernetes_read_api_serializes_and_closes_failures() -> None:
     class Core:
-        def read_node(self, *, name: str) -> object:
+        def __init__(self) -> None:
+            self.timeouts: list[float] = []
+
+        def read_node(self, *, name: str, _request_timeout: float) -> object:
+            self.timeouts.append(_request_timeout)
             return {"metadata": {"name": name}}
 
-        def read_namespaced_pod(self, *, name: str, namespace: str) -> object:
+        def read_namespaced_pod(
+            self, *, name: str, namespace: str, _request_timeout: float
+        ) -> object:
+            self.timeouts.append(_request_timeout)
             return {"metadata": {"name": name, "namespace": namespace}}
 
-    api = KubernetesReadApi(Core(), lambda value: value)
+    core = Core()
+    api = KubernetesReadApi(core, lambda value: value, operation_seconds=2)
     assert api.node("node")["metadata"] == {"name": "node"}
     assert api.pod("ns", "pod")["metadata"] == {"name": "pod", "namespace": "ns"}
-    failed = KubernetesReadApi(Core(), lambda _: [])
+    assert core.timeouts == [2.0, 2.0]
+    failed = KubernetesReadApi(Core(), lambda _: [], operation_seconds=2)
     with pytest.raises(KubernetesRuntimeError, match="response is invalid"):
         failed.node("node")
 
@@ -426,16 +614,18 @@ def test_cri_command_builder_requires_absolute_binary(
 @pytest.mark.unit
 def test_read_api_rejects_invalid_adapter_and_closes_client_failure() -> None:
     with pytest.raises(ValueError, match="read API"):
-        KubernetesReadApi(object(), lambda value: value)
+        KubernetesReadApi(object(), lambda value: value, operation_seconds=1)
 
     class FailedCore:
-        def read_node(self, *, name: str) -> object:
+        def read_node(self, *, name: str, _request_timeout: float) -> object:
             raise RuntimeError(name)
 
-        def read_namespaced_pod(self, *, name: str, namespace: str) -> object:
+        def read_namespaced_pod(
+            self, *, name: str, namespace: str, _request_timeout: float
+        ) -> object:
             raise RuntimeError(f"{namespace}/{name}")
 
-    api = KubernetesReadApi(FailedCore(), lambda value: value)
+    api = KubernetesReadApi(FailedCore(), lambda value: value, operation_seconds=1)
     with pytest.raises(KubernetesRuntimeError, match="read API failed"):
         api.node("sensitive-node")
 
@@ -451,12 +641,14 @@ def test_in_cluster_api_assembly_uses_official_client(mocker: Any) -> None:
     )
     mocker.patch.object(KubernetesReadApi, "__init__", return_value=None)
 
-    assert isinstance(KubernetesReadApi.in_cluster(), KubernetesReadApi)
+    assert isinstance(
+        KubernetesReadApi.in_cluster(operation_seconds=2), KubernetesReadApi
+    )
     assert importer.call_count == 2
 
     mocker.patch.object(target, "import_module", side_effect=RuntimeError("secret"))
     with pytest.raises(KubernetesRuntimeError, match="configuration failed"):
-        KubernetesReadApi.in_cluster()
+        KubernetesReadApi.in_cluster(operation_seconds=2)
 
 
 @pytest.mark.unit

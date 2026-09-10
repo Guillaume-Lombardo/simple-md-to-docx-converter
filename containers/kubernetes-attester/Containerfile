@@ -5,8 +5,10 @@ USER 0
 
 ARG UV_VERSION=0.12.1
 ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
+ARG TARGETARCH=amd64
 
-RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+RUN test "${TARGETARCH}" = "amd64" \
+    && curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
         --output /tmp/uv.tar.gz \
     && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \

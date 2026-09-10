@@ -1,0 +1,91 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+fail() {
+    printf '{"code":100,"msg":"markweave isolated CNI failed: %s"}\n' "$1" >&2
+    exit 1
+}
+
+payload=$(dd bs=4097 count=1 2>/dev/null) || fail input-read
+[ "${#payload}" -le 4096 ] || fail input-size
+
+case "${CNI_COMMAND:-}" in
+    VERSION)
+        printf '%s\n' '{"cniVersion":"1.0.0","supportedVersions":["1.0.0"]}'
+        exit 0
+        ;;
+    ADD|CHECK|DEL)
+        ;;
+    *)
+        fail command
+        ;;
+esac
+
+case "${CNI_CONTAINERID:-}" in
+    *[!0-9a-f]*|'') fail container-id ;;
+esac
+if [ "${#CNI_CONTAINERID}" -lt 32 ] || [ "${#CNI_CONTAINERID}" -gt 128 ]; then
+    fail container-id-size
+fi
+[ "${CNI_IFNAME:-}" = "eth0" ] || fail interface-name
+
+if [ "$CNI_COMMAND" = "DEL" ] && [ -z "${CNI_NETNS:-}" ]; then
+    exit 0
+fi
+
+case "${CNI_NETNS:-}" in
+    /var/run/netns/cni-*) ;;
+    *) fail namespace-path ;;
+esac
+netns_id=${CNI_NETNS#/var/run/netns/cni-}
+case "$netns_id" in
+    ????????-????-????-????-????????????) ;;
+    *) fail namespace-id ;;
+esac
+case "$netns_id" in
+    *[!0-9a-f-]*) fail namespace-id ;;
+esac
+case "$payload" in
+    *'"type":"markweave-isolated"'*) ;;
+    *) fail configuration ;;
+esac
+
+if [ "$CNI_COMMAND" = "DEL" ]; then
+    if [ -e "$CNI_NETNS" ]; then
+        nsenter --net="$CNI_NETNS" -- ip link delete dev eth0 2>/dev/null || true
+    fi
+    exit 0
+fi
+
+[ -e "$CNI_NETNS" ] || fail namespace-absent
+
+if [ "$CNI_COMMAND" = "ADD" ]; then
+    nsenter --net="$CNI_NETNS" -- ip link add dev eth0 type dummy || fail interface-add
+    nsenter --net="$CNI_NETNS" -- ip link set dev eth0 arp off multicast off || fail interface-flags
+    nsenter --net="$CNI_NETNS" -- ip address add 192.0.2.1/32 dev eth0 || fail address-add
+    nsenter --net="$CNI_NETNS" -- sh -c \
+        'printf 1 > /proc/sys/net/ipv6/conf/eth0/disable_ipv6 && printf 0 > /proc/sys/net/ipv4/ip_forward && printf 0 > /proc/sys/net/ipv6/conf/all/forwarding' \
+        || fail forwarding-disable
+    nsenter --net="$CNI_NETNS" -- ip route flush table main || fail ipv4-routes-flush
+    nsenter --net="$CNI_NETNS" -- ip -6 route flush table main || fail ipv6-routes-flush
+    nsenter --net="$CNI_NETNS" -- ip neighbour flush all 2>/dev/null || true
+    nsenter --net="$CNI_NETNS" -- ip link set dev lo up || fail loopback-up
+    nsenter --net="$CNI_NETNS" -- ip link set dev eth0 up || fail interface-up
+fi
+
+nsenter --net="$CNI_NETNS" -- ip -details link show dev eth0 | grep -q ' dummy ' || fail interface-kind
+addresses=$(nsenter --net="$CNI_NETNS" -- ip -o -4 address show dev eth0 scope global \
+    | sed -n 's/^.* inet \([^ ]*\).*$/\1/p') || fail address-read
+[ "$addresses" = "192.0.2.1/32" ] || fail address-mismatch
+[ -z "$(nsenter --net="$CNI_NETNS" -- ip route show table main)" ] || fail ipv4-routes-present
+[ -z "$(nsenter --net="$CNI_NETNS" -- ip -6 route show table main)" ] || fail ipv6-routes-present
+[ "$(nsenter --net="$CNI_NETNS" -- cat /proc/sys/net/ipv4/ip_forward)" = "0" ] || fail ipv4-forwarding
+[ "$(nsenter --net="$CNI_NETNS" -- cat /proc/sys/net/ipv6/conf/all/forwarding)" = "0" ] || fail ipv6-forwarding
+
+if [ "$CNI_COMMAND" = "ADD" ]; then
+    printf '%s\n' \
+        "{\"cniVersion\":\"1.0.0\",\"interfaces\":[{\"name\":\"eth0\",\"sandbox\":\"$CNI_NETNS\"}],\"ips\":[{\"address\":\"192.0.2.1/32\",\"interface\":0}],\"dns\":{}}"
+fi

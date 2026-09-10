@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -16,6 +17,10 @@ from uuid import UUID
 
 import yaml
 
+from markweave.broker.command_runner import (
+    BoundedCommandRunner,
+    PodmanCommandLimits,
+)
 from markweave.broker.kubernetes_attester import (
     NodeFenceSnapshot,
     RemovalSnapshot,
@@ -24,10 +29,6 @@ from markweave.broker.kubernetes_attester import (
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationNotReady,
     KubernetesRuntimeError,
-)
-from markweave.broker.podman_runtime import (
-    BoundedCommandRunner,
-    PodmanCommandLimits,
 )
 
 _POOL_LABEL = "reverse.markweave.dev/isolation-pool"
@@ -42,7 +43,14 @@ _MAX_OUTPUT_BYTES = 128 * 1024
 _MAX_NODE_NAME_BYTES = 253
 _CPU_MAX_FIELDS = 2
 _MIN_MOUNTINFO_FIELDS = 10
+_NETWORK_DEV_HEADER_LINES = 2
+_IPV4_MAX_OCTET = 255
+_IPV6_ROUTE_FIELDS = 10
 _EXPECTED_WORKSPACE_FLAGS = ("nodev", "noexec", "nosuid", "rw")
+_EXPECTED_NETWORK_INTERFACES = ("eth0", "lo")
+_EXPECTED_NETWORK_ADDRESSES = ("127.0.0.1", "192.0.2.1")
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_INTERFACE = re.compile(r"[A-Za-z0-9_.-]{1,15}\Z")
 
 
 class ReadOnlyKubernetesApi(Protocol):
@@ -54,9 +62,11 @@ class ReadOnlyKubernetesApi(Protocol):
 
 
 class _CoreReadApi(Protocol):
-    def read_node(self, *, name: str) -> object: ...
+    def read_node(self, *, name: str, _request_timeout: float) -> object: ...
 
-    def read_namespaced_pod(self, *, name: str, namespace: str) -> object: ...
+    def read_namespaced_pod(
+        self, *, name: str, namespace: str, _request_timeout: float
+    ) -> object: ...
 
 
 class CriCommand(Protocol):
@@ -117,6 +127,14 @@ class InspectorConfig:
     node_name: str
     cri_endpoint: str
     kubelet_config: Path
+    cni_config: Path
+    cni_config_digest: str
+    cni_plugin: Path
+    cni_plugin_digest: str
+    runtime_config: Path
+    runtime_config_digest: str
+    runtime_wrapper: Path
+    runtime_wrapper_digest: str
     cgroup_root: Path
     proc_root: Path
 
@@ -131,8 +149,21 @@ class InspectorConfig:
                 not isinstance(value, Path) or not value.is_absolute()
                 for value in (
                     self.kubelet_config,
+                    self.cni_config,
+                    self.cni_plugin,
+                    self.runtime_config,
+                    self.runtime_wrapper,
                     self.cgroup_root,
                     self.proc_root,
+                )
+            )
+            or any(
+                type(value) is not str or _DIGEST.fullmatch(value) is None
+                for value in (
+                    self.cni_config_digest,
+                    self.cni_plugin_digest,
+                    self.runtime_config_digest,
+                    self.runtime_wrapper_digest,
                 )
             )
         ):
@@ -143,19 +174,27 @@ class KubernetesReadApi:
     """Official-client adapter exposing only serialized Node and Pod reads."""
 
     def __init__(
-        self, core_api: object, serializer: Callable[[object], object]
+        self,
+        core_api: object,
+        serializer: Callable[[object], object],
+        *,
+        operation_seconds: float,
     ) -> None:
         if (
             not callable(getattr(core_api, "read_node", None))
             or not callable(getattr(core_api, "read_namespaced_pod", None))
             or not callable(serializer)
+            or type(operation_seconds) not in {int, float}
+            or not math.isfinite(operation_seconds)
+            or operation_seconds <= 0
         ):
             raise ValueError("Kubernetes read API is invalid")
         self._core = cast(_CoreReadApi, core_api)
         self._serialize = serializer
+        self._operation_seconds = float(operation_seconds)
 
     @classmethod
-    def in_cluster(cls) -> KubernetesReadApi:
+    def in_cluster(cls, *, operation_seconds: float) -> KubernetesReadApi:
         """Load the attester's read-only in-cluster identity."""
 
         try:
@@ -164,7 +203,9 @@ class KubernetesReadApi:
             config.load_incluster_config()
             api_client = client.ApiClient()
             return cls(
-                client.CoreV1Api(api_client), api_client.sanitize_for_serialization
+                client.CoreV1Api(api_client),
+                api_client.sanitize_for_serialization,
+                operation_seconds=operation_seconds,
             )
         except Exception:
             raise KubernetesRuntimeError(
@@ -172,11 +213,19 @@ class KubernetesReadApi:
             ) from None
 
     def node(self, name: str) -> Mapping[str, object]:
-        return self._read(lambda: self._core.read_node(name=name))
+        return self._read(
+            lambda: self._core.read_node(
+                name=name, _request_timeout=self._operation_seconds
+            )
+        )
 
     def pod(self, namespace: str, name: str) -> Mapping[str, object]:
         return self._read(
-            lambda: self._core.read_namespaced_pod(name=name, namespace=namespace)
+            lambda: self._core.read_namespaced_pod(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._operation_seconds,
+            )
         )
 
     def _read(self, operation: Callable[[], object]) -> Mapping[str, object]:
@@ -243,6 +292,17 @@ class BoundedCriCgroupInspector:
         kubelet = _yaml_mapping(self._config.kubelet_config)
         pids = _positive_int(kubelet.get("podPidsLimit"))
         period = _duration_micros(kubelet.get("cpuCFSQuotaPeriod"))
+        cni_config_digest = _file_digest(self._config.cni_config)
+        cni_plugin_digest = _file_digest(self._config.cni_plugin)
+        runtime_config_digest = _file_digest(self._config.runtime_config)
+        runtime_wrapper_digest = _file_digest(self._config.runtime_wrapper)
+        if (
+            cni_config_digest != self._config.cni_config_digest
+            or cni_plugin_digest != self._config.cni_plugin_digest
+            or runtime_config_digest != self._config.runtime_config_digest
+            or runtime_wrapper_digest != self._config.runtime_wrapper_digest
+        ):
+            raise KubernetesRuntimeError("Kubernetes node fence is invalid")
         if not (self._config.cgroup_root / "cgroup.controllers").is_file():
             raise KubernetesRuntimeError("Kubernetes node fence is invalid")
         try:
@@ -256,6 +316,10 @@ class BoundedCriCgroupInspector:
                 2,
                 pids,
                 period,
+                cni_config_digest,
+                cni_plugin_digest,
+                runtime_config_digest,
+                runtime_wrapper_digest,
             )
         except KeyError, TypeError, ValueError:
             raise KubernetesRuntimeError("Kubernetes node fence is invalid") from None
@@ -314,7 +378,7 @@ class BoundedCriCgroupInspector:
             observed_pod,
             present=present and "RUNNING" in container_states,
         )
-        interfaces, forwarding = self._network(info)
+        interfaces, addresses, routes, neighbors = self._network(info)
         state = sandbox_status.get("state")
         if state not in {"SANDBOX_READY", "SANDBOX_NOTREADY"}:
             raise KubernetesRuntimeError("Kubernetes sandbox lookup failed")
@@ -328,7 +392,9 @@ class BoundedCriCgroupInspector:
             container_states,
             state == "SANDBOX_READY",
             interfaces,
-            forwarding,
+            addresses,
+            routes,
+            neighbors,
             quota,
             period,
             memory,
@@ -452,7 +518,12 @@ class BoundedCriCgroupInspector:
         if type(canonical) is not str or not canonical.startswith("/sys/fs/cgroup/"):
             raise KubernetesRuntimeError("Kubernetes cgroup identity is invalid")
         relative = canonical.removeprefix("/sys/fs/cgroup/")
-        if not relative or _CGROUP_PARENT.fullmatch(f"/{relative}") is None:
+        components = relative.split("/")
+        if (
+            not relative
+            or _CGROUP_PARENT.fullmatch(f"/{relative}") is None
+            or any(component in {"", ".", ".."} for component in components)
+        ):
             raise KubernetesRuntimeError("Kubernetes cgroup identity is invalid")
         return self._config.cgroup_root / relative
 
@@ -492,22 +563,46 @@ class BoundedCriCgroupInspector:
                     )
         return tuple(sorted(result))
 
-    def _network(self, info: Mapping[str, object]) -> tuple[tuple[str, ...], bool]:
+    def _network(
+        self, info: Mapping[str, object]
+    ) -> tuple[
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[str, ...],
+    ]:
         cni = _mapping(info.get("cniResult"), "Kubernetes network inspection failed")
         raw_interfaces = _mapping(
             cni.get("Interfaces"), "Kubernetes network inspection failed"
         )
-        interfaces = tuple(
+        cni_interfaces = tuple(
             sorted(
                 name
                 for name, value in raw_interfaces.items()
                 if isinstance(value, Mapping) and bool(value.get("Sandbox"))
             )
         )
-        routes = cni.get("Routes")
-        if interfaces != ("lo",) or (routes is not None and routes != []):
+        if cni_interfaces != _EXPECTED_NETWORK_INTERFACES or cni.get("Routes") not in (
+            None,
+            [],
+        ):
             raise KubernetesRuntimeError("Kubernetes network isolation is invalid")
-        return interfaces, False
+        pid = _positive_int(info.get("pid"))
+        network = self._config.proc_root / str(pid) / "net"
+        interfaces = _network_interfaces(_read_text(network / "dev"))
+        addresses = _network_addresses(_read_text(network / "fib_trie"))
+        routes = _network_routes(
+            _read_text(network / "route"), _read_text(network / "ipv6_route")
+        )
+        neighbors = _network_neighbors(_read_text(network / "arp"))
+        if (
+            interfaces != _EXPECTED_NETWORK_INTERFACES
+            or addresses != _EXPECTED_NETWORK_ADDRESSES
+            or routes
+            or neighbors
+        ):
+            raise KubernetesRuntimeError("Kubernetes network isolation is invalid")
+        return interfaces, addresses, routes, neighbors
 
     def _workspace(
         self,
@@ -687,6 +782,79 @@ def _read_text(path: Path) -> str:
         return data.decode("ascii")
     except OSError, UnicodeError, ValueError:
         raise KubernetesRuntimeError("Kubernetes host inspection failed") from None
+
+
+def _file_digest(path: Path) -> str:
+    try:
+        data = path.read_bytes()
+        if not data or len(data) > _MAX_FILE_BYTES:
+            raise ValueError
+    except OSError, ValueError:
+        raise KubernetesRuntimeError("Kubernetes node asset is invalid") from None
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _network_interfaces(value: str) -> tuple[str, ...]:
+    lines = value.splitlines()
+    if len(lines) < _NETWORK_DEV_HEADER_LINES:
+        raise KubernetesRuntimeError("Kubernetes network inspection failed")
+    interfaces: list[str] = []
+    for line in lines[2:]:
+        if not line.strip():
+            continue
+        name, separator, _ = line.partition(":")
+        interface = name.strip()
+        if not separator or _INTERFACE.fullmatch(interface) is None:
+            raise KubernetesRuntimeError("Kubernetes network inspection failed")
+        interfaces.append(interface)
+    if len(interfaces) != len(set(interfaces)):
+        raise KubernetesRuntimeError("Kubernetes network inspection failed")
+    return tuple(sorted(interfaces))
+
+
+def _network_addresses(value: str) -> tuple[str, ...]:
+    lines = value.splitlines()
+    try:
+        local = lines.index("Local:")
+    except ValueError:
+        raise KubernetesRuntimeError("Kubernetes network inspection failed") from None
+    addresses: set[str] = set()
+    for index, line in enumerate(lines[local + 1 :], start=local + 1):
+        match = re.fullmatch(r"\s*[|+]-- ([0-9]{1,3}(?:\.[0-9]{1,3}){3})", line)
+        if match is None or index + 1 >= len(lines):
+            continue
+        if lines[index + 1].strip() == "/32 host LOCAL":
+            octets = match.group(1).split(".")
+            if any(int(octet) > _IPV4_MAX_OCTET for octet in octets):
+                raise KubernetesRuntimeError("Kubernetes network inspection failed")
+            addresses.add(match.group(1))
+    return tuple(sorted(addresses))
+
+
+def _network_routes(ipv4: str, ipv6: str) -> tuple[str, ...]:
+    ipv4_lines = [line for line in ipv4.splitlines() if line.strip()]
+    if len(ipv4_lines) != 1 or not ipv4_lines[0].startswith("Iface"):
+        raise KubernetesRuntimeError("Kubernetes network inspection failed")
+    routes: list[str] = []
+    for line in ipv6.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split()
+        if (
+            len(fields) != _IPV6_ROUTE_FIELDS
+            or _INTERFACE.fullmatch(fields[-1]) is None
+        ):
+            raise KubernetesRuntimeError("Kubernetes network inspection failed")
+        if fields[-1] != "lo":
+            routes.append(line)
+    return tuple(routes)
+
+
+def _network_neighbors(value: str) -> tuple[str, ...]:
+    lines = [line for line in value.splitlines() if line.strip()]
+    if len(lines) != 1 or not lines[0].startswith("IP address"):
+        raise KubernetesRuntimeError("Kubernetes network inspection failed")
+    return ()
 
 
 def _directory_present(path: Path) -> bool:

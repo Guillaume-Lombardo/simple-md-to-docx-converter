@@ -18,6 +18,12 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_NODE_FENCE_REVISION@", "fence-v1")
         .replace("@REQUIRED_ATTESTER_IMAGE_REPOSITORY@", "registry.example/attester")
         .replace("@REQUIRED_ATTESTER_IMAGE_DIGEST@", f"sha256:{'1' * 64}")
+        .replace("@REQUIRED_CRI_PROXY_IMAGE_REPOSITORY@", "registry.example/envoy")
+        .replace("@REQUIRED_CRI_PROXY_IMAGE_DIGEST@", f"sha256:{'4' * 64}")
+        .replace("@REQUIRED_CNI_CONFIG_SHA256@", f"sha256:{'5' * 64}")
+        .replace("@REQUIRED_CNI_PLUGIN_SHA256@", f"sha256:{'6' * 64}")
+        .replace("@REQUIRED_RUNTIME_CONFIG_SHA256@", f"sha256:{'7' * 64}")
+        .replace("@REQUIRED_RUNTIME_WRAPPER_SHA256@", f"sha256:{'8' * 64}")
         .replace("@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@", f"sha256:{'2' * 64}")
         .replace("@REQUIRED_ATTESTER_MAX_REQUEST_BYTES@", "262144")
         .replace("@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@", "65536")
@@ -26,6 +32,7 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_ATTESTER_MAX_RECORDS@", "1024")
         .replace("@REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@", "3")
         .replace("@REQUIRED_ATTESTER_HARD_SHUTDOWN_TIMEOUT_SECONDS@", "10")
+        .replace("@REQUIRED_ATTESTER_TERMINATION_GRACE_PERIOD_SECONDS@", "11")
         .replace("@REQUIRED_ATTESTER_MAX_SANDBOXES@", "64")
         .replace("@REQUIRED_ATTESTER_MAX_CONTAINERS@", "8")
         .replace("@REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@", "256")
@@ -113,7 +120,21 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     }
     assert attester_settings["listen_host"] == "0.0.0.0"  # noqa: S104
     assert attester_settings["listen_port"] == 9443
-    assert attester_settings["cri_endpoint"].startswith("unix:///host/")
+    assert attester_settings["cri_endpoint"] == "unix:///run/markweave-cri/proxy.sock"
+    assert {
+        key: attester_settings[key]
+        for key in (
+            "cni_config_sha256",
+            "cni_plugin_sha256",
+            "runtime_config_sha256",
+            "runtime_wrapper_sha256",
+        )
+    } == {
+        "cni_config_sha256": f"sha256:{'5' * 64}",
+        "cni_plugin_sha256": f"sha256:{'6' * 64}",
+        "runtime_config_sha256": f"sha256:{'7' * 64}",
+        "runtime_wrapper_sha256": f"sha256:{'8' * 64}",
+    }
     assert attester_settings["cgroup_root"] == "/host/sys/fs/cgroup"
     assert attester_settings["proc_root"] == "/host/proc"
     assert attester_settings["inventory_max_records"] == 1024
@@ -169,9 +190,16 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
 def test_attester_daemonset_is_pinned_and_read_only_except_for_its_ledger() -> None:
     resources = _resources()
     daemonset = next(item for item in resources if item["kind"] == "DaemonSet")
+    config = next(
+        item
+        for item in resources
+        if item["kind"] == "ConfigMap"
+        and item["metadata"]["name"] == "markweave-node-attester-config"
+    )
+    attester_settings = json.loads(config["data"]["attester.json"])
     pod = daemonset["spec"]["template"]["spec"]
     assert pod["serviceAccountName"] == "markweave-node-attester"
-    assert pod["automountServiceAccountToken"] is True
+    assert pod["automountServiceAccountToken"] is False
     assert pod["hostNetwork"] is True
     assert pod["hostPID"] is False
     assert pod["hostIPC"] is False
@@ -180,7 +208,12 @@ def test_attester_daemonset_is_pinned_and_read_only_except_for_its_ledger() -> N
         "reverse.markweave.dev/node-fence": "fence-v1",
     }
 
-    container = pod["containers"][0]
+    containers = {container["name"]: container for container in pod["containers"]}
+    container = containers["attester"]
+    assert (
+        pod["terminationGracePeriodSeconds"]
+        > attester_settings["hard_shutdown_timeout_seconds"]
+    )
     assert container["image"] == f"registry.example/attester@sha256:{'1' * 64}"
     assert container["ports"] == [
         {"name": "mtls", "containerPort": 9443, "hostPort": 9443, "protocol": "TCP"}
@@ -198,8 +231,11 @@ def test_attester_daemonset_is_pinned_and_read_only_except_for_its_ledger() -> N
     }
     mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
     assert mounts["state"].get("readOnly", False) is False
+    assert "cri-socket" not in mounts
     assert all(
-        mount["readOnly"] is True for name, mount in mounts.items() if name != "state"
+        mount["readOnly"] is True
+        for name, mount in mounts.items()
+        if name not in {"state", "cri-proxy-socket"}
     )
     volumes = {volume["name"]: volume for volume in pod["volumes"]}
     assert volumes["state"]["hostPath"] == {
@@ -207,6 +243,52 @@ def test_attester_daemonset_is_pinned_and_read_only_except_for_its_ledger() -> N
         "type": "Directory",
     }
     assert volumes["cri-socket"]["hostPath"]["type"] == "Socket"
+    proxy = containers["cri-read-proxy"]
+    assert proxy["image"] == f"registry.example/envoy@sha256:{'4' * 64}"
+    proxy_mounts = {mount["name"]: mount for mount in proxy["volumeMounts"]}
+    assert "cri-socket" in proxy_mounts
+    assert "service-account" not in proxy_mounts
+    assert proxy["securityContext"] == security
+
+
+@pytest.mark.unit
+def test_cri_proxy_allows_only_exact_read_only_runtime_methods() -> None:
+    resources = _resources()
+    config = next(
+        item
+        for item in resources
+        if item["kind"] == "ConfigMap"
+        and item["metadata"]["name"] == "markweave-cri-read-proxy-config"
+    )
+    envoy = cast(dict[str, Any], yaml.safe_load(config["data"]["envoy.yaml"]))
+    listener = envoy["static_resources"]["listeners"][0]
+    manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
+    routes = manager["route_config"]["virtual_hosts"][0]["routes"]
+    allowed = {route["match"]["path"] for route in routes if "path" in route["match"]}
+    assert allowed == {
+        "/runtime.v1.RuntimeService/Version",
+        "/runtime.v1.RuntimeService/ListPodSandbox",
+        "/runtime.v1.RuntimeService/PodSandboxStatus",
+        "/runtime.v1.RuntimeService/ListContainers",
+        "/runtime.v1.RuntimeService/ContainerStatus",
+    }
+    assert routes[-1] == {
+        "match": {"prefix": "/"},
+        "direct_response": {"status": 403},
+    }
+    source = config["data"]["envoy.yaml"]
+    assert not any(
+        method in source
+        for method in (
+            "RunPodSandbox",
+            "CreateContainer",
+            "StartContainer",
+            "StopContainer",
+            "RemoveContainer",
+            "RemovePodSandbox",
+            "Exec",
+        )
+    )
 
 
 @pytest.mark.unit

@@ -56,6 +56,70 @@ backend.
 
 ## Progress
 
+* 2026-09-10: Implemented and validated the selected RuntimeClass-scoped runc wrapper on the local
+  k3s 1.35/containerd 2.2 boundary. A real workload reached `Running`; kernel mountinfo and the
+  concrete inspector independently reported `/work` as a 32 MiB tmpfs with exact
+  `nodev,noexec,nosuid,rw` flags, while the accepted isolated CNI state and `pids.max=64` remained
+  intact. A workload missing `/work` failed closed with `StartError` before runc, and replacing the
+  installed wrapper bytes made the node fence fail. The fence and evidence now bind the exact
+  runtime-handler and wrapper digests, and the attester receives only read-only mounts of those
+  files. The previously blocked attester image now builds and its minimal import/closed-failure
+  smoke probes pass after separating the bounded command runner and making broker exports lazy;
+  no reverse-conversion parsing dependencies are installed in that image. Probe namespaces,
+  RuntimeClass, labels, taint, and five host assets were removed, and k3s is inactive/disabled.
+  The mandatory dedicated-pool, published-digest, full broker/attester/attempt exact-image matrix
+  remains unexecuted because this machine is a shared single-node development cluster.
+* 2026-09-10: The product manager selected the RuntimeClass-scoped OCI runtime-wrapper solution for
+  the Kubernetes 1.35 `emptyDir` mount-option gap. The trusted node wrapper must be fixed by the
+  dedicated
+  containerd runtime handler, digest-attested as part of the node fence, add only
+  `nodev,nosuid,noexec` to a present `/work` tmpfs before the attempt process starts, fail closed on
+  any malformed or unexpected mount, and leave the CRI pause sandbox unchanged. The node attester
+  must continue to verify the actual resulting mount independently. Implementation and real-k3s
+  validation resume under this decision.
+* 2026-09-10: The live concrete-inspector probe reached a second architecture decision point after
+  passing the selected CNI, CRI, cgroup, and node-fence checks. On k3s/Kubernetes 1.35, the required
+  memory-backed `emptyDir` workspace is actually mounted `rw,relatime`; `nodev`, `noexec`, and
+  `nosuid` are absent. The inspector faithfully returned only `rw`, so the T74 policy correctly
+  rejects the sandbox. Kubernetes 1.35 exposes no mount-options field for `emptyDir`; StorageClass
+  mount options do not apply. Preserving the approved workspace contract therefore requires a new
+  trusted CSI/node mount component or OCI runtime hook/wrapper with mount authority. The alternative
+  is an explicit security-contract relaxation. Either choice materially changes architecture or
+  acceptance criteria and requires product/security approval. All probe resources were cleaned up
+  and k3s is inactive/disabled.
+* 2026-09-10: Implemented the selected hardened standard-containerd design. The node attester now
+  reaches containerd only through a bounded Envoy Unix-socket proxy that permits the five exact CRI
+  v1 inspection methods and denies mutation; a live proxy probe successfully listed sandboxes and
+  rejected `StopPodSandbox`. Added the digest-attested `00-markweave-isolated` CNI, which creates an
+  unpeered dummy `eth0` with `192.0.2.1/32`, disables forwarding and IPv6 on that interface, and
+  removes routes and neighbors. A live k3s/containerd Pod reached `Running` with that address.
+  Kernel `/proc/<sandbox-pid>/net` evidence confirmed only `lo`/`eth0`, only loopback and the dummy
+  address, no IPv4 or non-loopback IPv6 routes, and no ARP neighbor. The attester now enforces those
+  live kernel facts and the exact CNI asset digests. The probe also proved that
+  `/proc/<pid>/root/proc/sys/net` reflects the reader namespace, so the design does not falsely use
+  it as sandbox forwarding evidence; the digest-attested CNI checks forwarding during ADD, while
+  the attested unpeered and unrouted state prevents egress. All temporary cluster and host changes
+  were removed and k3s returned to inactive/disabled. The dedicated exact-image acceptance matrix
+  remains required. ShellCheck, Ruff format/lint, `ty`, `git diff --check`, and 136 focused tests
+  pass; the three changed Python security modules have 93.21% combined branch coverage.
+* 2026-09-10: The product manager selected the hardened standard-containerd design: place a
+  separately trusted allowlist proxy between the node attester and the CRI socket, expose only the
+  exact inspection RPCs required by T74, and use an isolated non-loopback dummy interface with no
+  peer or routes. Network evidence must come from the sandbox's kernel network namespace and prove
+  the exact interface, address, route, and peer-isolation contract; the digest-attested CNI must
+  disable and check forwarding during namespace creation, and CRI CNI metadata is not sufficient
+  on its own. Implementation and real-k3s validation resume under this decision.
+* 2026-09-10: Independent review of PR #225 retained five findings. Local follow-up now bounds
+  official Kubernetes Node/Pod reads with the inspector operation timeout, rejects `.` and `..`
+  cgroup components for both sandbox and removal inspection, requires the rendered Kubernetes
+  termination grace period to exceed the attester watchdog, and declares the digest-pinned attester
+  image amd64-only. Ruff, `ty`, `git diff --check`, and 49 focused tests pass. The reported
+  multi-exception `SyntaxError` is not valid for the mandated Python 3.14 target (PEP 758), as also
+  demonstrated by the passing import and process tests. The remaining valid security finding is
+  architectural: a read-only filesystem mount of the containerd socket still permits mutation RPCs
+  over that socket. T74 therefore additionally requires a decision between a narrow separately
+  trusted CRI allowlist proxy, explicit acceptance of direct root-attester CRI authority, or stopping
+  the Kubernetes backend; the previously recorded CNI decision remains unresolved as well.
 * 2026-09-10: Implemented the reviewable portion preceding the CNI decision: a bounded read-only
   Kubernetes/CRI/cgroup-v2 inspector, root-only production attester process, strict immutable
   configuration, root-owned authenticated ledger wiring, least-privilege RBAC, hardened node-local

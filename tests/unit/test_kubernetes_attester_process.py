@@ -23,8 +23,12 @@ from markweave.kubernetes_attester_process import (
 def _settings(tmp_path: Path) -> dict[str, object]:
     return {
         "cgroup_root": str(tmp_path / "cgroup"),
+        "cni_config": str(tmp_path / "00-markweave-isolated.conflist"),
+        "cni_config_sha256": f"sha256:{'2' * 64}",
+        "cni_plugin": str(tmp_path / "markweave-isolated"),
+        "cni_plugin_sha256": f"sha256:{'3' * 64}",
         "client_ca_file": str(tmp_path / "ca.crt"),
-        "cri_endpoint": "unix:///host/run/k3s/containerd/containerd.sock",
+        "cri_endpoint": "unix:///run/markweave-cri/proxy.sock",
         "cri_executable": "/host/usr/local/bin/crictl",
         "expected_client_certificate_sha256": f"sha256:{'1' * 64}",
         "hard_shutdown_timeout_seconds": 5,
@@ -44,6 +48,10 @@ def _settings(tmp_path: Path) -> dict[str, object]:
         "operation_timeout_seconds": 2,
         "proc_root": str(tmp_path / "proc"),
         "request_timeout_seconds": 3,
+        "runtime_config": str(tmp_path / "20-markweave-reverse-runtime.toml"),
+        "runtime_config_sha256": f"sha256:{'4' * 64}",
+        "runtime_wrapper": str(tmp_path / "markweave-runc-wrapper"),
+        "runtime_wrapper_sha256": f"sha256:{'5' * 64}",
         "server_certificate_file": str(tmp_path / "tls.crt"),
         "server_private_key_file": str(tmp_path / "tls.key"),
     }

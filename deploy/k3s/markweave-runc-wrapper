@@ -1,0 +1,107 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+REAL_RUNC=/usr/bin/runc
+BUNDLE_PREFIX=/run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/
+MAX_CONFIG_BYTES=262144
+
+fail() {
+    logger -t markweave-runc-wrapper -- "failed: $1" 2>/dev/null || true
+    printf '%s\n' "markweave runc wrapper failed: $1" >&2
+    exit 1
+}
+
+[ -x "$REAL_RUNC" ] || fail runtime
+[ -x /usr/bin/jq ] || fail json-tool
+
+command_count=0
+bundle=
+expect_bundle=false
+for argument in "$@"; do
+    if [ "$expect_bundle" = true ]; then
+        [ -z "$bundle" ] || fail bundle-count
+        bundle=$argument
+        expect_bundle=false
+        continue
+    fi
+    case "$argument" in
+        create) command_count=$((command_count + 1)) ;;
+        --bundle|-b) expect_bundle=true ;;
+        --bundle=*)
+            [ -z "$bundle" ] || fail bundle-count
+            bundle=${argument#--bundle=}
+            ;;
+    esac
+done
+[ "$expect_bundle" = false ] || fail bundle
+
+if [ "$command_count" -eq 0 ]; then
+    exec "$REAL_RUNC" "$@"
+fi
+[ "$command_count" -eq 1 ] || fail command
+
+case "$bundle" in
+    "$BUNDLE_PREFIX"*) ;;
+    *) fail bundle ;;
+esac
+container_id=${bundle#"$BUNDLE_PREFIX"}
+case "$container_id" in
+    *[!0-9a-f]*|'') fail bundle-id ;;
+esac
+[ "${#container_id}" -eq 64 ] || fail bundle-id
+[ "$(realpath -e "$bundle")" = "$bundle" ] || fail bundle-path
+
+config=$bundle/config.json
+if [ ! -f "$config" ] || [ -L "$config" ]; then
+    fail config
+fi
+[ "$(stat -c %u "$config")" = 0 ] || fail config-owner
+config_size=$(stat -c %s "$config") || fail config-size
+if [ "$config_size" -le 0 ] || [ "$config_size" -gt "$MAX_CONFIG_BYTES" ]; then
+    fail config-size
+fi
+
+temporary=$(mktemp "$bundle/.markweave-config.XXXXXX") || fail temporary
+cleanup() {
+    if [ -e "$temporary" ]; then
+        unlink "$temporary" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+/usr/bin/jq -ce '
+  .annotations as $annotations
+  | ($annotations["io.kubernetes.cri.container-type"] // "") as $kind
+  | ([.mounts[]? | select(.destination == "/work")]) as $work
+  | if $kind == "sandbox" then
+      if ($work | length) == 0 then . else error("sandbox workspace") end
+    elif $kind == "container"
+      and ($work | length) == 1
+      and $work[0].type == "bind"
+      and ($work[0].source | type) == "string"
+      and ($work[0].source | test("^/var/lib/kubelet/pods/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/volumes/kubernetes\\.io~empty-dir/work$"))
+      and ($work[0].options | type) == "array"
+      and all($work[0].options[]; type == "string")
+      and ($work[0].options | length) == 3
+      and ($work[0].options | sort) == ["rbind", "rprivate", "rw"]
+    then
+      .mounts |= map(
+        if .destination == "/work"
+        then .options = ((.options + ["nodev", "noexec", "nosuid", "rw"]) | unique)
+        else .
+        end
+      )
+    else
+      error("unexpected CRI container")
+    end
+' "$config" >"$temporary" || fail policy
+
+chmod --reference="$config" "$temporary" || fail temporary-mode
+chown --reference="$config" "$temporary" || fail temporary-owner
+mv -f -- "$temporary" "$config" || fail config-replace
+trap - EXIT INT TERM
+
+exec "$REAL_RUNC" "$@"

@@ -314,6 +314,21 @@ isolation broker outside both the application worker and the attempt unit exclus
 Podman workload authority needed to create, constrain, inspect, terminate, and remove that unit.
 The application and child never receive a raw OCI socket. An optional Kubernetes backend is
 deferred to T74 and must preserve this contract without blocking the reverse-conversion delivery.
+Its dedicated node attester reaches standard containerd only through a separately trusted local
+proxy that permits the exact CRI v1 `Version`, `ListPodSandbox`, `PodSandboxStatus`,
+`ListContainers`, and `ContainerStatus` methods and rejects every other method. The raw CRI socket
+is mounted only into that proxy. Each attempt sandbox uses the digest-attested MarkWeave CNI with
+one unpeered dummy `eth0` address (`192.0.2.1/32`), no main-table route, no neighbor, disabled
+forwarding, and the normal loopback address. The attester verifies the CNI artifacts and reads the
+target sandbox's kernel `/proc/<pid>/net` interface, address, route, and neighbor state; CRI-reported
+CNI metadata alone is insufficient. The attempt remains capability-free, so it cannot change this
+network state. A digest-attested OCI runtime wrapper, selected only by the MarkWeave RuntimeClass,
+must add `nodev`, `noexec`, and `nosuid` to the exact kubelet-created `/work` `emptyDir` bind mount
+before the fixed attempt process starts, fail closed for any other source or option set, and leave
+the CRI pause sandbox unchanged; the attester independently verifies the resulting tmpfs and exact
+`rw,nodev,noexec,nosuid` VFS flags. The dedicated
+fenced pool and exact-image real-cluster acceptance matrix remain mandatory before operators may
+claim the backend supported.
 
 The worker-side attempt supervisor owns the durable attempt token and lease heartbeat, sends one
 bounded request to the broker, accepts one bounded result, revalidates both before publication,
@@ -820,9 +835,10 @@ the ticket before touching any path owned by another active ticket.
   identity/proof and resulting package, but must not introduce a second broker, runner, parser,
   renderer adapter, or manifest serializer.
 - T74 owns any optional Kubernetes reverse-isolation backend. It must use a separately reviewed
-  trusted node attester on a dedicated pool and preserve T70's containment, reconciliation, and
-  termination-proof contract. T74 is not a dependency of T70-T73 or the reverse-conversion
-  delivery.
+  trusted node attester on a dedicated pool, the exact-method CRI read proxy, and the digest-attested
+  unpeered dummy-interface CNI and RuntimeClass-scoped workspace mount hook described above, while
+  preserving T70's containment, reconciliation, and termination-proof contract. T74 is not a
+  dependency of T70-T73 or the reverse-conversion delivery.
 - T71 owns configurable reverse-upload, result, asset, concurrency, duration, queue, and retention
   limits. It must derive them from measured T69 evidence and must not silently copy forward-
   conversion values.

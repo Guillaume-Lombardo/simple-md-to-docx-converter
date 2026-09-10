@@ -14,6 +14,7 @@ def test_attester_container_is_digest_pinned_and_has_a_content_free_entrypoint()
 ):
     source = CONTAINERFILE.read_text(encoding="utf-8")
     assert "ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-314@sha256:" in source
+    assert 'test "${TARGETARCH}" = "amd64"' in source
     assert "uv sync --locked --no-dev --no-editable --extra kubernetes" in source
     assert 'assert version("kubernetes") == "35.0.0"' in source
     assert "FROM scratch" in source
