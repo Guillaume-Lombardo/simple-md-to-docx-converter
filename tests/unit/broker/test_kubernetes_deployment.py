@@ -85,7 +85,7 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
         (tuple(rule["resources"]), tuple(sorted(rule["verbs"]))) for rule in rules
     } == {
         (("pods",), ("create", "delete", "get", "list")),
-        (("pods/exec",), ("create",)),
+        (("pods/exec",), ("create", "get")),
     }
     cluster_role = by_kind_name[("ClusterRole", "markweave-node-attester-read-node")]
     assert cluster_role["rules"] == [
@@ -318,4 +318,7 @@ def test_guide_rejects_weak_kubernetes_termination_evidence() -> None:
     assert "force deletion" in guide
     assert "zero descendants" in guide
     assert "exact broker, attester, and reverse-attempt image digests" in guide
-    assert "remain required but unexecuted" in guide
+    assert (
+        "complete restart/recovery and negative exact-image acceptance matrix" in guide
+    )
+    assert "physical pool isolation" in guide

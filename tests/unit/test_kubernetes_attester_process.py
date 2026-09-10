@@ -29,7 +29,6 @@ def _settings(tmp_path: Path) -> dict[str, object]:
         "cni_plugin_sha256": f"sha256:{'3' * 64}",
         "client_ca_file": str(tmp_path / "ca.crt"),
         "cri_endpoint": "unix:///run/markweave-cri/proxy.sock",
-        "cri_executable": "/host/usr/local/bin/crictl",
         "expected_client_certificate_sha256": f"sha256:{'1' * 64}",
         "hard_shutdown_timeout_seconds": 5,
         "inventory_authentication_key_file": str(tmp_path / "key"),
@@ -38,7 +37,6 @@ def _settings(tmp_path: Path) -> dict[str, object]:
         "kubelet_config": str(tmp_path / "kubelet.yaml"),
         "listen_host": "0.0.0.0",  # noqa: S104 - explicit container bind address
         "listen_port": 9443,
-        "max_cgroup_directories": 16,
         "max_concurrent_requests": 4,
         "max_containers": 2,
         "max_descendant_pids": 64,
@@ -68,7 +66,6 @@ def test_load_config_closes_and_types_every_process_input(tmp_path: Path) -> Non
     config = load_config(_config_file(tmp_path), node_name="reverse-node-1")
     assert config.node_name == "reverse-node-1"
     assert config.inspector.node_name == "reverse-node-1"
-    assert config.cri_executable == Path("/host/usr/local/bin/crictl")
     assert config.inspector_limits.output_bytes == 65536
     assert config.transport_limits.timeout_seconds == 3
     assert config.tls.port == 9443
@@ -107,7 +104,6 @@ def test_process_config_model_rejects_invalid_identity(tmp_path: Path) -> None:
             "",
             config.inspector,
             config.inspector_limits,
-            config.cri_executable,
             config.tls,
             config.transport_limits,
             config.inventory_path,
@@ -126,7 +122,8 @@ def test_build_server_assembles_only_after_positive_node_fence(
     mocker.patch.object(target, "_private_key", return_value=b"k" * 32)
     state = mocker.patch.object(target, "_state_directory")
     api = mocker.patch.object(target.KubernetesReadApi, "in_cluster").return_value
-    command = mocker.patch.object(target, "build_cri_command").return_value
+    connect = mocker.patch.object(target.GrpcCriRuntimeClient, "connect")
+    cri = connect.return_value
     inspector_factory = mocker.patch.object(target, "BoundedCriCgroupInspector")
     inspector = inspector_factory.return_value
     inspector.node_fence.return_value = SimpleNamespace(ready=True)
@@ -138,7 +135,12 @@ def test_build_server_assembles_only_after_positive_node_fence(
     assert build_server(config) is expected
     state.assert_called_once_with(config.inventory_path.parent)
     inspector_factory.assert_called_once_with(
-        config.inspector, config.inspector_limits, api, command
+        config.inspector, config.inspector_limits, api, cri
+    )
+    connect.assert_called_once_with(
+        config.inspector.cri_endpoint,
+        operation_seconds=config.inspector_limits.operation_seconds,
+        output_bytes=config.inspector_limits.output_bytes,
     )
     service_factory.assert_called_once_with(engine, ledger, node_name="reverse-node-1")
 

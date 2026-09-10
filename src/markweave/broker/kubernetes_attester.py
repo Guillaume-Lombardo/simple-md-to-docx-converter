@@ -73,7 +73,7 @@ class SandboxSnapshot:
     cgroup_lookup_complete: bool
     cgroup_present: bool
     cgroup_populated: bool
-    descendant_pids: tuple[int, ...]
+    descendant_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,16 +280,22 @@ class NodeAttestationEngine:
         """Prove all CRI containers exited; a Pod phase or API result is ignored."""
 
         self._revalidate_fence(unit)
-        snapshot = self._sandbox(unit)
+        try:
+            snapshot = self._sandbox(unit)
+        except KubernetesRuntimeError:
+            raise KubernetesAttestationNotReady(
+                "Kubernetes exit is not observable"
+            ) from None
         if (
             not snapshot.container_states
             or not _same_container_ids(
                 snapshot.container_ids, unit.sandbox.container_ids
             )
             or len(snapshot.container_states) != len(unit.sandbox.container_ids)
-            or any(state != "EXITED" for state in snapshot.container_states)
         ):
             raise KubernetesRuntimeError("Kubernetes exit is unconfirmed")
+        if any(state != "EXITED" for state in snapshot.container_states):
+            raise KubernetesAttestationNotReady("Kubernetes exit is not observable")
         return _evidence(
             "exit",
             {
@@ -425,12 +431,12 @@ class NodeAttestationEngine:
             raise KubernetesRuntimeError("Kubernetes exit evidence is invalid")
         self._revalidate_fence(unit)
         snapshot = self._sandbox(unit)
-        if (
-            snapshot.cgroup_lookup_complete is not True
-            or snapshot.cgroup_populated is not False
-            or snapshot.descendant_pids != ()
-        ):
+        if snapshot.cgroup_lookup_complete is not True:
             raise KubernetesRuntimeError("Kubernetes stable unit is not empty")
+        if snapshot.cgroup_populated is not False or snapshot.descendant_count != 0:
+            raise KubernetesAttestationNotReady(
+                "Kubernetes stable unit emptiness is not observable"
+            )
         return _evidence(
             "empty",
             {
@@ -468,11 +474,14 @@ class NodeAttestationEngine:
             or snapshot.sandbox_id != unit.sandbox.sandbox_id
             or snapshot.cgroup_path != unit.sandbox.cgroup_path
             or snapshot.cri_lookup_complete is not True
-            or snapshot.sandbox_present is not False
             or snapshot.cgroup_lookup_complete is not True
-            or snapshot.cgroup_present is not False
         ):
             raise KubernetesRuntimeError("Kubernetes removal is unconfirmed")
+        if (
+            snapshot.sandbox_present is not False
+            or snapshot.cgroup_present is not False
+        ):
+            raise KubernetesAttestationNotReady("Kubernetes removal is not observable")
         return _evidence(
             "removed",
             {

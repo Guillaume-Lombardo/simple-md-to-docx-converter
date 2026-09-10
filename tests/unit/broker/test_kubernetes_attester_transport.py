@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -45,6 +46,7 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
+    RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
 from tests.unit.broker.test_kubernetes_runtime import (
@@ -540,6 +542,36 @@ def test_client_refuses_a_runtime_unit_that_it_did_not_bind() -> None:
 
 
 @pytest.mark.unit
+def test_client_reports_empty_error_responses_without_parsing_success_length(
+    mocker: MockerFixture,
+) -> None:
+    response = mocker.Mock()
+    response.status = 400
+    response.getheader.return_value = "0"
+    connection = mocker.Mock()
+    connection.sock = object()
+    connection.getresponse.return_value = response
+    mocker.patch.object(
+        transport.http.client, "HTTPSConnection", return_value=connection
+    )
+    mocker.patch.object(transport, "_certificate_digest", return_value=EVIDENCE)
+    client = object.__new__(HttpsNodeAttesterClient)
+    client._tls = cast(
+        AttesterClientTlsConfig,
+        SimpleNamespace(port=8443, expected_server_certificate=EVIDENCE),
+    )
+    client._limits = AttesterTransportLimits(4096, 4096, 1.0, 1)
+    client._context = cast(ssl.SSLContext, object())
+
+    with pytest.raises(KubernetesRuntimeError, match="attester request failed"):
+        client._exchange("node-a", {"operation": "bind"})
+
+    response.getheader.assert_not_called()
+    response.read.assert_not_called()
+    connection.close.assert_called_once_with()
+
+
+@pytest.mark.unit
 def test_service_exposes_only_explicit_not_ready_as_retryable(
     unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
@@ -573,8 +605,27 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
     contract = transport._contract(request["contract"])
     good = _call(service, request)
     client.responses = [{"outcome": "not_ready"}, good]
-    client.bind(pod, contract)
+    sandbox = client.bind(pod, contract)
     assert slept == [0.1]
+
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    client.responses = [
+        {"outcome": "not_ready"},
+        {"evidence": EVIDENCE.value, "outcome": "ok"},
+    ]
+    client._monotonic = iter((0.0, 0.1)).__next__
+    assert client.confirm_exit(runtime_unit) == EVIDENCE
+    assert slept == [0.1, 0.1]
+
+    client.responses = [{"outcome": "not_ready"}]
+    client._monotonic = iter((0.0, 1.0)).__next__
+    with pytest.raises(KubernetesRuntimeError, match="proof readiness timed out"):
+        client.confirm_exit(runtime_unit)
 
     client.responses = [{"outcome": "not_ready"}]
     client._monotonic = iter((0.0, 1.0)).__next__
@@ -910,6 +961,14 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
     }
     with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
         client.bind(pod, contract)
+
+    client._bound = {
+        pod.pod_uid: replace(
+            expected,
+            recovery_binding=RuntimeRecoveryBinding("kubernetes", 1, b"{}"),
+        )
+    }
+    assert client.bind(pod, contract) == sandbox
 
     client._bound = {}
     client.response = {}

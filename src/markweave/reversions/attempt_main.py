@@ -137,8 +137,19 @@ def _execute(request: ReverseAttemptRequest) -> ReverseAttemptResponse:
 def _linger_until_terminated() -> int:
     """Retain the tmpfs response until the broker terminates the stable unit."""
 
-    while True:
-        signal.pause()
+    stopping = False
+
+    def stop(_number: int, _frame: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        while not stopping:
+            signal.pause()
+        return 0
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def main() -> int:

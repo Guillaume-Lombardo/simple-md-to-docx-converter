@@ -62,7 +62,11 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
         "pillow>=12,<13",
         "tinycss2>=1.5,<2",
     ]
-    assert extras["kubernetes"] == ["kubernetes==35.0.0"]
+    assert extras["kubernetes"] == [
+        "grpcio>=1.76,<2",
+        "kubernetes==35.0.0",
+        "protobuf>=6.33,<7",
+    ]
     assert "boto3>=1.43.82,<2" not in extras["server"]
     assert "psycopg[binary]>=3.3.4,<4" not in extras["server"]
     assert (

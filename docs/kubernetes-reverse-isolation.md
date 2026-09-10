@@ -12,6 +12,14 @@ authority in the attempt namespace. It authors the immutable Pod specification a
 Pod UID precondition for deletion. The attempt service account has no RBAC and its
 token is not mounted.
 
+The broker Role grants both `create` and `get` on `pods/exec`: the Kubernetes
+Python client's WebSocket upgrade uses the GET form even though exec remains a
+single fixed, bounded command channel.
+
+CRI teardown is asynchronous. Exit, cgroup-emptiness, and removal proofs retry
+only bounded `not_ready` observations; persistent missing or contradictory
+identity evidence still fails closed when the readiness deadline expires.
+
 A separately deployed node attester, in a different namespace outside the broker Role and
 `pods/exec` scope, is the only component that can query the bounded CRI read proxy and stable cgroup. The
 broker has no Node-reading ClusterRole. The attester receives only `get` access to its Node and
@@ -74,20 +82,16 @@ initialization from the pinned `kubernetes==35.0.0` dependency; upgrades must pa
 test before changing that pin. The kill exec acknowledgement is never considered termination evidence.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. The production process uses
-the official read-only Kubernetes client, fixed bounded `crictl` commands, and bounded reads of the
-local cgroup v2 and `/proc` filesystems. Raw CRI and kernel output remains inside the attester
-process. Unknown fields, truncated CRI enumeration, lookup errors, identity
+the official read-only Kubernetes client, a purpose-built bounded gRPC client generated from the
+minimal wire-compatible Kubernetes CRI v1 schema, and bounded reads of the local cgroup v2 and
+`/proc` filesystems. The generated service exposes only `Version`, `ListPodSandbox`,
+`PodSandboxStatus`, `ListContainers`, and `ContainerStatus`; it defines no mutation or ImageService
+operation. Raw CRI and kernel output remains inside the attester process. Unknown fields, truncated
+CRI enumeration, lookup errors, identity
 changes, or an unavailable attester reject readiness or proof. Only an explicit trusted-inspector
 "sandbox not observable yet" result is retried, within a configured deadline; policy mismatches
 fail immediately. The node fence and complete runnable sandbox are re-attested before staging, and
 the node fence is revalidated at every proof transition.
-
-On k3s, `/usr/local/bin/crictl` is a bootstrap symlink whose target extracts runtime data before
-dispatch. The reference DaemonSet instead mounts the already extracted
-`/var/lib/rancher/k3s/data/current/bin/k3s` multicall binary at the fixed in-container basename
-`/host/usr/local/bin/crictl`; that basename selects its CRI client without writable extraction
-state. The `current` link must resolve to the exact active k3s data revision while the node fence is
-unavailable.
 
 ## Dedicated pool contract
 
@@ -182,8 +186,10 @@ portable production default.
 
 Readiness is based on observations from the sandbox and kernel, not the requested Pod resources.
 The attester reads and binds the sandbox cgroup's actual `cpu.max` quota and period, `memory.max`,
-and `pids.max`, plus the `/work` mount filesystem, path, size and exact `rw,nodev,noexec,nosuid`
-flags. Any mismatch with policy rejects the sandbox before request staging.
+`pids.max`, and hierarchical `pids.current`, plus the `/work` mount filesystem, path, kernel
+`size=` superblock option, and exact `rw,nodev,noexec,nosuid` flags. Reading the size from
+`mountinfo` avoids granting the attester access through another process's `/proc/<pid>/root`.
+Any mismatch with policy rejects the sandbox before request staging.
 
 Workspace transfer uses the exact attempt Pod identity and bounded T70 request/response channel.
 Document bytes never enter labels, inventory, evidence, diagnostics, or attester messages.
@@ -193,7 +199,10 @@ Document bytes never enter labels, inventory, evidence, diagnostics, or attester
 Pod phase, deletion acknowledgement, force deletion, and API absence are supplementary facts only.
 The node attester must first completely enumerate the exact CRI sandbox and prove every bound
 container exited. It then either observes the exact previously bound cgroup as unpopulated with
-zero descendants or completes a negative lookup of that exact cgroup on the unchanged fenced node. The
+zero descendants or completes a negative lookup of that exact cgroup on the unchanged fenced node.
+The descendant count comes from the cgroup v2 hierarchical `pids.current` counter; reading
+`cgroup.procs` from an attester outside the host PID namespace would expose host-only PIDs as zero,
+so it is neither used nor a reason to grant `hostPID`. The
 latter is accepted as kernel evidence that the cgroup became empty before containerd's automatic
 removal; an incomplete lookup, an unbound path, or absence without prior CRI exit evidence fails
 closed. Only after this positive evidence may the broker delete the exact Pod UID. Removal requires
@@ -244,10 +253,13 @@ the accepted Pod IP `192.0.2.1`. Kernel inspection of that live sandbox observed
 neighbor. Every probe namespace and host asset was removed and k3s was restored to its initial
 inactive/disabled state. This single general-purpose node is not a physically dedicated fenced
 pool. It may provide the explicitly approved bounded development evidence above, but not production
-isolation evidence. The attester image now builds and passes minimal-import and closed-failure smoke probes. The
-exact broker/attester/attempt image deployment and complete acceptance matrix are still pending.
-These gates remain required but unexecuted; unit, loopback-mTLS, fake-control-plane, or general-node
-results are not substitutes for that evidence.
+isolation evidence. The attester image now builds and passes minimal-import and closed-failure smoke
+probes. An exact broker/attester/attempt image deployment has completed one pristine successful
+lifecycle on the approved logically dedicated development worker. It proved live resource,
+workspace, network, exit, empty, removal, and acknowledgement behavior, but it does not prove
+physical pool isolation. The complete restart/recovery and negative exact-image acceptance matrix
+on a production-equivalent dedicated pool is still pending. Unit, loopback-mTLS,
+fake-control-plane, or general-node results are not substitutes for that remaining evidence.
 
 The same concrete-inspector probe exposed a containment gap on Kubernetes 1.35:
 `emptyDir.medium: Memory` produced a `/work` tmpfs mounted as `rw,relatime` with no `nodev`, `noexec`,
@@ -258,6 +270,7 @@ OCI runtime wrapper closes the configuration gap at runc create time and is itse
 fence. A native OCI prestart/createContainer hook was rejected during disposable testing because
 the kubelet bind mount was not present at the hook's execution point. A subsequent real-k3s probe
 ran the workload with exact `nodev,noexec,nosuid,rw` flags, rejected a workload missing `/work`
-before runc, and proved that modified wrapper bytes invalidate the fence. The full dedicated-pool,
-published-digest, broker/attester/attempt exact-image acceptance matrix remains required; the
+before runc, and proved that modified wrapper bytes invalidate the fence. The selected minimal CRI
+client then enabled an exact broker/attester/attempt image happy-path run. The full physical
+dedicated-pool restart/recovery and negative exact-image acceptance matrix remains required; the
 backend remains unsupported until that proof passes.

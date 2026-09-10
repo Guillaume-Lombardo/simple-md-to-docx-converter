@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
-import os
 import re
 import stat
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
@@ -17,15 +15,12 @@ from uuid import UUID
 
 import yaml
 
-from markweave.broker.command_runner import (
-    BoundedCommandRunner,
-    PodmanCommandLimits,
-)
 from markweave.broker.kubernetes_attester import (
     NodeFenceSnapshot,
     RemovalSnapshot,
     SandboxSnapshot,
 )
+from markweave.broker.kubernetes_cri import CriRuntimeApi
 from markweave.broker.kubernetes_runtime import (
     KubernetesAttestationNotReady,
     KubernetesRuntimeError,
@@ -69,26 +64,6 @@ class _CoreReadApi(Protocol):
     ) -> object: ...
 
 
-class CriCommand(Protocol):
-    """Bounded fixed-command adapter."""
-
-    def __call__(
-        self, arguments: Sequence[str], *, max_output_bytes: int | None = None
-    ) -> tuple[int, bytes]: ...
-
-
-class _StatvfsResult(Protocol):
-    @property
-    def f_frsize(self) -> int: ...
-
-    @property
-    def f_blocks(self) -> int: ...
-
-
-def _statvfs(path: Path) -> _StatvfsResult:
-    return os.statvfs(path)
-
-
 @dataclass(frozen=True, slots=True)
 class InspectorLimits:
     """Absolute bounds for local inspection work."""
@@ -97,7 +72,6 @@ class InspectorLimits:
     output_bytes: int
     max_sandboxes: int
     max_containers: int
-    max_cgroup_directories: int
     max_descendant_pids: int
 
     def __post_init__(self) -> None:
@@ -112,7 +86,6 @@ class InspectorLimits:
                 for value in (
                     self.max_sandboxes,
                     self.max_containers,
-                    self.max_cgroup_directories,
                     self.max_descendant_pids,
                 )
             )
@@ -236,20 +209,6 @@ class KubernetesReadApi:
         return _mapping(value, "Kubernetes read API response is invalid")
 
 
-def build_cri_command(
-    executable: Path, limits: InspectorLimits
-) -> BoundedCommandRunner:
-    """Build a no-shell command runner with fixed environment and ceilings."""
-
-    if not executable.is_absolute():
-        raise ValueError("Kubernetes CRI executable is invalid")
-    return BoundedCommandRunner(
-        executable,
-        PodmanCommandLimits(limits.operation_seconds, limits.output_bytes),
-        environment={"HOME": "/", "PATH": "/usr/bin:/bin"},
-    )
-
-
 class BoundedCriCgroupInspector:
     """Concrete inspector whose authority is limited to reads and fixed CRI argv."""
 
@@ -258,23 +217,27 @@ class BoundedCriCgroupInspector:
         config: InspectorConfig,
         limits: InspectorLimits,
         api: ReadOnlyKubernetesApi,
-        command: CriCommand,
-        *,
-        statvfs: Callable[[Path], _StatvfsResult] = _statvfs,
+        cri: CriRuntimeApi,
     ) -> None:
         if (
             type(config) is not InspectorConfig
             or type(limits) is not InspectorLimits
             or not all(callable(getattr(api, name, None)) for name in ("node", "pod"))
-            or not callable(command)
-            or not callable(statvfs)
+            or not all(
+                callable(getattr(cri, name, None))
+                for name in (
+                    "list_pod_sandboxes",
+                    "pod_sandbox_status",
+                    "list_containers",
+                    "container_status",
+                )
+            )
         ):
             raise ValueError("Kubernetes inspector is invalid")
         self._config = config
         self._limits = limits
         self._api = api
-        self._command = command
-        self._statvfs = statvfs
+        self._cri = cri
 
     def node_fence(self, node_name: str) -> NodeFenceSnapshot:
         """Read exact scheduling fence and explicit kubelet containment settings."""
@@ -334,7 +297,9 @@ class BoundedCriCgroupInspector:
             raise KubernetesRuntimeError("Kubernetes sandbox lookup failed")
         item = self._select_sandbox(pod_uid, sandbox_id)
         selected_id = _identifier(item.get("id"))
-        inspection = self._cri_json(("inspectp", selected_id))
+        inspection = self._cri_response(
+            lambda: self._cri.pod_sandbox_status(selected_id)
+        )
         sandbox_status = _mapping(
             inspection.get("status"), "Kubernetes sandbox lookup failed"
         )
@@ -366,6 +331,10 @@ class BoundedCriCgroupInspector:
                 containers, key=lambda value: _identifier(value.get("id"))
             )
         )
+        state = sandbox_status.get("state")
+        if state not in {"SANDBOX_READY", "SANDBOX_NOTREADY"}:
+            raise KubernetesRuntimeError("Kubernetes sandbox lookup failed")
+        runtime_active = state == "SANDBOX_READY" and "RUNNING" in container_states
         cgroup_path = _cgroup_path(info, pod_uid)
         cgroup = self._host_cgroup(cgroup_path)
         present = _directory_present(cgroup)
@@ -376,12 +345,11 @@ class BoundedCriCgroupInspector:
         workspace = self._workspace(
             containers,
             observed_pod,
-            present=present and "RUNNING" in container_states,
+            present=present and runtime_active,
         )
-        interfaces, addresses, routes, neighbors = self._network(info)
-        state = sandbox_status.get("state")
-        if state not in {"SANDBOX_READY", "SANDBOX_NOTREADY"}:
-            raise KubernetesRuntimeError("Kubernetes sandbox lookup failed")
+        interfaces, addresses, routes, neighbors = self._network(
+            info, runtime_active=runtime_active
+        )
         return SandboxSnapshot(
             pod_uid,
             node_uid,
@@ -465,9 +433,7 @@ class BoundedCriCgroupInspector:
         return matches[0]
 
     def _sandboxes(self, pod_uid: UUID) -> tuple[Mapping[str, object], ...]:
-        payload = self._cri_json(
-            ("pods", "--label", f"{_POD_UID_LABEL}={pod_uid}", "--output", "json")
-        )
+        payload = self._cri_response(lambda: self._cri.list_pod_sandboxes(pod_uid))
         items = _mapping_items(payload.get("items"), self._limits.max_sandboxes)
         for item in items:
             metadata = _mapping(
@@ -481,8 +447,8 @@ class BoundedCriCgroupInspector:
     def _containers(
         self, sandbox_id: str, pod_uid: UUID
     ) -> tuple[Mapping[str, object], ...]:
-        payload = self._cri_json(
-            ("ps", "--all", "--pod", sandbox_id, "--output", "json")
+        payload = self._cri_response(
+            lambda: self._cri.list_containers(sandbox_id, pod_uid)
         )
         items = _mapping_items(payload.get("containers"), self._limits.max_containers)
         if not items:
@@ -497,22 +463,15 @@ class BoundedCriCgroupInspector:
                 raise KubernetesRuntimeError("Kubernetes container lookup failed")
         return items
 
-    def _cri_json(self, arguments: Sequence[str]) -> Mapping[str, object]:
-        argv = (
-            "--runtime-endpoint",
-            self._config.cri_endpoint,
-            "--image-endpoint",
-            self._config.cri_endpoint,
-            "--timeout",
-            f"{self._limits.operation_seconds}s",
-            *arguments,
-        )
+    def _cri_response(
+        self, operation: Callable[[], Mapping[str, object]]
+    ) -> Mapping[str, object]:
         try:
-            _, output = self._command(argv, max_output_bytes=self._limits.output_bytes)
-            value = json.loads(output.decode("ascii"))
+            return _mapping(operation(), "Kubernetes CRI response is invalid")
+        except KubernetesRuntimeError:
+            raise
         except Exception:
             raise KubernetesRuntimeError("Kubernetes CRI inspection failed") from None
-        return _mapping(value, "Kubernetes CRI response is invalid")
 
     def _host_cgroup(self, canonical: str) -> Path:
         if type(canonical) is not str or not canonical.startswith("/sys/fs/cgroup/"):
@@ -533,38 +492,20 @@ class BoundedCriCgroupInspector:
         present: bool,
         fallback: tuple[int, int, int],
         pids_fallback: int,
-    ) -> tuple[int, int, int, int, bool, tuple[int, ...]]:
+    ) -> tuple[int, int, int, int, bool, int]:
         if not present:
-            return (*fallback, pids_fallback, False, ())
+            return (*fallback, pids_fallback, False, 0)
         quota, period = _cpu_max(_read_text(path / "cpu.max"))
         memory = _limit(_read_text(path / "memory.max"))
         pids = _limit(_read_text(path / "pids.max"))
         populated = _populated(_read_text(path / "cgroup.events"))
-        descendants = self._descendant_pids(path)
+        descendants = _nonnegative_text_int(_read_text(path / "pids.current").strip())
+        if descendants > self._limits.max_descendant_pids:
+            raise KubernetesRuntimeError("Kubernetes cgroup lookup exceeded its limit")
         return quota, period, memory, pids, populated, descendants
 
-    def _descendant_pids(self, root: Path) -> tuple[int, ...]:
-        directories = [root]
-        result: set[int] = set()
-        for directory in root.rglob("*"):
-            if directory.is_dir():
-                directories.append(directory)
-                if len(directories) > self._limits.max_cgroup_directories:
-                    raise KubernetesRuntimeError(
-                        "Kubernetes cgroup lookup exceeded its limit"
-                    )
-        for directory in directories:
-            for line in _read_text(directory / "cgroup.procs").splitlines():
-                pid = _positive_int(line)
-                result.add(pid)
-                if len(result) > self._limits.max_descendant_pids:
-                    raise KubernetesRuntimeError(
-                        "Kubernetes cgroup lookup exceeded its limit"
-                    )
-        return tuple(sorted(result))
-
     def _network(
-        self, info: Mapping[str, object]
+        self, info: Mapping[str, object], *, runtime_active: bool
     ) -> tuple[
         tuple[str, ...],
         tuple[str, ...],
@@ -587,7 +528,14 @@ class BoundedCriCgroupInspector:
             [],
         ):
             raise KubernetesRuntimeError("Kubernetes network isolation is invalid")
-        pid = _positive_int(info.get("pid"))
+        if not runtime_active:
+            return (
+                _EXPECTED_NETWORK_INTERFACES,
+                _EXPECTED_NETWORK_ADDRESSES,
+                (),
+                (),
+            )
+        pid = _observable_pid(info.get("pid"))
         network = self._config.proc_root / str(pid) / "net"
         interfaces = _network_interfaces(_read_text(network / "dev"))
         addresses = _network_addresses(_read_text(network / "fib_trie"))
@@ -617,20 +565,15 @@ class BoundedCriCgroupInspector:
         if len(containers) != 1:
             raise KubernetesRuntimeError("Kubernetes workspace inspection failed")
         container_id = _identifier(containers[0].get("id"))
-        inspection = self._cri_json(("inspect", container_id))
+        inspection = self._cri_response(
+            lambda: self._cri.container_status(container_id)
+        )
         info = _mapping(
             inspection.get("info"), "Kubernetes workspace inspection failed"
         )
-        pid = _positive_int(info.get("pid"))
+        pid = _observable_pid(info.get("pid"))
         mountinfo = _read_text(self._config.proc_root / str(pid) / "mountinfo")
-        filesystem, flags = _mountinfo(mountinfo, "/work")
-        try:
-            stats = self._statvfs(self._config.proc_root / str(pid) / "root" / "work")
-            actual_size = stats.f_frsize * stats.f_blocks
-        except OSError:
-            raise KubernetesRuntimeError(
-                "Kubernetes workspace inspection failed"
-            ) from None
+        filesystem, actual_size, flags = _mountinfo(mountinfo, "/work")
         return filesystem, actual_size, flags
 
 
@@ -687,10 +630,22 @@ def _positive_int(value: object) -> int:
     return result
 
 
+def _observable_pid(value: object) -> int:
+    if value in {0, "0"}:
+        raise KubernetesAttestationNotReady("Kubernetes process is not observable")
+    return _positive_int(value)
+
+
 def _nonnegative_int(value: object) -> int:
     if type(value) is not int or value < 0:
         raise KubernetesRuntimeError("Kubernetes numeric value is invalid")
     return value
+
+
+def _nonnegative_text_int(value: str) -> int:
+    if not value or not value.isascii() or not value.isdecimal():
+        raise KubernetesRuntimeError("Kubernetes numeric value is invalid")
+    return int(value)
 
 
 def _yaml_mapping(path: Path) -> Mapping[str, object]:
@@ -909,8 +864,8 @@ def _workspace_size(pod: Mapping[str, object]) -> int:
     return _positive_int(empty.get("sizeLimit"))
 
 
-def _mountinfo(value: str, target: str) -> tuple[str, tuple[str, ...]]:
-    matches: list[tuple[str, tuple[str, ...]]] = []
+def _mountinfo(value: str, target: str) -> tuple[str, int, tuple[str, ...]]:
+    matches: list[tuple[str, int, tuple[str, ...]]] = []
     for line in value.splitlines():
         fields = line.split()
         if (
@@ -922,13 +877,30 @@ def _mountinfo(value: str, target: str) -> tuple[str, tuple[str, ...]]:
         separator = fields.index("-")
         if separator + 3 >= len(fields):
             raise KubernetesRuntimeError("Kubernetes workspace mount is invalid")
-        flags = set(fields[5].split(",")) | set(fields[separator + 3].split(","))
+        super_options = fields[separator + 3].split(",")
+        sizes = [
+            item.removeprefix("size=")
+            for item in super_options
+            if item.startswith("size=")
+        ]
+        if len(sizes) != 1:
+            raise KubernetesRuntimeError("Kubernetes workspace mount is invalid")
+        flags = set(fields[5].split(",")) | set(super_options)
         matches.append(
             (
                 fields[separator + 1],
+                _mount_size(sizes[0]),
                 tuple(sorted(flags & set(_EXPECTED_WORKSPACE_FLAGS))),
             )
         )
     if len(matches) != 1:
         raise KubernetesRuntimeError("Kubernetes workspace mount is invalid")
     return matches[0]
+
+
+def _mount_size(value: str) -> int:
+    match = re.fullmatch(r"([1-9][0-9]*)([kKmMgG]?)", value)
+    if match is None:
+        raise KubernetesRuntimeError("Kubernetes workspace mount is invalid")
+    multipliers = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
+    return int(match.group(1)) * multipliers[match.group(2).lower()]

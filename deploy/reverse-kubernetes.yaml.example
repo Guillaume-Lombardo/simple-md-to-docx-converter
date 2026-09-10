@@ -65,7 +65,7 @@ rules:
     verbs: ["create", "delete", "get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["create", "get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -153,7 +153,6 @@ data:
       "server_certificate_file": "/run/markweave-tls/tls.crt",
       "server_private_key_file": "/run/markweave-tls/tls.key",
       "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
-      "cri_executable": "/host/usr/local/bin/crictl",
       "cri_endpoint": "unix:///run/markweave-cri/proxy.sock",
       "kubelet_config": "/host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf",
       "cni_config": "/host/var/lib/rancher/k3s/agent/etc/cni/net.d/00-markweave-isolated.conflist",
@@ -177,7 +176,6 @@ data:
       "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@,
       "max_sandboxes": @REQUIRED_ATTESTER_MAX_SANDBOXES@,
       "max_containers": @REQUIRED_ATTESTER_MAX_CONTAINERS@,
-      "max_cgroup_directories": @REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@,
       "max_descendant_pids": @REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@
     }
 ---
@@ -319,7 +317,6 @@ spec:
             - {name: authentication, mountPath: /run/markweave-auth/key, subPath: key, readOnly: true}
             - {name: state, mountPath: /var/lib/markweave-attester}
             - {name: cri-proxy-socket, mountPath: /run/markweave-cri}
-            - {name: crictl, mountPath: /host/usr/local/bin/crictl, readOnly: true}
             - {name: cgroup, mountPath: /host/sys/fs/cgroup, readOnly: true}
             - {name: proc, mountPath: /host/proc, readOnly: true}
             - {name: kubelet-config, mountPath: /host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, readOnly: true}
@@ -357,9 +354,6 @@ spec:
         - {name: state, hostPath: {path: /var/lib/markweave-attester, type: Directory}}
         - {name: cri-proxy-socket, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
         - {name: cri-socket, hostPath: {path: /run/k3s/containerd/containerd.sock, type: Socket}}
-        # k3s' /usr/local/bin/crictl is a bootstrap symlink that requires writable extraction
-        # state. Mount the already extracted multicall binary at a basename that selects crictl.
-        - {name: crictl, hostPath: {path: /var/lib/rancher/k3s/data/current/bin/k3s, type: File}}
         - {name: cgroup, hostPath: {path: /sys/fs/cgroup, type: Directory}}
         - {name: proc, hostPath: {path: /proc, type: Directory}}
         - {name: kubelet-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, type: File}}

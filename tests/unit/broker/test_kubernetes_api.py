@@ -157,7 +157,7 @@ class _ExecSession:
         self.input += data
 
     def close_stdin(self) -> None:
-        if "SIGKILL" in self.command[2]:
+        if "SIGTERM" in self.command[2]:
             return
         if self.command[2].startswith("import base64,json,os,sys"):
             payload = json.loads(self.input)
@@ -251,7 +251,7 @@ def test_control_plane_uses_exact_namespace_identity_and_fixed_exec_contract() -
     assert api.deleted.preconditions.uid == str(POD_UID)
     assert control.absent(pod) is True
     control.delete(pod)
-    assert any("SIGKILL" in command[2] for command in executions.commands)
+    assert any("SIGTERM" in command[2] for command in executions.commands)
 
 
 @pytest.mark.unit
@@ -508,6 +508,7 @@ def test_websocket_upgrade_receives_the_exact_connect_timeout(
         )
 
     assert observed["timeout"] == 0.25
+    assert observed["subprotocols"] == ["v5.channel.k8s.io"]
 
 
 @pytest.mark.unit
@@ -560,10 +561,8 @@ def test_websocket_upgrade_forwards_pinned_tls_headers_and_proxy_options(
     proxycare.assert_called_once()
     websocket.connect.assert_called_once_with(
         "wss://node/exec",
-        header=[
-            "authorization: Bearer opaque",
-            "sec-websocket-protocol: v5.channel.k8s.io",
-        ],
+        header=["authorization: Bearer opaque"],
+        subprotocols=["v5.channel.k8s.io"],
         timeout=0.25,
         http_proxy_host="proxy",
     )
@@ -672,6 +671,39 @@ def test_bounded_websocket_client_tracks_pinned_wsclient_initialization_contract
         for client in (bounded, upstream):
             with pytest.raises(TypeError, match="configured to not capture"):
                 client.read_all()
+
+
+@pytest.mark.unit
+def test_bounded_websocket_client_half_closes_only_stdin_via_v5(
+    mocker: MockerFixture,
+) -> None:
+    socket = SimpleNamespace(
+        subprotocol="v5.channel.k8s.io",
+        send=mocker.Mock(),
+    )
+    mocker.patch.object(
+        kubernetes_api_module,
+        "_bounded_create_websocket",
+        return_value=socket,
+    )
+    client = kubernetes_api_module._BoundedWsClient(
+        SimpleNamespace(),
+        "ws://node/exec",
+        None,
+        False,
+        binary=False,
+        timeout_seconds=0.25,
+    )
+
+    client.close_stdin()
+
+    socket.send.assert_called_once_with(
+        bytes((255, 0)),
+        opcode=kubernetes_api_module.ws_client.ABNF.OPCODE_BINARY,
+    )
+    socket.subprotocol = "v4.channel.k8s.io"
+    with pytest.raises(KubernetesRuntimeError, match="exec protocol is invalid"):
+        client.close_stdin()
 
 
 @pytest.mark.unit

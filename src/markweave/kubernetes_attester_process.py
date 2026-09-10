@@ -22,12 +22,12 @@ from markweave.broker.kubernetes_attester_transport import (
     AttesterTransportLimits,
     NodeAttesterService,
 )
+from markweave.broker.kubernetes_cri import GrpcCriRuntimeClient
 from markweave.broker.kubernetes_inspector import (
     BoundedCriCgroupInspector,
     InspectorConfig,
     InspectorLimits,
     KubernetesReadApi,
-    build_cri_command,
 )
 from markweave.broker.models import EvidenceDigest
 
@@ -44,7 +44,6 @@ _EXPECTED_KEYS = frozenset(
         "cni_plugin_sha256",
         "client_ca_file",
         "cri_endpoint",
-        "cri_executable",
         "expected_client_certificate_sha256",
         "hard_shutdown_timeout_seconds",
         "inventory_authentication_key_file",
@@ -53,7 +52,6 @@ _EXPECTED_KEYS = frozenset(
         "kubelet_config",
         "listen_host",
         "listen_port",
-        "max_cgroup_directories",
         "max_concurrent_requests",
         "max_containers",
         "max_descendant_pids",
@@ -84,7 +82,6 @@ class AttesterProcessConfig:
     node_name: str
     inspector: InspectorConfig
     inspector_limits: InspectorLimits
-    cri_executable: Path
     tls: AttesterServerTlsConfig
     transport_limits: AttesterTransportLimits
     inventory_path: Path
@@ -98,8 +95,6 @@ class AttesterProcessConfig:
             or not self.node_name
             or type(self.inspector) is not InspectorConfig
             or type(self.inspector_limits) is not InspectorLimits
-            or not isinstance(self.cri_executable, Path)
-            or not self.cri_executable.is_absolute()
             or type(self.tls) is not AttesterServerTlsConfig
             or type(self.transport_limits) is not AttesterTransportLimits
             or not isinstance(self.inventory_path, Path)
@@ -131,7 +126,6 @@ def load_config(path: Path, *, node_name: str) -> AttesterProcessConfig:
             _integer(settings, "max_response_bytes"),
             _integer(settings, "max_sandboxes"),
             _integer(settings, "max_containers"),
-            _integer(settings, "max_cgroup_directories"),
             _integer(settings, "max_descendant_pids"),
         )
         return AttesterProcessConfig(
@@ -152,7 +146,6 @@ def load_config(path: Path, *, node_name: str) -> AttesterProcessConfig:
                 _path(settings, "proc_root"),
             ),
             inspector_limits,
-            _path(settings, "cri_executable"),
             AttesterServerTlsConfig(
                 _text(settings, "listen_host"),
                 _integer(settings, "listen_port", allow_zero=True),
@@ -194,7 +187,11 @@ def build_server(config: AttesterProcessConfig) -> AttesterHttpsServer:
         config.inspector,
         config.inspector_limits,
         api,
-        build_cri_command(config.cri_executable, config.inspector_limits),
+        GrpcCriRuntimeClient.connect(
+            config.inspector.cri_endpoint,
+            operation_seconds=config.inspector_limits.operation_seconds,
+            output_bytes=config.inspector_limits.output_bytes,
+        ),
     )
     fence = inspector.node_fence(config.node_name)
     if fence.ready is not True:

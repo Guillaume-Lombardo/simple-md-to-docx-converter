@@ -108,7 +108,6 @@ def render(
         "@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@": "4",
         "@REQUIRED_ATTESTER_MAX_SANDBOXES@": "128",
         "@REQUIRED_ATTESTER_MAX_CONTAINERS@": "256",
-        "@REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@": "1024",
         "@REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@": "64",
     }
     for placeholder, value in replacements.items():

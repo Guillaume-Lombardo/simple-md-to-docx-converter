@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import Any, cast
 from uuid import UUID
@@ -245,6 +246,27 @@ def test_main_reads_executes_and_writes_without_output(mocker: Any) -> None:
 
     assert attempt_main.main() == 0
     write.assert_called_once_with(response, channel_limits)
+
+
+def test_linger_exits_cleanly_when_the_broker_sends_sigterm(mocker: Any) -> None:
+    installed: dict[int, object] = {}
+
+    def install(number: int, handler: object) -> object:
+        previous = installed.get(number, attempt_main.signal.SIG_DFL)
+        installed[number] = handler
+        return previous
+
+    mocker.patch.object(attempt_main.signal, "signal", side_effect=install)
+
+    def pause() -> None:
+        handler = installed[attempt_main.signal.SIGTERM]
+        assert callable(handler)
+        cast(Callable[[int, object], None], handler)(attempt_main.signal.SIGTERM, None)
+
+    mocker.patch.object(attempt_main.signal, "pause", side_effect=pause)
+
+    assert attempt_main._linger_until_terminated() == 0
+    assert installed[attempt_main.signal.SIGTERM] is attempt_main.signal.SIG_DFL
 
 
 def test_main_rejects_arguments_and_unreadable_request(mocker: Any) -> None:

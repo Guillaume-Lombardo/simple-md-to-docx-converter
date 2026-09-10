@@ -56,6 +56,33 @@ backend.
 
 ## Progress
 
+* 2026-09-11: Replaced `crictl` with the selected purpose-built gRPC client generated from an
+  intentionally minimal, wire-compatible CRI v1 schema. The client and Envoy allowlist expose only
+  `Version`, `ListPodSandbox`, `PodSandboxStatus`, `ListContainers`, and `ContainerStatus`; neither
+  ImageService nor any mutation method is present. The exact attester image
+  `sha256:184c047d56529d86689b3c0ca825f51459e78607589b5655ae496b47fa1892e0` and exact attempt image
+  `sha256:d92d26a4eafe8ffe562ca518c15e09342d765ea34d6b35ac01b9b4611312ee11` completed a pristine
+  broker/attester/attempt lifecycle on the approved logically dedicated `codex-dev` k3s worker.
+  The run produced a 2,044-byte result with SHA-256
+  `efd83ae4ca5a6931697deb116c990756bb0454384ed121916de520cdecf8c328`, retained exact exit/empty/
+  removal evidence through acknowledgement, and left no attester ledger record. Live inspection
+  proved the exact container and sandbox identities, CPU `50000/100000`, memory `134217728`,
+  hierarchical PID count with `pids.max=64`, a 32 MiB `tmpfs` `/work` mounted
+  `rw,nodev,noexec,nosuid`, and the isolated `lo`/dummy-`eth0` network with no route or neighbor.
+  A direct v5 Kubernetes exec probe also proved bounded stdin close and successful completion.
+  Namespaces, cluster-scoped objects, labels, taint, imported images, credentials, ledger, and host
+  assets were removed, and k3s is inactive and disabled again. Ruff, `ty`, `git diff --check`, and
+  246 focused tests pass with 95.06% combined branch coverage. The canonical engine-excluded run
+  reached 4,200 passes and 94.37% repository coverage; its 44 PostgreSQL setup errors, three RustFS
+  failures, and two release-test failures are unrelated unavailable-environment/pre-existing
+  failures, and its one change-related package-matrix assertion was updated and reverified. T74
+  remains In Progress: this approved development substitution is not physical dedicated-pool
+  evidence, and the required exact-image restart/recovery and negative real-cluster matrix remains
+  unexecuted on such a production-equivalent pool.
+* 2026-09-10: The product manager selected the least-privilege CRI client design. The Envoy proxy
+  allowlist remains limited to the exact five approved RuntimeService methods, and the attester
+  must replace `crictl` with a purpose-built client that has no ImageService operation. Exact-image
+  real-cluster acceptance resumes under this decision.
 * 2026-09-10: The simulated-dedicated exact-image run exposed and fixed two deployment-only
   failures: UBI 9's SQLite does not support `STRICT` tables, so the attester ledger now uses
   equivalent explicit `typeof(...)` constraints, and the DaemonSet mounts k3s' already extracted

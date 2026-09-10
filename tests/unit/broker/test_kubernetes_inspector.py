@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,9 +16,11 @@ from markweave.broker.kubernetes_inspector import (
     InspectorConfig,
     InspectorLimits,
     KubernetesReadApi,
-    build_cri_command,
 )
-from markweave.broker.kubernetes_runtime import KubernetesRuntimeError
+from markweave.broker.kubernetes_runtime import (
+    KubernetesAttestationNotReady,
+    KubernetesRuntimeError,
+)
 
 POD_UID = UUID("11111111-2222-4333-8444-555555555555")
 NODE_UID = UUID("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
@@ -85,7 +86,9 @@ class ApiDouble:
 class CommandDouble:
     def __init__(self) -> None:
         self.sandbox_state = "SANDBOX_READY"
+        self.sandbox_pid = 4321
         self.container_state = "CONTAINER_RUNNING"
+        self.container_pid = 4322
         self.routes: object = []
         self.interfaces: object = {
             "eth0": {
@@ -120,63 +123,65 @@ class CommandDouble:
         self.fail = False
         self.cgroup_parent = CGROUP_PARENT
 
-    def __call__(
-        self, arguments: Sequence[str], *, max_output_bytes: int | None = None
-    ) -> tuple[int, bytes]:
-        assert max_output_bytes == 65536
-        assert tuple(arguments[:2]) == (
-            "--runtime-endpoint",
-            "unix:///run/containerd.sock",
-        )
+    def _check(self) -> None:
         if self.fail:
             raise RuntimeError("sensitive command failure")
-        if "inspectp" in arguments:
-            value = {
-                "status": {
-                    "id": SANDBOX_ID,
-                    "metadata": {
-                        "name": "attempt-1",
-                        "namespace": "markweave-reverse",
-                        "uid": str(POD_UID),
-                    },
-                    "state": self.sandbox_state,
+
+    def pod_sandbox_status(self, sandbox_id: str) -> Mapping[str, object]:
+        self._check()
+        assert sandbox_id == SANDBOX_ID
+        return {
+            "status": {
+                "id": SANDBOX_ID,
+                "metadata": {
+                    "name": "attempt-1",
+                    "namespace": "markweave-reverse",
+                    "uid": str(POD_UID),
                 },
-                "info": {
-                    "pid": 4321,
-                    "cniResult": {
-                        "Interfaces": self.interfaces,
-                        "Routes": self.routes,
-                    },
-                    "config": {
-                        "linux": {
-                            "cgroup_parent": self.cgroup_parent,
-                            "resources": {
-                                "cpu_quota": 50000,
-                                "cpu_period": 100000,
-                                "memory_limit_in_bytes": 134217728,
-                            },
-                        }
-                    },
+                "state": self.sandbox_state,
+            },
+            "info": {
+                "pid": self.sandbox_pid,
+                "cniResult": {
+                    "Interfaces": self.interfaces,
+                    "Routes": self.routes,
                 },
-            }
-        elif "pods" in arguments:
-            value = {"items": self.sandboxes}
-        elif "ps" in arguments:
-            containers = deepcopy(self.containers)
-            assert isinstance(containers, list)
-            for item in containers:
-                item["state"] = self.container_state
-            value = {"containers": containers}
-        elif "inspect" in arguments:
-            value = {"info": {"pid": 4322}}
-        else:
-            raise AssertionError(arguments)
-        return 0, json.dumps(value).encode("ascii")
+                "config": {
+                    "linux": {
+                        "cgroup_parent": self.cgroup_parent,
+                        "resources": {
+                            "cpu_quota": 50000,
+                            "cpu_period": 100000,
+                            "memory_limit_in_bytes": 134217728,
+                        },
+                    }
+                },
+            },
+        }
+
+    def list_pod_sandboxes(self, pod_uid: UUID) -> Mapping[str, object]:
+        self._check()
+        assert pod_uid == POD_UID
+        return {"items": self.sandboxes}
+
+    def list_containers(self, sandbox_id: str, pod_uid: UUID) -> Mapping[str, object]:
+        self._check()
+        assert (sandbox_id, pod_uid) == (SANDBOX_ID, POD_UID)
+        containers = deepcopy(self.containers)
+        assert isinstance(containers, list)
+        for item in containers:
+            item["state"] = self.container_state
+        return {"containers": containers}
+
+    def container_status(self, container_id: str) -> Mapping[str, object]:
+        self._check()
+        assert container_id == CONTAINER_ID
+        return {"info": {"pid": self.container_pid}}
 
 
 @pytest.fixture
 def limits() -> InspectorLimits:
-    return InspectorLimits(2, 65536, 4, 4, 8, 16)
+    return InspectorLimits(2, 65536, 4, 4, 16)
 
 
 @pytest.fixture
@@ -191,14 +196,12 @@ def inspector(
         "cpu memory pids\n", encoding="ascii"
     )
     cgroup = cgroup_root / CGROUP_PARENT.removeprefix("/")
-    child = cgroup / "child.scope"
-    child.mkdir(parents=True)
+    cgroup.mkdir(parents=True)
     (cgroup / "cpu.max").write_text("50000 100000\n", encoding="ascii")
     (cgroup / "memory.max").write_text("134217728\n", encoding="ascii")
     (cgroup / "pids.max").write_text("64\n", encoding="ascii")
     (cgroup / "cgroup.events").write_text("populated 1\nfrozen 0\n", encoding="ascii")
-    (cgroup / "cgroup.procs").write_text("41\n", encoding="ascii")
-    (child / "cgroup.procs").write_text("42\n", encoding="ascii")
+    (cgroup / "pids.current").write_text("2\n", encoding="ascii")
     proc_root = tmp_path / "proc"
     sandbox = proc_root / "4321"
     (sandbox / "net").mkdir(parents=True)
@@ -223,9 +226,10 @@ def inspector(
         "IP address HW type Flags HW address Mask Device\n", encoding="ascii"
     )
     process = proc_root / "4322"
-    (process / "root" / "work").mkdir(parents=True)
+    process.mkdir(parents=True)
     (process / "mountinfo").write_text(
-        "1 2 0:1 / /work rw,nosuid,nodev,noexec - tmpfs tmpfs rw,nosuid,nodev,noexec\n",
+        "1 2 0:1 / /work rw,nosuid,nodev,noexec - tmpfs tmpfs "
+        "rw,nosuid,nodev,noexec,size=32768k\n",
         encoding="ascii",
     )
     api = ApiDouble()
@@ -257,7 +261,6 @@ def inspector(
         limits,
         api,
         command,
-        statvfs=lambda _: SimpleNamespace(f_frsize=4096, f_blocks=8192),
     )
     return instance, api, command, cgroup
 
@@ -299,7 +302,7 @@ def test_sandbox_reads_positive_cri_network_workspace_and_cgroup_facts(
     assert snapshot.cgroup_lookup_complete is True
     assert snapshot.cgroup_present is True
     assert snapshot.cgroup_populated is True
-    assert snapshot.descendant_pids == (41, 42)
+    assert snapshot.descendant_count == 2
     assert snapshot.cpu_quota_micros == 50000
     assert snapshot.cpu_period_micros == 100000
     assert snapshot.memory_max_bytes == 134217728
@@ -330,7 +333,7 @@ def test_exact_absent_cgroup_is_bounded_empty_fact_after_cri_exit(
     assert snapshot.cgroup_lookup_complete is True
     assert snapshot.cgroup_present is False
     assert snapshot.cgroup_populated is False
-    assert snapshot.descendant_pids == ()
+    assert snapshot.descendant_count == 0
     assert snapshot.workspace_size_bytes == 33554432
 
 
@@ -519,8 +522,8 @@ def test_node_fence_reports_not_ready_without_treating_it_as_ready(
 @pytest.mark.parametrize(
     "factory",
     [
-        lambda path: InspectorLimits(0, 65536, 1, 1, 1, 1),
-        lambda path: InspectorLimits(1, 1, 1, 1, 1, 1),
+        lambda path: InspectorLimits(0, 65536, 1, 1, 1),
+        lambda path: InspectorLimits(1, 1, 1, 1, 1),
         lambda path: InspectorConfig(
             "",
             "unix:///run/c.sock",
@@ -602,16 +605,6 @@ def test_kubernetes_read_api_serializes_and_closes_failures() -> None:
 
 
 @pytest.mark.unit
-def test_cri_command_builder_requires_absolute_binary(
-    limits: InspectorLimits, tmp_path: Path
-) -> None:
-    with pytest.raises(ValueError, match="executable"):
-        build_cri_command(Path("crictl"), limits)
-    runner = build_cri_command(tmp_path / "crictl", limits)
-    assert callable(runner)
-
-
-@pytest.mark.unit
 def test_read_api_rejects_invalid_adapter_and_closes_client_failure() -> None:
     with pytest.raises(ValueError, match="read API"):
         KubernetesReadApi(object(), lambda value: value, operation_seconds=1)
@@ -659,7 +652,7 @@ def test_inspector_constructor_and_public_identity_inputs_fail_closed(
     with pytest.raises(ValueError, match="inspector is invalid"):
         BoundedCriCgroupInspector(
             cast(InspectorConfig, object()),
-            InspectorLimits(1, 4096, 1, 1, 1, 1),
+            InspectorLimits(1, 4096, 1, 1, 1),
             api,
             command,
         )
@@ -694,6 +687,7 @@ def test_sandbox_selects_unique_latest_nonready_attempt(
 ) -> None:
     instance, _, command, _ = inspector
     command.sandbox_state = "SANDBOX_NOTREADY"
+    command.sandbox_pid = 0
     command.container_state = "CONTAINER_EXITED"
     assert isinstance(command.sandboxes, list)
     command.sandboxes[0]["state"] = "SANDBOX_NOTREADY"
@@ -704,6 +698,22 @@ def test_sandbox_selects_unique_latest_nonready_attempt(
     command.sandboxes.append(older)
 
     assert instance.sandbox(POD_UID).sandbox_id == SANDBOX_ID
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pid_source", ["sandbox", "container"])
+def test_sandbox_retries_only_an_explicit_zero_runtime_pid(
+    inspector: tuple[BoundedCriCgroupInspector, ApiDouble, CommandDouble, Path],
+    pid_source: str,
+) -> None:
+    instance, _, command, _ = inspector
+    if pid_source == "sandbox":
+        command.sandbox_pid = 0
+    else:
+        command.container_pid = 0
+
+    with pytest.raises(KubernetesAttestationNotReady, match="not observable"):
+        instance.sandbox(POD_UID)
 
 
 @pytest.mark.unit
@@ -739,6 +749,10 @@ def test_cgroup_and_workspace_limits_fail_closed(
     with pytest.raises(KubernetesRuntimeError, match="CPU cgroup"):
         instance.sandbox(POD_UID)
     (cgroup / "cpu.max").write_text("50000 100000\n", encoding="ascii")
+    (cgroup / "pids.current").write_text("17\n", encoding="ascii")
+    with pytest.raises(KubernetesRuntimeError, match="exceeded"):
+        instance.sandbox(POD_UID)
+    (cgroup / "pids.current").write_text("2\n", encoding="ascii")
     assert isinstance(command.containers, list)
     command.containers.append(deepcopy(command.containers[0]))
     command.containers[1]["id"] = "8" * 64
@@ -799,4 +813,4 @@ def test_bounded_file_and_yaml_reads_reject_invalid_material(tmp_path: Path) -> 
     invalid_yaml.write_text("[", encoding="ascii")
     with pytest.raises(KubernetesRuntimeError, match="kubelet configuration"):
         target._yaml_mapping(invalid_yaml)
-    assert target._statvfs(tmp_path).f_blocks > 0
+    assert target._mount_size("32m") == 33554432

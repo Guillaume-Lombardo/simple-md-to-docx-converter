@@ -279,7 +279,7 @@ class InspectorDouble:
             "cgroup_lookup_complete": True,
             "cgroup_present": True,
             "cgroup_populated": running,
-            "descendant_pids": (123,) if running else (),
+            "descendant_count": 1 if running else 0,
         }
         values.update(self.override_sandbox)
         return SandboxSnapshot(**values)
@@ -539,6 +539,8 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     metadata["uid"] = str(POD_UID)
     specification = observed["spec"]
     assert isinstance(specification, dict)
+    for omitted in ("hostIPC", "hostNetwork", "hostPID"):
+        del specification[omitted]
     specification["nodeName"] = "reverse-node-1"
     specification["preemptionPolicy"] = "PreemptLowerPriority"
     specification["priority"] = 0
@@ -564,6 +566,15 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     )
     container = specification["containers"][0]
     assert isinstance(container, dict)
+    del container["args"]
+    field_reference = cast(
+        dict[str, object],
+        cast(
+            dict[str, object],
+            cast(list[dict[str, object]], container["env"])[0]["valueFrom"],
+        )["fieldRef"],
+    )
+    field_reference["apiVersion"] = "v1"
     container["terminationMessagePath"] = "/dev/termination-log"
     container["terminationMessagePolicy"] = "File"
     resources = container["resources"]
@@ -792,7 +803,7 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
 
     inspector.fail_operation = None
     runtime_unit = runtime.create(unit, policy)
-    engine = NodeAttestationEngine(inspector)
+    engine = cast(NodeAttestationEngine, runtime._attester)
     with pytest.raises(KubernetesRuntimeError, match="exit evidence"):
         engine.confirm_empty(runtime_unit, cast(EvidenceDigest, object()))
     with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
@@ -801,6 +812,8 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
         engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
 
     inspector.fail_operation = "sandbox"
+    with pytest.raises(KubernetesAttestationNotReady, match="not observable"):
+        engine.confirm_exit(runtime_unit)
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
 
@@ -1293,7 +1306,7 @@ def test_exit_and_empty_require_positive_cri_and_cgroup_facts(
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
     control.terminated = True
-    inspector.override_sandbox = {"descendant_pids": (999,)}
+    inspector.override_sandbox = {"descendant_count": 1}
     with pytest.raises(KubernetesRuntimeError, match="not empty"):
         runtime.confirm_empty(runtime_unit)
     inspector.override_sandbox = {"sandbox_id": "a" * 64}
@@ -1312,7 +1325,7 @@ def test_complete_absence_of_exact_bound_cgroup_is_accepted_after_exit(
         "sandbox_ready": True,
         "cgroup_present": False,
         "cgroup_populated": False,
-        "descendant_pids": (),
+        "descendant_count": 0,
     }
 
     exit_evidence = runtime.confirm_exit(runtime_unit)
@@ -1333,7 +1346,7 @@ def test_absent_cgroup_fails_closed_when_lookup_is_incomplete(
         "cgroup_lookup_complete": False,
         "cgroup_present": False,
         "cgroup_populated": False,
-        "descendant_pids": (),
+        "descendant_count": 0,
     }
 
     with pytest.raises(KubernetesRuntimeError, match="not empty"):
