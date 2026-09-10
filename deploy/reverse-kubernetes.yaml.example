@@ -100,6 +100,46 @@ kind: ServiceAccount
 metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 automountServiceAccountToken: false
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: markweave-node-attester-read-node}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: markweave-node-attester-read-node}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: markweave-node-attester-read-node
+subjects:
+  - kind: ServiceAccount
+    name: markweave-node-attester
+    namespace: markweave-attestation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: markweave-node-attester-read-pod, namespace: markweave-reverse}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: markweave-node-attester-read-pod, namespace: markweave-reverse}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: markweave-node-attester-read-pod
+subjects:
+  - kind: ServiceAccount
+    name: markweave-node-attester
+    namespace: markweave-attestation
+---
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: markweave-node-attester-config, namespace: markweave-attestation}
@@ -107,16 +147,30 @@ immutable: true
 data:
   attester.json: |
     {
-      "listen_address": "0.0.0.0:9443",
+      "listen_host": "0.0.0.0",
+      "listen_port": 9443,
       "client_ca_file": "/run/markweave-tls/ca.crt",
       "server_certificate_file": "/run/markweave-tls/tls.crt",
       "server_private_key_file": "/run/markweave-tls/tls.key",
-      "require_client_certificate": true,
       "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
+      "cri_executable": "/host/usr/local/bin/crictl",
+      "cri_endpoint": "unix:///host/run/k3s/containerd/containerd.sock",
+      "kubelet_config": "/host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf",
+      "cgroup_root": "/host/sys/fs/cgroup",
+      "proc_root": "/host/proc",
+      "inventory_path": "/var/lib/markweave-attester/inventory.sqlite3",
+      "inventory_authentication_key_file": "/run/markweave-auth/key",
+      "inventory_max_records": @REQUIRED_ATTESTER_MAX_RECORDS@,
       "max_request_bytes": @REQUIRED_ATTESTER_MAX_REQUEST_BYTES@,
       "max_response_bytes": @REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@,
       "request_timeout_seconds": @REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@,
-      "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@
+      "operation_timeout_seconds": @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@,
+      "hard_shutdown_timeout_seconds": @REQUIRED_ATTESTER_HARD_SHUTDOWN_TIMEOUT_SECONDS@,
+      "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@,
+      "max_sandboxes": @REQUIRED_ATTESTER_MAX_SANDBOXES@,
+      "max_containers": @REQUIRED_ATTESTER_MAX_CONTAINERS@,
+      "max_cgroup_directories": @REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@,
+      "max_descendant_pids": @REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@
     }
 ---
 apiVersion: v1
@@ -128,3 +182,84 @@ stringData:
   ca.crt: "@REQUIRED_BROKER_CLIENT_CA_PEM@"
   tls.crt: "@REQUIRED_ATTESTER_CERTIFICATE_PEM@"
   tls.key: "@REQUIRED_ATTESTER_PRIVATE_KEY_PEM@"
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: markweave-node-attester-auth, namespace: markweave-attestation}
+type: Opaque
+immutable: true
+stringData:
+  key: "@REQUIRED_ATTESTER_INVENTORY_AUTHENTICATION_KEY@"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: markweave-node-attester, namespace: markweave-attestation}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: markweave-node-attester}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: markweave-node-attester}
+    spec:
+      automountServiceAccountToken: true
+      dnsPolicy: ClusterFirstWithHostNet
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: true
+      hostPID: false
+      nodeSelector:
+        reverse.markweave.dev/isolation-pool: reverse
+        reverse.markweave.dev/node-fence: "@REQUIRED_NODE_FENCE_REVISION@"
+      serviceAccountName: markweave-node-attester
+      terminationGracePeriodSeconds: 10
+      tolerations:
+        - effect: NoSchedule
+          key: reverse.markweave.dev/dedicated
+          operator: Equal
+          value: reverse
+      containers:
+        - name: attester
+          image: "@REQUIRED_ATTESTER_IMAGE_REPOSITORY@@@REQUIRED_ATTESTER_IMAGE_DIGEST@"
+          imagePullPolicy: IfNotPresent
+          args: ["/etc/markweave/attester.json"]
+          env:
+            - name: MARKWEAVE_NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {name: mtls, containerPort: 9443, hostPort: 9443, protocol: TCP}
+          readinessProbe: {tcpSocket: {port: mtls}, periodSeconds: 2, timeoutSeconds: 1}
+          livenessProbe: {tcpSocket: {port: mtls}, periodSeconds: 10, timeoutSeconds: 1}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 16Mi}
+            limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 0
+            runAsNonRoot: false
+            runAsUser: 0
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: config, mountPath: /etc/markweave/attester.json, subPath: attester.json, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/ca.crt, subPath: ca.crt, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/tls.crt, subPath: tls.crt, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/tls.key, subPath: tls.key, readOnly: true}
+            - {name: authentication, mountPath: /run/markweave-auth/key, subPath: key, readOnly: true}
+            - {name: state, mountPath: /var/lib/markweave-attester}
+            - {name: cri-socket, mountPath: /host/run/k3s/containerd/containerd.sock, readOnly: true}
+            - {name: crictl, mountPath: /host/usr/local/bin/crictl, readOnly: true}
+            - {name: cgroup, mountPath: /host/sys/fs/cgroup, readOnly: true}
+            - {name: proc, mountPath: /host/proc, readOnly: true}
+            - {name: kubelet-config, mountPath: /host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: markweave-node-attester-config, defaultMode: 292}}
+        - {name: tls, secret: {secretName: markweave-node-attester-tls, defaultMode: 256}}
+        - {name: authentication, secret: {secretName: markweave-node-attester-auth, defaultMode: 256}}
+        - {name: state, hostPath: {path: /var/lib/markweave-attester, type: Directory}}
+        - {name: cri-socket, hostPath: {path: /run/k3s/containerd/containerd.sock, type: Socket}}
+        - {name: crictl, hostPath: {path: /usr/local/bin/crictl, type: File}}
+        - {name: cgroup, hostPath: {path: /sys/fs/cgroup, type: Directory}}
+        - {name: proc, hostPath: {path: /proc, type: Directory}}
+        - {name: kubelet-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, type: File}}

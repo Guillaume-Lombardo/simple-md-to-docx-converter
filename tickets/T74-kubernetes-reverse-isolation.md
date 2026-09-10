@@ -25,8 +25,11 @@ backend.
   PID/descendant, workspace/ephemeral, and autonomous deadline policy at the runtime/kernel boundary.
 * Use a memory-backed bounded workspace, fixed node-level PID policy, default-deny egress including
   node-local destinations, and fail-closed node fencing.
-* Prove the stable isolation unit is exited, empty, and removed using CRI/cgroup evidence; Pod
-  deletion, absence, force deletion, or an API acknowledgement alone is insufficient.
+* Prove the stable isolation unit is exited, empty, and removed using CRI/cgroup evidence. After
+  complete CRI evidence proves every container exited on the unchanged fenced node, a complete
+  negative lookup of the exact previously bound cgroup is accepted as kernel evidence that the
+  cgroup became empty before its runtime-managed removal. Pod deletion, Pod absence, force
+  deletion, an incomplete lookup, or an API acknowledgement alone is insufficient.
 * Preserve T70 inventory, reconciliation, tombstone, proof acknowledgement, and both authenticated
   broker transport contracts.
 * Add unit, integration, real-cluster, restart/recovery, failure, security, and exact-image E2E
@@ -53,6 +56,51 @@ backend.
 
 ## Progress
 
+* 2026-09-10: Implemented the reviewable portion preceding the CNI decision: a bounded read-only
+  Kubernetes/CRI/cgroup-v2 inspector, root-only production attester process, strict immutable
+  configuration, root-owned authenticated ledger wiring, least-privilege RBAC, hardened node-local
+  DaemonSet, digest-pinned minimal attester Containerfile, containerd runtime handler, and effective
+  kubelet configuration drop-in. The solution-3 absent-cgroup proof is covered by fail-closed tests.
+  Ruff, `ty`, `git diff --check`, 125 focused tests, and 119 focused coverage tests pass; the three
+  changed security modules reach 94.23% branch coverage. The canonical engine-excluded run passed
+  4,169 tests and reached 94.63% total coverage, with 44 PostgreSQL setup errors, three RustFS
+  failures, and two pre-existing release-integration failures caused by unavailable external
+  configuration or environment behavior. Its only change-related packaging failure was fixed and
+  reverified. The attester image build could not complete because repeated checksum-pinned `uv`
+  downloads from GitHub reset or stalled; no image/E2E success is claimed.
+* 2026-09-10: A second authorized real-k3s probe validated the dedicated runtime handler, effective
+  kubelet config drop-in (`podPidsLimit=64`, `cpuCFSQuotaPeriod=100ms`), exact node labels/taint,
+  and the concrete inspector's positive fence. The inspector correctly rejected a real Flannel
+  sandbox as non-isolated. A positive loopback-only probe then exposed a CRI constraint:
+  containerd refuses `RunPodSandbox` when CNI reports no non-loopback Pod IP; adding `127.0.0.1/8`
+  to the result is still rejected. Standard Kubernetes/containerd therefore cannot create the
+  currently required `lo`-only attempt sandbox. The namespace, RuntimeClass, labels, taint, CNI
+  probe files, kubelet/runtime drop-ins, and service changes were removed, and k3s was restored to
+  inactive/disabled. T74 is blocked on a product/security decision: either approve an isolated
+  non-loopback dummy interface with stronger kernel/netns attestation, approve maintaining a
+  patched CRI/runtime that accepts loopback-only Pod IPs, or retain the current contract and stop
+  Kubernetes backend work.
+* 2026-09-10: The product manager selected the bounded absent-cgroup proof design. T74 may treat a
+  complete negative lookup of the exact previously attested cgroup as empty evidence only after
+  complete CRI enumeration proves every bound container exited and the node fence and all retained
+  identities remain unchanged. This intentionally adapts the temporal proof contract to observed
+  containerd/kubelet cgroup lifecycle; Pod state, Pod absence, deletion acknowledgement, incomplete
+  enumeration, or an unbound path remain insufficient. Implementation resumes under this explicit
+  decision.
+* 2026-09-10: Authorized real-k3s inspection on `codex-dev` exposed a lifecycle
+  contract blocker before implementation of the concrete inspector. On k3s `v1.35.5+k3s1`,
+  containerd `2.2.3-k3s1`, and cgroup v2, an exact disposable probe showed that the bounded
+  workload container's cgroup is removed automatically after its process exits, while the stable
+  Pod cgroup remains populated by the CRI pause sandbox. Kubelet subsequently stops the sandbox
+  and removes the Pod cgroup automatically. The current contract requires positive durable
+  `EXITED`, `EMPTY`, and `REMOVED` transitions, with `EMPTY` recorded before the broker deletes the
+  exact Pod UID; neither available cgroup therefore supplies the required stable lifecycle. Treating
+  an already absent workload cgroup as proof that it was empty would change the approved proof
+  semantics. Preserving a separately removable stable cgroup instead requires a new trusted
+  node-level runtime wrapper or supervisor with cgroup-mutation authority, beyond the currently
+  approved read-only inspector. The probe namespace was deleted and k3s was returned to its initial
+  inactive/disabled state. T74 remains blocked pending the product/security choice between those
+  two designs; fake or Pod-API-only evidence is still not accepted.
 * 2026-09-08: Partial durable-recovery PR
   [#224](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/224) was
   squash-merged as `a8ac43abee44609860594fbbf40bbe781ddf2a5f` after independent functional

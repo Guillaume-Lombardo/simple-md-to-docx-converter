@@ -36,6 +36,7 @@ def test_package_declares_the_markweave_console_entry_point() -> None:
     assert metadata["project"]["scripts"] == {
         "markweave": "markweave.cli.main:main",
         "markweave-broker": "markweave.broker_process:main",
+        "markweave-kubernetes-attester": "markweave.kubernetes_attester_process:main",
     }
 
 

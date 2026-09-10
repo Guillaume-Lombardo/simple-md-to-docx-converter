@@ -355,8 +355,11 @@ lease and attempt token for publication. Python timeouts, cancellation flags, us
 sampling, or publication fencing alone remain insufficient.
 
 The broker durably records runtime-confirmed exit and empty transitions before removal, then records
-the removed transition before returning proof. A missing runtime object or removal acknowledgement
-alone is never proof. If the broker crashes after kill or removal
+the removed transition before returning proof. For the optional Kubernetes backend only, after
+complete CRI evidence proves every bound container exited on an unchanged fenced node, a complete
+negative lookup of the exact previously attested cgroup is accepted as kernel evidence that the
+cgroup became empty before containerd removed it. Pod state, Pod absence, force deletion, an
+incomplete lookup, or an API acknowledgement alone is never proof. If the broker crashes after kill or removal
 but before returning proof, idempotent restart reconciliation resumes from the inventory and runtime
 state. The content-free termination tombstone is retained until the worker/T71 durably acknowledges
 the proof. The worker keeps recovery blocked until T71 has durably recorded it.

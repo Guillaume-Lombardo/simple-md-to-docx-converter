@@ -14,14 +14,19 @@ token is not mounted.
 
 A separately deployed node attester, in a different namespace outside the broker Role and
 `pods/exec` scope, is the only component that can query the CRI socket and stable cgroup. The
-broker has no Node-reading ClusterRole. The attester service account token is disabled. Its mTLS
+broker has no Node-reading ClusterRole. The attester receives only `get` access to its Node and
+attempt Pods; no mutating verb is granted. Its mTLS
 endpoint accepts only the broker identity and returns bounded, content-free evidence. The attester
 never accepts a command, argv, image, path, PID, cgroup, sandbox, or node chosen independently by
 the caller: it derives these identities from the Pod UID and verifies them against CRI metadata.
 
-The reference file intentionally omits a DaemonSet: no node-attester command, concrete CRI/cgroup
-inspector, production process assembly, durable volume/key wiring, or certificate-rotation
-procedure exists yet.
+The reference DaemonSet runs the production attester process as root without privilege, added
+capabilities, host PID/IPC, or a writable root filesystem. Root is required only to read the
+root-owned CRI socket, cgroup v2 hierarchy, process mount metadata, and kubelet configuration. All
+host mounts are read-only except the bounded authenticated SQLite ledger directory. Operators must
+pre-create `/var/lib/markweave-attester` as root-owned mode `0700`; the immutable authentication
+key is projected root-owned mode `0400`. Certificate and inventory-key rotation require rendering
+new immutable Secrets and rolling the DaemonSet while the fenced pool is unavailable to brokers.
 The intended node-local mTLS transport uses TCP port `9443` without a cluster-wide Service. The broker derives the allowed endpoint as
 `<attempt Pod spec.nodeName>:9443`; cluster DNS or the deployment network must resolve every
 Kubernetes node name directly to that node's reachable address. The server certificate must cover
@@ -62,11 +67,10 @@ as well as stream polling. This bounded connection path intentionally mirrors pr
 initialization from the pinned `kubernetes==35.0.0` dependency; upgrades must pass the compatibility
 test before changing that pin. The kill exec acknowledgement is never considered termination evidence.
 
-The committed `NodeAttestationEngine` is the fail-closed policy core. A concrete bounded
-`CriCgroupInspector`, node-attester command/process assembly, durable volume and key wiring, and
-certificate rotation remain deployment work. A production implementation must collect the
-corresponding facts from the local CRI and cgroup v2 filesystem and keep raw output inside the
-attester process. Unknown fields, truncated CRI enumeration, lookup errors, identity
+The committed `NodeAttestationEngine` is the fail-closed policy core. The production process uses
+the official read-only Kubernetes client, fixed bounded `crictl` commands, and bounded reads of the
+local cgroup v2 and `/proc` filesystems. Raw CRI and kernel output remains inside the attester
+process. Unknown fields, truncated CRI enumeration, lookup errors, identity
 changes, or an unavailable attester reject readiness or proof. Only an explicit trusted-inspector
 "sandbox not observable yet" result is retried, within a configured deadline; policy mismatches
 fail immediately. The node fence and complete runnable sandbox are re-attested before staging, and
@@ -104,6 +108,21 @@ Changing kubelet, CRI, cgroup, runtime-handler, CNI, image-cache, kernel, or att
 requires a new fence revision, draining the old pool, real-cluster validation, and then relabeling.
 The broker fails closed while no positively attested node matches.
 
+For k3s, render `deploy/k3s/reverse-node-config.yaml.example` into the dedicated agent's
+`/etc/rancher/k3s/config.yaml.d/` directory. Render
+`deploy/k3s/10-markweave-reverse-kubelet.conf.example` as
+`/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf`; the attester reads this
+effective kubelet drop-in instead of trusting launch arguments. Install
+`deploy/k3s/20-markweave-reverse-runtime.toml` as
+`/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/20-markweave-reverse.toml`.
+Restart the dedicated agent only while its fence is unavailable, then verify the generated kubelet
+configuration, containerd handler, labels, taint, and actual sandbox network before making the new
+fence revision schedulable. RuntimeClass selection alone does not select a CNI, so the dedicated
+node and the attester's positive network observation are both mandatory. k3s/containerd rejects a
+sandbox whose CNI result has only loopback addresses, even when the official loopback plugin has
+successfully configured `lo`. The required CNI topology is therefore unresolved and no production
+CNI artifact is supplied by this reference.
+
 ## Attempt policy
 
 Each attempt is one UID-bound Pod with a digest-only image, fixed Python module entrypoint, empty
@@ -133,11 +152,15 @@ Document bytes never enter labels, inventory, evidence, diagnostics, or attester
 ## Termination proof and recovery
 
 Pod phase, deletion acknowledgement, force deletion, and API absence are supplementary facts only.
-The node attester must first enumerate the exact CRI sandbox and prove every container exited. It
-then proves the stable cgroup is unpopulated and contains zero descendants. Only after this positive
-evidence may the broker delete the exact Pod UID. Removal requires complete CRI enumeration proving
-the sandbox is gone, cgroup lookup proving the previously emptied cgroup is gone, and bounded Pod
-API absence. The final evidence binds all identities and the prior emptiness digest.
+The node attester must first completely enumerate the exact CRI sandbox and prove every bound
+container exited. It then either observes the exact previously bound cgroup as unpopulated with
+zero descendants or completes a negative lookup of that exact cgroup on the unchanged fenced node. The
+latter is accepted as kernel evidence that the cgroup became empty before containerd's automatic
+removal; an incomplete lookup, an unbound path, or absence without prior CRI exit evidence fails
+closed. Only after this positive evidence may the broker delete the exact Pod UID. Removal requires
+complete CRI enumeration proving the sandbox is gone, a complete cgroup lookup proving the
+previously emptied cgroup is gone, and bounded Pod API absence. The final evidence binds all
+identities and the prior emptiness digest.
 
 Before the first Pod API mutation, the broker inventory persists a bounded, versioned,
 content-free prepared binding on `CREATE_INTENT`. It fixes the unit identity, creation-time policy,
@@ -168,7 +191,10 @@ cancellation, OOM, PID exhaustion, workspace exhaustion, attempted credential ac
 class including node-local destinations, Pod substitution, node relabeling, attester outage,
 incomplete CRI enumeration, descendant escape attempts, and proof retention/acknowledgement.
 
-The authorized `codex-dev` k3s installation was inactive and its kubeconfig was root-readable only
-on 2026-09-08. No privileged service or credential change was made during this implementation.
-The cluster, inspector, CNI, dedicated-pool, and exact-image gates therefore remain required but unexecuted;
-unit, loopback-mTLS, or fake-control-plane results are not substitutes for that evidence.
+An authorized disposable probe on `codex-dev` k3s `v1.35.5+k3s1`, containerd `2.2.3-k3s1`, and
+cgroup v2 established the actual automatic cgroup-removal ordering used by the bounded
+absent-cgroup rule. The probe namespace was removed and k3s was restored to its initial
+inactive/disabled state. This single general-purpose node is not the required dedicated fenced
+pool. The dedicated-pool CNI, exact-image, and complete acceptance matrix therefore remain required but unexecuted;
+unit, loopback-mTLS, fake-control-plane, or general-node results are not substitutes
+for that evidence.

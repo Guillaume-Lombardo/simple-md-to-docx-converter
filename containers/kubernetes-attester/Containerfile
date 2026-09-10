@@ -1,0 +1,52 @@
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-314@sha256:194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653
+FROM ${BASE_IMAGE} AS build
+
+USER 0
+
+ARG UV_VERSION=0.12.1
+ARG UV_SHA256=90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb
+
+RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+        --output /tmp/uv.tar.gz \
+    && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \
+    && tar --extract --gzip --file /tmp/uv.tar.gz --strip-components=1 \
+        --directory /usr/local/bin \
+        uv-x86_64-unknown-linux-gnu/uv uv-x86_64-unknown-linux-gnu/uvx \
+    && rm /tmp/uv.tar.gz \
+    && test "$(uv --version)" = "uv ${UV_VERSION} (x86_64-unknown-linux-gnu)"
+
+WORKDIR /opt/markweave/app
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src ./src
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/markweave/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+RUN uv sync --locked --no-dev --no-editable --extra kubernetes \
+    && /opt/markweave/venv/bin/python -c \
+        'from importlib.metadata import version; from markweave.kubernetes_attester_process import main; assert version("kubernetes") == "35.0.0"; assert callable(main)' \
+    && mkdir -p /opt/markweave/licenses \
+    && cp LICENSE /opt/markweave/licenses/LICENSE \
+    && rm -rf /root/.cache/uv /opt/markweave/app/src \
+    && rm -f /opt/markweave/app/pyproject.toml /opt/markweave/app/uv.lock \
+        /opt/markweave/app/README.md /opt/markweave/app/LICENSE \
+        /usr/local/bin/uv /usr/local/bin/uvx \
+        /usr/bin/curl /usr/bin/openssl /usr/sbin/httpd
+
+FROM scratch
+COPY --from=build / /
+
+ENV PATH=/opt/markweave/venv/bin:/usr/local/bin:/usr/bin \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+ARG BASE_IMAGE
+LABEL org.opencontainers.image.title="Markweave Kubernetes node attester" \
+      org.opencontainers.image.source="https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+USER 0:0
+ENTRYPOINT ["markweave-kubernetes-attester"]

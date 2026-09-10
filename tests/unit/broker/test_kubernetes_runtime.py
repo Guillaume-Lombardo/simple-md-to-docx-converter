@@ -233,7 +233,8 @@ class InspectorDouble:
         values.update(self.override_node)
         return NodeFenceSnapshot(**values)
 
-    def sandbox(self, pod_uid: UUID) -> SandboxSnapshot:
+    def sandbox(self, pod_uid: UUID, sandbox_id: str | None = None) -> SandboxSnapshot:
+        assert sandbox_id in {None, SANDBOX_ID}
         if self.fail_operation == "not_ready":
             raise KubernetesAttestationNotReady("Kubernetes sandbox is not ready")
         if self.fail_operation == "sandbox":
@@ -269,13 +270,19 @@ class InspectorDouble:
             "workspace_mount_path": "/work",
             "workspace_size_bytes": self.policy.limits.workspace_bytes,
             "workspace_mount_flags": ("nodev", "noexec", "nosuid", "rw"),
+            "cgroup_lookup_complete": True,
+            "cgroup_present": True,
             "cgroup_populated": running,
             "descendant_pids": (123,) if running else (),
         }
         values.update(self.override_sandbox)
         return SandboxSnapshot(**values)
 
-    def removal(self, pod_uid: UUID) -> RemovalSnapshot:
+    def removal(
+        self, pod_uid: UUID, sandbox_id: str, cgroup_path: str
+    ) -> RemovalSnapshot:
+        assert sandbox_id == SANDBOX_ID
+        assert cgroup_path == CGROUP
         if self.fail_operation == "removal":
             raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         values: dict[str, Any] = {
@@ -1284,6 +1291,45 @@ def test_exit_and_empty_require_positive_cri_and_cgroup_facts(
     inspector.override_sandbox = {"sandbox_id": "a" * 64}
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+def test_complete_absence_of_exact_bound_cgroup_is_accepted_after_exit(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {
+        "sandbox_ready": True,
+        "cgroup_present": False,
+        "cgroup_populated": False,
+        "descendant_pids": (),
+    }
+
+    exit_evidence = runtime.confirm_exit(runtime_unit)
+    empty_evidence = runtime.confirm_empty(runtime_unit)
+
+    assert isinstance(exit_evidence, EvidenceDigest)
+    assert isinstance(empty_evidence, EvidenceDigest)
+
+
+@pytest.mark.unit
+def test_absent_cgroup_fails_closed_when_lookup_is_incomplete(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {
+        "cgroup_lookup_complete": False,
+        "cgroup_present": False,
+        "cgroup_populated": False,
+        "descendant_pids": (),
+    }
+
+    with pytest.raises(KubernetesRuntimeError, match="not empty"):
+        runtime.confirm_empty(runtime_unit)
 
 
 @pytest.mark.unit

@@ -64,6 +64,8 @@ class SandboxSnapshot:
     workspace_mount_path: str
     workspace_size_bytes: int
     workspace_mount_flags: tuple[str, ...]
+    cgroup_lookup_complete: bool
+    cgroup_present: bool
     cgroup_populated: bool
     descendant_pids: tuple[int, ...]
 
@@ -87,9 +89,13 @@ class CriCgroupInspector(Protocol):
 
     def node_fence(self, node_name: str) -> NodeFenceSnapshot: ...
 
-    def sandbox(self, pod_uid: UUID) -> SandboxSnapshot: ...
+    def sandbox(
+        self, pod_uid: UUID, sandbox_id: str | None = None
+    ) -> SandboxSnapshot: ...
 
-    def removal(self, pod_uid: UUID) -> RemovalSnapshot: ...
+    def removal(
+        self, pod_uid: UUID, sandbox_id: str, cgroup_path: str
+    ) -> RemovalSnapshot: ...
 
 
 def _evidence(kind: str, payload: object) -> EvidenceDigest:
@@ -163,7 +169,7 @@ class NodeAttestationEngine:
                 )
                 or (
                     _allow_exited
-                    and sandbox.sandbox_ready is False
+                    and type(sandbox.sandbox_ready) is bool
                     and all(state == "EXITED" for state in sandbox.container_states)
                 )
             )
@@ -175,6 +181,8 @@ class NodeAttestationEngine:
             or sandbox.workspace_mount_path != "/work"
             or sandbox.workspace_size_bytes != contract.policy.limits.workspace_bytes
             or sandbox.workspace_mount_flags != ("nodev", "noexec", "nosuid", "rw")
+            or sandbox.cgroup_lookup_complete is not True
+            or sandbox.cgroup_present is not True
         ):
             raise KubernetesRuntimeError("Kubernetes sandbox attestation is invalid")
         fence = _evidence(
@@ -260,8 +268,7 @@ class NodeAttestationEngine:
         self._revalidate_fence(unit)
         snapshot = self._sandbox(unit)
         if (
-            snapshot.sandbox_ready is not False
-            or not snapshot.container_states
+            not snapshot.container_states
             or not _same_container_ids(
                 snapshot.container_ids, unit.sandbox.container_ids
             )
@@ -318,7 +325,6 @@ class NodeAttestationEngine:
                         snapshot.observed_pod, contract.pod_contract
                     )
                     != contract.pod_contract
-                    or snapshot.sandbox_ready is not False
                     or not snapshot.container_states
                     or not _same_container_ids(
                         snapshot.container_ids, unit.sandbox.container_ids
@@ -361,7 +367,6 @@ class NodeAttestationEngine:
                 not _observed_identity_matches(snapshot.observed_pod, unit.pod)
                 or project_observed_pod(snapshot.observed_pod, contract.pod_contract)
                 != contract.pod_contract
-                or snapshot.sandbox_ready is not False
                 or not snapshot.container_states
                 or not _same_container_ids(
                     snapshot.container_ids, unit.sandbox.container_ids
@@ -404,7 +409,11 @@ class NodeAttestationEngine:
             raise KubernetesRuntimeError("Kubernetes exit evidence is invalid")
         self._revalidate_fence(unit)
         snapshot = self._sandbox(unit)
-        if snapshot.cgroup_populated is not False or snapshot.descendant_pids != ():
+        if (
+            snapshot.cgroup_lookup_complete is not True
+            or snapshot.cgroup_populated is not False
+            or snapshot.descendant_pids != ()
+        ):
             raise KubernetesRuntimeError("Kubernetes stable unit is not empty")
         return _evidence(
             "empty",
@@ -415,6 +424,7 @@ class NodeAttestationEngine:
                 "node_uid": str(snapshot.node_uid),
                 "pod_uid": str(snapshot.pod_uid),
                 "populated": False,
+                "present": snapshot.cgroup_present,
                 "sandbox_id": snapshot.sandbox_id,
             },
         )
@@ -428,7 +438,11 @@ class NodeAttestationEngine:
             raise KubernetesRuntimeError("Kubernetes empty evidence is invalid")
         self._revalidate_fence(unit)
         snapshot = _inspector_call(
-            lambda: self._inspector.removal(unit.pod.pod_uid),
+            lambda: self._inspector.removal(
+                unit.pod.pod_uid,
+                unit.sandbox.sandbox_id,
+                unit.sandbox.cgroup_path,
+            ),
             "Kubernetes removal is unconfirmed",
         )
         if (
@@ -482,7 +496,7 @@ class NodeAttestationEngine:
         if type(unit) is not KubernetesRuntimeUnit:
             raise KubernetesRuntimeError("Kubernetes runtime unit is invalid")
         snapshot = _inspector_call(
-            lambda: self._inspector.sandbox(unit.pod.pod_uid),
+            lambda: self._inspector.sandbox(unit.pod.pod_uid, unit.sandbox.sandbox_id),
             "Kubernetes sandbox lookup failed",
         )
         if (

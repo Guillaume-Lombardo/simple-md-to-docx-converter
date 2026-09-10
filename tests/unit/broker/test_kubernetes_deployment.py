@@ -23,6 +23,13 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@", "65536")
         .replace("@REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@", "5")
         .replace("@REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@", "8")
+        .replace("@REQUIRED_ATTESTER_MAX_RECORDS@", "1024")
+        .replace("@REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@", "3")
+        .replace("@REQUIRED_ATTESTER_HARD_SHUTDOWN_TIMEOUT_SECONDS@", "10")
+        .replace("@REQUIRED_ATTESTER_MAX_SANDBOXES@", "64")
+        .replace("@REQUIRED_ATTESTER_MAX_CONTAINERS@", "8")
+        .replace("@REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@", "256")
+        .replace("@REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@", "512")
         .replace("@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@", "30")
         .replace("@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@", "0.1")
         .replace("@REQUIRED_ATTESTER_SERVER_CERTIFICATE_SHA256@", f"sha256:{'3' * 64}")
@@ -73,13 +80,19 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
         (("pods",), ("create", "delete", "get", "list")),
         (("pods/exec",), ("create",)),
     }
-    assert not any(item["kind"] == "ClusterRole" for item in resources)
-    assert not any(item["kind"] == "ClusterRoleBinding" for item in resources)
-    assert not any(item["kind"] == "Service" for item in resources)
-
-    assert not any(
-        item["kind"] in {"DaemonSet", "PodDisruptionBudget"} for item in resources
+    cluster_role = by_kind_name[("ClusterRole", "markweave-node-attester-read-node")]
+    assert cluster_role["rules"] == [
+        {"apiGroups": [""], "resources": ["nodes"], "verbs": ["get"]}
+    ]
+    pod_role = by_kind_name[("Role", "markweave-node-attester-read-pod")]
+    assert pod_role["rules"] == [
+        {"apiGroups": [""], "resources": ["pods"], "verbs": ["get"]}
+    ]
+    assert len([item for item in resources if item["kind"] == "ClusterRole"]) == 1
+    assert (
+        len([item for item in resources if item["kind"] == "ClusterRoleBinding"]) == 1
     )
+    assert not any(item["kind"] == "Service" for item in resources)
 
     config = by_kind_name[("ConfigMap", "markweave-node-attester-config")]
     assert config["immutable"] is True
@@ -98,8 +111,12 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
         "request_timeout_seconds": int,
         "max_concurrent_requests": int,
     }
-    assert '"listen_address": "0.0.0.0:9443"' in config["data"]["attester.json"]
-    assert '"require_client_certificate": true' in config["data"]["attester.json"]
+    assert attester_settings["listen_host"] == "0.0.0.0"  # noqa: S104
+    assert attester_settings["listen_port"] == 9443
+    assert attester_settings["cri_endpoint"].startswith("unix:///host/")
+    assert attester_settings["cgroup_root"] == "/host/sys/fs/cgroup"
+    assert attester_settings["proc_root"] == "/host/proc"
+    assert attester_settings["inventory_max_records"] == 1024
     assert (
         f'"expected_client_certificate_sha256": "sha256:{"2" * 64}"'
         in (config["data"]["attester.json"])
@@ -107,6 +124,9 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
     tls = by_kind_name[("Secret", "markweave-node-attester-tls")]
     assert tls["immutable"] is True
     assert set(tls["stringData"]) == {"ca.crt", "tls.crt", "tls.key"}
+    authentication = by_kind_name[("Secret", "markweave-node-attester-auth")]
+    assert authentication["immutable"] is True
+    assert set(authentication["stringData"]) == {"key"}
     broker_tls = by_kind_name[("Secret", "markweave-reverse-broker-attester-tls")]
     assert broker_tls["metadata"]["namespace"] == "markweave-reverse"
     assert broker_tls["immutable"] is True
@@ -143,6 +163,50 @@ def test_reference_deployment_separates_credentials_and_node_authority() -> None
         f'"expected_attester_server_certificate_sha256": "sha256:{"3" * 64}"'
         in (broker_config["data"]["kubernetes.json"])
     )
+
+
+@pytest.mark.unit
+def test_attester_daemonset_is_pinned_and_read_only_except_for_its_ledger() -> None:
+    resources = _resources()
+    daemonset = next(item for item in resources if item["kind"] == "DaemonSet")
+    pod = daemonset["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "markweave-node-attester"
+    assert pod["automountServiceAccountToken"] is True
+    assert pod["hostNetwork"] is True
+    assert pod["hostPID"] is False
+    assert pod["hostIPC"] is False
+    assert pod["nodeSelector"] == {
+        "reverse.markweave.dev/isolation-pool": "reverse",
+        "reverse.markweave.dev/node-fence": "fence-v1",
+    }
+
+    container = pod["containers"][0]
+    assert container["image"] == f"registry.example/attester@sha256:{'1' * 64}"
+    assert container["ports"] == [
+        {"name": "mtls", "containerPort": 9443, "hostPort": 9443, "protocol": "TCP"}
+    ]
+    security = container["securityContext"]
+    assert security == {
+        "allowPrivilegeEscalation": False,
+        "capabilities": {"drop": ["ALL"]},
+        "privileged": False,
+        "readOnlyRootFilesystem": True,
+        "runAsGroup": 0,
+        "runAsNonRoot": False,
+        "runAsUser": 0,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+    mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
+    assert mounts["state"].get("readOnly", False) is False
+    assert all(
+        mount["readOnly"] is True for name, mount in mounts.items() if name != "state"
+    )
+    volumes = {volume["name"]: volume for volume in pod["volumes"]}
+    assert volumes["state"]["hostPath"] == {
+        "path": "/var/lib/markweave-attester",
+        "type": "Directory",
+    }
+    assert volumes["cri-socket"]["hostPath"]["type"] == "Socket"
 
 
 @pytest.mark.unit
