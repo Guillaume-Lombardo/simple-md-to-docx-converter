@@ -46,6 +46,11 @@ images from source `78cb86d450e940a3190591de62ee0ebade216d8b`, and the separate 
 registry digests in Compose, the quickstarts, and the durable cutover evidence. Normal fully aligned
 public-release checks apply after adoption.
 
+The `0.6.2` patch follows that normal paired-release path. Its candidate changes the package and
+application version while public Compose remains pinned to the verified `0.6.1` pair. After
+publication, a separate adoption change must bind the exact retained backend and frontend receipts
+before unrelated integration resumes.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment

@@ -1,6 +1,6 @@
 # Architecture
 
-Version `0.6.1` delivers the browser cutover: the backend composition root contains no HTML or
+Version `0.6.2` retains the browser cutover: the backend composition root contains no HTML or
 static-asset router. Next.js owns browser presentation, the same-origin router owns only transport
 routing and minimum response headers, and FastAPI remains the sole business and persistence
 authority.
@@ -12,6 +12,12 @@ remain authoritative. See
 topology and parity contract. Markweave accepts Markdown, local resources, and validated DOCX
 reference templates; Pandoc creates DOCX, local Mermaid CLI and sandboxed Chromium render diagrams,
 and headless LibreOffice creates PDF.
+
+The experimental reverse path accepts supported office documents through the same authenticated
+browser, API, and CLI boundary, persists a separate durable job, and delegates document parsing to
+an isolated attempt runtime. Rootless Podman is the primary reviewed isolation backend. The
+Kubernetes backend remains optional and must not be described as production-qualified until its
+exact images pass the dedicated physical-worker acceptance matrix.
 
 ## Component boundaries
 

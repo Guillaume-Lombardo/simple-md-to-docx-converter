@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import sys
 from importlib.machinery import ModuleSpec
@@ -24,6 +25,8 @@ from scripts.release.verify_install import (
     EXTRA_IMPORT_CHECK,
     IMPORT_TIMEOUT_SECONDS,
     INSTALL_TIMEOUT_SECONDS,
+    KUBERNETES_ATTESTER_CONSOLE_CHECK,
+    KUBERNETES_IMPORT_CHECK,
     PUBLIC_IMPORT_CHECK,
     STANDALONE_RECOVERY_CHECK,
     SUPPORTED_INSTALLATION_PROFILES,
@@ -60,7 +63,7 @@ def test_public_import_check_rejects_legacy_import_after_install(
     monkeypatch.setattr(
         importlib.util, "find_spec", lambda name: ModuleSpec(name, loader=None)
     )
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.1"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.2"])
 
     with pytest.raises(
         SystemExit, match="legacy md_converter import remains installed"
@@ -73,7 +76,7 @@ def test_public_import_check_rejects_application_version_mismatch(
 ) -> None:
     """Distribution and public application versions must identify one release."""
     monkeypatch.setattr(markweave, "__version__", "9.9.9")
-    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.1"])
+    monkeypatch.setattr(sys, "argv", ["check", "markweave", "0.6.2"])
 
     with pytest.raises(SystemExit, match=r"unexpected markweave\.__version__"):
         exec(PUBLIC_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
@@ -101,6 +104,29 @@ def test_extra_import_check_rejects_a_missing_dependency(
 
     with pytest.raises(SystemExit, match="missing required optional dependency"):
         exec(EXTRA_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
+
+
+def test_kubernetes_checks_are_valid_isolated_python() -> None:
+    """The Kubernetes wheel contracts remain executable verifier scripts."""
+    compile(KUBERNETES_IMPORT_CHECK, "<kubernetes-import-check>", "exec")
+    compile(KUBERNETES_ATTESTER_CONSOLE_CHECK, "<attester-console-check>", "exec")
+
+
+def test_kubernetes_import_check_rejects_present_but_broken_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A discoverable dependency must also import successfully."""
+    assert importlib.util.find_spec("markweave") is not None
+    monkeypatch.setattr(sys, "argv", ["check", "markweave"])
+
+    def fail_import(name: str) -> None:
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+    with pytest.raises(
+        SystemExit, match="unimportable required Kubernetes dependency: markweave"
+    ):
+        exec(KUBERNETES_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
 
 
 @pytest.fixture
@@ -193,6 +219,11 @@ def test_clean_install_uses_private_digest_bound_copy_and_cleans_up(
                 f"isolated {profile.name} console version check",
                 f"isolated {profile.name} console help check",
                 f"isolated {profile.name} broker console check",
+                *(
+                    ["isolated kubernetes attester console check"]
+                    if profile.name == "kubernetes"
+                    else []
+                ),
             ]
         )
     assert events == expected_events

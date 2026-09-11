@@ -1,8 +1,9 @@
 # Backup and recovery
 
-The `0.6.1` release identity is a matched backend/frontend digest pair plus its route manifest and
-evidence checksum. Rollback restores the prior backend containing the legacy UI and its matching
-route manifest as one release-level operation; never combine either image across releases. Storage
+Each release identity is a matched backend/frontend digest pair plus its route manifest and
+evidence checksum. The `0.6.2` candidate does not replace the verified `0.6.1` rollback identity
+until both new image receipts are published and adopted. Rollback restores a complete matched pair
+and its route manifest as one release-level operation; never combine images across releases. Storage
 restore requirements remain profile-specific and are determined by schema/data compatibility, not
 by the stateless frontend.
 

@@ -8,6 +8,31 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-2"></a>
+
+## [0.6.2] - 2026-09-11
+
+### Added
+
+- An experimental reverse-conversion workflow converts supported office documents to Markdown
+  with bounded asset extraction through the browser, HTTP API, and CLI.
+- Durable reverse jobs run through an authenticated rootless Podman isolation broker, with an
+  optional Kubernetes backend and node-level runtime attestation foundation.
+- Public security and support policies document vulnerability reporting and supported releases.
+
+### Changed
+
+- JavaScript tooling now uses one deterministic pnpm workspace for the frontend and toolchain.
+- Reverse queue metrics, audit events, recovery state, cancellation, and result retention are
+  available in both standalone and distributed storage profiles.
+
+### Fixed
+
+- Rootless Podman quickstarts route the browser and API correctly from the host without weakening
+  their loopback-only exposure.
+- Mutation campaigns retain exact idle-expiry coverage while avoiding out-of-scope generated
+  mutants.
+
 <a id="release-0-6-1"></a>
 
 ## [0.6.1] - 2026-09-03
@@ -183,6 +208,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.2](#release-0-6-2)
 - [0.6.1](#release-0-6-1)
 - [0.6.0](#release-0-6-0)
 - [0.5.2](#release-0-5-2)
