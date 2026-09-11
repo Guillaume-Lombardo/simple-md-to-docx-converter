@@ -1,0 +1,5 @@
+node-label:
+  - "reverse.markweave.dev/isolation-pool=reverse"
+  - "reverse.markweave.dev/node-fence=@REQUIRED_NODE_FENCE_REVISION@"
+node-taint:
+  - "reverse.markweave.dev/dedicated=reverse:NoSchedule"

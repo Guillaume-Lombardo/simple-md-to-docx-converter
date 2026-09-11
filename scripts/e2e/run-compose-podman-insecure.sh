@@ -138,7 +138,7 @@ test "$(podman port "$application_id" 3100/tcp)" = "127.0.0.1:$port"
 assert_no_port_bindings \
   "$(podman inspect --format '{{json .HostConfig.PortBindings}}' "$router_id")"
 podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$router_id" \
-  | grep -Fqx 'ROUTER_HOST=0.0.0.0'
+  | grep -Fx 'ROUTER_HOST=0.0.0.0' >/dev/null
 
 # Exercise both browser and direct FastAPI routing through the real host port.
 test "$(curl --connect-timeout 2 --max-time 10 --silent \

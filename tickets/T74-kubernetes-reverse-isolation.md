@@ -25,8 +25,11 @@ backend.
   PID/descendant, workspace/ephemeral, and autonomous deadline policy at the runtime/kernel boundary.
 * Use a memory-backed bounded workspace, fixed node-level PID policy, default-deny egress including
   node-local destinations, and fail-closed node fencing.
-* Prove the stable isolation unit is exited, empty, and removed using CRI/cgroup evidence; Pod
-  deletion, absence, force deletion, or an API acknowledgement alone is insufficient.
+* Prove the stable isolation unit is exited, empty, and removed using CRI/cgroup evidence. After
+  complete CRI evidence proves every container exited on the unchanged fenced node, a complete
+  negative lookup of the exact previously bound cgroup is accepted as kernel evidence that the
+  cgroup became empty before its runtime-managed removal. Pod deletion, Pod absence, force
+  deletion, an incomplete lookup, or an API acknowledgement alone is insufficient.
 * Preserve T70 inventory, reconciliation, tombstone, proof acknowledgement, and both authenticated
   broker transport contracts.
 * Add unit, integration, real-cluster, restart/recovery, failure, security, and exact-image E2E
@@ -53,6 +56,192 @@ backend.
 
 ## Progress
 
+* 2026-09-11: Addressed seven incremental findings from the independent PR #225 review. Acceptance
+  manifests containing private keys now require a new non-symlink output and are restricted to
+  mode `0600` before any bytes are written; failed real-cluster lifecycle runs terminate and
+  acknowledge their exact created unit; schema-v1 attester ledgers created with the former SQLite
+  `STRICT` declarations remain readable; and readiness exchanges use the smaller of the transport
+  timeout and the remaining overall deadline, rejecting responses completed after that deadline.
+  The concrete inspector no longer synthesizes network facts after the namespace has exited:
+  authenticated persisted bindings retain the original positive network evidence for recovery,
+  while uncommitted exited adoption fails closed. Reverse-attempt shutdown now blocks and consumes
+  `SIGTERM` atomically, and the Envoy allowlist test rejects any non-exact route before the terminal
+  deny rule. Ruff, `ty`, `git diff --check`, and 198 focused unit/integration tests pass. The
+  canonical engine-excluded run reached 4,204 passes and 94.43% total coverage; its 44 PostgreSQL
+  setup errors, three RustFS failures, and two release-integration failures are the same unrelated
+  unavailable-environment or pre-existing failures recorded by the previous T74 run. T74 remains
+  In Progress because physical dedicated-pool evidence and the production-equivalent exact-image
+  restart/recovery and negative real-cluster matrix are still outstanding.
+* 2026-09-11: Replaced `crictl` with the selected purpose-built gRPC client generated from an
+  intentionally minimal, wire-compatible CRI v1 schema. The client and Envoy allowlist expose only
+  `Version`, `ListPodSandbox`, `PodSandboxStatus`, `ListContainers`, and `ContainerStatus`; neither
+  ImageService nor any mutation method is present. The exact attester image
+  `sha256:184c047d56529d86689b3c0ca825f51459e78607589b5655ae496b47fa1892e0` and exact attempt image
+  `sha256:d92d26a4eafe8ffe562ca518c15e09342d765ea34d6b35ac01b9b4611312ee11` completed a pristine
+  broker/attester/attempt lifecycle on the approved logically dedicated `codex-dev` k3s worker.
+  The run produced a 2,044-byte result with SHA-256
+  `efd83ae4ca5a6931697deb116c990756bb0454384ed121916de520cdecf8c328`, retained exact exit/empty/
+  removal evidence through acknowledgement, and left no attester ledger record. Live inspection
+  proved the exact container and sandbox identities, CPU `50000/100000`, memory `134217728`,
+  hierarchical PID count with `pids.max=64`, a 32 MiB `tmpfs` `/work` mounted
+  `rw,nodev,noexec,nosuid`, and the isolated `lo`/dummy-`eth0` network with no route or neighbor.
+  A direct v5 Kubernetes exec probe also proved bounded stdin close and successful completion.
+  Namespaces, cluster-scoped objects, labels, taint, imported images, credentials, ledger, and host
+  assets were removed, and k3s is inactive and disabled again. Ruff, `ty`, `git diff --check`, and
+  246 focused tests pass with 95.06% combined branch coverage. The canonical engine-excluded run
+  reached 4,200 passes and 94.37% repository coverage; its 44 PostgreSQL setup errors, three RustFS
+  failures, and two release-test failures are unrelated unavailable-environment/pre-existing
+  failures, and its one change-related package-matrix assertion was updated and reverified. T74
+  remains In Progress: this approved development substitution is not physical dedicated-pool
+  evidence, and the required exact-image restart/recovery and negative real-cluster matrix remains
+  unexecuted on such a production-equivalent pool.
+* 2026-09-10: The product manager selected the least-privilege CRI client design. The Envoy proxy
+  allowlist remains limited to the exact five approved RuntimeService methods, and the attester
+  must replace `crictl` with a purpose-built client that has no ImageService operation. Exact-image
+  real-cluster acceptance resumes under this decision.
+* 2026-09-10: The simulated-dedicated exact-image run exposed and fixed two deployment-only
+  failures: UBI 9's SQLite does not support `STRICT` tables, so the attester ledger now uses
+  equivalent explicit `typeof(...)` constraints, and the DaemonSet mounts k3s' already extracted
+  multicall binary because its `/usr/local/bin/crictl` bootstrap symlink cannot run from a lone
+  read-only file mount. The rebuilt exact attester image reached `2/2 Running`, strict TLS 1.3 mTLS
+  succeeded, and an exact attempt Pod reached `Running` with RuntimeClass `markweave-reverse`, Pod
+  IP `192.0.2.1`, and the fixed resource contract. Recovery then failed closed at the CRI proxy:
+  k3s' embedded `crictl` always performs `ImageService/ImageFsInfo` connection validation before
+  `ps`, but the approved proxy permits only five RuntimeService methods. There is no command-line
+  switch to disable that validation. Completing the exact-image lifecycle therefore requires a
+  security decision between adding this sixth read method or replacing `crictl` with a minimal
+  RuntimeService-only client. No success or termination proof is claimed for this failed run.
+  Both namespaces, the RuntimeClass, RBAC, node labels and taint, imported images, five host assets,
+  ledger, generated certificates, token, and rendered Secret manifest were removed; k3s is again
+  inactive/disabled.
+* 2026-09-10: The product manager approved option 1 for development acceptance: during a bounded
+  T74 validation window, the single `codex-dev` k3s worker may be treated as logically dedicated
+  when the exact isolation labels and taint are installed and no other T74 workload is admitted.
+  This is an explicit development substitution, not evidence of physical worker isolation; normal
+  k3s system Pods may remain. Every run must verify the fence, avoid concurrent T74 workloads, and
+  restore the initially inactive/disabled cluster and remove all temporary host assets afterward.
+  The exact-image real-cluster matrix resumes under that constraint.
+* 2026-09-10: Implemented and validated the selected RuntimeClass-scoped runc wrapper on the local
+  k3s 1.35/containerd 2.2 boundary. A real workload reached `Running`; kernel mountinfo and the
+  concrete inspector independently reported `/work` as a 32 MiB tmpfs with exact
+  `nodev,noexec,nosuid,rw` flags, while the accepted isolated CNI state and `pids.max=64` remained
+  intact. A workload missing `/work` failed closed with `StartError` before runc, and replacing the
+  installed wrapper bytes made the node fence fail. The fence and evidence now bind the exact
+  runtime-handler and wrapper digests, and the attester receives only read-only mounts of those
+  files. The previously blocked attester image now builds and its minimal import/closed-failure
+  smoke probes pass after separating the bounded command runner and making broker exports lazy;
+  no reverse-conversion parsing dependencies are installed in that image. Probe namespaces,
+  RuntimeClass, labels, taint, and five host assets were removed, and k3s is inactive/disabled.
+  The mandatory dedicated-pool, published-digest, full broker/attester/attempt exact-image matrix
+  remains unexecuted because this machine is a shared single-node development cluster.
+* 2026-09-10: The product manager selected the RuntimeClass-scoped OCI runtime-wrapper solution for
+  the Kubernetes 1.35 `emptyDir` mount-option gap. The trusted node wrapper must be fixed by the
+  dedicated
+  containerd runtime handler, digest-attested as part of the node fence, add only
+  `nodev,nosuid,noexec` to a present `/work` tmpfs before the attempt process starts, fail closed on
+  any malformed or unexpected mount, and leave the CRI pause sandbox unchanged. The node attester
+  must continue to verify the actual resulting mount independently. Implementation and real-k3s
+  validation resume under this decision.
+* 2026-09-10: The live concrete-inspector probe reached a second architecture decision point after
+  passing the selected CNI, CRI, cgroup, and node-fence checks. On k3s/Kubernetes 1.35, the required
+  memory-backed `emptyDir` workspace is actually mounted `rw,relatime`; `nodev`, `noexec`, and
+  `nosuid` are absent. The inspector faithfully returned only `rw`, so the T74 policy correctly
+  rejects the sandbox. Kubernetes 1.35 exposes no mount-options field for `emptyDir`; StorageClass
+  mount options do not apply. Preserving the approved workspace contract therefore requires a new
+  trusted CSI/node mount component or OCI runtime hook/wrapper with mount authority. The alternative
+  is an explicit security-contract relaxation. Either choice materially changes architecture or
+  acceptance criteria and requires product/security approval. All probe resources were cleaned up
+  and k3s is inactive/disabled.
+* 2026-09-10: Implemented the selected hardened standard-containerd design. The node attester now
+  reaches containerd only through a bounded Envoy Unix-socket proxy that permits the five exact CRI
+  v1 inspection methods and denies mutation; a live proxy probe successfully listed sandboxes and
+  rejected `StopPodSandbox`. Added the digest-attested `00-markweave-isolated` CNI, which creates an
+  unpeered dummy `eth0` with `192.0.2.1/32`, disables forwarding and IPv6 on that interface, and
+  removes routes and neighbors. A live k3s/containerd Pod reached `Running` with that address.
+  Kernel `/proc/<sandbox-pid>/net` evidence confirmed only `lo`/`eth0`, only loopback and the dummy
+  address, no IPv4 or non-loopback IPv6 routes, and no ARP neighbor. The attester now enforces those
+  live kernel facts and the exact CNI asset digests. The probe also proved that
+  `/proc/<pid>/root/proc/sys/net` reflects the reader namespace, so the design does not falsely use
+  it as sandbox forwarding evidence; the digest-attested CNI checks forwarding during ADD, while
+  the attested unpeered and unrouted state prevents egress. All temporary cluster and host changes
+  were removed and k3s returned to inactive/disabled. The dedicated exact-image acceptance matrix
+  remains required. ShellCheck, Ruff format/lint, `ty`, `git diff --check`, and 136 focused tests
+  pass; the three changed Python security modules have 93.21% combined branch coverage.
+* 2026-09-10: The product manager selected the hardened standard-containerd design: place a
+  separately trusted allowlist proxy between the node attester and the CRI socket, expose only the
+  exact inspection RPCs required by T74, and use an isolated non-loopback dummy interface with no
+  peer or routes. Network evidence must come from the sandbox's kernel network namespace and prove
+  the exact interface, address, route, and peer-isolation contract; the digest-attested CNI must
+  disable and check forwarding during namespace creation, and CRI CNI metadata is not sufficient
+  on its own. Implementation and real-k3s validation resume under this decision.
+* 2026-09-10: Independent review of PR #225 retained five findings. Local follow-up now bounds
+  official Kubernetes Node/Pod reads with the inspector operation timeout, rejects `.` and `..`
+  cgroup components for both sandbox and removal inspection, requires the rendered Kubernetes
+  termination grace period to exceed the attester watchdog, and declares the digest-pinned attester
+  image amd64-only. Ruff, `ty`, `git diff --check`, and 49 focused tests pass. The reported
+  multi-exception `SyntaxError` is not valid for the mandated Python 3.14 target (PEP 758), as also
+  demonstrated by the passing import and process tests. The remaining valid security finding is
+  architectural: a read-only filesystem mount of the containerd socket still permits mutation RPCs
+  over that socket. T74 therefore additionally requires a decision between a narrow separately
+  trusted CRI allowlist proxy, explicit acceptance of direct root-attester CRI authority, or stopping
+  the Kubernetes backend; the previously recorded CNI decision remains unresolved as well.
+* 2026-09-10: Implemented the reviewable portion preceding the CNI decision: a bounded read-only
+  Kubernetes/CRI/cgroup-v2 inspector, root-only production attester process, strict immutable
+  configuration, root-owned authenticated ledger wiring, least-privilege RBAC, hardened node-local
+  DaemonSet, digest-pinned minimal attester Containerfile, containerd runtime handler, and effective
+  kubelet configuration drop-in. The solution-3 absent-cgroup proof is covered by fail-closed tests.
+  Ruff, `ty`, `git diff --check`, 125 focused tests, and 119 focused coverage tests pass; the three
+  changed security modules reach 94.23% branch coverage. The canonical engine-excluded run passed
+  4,169 tests and reached 94.63% total coverage, with 44 PostgreSQL setup errors, three RustFS
+  failures, and two pre-existing release-integration failures caused by unavailable external
+  configuration or environment behavior. Its only change-related packaging failure was fixed and
+  reverified. The attester image build could not complete because repeated checksum-pinned `uv`
+  downloads from GitHub reset or stalled; no image/E2E success is claimed.
+* 2026-09-10: A second authorized real-k3s probe validated the dedicated runtime handler, effective
+  kubelet config drop-in (`podPidsLimit=64`, `cpuCFSQuotaPeriod=100ms`), exact node labels/taint,
+  and the concrete inspector's positive fence. The inspector correctly rejected a real Flannel
+  sandbox as non-isolated. A positive loopback-only probe then exposed a CRI constraint:
+  containerd refuses `RunPodSandbox` when CNI reports no non-loopback Pod IP; adding `127.0.0.1/8`
+  to the result is still rejected. Standard Kubernetes/containerd therefore cannot create the
+  currently required `lo`-only attempt sandbox. The namespace, RuntimeClass, labels, taint, CNI
+  probe files, kubelet/runtime drop-ins, and service changes were removed, and k3s was restored to
+  inactive/disabled. T74 is blocked on a product/security decision: either approve an isolated
+  non-loopback dummy interface with stronger kernel/netns attestation, approve maintaining a
+  patched CRI/runtime that accepts loopback-only Pod IPs, or retain the current contract and stop
+  Kubernetes backend work.
+* 2026-09-10: The product manager selected the bounded absent-cgroup proof design. T74 may treat a
+  complete negative lookup of the exact previously attested cgroup as empty evidence only after
+  complete CRI enumeration proves every bound container exited and the node fence and all retained
+  identities remain unchanged. This intentionally adapts the temporal proof contract to observed
+  containerd/kubelet cgroup lifecycle; Pod state, Pod absence, deletion acknowledgement, incomplete
+  enumeration, or an unbound path remain insufficient. Implementation resumes under this explicit
+  decision.
+* 2026-09-10: Authorized real-k3s inspection on `codex-dev` exposed a lifecycle
+  contract blocker before implementation of the concrete inspector. On k3s `v1.35.5+k3s1`,
+  containerd `2.2.3-k3s1`, and cgroup v2, an exact disposable probe showed that the bounded
+  workload container's cgroup is removed automatically after its process exits, while the stable
+  Pod cgroup remains populated by the CRI pause sandbox. Kubelet subsequently stops the sandbox
+  and removes the Pod cgroup automatically. The current contract requires positive durable
+  `EXITED`, `EMPTY`, and `REMOVED` transitions, with `EMPTY` recorded before the broker deletes the
+  exact Pod UID; neither available cgroup therefore supplies the required stable lifecycle. Treating
+  an already absent workload cgroup as proof that it was empty would change the approved proof
+  semantics. Preserving a separately removable stable cgroup instead requires a new trusted
+  node-level runtime wrapper or supervisor with cgroup-mutation authority, beyond the currently
+  approved read-only inspector. The probe namespace was deleted and k3s was returned to its initial
+  inactive/disabled state. T74 remains blocked pending the product/security choice between those
+  two designs; fake or Pod-API-only evidence is still not accepted.
+* 2026-09-08: Partial durable-recovery PR
+  [#224](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/224) was
+  squash-merged as `a8ac43abee44609860594fbbf40bbe781ddf2a5f` after independent functional
+  and security reviews, a completed incremental CodeRabbit review, and resolution of every review
+  thread. Exact-head CI
+  [run 34271382507](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/34271382507)
+  and exact-main CI
+  [run 34274314282](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/34274314282)
+  are green, including branch and changed-line coverage gates, both rootless exact-image E2E
+  variants, document engines, PostgreSQL, and S3/RustFS suites. T74 remains In Progress: the
+  concrete bounded CRI/cgroup inspector, attester process and deployment, dedicated-pool fencing,
+  loopback-only CNI and node-local egress proof, and real-k3s acceptance matrix remain mandatory.
 * 2026-09-08: Added crash-consistent Kubernetes creation and lifecycle recovery. The broker now
   persists an authenticated, bounded, content-free creation binding before any Kubernetes API
   mutation, migrates authenticated inventory schema v2 to v3 atomically, and retains recovery

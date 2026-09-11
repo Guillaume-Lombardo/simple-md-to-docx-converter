@@ -229,11 +229,16 @@ class InspectorDouble:
             "cgroup_version": 2,
             "pod_pids_limit": self.policy.limits.pid_limit,
             "cpu_quota_period_micros": self.policy.limits.cpu_period_micros,
+            "cni_config_digest": f"sha256:{'7' * 64}",
+            "cni_plugin_digest": f"sha256:{'8' * 64}",
+            "runtime_config_digest": f"sha256:{'9' * 64}",
+            "runtime_wrapper_digest": f"sha256:{'a' * 64}",
         }
         values.update(self.override_node)
         return NodeFenceSnapshot(**values)
 
-    def sandbox(self, pod_uid: UUID) -> SandboxSnapshot:
+    def sandbox(self, pod_uid: UUID, sandbox_id: str | None = None) -> SandboxSnapshot:
+        assert sandbox_id in {None, SANDBOX_ID}
         if self.fail_operation == "not_ready":
             raise KubernetesAttestationNotReady("Kubernetes sandbox is not ready")
         if self.fail_operation == "sandbox":
@@ -259,8 +264,10 @@ class InspectorDouble:
             "container_ids": ("9" * 64,),
             "container_states": states,
             "sandbox_ready": running,
-            "network_interfaces": ("lo",),
-            "forwarding_enabled": False,
+            "network_interfaces": ("eth0", "lo") if running else (),
+            "network_addresses": (("127.0.0.1", "192.0.2.1") if running else ()),
+            "network_routes": (),
+            "network_neighbors": (),
             "cpu_quota_micros": self.policy.limits.cpu_quota_micros,
             "cpu_period_micros": self.policy.limits.cpu_period_micros,
             "memory_max_bytes": self.policy.limits.memory_bytes,
@@ -269,13 +276,19 @@ class InspectorDouble:
             "workspace_mount_path": "/work",
             "workspace_size_bytes": self.policy.limits.workspace_bytes,
             "workspace_mount_flags": ("nodev", "noexec", "nosuid", "rw"),
+            "cgroup_lookup_complete": True,
+            "cgroup_present": True,
             "cgroup_populated": running,
-            "descendant_pids": (123,) if running else (),
+            "descendant_count": 1 if running else 0,
         }
         values.update(self.override_sandbox)
         return SandboxSnapshot(**values)
 
-    def removal(self, pod_uid: UUID) -> RemovalSnapshot:
+    def removal(
+        self, pod_uid: UUID, sandbox_id: str, cgroup_path: str
+    ) -> RemovalSnapshot:
+        assert sandbox_id == SANDBOX_ID
+        assert cgroup_path == CGROUP
         if self.fail_operation == "removal":
             raise RuntimeError(f"injected failure: {SENSITIVE_MARKER}")
         values: dict[str, Any] = {
@@ -526,6 +539,8 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     metadata["uid"] = str(POD_UID)
     specification = observed["spec"]
     assert isinstance(specification, dict)
+    for omitted in ("hostIPC", "hostNetwork", "hostPID"):
+        del specification[omitted]
     specification["nodeName"] = "reverse-node-1"
     specification["preemptionPolicy"] = "PreemptLowerPriority"
     specification["priority"] = 0
@@ -551,6 +566,15 @@ def test_observed_pod_projection_accepts_api_defaults_and_quantity_forms(
     )
     container = specification["containers"][0]
     assert isinstance(container, dict)
+    del container["args"]
+    field_reference = cast(
+        dict[str, object],
+        cast(
+            dict[str, object],
+            cast(list[dict[str, object]], container["env"])[0]["valueFrom"],
+        )["fieldRef"],
+    )
+    field_reference["apiVersion"] = "v1"
     container["terminationMessagePath"] = "/dev/termination-log"
     container["terminationMessagePolicy"] = "File"
     resources = container["resources"]
@@ -602,8 +626,10 @@ def test_observed_pod_rejects_orphaned_deletion_grace_period(
         ("workspace_mount_path", "/unexpected-work"),
         ("workspace_size_bytes", 1),
         ("workspace_mount_flags", ("rw",)),
-        ("network_interfaces", ("eth0", "lo")),
-        ("forwarding_enabled", True),
+        ("network_interfaces", ("lo", "veth0")),
+        ("network_addresses", ("127.0.0.1", "192.0.2.2")),
+        ("network_routes", ("default",)),
+        ("network_neighbors", ("192.0.2.2",)),
     ],
 )
 def test_sandbox_kernel_enforcement_must_match_exact_policy(
@@ -777,7 +803,7 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
 
     inspector.fail_operation = None
     runtime_unit = runtime.create(unit, policy)
-    engine = NodeAttestationEngine(inspector)
+    engine = cast(NodeAttestationEngine, runtime._attester)
     with pytest.raises(KubernetesRuntimeError, match="exit evidence"):
         engine.confirm_empty(runtime_unit, cast(EvidenceDigest, object()))
     with pytest.raises(KubernetesRuntimeError, match="empty evidence"):
@@ -786,6 +812,8 @@ def test_attester_public_proof_operations_validate_inputs_and_inspector_failures
         engine.confirm_exit(cast(KubernetesRuntimeUnit, object()))
 
     inspector.fail_operation = "sandbox"
+    with pytest.raises(KubernetesAttestationNotReady, match="not observable"):
+        engine.confirm_exit(runtime_unit)
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
 
@@ -1278,12 +1306,51 @@ def test_exit_and_empty_require_positive_cri_and_cgroup_facts(
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
     control.terminated = True
-    inspector.override_sandbox = {"descendant_pids": (999,)}
+    inspector.override_sandbox = {"descendant_count": 1}
     with pytest.raises(KubernetesRuntimeError, match="not empty"):
         runtime.confirm_empty(runtime_unit)
     inspector.override_sandbox = {"sandbox_id": "a" * 64}
     with pytest.raises(KubernetesRuntimeError, match="exit is unconfirmed"):
         runtime.confirm_exit(runtime_unit)
+
+
+@pytest.mark.unit
+def test_complete_absence_of_exact_bound_cgroup_is_accepted_after_exit(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {
+        "sandbox_ready": True,
+        "cgroup_present": False,
+        "cgroup_populated": False,
+        "descendant_count": 0,
+    }
+
+    exit_evidence = runtime.confirm_exit(runtime_unit)
+    empty_evidence = runtime.confirm_empty(runtime_unit)
+
+    assert isinstance(exit_evidence, EvidenceDigest)
+    assert isinstance(empty_evidence, EvidenceDigest)
+
+
+@pytest.mark.unit
+def test_absent_cgroup_fails_closed_when_lookup_is_incomplete(
+    unit: ManagedUnit, policy: BrokerPolicy
+) -> None:
+    runtime, control, inspector = _runtime(unit, policy)
+    runtime_unit = runtime.create(unit, policy)
+    control.terminated = True
+    inspector.override_sandbox = {
+        "cgroup_lookup_complete": False,
+        "cgroup_present": False,
+        "cgroup_populated": False,
+        "descendant_count": 0,
+    }
+
+    with pytest.raises(KubernetesRuntimeError, match="not empty"):
+        runtime.confirm_empty(runtime_unit)
 
 
 @pytest.mark.unit

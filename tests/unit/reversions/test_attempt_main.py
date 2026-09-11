@@ -247,6 +247,26 @@ def test_main_reads_executes_and_writes_without_output(mocker: Any) -> None:
     write.assert_called_once_with(response, channel_limits)
 
 
+def test_linger_exits_cleanly_when_the_broker_sends_sigterm(mocker: Any) -> None:
+    previous = {attempt_main.signal.SIGINT}
+    mask = mocker.patch.object(
+        attempt_main.signal, "pthread_sigmask", return_value=previous
+    )
+    wait = mocker.patch.object(
+        attempt_main.signal,
+        "sigwait",
+        return_value=attempt_main.signal.SIGTERM,
+    )
+
+    assert attempt_main._linger_until_terminated() == 0
+    blocked = {attempt_main.signal.SIGTERM}
+    assert mask.call_args_list == [
+        mocker.call(attempt_main.signal.SIG_BLOCK, blocked),
+        mocker.call(attempt_main.signal.SIG_SETMASK, previous),
+    ]
+    wait.assert_called_once_with(blocked)
+
+
 def test_main_rejects_arguments_and_unreadable_request(mocker: Any) -> None:
     mocker.patch.object(attempt_main.sys, "argv", ["attempt_main", "override"])
     assert attempt_main.main() == 2

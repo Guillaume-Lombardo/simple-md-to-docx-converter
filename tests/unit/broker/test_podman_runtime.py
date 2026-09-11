@@ -13,7 +13,7 @@ from uuid import UUID, uuid5
 import pytest
 from pytest_mock import MockerFixture
 
-from markweave.broker import podman_runtime
+from markweave.broker import command_runner, podman_runtime
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
@@ -1483,7 +1483,7 @@ def test_command_runner_is_hermetic_and_reaps_after_unexpected_read_error(
         environment={"PATH": "/usr/bin:/bin"},
     )(("--null",))
     assert b"CONTAINER_HOST" not in environment_output
-    original_popen = podman_runtime.subprocess.Popen
+    original_popen = command_runner.subprocess.Popen
     spawned: list[Any] = []
 
     def capture(*args: Any, **kwargs: Any) -> Any:
@@ -1491,9 +1491,9 @@ def test_command_runner_is_hermetic_and_reaps_after_unexpected_read_error(
         spawned.append(process)
         return process
 
-    mocker.patch.object(podman_runtime.subprocess, "Popen", side_effect=capture)
+    mocker.patch.object(command_runner.subprocess, "Popen", side_effect=capture)
     mocker.patch.object(
-        podman_runtime.selectors.EpollSelector,
+        command_runner.selectors.EpollSelector,
         "select",
         side_effect=OSError("secret"),
     )

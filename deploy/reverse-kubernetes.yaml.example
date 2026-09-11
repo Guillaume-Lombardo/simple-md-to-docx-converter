@@ -65,7 +65,7 @@ rules:
     verbs: ["create", "delete", "get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["create", "get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -79,8 +79,8 @@ subjects:
     name: markweave-reverse-broker
     namespace: markweave-reverse
 ---
-# This RuntimeClass handler exists only on nodes whose CNI configuration creates
-# a loopback-only sandbox. A NetworkPolicy is intentionally not treated as proof.
+# This RuntimeClass handler exists only on dedicated nodes whose sole CNI configuration creates
+# the attested isolated-dummy eth0 + lo sandbox. A NetworkPolicy is intentionally not proof.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata: {name: markweave-reverse}
@@ -100,6 +100,46 @@ kind: ServiceAccount
 metadata: {name: markweave-node-attester, namespace: markweave-attestation}
 automountServiceAccountToken: false
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: markweave-node-attester-read-node}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: markweave-node-attester-read-node}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: markweave-node-attester-read-node
+subjects:
+  - kind: ServiceAccount
+    name: markweave-node-attester
+    namespace: markweave-attestation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: markweave-node-attester-read-pod, namespace: markweave-reverse}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: markweave-node-attester-read-pod, namespace: markweave-reverse}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: markweave-node-attester-read-pod
+subjects:
+  - kind: ServiceAccount
+    name: markweave-node-attester
+    namespace: markweave-attestation
+---
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: markweave-node-attester-config, namespace: markweave-attestation}
@@ -107,17 +147,99 @@ immutable: true
 data:
   attester.json: |
     {
-      "listen_address": "0.0.0.0:9443",
+      "listen_host": "0.0.0.0",
+      "listen_port": 9443,
       "client_ca_file": "/run/markweave-tls/ca.crt",
       "server_certificate_file": "/run/markweave-tls/tls.crt",
       "server_private_key_file": "/run/markweave-tls/tls.key",
-      "require_client_certificate": true,
       "expected_client_certificate_sha256": "@REQUIRED_BROKER_CLIENT_CERTIFICATE_SHA256@",
+      "cri_endpoint": "unix:///run/markweave-cri/proxy.sock",
+      "kubelet_config": "/host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf",
+      "cni_config": "/host/var/lib/rancher/k3s/agent/etc/cni/net.d/00-markweave-isolated.conflist",
+      "cni_config_sha256": "@REQUIRED_CNI_CONFIG_SHA256@",
+      "cni_plugin": "/host/var/lib/rancher/k3s/data/cni/markweave-isolated",
+      "cni_plugin_sha256": "@REQUIRED_CNI_PLUGIN_SHA256@",
+      "runtime_config": "/host/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/20-markweave-reverse.toml",
+      "runtime_config_sha256": "@REQUIRED_RUNTIME_CONFIG_SHA256@",
+      "runtime_wrapper": "/host/var/lib/rancher/k3s/data/markweave/markweave-runc-wrapper",
+      "runtime_wrapper_sha256": "@REQUIRED_RUNTIME_WRAPPER_SHA256@",
+      "cgroup_root": "/host/sys/fs/cgroup",
+      "proc_root": "/host/proc",
+      "inventory_path": "/var/lib/markweave-attester/inventory.sqlite3",
+      "inventory_authentication_key_file": "/run/markweave-auth/key",
+      "inventory_max_records": @REQUIRED_ATTESTER_MAX_RECORDS@,
       "max_request_bytes": @REQUIRED_ATTESTER_MAX_REQUEST_BYTES@,
       "max_response_bytes": @REQUIRED_ATTESTER_MAX_RESPONSE_BYTES@,
       "request_timeout_seconds": @REQUIRED_ATTESTER_REQUEST_TIMEOUT_SECONDS@,
-      "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@
+      "operation_timeout_seconds": @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@,
+      "hard_shutdown_timeout_seconds": @REQUIRED_ATTESTER_HARD_SHUTDOWN_TIMEOUT_SECONDS@,
+      "max_concurrent_requests": @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@,
+      "max_sandboxes": @REQUIRED_ATTESTER_MAX_SANDBOXES@,
+      "max_containers": @REQUIRED_ATTESTER_MAX_CONTAINERS@,
+      "max_descendant_pids": @REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: markweave-cri-read-proxy-config, namespace: markweave-attestation}
+immutable: true
+data:
+  envoy.yaml: |
+    static_resources:
+      listeners:
+        - name: cri-read-only
+          per_connection_buffer_limit_bytes: 131072
+          address:
+            pipe: {path: /run/markweave-cri/proxy.sock, mode: 384}
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: cri_read_only
+                    codec_type: HTTP2
+                    stream_idle_timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s
+                    max_request_headers_kb: 4
+                    route_config:
+                      name: cri_read_only
+                      virtual_hosts:
+                        - name: cri
+                          domains: ["*"]
+                          routes:
+                            - match: {path: /runtime.v1.RuntimeService/Version}
+                              route: {cluster: containerd, timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s}
+                            - match: {path: /runtime.v1.RuntimeService/ListPodSandbox}
+                              route: {cluster: containerd, timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s}
+                            - match: {path: /runtime.v1.RuntimeService/PodSandboxStatus}
+                              route: {cluster: containerd, timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s}
+                            - match: {path: /runtime.v1.RuntimeService/ListContainers}
+                              route: {cluster: containerd, timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s}
+                            - match: {path: /runtime.v1.RuntimeService/ContainerStatus}
+                              route: {cluster: containerd, timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s}
+                            - match: {prefix: /}
+                              direct_response: {status: 403}
+                    http_filters:
+                      - name: envoy.filters.http.buffer
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                          max_request_bytes: 16384
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: containerd
+          connect_timeout: @REQUIRED_ATTESTER_OPERATION_TIMEOUT_SECONDS@s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config: {http2_protocol_options: {max_concurrent_streams: @REQUIRED_ATTESTER_MAX_CONCURRENT_REQUESTS@}}
+          load_assignment:
+            cluster_name: containerd
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe: {path: /host/run/k3s/containerd/containerd.sock}
 ---
 apiVersion: v1
 kind: Secret
@@ -128,3 +250,121 @@ stringData:
   ca.crt: "@REQUIRED_BROKER_CLIENT_CA_PEM@"
   tls.crt: "@REQUIRED_ATTESTER_CERTIFICATE_PEM@"
   tls.key: "@REQUIRED_ATTESTER_PRIVATE_KEY_PEM@"
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: markweave-node-attester-auth, namespace: markweave-attestation}
+type: Opaque
+immutable: true
+stringData:
+  key: "@REQUIRED_ATTESTER_INVENTORY_AUTHENTICATION_KEY@"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: markweave-node-attester, namespace: markweave-attestation}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: markweave-node-attester}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: markweave-node-attester}
+    spec:
+      automountServiceAccountToken: false
+      dnsPolicy: ClusterFirstWithHostNet
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: true
+      hostPID: false
+      nodeSelector:
+        reverse.markweave.dev/isolation-pool: reverse
+        reverse.markweave.dev/node-fence: "@REQUIRED_NODE_FENCE_REVISION@"
+      serviceAccountName: markweave-node-attester
+      terminationGracePeriodSeconds: @REQUIRED_ATTESTER_TERMINATION_GRACE_PERIOD_SECONDS@
+      tolerations:
+        - effect: NoSchedule
+          key: reverse.markweave.dev/dedicated
+          operator: Equal
+          value: reverse
+      containers:
+        - name: attester
+          image: "@REQUIRED_ATTESTER_IMAGE_REPOSITORY@@@REQUIRED_ATTESTER_IMAGE_DIGEST@"
+          imagePullPolicy: IfNotPresent
+          args: ["/etc/markweave/attester.json"]
+          env:
+            - name: MARKWEAVE_NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {name: mtls, containerPort: 9443, hostPort: 9443, protocol: TCP}
+          readinessProbe: {tcpSocket: {port: mtls}, periodSeconds: 2, timeoutSeconds: 1}
+          livenessProbe: {tcpSocket: {port: mtls}, periodSeconds: 10, timeoutSeconds: 1}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 16Mi}
+            limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 0
+            runAsNonRoot: false
+            runAsUser: 0
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: config, mountPath: /etc/markweave/attester.json, subPath: attester.json, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/ca.crt, subPath: ca.crt, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/tls.crt, subPath: tls.crt, readOnly: true}
+            - {name: tls, mountPath: /run/markweave-tls/tls.key, subPath: tls.key, readOnly: true}
+            - {name: authentication, mountPath: /run/markweave-auth/key, subPath: key, readOnly: true}
+            - {name: state, mountPath: /var/lib/markweave-attester}
+            - {name: cri-proxy-socket, mountPath: /run/markweave-cri}
+            - {name: cgroup, mountPath: /host/sys/fs/cgroup, readOnly: true}
+            - {name: proc, mountPath: /host/proc, readOnly: true}
+            - {name: kubelet-config, mountPath: /host/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, readOnly: true}
+            - {name: cni-config, mountPath: /host/var/lib/rancher/k3s/agent/etc/cni/net.d/00-markweave-isolated.conflist, readOnly: true}
+            - {name: cni-plugin, mountPath: /host/var/lib/rancher/k3s/data/cni/markweave-isolated, readOnly: true}
+            - {name: runtime-config, mountPath: /host/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/20-markweave-reverse.toml, readOnly: true}
+            - {name: runtime-wrapper, mountPath: /host/var/lib/rancher/k3s/data/markweave/markweave-runc-wrapper, readOnly: true}
+            - {name: service-account, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+        - name: cri-read-proxy
+          image: "@REQUIRED_CRI_PROXY_IMAGE_REPOSITORY@@@REQUIRED_CRI_PROXY_IMAGE_DIGEST@"
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/envoy"]
+          args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "error", "--disable-hot-restart"]
+          resources:
+            requests: {cpu: 25m, memory: 32Mi, ephemeral-storage: 8Mi}
+            limits: {cpu: 250m, memory: 128Mi, ephemeral-storage: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 0
+            runAsNonRoot: false
+            runAsUser: 0
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: cri-proxy-config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml, readOnly: true}
+            - {name: cri-proxy-socket, mountPath: /run/markweave-cri}
+            - {name: cri-socket, mountPath: /host/run/k3s/containerd/containerd.sock, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: markweave-node-attester-config, defaultMode: 292}}
+        - {name: cri-proxy-config, configMap: {name: markweave-cri-read-proxy-config, defaultMode: 292}}
+        - {name: tls, secret: {secretName: markweave-node-attester-tls, defaultMode: 256}}
+        - {name: authentication, secret: {secretName: markweave-node-attester-auth, defaultMode: 256}}
+        - {name: state, hostPath: {path: /var/lib/markweave-attester, type: Directory}}
+        - {name: cri-proxy-socket, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+        - {name: cri-socket, hostPath: {path: /run/k3s/containerd/containerd.sock, type: Socket}}
+        - {name: cgroup, hostPath: {path: /sys/fs/cgroup, type: Directory}}
+        - {name: proc, hostPath: {path: /proc, type: Directory}}
+        - {name: kubelet-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-markweave-reverse.conf, type: File}}
+        - {name: cni-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/cni/net.d/00-markweave-isolated.conflist, type: File}}
+        - {name: cni-plugin, hostPath: {path: /var/lib/rancher/k3s/data/cni/markweave-isolated, type: File}}
+        - {name: runtime-config, hostPath: {path: /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/20-markweave-reverse.toml, type: File}}
+        - {name: runtime-wrapper, hostPath: {path: /var/lib/rancher/k3s/data/markweave/markweave-runc-wrapper, type: File}}
+        - name: service-account
+          projected:
+            defaultMode: 256
+            sources:
+              - serviceAccountToken: {path: token, expirationSeconds: 3600}
+              - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
+              - downwardAPI: {items: [{path: namespace, fieldRef: {fieldPath: metadata.namespace}}]}

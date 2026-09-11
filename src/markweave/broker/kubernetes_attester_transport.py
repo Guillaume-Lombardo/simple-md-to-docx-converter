@@ -244,7 +244,7 @@ class NodeAttesterService:
             sandbox,
         )
         previous = self._bound.setdefault(pod.pod_uid, unit)
-        if previous != unit:
+        if not _same_runtime_identity(previous, unit):
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
         record = AttesterLifecycleRecord(
             pod.pod_uid,
@@ -621,15 +621,11 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
             "protocol": _PROTOCOL,
             "version": _VERSION,
         }
-        deadline = self._monotonic() + self._readiness.timeout_seconds
-        while True:
-            response = self._exchange(pod.node_name, request)
-            if response != {"outcome": "not_ready"}:
-                break
-            remaining = deadline - self._monotonic()
-            if remaining <= 0:
-                raise KubernetesRuntimeError("Kubernetes sandbox readiness timed out")
-            self._sleep(min(self._readiness.poll_interval_seconds, remaining))
+        response = self._exchange_until_ready(
+            pod.node_name,
+            request,
+            timeout_message="Kubernetes sandbox readiness timed out",
+        )
         if set(response) != {"outcome", "sandbox"} or response["outcome"] != "ok":
             raise KubernetesRuntimeError("Kubernetes attester response is invalid")
         try:
@@ -645,7 +641,7 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
             sandbox,
         )
         previous = self._bound.setdefault(pod.pod_uid, unit)
-        if previous != unit:
+        if not _same_runtime_identity(previous, unit):
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
         return sandbox
 
@@ -693,7 +689,7 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
                 "Kubernetes attester response is invalid"
             ) from None
         previous = self._bound.setdefault(pod.pod_uid, unit)
-        if previous != unit:
+        if not _same_runtime_identity(previous, unit):
             raise KubernetesRuntimeError("Kubernetes attester binding conflicts")
         return sandbox, contract
 
@@ -836,7 +832,11 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
         }
         if prior is not None:
             request["prior_evidence"] = prior.value
-        response = self._exchange(unit.pod.node_name, request)
+        response = self._exchange_until_ready(
+            unit.pod.node_name,
+            request,
+            timeout_message="Kubernetes attester proof readiness timed out",
+        )
         if set(response) != {"evidence", "outcome"} or response["outcome"] != "ok":
             raise KubernetesRuntimeError("Kubernetes attester response is invalid")
         try:
@@ -846,8 +846,36 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
                 "Kubernetes attester response is invalid"
             ) from None
 
+    def _exchange_until_ready(
+        self,
+        node_name: str,
+        request: Mapping[str, object],
+        *,
+        timeout_message: str,
+    ) -> Mapping[str, object]:
+        deadline = self._monotonic() + self._readiness.timeout_seconds
+        while True:
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                raise KubernetesRuntimeError(timeout_message)
+            response = self._exchange(
+                node_name,
+                request,
+                timeout_seconds=min(self._limits.timeout_seconds, remaining),
+            )
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                raise KubernetesRuntimeError(timeout_message)
+            if response != {"outcome": "not_ready"}:
+                return response
+            self._sleep(min(self._readiness.poll_interval_seconds, remaining))
+
     def _exchange(
-        self, node_name: str, request: Mapping[str, object]
+        self,
+        node_name: str,
+        request: Mapping[str, object],
+        *,
+        timeout_seconds: float | None = None,
     ) -> Mapping[str, object]:
         payload = _encode(request)
         if len(payload) > self._limits.max_request_bytes:
@@ -857,7 +885,11 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
         connection = http.client.HTTPSConnection(
             node_name,
             self._tls.port,
-            timeout=self._limits.timeout_seconds,
+            timeout=(
+                self._limits.timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
             context=self._context,
         )
         try:
@@ -880,10 +912,11 @@ class HttpsNodeAttesterClient(KubernetesNodeAttester):
                 },
             )
             response = connection.getresponse()
+            if response.status != _HTTP_OK:
+                raise KubernetesRuntimeError("Kubernetes attester request failed")
             length = _content_length(response.getheader("Content-Length"))
             if (
-                response.status != _HTTP_OK
-                or response.getheader("Content-Type") != _CONTENT_TYPE
+                response.getheader("Content-Type") != _CONTENT_TYPE
                 or length > self._limits.max_response_bytes
             ):
                 raise KubernetesRuntimeError("Kubernetes attester request failed")

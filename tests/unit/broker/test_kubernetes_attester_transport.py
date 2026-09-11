@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -45,6 +46,7 @@ from markweave.broker.models import (
     RuntimeChannelLimits,
     RuntimeIncarnation,
     RuntimeLimits,
+    RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
 from tests.unit.broker.test_kubernetes_runtime import (
@@ -540,6 +542,36 @@ def test_client_refuses_a_runtime_unit_that_it_did_not_bind() -> None:
 
 
 @pytest.mark.unit
+def test_client_reports_empty_error_responses_without_parsing_success_length(
+    mocker: MockerFixture,
+) -> None:
+    response = mocker.Mock()
+    response.status = 400
+    response.getheader.return_value = "0"
+    connection = mocker.Mock()
+    connection.sock = object()
+    connection.getresponse.return_value = response
+    mocker.patch.object(
+        transport.http.client, "HTTPSConnection", return_value=connection
+    )
+    mocker.patch.object(transport, "_certificate_digest", return_value=EVIDENCE)
+    client = object.__new__(HttpsNodeAttesterClient)
+    client._tls = cast(
+        AttesterClientTlsConfig,
+        SimpleNamespace(port=8443, expected_server_certificate=EVIDENCE),
+    )
+    client._limits = AttesterTransportLimits(4096, 4096, 1.0, 1)
+    client._context = cast(ssl.SSLContext, object())
+
+    with pytest.raises(KubernetesRuntimeError, match="attester request failed"):
+        client._exchange("node-a", {"operation": "bind"})
+
+    response.getheader.assert_not_called()
+    response.read.assert_not_called()
+    connection.close.assert_called_once_with()
+
+
+@pytest.mark.unit
 def test_service_exposes_only_explicit_not_ready_as_retryable(
     unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
@@ -557,14 +589,24 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
 ) -> None:
     class ClientDouble(HttpsNodeAttesterClient):
         responses: list[dict[str, object]]
+        timeouts: list[float | None]
 
-        def _exchange(self, node_name: str, request: object) -> dict[str, object]:
+        def _exchange(
+            self,
+            node_name: str,
+            request: object,
+            *,
+            timeout_seconds: float | None = None,
+        ) -> dict[str, object]:
             del node_name, request
+            self.timeouts.append(timeout_seconds)
             return self.responses.pop(0)
 
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
-    client._monotonic = iter((0.0, 0.1)).__next__
+    client._limits = AttesterTransportLimits(4096, 4096, 10, 1)
+    client._monotonic = iter((0.0, 0.0, 0.1, 0.2, 0.3)).__next__
+    client.timeouts = []
     slept: list[float] = []
     client._sleep = slept.append
     client._bound = {}
@@ -573,13 +615,39 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
     contract = transport._contract(request["contract"])
     good = _call(service, request)
     client.responses = [{"outcome": "not_ready"}, good]
-    client.bind(pod, contract)
+    sandbox = client.bind(pod, contract)
     assert slept == [0.1]
+    assert client.timeouts == [1.0, 0.8]
+
+    runtime_unit = KubernetesRuntimeUnit(
+        pod.unit_id,
+        RuntimeIncarnation(pod.pod_uid, pod.policy_specification),
+        pod,
+        sandbox,
+    )
+    client.responses = [
+        {"outcome": "not_ready"},
+        {"evidence": EVIDENCE.value, "outcome": "ok"},
+    ]
+    client._monotonic = iter((0.0, 0.0, 0.1, 0.2, 0.3)).__next__
+    client.timeouts = []
+    assert client.confirm_exit(runtime_unit) == EVIDENCE
+    assert slept == [0.1, 0.1]
+    assert client.timeouts == [1.0, 0.8]
 
     client.responses = [{"outcome": "not_ready"}]
-    client._monotonic = iter((0.0, 1.0)).__next__
+    client._monotonic = iter((0.0, 0.0, 1.0)).__next__
+    client.timeouts = []
+    with pytest.raises(KubernetesRuntimeError, match="proof readiness timed out"):
+        client.confirm_exit(runtime_unit)
+    assert client.timeouts == [1.0]
+
+    client.responses = [good]
+    client._monotonic = iter((0.0, 0.0, 1.1)).__next__
+    client.timeouts = []
     with pytest.raises(KubernetesRuntimeError, match="readiness timed out"):
         client.bind(replace(pod, pod_uid=UUID(int=98)), contract)
+    assert client.timeouts == [1.0]
 
     client.responses = [{"outcome": "ok", "sandbox": {"sandbox_id": "invalid"}}]
     client._monotonic = lambda: 0.0
@@ -596,9 +664,13 @@ def test_recovery_clients_normalize_malformed_success_payloads(
         response: dict[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -644,9 +716,13 @@ def test_attester_client_rejects_each_invalid_recovery_and_proof_boundary(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -662,6 +738,7 @@ def test_attester_client_rejects_each_invalid_recovery_and_proof_boundary(
     )
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._limits = AttesterTransportLimits(4096, 4096, 1, 1)
     client._monotonic = lambda: 0.0
     client._sleep = lambda _: None
     client._bound = {}
@@ -826,9 +903,13 @@ def test_client_accepts_successful_adoption_recovery_and_acknowledgement(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -880,9 +961,13 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -901,6 +986,7 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
 
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._limits = AttesterTransportLimits(4096, 4096, 1, 1)
     client._monotonic = lambda: 0.0
     client._sleep = lambda _: None
     client._bound = {pod.pod_uid: replace(expected, unit_id=UUID(int=98))}
@@ -910,6 +996,14 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
     }
     with pytest.raises(KubernetesRuntimeError, match="binding conflicts"):
         client.bind(pod, contract)
+
+    client._bound = {
+        pod.pod_uid: replace(
+            expected,
+            recovery_binding=RuntimeRecoveryBinding("kubernetes", 1, b"{}"),
+        )
+    }
+    assert client.bind(pod, contract) == sandbox
 
     client._bound = {}
     client.response = {}
@@ -1137,12 +1231,11 @@ def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("terminal", [False, True])
 def test_service_durably_adopts_prepared_create_before_bind_reply(
-    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path, terminal: bool
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
     service, request, _, control = _binding(unit, policy, tmp_path)
-    control.terminated = terminal
+    control.terminated = False
 
     adopted = _call(
         service,
@@ -1162,6 +1255,33 @@ def test_service_durably_adopts_prepared_create_before_bind_reply(
     ).records()
     assert len(records) == 1
     assert records[0].state is AttesterLifecycleState.BOUND
+
+
+@pytest.mark.unit
+def test_service_rejects_uncommitted_exited_adoption_without_network_evidence(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, request, _, control = _binding(unit, policy, tmp_path)
+    control.terminated = True
+
+    with pytest.raises(KubernetesRuntimeError, match="attestation is invalid"):
+        _call(
+            service,
+            {
+                "operation": "adopt_create_intent",
+                "pod": request["pod"],
+                "proposed_contract": request["contract"],
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+
+    assert (
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ).records()
+        == ()
+    )
 
 
 @pytest.mark.unit

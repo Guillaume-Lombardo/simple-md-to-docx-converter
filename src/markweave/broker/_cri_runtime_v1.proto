@@ -1,0 +1,134 @@
+// Copyright 2020 The Kubernetes Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// This is the intentionally minimal, wire-compatible subset of Kubernetes
+// cri-api v0.35.0 used by the Markweave read-only node attester. Field numbers
+// and types come from pkg/apis/runtime/v1/api.proto at tag v0.35.0. Do not add
+// mutation RPCs or ImageService here.
+
+syntax = "proto3";
+
+package runtime.v1;
+
+service RuntimeService {
+  rpc Version(VersionRequest) returns (VersionResponse) {}
+  rpc ListPodSandbox(ListPodSandboxRequest) returns (ListPodSandboxResponse) {}
+  rpc PodSandboxStatus(PodSandboxStatusRequest) returns (PodSandboxStatusResponse) {}
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse) {}
+  rpc ContainerStatus(ContainerStatusRequest) returns (ContainerStatusResponse) {}
+}
+
+message VersionRequest {
+  string version = 1;
+}
+
+message VersionResponse {
+  string version = 1;
+  string runtime_name = 2;
+  string runtime_version = 3;
+  string runtime_api_version = 4;
+}
+
+message PodSandboxMetadata {
+  string name = 1;
+  string uid = 2;
+  string namespace = 3;
+  uint32 attempt = 4;
+}
+
+enum PodSandboxState {
+  SANDBOX_READY = 0;
+  SANDBOX_NOTREADY = 1;
+}
+
+message PodSandboxStatusRequest {
+  string pod_sandbox_id = 1;
+  bool verbose = 2;
+}
+
+message PodSandboxStatus {
+  string id = 1;
+  PodSandboxMetadata metadata = 2;
+  PodSandboxState state = 3;
+  map<string, string> labels = 7;
+}
+
+message PodSandboxStatusResponse {
+  PodSandboxStatus status = 1;
+  map<string, string> info = 2;
+}
+
+message PodSandboxFilter {
+  string id = 1;
+  map<string, string> label_selector = 3;
+}
+
+message ListPodSandboxRequest {
+  PodSandboxFilter filter = 1;
+}
+
+message PodSandbox {
+  string id = 1;
+  PodSandboxMetadata metadata = 2;
+  PodSandboxState state = 3;
+  map<string, string> labels = 5;
+}
+
+message ListPodSandboxResponse {
+  repeated PodSandbox items = 1;
+}
+
+enum ContainerState {
+  CONTAINER_CREATED = 0;
+  CONTAINER_RUNNING = 1;
+  CONTAINER_EXITED = 2;
+  CONTAINER_UNKNOWN = 3;
+}
+
+message ContainerFilter {
+  string id = 1;
+  string pod_sandbox_id = 3;
+  map<string, string> label_selector = 4;
+}
+
+message ListContainersRequest {
+  ContainerFilter filter = 1;
+}
+
+message Container {
+  string id = 1;
+  string pod_sandbox_id = 2;
+  ContainerState state = 6;
+  map<string, string> labels = 8;
+}
+
+message ListContainersResponse {
+  repeated Container containers = 1;
+}
+
+message ContainerStatusRequest {
+  string container_id = 1;
+  bool verbose = 2;
+}
+
+message ContainerStatus {
+  string id = 1;
+  ContainerState state = 3;
+  map<string, string> labels = 12;
+}
+
+message ContainerStatusResponse {
+  ContainerStatus status = 1;
+  map<string, string> info = 2;
+}

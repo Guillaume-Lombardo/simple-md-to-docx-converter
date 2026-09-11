@@ -50,6 +50,9 @@ _CONTAINER = "attempt"
 _MAX_API_OBJECT_BYTES = 256 * 1024
 _MAX_EXEC_ERROR_BYTES = 4096
 _NOT_FOUND = 404
+_STDIN_CHANNEL = 0
+_STREAM_CLOSE_CHANNEL = 255
+_STREAM_PROTOCOL_V5 = "v5.channel.k8s.io"
 _STAGE_SCRIPT = """import base64,json,os,sys
 if os.environ.get('MARKWEAVE_POD_UID')!=sys.argv[1]: raise SystemExit(3)
 p=json.loads(sys.stdin.buffer.read())
@@ -77,7 +80,7 @@ sys.stdout.write(base64.b64encode(d).decode('ascii'))
 """
 _KILL_SCRIPT = """import os,signal,sys
 if os.environ.get('MARKWEAVE_POD_UID')!=sys.argv[1]: raise SystemExit(3)
-os.kill(1,signal.SIGKILL)
+os.kill(1,signal.SIGTERM)
 """
 
 
@@ -142,10 +145,11 @@ def _bounded_create_websocket(
     header: list[str] = []
     if headers and "authorization" in headers:
         header.append(f"authorization: {headers['authorization']}")
-    if headers and "sec-websocket-protocol" in headers:
-        header.append(f"sec-websocket-protocol: {headers['sec-websocket-protocol']}")
-    else:
-        header.append("sec-websocket-protocol: v4.channel.k8s.io")
+    if headers and headers.get("sec-websocket-protocol") not in {
+        None,
+        _STREAM_PROTOCOL_V5,
+    }:
+        raise KubernetesRuntimeError("Kubernetes exec protocol is invalid")
     if url.startswith("wss://") and configuration.verify_ssl:
         ssl_options: dict[str, object] = {
             "cert_reqs": ssl.CERT_REQUIRED,
@@ -164,6 +168,7 @@ def _bounded_create_websocket(
     websocket = ws_client.WebSocket(sslopt=ssl_options, skip_utf8_validation=False)
     connect_options: dict[str, object] = {
         "header": header,
+        "subprotocols": [_STREAM_PROTOCOL_V5],
         "timeout": timeout_seconds,
     }
     if configuration.proxy or configuration.proxy_headers:
@@ -198,6 +203,16 @@ class _BoundedWsClient(ws_client.WSClient):
         )
         self._connected = True
         self._returncode = None
+
+    def close_stdin(self) -> None:
+        """Half-close stdin with the Kubernetes remotecommand v5 signal."""
+
+        if getattr(self.sock, "subprotocol", None) != _STREAM_PROTOCOL_V5:
+            raise KubernetesRuntimeError("Kubernetes exec protocol is invalid")
+        self.sock.send(
+            bytes((_STREAM_CLOSE_CHANNEL, _STDIN_CHANNEL)),
+            opcode=ws_client.ABNF.OPCODE_BINARY,
+        )
 
 
 def _bounded_websocket_call(

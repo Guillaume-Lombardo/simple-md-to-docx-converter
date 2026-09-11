@@ -14,7 +14,8 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Protocol, cast
+from importlib import import_module
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
 from markweave.broker.models import (
@@ -29,8 +30,13 @@ from markweave.broker.models import (
     RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
-from markweave.broker.ports import RuntimeUnit
-from markweave.reversions.models import ReverseAttemptRequest, ReverseAttemptResponse
+
+if TYPE_CHECKING:
+    from markweave.broker.ports import RuntimeUnit
+    from markweave.reversions.models import (
+        ReverseAttemptRequest,
+        ReverseAttemptResponse,
+    )
 
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?\Z")
 _SANDBOX_ID = re.compile(r"[0-9a-f]{32,128}\Z")
@@ -317,7 +323,9 @@ def project_observed_pod(
     try:
         if _extra_workload_containers(observed):
             raise ValueError
-        prepared = _filter_default_tolerations(observed, expected)
+        prepared = _restore_omitted_api_defaults(
+            _filter_default_tolerations(observed, expected), expected
+        )
         projected = _project_like(prepared, expected, ())
     except (KeyError, TypeError, ValueError, InvalidOperation) as error:
         raise KubernetesRuntimeError("Kubernetes observed Pod is invalid") from error
@@ -639,7 +647,10 @@ class KubernetesIsolationRuntime:
         self, runtime_unit: RuntimeUnit, request: ReverseAttemptRequest
     ) -> None:
         verified = self._coerce(runtime_unit)
-        if type(request) is not ReverseAttemptRequest:
+        request_model = import_module(
+            "markweave.reversions.models"
+        ).ReverseAttemptRequest
+        if type(request) is not request_model:
             raise KubernetesRuntimeError("Kubernetes workspace request is invalid")
         managed = ManagedUnit(
             verified.pod.attempt_id,
@@ -1263,6 +1274,43 @@ def _filter_default_tolerations(
     return observed_copy
 
 
+def _restore_omitted_api_defaults(
+    observed: Mapping[str, object], expected: Mapping[str, object]
+) -> dict[str, object]:
+    """Restore secure zero-value fields omitted by Kubernetes serialization."""
+
+    observed_copy = dict(observed)
+    observed_specification = observed.get("spec")
+    expected_specification = expected.get("spec")
+    if not isinstance(observed_specification, Mapping) or not isinstance(
+        expected_specification, Mapping
+    ):
+        raise TypeError
+    specification_copy = dict(observed_specification)
+    for key in ("hostIPC", "hostNetwork", "hostPID"):
+        if key not in specification_copy and expected_specification.get(key) is False:
+            specification_copy[key] = False
+    observed_containers = specification_copy.get("containers")
+    expected_containers = expected_specification.get("containers")
+    if type(observed_containers) is not list or type(expected_containers) is not list:
+        raise TypeError
+    containers_copy = list(observed_containers)
+    if len(containers_copy) == 1 and len(expected_containers) == 1:
+        observed_container = containers_copy[0]
+        expected_container = expected_containers[0]
+        if not isinstance(observed_container, Mapping) or not isinstance(
+            expected_container, Mapping
+        ):
+            raise TypeError
+        container_copy = dict(observed_container)
+        if "args" not in container_copy and expected_container.get("args") == []:
+            container_copy["args"] = []
+        containers_copy[0] = container_copy
+    specification_copy["containers"] = containers_copy
+    observed_copy["spec"] = specification_copy
+    return observed_copy
+
+
 def _allowed_api_default(
     path: tuple[str, ...], key: str, value: object, parent: Mapping[object, object]
 ) -> bool:
@@ -1305,6 +1353,16 @@ def _allowed_api_default(
             ("terminationMessagePath", "/dev/termination-log"),
             ("terminationMessagePolicy", "File"),
         }
+    elif path == (
+        "spec",
+        "containers",
+        "0",
+        "env",
+        "0",
+        "valueFrom",
+        "fieldRef",
+    ):
+        allowed = (key, value) == ("apiVersion", "v1")
     return allowed
 
 

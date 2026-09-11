@@ -38,28 +38,57 @@ _SELECT = (
 _MINIMUM_KEY_BYTES = 32
 _CREATE_LIFECYCLE = (
     "CREATE TABLE lifecycle ("
-    "pod_uid TEXT PRIMARY KEY NOT NULL,"
-    "state TEXT NOT NULL,"
-    "binding_payload BLOB NOT NULL,"
-    "sandbox_payload BLOB NOT NULL,"
-    "exit_evidence TEXT,"
-    "empty_evidence TEXT,"
-    "removed_evidence TEXT,"
-    "revision INTEGER NOT NULL CHECK (revision >= 0),"
-    "mac_version INTEGER NOT NULL,"
-    "mac BLOB NOT NULL"
-    ") STRICT"
+    "pod_uid TEXT PRIMARY KEY NOT NULL CHECK (typeof(pod_uid) = 'text'),"
+    "state TEXT NOT NULL CHECK (typeof(state) = 'text'),"
+    "binding_payload BLOB NOT NULL CHECK (typeof(binding_payload) = 'blob'),"
+    "sandbox_payload BLOB NOT NULL CHECK (typeof(sandbox_payload) = 'blob'),"
+    "exit_evidence TEXT CHECK (exit_evidence IS NULL OR typeof(exit_evidence) = 'text'),"
+    "empty_evidence TEXT CHECK (empty_evidence IS NULL OR typeof(empty_evidence) = 'text'),"
+    "removed_evidence TEXT CHECK (removed_evidence IS NULL OR typeof(removed_evidence) = 'text'),"
+    "revision INTEGER NOT NULL CHECK (revision >= 0 AND typeof(revision) = 'integer'),"
+    "mac_version INTEGER NOT NULL CHECK (typeof(mac_version) = 'integer'),"
+    "mac BLOB NOT NULL CHECK (typeof(mac) = 'blob')"
+    ")"
 )
 _CREATE_MANIFEST = (
     "CREATE TABLE lifecycle_manifest ("
-    "singleton_id INTEGER PRIMARY KEY NOT NULL CHECK (singleton_id = 1),"
-    "generation INTEGER NOT NULL CHECK (generation >= 0),"
-    "record_count INTEGER NOT NULL CHECK (record_count >= 0),"
-    "records_digest TEXT NOT NULL,"
-    "mac_version INTEGER NOT NULL,"
-    "mac BLOB NOT NULL"
-    ") STRICT"
+    "singleton_id INTEGER PRIMARY KEY NOT NULL "
+    "CHECK (singleton_id = 1 AND typeof(singleton_id) = 'integer'),"
+    "generation INTEGER NOT NULL "
+    "CHECK (generation >= 0 AND typeof(generation) = 'integer'),"
+    "record_count INTEGER NOT NULL "
+    "CHECK (record_count >= 0 AND typeof(record_count) = 'integer'),"
+    "records_digest TEXT NOT NULL CHECK (typeof(records_digest) = 'text'),"
+    "mac_version INTEGER NOT NULL CHECK (typeof(mac_version) = 'integer'),"
+    "mac BLOB NOT NULL CHECK (typeof(mac) = 'blob')"
+    ")"
 )
+_LEGACY_STRICT_SCHEMAS = {
+    "lifecycle": (
+        "CREATE TABLE lifecycle ("
+        "pod_uid TEXT PRIMARY KEY NOT NULL,"
+        "state TEXT NOT NULL,"
+        "binding_payload BLOB NOT NULL,"
+        "sandbox_payload BLOB NOT NULL,"
+        "exit_evidence TEXT,"
+        "empty_evidence TEXT,"
+        "removed_evidence TEXT,"
+        "revision INTEGER NOT NULL CHECK (revision >= 0),"
+        "mac_version INTEGER NOT NULL,"
+        "mac BLOB NOT NULL"
+        ") STRICT"
+    ),
+    "lifecycle_manifest": (
+        "CREATE TABLE lifecycle_manifest ("
+        "singleton_id INTEGER PRIMARY KEY NOT NULL CHECK (singleton_id = 1),"
+        "generation INTEGER NOT NULL CHECK (generation >= 0),"
+        "record_count INTEGER NOT NULL CHECK (record_count >= 0),"
+        "records_digest TEXT NOT NULL,"
+        "mac_version INTEGER NOT NULL,"
+        "mac BLOB NOT NULL"
+        ") STRICT"
+    ),
+}
 
 
 class AttesterLifecycleState(StrEnum):
@@ -316,10 +345,11 @@ class SQLiteNodeAttesterLedger:
                 "AND name IN ('lifecycle', 'lifecycle_manifest')"
             )
         )
-        if schemas != {
+        current_schemas = {
             "lifecycle": _CREATE_LIFECYCLE,
             "lifecycle_manifest": _CREATE_MANIFEST,
-        }:
+        }
+        if schemas not in (current_schemas, _LEGACY_STRICT_SCHEMAS):
             raise KubernetesRuntimeError("Kubernetes attester ledger failed")
         if [row[0] for row in connection.execute("PRAGMA integrity_check")] != ["ok"]:
             raise KubernetesRuntimeError("Kubernetes attester ledger failed")
