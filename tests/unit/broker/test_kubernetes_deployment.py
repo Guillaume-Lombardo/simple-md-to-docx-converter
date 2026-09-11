@@ -263,7 +263,8 @@ def test_cri_proxy_allows_only_exact_read_only_runtime_methods() -> None:
     listener = envoy["static_resources"]["listeners"][0]
     manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
     routes = manager["route_config"]["virtual_hosts"][0]["routes"]
-    allowed = {route["match"]["path"] for route in routes if "path" in route["match"]}
+    assert all(set(route["match"]) == {"path"} for route in routes[:-1])
+    allowed = {route["match"]["path"] for route in routes[:-1]}
     assert allowed == {
         "/runtime.v1.RuntimeService/Version",
         "/runtime.v1.RuntimeService/ListPodSandbox",

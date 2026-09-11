@@ -34,6 +34,7 @@ from markweave.broker.models import (
     ReplayPosition,
     RuntimeChannelLimits,
     RuntimeLimits,
+    TerminationProof,
 )
 from markweave.broker.service import IsolationBrokerService
 from markweave.broker.workspace_protocol import (
@@ -45,6 +46,18 @@ from markweave.broker.workspace_protocol import (
 from markweave.reversions.models import ReverseContentLimits
 
 _POLL_SECONDS = 0.25
+
+
+def _terminate_and_acknowledge(
+    broker: IsolationBrokerService,
+    principal: AuthenticatedPrincipal,
+    attempt_id: UUID,
+    unit_id: UUID,
+) -> TerminationProof:
+    proof = broker.terminate(principal, attempt_id, unit_id)
+    if not broker.acknowledge(principal, attempt_id, unit_id, proof.proof_id):
+        raise RuntimeError("Kubernetes proof acknowledgement failed")
+    return proof
 
 
 def _certificate_digest(path: Path) -> EvidenceDigest:
@@ -127,62 +140,67 @@ def main() -> int:
     )
     broker.start()
     unit = broker.create(ReplayPosition(principal, 1), attempt_id)
-    stage_request_id = uuid4()
-    source = arguments.source.read_bytes()
-    receipt = broker.stage_workspace(
-        principal,
-        WorkspaceStageRequest(
-            stage_request_id,
-            2,
-            attempt_id,
-            unit.unit_id,
-            unit.create_sequence,
-            arguments.source.suffix,
-            ReverseContentLimits(
-                1_000_000,
-                2_000_000,
-                500_000,
-                4_096,
-                4_096,
-                16_777_216,
-                10_000,
-                64,
-                64,
-                1_000_000,
-                1_500_000,
-                1_000_000,
-                2_000_000,
-            ),
-            source,
-        ),
-    )
-    deadline = time.monotonic() + 90
-    sequence = 3
-    while True:
-        response = broker.collect_workspace(
+    try:
+        stage_request_id = uuid4()
+        source = arguments.source.read_bytes()
+        receipt = broker.stage_workspace(
             principal,
-            WorkspaceCollectRequest(
-                uuid4(),
-                sequence,
-                receipt.request_id,
-                receipt.stage_sequence,
-                receipt.attempt_id,
-                receipt.unit_id,
-                receipt.create_sequence,
-                receipt.incarnation_id,
+            WorkspaceStageRequest(
+                stage_request_id,
+                2,
+                attempt_id,
+                unit.unit_id,
+                unit.create_sequence,
+                arguments.source.suffix,
+                ReverseContentLimits(
+                    1_000_000,
+                    2_000_000,
+                    500_000,
+                    4_096,
+                    4_096,
+                    16_777_216,
+                    10_000,
+                    64,
+                    64,
+                    1_000_000,
+                    1_500_000,
+                    1_000_000,
+                    2_000_000,
+                ),
+                source,
             ),
         )
-        sequence += 1
-        if not isinstance(response, WorkspacePendingResponse):
-            break
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Kubernetes reverse conversion did not finish")
-        time.sleep(_POLL_SECONDS)
-    if not isinstance(response, WorkspaceSuccessResponse):
-        raise RuntimeError("Kubernetes reverse conversion failed")
-    proof = broker.terminate(principal, attempt_id, unit.unit_id)
-    if not broker.acknowledge(principal, attempt_id, unit.unit_id, proof.proof_id):
-        raise RuntimeError("Kubernetes proof acknowledgement failed")
+        deadline = time.monotonic() + 90
+        sequence = 3
+        while True:
+            response = broker.collect_workspace(
+                principal,
+                WorkspaceCollectRequest(
+                    uuid4(),
+                    sequence,
+                    receipt.request_id,
+                    receipt.stage_sequence,
+                    receipt.attempt_id,
+                    receipt.unit_id,
+                    receipt.create_sequence,
+                    receipt.incarnation_id,
+                ),
+            )
+            sequence += 1
+            if not isinstance(response, WorkspacePendingResponse):
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Kubernetes reverse conversion did not finish")
+            time.sleep(_POLL_SECONDS)
+        if not isinstance(response, WorkspaceSuccessResponse):
+            raise RuntimeError("Kubernetes reverse conversion failed")
+    except BaseException as error:
+        try:
+            _terminate_and_acknowledge(broker, principal, attempt_id, unit.unit_id)
+        except Exception:
+            error.add_note("Kubernetes reverse lifecycle cleanup failed")
+        raise
+    proof = _terminate_and_acknowledge(broker, principal, attempt_id, unit.unit_id)
     print(
         "Kubernetes reverse lifecycle passed: "
         f"result_bytes={len(response.result)} "

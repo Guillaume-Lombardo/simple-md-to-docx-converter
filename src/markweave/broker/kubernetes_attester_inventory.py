@@ -63,6 +63,10 @@ _CREATE_MANIFEST = (
     "mac BLOB NOT NULL CHECK (typeof(mac) = 'blob')"
     ")"
 )
+_LEGACY_STRICT_SCHEMAS = {
+    "lifecycle": _CREATE_LIFECYCLE + " STRICT",
+    "lifecycle_manifest": _CREATE_MANIFEST + " STRICT",
+}
 
 
 class AttesterLifecycleState(StrEnum):
@@ -319,10 +323,11 @@ class SQLiteNodeAttesterLedger:
                 "AND name IN ('lifecycle', 'lifecycle_manifest')"
             )
         )
-        if schemas != {
+        current_schemas = {
             "lifecycle": _CREATE_LIFECYCLE,
             "lifecycle_manifest": _CREATE_MANIFEST,
-        }:
+        }
+        if schemas not in (current_schemas, _LEGACY_STRICT_SCHEMAS):
             raise KubernetesRuntimeError("Kubernetes attester ledger failed")
         if [row[0] for row in connection.execute("PRAGMA integrity_check")] != ["ok"]:
             raise KubernetesRuntimeError("Kubernetes attester ledger failed")

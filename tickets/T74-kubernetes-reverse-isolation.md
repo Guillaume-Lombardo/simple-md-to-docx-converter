@@ -56,6 +56,22 @@ backend.
 
 ## Progress
 
+* 2026-09-11: Addressed seven incremental findings from the independent PR #225 review. Acceptance
+  manifests containing private keys are now opened without following symlinks and restricted to
+  mode `0600` before any bytes are written; failed real-cluster lifecycle runs terminate and
+  acknowledge their exact created unit; schema-v1 attester ledgers created with the former SQLite
+  `STRICT` declarations remain readable; and readiness exchanges use the smaller of the transport
+  timeout and the remaining overall deadline, rejecting responses completed after that deadline.
+  The concrete inspector no longer synthesizes network facts after the namespace has exited:
+  authenticated persisted bindings retain the original positive network evidence for recovery,
+  while uncommitted exited adoption fails closed. Reverse-attempt shutdown now blocks and consumes
+  `SIGTERM` atomically, and the Envoy allowlist test rejects any non-exact route before the terminal
+  deny rule. Ruff, `ty`, `git diff --check`, and 119 focused unit/integration tests pass. The
+  canonical engine-excluded run reached 4,204 passes and 94.43% total coverage; its 44 PostgreSQL
+  setup errors, three RustFS failures, and two release-integration failures are the same unrelated
+  unavailable-environment or pre-existing failures recorded by the previous T74 run. T74 remains
+  In Progress because physical dedicated-pool evidence and the production-equivalent exact-image
+  restart/recovery and negative real-cluster matrix are still outstanding.
 * 2026-09-11: Replaced `crictl` with the selected purpose-built gRPC client generated from an
   intentionally minimal, wire-compatible CRI v1 schema. The client and Envoy allowlist expose only
   `Version`, `ListPodSandbox`, `PodSandboxStatus`, `ListContainers`, and `ContainerStatus`; neither

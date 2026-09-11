@@ -143,6 +143,22 @@ def test_ledger_schema_enforces_types_without_sqlite_strict_tables(
 
 
 @pytest.mark.unit
+def test_ledger_reopens_authenticated_legacy_strict_schema(tmp_path: Path) -> None:
+    path = tmp_path / "attester.sqlite3"
+    expected = _record()
+    SQLiteNodeAttesterLedger(path, KEY, max_records=2).reserve(expected)
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("PRAGMA writable_schema = ON")
+        connection.execute(
+            "UPDATE sqlite_master SET sql = sql || ' STRICT' "
+            "WHERE name IN ('lifecycle', 'lifecycle_manifest')"
+        )
+        connection.execute("PRAGMA writable_schema = OFF")
+
+    assert SQLiteNodeAttesterLedger(path, KEY, max_records=2).records() == (expected,)
+
+
+@pytest.mark.unit
 def test_lifecycle_record_validates_every_bounded_field() -> None:
     record = _record()
     invalid_factories = (

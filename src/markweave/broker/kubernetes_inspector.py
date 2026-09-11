@@ -529,12 +529,7 @@ class BoundedCriCgroupInspector:
         ):
             raise KubernetesRuntimeError("Kubernetes network isolation is invalid")
         if not runtime_active:
-            return (
-                _EXPECTED_NETWORK_INTERFACES,
-                _EXPECTED_NETWORK_ADDRESSES,
-                (),
-                (),
-            )
+            return (), (), (), ()
         pid = _observable_pid(info.get("pid"))
         network = self._config.proc_root / str(pid) / "net"
         interfaces = _network_interfaces(_read_text(network / "dev"))

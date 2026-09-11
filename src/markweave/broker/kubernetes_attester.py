@@ -351,8 +351,10 @@ class NodeAttestationEngine:
                     )
                     or len(snapshot.container_states) != len(unit.sandbox.container_ids)
                     or any(state != "EXITED" for state in snapshot.container_states)
-                    or snapshot.network_interfaces != ("eth0", "lo")
-                    or snapshot.network_addresses != ("127.0.0.1", "192.0.2.1")
+                    # The exited network namespace no longer exists. Its positive
+                    # facts remain bound by the authenticated ledger identity.
+                    or snapshot.network_interfaces
+                    or snapshot.network_addresses
                     or snapshot.network_routes
                     or snapshot.network_neighbors
                     or snapshot.cpu_quota_micros

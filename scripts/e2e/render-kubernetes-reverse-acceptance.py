@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -34,6 +35,19 @@ def _digest(value: str) -> str:
         raise ValueError("image digest must be a complete SHA-256 digest")
     int(value.removeprefix("sha256:"), 16)
     return value
+
+
+def _write_private_text(path: Path, value: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC | os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor = -1
+            stream.write(value)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def render(
@@ -114,8 +128,7 @@ def render(
         text = text.replace(placeholder, value)
     if "@REQUIRED_" in text:
         raise ValueError("deployment contains an unrendered placeholder")
-    output.write_text(text, encoding="utf-8")
-    output.chmod(0o600)
+    _write_private_text(output, text)
 
 
 def main() -> int:

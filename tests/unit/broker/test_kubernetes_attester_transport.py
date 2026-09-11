@@ -589,14 +589,24 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
 ) -> None:
     class ClientDouble(HttpsNodeAttesterClient):
         responses: list[dict[str, object]]
+        timeouts: list[float | None]
 
-        def _exchange(self, node_name: str, request: object) -> dict[str, object]:
+        def _exchange(
+            self,
+            node_name: str,
+            request: object,
+            *,
+            timeout_seconds: float | None = None,
+        ) -> dict[str, object]:
             del node_name, request
+            self.timeouts.append(timeout_seconds)
             return self.responses.pop(0)
 
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
-    client._monotonic = iter((0.0, 0.1)).__next__
+    client._limits = AttesterTransportLimits(4096, 4096, 10, 1)
+    client._monotonic = iter((0.0, 0.0, 0.1, 0.2, 0.3)).__next__
+    client.timeouts = []
     slept: list[float] = []
     client._sleep = slept.append
     client._bound = {}
@@ -607,6 +617,7 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
     client.responses = [{"outcome": "not_ready"}, good]
     sandbox = client.bind(pod, contract)
     assert slept == [0.1]
+    assert client.timeouts == [1.0, 0.8]
 
     runtime_unit = KubernetesRuntimeUnit(
         pod.unit_id,
@@ -618,19 +629,25 @@ def test_client_retries_only_not_ready_and_normalizes_malformed_binding(
         {"outcome": "not_ready"},
         {"evidence": EVIDENCE.value, "outcome": "ok"},
     ]
-    client._monotonic = iter((0.0, 0.1)).__next__
+    client._monotonic = iter((0.0, 0.0, 0.1, 0.2, 0.3)).__next__
+    client.timeouts = []
     assert client.confirm_exit(runtime_unit) == EVIDENCE
     assert slept == [0.1, 0.1]
+    assert client.timeouts == [1.0, 0.8]
 
     client.responses = [{"outcome": "not_ready"}]
-    client._monotonic = iter((0.0, 1.0)).__next__
+    client._monotonic = iter((0.0, 0.0, 1.0)).__next__
+    client.timeouts = []
     with pytest.raises(KubernetesRuntimeError, match="proof readiness timed out"):
         client.confirm_exit(runtime_unit)
+    assert client.timeouts == [1.0]
 
-    client.responses = [{"outcome": "not_ready"}]
-    client._monotonic = iter((0.0, 1.0)).__next__
+    client.responses = [good]
+    client._monotonic = iter((0.0, 0.0, 1.1)).__next__
+    client.timeouts = []
     with pytest.raises(KubernetesRuntimeError, match="readiness timed out"):
         client.bind(replace(pod, pod_uid=UUID(int=98)), contract)
+    assert client.timeouts == [1.0]
 
     client.responses = [{"outcome": "ok", "sandbox": {"sandbox_id": "invalid"}}]
     client._monotonic = lambda: 0.0
@@ -647,9 +664,13 @@ def test_recovery_clients_normalize_malformed_success_payloads(
         response: dict[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -695,9 +716,13 @@ def test_attester_client_rejects_each_invalid_recovery_and_proof_boundary(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -713,6 +738,7 @@ def test_attester_client_rejects_each_invalid_recovery_and_proof_boundary(
     )
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._limits = AttesterTransportLimits(4096, 4096, 1, 1)
     client._monotonic = lambda: 0.0
     client._sleep = lambda _: None
     client._bound = {}
@@ -877,9 +903,13 @@ def test_client_accepts_successful_adoption_recovery_and_acknowledgement(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -931,9 +961,13 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
         response: Mapping[str, object]
 
         def _exchange(
-            self, node_name: str, request: Mapping[str, object]
+            self,
+            node_name: str,
+            request: Mapping[str, object],
+            *,
+            timeout_seconds: float | None = None,
         ) -> Mapping[str, object]:
-            del node_name, request
+            del node_name, request, timeout_seconds
             return self.response
 
     service, request, _, _ = _binding(unit, policy, tmp_path)
@@ -952,6 +986,7 @@ def test_service_and_client_reject_volatile_conflicts_and_closed_responses(
 
     client = object.__new__(ClientDouble)
     client._readiness = AttesterReadinessPolicy(1, 0.1)
+    client._limits = AttesterTransportLimits(4096, 4096, 1, 1)
     client._monotonic = lambda: 0.0
     client._sleep = lambda _: None
     client._bound = {pod.pod_uid: replace(expected, unit_id=UUID(int=98))}

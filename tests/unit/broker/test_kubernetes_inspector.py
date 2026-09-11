@@ -335,6 +335,8 @@ def test_exact_absent_cgroup_is_bounded_empty_fact_after_cri_exit(
     assert snapshot.cgroup_populated is False
     assert snapshot.descendant_count == 0
     assert snapshot.workspace_size_bytes == 33554432
+    assert snapshot.network_interfaces == ()
+    assert snapshot.network_addresses == ()
 
 
 @pytest.mark.unit

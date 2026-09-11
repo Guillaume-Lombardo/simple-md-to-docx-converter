@@ -21,6 +21,7 @@ from markweave.broker.kubernetes_attester import NodeAttestationEngine
 from markweave.broker.kubernetes_attester_inventory import SQLiteNodeAttesterLedger
 from markweave.broker.kubernetes_attester_transport import (
     AttesterReadinessPolicy,
+    AttesterTransportLimits,
     HttpsNodeAttesterClient,
     NodeAttesterService,
 )
@@ -63,14 +64,20 @@ INVENTORY_KEY = b"k" * 32
 class _LocalAttesterClient(HttpsNodeAttesterClient):
     def __init__(self, service: NodeAttesterService) -> None:
         self._service = service
+        self._limits = AttesterTransportLimits(262_144, 131_072, 1, 1)
         self._readiness = AttesterReadinessPolicy(1, 1)
         self._monotonic = lambda: 0.0
         self._sleep = lambda _: None
         self._bound = {}
 
     def _exchange(
-        self, node_name: str, request: Mapping[str, object]
+        self,
+        node_name: str,
+        request: Mapping[str, object],
+        *,
+        timeout_seconds: float | None = None,
     ) -> Mapping[str, object]:
+        assert timeout_seconds is None or timeout_seconds > 0
         assert node_name == "reverse-node-1"
         response = self._service.handle(attester_transport._encode(request))
         return attester_transport._decode(response)
