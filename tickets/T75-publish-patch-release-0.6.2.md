@@ -57,6 +57,11 @@ Kubernetes qualification.
   failures are exclusively due to absent `MARKWEAVE_TEST_POSTGRES_URL` and
   `MARKWEAVE_TEST_S3_*` services. Four unrelated environment/load failures passed when rerun
   independently. Hosted CI remains responsible for both configured storage-profile boundaries.
+- 2026-09-11: CodeRabbit identified that module discovery alone did not execute the lazy
+  `kubernetes.client` and `kubernetes.config` imports. The release verifier now imports every
+  required Kubernetes runtime submodule, rejects an installed-but-unimportable dependency, and
+  retains the server-dependency isolation check. The 55-test release-verifier set, including a
+  real clean Kubernetes-extra installation and attester invocation, passes after the correction.
 
 ## Synchronization
 

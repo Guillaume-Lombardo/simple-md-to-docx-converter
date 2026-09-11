@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import sys
 from importlib.machinery import ModuleSpec
@@ -109,6 +110,23 @@ def test_kubernetes_checks_are_valid_isolated_python() -> None:
     """The Kubernetes wheel contracts remain executable verifier scripts."""
     compile(KUBERNETES_IMPORT_CHECK, "<kubernetes-import-check>", "exec")
     compile(KUBERNETES_ATTESTER_CONSOLE_CHECK, "<attester-console-check>", "exec")
+
+
+def test_kubernetes_import_check_rejects_present_but_broken_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A discoverable dependency must also import successfully."""
+    assert importlib.util.find_spec("markweave") is not None
+    monkeypatch.setattr(sys, "argv", ["check", "markweave"])
+
+    def fail_import(name: str) -> None:
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+    with pytest.raises(
+        SystemExit, match="unimportable required Kubernetes dependency: markweave"
+    ):
+        exec(KUBERNETES_IMPORT_CHECK, {})  # noqa: S102 - isolated verifier contract
 
 
 @pytest.fixture

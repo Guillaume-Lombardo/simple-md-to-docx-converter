@@ -76,12 +76,17 @@ if find_spec("fastapi") is not None or find_spec("uvicorn") is not None:
 """
 
 KUBERNETES_IMPORT_CHECK = """\
+from importlib import import_module
 from importlib.util import find_spec
 import sys
 
 for module in sys.argv[1:]:
-    if find_spec(module) is None:
-        raise SystemExit(f"missing required Kubernetes dependency: {module}")
+    try:
+        import_module(module)
+    except ImportError as error:
+        raise SystemExit(
+            f"unimportable required Kubernetes dependency: {module}"
+        ) from error
 import markweave.kubernetes_attester_process
 if not callable(markweave.kubernetes_attester_process.main):
     raise SystemExit("Kubernetes attester process is unavailable")
@@ -306,7 +311,7 @@ SUPPORTED_INSTALLATION_PROFILES = (
     InstallationProfile(
         "kubernetes",
         "kubernetes",
-        ("grpc", "kubernetes", "google.protobuf"),
+        ("grpc", "kubernetes.client", "kubernetes.config", "google.protobuf"),
         KUBERNETES_IMPORT_CHECK,
     ),
 )
