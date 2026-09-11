@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,23 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Progress
 
+* 2026-09-11: Repaired the scheduled campaign regression exposed by GitHub Actions run
+  `34208094845`. Mutmut generation is now limited to the nine source modules that contain the
+  reviewed manifest's exact mutants, so unrelated new Python syntax cannot break a bounded run
+  before symbol selection. The two stale `_active_session` identifiers now target the renamed
+  `_stored_session` boundary, and a mutation-driven CSRF test covers exact idle expiration. A fresh
+  full campaign killed all 25 selected mutants with every strict failure status at zero. Ruff,
+  `ty`, 53 focused tests, and the 17 mutation-policy/maintenance tests pass. The canonical
+  engine-excluded suite reached 4,205 passes and 94.57% coverage; its PostgreSQL/RustFS failures,
+  two release-environment failures, and local group-writable checkout-mode failures for two T74
+  assets are unrelated to this change. The contributor-immutable organization-level required
+  workflow remains the sole T48 completion blocker.
+* 2026-09-11: Resumed the locally actionable T48 maintenance after scheduled mutation run
+  `34208094845` failed while generating an unselected mutant for
+  `reversion_jobs/result_validation.py`. Mutmut 3.7.0 generates every configured source file before
+  applying the requested symbol filter, so the campaign must constrain generation to the exact
+  source modules represented by the reviewed 25-mutant manifest. The organization-level required
+  workflow prerequisite remains external and unchanged.
 * 2026-09-08: The product manager selected an organization-level required workflow as the
   contributor-immutable mutation gate. The repository is currently owned by the personal
   `Guillaume-Lombardo` account, while the accessible organizations are on GitHub Free. GitHub's
@@ -60,7 +77,8 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Coordination
 
-* Status: Backlog; blocked on the selected organization-level required-workflow prerequisites.
+* Status: In Progress; the bounded scheduled campaign is repaired, while completion remains blocked
+  on the selected organization-level required-workflow prerequisite.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

@@ -51,8 +51,8 @@
         "markweave.auth.service.xǁAuthenticationServiceǁauthenticate__mutmut_1",
         "markweave.auth.service.xǁAuthenticationServiceǁauthenticate__mutmut_8",
         "markweave.auth.service.xǁAuthenticationServiceǁvalidate_csrf__mutmut_3",
-        "markweave.auth.service.xǁAuthenticationServiceǁ_active_session__mutmut_3",
-        "markweave.auth.service.xǁAuthenticationServiceǁ_active_session__mutmut_8"
+        "markweave.auth.service.xǁAuthenticationServiceǁ_stored_session__mutmut_3",
+        "markweave.auth.service.xǁAuthenticationServiceǁ_stored_session__mutmut_9"
       ],
       "review_notes": [
         "Covers password-change enforcement, disabled/versioned accounts, session token binding, idle/absolute expiry, and session-bound CSRF validation.",
