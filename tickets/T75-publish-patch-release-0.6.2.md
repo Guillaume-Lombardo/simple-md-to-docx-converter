@@ -2,7 +2,7 @@
 ticket: T75
 linear_id: G1L-574
 linear_url: https://linear.app/g1lom/issue/G1L-574/t75-publish-patch-release-062
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -62,6 +62,14 @@ Kubernetes qualification.
   required Kubernetes runtime submodule, rejects an installed-but-unimportable dependency, and
   retains the server-dependency isolation check. The 55-test release-verifier set, including a
   real clean Kubernetes-extra installation and attester invocation, passes after the correction.
+- 2026-09-11: PR #228 passed all 14 CI jobs and squash-merged to `main` as
+  `d7188c4fd3d9c7d4f1d82995850b3827f09e3a83`. Automatic release run `34648944379` completed
+  successfully and published the wheel, sdist, GitHub release/tag, SBOMs, attestations, and paired
+  images.
+- 2026-09-11: Anonymous GHCR verification matches the retained receipts. The backend digest is
+  `sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a118330ae`; the frontend digest is
+  `sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7`. Both attestations verify,
+  and the public Compose and quickstart defaults now pin this exact pair.
 
 ## Synchronization
 

@@ -80,7 +80,7 @@ x-markweave-settings: &markweave-settings
 
 services:
   markweave:
-    image: ghcr.io/guillaume-lombardo/md-converter:0.6.1@sha256:f8541a990237a60ffdbc2f33367921faafa2acd54007daa3c38e15e4b91120ea
+    image: ghcr.io/guillaume-lombardo/md-converter:0.6.2@sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a118330ae
     platform: linux/amd64
     command: serve
     depends_on:

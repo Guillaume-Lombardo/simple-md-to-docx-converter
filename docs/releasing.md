@@ -46,10 +46,12 @@ images from source `78cb86d450e940a3190591de62ee0ebade216d8b`, and the separate 
 registry digests in Compose, the quickstarts, and the durable cutover evidence. Normal fully aligned
 public-release checks apply after adoption.
 
-The `0.6.2` patch follows that normal paired-release path. Its candidate changes the package and
-application version while public Compose remains pinned to the verified `0.6.1` pair. After
-publication, a separate adoption change must bind the exact retained backend and frontend receipts
-before unrelated integration resumes.
+The `0.6.2` patch followed that normal paired-release path. Protected release run `34648944379`
+published the Python artifacts and paired images from source
+`d7188c4fd3d9c7d4f1d82995850b3827f09e3a83`. The separate adoption change pins the exact retained
+backend digest `sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a118330ae`
+and frontend digest `sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7`
+in Compose and both quickstarts.
 
 ## GitHub and PyPI trust configuration
 
