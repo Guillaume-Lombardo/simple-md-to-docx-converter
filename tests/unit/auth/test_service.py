@@ -248,6 +248,20 @@ def test_csrf_is_session_bound_and_logout_is_idempotent() -> None:
 
 
 @pytest.mark.unit
+def test_csrf_rejects_a_session_at_the_exact_idle_expiry_boundary() -> None:
+    service, _, clock = build_service()
+    service.bootstrap_admin("admin", "correct")
+    login = service.login("admin", "correct")
+
+    clock.advance(seconds=30)
+
+    assert_error(
+        "AUTHENTICATION_REQUIRED",
+        lambda: service.validate_csrf(login.session_token, login.csrf_token),
+    )
+
+
+@pytest.mark.unit
 def test_admin_account_lifecycle_revokes_all_sessions() -> None:
     service, _, _ = build_service()
     admin = service.bootstrap_admin("admin", "correct")

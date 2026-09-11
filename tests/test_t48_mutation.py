@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,21 @@ def test_manifest_is_risk_ranked_exact_and_reviews_every_critical_domain() -> No
     )
     assert all(domain.review_notes for domain in manifest.domains)
     assert manifest.failure_statuses == FAILURE_STATUSES
+
+
+@pytest.mark.unit
+def test_mutmut_generation_is_bounded_to_reviewed_manifest_modules() -> None:
+    configuration = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["mutmut"]
+    configured_paths = set(configuration["only_mutate"])
+    manifest = load_manifest(MANIFEST)
+    reviewed_modules = {
+        "src/" + mutant.split(".x", maxsplit=1)[0].replace(".", "/") + ".py"
+        for domain in manifest.domains
+        for mutant in domain.mutants
+    }
+    assert configured_paths == reviewed_modules
 
 
 @pytest.mark.unit
