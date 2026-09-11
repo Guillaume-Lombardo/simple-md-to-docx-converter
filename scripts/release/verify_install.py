@@ -75,6 +75,20 @@ if find_spec("fastapi") is not None or find_spec("uvicorn") is not None:
     raise SystemExit("reverse-attempt install contains HTTP server dependencies")
 """
 
+KUBERNETES_IMPORT_CHECK = """\
+from importlib.util import find_spec
+import sys
+
+for module in sys.argv[1:]:
+    if find_spec(module) is None:
+        raise SystemExit(f"missing required Kubernetes dependency: {module}")
+import markweave.kubernetes_attester_process
+if not callable(markweave.kubernetes_attester_process.main):
+    raise SystemExit("Kubernetes attester process is unavailable")
+if find_spec("fastapi") is not None or find_spec("uvicorn") is not None:
+    raise SystemExit("Kubernetes install contains HTTP server dependencies")
+"""
+
 BASE_ISOLATION_CHECK = """\
 from importlib.util import find_spec
 import sys
@@ -202,7 +216,15 @@ adapter = S3RecoveryAdapter(
 adapter.close()
 """
 
-BASE_FORBIDDEN_MODULES = ("fastapi", "sqlalchemy", "boto3", "psycopg", "anydoc")
+BASE_FORBIDDEN_MODULES = (
+    "fastapi",
+    "sqlalchemy",
+    "boto3",
+    "psycopg",
+    "anydoc",
+    "grpc",
+    "kubernetes",
+)
 
 BROKER_CONSOLE_CHECK = """\
 import subprocess
@@ -220,6 +242,24 @@ if (
     or completed.stderr != b"broker configuration failed\\n"
 ):
     raise SystemExit("broker console contract failed")
+"""
+
+KUBERNETES_ATTESTER_CONSOLE_CHECK = """\
+import subprocess
+import sys
+
+completed = subprocess.run(
+    [sys.executable, "-I", sys.argv[1]],
+    check=False,
+    capture_output=True,
+    timeout=5,
+)
+if (
+    completed.returncode != 2
+    or completed.stdout != b""
+    or completed.stderr != b"Kubernetes attester configuration failed\\n"
+):
+    raise SystemExit("Kubernetes attester console contract failed")
 """
 
 
@@ -262,6 +302,12 @@ SUPPORTED_INSTALLATION_PROFILES = (
         "reverse-attempt",
         ("anydoc", "cairosvg", "defusedxml", "PIL", "tinycss2"),
         REVERSE_ATTEMPT_IMPORT_CHECK,
+    ),
+    InstallationProfile(
+        "kubernetes",
+        "kubernetes",
+        ("grpc", "kubernetes", "google.protobuf"),
+        KUBERNETES_IMPORT_CHECK,
     ),
 )
 
@@ -472,6 +518,20 @@ def verify_clean_install(
                 label=f"isolated {profile.name} broker console check",
                 timeout=CONSOLE_TIMEOUT_SECONDS,
             )
+            if profile.name == "kubernetes":
+                attester_console = environment / "bin" / "markweave-kubernetes-attester"
+                run_command(
+                    (
+                        str(python),
+                        "-I",
+                        "-c",
+                        KUBERNETES_ATTESTER_CONSOLE_CHECK,
+                        str(attester_console),
+                    ),
+                    cwd=root,
+                    label="isolated kubernetes attester console check",
+                    timeout=CONSOLE_TIMEOUT_SECONDS,
+                )
     return CleanInstallResult(wheel_name=artifacts.wheel.name, sha256=wheel_digest)
 
 

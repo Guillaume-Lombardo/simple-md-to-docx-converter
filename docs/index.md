@@ -22,6 +22,10 @@ HTTP API. Start with the guide for your role:
 - [Local development](local-development.md): toolchain, tests, CI, and dependency changes.
 - [Agent workflow](agent-workflow.md): repository-specific process for automated contributors.
 - [Release process](releasing.md): versioning, publication, provenance, and post-release checks.
+- [Reverse-conversion broker](reverse-broker-deployment.md): experimental document-to-Markdown
+  isolation, worker transport, and operational boundaries.
+- [Optional Kubernetes reverse isolation](kubernetes-reverse-isolation.md): dedicated-node policy,
+  runtime attestation, deployment assets, and the remaining production-acceptance requirement.
 
 Format-specific and security details are documented in [conversion jobs](jobs.md),
 [authentication](authentication.md), [resource policy](resource-policy.md),
