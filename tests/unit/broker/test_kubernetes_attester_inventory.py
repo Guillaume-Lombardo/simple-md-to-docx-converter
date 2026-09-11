@@ -25,6 +25,30 @@ OTHER_POD = UUID("22222222-2222-4222-8222-222222222222")
 EXIT = EvidenceDigest(f"sha256:{'1' * 64}")
 EMPTY = EvidenceDigest(f"sha256:{'2' * 64}")
 REMOVED = EvidenceDigest(f"sha256:{'3' * 64}")
+LEGACY_LIFECYCLE_SCHEMA = (
+    "CREATE TABLE lifecycle ("
+    "pod_uid TEXT PRIMARY KEY NOT NULL,"
+    "state TEXT NOT NULL,"
+    "binding_payload BLOB NOT NULL,"
+    "sandbox_payload BLOB NOT NULL,"
+    "exit_evidence TEXT,"
+    "empty_evidence TEXT,"
+    "removed_evidence TEXT,"
+    "revision INTEGER NOT NULL CHECK (revision >= 0),"
+    "mac_version INTEGER NOT NULL,"
+    "mac BLOB NOT NULL"
+    ") STRICT"
+)
+LEGACY_MANIFEST_SCHEMA = (
+    "CREATE TABLE lifecycle_manifest ("
+    "singleton_id INTEGER PRIMARY KEY NOT NULL CHECK (singleton_id = 1),"
+    "generation INTEGER NOT NULL CHECK (generation >= 0),"
+    "record_count INTEGER NOT NULL CHECK (record_count >= 0),"
+    "records_digest TEXT NOT NULL,"
+    "mac_version INTEGER NOT NULL,"
+    "mac BLOB NOT NULL"
+    ") STRICT"
+)
 
 
 def _record(pod_uid: UUID = POD) -> AttesterLifecycleRecord:
@@ -147,13 +171,23 @@ def test_ledger_reopens_authenticated_legacy_strict_schema(tmp_path: Path) -> No
     path = tmp_path / "attester.sqlite3"
     expected = _record()
     SQLiteNodeAttesterLedger(path, KEY, max_records=2).reserve(expected)
+    with closing(sqlite3.connect(path)) as connection:
+        record = connection.execute("SELECT * FROM lifecycle").fetchone()
+        manifest = connection.execute("SELECT * FROM lifecycle_manifest").fetchone()
+    assert record is not None
+    assert manifest is not None
+    path.unlink()
     with closing(sqlite3.connect(path)) as connection, connection:
-        connection.execute("PRAGMA writable_schema = ON")
+        connection.execute(LEGACY_LIFECYCLE_SCHEMA)
+        connection.execute(LEGACY_MANIFEST_SCHEMA)
         connection.execute(
-            "UPDATE sqlite_master SET sql = sql || ' STRICT' "
-            "WHERE name IN ('lifecycle', 'lifecycle_manifest')"
+            "INSERT INTO lifecycle VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", record
         )
-        connection.execute("PRAGMA writable_schema = OFF")
+        connection.execute(
+            "INSERT INTO lifecycle_manifest VALUES (?, ?, ?, ?, ?, ?)", manifest
+        )
+        connection.execute("PRAGMA application_id = 1297563980")
+        connection.execute("PRAGMA user_version = 1")
 
     assert SQLiteNodeAttesterLedger(path, KEY, max_records=2).records() == (expected,)
 

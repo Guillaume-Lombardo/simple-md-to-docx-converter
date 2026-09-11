@@ -1231,12 +1231,11 @@ def test_service_restarts_and_exactly_replays_every_durable_lifecycle_reply(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("terminal", [False, True])
 def test_service_durably_adopts_prepared_create_before_bind_reply(
-    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path, terminal: bool
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
 ) -> None:
     service, request, _, control = _binding(unit, policy, tmp_path)
-    control.terminated = terminal
+    control.terminated = False
 
     adopted = _call(
         service,
@@ -1256,6 +1255,33 @@ def test_service_durably_adopts_prepared_create_before_bind_reply(
     ).records()
     assert len(records) == 1
     assert records[0].state is AttesterLifecycleState.BOUND
+
+
+@pytest.mark.unit
+def test_service_rejects_uncommitted_exited_adoption_without_network_evidence(
+    unit: ManagedUnit, policy: BrokerPolicy, tmp_path: Path
+) -> None:
+    service, request, _, control = _binding(unit, policy, tmp_path)
+    control.terminated = True
+
+    with pytest.raises(KubernetesRuntimeError, match="attestation is invalid"):
+        _call(
+            service,
+            {
+                "operation": "adopt_create_intent",
+                "pod": request["pod"],
+                "proposed_contract": request["contract"],
+                "protocol": "markweave-kubernetes-node-attester",
+                "version": 1,
+            },
+        )
+
+    assert (
+        SQLiteNodeAttesterLedger(
+            tmp_path / "attester.sqlite3", b"a" * 32, max_records=8
+        ).records()
+        == ()
+    )
 
 
 @pytest.mark.unit

@@ -41,3 +41,13 @@ def test_kubernetes_renderer_rejects_symlink_output(tmp_path: Path) -> None:
         _private_writer()(output, "private-key-material")
 
     assert target.read_text(encoding="utf-8") == "preserve"
+
+
+def test_kubernetes_renderer_rejects_existing_regular_output(tmp_path: Path) -> None:
+    output = tmp_path / "deployment.yaml"
+    output.write_text("preserve", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        _private_writer()(output, "private-key-material")
+
+    assert output.read_text(encoding="utf-8") == "preserve"

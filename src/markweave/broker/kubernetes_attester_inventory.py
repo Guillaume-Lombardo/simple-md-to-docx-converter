@@ -64,8 +64,30 @@ _CREATE_MANIFEST = (
     ")"
 )
 _LEGACY_STRICT_SCHEMAS = {
-    "lifecycle": _CREATE_LIFECYCLE + " STRICT",
-    "lifecycle_manifest": _CREATE_MANIFEST + " STRICT",
+    "lifecycle": (
+        "CREATE TABLE lifecycle ("
+        "pod_uid TEXT PRIMARY KEY NOT NULL,"
+        "state TEXT NOT NULL,"
+        "binding_payload BLOB NOT NULL,"
+        "sandbox_payload BLOB NOT NULL,"
+        "exit_evidence TEXT,"
+        "empty_evidence TEXT,"
+        "removed_evidence TEXT,"
+        "revision INTEGER NOT NULL CHECK (revision >= 0),"
+        "mac_version INTEGER NOT NULL,"
+        "mac BLOB NOT NULL"
+        ") STRICT"
+    ),
+    "lifecycle_manifest": (
+        "CREATE TABLE lifecycle_manifest ("
+        "singleton_id INTEGER PRIMARY KEY NOT NULL CHECK (singleton_id = 1),"
+        "generation INTEGER NOT NULL CHECK (generation >= 0),"
+        "record_count INTEGER NOT NULL CHECK (record_count >= 0),"
+        "records_digest TEXT NOT NULL,"
+        "mac_version INTEGER NOT NULL,"
+        "mac BLOB NOT NULL"
+        ") STRICT"
+    ),
 }
 
 
