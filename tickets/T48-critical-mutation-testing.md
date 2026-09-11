@@ -2,7 +2,7 @@
 ticket: T48
 linear_id: G1L-424
 linear_url: https://linear.app/g1lom/issue/G1L-424/t48-expand-mutation-testing-across-critical-invariants
-status: In Progress
+status: Backlog
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -36,6 +36,15 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Progress
 
+* 2026-09-11: Maintenance PR
+  [#226](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/226) was
+  squash-merged as `22b1f7f84903de0b0e912e984e6d7359a0678ff3` after CodeRabbit found no
+  actionable issue and exact-head CI run `34627972460` passed every job, including both storage
+  profiles, both rootless E2E variants, document engines, and the required aggregate gate. The
+  automatic release workflow and exact-main CI run `34630836776` also passed for the merge commit.
+  All repository-local T48 work is exhausted, so the ticket returns to Backlog pending the selected
+  Enterprise Cloud organization, repository transfer, and separately owned required-workflow
+  repository.
 * 2026-09-11: Repaired the scheduled campaign regression exposed by GitHub Actions run
   `34208094845`. Mutmut generation is now limited to the nine source modules that contain the
   reviewed manifest's exact mutants, so unrelated new Python syntax cannot break a bounded run
@@ -77,8 +86,8 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Coordination
 
-* Status: In Progress; the bounded scheduled campaign is repaired, while completion remains blocked
-  on the selected organization-level required-workflow prerequisite.
+* Status: Backlog; all repository-local work is exhausted and completion remains blocked on the
+  selected organization-level required-workflow prerequisite.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
