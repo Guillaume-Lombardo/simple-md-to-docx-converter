@@ -35,7 +35,6 @@ def _resources() -> list[dict[str, Any]]:
         .replace("@REQUIRED_ATTESTER_TERMINATION_GRACE_PERIOD_SECONDS@", "11")
         .replace("@REQUIRED_ATTESTER_MAX_SANDBOXES@", "64")
         .replace("@REQUIRED_ATTESTER_MAX_CONTAINERS@", "8")
-        .replace("@REQUIRED_ATTESTER_MAX_CGROUP_DIRECTORIES@", "256")
         .replace("@REQUIRED_ATTESTER_MAX_DESCENDANT_PIDS@", "512")
         .replace("@REQUIRED_ATTESTER_READINESS_TIMEOUT_SECONDS@", "30")
         .replace("@REQUIRED_ATTESTER_READINESS_POLL_INTERVAL_SECONDS@", "0.1")
