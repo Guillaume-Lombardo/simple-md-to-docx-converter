@@ -62,7 +62,7 @@ reverse-attempt = [
 ]
 kubernetes = [
     "grpcio>=1.76,<2",
-    "kubernetes==35.0.0",
+    "kubernetes==36.0.3",
     "protobuf>=6.33,<7",
 ]
 
