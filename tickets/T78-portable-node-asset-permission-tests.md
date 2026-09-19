@@ -2,7 +2,7 @@
 ticket: T78
 linear_id: G1L-577
 linear_url: https://linear.app/g1lom/issue/G1L-577/t78-make-node-asset-permission-tests-independent-of-checkout-modes
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,6 +32,8 @@ does not block this checkout-portability repair.
 ## Progress
 
 - 2026-09-19: Created from the repository audit; this ticket does not authorize changes to a live cluster.
+
+- 2026-09-19: Reproduced both exact-mode failures on an untouched 0775 checkout; Git records both assets as 100755. Implementation separates checkout executability from explicit secure installation in temporary directories. No live-cluster changes.
 
 ## Synchronization
 
