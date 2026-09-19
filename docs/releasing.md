@@ -227,3 +227,37 @@ preflight, exact-copy verification, narrow external-writer race disclosure, perm
 concurrency, provenance, attachment, and anonymous verification rules apply separately to each
 package. See [the reviewed migration architecture](nextjs-migration-architecture.md) for the image
 baseline, staged cutover, and release-level rollback contract.
+
+## Linux release-command cleanup
+
+The host-side build and clean-install tools require Linux `prctl` child-subreaper support.
+They temporarily adopt orphan descendants, reap only children in the command's new process group,
+and restore the caller's previous subreaper setting. Calls through the release helper are serialized
+because that setting is process-wide. These are dedicated release CLI processes, not application
+worker supervisors; embedding them alongside unrelated orphan-producing workloads is unsupported.
+Existing unrelated direct children retain their exit status for their own `Popen` owners.
+
+A zombie has exited but still makes `killpg(group, 0)` succeed until its parent reaps it. Reaping
+adopted zombies before probing the group avoids depending on CI or development-host PID 1 behavior.
+Reaping uses bounded batches and deadline checks, so a continuous stream of exited descendants
+cannot delay termination indefinitely. Live leftovers after a successful leader exit still fail the command. Timeout cleanup sends SIGTERM
+to the entire group, then SIGKILL when necessary, with bounded leader waits and group polls. Failure
+to adopt, inspect, signal, or reap remains an explicit safe release error; it is never downgraded to
+a normal timeout. Commands must remain in their assigned process group; this helper is not a
+containment boundary for untrusted programs that create new sessions.
+
+`uv run pytest tests/release --no-cov` covers the actual build/installation workflow and real
+subprocess regressions. `tests/release/process_probe.py` is a dependency-free acceptance probe for
+success, timeout, live leftovers, zombies, and injected cleanup failure. It also runs with the
+reviewed source mounted read-only inside the final rootless Linux image:
+
+```bash
+podman run --rm --network=none --read-only --cap-drop=all \
+  --security-opt=no-new-privileges --user=10042:0 --pids-limit=64 --memory=256m \
+  --tmpfs=/tmp:rw,size=32m,mode=1777 --volume="$PWD:/verification:ro" \
+  --workdir=/verification --entrypoint=python <verified-final-image-id> \
+  -B -m tests.release.process_probe
+```
+
+This probe verifies the host release tooling on the final image's Linux/Python runtime; the tooling
+is not included in the application image and does not change either storage profile.
