@@ -339,4 +339,13 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 
 ## Synchronization
 
+- 2026-09-19 maintenance: Dependabot PR #231 updates seven `astral-sh/setup-uv` references
+  across four workflows to official v10.1.0 commit
+  `bec219d24cd3e171d82865faccec33120bb574f4`. Verified that these exact pinned-reference
+  substitutions are the entire workflow diff, then refreshed the four canonical policy
+  fingerprints. Workflow permissions, triggers, jobs, cache boundaries and commands are
+  unchanged. All 184 workflow-policy and CI-runner/integration tests pass; Ruff, ty and the
+  local CI security validator pass. This maintains the completed T22 dependency-update
+  workflow under the user's explicit CI-first merge and cleanup authorization.
+
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.
