@@ -103,7 +103,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=./spikes/toolchain/chrome-seccomp.json
+      - seccomp=./toolchain/document-engines/chrome-seccomp.json
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
     shm_size: 128m

@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+    environment:
+      POSTGRES_DB: md_converter_test
+      POSTGRES_PASSWORD: ${MARKWEAVE_LOCAL_TEST_PASSWORD:?set by test service manager}
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d md_converter_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+  rustfs:
+    image: ghcr.io/rustfs/rustfs:1.0.0-beta.12-glibc@sha256:6d693c8d0c09a1c5770f1780303a5d58b9e864c313fd2644ecd561e92b79ae04
+    environment:
+      RUSTFS_ACCESS_KEY: ${MARKWEAVE_LOCAL_TEST_ACCESS_KEY:?set by test service manager}
+      RUSTFS_SECRET_KEY: ${MARKWEAVE_LOCAL_TEST_PASSWORD:?set by test service manager}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "false"
+    ports:
+      - "127.0.0.1::9000"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:9000/health]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 256
+volumes:
+  postgres-data:
+  rustfs-data:

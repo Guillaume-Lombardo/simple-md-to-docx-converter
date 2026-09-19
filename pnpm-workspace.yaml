@@ -1,7 +1,7 @@
 packages:
   - "."
   - "web"
-  - "!spikes/toolchain"
+  - "!toolchain/document-engines"
 
 strictPeerDependencies: true
 engineStrict: true

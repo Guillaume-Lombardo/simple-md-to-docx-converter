@@ -94,7 +94,7 @@ def generate(output: Path, workspace: Path) -> None:
     docx = PandocDocxConverter(
         PandocConfig(pandoc, 30.0, 2.0, workspace), os.environ
     ).convert(ApprovedMarkdown(markdown.decode("utf-8")), reference)
-    font_manifest = Path("spikes/toolchain/fonts/manifest.json").read_bytes()
+    font_manifest = Path("toolchain/document-engines/fonts/manifest.json").read_bytes()
     trace = PdfTraceabilityContext(
         application_version=VERSION,
         conversion_contract_version="1",

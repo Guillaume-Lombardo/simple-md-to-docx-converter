@@ -39,20 +39,20 @@ Requirements:
 Run the successful document-engine and security-property probe:
 
 ```bash
-spikes/toolchain/run-validation.sh documents
+toolchain/document-engines/run-validation.sh documents
 ```
 
 Docker remains the default for backward compatibility. Select rootless Podman
 explicitly without a Docker alias:
 
 ```bash
-spikes/toolchain/run-validation.sh --runtime podman documents
+toolchain/document-engines/run-validation.sh --runtime podman documents
 ```
 
 Run the successful probe and all expected-failure probes:
 
 ```bash
-spikes/toolchain/test-validation.sh
+toolchain/document-engines/test-validation.sh
 ```
 
 Pass `--runtime podman` to run the same successful tmpfs and disk-backed probes,
@@ -64,7 +64,7 @@ runtime other than `docker` or `podman`.
 Run the positive Chrome/Mermaid path directly with:
 
 ```bash
-spikes/toolchain/run-validation.sh --runtime podman target
+toolchain/document-engines/run-validation.sh --runtime podman target
 ```
 
 The runner verifies the committed profile SHA-256 before passing it to Podman.
@@ -77,9 +77,9 @@ directory must already exist; the wrapper never creates or configures that
 cluster-global directory:
 
 ```bash
-podman build --pull=false --file spikes/toolchain/Containerfile \
-  --tag simple-md-toolchain:t00 spikes/toolchain
-spikes/toolchain/test-k3s-validation.sh --sudo-k3s
+podman build --pull=false --file toolchain/document-engines/Containerfile \
+  --tag simple-md-toolchain:t00 toolchain/document-engines
+toolchain/document-engines/test-k3s-validation.sh --sudo-k3s
 ```
 
 The wrapper generates one lowercase run identifier and derives a unique
@@ -117,9 +117,9 @@ Run the collision, ownership-change, installed-profile-tampering, cleanup-
 refusal, namespace-UID, and image-digest probes without a cluster:
 
 ```bash
-spikes/toolchain/test-k3s-resource-guards.sh
-spikes/toolchain/test-k3s-proxy-lifecycle.sh
-spikes/toolchain/test-k3s-acquisition-failures.sh
+toolchain/document-engines/test-k3s-resource-guards.sh
+toolchain/document-engines/test-k3s-proxy-lifecycle.sh
+toolchain/document-engines/test-k3s-acquisition-failures.sh
 ```
 
 The latter probes exercise proxy success, failure, interrupted-run cleanup, and
@@ -154,7 +154,7 @@ readonly T00_BASE_IMAGE="registry.access.redhat.com/ubi9/python-314@${T00_BASE_D
 podman pull --quiet "${T00_BASE_IMAGE}"
 test "$(podman image inspect "${T00_BASE_IMAGE}" --format '{{.Digest}}')" = \
     "${T00_BASE_DIGEST}"
-spikes/toolchain/test-validation.sh --runtime podman
+toolchain/document-engines/test-validation.sh --runtime podman
 ```
 
 This idempotently adds or reuses the exact manifest and layers in the invoking
@@ -330,7 +330,7 @@ capability. [containers/common profile](https://github.com/containers/common/blo
 [Chromium sandbox design](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/README.md),
 [Chromium chroot implementation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/services/credentials.cc)
 
-The committed `spikes/toolchain/chrome-seccomp.json` has SHA-256
+The committed `toolchain/document-engines/chrome-seccomp.json` has SHA-256
 `bbd643f78d48b477111dd8597a69ba6bee4db68ce199dbf09d87bf90a1377f46`.
 Its upstream Debian profile has SHA-256
 `a37993729fdc03beeb0f00c5e31954a1a4412f7624d4672258ac6f5bd44a0ccb`;

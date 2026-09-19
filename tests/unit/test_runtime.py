@@ -32,7 +32,7 @@ def _settings(tmp_path: Path, *, profile: str) -> Settings:
         "storage_profile": profile,
         **template_settings(
             conversion_font_manifest_path=(
-                Path("spikes/toolchain/fonts/manifest.json").resolve()
+                Path("toolchain/document-engines/fonts/manifest.json").resolve()
             )
         ),
     }

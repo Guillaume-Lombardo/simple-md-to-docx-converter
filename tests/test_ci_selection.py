@@ -368,7 +368,7 @@ def test_t21_e2e_domains_are_active_and_profile_specific() -> None:
         "container/entrypoint.sh",
         "scripts/container/build.sh",
         "scripts/e2e/run.sh",
-        "spikes/toolchain/package-lock.json",
+        "toolchain/document-engines/package-lock.json",
         "tests/e2e/rootless.spec.mjs",
         "tests/corpus/mermaid/diagram.md",
         "deploy/standalone.yaml.example",
@@ -485,3 +485,11 @@ def test_cli_writes_compact_github_outputs(tmp_path: Path) -> None:
         set(DOMAIN_PATTERNS) - {"ci-infrastructure", "compose", "container", "frontend"}
     )
     assert json.loads(values["runnable-domains"]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["compose.test.yaml", "scripts/testing/services.py"])
+def test_local_services_select_infrastructure_and_distributed_storage(
+    path: str,
+) -> None:
+    assert select_domains([path]) == ["ci-infrastructure", "storage-distributed"]

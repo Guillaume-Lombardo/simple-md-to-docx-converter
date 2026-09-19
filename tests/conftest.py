@@ -8,7 +8,24 @@ from typing import Any
 import pytest
 
 from markweave.persistence import sql as sql_persistence
+from scripts.testing.services import distributed_services
 from tests.golden.corpus import CorpusManifest, materialize_case, read_manifest
+
+
+@pytest.fixture(scope="session")
+def local_distributed_services() -> Iterator[None]:
+    """Only boundary tests acquire infrastructure; unit-only runs never start it."""
+    with distributed_services():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def configure_distributed_test_services(request: pytest.FixtureRequest) -> None:
+    if any(
+        request.node.get_closest_marker(marker) is not None
+        for marker in ("requires_postgres", "requires_s3")
+    ):
+        request.getfixturevalue("local_distributed_services")
 
 
 def pytest_configure(config: pytest.Config) -> None:

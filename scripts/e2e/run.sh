@@ -80,7 +80,7 @@ readonly worker_one_name="$prefix-worker-1"
 readonly worker_two_name="$prefix-worker-2"
 readonly runtime_uid="${T21_RUNTIME_UID:-51000}"
 readonly artifact_directory="$repository/artifacts/e2e/$profile"
-readonly seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
+readonly seccomp_profile="$repository/toolchain/document-engines/chrome-seccomp.json"
 
 # shellcheck source=scripts/e2e/harness.sh
 source "$repository/scripts/e2e/harness.sh"

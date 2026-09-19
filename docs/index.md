@@ -3,6 +3,7 @@
 Markweave converts Markdown to DOCX, PDF, or both through a browser interface or an asynchronous
 HTTP API. Start with the guide for your role:
 
+- [Quickstart operations](quickstart.md): local profiles, runtime selection, origins and recovery.
 - [User guide](user-guide.md): sign in, choose templates, submit conversions, cancel work, and
   download results.
 - [API guide](api-guide.md): authentication, CSRF protection, conversion and template endpoints,

@@ -206,9 +206,9 @@ scanner, authorization, filename, digest, content-type, `nosniff`, and private n
 
 The root browser-test package and `web/` use one pnpm workspace and one root `pnpm-lock.yaml`.
 Workspace membership explicitly includes only the repository root and `web/` and explicitly
-excludes `spikes/toolchain`; an automated negative-membership test enforces that boundary. The
+excludes `toolchain/document-engines`; an automated negative-membership test enforces that boundary. The
 isolated Mermaid production graph remains npm-based, retains its independent lock and exact Mermaid
-version, and is installed only with `npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts`.
+version, and is installed only with `npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts`.
 
 The frontend uses digest-pinned UBI 9 Node.js 24 builder and minimal runtime images. Node.js
 `24.19.0`, Corepack `0.36.0`, pnpm `11.25.0`, the integrity-bound root `packageManager` selection,
@@ -634,6 +634,11 @@ markers = [
 ]
 ```
 
+Local PostgreSQL/S3 integration tests may provision a disposable loopback-only PostgreSQL/RustFS
+Compose project when no external test-service configuration is supplied. Use pinned CI images,
+per-session credentials and ports, bounded readiness, and guaranteed session cleanup; partial
+external configuration fails explicitly. Unit-only runs must never provision services.
+
 Unit tests remain fast and deterministic and use pytest-mock rather than direct `unittest.mock`. Ruff must enforce that restriction. Calculate branch coverage from unit tests with a blocking 90% threshold and enforce 90% changed-line coverage in pull requests. The frontend independently blocks line, branch, and function coverage below 90% and runs strict TypeScript, lint, formatting, deterministic-build, and OpenAPI-binding freshness checks.
 
 Functional tests exercise assembled application behavior with substituted adapters. Every feature that crosses a real boundary—document engine, database, object store, filesystem boundary, authentication mechanism, worker, or external process—has at least one integration test covering its primary successful path and every relevant failure behavior. Integration tests exercise real engines and both storage contracts. The corpus covers Unicode, headings, tables, footnotes, code, local images, malformed resources, Mermaid, fonts, multiple templates, malicious ZIP/SVG inputs, timeouts, and concurrency. Inspect DOCX as OpenXML and rasterize PDF for golden comparison with controlled tolerances.
@@ -754,10 +759,14 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T70 | Implement the external rootless Podman isolation broker and authenticated bounded protocol, disposable anydoc attempt runner, bounded internal renderer adapter, and deterministic asset-aware Markdown package builder | T08, T18, T20, T69 |
 | T71 | Add authenticated persistent reverse-conversion jobs, API, workers, observability, and both storage profiles | T13, T19, T45, T70 |
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
-| T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
+| T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T50, T67, T70, T71, T72 |
 | T74 | Design and implement the optional Kubernetes reverse-isolation backend and node attester without weakening the T70 proof contract | T70, T71 |
 | T75 | Publish patch release 0.6.2 and adopt its verified image pair (completed) | T22, T69, T70, T71, T72 |
 | T76 | Rename workflow navigation and publish patch 0.6.3 with verified image-pair adoption | T22, T71, T72, T75 |
+| T77 | Make release subprocess termination and reaping reliable | T22 |
+| T78 | Make node asset permission tests independent of checkout modes | T05, T20 |
+| T79 | Decompose large reverse-conversion modules without changing contracts | T70, T71 |
+| T80 | Clean maintenance assets and provide automatic local distributed-test services | T22, T23, T67, T76 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -771,10 +780,11 @@ protocol, disposable attempt runner, bounded internal renderer adapter, and pack
 binds that runner and its content-free stable-unit termination proof to persistent leases, recovery,
 publication, and the backend workflow. T67 follows T64 and establishes the normative
 package-manager, bootstrap, workspace, command, and lockfile contract before T72 starts. T72 then
-builds the Revert workspace on that finalized pnpm toolchain. T46, T48, and T50 must finish
-their baseline security/support policies, mutation gate, and cross-surface documentation/acceptance
+builds the Revert workspace on that finalized pnpm toolchain. T46 and T50 must finish
+their baseline security/support policies and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
-surfaces; it does not reopen their baseline scope or edit an exclusively owned path while another
+surfaces. T48 is not a blocking dependency; its baseline mutation gate remains out of scope.
+T73 does not reopen their baseline scope or edit an exclusively owned path while another
 ticket is active. T73 owns the complete final-image, two-profile, cross-format, reverse-security,
 dedicated reverse-documentation, third public reverse-attempt image contract, and release-readiness
 acceptance matrix. OCR remains outside this sequence. T74 separately owns optional Kubernetes
