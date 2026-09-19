@@ -50,7 +50,7 @@ def main() -> None:
             pid_file = cwd / f"{mode}.pid"
             original = runner._reap_group
             if mode == "cleanup-failure":
-                runner._reap_group = _leave_zombies
+                runner.__dict__["_reap_group"] = _leave_zombies
             try:
                 try:
                     runner.run_command(
@@ -76,7 +76,7 @@ def main() -> None:
                 else:
                     raise AssertionError(f"{mode}: child was not reaped")
             finally:
-                runner._reap_group = original
+                runner.__dict__["_reap_group"] = original
     print(
         "Release process boundary: success, timeout, leftovers, zombies, cleanup failure passed"
     )
