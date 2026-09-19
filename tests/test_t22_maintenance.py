@@ -101,9 +101,9 @@ def test_mutation_campaign_is_reproducible_nonempty_and_strict() -> None:
         assert f'"{failure}"' in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
-    assert '"mutmut==3.7.0"' in pyproject
+    assert '"mutmut==3.8.0"' in pyproject
     assert "[tool.mutmut]" in pyproject
-    assert 'name = "mutmut"\nversion = "3.7.0"' in lock
+    assert 'name = "mutmut"\nversion = "3.8.0"' in lock
 
 
 @pytest.mark.unit

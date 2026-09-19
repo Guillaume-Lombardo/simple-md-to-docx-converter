@@ -64,7 +64,7 @@ def test_distribution_metadata_declares_the_supported_dependency_matrix() -> Non
     ]
     assert extras["kubernetes"] == [
         "grpcio>=1.76,<2",
-        "kubernetes==35.0.0",
+        "kubernetes==36.0.3",
         "protobuf>=6.33,<7",
     ]
     assert "boto3>=1.43.82,<2" not in extras["server"]
