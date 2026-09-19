@@ -44,6 +44,8 @@ Apply the approved repository cleanup from current main and provide reproducible
 
 ## Synchronization
 
+PR #236 follow-up: user authorized repairing the distributed E2E readiness deadline. A deliberately stopped RustFS takes approximately 20 seconds to produce HTTP 503, equal to the old outer CLI process deadline. The failure-only probe now uses a bounded 30-second HTTP deadline within a 45-second process deadline; other commands retain 20 seconds. Preserve exit status 1 and the exact not_ready error contract, rejecting network/timeout substitutions. Validation passed: 22 targeted tests, Ruff, ty and CI policy checks. The rootless final-image CLI received and validated a real HTTP 503/not_ready response delayed by 21 seconds. Full two-profile GitHub verification remains pending.
+
 Publication follow-up: the user authorized a ready-for-review pull request, monitoring,
 squash merge after successful checks and independent review, and source-branch cleanup.
 Completion remains conditional on verification on main. T77/T78 repairs and T73/T50
