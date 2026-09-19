@@ -62,7 +62,7 @@ reverse-attempt = [
 ]
 kubernetes = [
     "grpcio>=1.76,<2",
-    "kubernetes==35.0.0",
+    "kubernetes==36.0.3",
     "protobuf>=6.33,<7",
 ]
 
@@ -84,7 +84,7 @@ dev = [
     "grpcio-tools==1.76.0",
     "httpx>=0.28,<1",
     "markweave[all,kubernetes,reverse-attempt]",
-    "mutmut==3.7.0",
+    "mutmut==3.8.0",
     "pypdfium2>=5.13,<6",
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",
