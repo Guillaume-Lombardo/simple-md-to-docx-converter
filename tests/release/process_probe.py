@@ -29,8 +29,9 @@ time.sleep(60)
 """
 
 
-def _leave_zombies(process_group: int) -> None:
+def _leave_zombies(process_group: int) -> bool:
     """Inject a reaping failure without preventing real group termination."""
+    return True
 
 
 def main() -> None:

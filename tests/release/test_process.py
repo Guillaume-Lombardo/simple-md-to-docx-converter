@@ -77,3 +77,53 @@ def test_failed_exit_keeps_status(mocker: MockerFixture, tmp_path: Path) -> None
     mocker.patch.object(runner, "_group_exists", return_value=False)
     with pytest.raises(ArtifactError, match="failed with exit code 17"):
         runner._run_command(("fixed",), cwd=tmp_path, label="build", timeout=1)
+
+
+def test_continuous_exited_children_cannot_monopolize_reaping(
+    mocker: MockerFixture,
+) -> None:
+    wait = mocker.patch.object(runner.os, "waitpid", return_value=(456, 0))
+    assert runner._reap_group(123) is False
+    assert wait.call_count == runner.REAP_BATCH_SIZE
+
+
+def test_continuous_reaping_preserves_group_cleanup_deadline(
+    mocker: MockerFixture,
+) -> None:
+    process = mocker.Mock(pid=123)
+    process.poll.return_value = 0
+    mocker.patch.object(runner.os, "waitpid", return_value=(456, 0))
+    mocker.patch.object(runner, "_group_exists", return_value=True)
+    mocker.patch.object(runner.time, "monotonic", side_effect=(0, 6))
+    assert runner._wait_group_exit(process, timeout=5) is False
+
+
+def test_continuous_reaping_after_leader_exit_still_attempts_termination(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process = mocker.Mock(pid=123)
+    process.wait.return_value = 0
+    mocker.patch.object(runner.subprocess, "Popen", return_value=process)
+    mocker.patch.object(runner.os, "waitpid", return_value=(456, 0))
+    mocker.patch.object(runner.time, "monotonic", side_effect=(0, 6))
+    mocker.patch.object(runner, "_group_exists", return_value=True)
+    terminate = mocker.patch.object(runner, "_terminate_group")
+    with pytest.raises(ArtifactError, match="left descendant processes running"):
+        runner._run_command(("fixed",), cwd=tmp_path, label="build", timeout=1)
+    terminate.assert_called_once_with(process, label="build")
+
+
+def test_finite_zombie_batches_after_leader_exit_can_succeed(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    process = mocker.Mock(pid=123)
+    process.wait.return_value = 0
+    mocker.patch.object(runner.subprocess, "Popen", return_value=process)
+    wait = mocker.patch.object(
+        runner.os,
+        "waitpid",
+        side_effect=[(456, 0)] * (runner.REAP_BATCH_SIZE + 1) + [ChildProcessError],
+    )
+    mocker.patch.object(runner, "_group_exists", return_value=False)
+    runner._run_command(("fixed",), cwd=tmp_path, label="build", timeout=1)
+    assert wait.call_count == runner.REAP_BATCH_SIZE + 2

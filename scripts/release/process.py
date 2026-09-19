@@ -16,6 +16,7 @@ from scripts.release.artifacts import ArtifactError
 
 TERMINATION_GRACE_SECONDS = 5.0
 GROUP_POLL_SECONDS = 0.02
+REAP_BATCH_SIZE = 64
 PR_SET_CHILD_SUBREAPER = 36
 PR_GET_CHILD_SUBREAPER = 37
 _SUBREAPER_LOCK = Lock()
@@ -38,17 +39,18 @@ def _subreaper() -> Iterator[None]:
                 raise ArtifactError("cannot restore release command child reaper")
 
 
-def _reap_group(process_group: int) -> None:
-    """Reap only adopted children in this group, never an unrelated command."""
-    while True:
+def _reap_group(process_group: int) -> bool:
+    """Reap a bounded batch; return whether no more exited children are ready."""
+    for _ in range(REAP_BATCH_SIZE):
         try:
             process_id, _ = os.waitpid(-process_group, os.WNOHANG)
         except ChildProcessError:
-            return
+            return True
         except OSError as error:
             raise ArtifactError("cannot reap release command descendants") from error
         if process_id == 0:
-            return
+            return True
+    return False
 
 
 def _group_exists(process_group: int) -> bool:
@@ -123,7 +125,10 @@ def _run_command(
     except subprocess.TimeoutExpired as error:
         _terminate_group(process, label=label)
         raise ArtifactError(f"{label} timed out") from error
-    _reap_group(process.pid)
+    reap_deadline = time.monotonic() + TERMINATION_GRACE_SECONDS
+    while not _reap_group(process.pid):
+        if time.monotonic() >= reap_deadline:
+            break
     if _group_exists(process.pid):
         _terminate_group(process, label=label)
         if return_code == 0:

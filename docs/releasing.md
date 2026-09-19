@@ -239,7 +239,8 @@ Existing unrelated direct children retain their exit status for their own `Popen
 
 A zombie has exited but still makes `killpg(group, 0)` succeed until its parent reaps it. Reaping
 adopted zombies before probing the group avoids depending on CI or development-host PID 1 behavior.
-Live leftovers after a successful leader exit still fail the command. Timeout cleanup sends SIGTERM
+Reaping uses bounded batches and deadline checks, so a continuous stream of exited descendants
+cannot delay termination indefinitely. Live leftovers after a successful leader exit still fail the command. Timeout cleanup sends SIGTERM
 to the entire group, then SIGKILL when necessary, with bounded leader waits and group polls. Failure
 to adopt, inspect, signal, or reap remains an explicit safe release error; it is never downgraded to
 a normal timeout. Commands must remain in their assigned process group; this helper is not a

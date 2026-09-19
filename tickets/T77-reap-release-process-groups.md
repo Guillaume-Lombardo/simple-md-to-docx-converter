@@ -38,7 +38,7 @@ Diagnose and repair release-command timeout cleanup so descendants are terminate
   SIGTERM-resistant descendant, live/zombie exit, unrelated-child, concurrent-caller, syscall
   failure, and portable acceptance-probe regressions. Release guide documents Linux support.
 - Validation: `uv sync --all-groups`, Ruff format/check, and `uv run ty check` pass;
-  `uv run pytest tests/release --no-cov -q`: 212 passed. Canonical default suite was interrupted cleanly after concurrent runs were found to share
+  `uv run pytest tests/release --no-cov -q`: 216 passed. Canonical default suite was interrupted cleanly after concurrent runs were found to share
   broker fixtures; its partial failures cannot be attributed reliably. Exclusive rerun pending. Full suite requires unavailable host
   Pandoc, Mermaid CLI, and LibreOffice and remains unverified locally.
 - Final-image Linux probe passed with read-only source mount, arbitrary UID 10042:0, read-only
@@ -49,6 +49,13 @@ Diagnose and repair release-command timeout cleanup so descendants are terminate
 - Independent read-only review approved PR #239 head `90560d71ee4f84c6179685dd4199d89a4c998599`
   with no findings; 18 focused process tests passed. Registered these fast real-process integration
   tests in the existing light-coverage CI gate so the regression runs on every pull request.
+
+- Additional independent deadline audit identified an unbounded reap-drain loop. The initial
+  approval is superseded: bounded batches now return control to deadline checks, while an initial
+  post-leader drain also has a grace deadline before group termination. Regressions cover continuous
+  exited children, forced return to cleanup deadlines, and finite multi-batch zombie success.
+  Ruff format/lint, type checking, all 216 release tests, and the hardened final-image probe pass.
+  Fresh exact-head review and required CI are pending.
 
 ## Synchronization
 
