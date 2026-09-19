@@ -2,7 +2,7 @@
 ticket: T72
 linear_id: G1L-540
 linear_url: https://linear.app/g1lom/issue/G1L-540/t72-build-the-experimental-revert-workspace
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -169,6 +169,11 @@ downloading their results.
   squash-merged as `2e54bdc3fa9a2125c75d7492ec7459f0f4bdbbb3`; exact-main CI run `34043478649`
   then passed its light, frontend, standalone E2E, distributed E2E, and final gate jobs. T72 is
   complete on verified `main`; the full successful cross-format release matrix remains with T73.
+
+- 2026-09-19: Follow-up fix verified on main `5e789c11600d429997c037b4d24eea399821a2ed`
+  through squash PR #232. All required exact-head and main CI domains pass (runs 35453205924
+  and 35454910111). Release 0.6.3 succeeds in run 35454910249. This completes the reopened
+  corrective work; T73 final reverse-engine qualification remains separate.
 
 ## Synchronization
 

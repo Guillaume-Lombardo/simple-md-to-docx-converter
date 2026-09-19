@@ -62,6 +62,19 @@ labels: `md 2 docx`, `x 2 md`, and `template docx`.
   without disabling inventory validation, signature checks or vulnerability gates. Also added
   the existing completed T75 prerequisite to the delivery table as requested by CodeRabbit.
 
+- 2026-09-19: PR #232 squash-merged as `5e789c11600d429997c037b4d24eea399821a2ed`.
+  Exact-head CI run 35453205924 and main CI run 35454910111 pass every required domain,
+  including both final-image E2E and storage profiles. The source branch is deleted locally
+  and remotely. CodeRabbit's independent review finding was corrected; all conversations resolved.
+- 2026-09-19: Automatic release run 35454910249 succeeds, publishing the PyPI wheel/sdist,
+  GitHub tag/release and both GHCR images. Anonymous manifest checks match the retained receipts:
+  backend `sha256:6560d86e4ca33327a5f454530c8b6a2fadb20b55af6373aea01378b00920bb4e`;
+  frontend `sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5`.
+  Receipt hashes and the frontend lockfile match the paired release manifest. GitHub attestation
+  verification enforces the repository, reusable container workflow, main ref, source SHA and
+  hosted runner identity for both images. The follow-up adoption updates Compose, quickstarts,
+  deployment documentation and their contracts; its protected merge remains pending.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, acceptance criteria, dependencies,

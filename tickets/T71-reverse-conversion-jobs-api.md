@@ -2,7 +2,7 @@
 ticket: T71
 linear_id: G1L-539
 linear_url: https://linear.app/g1lom/issue/G1L-539/t71-add-persistent-reverse-conversion-jobs-and-api
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -326,6 +326,11 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   coverage gates, and the final CI gate. CodeRabbit passed the exact head and all review threads
   were resolved. The criterion-by-criterion acceptance audit found no remaining T71 gap; the
   combined final three-image release matrix remains explicitly owned by T73.
+
+- 2026-09-19: Follow-up fix verified on main `5e789c11600d429997c037b4d24eea399821a2ed`
+  through squash PR #232. All required exact-head and main CI domains pass (runs 35453205924
+  and 35454910111). Release 0.6.3 succeeds in run 35454910249. This completes the reopened
+  corrective work; T73 final reverse-engine qualification remains separate.
 
 ## Synchronization
 

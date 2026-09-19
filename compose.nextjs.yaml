@@ -2,11 +2,11 @@
 # locally staged identities; public quickstarts use the verified release pair.
 services:
   markweave:
-    image: "${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.6.2@sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a118330ae}"
+    image: "${MARKWEAVE_CUTOVER_BACKEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter:0.6.3@sha256:6560d86e4ca33327a5f454530c8b6a2fadb20b55af6373aea01378b00920bb4e}"
     ports: !reset []
 
   frontend:
-    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.2@sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7}"
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.3@sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5}"
     platform: linux/amd64
     depends_on:
       markweave:
@@ -40,7 +40,7 @@ services:
       start_period: 10s
 
   router:
-    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.2@sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7}"
+    image: "${MARKWEAVE_CUTOVER_FRONTEND_IMAGE:-ghcr.io/guillaume-lombardo/md-converter-web:0.6.3@sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5}"
     platform: linux/amd64
     command: [node, router.mjs]
     depends_on:
