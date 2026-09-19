@@ -57,7 +57,7 @@ def test_runtime_wrapper_closes_workspace_mount_policy_before_runc_create() -> N
     wrapper_path = K3S / "markweave-runc-wrapper"
     wrapper = wrapper_path.read_text()
 
-    assert stat.S_IMODE(wrapper_path.stat().st_mode) == 0o755
+    assert wrapper_path.stat().st_mode & stat.S_IXUSR
     assert "REAL_RUNC=/usr/bin/runc" in wrapper
     assert "[ -x /usr/bin/jq ]" in wrapper
     assert "io.containerd.runtime.v2.task/k8s.io/" in wrapper
@@ -81,7 +81,7 @@ def test_isolated_cni_has_one_fixed_dummy_address_and_no_route_contract() -> Non
 
     plugin_path = K3S / "markweave-isolated"
     plugin = plugin_path.read_text()
-    assert stat.S_IMODE(plugin_path.stat().st_mode) == 0o755
+    assert plugin_path.stat().st_mode & stat.S_IXUSR
     assert 'CNI_IFNAME:-}" = "eth0"' in plugin
     assert "ip link add dev eth0 type dummy" in plugin
     assert "192.0.2.1/32" in plugin

@@ -156,6 +156,21 @@ mount shape.
 Install `deploy/k3s/00-markweave-isolated.conflist` as
 `/var/lib/rancher/k3s/agent/etc/cni/net.d/00-markweave-isolated.conflist` and install the executable
 `deploy/k3s/markweave-isolated` as `/var/lib/rancher/k3s/data/cni/markweave-isolated`, mode `0755`.
+Use explicit install modes for both executables; checkout permissions depend on the checkout's
+umask and are not installed-node permissions. From the repository root, an authorized node
+administrator installs into the existing root-owned destination directories with:
+
+```bash
+install --mode=0755 -- deploy/k3s/markweave-runc-wrapper /var/lib/rancher/k3s/data/markweave/markweave-runc-wrapper
+install --mode=0755 -- deploy/k3s/markweave-isolated /var/lib/rancher/k3s/data/cni/markweave-isolated
+```
+
+These commands replace destination files with the explicit mode without changing source checkout
+permissions. Run them only as part of the fenced-node procedure below, not during tests or local
+checkout setup. Repository integration tests exercise these commands with temporary destinations.
+The host-installed executables are not part of the application, broker, attester, or attempt images;
+final-image tests cannot verify their installed host permissions.
+
 The `00-` prefix is security-significant: containerd selects the lexicographically first CNI
 configuration, and k3s regenerates its later `10-flannel.conflist`. Render the CNI configuration,
 CNI executable, runtime handler, and runtime-wrapper digests into the attester configuration.
