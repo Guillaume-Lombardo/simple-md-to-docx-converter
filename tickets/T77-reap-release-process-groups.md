@@ -2,7 +2,7 @@
 ticket: T77
 linear_id: G1L-576
 linear_url: https://linear.app/g1lom/issue/G1L-576/t77-reap-release-subprocess-groups-reliably
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -28,6 +28,10 @@ Diagnose and repair release-command timeout cleanup so descendants are terminate
 ## Progress
 
 - 2026-09-19: Created from the repository audit. Implementation is not part of the repository-cleanup request.
+
+- 2026-09-19: Implementation started in isolated branch `fix/T77-release-process-reaping`.
+  Reproduced the audit error under a Linux subreaper that retains orphan zombies; the original
+  test passes when the host ancestor promptly reaps them.
 
 ## Synchronization
 
