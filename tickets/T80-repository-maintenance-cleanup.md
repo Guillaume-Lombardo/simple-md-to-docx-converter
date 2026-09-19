@@ -2,7 +2,7 @@
 ticket: T80
 linear_id: G1L-579
 linear_url: https://linear.app/g1lom/issue/G1L-579/t80-clean-repository-maintenance-assets-and-configure-local
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -40,15 +40,20 @@ Apply the approved repository cleanup from current main and provide reproducible
 - Validation passed: uv sync --all-groups; Ruff format/check; ty; CI policy validation; frozen pnpm installation/workspace validation; 16 browser tests; 441 targeted Python tests; final 65 service/fixture tests including 47 real PostgreSQL/RustFS tests and real resource cleanup after a failing test body. No test-service containers remained.
 - Built the final rootless image and passed document-engine smoke validation, runtime-operations E2E, API smoke and distributed API smoke including termination/recovery.
 - Canonical engine-excluded suite: 4286 passed, 6 failed, 45 deselected; coverage 94.86%. Three fixture-call failures introduced by the new dependency were corrected and passed in the final 65-test rerun. The three remaining known failures are release process reaping (T77) and two checkout-mode assertions (T78). The entire 24-minute suite was not repeated after that test-helper-only correction.
-- Unrestricted host uv run pytest was not run because Pandoc, Mermaid/Chromium and LibreOffice are absent on the host; real engines were validated in the final image. Nothing was committed, pushed, published or merged. Keep In Progress until reviewed and verified on main.
+- Unrestricted host uv run pytest was not run because Pandoc, Mermaid/Chromium and LibreOffice are absent on the host; real engines were validated in the final image. These were the initial local-validation results before PR publication; the later GitHub verification and merge evidence below supersede the publication status.
+
+## Publication and verification
+
+PR #236 follow-up: user authorized repairing the distributed E2E readiness deadline. A deliberately stopped RustFS takes approximately 20 seconds to produce HTTP 503, equal to the old outer CLI process deadline. The failure-only probe now uses a bounded 30-second HTTP deadline within a 45-second process deadline; other commands retain 20 seconds. Preserve exit status 1 and the exact not_ready error contract, rejecting network/timeout substitutions. Validation passed: 22 targeted tests, Ruff, ty and CI policy checks. The rootless final-image CLI received and validated a real HTTP 503/not_ready response delayed by 21 seconds. Both complete rootless E2E profiles subsequently passed on the final PR head.
+
+- Implementation: [PR #236](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/236), reviewed head `5f790e04d49a82a45b863658553ac5b0613872f5`.
+- Final PR CI: [run 35468541740](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35468541740), all domains and the required gate passed, including both rootless E2E profiles and real PostgreSQL/S3 tests.
+- Independent CodeRabbit review completed without remaining actionable findings; the archive-reference discussion was resolved.
+- Squash merge on main: `55c9a1c813ebf3148540dc85535b6cbdfa10968e`; the merged tree matches the reviewed head exactly.
+- Source branch `chore/T80-repository-cleanup` was deleted locally and remotely after verification; no version or public deployment digest changed.
+- Main verification: [run 35470075536](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35470075536), completed successfully on the exact main commit, including all domains and the required gate. T80 is verified Done; Linear and this completion record reflect that result.
+- T77/T78 repairs, T79 decomposition, and T73/T50 qualification remain separate work; this ticket does not claim those criteria.
 
 ## Synchronization
-
-PR #236 follow-up: user authorized repairing the distributed E2E readiness deadline. A deliberately stopped RustFS takes approximately 20 seconds to produce HTTP 503, equal to the old outer CLI process deadline. The failure-only probe now uses a bounded 30-second HTTP deadline within a 45-second process deadline; other commands retain 20 seconds. Preserve exit status 1 and the exact not_ready error contract, rejecting network/timeout substitutions. Validation passed: 22 targeted tests, Ruff, ty and CI policy checks. The rootless final-image CLI received and validated a real HTTP 503/not_ready response delayed by 21 seconds. Full two-profile GitHub verification remains pending.
-
-Publication follow-up: the user authorized a ready-for-review pull request, monitoring,
-squash merge after successful checks and independent review, and source-branch cleanup.
-Completion remains conditional on verification on main. T77/T78 repairs and T73/T50
-qualification remain separate work.
 
 Keep Linear and this mirror synchronized. Mark Done only after verification on main.
