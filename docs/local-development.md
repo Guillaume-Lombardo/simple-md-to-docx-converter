@@ -101,9 +101,26 @@ uv run pytest
 ```
 
 Every external requirement must use its registered Pytest marker. PostgreSQL, S3, slow,
-integration, and end-to-end tests remain included in the default command. Configure
-`MARKWEAVE_TEST_POSTGRES_URL` and the `MARKWEAVE_TEST_S3_*` variables before the canonical
-run. The distributed CI domain provisions PostgreSQL and RustFS and never substitutes MinIO.
+integration, and end-to-end tests remain included in the default command. When these tests first need distributed services and no service variables are set, Pytest
+starts a disposable Docker Compose project from `compose.test.yaml`. It uses the same pinned
+PostgreSQL and RustFS images as CI, random loopback ports, per-session generated credentials,
+health checks, and isolated schemas/buckets. The session removes its own containers, network
+and volumes even after a test failure. Unit-only runs never start containers.
+
+The local Docker Engine socket `/var/run/docker.sock` and `docker compose` must be available
+to the current user. The helper explicitly selects that socket, ignoring remote Docker contexts.
+No `sudo`, system
+package installation, external credentials, persistent `.env`, or manual exports are needed.
+The first run may pull the pinned images. Do not interrupt cleanup with SIGKILL; after a host
+crash, inspect projects with `docker compose ls --all` and remove only the exact abandoned
+`markweave-tests-<id>` project using `compose.test.yaml`.
+
+To use externally managed services instead, configure **all six** variables:
+`MARKWEAVE_TEST_POSTGRES_URL`, `MARKWEAVE_TEST_S3_ENDPOINT_URL`, `MARKWEAVE_TEST_S3_REGION`,
+`MARKWEAVE_TEST_S3_ACCESS_KEY_ID`, `MARKWEAVE_TEST_S3_SECRET_ACCESS_KEY`, and
+`MARKWEAVE_TEST_S3_BUCKET`. The bucket must already exist. Partial configuration fails explicitly;
+it never silently starts replacements or skips tests. External services are never stopped by
+Pytest. CI keeps its existing provisioned services and environment. RustFS is not replaced by MinIO.
 
 Pytest always measures the installed `markweave` application package and enforces two separate
 thresholds: at least 90% overall application coverage and at least 90% of application branches.

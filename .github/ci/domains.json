@@ -91,6 +91,7 @@
       "pytest",
       "tests/integration/postgres",
       "tests/integration/s3",
+      "tests/integration/test_local_test_services_lifecycle.py",
       "-m",
       "requires_postgres or requires_s3",
       "--no-cov"

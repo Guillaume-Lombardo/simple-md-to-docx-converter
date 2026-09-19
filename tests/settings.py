@@ -43,7 +43,7 @@ def template_settings(**overrides: Any) -> dict[str, Any]:
         "conversion_pdf_max_pages": 100,
         "conversion_pdf_max_objects": 100_000,
         "conversion_pdf_max_object_depth": 100,
-        "conversion_font_manifest_path": "spikes/toolchain/fonts/manifest.json",
+        "conversion_font_manifest_path": "toolchain/document-engines/fonts/manifest.json",
         "template_max_archive_bytes": 1_000_000,
         "template_request_max_bytes": 1_100_000,
         "template_metadata_request_max_bytes": 4_096,

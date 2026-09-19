@@ -21,8 +21,8 @@ RUN dnf install -y \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
-COPY --chmod=0555 spikes/toolchain/fonts/install-fonts.sh /usr/local/bin/install-md-converter-fonts
-COPY --chmod=0444 spikes/toolchain/fonts/fonts.conf /opt/md-converter/fontconfig/fonts.conf
+COPY --chmod=0555 toolchain/document-engines/fonts/install-fonts.sh /usr/local/bin/install-md-converter-fonts
+COPY --chmod=0444 toolchain/document-engines/fonts/fonts.conf /opt/md-converter/fontconfig/fonts.conf
 RUN install-md-converter-fonts \
     && mkdir -p /opt/md-converter/fontconfig/cache \
     && FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf fc-cache --force \
@@ -67,7 +67,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
     FONTCONFIG_FILE=/opt/md-converter/fontconfig/fonts.conf
 
 WORKDIR /opt/md-converter/node
-COPY spikes/toolchain/package.json spikes/toolchain/package-lock.json ./
+COPY toolchain/document-engines/package.json toolchain/document-engines/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force \
     && ln -s /opt/md-converter/node/node_modules/.bin/mmdc /usr/local/bin/mmdc \
@@ -99,10 +99,10 @@ RUN uv sync --locked --no-dev --no-editable --extra all \
 
 COPY --chmod=0555 container/entrypoint.sh /usr/local/bin/md-converter-entrypoint
 COPY --chmod=0555 container/preflight.sh /usr/local/bin/md-converter-preflight
-COPY --chmod=0444 spikes/toolchain/chrome-seccomp.json /opt/md-converter/chrome-seccomp.json
-COPY --chmod=0444 spikes/toolchain/fonts/manifest.json /opt/md-converter/font-manifest.json
-COPY --chmod=0444 spikes/toolchain/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
-COPY --chmod=0444 spikes/toolchain/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
+COPY --chmod=0444 toolchain/document-engines/chrome-seccomp.json /opt/md-converter/chrome-seccomp.json
+COPY --chmod=0444 toolchain/document-engines/fonts/manifest.json /opt/md-converter/font-manifest.json
+COPY --chmod=0444 toolchain/document-engines/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
+COPY --chmod=0444 toolchain/document-engines/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
 # Reviewed UBI Mesa 25.2.7-5.el9_8 inventory; see the T76 release record.
 ARG RPM_INVENTORY_SHA256=5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef

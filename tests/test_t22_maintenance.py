@@ -41,11 +41,11 @@ def test_dependabot_covers_every_dependency_ecosystem_weekly_in_groups() -> None
     assert by_ecosystem["github-actions"][0]["directory"] == "/"
     assert [entry["directory"] for entry in by_ecosystem["npm"]] == [
         "/",
-        "/spikes/toolchain",
+        "/toolchain/document-engines",
     ]
     assert by_ecosystem["docker"][0]["directories"] == [
         "/",
-        "/spikes/toolchain",
+        "/toolchain/document-engines",
     ]
     for update in updates:
         assert update["schedule"]["interval"] == "weekly"

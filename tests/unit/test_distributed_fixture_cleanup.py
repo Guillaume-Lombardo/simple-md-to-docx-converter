@@ -30,7 +30,7 @@ def _fixture_generator(
     monkeypatch: pytest.MonkeyPatch,
 ):
     fixture = cast(Any, distributed_conftest.isolated_postgresql_and_s3_resources)
-    return fixture.__wrapped__(request, monkeypatch)
+    return fixture.__wrapped__(request, monkeypatch, local_distributed_services=None)
 
 
 def test_distributed_fixture_drops_schema_when_s3_client_creation_fails(

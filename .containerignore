@@ -11,6 +11,6 @@ node_modules
 tests
 tickets
 docs
-spikes/toolchain/node_modules
+toolchain/document-engines/node_modules
 **/__pycache__
 **/*.pyc

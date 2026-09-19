@@ -46,7 +46,7 @@ The examples are workload fragments, not complete production stacks. They delibe
 approved value. `WORKER_MEMORY_BUDGET_BYTES` and `WORKER_EPHEMERAL_STORAGE_BUDGET_BYTES` appear both
 in the application configuration and the worker resource limits so the approved values are enforced
 without unit conversion. Do not introduce example values as production defaults. The Localhost
-Chrome seccomp profile is `spikes/toolchain/chrome-seccomp.json`; install that exact reviewed file
+Chrome seccomp profile is `toolchain/document-engines/chrome-seccomp.json`; install that exact reviewed file
 on each worker node before applying a manifest. OpenShift validation remains deferred, so these
 manifests do not claim OpenShift compatibility.
 

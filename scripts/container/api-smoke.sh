@@ -9,7 +9,7 @@ readonly network_name=md-converter-t20-api-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
 readonly expect_reversion_capabilities="${MARKWEAVE_EXPECT_REVERSION_CAPABILITIES:-true}"
-seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
+seccomp_profile="$repository/toolchain/document-engines/chrome-seccomp.json"
 readonly seccomp_profile
 created=false
 legacy_created=false

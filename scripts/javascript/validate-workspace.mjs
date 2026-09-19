@@ -12,7 +12,7 @@ const { values } = parseArgs({
 });
 
 const workspace = await readFile(resolve(repository, "pnpm-workspace.yaml"), "utf8");
-assert.match(workspace, /^packages:\n  - "\."\n  - "web"\n  - "!spikes\/toolchain"\n/m);
+assert.match(workspace, /^packages:\n  - "\."\n  - "web"\n  - "!toolchain\/document-engines"\n/m);
 
 const listing = values["list-json"]
   ? JSON.parse(await readFile(values["list-json"], "utf8"))
@@ -31,6 +31,6 @@ assert.deepEqual(
   "the root workspace must contain only the root browser tests and web package",
 );
 assert.ok(
-  paths.every((path) => !path.startsWith(`${resolve(repository, "spikes/toolchain")}/`) && path !== resolve(repository, "spikes/toolchain")),
-  "spikes/toolchain must remain outside the pnpm workspace",
+  paths.every((path) => !path.startsWith(`${resolve(repository, "toolchain/document-engines")}/`) && path !== resolve(repository, "toolchain/document-engines")),
+  "toolchain/document-engines must remain outside the pnpm workspace",
 );

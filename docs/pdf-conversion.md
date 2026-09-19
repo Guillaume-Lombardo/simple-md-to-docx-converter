@@ -48,9 +48,9 @@ failures, timeout, cancellation, descendant cleanup, and exact raster golden com
 Build the current toolchain and reproduce that focused rootless suite with:
 
 ```bash
-podman build --pull=false --file spikes/toolchain/Containerfile \
-  --tag localhost/simple-md-toolchain:t11 spikes/toolchain
-spikes/toolchain/run-t11-tests.sh
+podman build --pull=false --file toolchain/document-engines/Containerfile \
+  --tag localhost/simple-md-toolchain:t11 toolchain/document-engines
+toolchain/document-engines/run-t11-tests.sh
 ```
 
 The harness stages a read-only source copy, installs only the locked dependency graph, disables

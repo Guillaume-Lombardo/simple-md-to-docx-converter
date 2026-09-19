@@ -4,7 +4,7 @@ set -euo pipefail
 readonly image="${1:-localhost/md-converter:t20-ci}"
 readonly runtime_uid="${T36_RUNTIME_UID:-53000}"
 readonly application_version="$(uv version --short --locked)"
-seccomp_profile="$(pwd)/spikes/toolchain/chrome-seccomp.json"
+seccomp_profile="$(pwd)/toolchain/document-engines/chrome-seccomp.json"
 readonly seccomp_profile
 
 # shellcheck source=scripts/e2e/runtime-settings.sh

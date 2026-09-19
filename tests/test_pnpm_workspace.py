@@ -16,8 +16,8 @@ from scripts.javascript import verify_benchmark_artifact_metadata as metadata_ve
 @pytest.mark.unit
 def test_workspace_excludes_the_isolated_mermaid_toolchain() -> None:
     workspace = yaml.safe_load(Path("pnpm-workspace.yaml").read_text(encoding="utf-8"))
-    assert workspace["packages"] == [".", "web", "!spikes/toolchain"]
-    assert Path("spikes/toolchain/package-lock.json").is_file()
+    assert workspace["packages"] == [".", "web", "!toolchain/document-engines"]
+    assert Path("toolchain/document-engines/package-lock.json").is_file()
     assert not Path("package-lock.json").exists()
     assert not Path("web/package-lock.json").exists()
 
@@ -39,7 +39,7 @@ def test_lock_preserves_the_audited_npm_package_versions_and_integrities() -> No
         "472524d7c110193275295a9edaadc0bd5492a9d073af47ecc8b433b3daf78a93"
     )
     assert hashlib.sha256(
-        Path("spikes/toolchain/package-lock.json").read_bytes()
+        Path("toolchain/document-engines/package-lock.json").read_bytes()
     ).hexdigest() == (
         "65e41ba309b46b59d92c0158899776ed0c4f04fc97c8aeaa96b0bfd571f9fcff"
     )

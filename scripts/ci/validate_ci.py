@@ -105,10 +105,6 @@ READ_ONLY_ENV_STEPS = frozenset(
             "Install verified fonts and LibreOffice for document-engine tests",
         ),
         ("heavy", "Install verified Mermaid and Chrome for document-engine tests"),
-        ("heavy", "Rehearse the exact npm rollback candidate"),
-        ("heavy", "Verify the accepted T67 benchmark metadata"),
-        ("heavy", "Verify the accepted T67 package-manager benchmark"),
-        ("heavy", "Collect the T67 package-manager benchmark"),
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
@@ -116,24 +112,6 @@ READ_ONLY_ENV_STEPS = frozenset(
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
-T67_ROLLBACK_REHEARSAL_CONDITION = (
-    "${{ matrix.domain == 'frontend' && github.event_name == 'pull_request' && "
-    "github.head_ref == 'chore/T67-pnpm-workspace' && "
-    "github.event.pull_request.head.repo.full_name == github.repository }}"
-)
-T67_MANUAL_BENCHMARK_CONDITION = (
-    "${{ matrix.domain == 'frontend' && github.event_name == 'workflow_dispatch' "
-    "&& inputs.rerun_t67_benchmark && "
-    "github.ref == 'refs/heads/chore/T67-pnpm-workspace' }}"
-)
-T67_BENCHMARK_ARTIFACT_CONDITION = (
-    "${{ always() && matrix.domain == 'frontend' && "
-    "((github.event_name == 'pull_request' && "
-    "github.head_ref == 'chore/T67-pnpm-workspace' && "
-    "github.event.pull_request.head.repo.full_name == github.repository) || "
-    "(github.event_name == 'workflow_dispatch' && inputs.rerun_t67_benchmark && "
-    "github.ref == 'refs/heads/chore/T67-pnpm-workspace')) }}"
-)
 
 
 @dataclass(frozen=True)
@@ -338,30 +316,6 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             (
                 "heavy",
-                "Rehearse the exact npm rollback candidate",
-            ): T67_ROLLBACK_REHEARSAL_CONDITION,
-            (
-                "heavy",
-                "Verify the accepted T67 benchmark metadata",
-            ): T67_ROLLBACK_REHEARSAL_CONDITION,
-            (
-                "heavy",
-                "Download the accepted T67 package-manager benchmark",
-            ): T67_ROLLBACK_REHEARSAL_CONDITION,
-            (
-                "heavy",
-                "Verify the accepted T67 package-manager benchmark",
-            ): T67_ROLLBACK_REHEARSAL_CONDITION,
-            (
-                "heavy",
-                "Collect the T67 package-manager benchmark",
-            ): T67_MANUAL_BENCHMARK_CONDITION,
-            (
-                "heavy",
-                "Retain the T67 package-manager benchmark",
-            ): T67_BENCHMARK_ARTIFACT_CONDITION,
-            (
-                "heavy",
                 "Install verified Mermaid and Chrome for document-engine tests",
             ): "${{ matrix.domain == 'document-engines' }}",
             (
@@ -381,7 +335,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="128d77b7c99e103bdb1a69e6f11bf4f9df9e572a6a2b6cff2dd77c921b7246d6",
+        canonical_digest="e8a064c2e29334dc1f88b37da285c96c3974f2caed206bbaa9c1152ad59ba35f",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -611,7 +565,7 @@ def _validate_read_only_job_permissions(
 ) -> list[str]:
     expected = {
         "light": {"contents": "read", "packages": "read"},
-        "heavy": {"actions": "read", "contents": "read"},
+        "heavy": {"contents": "read"},
     }.get(job_name)
     if expected is not None and job.get("permissions") != expected:
         return [
@@ -831,26 +785,6 @@ def _validate_public_alignment_credentials(
     return []
 
 
-def _validate_t67_benchmark_download(workflow: Mapping[str, Any]) -> list[str]:
-    downloads = [
-        step
-        for step in _job_steps(workflow, "heavy")
-        if step.get("name") == "Download the accepted T67 package-manager benchmark"
-    ]
-    expected = {
-        "artifact-ids": 9_911_803_951,
-        "path": "artifacts/package-manager-benchmark",
-        "github-token": "${{ github.token }}",
-        "repository": "Guillaume-Lombardo/simple-md-to-docx-converter",
-        "run-id": 33_799_673_333,
-    }
-    if len(downloads) != 1 or downloads[0].get("with") != expected:
-        return [
-            "accepted T67 benchmark download must use the exact reviewed artifact ID"
-        ]
-    return []
-
-
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -898,28 +832,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             "pnpm install --frozen-lockfile --ignore-scripts "
             "--filter md-converter-web-tests"
         ),
-        ("heavy", "Rehearse the exact npm rollback candidate"): (
-            "scripts/javascript/run_bounded_benchmark_command.py "
-            "900 10 /dev/stderr t67/rollback -- "
-            "bash scripts/javascript/rehearse-npm-rollback.sh "
-            '"$T67_CANDIDATE_SHA" "$NPM_BASELINE_SHA"'
-        ),
-        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
-            "bash scripts/javascript/reuse-package-benchmark.sh "
-            '"$PNPM_CANDIDATE_SHA" artifacts/package-manager-benchmark '
-            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
-        ),
-        ("heavy", "Verify the accepted T67 benchmark metadata"): (
-            "uv run python scripts/javascript/verify_benchmark_artifact_metadata.py "
-            '"$RUNNER_TEMP/t67-benchmark-metadata.txt"'
-        ),
-        ("heavy", "Collect the T67 package-manager benchmark"): (
-            "scripts/javascript/run_bounded_benchmark_command.py "
-            "1620 20 /dev/stderr t67/benchmark -- "
-            "bash scripts/javascript/benchmark-package-managers.sh "
-            '"$NPM_BASELINE_SHA" "$PNPM_CANDIDATE_SHA" '
-            "artifacts/package-manager-benchmark"
-        ),
         ("gate", "Require every implemented CI stage"): (
             'set -euo pipefail\n[[ "$DETECT_RESULT" == "success" ]]\n'
             '[[ "$DOMAIN_PLAN_RESULT" == "success" ]]\n'
@@ -937,8 +849,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ]
         if len(matches) != 1 or matches[0].get("run") != expected_command:
             errors.append(f"missing required workflow command: {expected_command!r}")
-
-    errors.extend(_validate_t67_benchmark_download(workflow))
 
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
@@ -961,21 +871,6 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         ),
         ("heavy", "Set up pinned Node for rootless E2E"): (
             "${{ startsWith(matrix.domain, 'e2e-') }}"
-        ),
-        ("heavy", "Rehearse the exact npm rollback candidate"): (
-            T67_ROLLBACK_REHEARSAL_CONDITION
-        ),
-        ("heavy", "Verify the accepted T67 benchmark metadata"): (
-            T67_ROLLBACK_REHEARSAL_CONDITION
-        ),
-        ("heavy", "Download the accepted T67 package-manager benchmark"): (
-            T67_ROLLBACK_REHEARSAL_CONDITION
-        ),
-        ("heavy", "Verify the accepted T67 package-manager benchmark"): (
-            T67_ROLLBACK_REHEARSAL_CONDITION
-        ),
-        ("heavy", "Collect the T67 package-manager benchmark"): (
-            T67_MANUAL_BENCHMARK_CONDITION
         ),
         ("heavy", "Retain failed E2E evidence"): (
             "${{ failure() && startsWith(matrix.domain, 'e2e-') }}"
@@ -2286,6 +2181,23 @@ def discover_workflow_paths(directory: Path) -> list[Path]:
     return sorted((*directory.glob("*.yml"), *directory.glob("*.yaml")))
 
 
+def discover_python_sources(root: Path) -> list[Path]:
+    """Inspect repository sources without traversing installed tool dependencies."""
+    excluded = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        ".pnpm-tools",
+        ".pnpm-store",
+    }
+    paths: list[Path] = []
+    for directory, directories, files in root.walk():
+        directories[:] = [name for name in directories if name not in excluded]
+        paths.extend(directory / name for name in files if name.endswith(".py"))
+    return sorted(paths)
+
+
 def main() -> int:
     """Validate the committed CI implementation."""
     root = Path(__file__).resolve().parents[2]
@@ -2306,12 +2218,7 @@ def main() -> int:
         for workflow_name in sorted(missing_workflows)
     )
     errors.extend(validate_registry_text(registry.read_text(encoding="utf-8")))
-    python_paths = (
-        path
-        for path in root.rglob("*.py")
-        if not {".git", ".venv", "__pycache__"}.intersection(path.parts)
-    )
-    errors.extend(validate_python_imports(python_paths))
+    errors.extend(validate_python_imports(discover_python_sources(root)))
     try:
         load_registry(registry)
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:

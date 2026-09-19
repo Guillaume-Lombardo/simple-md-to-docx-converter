@@ -39,6 +39,7 @@ def _delete_bucket(s3_client: Any, bucket: str) -> None:
 def isolated_postgresql_and_s3_resources(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
+    local_distributed_services: None,
 ) -> Iterator[None]:
     """Give every distributed test unique resources and deterministic teardown."""
 

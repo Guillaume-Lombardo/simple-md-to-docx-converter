@@ -130,9 +130,14 @@ def _plain(
     *,
     expected: int = 0,
     message: str | None = None,
+    timeout: float = 20,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        [*prefix, *command], check=False, capture_output=True, text=True, timeout=20
+        [*prefix, *command],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
     combined = result.stdout + result.stderr
     if result.returncode != expected or (
@@ -323,11 +328,14 @@ def _exercise(container: str) -> None:
 
 
 def _expect_readiness_failure(container: str) -> None:
+    # A stopped S3 service can consume the server's 20-second readiness probe.
+    # Bound HTTP above that probe, then allow container/CLI startup overhead.
     result = _plain(
         _exec_prefix(container, tty=False),
-        ("--json", "health", "ready", "--url", _SERVICE_URL),
+        ("--json", "--timeout", "30", "health", "ready", "--url", _SERVICE_URL),
         expected=1,
         message="not ready",
+        timeout=45,
     )
     try:
         error = json.loads(result.stderr)["error"]

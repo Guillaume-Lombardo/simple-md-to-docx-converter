@@ -167,7 +167,8 @@ def test_application_has_disk_workspace_and_memory_headroom() -> None:
     assert application["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in application["security_opt"]
     assert (
-        "seccomp=./spikes/toolchain/chrome-seccomp.json" in application["security_opt"]
+        "seccomp=./toolchain/document-engines/chrome-seccomp.json"
+        in application["security_opt"]
     )
     assert {entry.split(":", 1)[0] for entry in application["tmpfs"]} == {
         "/tmp",  # noqa: S108 - asserting the required isolated container mount
@@ -216,7 +217,9 @@ def test_committed_quickstart_fixture_is_stable_docx_with_declared_fonts() -> No
 
 
 def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
-    readme = README.read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8") + (
+        ROOT / "docs/quickstart.md"
+    ).read_text(encoding="utf-8")
 
     assert "scripts/quickstart.sh up" in readme
     assert "scripts/quickstart-simple.sh up" in readme
@@ -372,7 +375,7 @@ def test_simple_quickstart_is_unprivileged_and_removes_only_exact_scratch() -> N
     assert 'env "DOCKER_HOST=unix://$podman_socket"' in script
     assert "rootless Podman only" in script
     assert 'CONTAINERS_CONF="$podman_config_file"' in script
-    assert "spikes/toolchain/chrome-seccomp.json" in script
+    assert "toolchain/document-engines/chrome-seccomp.json" in script
     assert "command -v crun" in script
     assert "{{.Host.OCIRuntime.Path}}" in script
     assert 'runtime="%s"' in script

@@ -71,7 +71,6 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 * T22
 * T23
 * T46
-* T48
 * T50
 * T67
 * T70
@@ -82,7 +81,7 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 * Own final-image integration, two-profile browser/API/CLI acceptance, selective CI wiring, cross-
   cutting documentation, and release-readiness evidence.
-* Begin only after T46, T48, T50, and T67 complete their baseline policy, mutation, documentation,
+* Begin only after T46, T50, and T67 complete their baseline policy, mutation, documentation,
   acceptance, and JavaScript-tooling ownership. Add narrowly scoped reverse-conversion extensions
   to the established surfaces without reopening those tickets' baseline decisions.
 * Do not edit `SECURITY.md`, `SUPPORT.md`, README, `docs/index.md`, shared cross-guide navigation,
@@ -111,6 +110,10 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 * 2026-09-05: Product-manager decision deferred the third public reverse-attempt image from T70 to
   T73. T73 now owns its atomic inclusion in the final matched release set; T70 and T71 may use only
   locally built or CI-built exact images before that publication boundary.
+
+* 2026-09-19: User excluded T48 from this qualification follow-up. T48 is no longer a
+  blocking dependency and its baseline mutation gate remains out of scope. T71/T72 are
+  verified Done on main; all other acceptance criteria and dependencies remain.
 
 ## Synchronization
 

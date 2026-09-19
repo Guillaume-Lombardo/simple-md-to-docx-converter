@@ -11,7 +11,7 @@ readonly clamav_name=md-converter-t20-distributed-clamav-smoke
 readonly clamav_probe_name=md-converter-t20-distributed-clamav-probe-smoke
 readonly runtime_uid="${T20_RUNTIME_UID:-50000}"
 readonly repository="${MARKWEAVE_REPOSITORY_ROOT:-$PWD}"
-seccomp_profile="$repository/spikes/toolchain/chrome-seccomp.json"
+seccomp_profile="$repository/toolchain/document-engines/chrome-seccomp.json"
 readonly seccomp_profile
 created=()
 template_directory="$(mktemp -d)"

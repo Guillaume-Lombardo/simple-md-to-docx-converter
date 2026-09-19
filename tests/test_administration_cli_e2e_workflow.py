@@ -147,14 +147,43 @@ def test_administration_e2e_has_a_strict_readiness_failure_mode(mocker) -> None:
 
     driver._expect_readiness_failure("application")
 
-    assert plain.call_args.kwargs == {"expected": 1, "message": "not ready"}
+    assert plain.call_args.kwargs == {
+        "expected": 1,
+        "message": "not ready",
+        "timeout": 45,
+    }
     assert plain.call_args.args[1] == (
         "--json",
+        "--timeout",
+        "30",
         "health",
         "ready",
         "--url",
         "http://127.0.0.1:8080",
     )
+
+
+@pytest.mark.parametrize("code", ["not_ready", "network_error", "operation_timeout"])
+def test_readiness_failure_requires_server_error_with_nested_deadlines(mocker, code):
+    driver = _driver_module()
+    run = mocker.patch.object(
+        driver.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(
+            [],
+            1,
+            stdout="",
+            stderr=json.dumps({"error": {"code": code, "message": "Not ready."}}),
+        ),
+    )
+    if code == "not_ready":
+        driver._expect_readiness_failure("application")
+    else:
+        with pytest.raises(driver._WorkflowFailure, match="readiness error code"):
+            driver._expect_readiness_failure("application")
+    argv = run.call_args.args[0]
+    http_timeout = float(argv[argv.index("--timeout") + 1])
+    assert 20 < http_timeout < run.call_args.kwargs["timeout"] <= 45
 
 
 def test_administration_e2e_launcher_dispatches_modes(monkeypatch, mocker) -> None:

@@ -40,7 +40,7 @@ The installer verifies every archive, raw font, and notice before use. Liberatio
 Caladea retain their complete SIL OFL 1.1 notices. DejaVu retains the complete combined Bitstream
 Vera, DejaVu, and Arev license. Liberation and DejaVu provide no detached signature; Carlito and
 Caladea use GitHub-verified signed commits. Exact sources and per-file checksums live in
-`spikes/toolchain/fonts/manifest.json` and `install-fonts.sh`.
+`toolchain/document-engines/fonts/manifest.json` and `install-fonts.sh`.
 
 Fontconfig resolves Arial to Liberation Sans, Times New Roman to Liberation Serif, Courier New and
 Consolas to Liberation Mono, Calibri/Aptos/Aptos Display to Carlito, Cambria to Caladea, and Cambria

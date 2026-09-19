@@ -151,7 +151,7 @@ start_private_podman_service() {
     fail "Podman's OCI runtime must be an executable absolute path."
   temporary="$(mktemp "$state_directory/podman-config.XXXXXX")"
   printf '[containers]\nseccomp_profile="%s"\n[engine]\nruntime="%s"\n' \
-    "$repository/spikes/toolchain/chrome-seccomp.json" "$oci_runtime" >"$temporary"
+    "$repository/toolchain/document-engines/chrome-seccomp.json" "$oci_runtime" >"$temporary"
   chmod 0600 -- "$temporary"
   mv -- "$temporary" "$podman_config_file"
   CONTAINERS_CONF="$podman_config_file" \

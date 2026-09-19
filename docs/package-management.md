@@ -1,7 +1,7 @@
 # JavaScript package management
 
 The root browser-test package and `web/` form one pnpm workspace with one
-`pnpm-lock.yaml`. `spikes/toolchain` is deliberately outside that workspace and continues to use
+`pnpm-lock.yaml`. `toolchain/document-engines` is deliberately outside that workspace and continues to use
 its reviewed npm lock and exact Mermaid production graph.
 
 ## Reviewed bootstrap
@@ -41,11 +41,11 @@ discarded builder.
 
 ## Isolated Mermaid toolchain
 
-Do not migrate or update `spikes/toolchain` as part of workspace maintenance. Continue to verify
+Do not migrate or update `toolchain/document-engines` as part of workspace maintenance. Continue to verify
 its lock digest and execute:
 
 ```bash
-npm ci --prefix spikes/toolchain --omit=dev --ignore-scripts
+npm ci --prefix toolchain/document-engines --omit=dev --ignore-scripts
 ```
 
 ## Rollback and benchmark evidence
@@ -72,10 +72,11 @@ three cold and three warm samples, cache archive size, workspace `node_modules` 
 frontend build time, and final frontend image size for both the npm parent and pnpm candidate.
 Keep raw step logs with the pull request. A material regression stops delivery until a reviewer
 explicitly approves it; this project does not invent a threshold after observing results.
-The T67 pull request's frontend job runs `scripts/javascript/benchmark-package-managers.sh` against
-the immutable npm baseline and reviewed pnpm candidate, then retains its environment, timing, disk,
-compressed-cache, image-size, manifest/lock digest, and raw command output for 30 days. The step is
-restricted to the repository-owned T67 branch and cannot burden later frontend pull requests.
+The completed T67 pull request's frontend job ran `scripts/javascript/benchmark-package-managers.sh` against
+the immutable npm baseline and reviewed pnpm candidate, then retained its environment, timing, disk,
+compressed-cache, image-size, manifest/lock digest, and raw command output for 30 days. T80 removes those branch-specific workflow steps and their manual input after the migration.
+The historical scripts and immutable baseline identifiers remain available for evidence review;
+they intentionally reference the old `spikes/toolchain` path at those historical commits.
 
 A local rootless Podman diagnostic (not a substitute for hosted evidence) built the npm baseline
 at `1,061,525,142` bytes and the target-platform pnpm candidate at `1,033,797,849` bytes. The

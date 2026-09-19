@@ -58,7 +58,7 @@ def _workspace(tmp_path: Path) -> Path:
 
 
 def _trace(reference: bytes) -> PdfTraceabilityContext:
-    font_manifest = Path("spikes/toolchain/fonts/manifest.json").read_bytes()
+    font_manifest = Path("toolchain/document-engines/fonts/manifest.json").read_bytes()
     return PdfTraceabilityContext(
         application_version="0.1.0",
         conversion_contract_version="1",
@@ -194,7 +194,7 @@ def test_real_pdf_matches_locked_structural_raster_golden(tmp_path: Path) -> Non
     assert (
         manifest["font_manifest_sha256"]
         == hashlib.sha256(
-            Path("spikes/toolchain/fonts/manifest.json").read_bytes()
+            Path("toolchain/document-engines/fonts/manifest.json").read_bytes()
         ).hexdigest()
     )
     assert manifest["libreoffice_version"] == LIBREOFFICE_VERSION
