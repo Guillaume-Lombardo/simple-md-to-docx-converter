@@ -34,12 +34,32 @@ test(
       });
       const page = await context.newPage();
       await login(page);
+      await page.getByLabel(/Source file/).setInputFiles({
+        buffer: Buffer.from("# Forward conversion source"),
+        mimeType: "text/markdown",
+        name: "forward-only.md",
+      });
+      await page.getByText(/Selected forward-only.md/).waitFor();
+      const reverseSubmissions = [];
+      const forwardSubmissions = [];
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/v1/conversions"
+        )
+          forwardSubmissions.push(request);
+        if (
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/v1/reversions"
+        )
+          reverseSubmissions.push(request);
+      });
       const capabilitiesResponse = page.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/reversions/capabilities") &&
           response.request().method() === "GET",
       );
-      await page.getByRole("link", { name: "Revert, Experimental" }).click();
+      await page.getByRole("link", { name: "x 2 md, Experimental" }).click();
       await page.waitForURL("**/revert");
       assert.equal((await capabilitiesResponse).status(), 200);
       await page
@@ -49,6 +69,15 @@ test(
       await page.getByText(/OCR is not available/).waitFor();
 
       const input = page.getByLabel(/Source document/);
+      assert.equal(await input.evaluate((element) => element.files.length), 0);
+      assert.equal(await page.getByText(/Selected forward-only.md/).count(), 0);
+      assert.deepEqual(
+        (
+          await page.getByRole("main").getByRole("alert").allTextContents()
+        ).filter((text) => text.trim()),
+        [],
+      );
+      assert.equal(reverseSubmissions.length, 0);
       const acceptedExtensions = (await input.getAttribute("accept")) ?? "";
       assert.match(acceptedExtensions, /\.rtf(?:,|$)/);
       await page.getByRole("button", { name: "Start conversion" }).click();
@@ -56,6 +85,7 @@ test(
         .getByRole("alert")
         .getByText(/Choose a supported document/)
         .waitFor();
+      assert.equal(reverseSubmissions.length, 0);
 
       await input.setInputFiles({
         buffer: Buffer.from("{\\rtf1\\ansi Browser reverse conversion}"),
@@ -82,10 +112,34 @@ test(
       assert.equal((await cancelled).status(), 200);
       await page.getByText(/conversion was cancelled/i).waitFor();
       assert.equal(
-        await page
-          .getByRole("button", { name: "Download result" })
-          .count(),
+        await page.getByRole("button", { name: "Download result" }).count(),
         0,
+      );
+      await page.getByRole("link", { name: "md 2 docx", exact: true }).click();
+      await page
+        .getByRole("heading", { name: "New conversion", exact: true })
+        .waitFor();
+      assert.equal(
+        await page
+          .getByLabel(/Source file/)
+          .evaluate((element) =>
+            Array.from(element.files).some(
+              (file) => file.name === "browser-source.rtf",
+            ),
+          ),
+        false,
+      );
+      assert.equal(
+        await page.getByText(/Selected browser-source.rtf/).count(),
+        0,
+      );
+      assert.equal(forwardSubmissions.length, 0);
+      assert.equal(reverseSubmissions.length, 1);
+      assert.deepEqual(
+        (
+          await page.getByRole("main").getByRole("alert").allTextContents()
+        ).filter((text) => text.trim()),
+        [],
       );
       await context.close();
     } finally {

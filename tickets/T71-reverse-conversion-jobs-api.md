@@ -89,6 +89,27 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 
 ## Progress
 
+* 2026-09-19: The canonical non-engine Python suite completed with 4,217 passed,
+  6 failed, and 44 errors. PostgreSQL/S3 service configuration is unavailable locally.
+  Two exact-file-mode failures passed after restoring checkout permissions to 0755;
+  the process-group cleanup failure passed on targeted rerun. All four rechecks pass,
+  but the full run is not green. Application branch coverage is 90.69%; changed
+  executable Python lines are 100% covered (5/5). The engine-dependent full suite
+  and distributed/two-profile final-image matrix remain unexecuted locally.
+
+* 2026-09-19: Added JSON decoding for the broker certificate-pin tuple before normal
+  validation. Canonical and legacy environment aliases accept equivalent JSON arrays;
+  malformed JSON and invalid/duplicate pins fail with the sanitized configuration error.
+  All 136 targeted configuration/runtime tests, Ruff, and ty pass. The patched 0.6.2
+  backend starts successfully with the real mTLS broker on docker-box and completes a
+  DOCX-to-Markdown conversion through the HTTPS browser workflow. No release or merge
+  was performed; the ticket remains In Progress pending verification on main.
+
+* 2026-09-19: Reopened after the authorized docker-box deployment exposed an environment-loading
+  bug: JSON certificate-pin arrays reach `model_validate` as strings, preventing mTLS reverse
+  configuration from starting in 0.6.2. Add narrow field decoding and canonical/legacy environment
+  regressions without changing pin validation or weakening broker authentication.
+
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70.
 * 2026-09-03: Added a distinct measured low-compute budget and fair-scheduling requirement for the
   CPU-only reverse workload.
@@ -305,6 +326,11 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
   coverage gates, and the final CI gate. CodeRabbit passed the exact head and all review threads
   were resolved. The criterion-by-criterion acceptance audit found no remaining T71 gap; the
   combined final three-image release matrix remains explicitly owned by T73.
+
+- 2026-09-19: Follow-up fix verified on main `5e789c11600d429997c037b4d24eea399821a2ed`
+  through squash PR #232. All required exact-head and main CI domains pass (runs 35453205924
+  and 35454910111). Release 0.6.3 succeeds in run 35454910249. This completes the reopened
+  corrective work; T73 final reverse-engine qualification remains separate.
 
 ## Synchronization
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
 from enum import StrEnum
@@ -284,6 +285,12 @@ class Settings(BaseSettings):
         ):
             raise ValueError("public origin must contain only scheme, host, and port")
         return value
+
+    @field_validator("reversion_broker_server_leaf_sha256", mode="before")
+    @classmethod
+    def parse_broker_certificate_pins(cls, value: Any) -> Any:
+        """Decode environment JSON before validating the broker certificate pins."""
+        return json.loads(value) if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def validate_lifetimes(self) -> Self:

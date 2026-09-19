@@ -323,6 +323,56 @@ test("accepted running work schedules once and duplicate submission is ignored",
   controller.dispose();
 });
 
+test.each(["poll", "dispose"])(
+  "%s calls a browser-like timer cancellation without a receiver",
+  async (action) => {
+    let scheduled!: () => void;
+    const timer = 17 as unknown as ReturnType<typeof setTimeout>;
+    const cancelSchedule = vi.fn(function browserCancel(
+      this: unknown,
+      received: ReturnType<typeof setTimeout>,
+    ) {
+      expect(this).toBeUndefined();
+      expect(received).toBe(timer);
+    });
+    const controller = new ReversionController(
+      api({
+        json: vi
+          .fn()
+          .mockResolvedValueOnce(capabilities())
+          .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 })
+          .mockResolvedValueOnce(job({ state: "succeeded" })),
+        multipartWithMetadata: vi.fn().mockResolvedValue({
+          data: job(),
+          location: `/api/v1/reversions/${job().id}`,
+          retryAfterSeconds: 1,
+          status: 202,
+        }),
+      }),
+      undefined,
+      undefined,
+      (callback) => {
+        scheduled = callback;
+        return timer;
+      },
+      cancelSchedule,
+    );
+    await controller.load();
+    controller.setSource([new File(["document"], "report.docx")]);
+    await controller.submit();
+
+    if (action === "dispose") {
+      controller.dispose();
+    } else {
+      scheduled();
+      await vi.waitFor(() =>
+        expect(controller.snapshot().active?.state).toBe("succeeded"),
+      );
+    }
+    expect(cancelSchedule).toHaveBeenCalledOnce();
+  },
+);
+
 test("polling backs off, updates jobs, retries temporary errors, and fences cancellation", async () => {
   const scheduled: Array<{ callback: () => void; delay: number }> = [];
   const json = vi
