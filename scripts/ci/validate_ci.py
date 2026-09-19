@@ -173,14 +173,14 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "6040a82045b49f57ca16a6e2bf1fd0b109b4e173107b1f117c0260fde4808891"
+    "8b1116138bdb8603c5643ad0330ce9b95aeb4e69dec303af0b87cf112891d411"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
     "b180243d6fefbbbe9b4966e50cb5f42dea066cef48d419d0fb034e618758b3fe"
 )
 RELEASE_IMAGE_ROLES = ("backend", "frontend")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
-    "924bf3cb1e0c45a59942e2f010bdd416ad52636e29358f64ed904462380ee815"
+    "7f1e229cb775c2d79c397bae9269c410676dd7ab624cfb7b15c3b44636e60392"
 )
 
 
@@ -381,7 +381,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="b50e0259af2f199115a350f621f7c469e7ab204995b9335d6ad44dc17407f887",
+        canonical_digest="128d77b7c99e103bdb1a69e6f11bf4f9df9e572a6a2b6cff2dd77c921b7246d6",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -396,7 +396,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
         step_conditions={},
-        canonical_digest="506f4cf1a2459e732d987aa0bbe9e5dc43af15df8b922404d750555b346d83a3",
+        canonical_digest="ce96d120e6ad58bdb7a15559f8207c52d6c25d2a6581584a0dddba373ace20b9",
     ),
 }
 
