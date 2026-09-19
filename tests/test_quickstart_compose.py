@@ -50,12 +50,12 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.6.2@"
-    "sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a118330ae"
+    "ghcr.io/guillaume-lombardo/md-converter:0.6.3@"
+    "sha256:6560d86e4ca33327a5f454530c8b6a2fadb20b55af6373aea01378b00920bb4e"
 )
 FRONTEND_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter-web:0.6.2@"
-    "sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7"
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.6.3@"
+    "sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"
@@ -225,7 +225,8 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "scripts/quickstart.sh down" in readme
     assert "scripts/quickstart.sh password" in readme
     assert "http://localhost:8080" in readme
-    assert "**Templates**" in readme
+    assert "**template docx**" in readme
+    assert "**md 2 docx**" in readme
     assert "**Administration**" not in readme
     assert "examples/quickstart-template.docx.base64" in readme
     assert "examples/quickstart-source.md" in readme

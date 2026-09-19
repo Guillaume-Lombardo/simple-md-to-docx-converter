@@ -53,6 +53,16 @@ backend digest `sha256:30c9fa538e7c4eb56b1b1434cd14251ee82b3a3962ad1a072fe5564a1
 and frontend digest `sha256:8908a28dea630ef520eb60828d6717c46fdc445c8878e4bacc6b239ccb32c2e7`
 in Compose and both quickstarts.
 
+Protected release run `35454910249` published `0.6.3` from source
+`5e789c11600d429997c037b4d24eea399821a2ed` after PR #232 passed all required checks.
+The backend receipt records
+`sha256:6560d86e4ca33327a5f454530c8b6a2fadb20b55af6373aea01378b00920bb4e`, and the
+frontend receipt records
+`sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5`.
+Both anonymous registry manifests, receipt hashes, frontend lockfile binding and GitHub
+provenance match the release source. Compose and both quickstarts adopt these exact digests;
+the quickstart instructions use the released `md 2 docx` and `template docx` navigation labels.
+
 ## GitHub and PyPI trust configuration
 
 Keep the GitHub Actions environment `pypi` without required reviewers, wait timers, deployment
