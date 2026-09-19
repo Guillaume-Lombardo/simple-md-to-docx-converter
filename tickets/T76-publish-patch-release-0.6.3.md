@@ -2,7 +2,7 @@
 ticket: T76
 linear_id: G1L-575
 linear_url: https://linear.app/g1lom/issue/G1L-575/t76-rename-workflow-tabs-and-publish-patch-release-063
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -74,6 +74,15 @@ labels: `md 2 docx`, `x 2 md`, and `template docx`.
   verification enforces the repository, reusable container workflow, main ref, source SHA and
   hosted runner identity for both images. The follow-up adoption updates Compose, quickstarts,
   deployment documentation and their contracts; its protected merge remains pending.
+
+- 2026-09-19: Adoption PR #234 passed every selected domain and `CI / gate` in run
+  35456711142, including Compose quickstarts and both final-image E2E profiles. CodeRabbit
+  completed its independent review without actionable findings. The PR squash-merged as
+  `81fb51efce643e3149bbe4bcc19f7acab80159b5`; its exact source branch is deleted locally
+  and remotely. Public release alignment passes from that main checkout: package, PyPI,
+  GitHub receipts and both Compose image digests agree on 0.6.3. All T76 acceptance criteria
+  are verified on main. Updating the separate test server remains dependent on restoring
+  its forwarded SSH agent and is not claimed as part of the published-image adoption.
 
 ## Synchronization
 
