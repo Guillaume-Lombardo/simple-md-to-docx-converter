@@ -22,6 +22,7 @@ target. Internal ticket choreography is intentionally excluded.
 ### Fixed
 
 - Reverse job polling and timer cleanup no longer raise browser `Illegal invocation` errors.
+- The container inventory pin now matches the reviewed UBI Mesa RPM update.
 - Reverse-worker mTLS certificate pins now load from their documented JSON environment value.
   Forward and reverse uploads remain independent, with navigation and late-response regressions.
 

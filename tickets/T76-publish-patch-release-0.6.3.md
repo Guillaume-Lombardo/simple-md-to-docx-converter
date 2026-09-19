@@ -52,6 +52,16 @@ labels: `md 2 docx`, `x 2 md`, and `template docx`.
   canonical Python run and its unavailable PostgreSQL/S3 limitations are recorded in T71/T72;
   hosted exact-head CI must validate both storage profiles before merge.
 
+- 2026-09-19: CI run 35452514475 found a changed UBI RPM inventory. Compared the retained
+  baseline (`3c4d1883b398ebf8b2bdaa3e5fb9ff956214e395b6517e00f1e58f0903a49576`) with the
+  actual CI transaction: only `mesa-libgbm`, `mesa-filesystem`, and `mesa-dri-drivers` advance
+  from `25.2.7-4.el9` to `25.2.7-5.el9_8`. Applying exactly those three version substitutions
+  reproduces the CI inventory digest
+  `5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef`; licenses, package
+  names, architectures and all other versions are unchanged. Refreshed the fail-closed digest
+  without disabling inventory validation, signature checks or vulnerability gates. Also added
+  the existing completed T75 prerequisite to the delivery table as requested by CodeRabbit.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, acceptance criteria, dependencies,

@@ -104,7 +104,8 @@ COPY --chmod=0444 spikes/toolchain/fonts/manifest.json /opt/md-converter/font-ma
 COPY --chmod=0444 spikes/toolchain/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
 COPY --chmod=0444 spikes/toolchain/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
-ARG RPM_INVENTORY_SHA256=3c4d1883b398ebf8b2bdaa3e5fb9ff956214e395b6517e00f1e58f0903a49576
+# Reviewed UBI Mesa 25.2.7-5.el9_8 inventory; see the T76 release record.
+ARG RPM_INVENTORY_SHA256=5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef
 RUN mkdir -p /data /work /tmp/md-converter \
     && chgrp -R 0 /data /work /tmp/md-converter \
     && chmod -R g=u /data /work /tmp/md-converter \
