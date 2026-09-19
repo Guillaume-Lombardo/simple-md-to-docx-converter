@@ -339,4 +339,16 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
 
 ## Synchronization
 
+### September 2026 Python dependency maintenance (PR #233)
+
+- Align the bounded WebSocket adapter with Kubernetes SDK 36.0.3, including
+  negotiated protocol state, closed-channel tracking, and preloaded response status.
+- Keep the attester image, package assertions, and documented SDK pin consistent.
+- Update mutation-tool expectations for mutmut 3.8.0 and cover preservation of
+  supported HTTP method labels; the targeted campaign kills all six mutants.
+- Remove a tautological test assertion diagnosed by ty 0.0.81.
+- Local validation: 1,107 targeted broker, integration, package, and tooling tests;
+  13 recovery-manifest tests; Ruff and ty; rootless attester image build and isolated
+  SDK/entrypoint import smoke test. Hosted CI remains the merge gate.
+
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.
