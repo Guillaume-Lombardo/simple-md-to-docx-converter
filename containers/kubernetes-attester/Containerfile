@@ -28,7 +28,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/markweave/venv \
 
 RUN uv sync --locked --no-dev --no-editable --extra kubernetes \
     && /opt/markweave/venv/bin/python -c \
-        'from importlib.metadata import version; from markweave.kubernetes_attester_process import main; assert version("kubernetes") == "35.0.0"; assert callable(main)' \
+        'from importlib.metadata import version; from markweave.kubernetes_attester_process import main; assert version("kubernetes") == "36.0.3"; assert callable(main)' \
     && mkdir -p /opt/markweave/licenses \
     && cp LICENSE /opt/markweave/licenses/LICENSE \
     && rm -rf /root/.cache/uv /opt/markweave/app/src \

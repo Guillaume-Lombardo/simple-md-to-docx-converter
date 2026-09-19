@@ -11,7 +11,6 @@ import pytest
 
 from markweave.config import StorageProfile
 from markweave.recovery_manifest import (
-    MANIFEST_SCHEMA,
     RecoveryError,
     RecoveryIdentity,
     RecoveryMember,
@@ -138,4 +137,3 @@ def test_manifest_checksum_and_file_hash_fail_closed(tmp_path: Path) -> None:
         sha256_file(tmp_path)
     assert _digest("a" * 64)
     assert not _digest(42)
-    assert MANIFEST_SCHEMA

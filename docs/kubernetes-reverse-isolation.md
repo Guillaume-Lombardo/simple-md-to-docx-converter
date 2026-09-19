@@ -68,7 +68,7 @@ Node-name routing, attester `hostPort`
 support, firewall policy, certificate coverage, and failure behavior still require real-cluster
 proof before this topology is supported.
 
-The broker's `KubernetesApiControlPlane` uses the official Kubernetes 1.35 Python client under the
+The broker's `KubernetesApiControlPlane` uses the official Kubernetes 1.36 Python client under the
 optional `markweave[kubernetes]` extra. It loads only the broker Pod's in-cluster identity and fixes
 the namespace, attempt container, workspace paths, and exec commands in code. Pod creation waits a
 configured bounded interval for API-bound node assignment. Every later workspace or lifecycle
@@ -78,7 +78,7 @@ rechecks the API identity, and the helper checks a kubelet-projected Pod UID bef
 Workspace exec transfers canonical attempt-channel files with bounded base64 framing,
 and the pinned websocket client receives the exact broker timeout during connection establishment
 as well as stream polling. This bounded connection path intentionally mirrors private `WSClient`
-initialization from the pinned `kubernetes==35.0.0` dependency; upgrades must pass the compatibility
+initialization from the pinned `kubernetes==36.0.3` dependency; upgrades must pass the compatibility
 test before changing that pin. The kill exec acknowledgement is never considered termination evidence.
 
 The committed `NodeAttestationEngine` is the fail-closed policy core. The production process uses

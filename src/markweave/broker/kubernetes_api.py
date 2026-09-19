@@ -192,6 +192,8 @@ class _BoundedWsClient(ws_client.WSClient):
     ) -> None:
         self._connected = False
         self._channels = {}
+        self._closed_channels: set[int] = set()
+        self.subprotocol = None
         self.binary = binary
         self.newline = b"\n" if binary else "\n"
         if capture_all:
@@ -201,6 +203,14 @@ class _BoundedWsClient(ws_client.WSClient):
         self.sock = _bounded_create_websocket(
             configuration, url, headers, timeout_seconds
         )
+        self.subprotocol = getattr(self.sock, "subprotocol", None)
+        if not self.subprotocol and self.sock:
+            response_headers = self.sock.getheaders()
+            if response_headers:
+                for name, value in response_headers.items():
+                    if name.lower() == "sec-websocket-protocol":
+                        self.subprotocol = value
+                        break
         self._connected = True
         self._returncode = None
 
@@ -213,6 +223,7 @@ class _BoundedWsClient(ws_client.WSClient):
             bytes((_STREAM_CLOSE_CHANNEL, _STDIN_CHANNEL)),
             opcode=ws_client.ABNF.OPCODE_BINARY,
         )
+        self._closed_channels.add(_STDIN_CHANNEL)
 
 
 def _bounded_websocket_call(
@@ -243,7 +254,7 @@ def _bounded_websocket_call(
         if not bool(kwargs.get("_preload_content", True)):
             return client
         client.run_forever(timeout=timeout_seconds)
-        return ws_client.WSResponse(client.read_all())
+        return ws_client.WSResponse(data=client.read_all(), status=200)
     except (Exception, KeyboardInterrupt, SystemExit) as error:
         raise ApiException(status=0, reason=str(error)) from None
 

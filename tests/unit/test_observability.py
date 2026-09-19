@@ -242,6 +242,7 @@ def test_metrics_are_low_cardinality_and_cover_required_operational_signals() ->
     assert "md_converter_job_recoveries_total 3" in rendered
     assert 'md_converter_job_step_duration_seconds_sum{step="docx"} 1.25' in rendered
     assert 'method="OTHER",status="400"' in rendered
+    assert 'method="POST",status="202"' in rendered
     assert "ATTACKER-CONTROLLED-METHOD" not in rendered
     assert "00000000" not in rendered
     assert "md_converter_reversion_runtime_enabled 1" in rendered

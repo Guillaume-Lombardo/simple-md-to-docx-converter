@@ -569,12 +569,14 @@ def test_websocket_upgrade_forwards_pinned_tls_headers_and_proxy_options(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("output", ["output", b"output"])
 def test_bounded_websocket_call_handles_preload_tuple_and_invalid_timeouts(
     mocker: MockerFixture,
+    output: str | bytes,
 ) -> None:
     client = SimpleNamespace(
         run_forever=mocker.Mock(),
-        read_all=mocker.Mock(return_value="output"),
+        read_all=mocker.Mock(return_value=output),
     )
     constructor = mocker.patch.object(
         kubernetes_api_module, "_BoundedWsClient", return_value=client
@@ -584,11 +586,6 @@ def test_bounded_websocket_call_handles_preload_tuple_and_invalid_timeouts(
         "get_websocket_url",
         return_value="ws://node/exec",
     )
-    response = object()
-    mocker.patch.object(
-        kubernetes_api_module.ws_client, "WSResponse", return_value=response
-    )
-
     assert (
         kubernetes_api_module._bounded_websocket_call(
             SimpleNamespace(),
@@ -599,12 +596,16 @@ def test_bounded_websocket_call_handles_preload_tuple_and_invalid_timeouts(
         )
         is client
     )
-    assert (
-        kubernetes_api_module._bounded_websocket_call(
-            SimpleNamespace(), "GET", "https://node/exec", _request_timeout=0.5
-        )
-        is response
+    response = kubernetes_api_module._bounded_websocket_call(
+        SimpleNamespace(),
+        "GET",
+        "https://node/exec",
+        _request_timeout=0.5,
+        binary=isinstance(output, bytes),
     )
+    assert isinstance(response, kubernetes_api_module.ws_client.WSResponse)
+    assert response.data == output
+    assert response.status == 200
     client.run_forever.assert_called_once_with(timeout=0.5)
     assert constructor.call_count == 2
 
@@ -622,10 +623,26 @@ def test_bounded_websocket_call_handles_preload_tuple_and_invalid_timeouts(
 @pytest.mark.parametrize(
     ("capture_all", "binary"), [(True, False), (True, True), (False, False)]
 )
+@pytest.mark.parametrize(
+    ("subprotocol", "response_headers"),
+    [
+        ("v5.channel.k8s.io", {}),
+        (None, {"Sec-WebSocket-Protocol": "v5.channel.k8s.io"}),
+        (None, {}),
+        (None, {"Other": "value"}),
+    ],
+)
 def test_bounded_websocket_client_tracks_pinned_wsclient_initialization_contract(
-    mocker: MockerFixture, *, capture_all: bool, binary: bool
+    mocker: MockerFixture,
+    subprotocol: str | None,
+    response_headers: dict[str, str],
+    *,
+    capture_all: bool,
+    binary: bool,
 ) -> None:
-    socket = SimpleNamespace()
+    socket = SimpleNamespace(
+        subprotocol=subprotocol, getheaders=lambda: response_headers
+    )
     mocker.patch.object(
         kubernetes_api_module.ws_client, "create_websocket", return_value=socket
     )
@@ -653,17 +670,21 @@ def test_bounded_websocket_client_tracks_pinned_wsclient_initialization_contract
     required_attributes = {
         "_all",
         "_channels",
+        "_closed_channels",
         "_connected",
         "_returncode",
         "binary",
         "newline",
         "sock",
+        "subprotocol",
     }
 
     assert set(vars(upstream)) == set(vars(bounded)) == required_attributes
     assert bounded.is_open() == upstream.is_open() is True
     assert bounded.binary == upstream.binary == binary
     assert bounded.newline == upstream.newline
+    assert bounded.subprotocol == upstream.subprotocol
+    assert bounded._closed_channels == upstream._closed_channels == set()
     assert type(bounded._all) is type(upstream._all)
     if capture_all:
         assert bounded.read_all() == upstream.read_all()
@@ -696,6 +717,7 @@ def test_bounded_websocket_client_half_closes_only_stdin_via_v5(
     )
 
     client.close_stdin()
+    assert client._closed_channels == {0}
 
     socket.send.assert_called_once_with(
         bytes((255, 0)),
