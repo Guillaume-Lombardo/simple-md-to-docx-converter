@@ -8,6 +8,23 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-3"></a>
+
+## [0.6.3] - 2026-09-19
+
+### Changed
+
+- Navigation tabs are now `md 2 docx`, `x 2 md`, and `template docx`. Reverse
+  conversion retains its Experimental badge; routes and supported outputs are unchanged.
+- The reverse-service unavailable message now identifies a service/configuration problem
+  instead of suggesting an unsupported uploaded document.
+
+### Fixed
+
+- Reverse job polling and timer cleanup no longer raise browser `Illegal invocation` errors.
+- Reverse-worker mTLS certificate pins now load from their documented JSON environment value.
+  Forward and reverse uploads remain independent, with navigation and late-response regressions.
+
 <a id="release-0-6-2"></a>
 
 ## [0.6.2] - 2026-09-11
@@ -208,6 +225,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.3](#release-0-6-3)
 - [0.6.2](#release-0-6-2)
 - [0.6.1](#release-0-6-1)
 - [0.6.0](#release-0-6-0)

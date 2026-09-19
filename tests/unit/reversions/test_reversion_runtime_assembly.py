@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -10,7 +11,7 @@ from pytest_mock import MockerFixture
 
 from markweave.broker.mtls_transport import MtlsBrokerClient
 from markweave.broker.unix_transport import UnixBrokerClient
-from markweave.config import Settings
+from markweave.config import ConfigurationError, Settings
 from markweave.reversion_jobs.runtime import (
     build_reversion_broker_client,
     build_reversion_execution_policies,
@@ -90,6 +91,79 @@ def test_unix_execution_policy_and_client_use_every_explicit_ceiling(
     assert policies.content_limits.max_input_bytes == 10_000
     assert policies.broker_policy.channel_limits.max_output_bytes == 30_000
     assert policies.broker_policy.limits.memory_bytes == 512_000_000
+
+
+def _mtls_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    values = _settings(tmp_path).model_dump(mode="json")
+    values.update(
+        reversion_broker_transport="mtls",
+        reversion_broker_socket_path=None,
+        reversion_broker_endpoint_host="127.0.0.1",
+        reversion_broker_endpoint_port=9443,
+        reversion_broker_ca_certificate_path=str(tmp_path / "ca.pem"),
+        reversion_broker_certificate_chain_path=str(tmp_path / "worker.pem"),
+        reversion_broker_private_key_path=str(tmp_path / "worker.key"),
+        reversion_broker_worker_uri_san="spiffe://markweave/worker",
+        reversion_broker_server_uri_san="spiffe://markweave/broker",
+        reversion_broker_server_principal_id="20000000-0000-4000-8000-000000000002",
+        reversion_broker_server_leaf_sha256=["sha256:" + "b" * 64],
+    )
+    for name, value in values.items():
+        for candidate in ("MARKWEAVE_", "MD_CONVERTER_"):
+            monkeypatch.delenv(candidate + name.upper(), raising=False)
+        if value is not None:
+            encoded = (
+                json.dumps(value) if isinstance(value, (list, bool)) else str(value)
+            )
+            monkeypatch.setenv(prefix + name.upper(), encoded)
+
+
+@pytest.mark.parametrize("prefix", ("MARKWEAVE_", "MD_CONVERTER_"))
+def test_mtls_certificate_pins_load_from_environment_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    _mtls_environment(tmp_path, monkeypatch, prefix)
+    with pytest.warns(FutureWarning):
+        settings = Settings.load()
+    assert settings.reversion_execution_configured
+    assert settings.reversion_broker_server_leaf_sha256 == ("sha256:" + "b" * 64,)
+    monkeypatch.setenv(
+        "MARKWEAVE_REVERSION_BROKER_SERVER_LEAF_SHA256",
+        '[ "sha256:' + "b" * 64 + '" ]',
+    )
+    monkeypatch.setenv(
+        "MD_CONVERTER_REVERSION_BROKER_SERVER_LEAF_SHA256",
+        json.dumps(["sha256:" + "b" * 64]),
+    )
+    with pytest.warns(FutureWarning):
+        assert Settings.load().reversion_broker_server_leaf_sha256 == (
+            "sha256:" + "b" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "private-invalid-json",
+        "null",
+        '"not-an-array"',
+        "42",
+        "[]",
+        '["bad-pin"]',
+        json.dumps(["sha256:" + "b" * 64] * 2),
+    ],
+)
+def test_mtls_environment_rejects_malformed_or_invalid_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+) -> None:
+    _mtls_environment(tmp_path, monkeypatch, "MARKWEAVE_")
+    monkeypatch.setenv("MARKWEAVE_REVERSION_BROKER_SERVER_LEAF_SHA256", invalid)
+    with pytest.raises(
+        ConfigurationError, match=r"^Invalid application configuration$"
+    ):
+        Settings.load()
 
 
 def test_execution_settings_are_all_or_none_without_affecting_http_only(

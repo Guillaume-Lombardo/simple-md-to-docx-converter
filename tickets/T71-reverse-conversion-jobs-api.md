@@ -2,7 +2,7 @@
 ticket: T71
 linear_id: G1L-539
 linear_url: https://linear.app/g1lom/issue/G1L-539/t71-add-persistent-reverse-conversion-jobs-and-api
-status: Done
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -88,6 +88,27 @@ owner isolation, both storage profiles, and deterministic Markdown-package downl
 * Keep repository artifacts and API text in English.
 
 ## Progress
+
+* 2026-09-19: The canonical non-engine Python suite completed with 4,217 passed,
+  6 failed, and 44 errors. PostgreSQL/S3 service configuration is unavailable locally.
+  Two exact-file-mode failures passed after restoring checkout permissions to 0755;
+  the process-group cleanup failure passed on targeted rerun. All four rechecks pass,
+  but the full run is not green. Application branch coverage is 90.69%; changed
+  executable Python lines are 100% covered (5/5). The engine-dependent full suite
+  and distributed/two-profile final-image matrix remain unexecuted locally.
+
+* 2026-09-19: Added JSON decoding for the broker certificate-pin tuple before normal
+  validation. Canonical and legacy environment aliases accept equivalent JSON arrays;
+  malformed JSON and invalid/duplicate pins fail with the sanitized configuration error.
+  All 136 targeted configuration/runtime tests, Ruff, and ty pass. The patched 0.6.2
+  backend starts successfully with the real mTLS broker on docker-box and completes a
+  DOCX-to-Markdown conversion through the HTTPS browser workflow. No release or merge
+  was performed; the ticket remains In Progress pending verification on main.
+
+* 2026-09-19: Reopened after the authorized docker-box deployment exposed an environment-loading
+  bug: JSON certificate-pin arrays reach `model_validate` as strings, preventing mTLS reverse
+  configuration from starting in 0.6.2. Add narrow field decoding and canonical/legacy environment
+  regressions without changing pin validation or weakening broker authentication.
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70.
 * 2026-09-03: Added a distinct measured low-compute budget and fair-scheduling requirement for the

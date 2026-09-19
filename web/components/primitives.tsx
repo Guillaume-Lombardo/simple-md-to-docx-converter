@@ -46,16 +46,16 @@ export function AppShell({
             className="text-accent underline-offset-4 hover:underline"
             href="/convert"
           >
-            Convert
+            md 2 docx
           </Link>
           {user && !user.password_change_required ? (
             <Link
               aria-current={current === "Revert" ? "page" : undefined}
-              aria-label="Revert, Experimental"
+              aria-label="x 2 md, Experimental"
               className="flex items-center gap-2 text-accent underline-offset-4 hover:underline"
               href="/revert"
             >
-              Revert
+              x 2 md
               <span aria-hidden="true" className="experimental-stamp">
                 Experimental
               </span>
@@ -65,7 +65,7 @@ export function AppShell({
               aria-disabled="true"
               className="flex items-center gap-2 text-muted"
             >
-              Revert
+              x 2 md
               <span className="experimental-stamp">Experimental</span>
             </span>
           )}
@@ -75,11 +75,11 @@ export function AppShell({
               className="text-accent underline-offset-4 hover:underline"
               href="/templates"
             >
-              Templates
+              template docx
             </Link>
           ) : (
             <span aria-disabled="true" className="text-muted">
-              Templates
+              template docx
             </span>
           )}
           {user?.role === "admin" && !user.password_change_required && (

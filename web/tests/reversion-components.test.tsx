@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach } from "vitest";
-import type { ApiTransport } from "../src/api/transport";
+import { ApiError, type ApiTransport } from "../src/api/transport";
 import { AuthController } from "../src/auth/controller";
 import { AuthProvider } from "../src/auth/context";
+import { ConversionController } from "../src/conversion/controller";
+import { ConversionWorkspace } from "../src/conversion/workspace";
 import { ReversionController } from "../src/reversion/controller";
 import {
   ReversionWorkspace,
@@ -73,6 +75,109 @@ const reversionJob = {
   updated_at: "2026-09-06T08:00:00Z",
 };
 
+test.each(["Convert", "Revert"] as const)(
+  "%s uploads and late failures never enter the other workspace",
+  async (startingWorkspace) => {
+    const failures: Array<(error: Error) => void> = [];
+    const multipartWithMetadata = vi.fn(
+      () => new Promise((_resolve, reject) => failures.push(reject)),
+    );
+    const api = {
+      json: vi.fn(async (path: string) => {
+        if (path === "/api/v1/conversion-options")
+          return {
+            conversion_upload_max_bytes: 1_000,
+            resolved_template: null,
+            selection_source: "pandoc_default",
+            template_version_id: null,
+          };
+        if (path === "/api/v1/reversions/capabilities") return capabilities;
+        return { items: [], limit: 10, offset: 0, total: 0 };
+      }),
+      multipartWithMetadata,
+    } as unknown as ApiTransport;
+    const auth = new AuthController({
+      json: vi.fn().mockResolvedValue(user),
+    } as unknown as ApiTransport);
+    const forward = new ConversionController(
+      api,
+      undefined,
+      () => "forward-key",
+    );
+    const reverse = new ReversionController(
+      api,
+      undefined,
+      () => "reverse-key",
+    );
+    const streams = [
+      {
+        controller: forward,
+        element: <ConversionWorkspace controller={forward} />,
+        label: /Source file/,
+        source: new File(["# Markdown"], "forward-only.md"),
+        endpoint: "/api/v1/conversions",
+        key: "forward-key",
+      },
+      {
+        controller: reverse,
+        element: <ReversionWorkspace controller={reverse} />,
+        label: /Source document/,
+        source: new File(["document"], "reverse-only.docx"),
+        endpoint: "/api/v1/reversions",
+        key: "reverse-key",
+      },
+    ];
+    if (startingWorkspace === "Revert") streams.reverse();
+    const [first, second] = streams;
+    const view = render(
+      <AuthProvider controller={auth}>{first!.element}</AuthProvider>,
+    );
+    fireEvent.change(await screen.findByLabelText(first!.label), {
+      target: { files: [first!.source] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
+    expect(multipartWithMetadata).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <AuthProvider controller={auth}>{second!.element}</AuthProvider>,
+    );
+    const input = (await screen.findByLabelText(
+      second!.label,
+    )) as HTMLInputElement;
+    expect(input.files).toHaveLength(0);
+    expect(second!.controller.snapshot().source).toBeUndefined();
+    expect(screen.queryByText(new RegExp(first!.source.name))).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(multipartWithMetadata).toHaveBeenCalledOnce();
+    await act(async () => {
+      failures[0]!(
+        new ApiError(422, "INVALID_SOURCE", "First stream rejected."),
+      );
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(second!.controller.snapshot().active).toBeUndefined();
+
+    fireEvent.change(input, { target: { files: [second!.source] } });
+    fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
+    expect(multipartWithMetadata).toHaveBeenCalledTimes(2);
+    for (const [index, stream] of streams.entries()) {
+      const call = vi.mocked(api.multipartWithMetadata).mock.calls[index]!;
+      expect(call[0]).toBe(stream.endpoint);
+      expect(call[1].get("source")).toBe(stream.source);
+      expect(call[3]?.idempotencyKey).toBe(stream.key);
+    }
+    await act(async () => {
+      failures[1]!(
+        new ApiError(422, "INVALID_SOURCE", "Second stream rejected."),
+      );
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Second stream rejected.",
+    );
+    expect(first!.controller.snapshot().error).toBeUndefined();
+  },
+);
+
 function renderWorkspace(reversionApi: Partial<ApiTransport>) {
   const auth = new AuthController({
     json: vi.fn().mockResolvedValue(user),
@@ -105,7 +210,7 @@ test("workspace uses authoritative capabilities for accessible controls and copy
   ).toBeVisible();
   expect(screen.getAllByText("Experimental")).not.toHaveLength(0);
   expect(
-    screen.getByRole("link", { name: "Revert, Experimental" }),
+    screen.getByRole("link", { name: "x 2 md, Experimental" }),
   ).toHaveAttribute("aria-current", "page");
   expect(screen.getByLabelText(/Source document/)).toHaveAttribute(
     "accept",
@@ -119,6 +224,10 @@ test("workspace uses authoritative capabilities for accessible controls and copy
   expect(screen.getByText(/OCR is not available/)).toBeVisible();
   expect(screen.getByText(/Images are not preserved/)).toBeVisible();
   expect(screen.getByText("No recent document conversions.")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(
+    (screen.getByLabelText(/Source document/) as HTMLInputElement).files,
+  ).toHaveLength(0);
   expect(
     screen.getByRole("heading", { name: "New conversion to Markdown" })
       .parentElement?.parentElement,
@@ -221,6 +330,12 @@ test("unavailable capabilities fail closed and retry without leaking details", a
     await screen.findByRole("heading", { name: "Revert is unavailable" }),
   ).toBeVisible();
   expect(screen.getByText(/Submission is disabled/)).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "The reverse-conversion service is unavailable",
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Try again or contact your administrator.",
+  );
   expect(document.body).not.toHaveTextContent("private host");
   expect(screen.queryByRole("button", { name: "Start conversion" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
