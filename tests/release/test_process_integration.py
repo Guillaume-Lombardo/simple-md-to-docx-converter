@@ -16,7 +16,7 @@ from scripts.release import process as runner
 from scripts.release.artifacts import ArtifactError
 from scripts.release.process import run_command
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.light_coverage]
 
 SPAWN_DESCENDANT = """\
 import subprocess
