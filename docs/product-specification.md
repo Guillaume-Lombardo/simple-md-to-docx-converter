@@ -103,11 +103,11 @@ Provide a login page and three main browser workflows. The target implementation
 TypeScript, and Tailwind CSS application under `web/`; the current server-rendered pages remain the
 production implementation until T64 completes parity, rootless E2E verification, and cutover:
 
-- **Convert:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
+- **md 2 docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
   choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
   display accessible English errors.
-- **Templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
-- **Revert (Experimental):** upload or drag-and-drop a supported office document, create a local
+- **template docx:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
+- **x 2 md (Experimental):** upload or drag-and-drop a supported office document, create a local
   document-to-Markdown job, poll with progressive backoff, cancel, inspect status, download the
   Markdown result or asset package, and display accessible English errors. The navigation label has
   a visible stamp-style `Experimental` treatment whose meaning is also available to assistive
@@ -756,6 +756,8 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T72 | Build the experimental Next.js Revert workspace with accessible stamped navigation and complete asynchronous job behavior | T60, T61, T64, T67, T71 |
 | T73 | Harden, document, and verify reverse conversion against exact final images and both storage profiles | T21, T22, T23, T46, T48, T50, T67, T70, T71, T72 |
 | T74 | Design and implement the optional Kubernetes reverse-isolation backend and node attester without weakening the T70 proof contract | T70, T71 |
+| T75 | Publish patch release 0.6.2 and adopt its verified image pair (completed) | T22, T69, T70, T71, T72 |
+| T76 | Rename workflow navigation and publish patch 0.6.3 with verified image-pair adoption | T22, T71, T72, T75 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 

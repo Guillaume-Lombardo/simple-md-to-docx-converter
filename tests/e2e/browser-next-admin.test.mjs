@@ -490,7 +490,7 @@ test(
       );
       alicePage.off("request", countForbiddenPolicyGets);
       await alicePage
-        .getByRole("link", { name: "Templates", exact: true })
+        .getByRole("link", { name: "template docx", exact: true })
         .click();
       await alicePage.waitForURL("**/templates");
       await alicePage
@@ -548,7 +548,7 @@ test(
       );
 
       await bobPage
-        .getByRole("link", { name: "Templates", exact: true })
+        .getByRole("link", { name: "template docx", exact: true })
         .click();
       await bobPage.waitForURL("**/templates");
       const bobView = templateCard(bobPage, templateName);

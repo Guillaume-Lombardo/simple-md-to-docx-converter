@@ -79,8 +79,9 @@ export function ReversionWorkspace({
         <section aria-labelledby="reversion-unavailable" className="space-y-3">
           <h2 id="reversion-unavailable">Revert is unavailable</h2>
           <Alert tone="danger">
-            Supported document types could not be loaded safely. Submission is
-            disabled.
+            The reverse-conversion service is unavailable or its configuration
+            could not be loaded. Try again or contact your administrator.
+            Submission is disabled.
           </Alert>
           <button type="button" onClick={() => void controller.load()}>
             Try again

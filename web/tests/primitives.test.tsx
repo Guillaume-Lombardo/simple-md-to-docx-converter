@@ -18,14 +18,14 @@ test("application shell exposes navigation and skip target", () => {
     </AppShell>,
   );
   expect(screen.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Convert" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "md 2 docx" })).toHaveAttribute(
     "aria-current",
     "page",
   );
-  expect(screen.queryByRole("link", { name: "Templates" })).toBeNull();
-  expect(screen.queryByRole("link", { name: /Revert/ })).toBeNull();
-  expect(screen.getByText("Revert")).toHaveAttribute("aria-disabled", "true");
-  expect(screen.getByText("Templates")).toHaveAttribute(
+  expect(screen.queryByRole("link", { name: "template docx" })).toBeNull();
+  expect(screen.queryByRole("link", { name: /x 2 md/ })).toBeNull();
+  expect(screen.getByText("x 2 md")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByText("template docx")).toHaveAttribute(
     "aria-disabled",
     "true",
   );
@@ -50,12 +50,12 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
       Work
     </AppShell>,
   );
-  expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "template docx" })).toHaveAttribute(
     "aria-current",
     "page",
   );
   expect(
-    screen.getByRole("link", { name: "Revert, Experimental" }),
+    screen.getByRole("link", { name: "x 2 md, Experimental" }),
   ).toHaveAttribute("href", "/revert");
   expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
     "href",
