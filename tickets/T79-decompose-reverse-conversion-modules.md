@@ -2,7 +2,7 @@
 ticket: T79
 linear_id: G1L-578
 linear_url: https://linear.app/g1lom/issue/G1L-578/t79-decompose-large-reverse-conversion-modules-by-responsibility
-status: Backlog
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -29,6 +29,14 @@ Reduce maintenance cost in reverse-job persistence, broker runtime/transport imp
 ## Progress
 
 - 2026-09-19: Created from the repository audit. Refactoring is planned separately from the cleanup.
+
+- 2026-09-19: Started bounded responsibility extractions. Admission/owner reads and retention
+  move to SQL mixins, preserving complete transaction blocks; claims, reconciliation, lease
+  fencing, termination proof, and publication stay together in the repository. Podman workspace
+  TAR serialization moves out of lifecycle control, and canonical mTLS control frames move out
+  of socket/authentication orchestration. Pure hyperlink validation moves out of the anydoc
+  adapter; all concrete model access, upstream renderer behavior, private-symbol inventory,
+  and the MIT notice remain in the single compatibility boundary. Public imports remain stable.
 
 ## Synchronization
 

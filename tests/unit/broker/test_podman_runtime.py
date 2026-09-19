@@ -650,7 +650,7 @@ def test_workspace_tar_ceiling_rejects_invalid_bounds(maximum: object) -> None:
 @pytest.mark.unit
 def test_request_archive_wraps_tar_encoder_failure(mocker: MockerFixture) -> None:
     mocker.patch.object(
-        podman_runtime.tarfile,
+        tarfile,
         "open",
         side_effect=tarfile.TarError("document-content-must-not-escape"),
     )

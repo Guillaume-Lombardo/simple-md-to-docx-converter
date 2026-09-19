@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import cast
 from uuid import UUID, uuid4
@@ -23,17 +22,16 @@ from markweave.broker.reconciliation_protocol import (
 )
 from markweave.persistence.job_admission import (
     ACTIVE_JOB_STATES,
-    global_active_job_count,
-    lock_global_admission,
     lock_reverse_claim,
 )
+from markweave.persistence.reversion_jobs.admission import _SqlReversionAdmission
 from markweave.persistence.reversion_jobs.common import (
     _attempt,
     _job,
     _required_utc,
-    _SqlReversionStore,
     _trace_json,
 )
+from markweave.persistence.reversion_jobs.retention import _SqlReversionRetention
 from markweave.persistence.schema import (
     ReversionAttemptRow,
     ReversionBrokerPrincipalRow,
@@ -45,23 +43,17 @@ from markweave.reversion_jobs.errors import (
     ReversionJobConflictError,
     ReversionJobLeaseLostError,
     ReversionJobRepositoryError,
-    ReversionJobUserQuotaExceededError,
     ReversionProofRequiredError,
-    ReversionQueueCapacityExceededError,
 )
 from markweave.reversion_jobs.models import (
     SHA256_CHARACTERS,
-    TERMINAL_REVERSION_STATES,
-    ExpiredReversionObjects,
     ReversionAttempt,
     ReversionFailure,
     ReversionJob,
-    ReversionJobPage,
     ReversionJobState,
     ReversionJobStep,
     ReversionLeaseHeartbeat,
     ReversionLeaseRecoveryResult,
-    ReversionSubmission,
     ReversionTraceMetadata,
     reversion_result_object_id,
 )
@@ -70,222 +62,8 @@ from markweave.reversions.models import ReverseOutputMode
 _MAX_WORKER_ID_LENGTH = 255
 
 
-class SqlReversionJobRepository(_SqlReversionStore):
+class SqlReversionJobRepository(_SqlReversionAdmission, _SqlReversionRetention):
     """Complete reverse queue contract with owner-bound public reads."""
-
-    def create(self, submission: ReversionSubmission) -> tuple[ReversionJob, bool]:
-        row = ReversionJobRow(
-            id=str(submission.id),
-            owner_id=str(submission.owner_id),
-            source_object_id=str(submission.source_object_id),
-            source_stem=submission.source_stem,
-            source_extension=submission.admission.extension,
-            source_family=submission.admission.family.value,
-            detected_format=submission.admission.detected_format,
-            parser_format=submission.admission.parser_format,
-            source_sha256=submission.source_sha256,
-            source_size=submission.source_size,
-            component_versions=json.dumps(
-                submission.component_versions, separators=(",", ":")
-            ),
-            request_digest=submission.request_digest,
-            idempotency_digest=submission.idempotency_digest,
-            correlation_id=submission.correlation_id,
-            state=ReversionJobState.QUEUED.value,
-            step=ReversionJobStep.QUEUED.value,
-            created_at=submission.created_at,
-            updated_at=submission.created_at,
-            attempt=0,
-            source_ready=False,
-            cancel_requested=False,
-            cleanup_completed=False,
-        )
-        try:
-            with DatabaseSession(self._engine) as database, database.begin():
-                serialize_sqlite_write(database, self._engine)
-                if self._admission_policy is not None:
-                    lock_global_admission(database, self._engine.dialect.name)
-                replay = self._find_idempotent(database, submission)
-                if replay is not None:
-                    return replay, True
-                self._after_idempotency_miss()
-                self._enforce_admission(database, submission.owner_id)
-                database.add(row)
-                database.flush()
-                return _job(row), False
-        except ReversionJobUserQuotaExceededError, ReversionQueueCapacityExceededError:
-            raise
-        except IntegrityError:
-            if submission.idempotency_digest is None:
-                raise ReversionJobRepositoryError from None
-            self._after_idempotency_collision()
-            replay = self._get_idempotent(
-                submission.owner_id, submission.idempotency_digest
-            )
-            if replay is None:
-                raise ReversionJobRepositoryError from None
-            if replay.request_digest != submission.request_digest:
-                raise ReversionJobConflictError(
-                    "Reverse idempotency key conflicts"
-                ) from None
-            return replay, True
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def _after_idempotency_miss(self) -> None:
-        """Private synchronization seam overridden only by concurrency tests."""
-
-    def _after_idempotency_collision(self) -> None:
-        """Private observation seam overridden only by concurrency tests."""
-
-    @staticmethod
-    def _find_idempotent(
-        database: DatabaseSession, submission: ReversionSubmission
-    ) -> ReversionJob | None:
-        if submission.idempotency_digest is None:
-            return None
-        row = database.scalar(
-            select(ReversionJobRow).where(
-                ReversionJobRow.owner_id == str(submission.owner_id),
-                ReversionJobRow.idempotency_digest == submission.idempotency_digest,
-            )
-        )
-        if row is None:
-            return None
-        if row.request_digest != submission.request_digest:
-            raise ReversionJobConflictError("Reverse idempotency key conflicts")
-        return _job(row)
-
-    def _get_idempotent(self, owner_id: UUID, digest: str) -> ReversionJob | None:
-        try:
-            with DatabaseSession(self._engine) as database:
-                row = database.scalar(
-                    select(ReversionJobRow).where(
-                        ReversionJobRow.owner_id == str(owner_id),
-                        ReversionJobRow.idempotency_digest == digest,
-                    )
-                )
-                return _job(row) if row is not None else None
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def _enforce_admission(self, database: DatabaseSession, owner_id: UUID) -> None:
-        policy = self._admission_policy
-        if policy is None:
-            return
-        owner_active = database.scalar(
-            select(func.count())
-            .select_from(ReversionJobRow)
-            .where(
-                ReversionJobRow.owner_id == str(owner_id),
-                ReversionJobRow.state.in_(ACTIVE_JOB_STATES),
-            )
-        )
-        if int(owner_active or 0) >= policy.active_jobs_per_user:
-            raise ReversionJobUserQuotaExceededError(
-                "Active reverse-job quota exceeded"
-            )
-        if global_active_job_count(database) >= policy.global_queue_capacity:
-            raise ReversionQueueCapacityExceededError(
-                "Shared conversion queue capacity exceeded"
-            )
-
-    def activate_source(self, job_id: UUID, now: datetime) -> ReversionJob:
-        try:
-            with DatabaseSession(self._engine) as database, database.begin():
-                serialize_sqlite_write(database, self._engine)
-                row = self._update_job(
-                    database,
-                    update(ReversionJobRow)
-                    .where(
-                        ReversionJobRow.id == str(job_id),
-                        ReversionJobRow.state == ReversionJobState.QUEUED.value,
-                        ReversionJobRow.source_ready.is_(False),
-                    )
-                    .values(source_ready=True, updated_at=now),
-                    str(job_id),
-                )
-                if row is not None:
-                    return _job(row)
-                existing = database.get(ReversionJobRow, str(job_id))
-                if (
-                    existing is None
-                    or existing.state != ReversionJobState.QUEUED.value
-                    or not existing.source_ready
-                ):
-                    raise ReversionJobRepositoryError
-                return _job(existing)
-        except ReversionJobRepositoryError:
-            raise
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def get_owner(self, job_id: UUID, owner_id: UUID) -> ReversionJob | None:
-        try:
-            with DatabaseSession(self._engine) as database:
-                row = database.scalar(
-                    select(ReversionJobRow).where(
-                        ReversionJobRow.id == str(job_id),
-                        ReversionJobRow.owner_id == str(owner_id),
-                    )
-                )
-                return _job(row) if row is not None else None
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def list_owner(
-        self, owner_id: UUID, *, offset: int, limit: int
-    ) -> ReversionJobPage:
-        try:
-            with DatabaseSession(self._engine) as database:
-                owner = str(owner_id)
-                total = database.scalar(
-                    select(func.count())
-                    .select_from(ReversionJobRow)
-                    .where(ReversionJobRow.owner_id == owner)
-                )
-                rows = database.scalars(
-                    select(ReversionJobRow)
-                    .where(ReversionJobRow.owner_id == owner)
-                    .order_by(
-                        ReversionJobRow.created_at.desc(), ReversionJobRow.id.desc()
-                    )
-                    .offset(offset)
-                    .limit(limit)
-                )
-                return ReversionJobPage(
-                    tuple(_job(row) for row in rows), int(total or 0), offset, limit
-                )
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def get_internal(self, job_id: UUID) -> ReversionJob | None:
-        try:
-            with DatabaseSession(self._engine) as database:
-                row = database.get(ReversionJobRow, str(job_id))
-                return _job(row) if row is not None else None
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def get_attempt(self, attempt_id: UUID) -> ReversionAttempt | None:
-        try:
-            with DatabaseSession(self._engine) as database:
-                row = database.get(ReversionAttemptRow, str(attempt_id))
-                return _attempt(row) if row is not None else None
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def list_attempts(self, job_id: UUID) -> tuple[ReversionAttempt, ...]:
-        try:
-            with DatabaseSession(self._engine) as database:
-                rows = database.scalars(
-                    select(ReversionAttemptRow)
-                    .where(ReversionAttemptRow.job_id == str(job_id))
-                    .order_by(ReversionAttemptRow.attempt_number)
-                )
-                return tuple(_attempt(row) for row in rows)
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
 
     def claim(
         self,
@@ -1570,102 +1348,3 @@ class SqlReversionJobRepository(_SqlReversionStore):
         if row is None:
             raise ReversionJobLeaseLostError("Reverse job lease was lost")
         return row
-
-    def expire_terminal(
-        self,
-        worker_id: str,
-        now: datetime,
-        cleanup_lease_expires_at: datetime,
-        limit: int,
-    ) -> tuple[ExpiredReversionObjects, ...]:
-        terminal = tuple(
-            state.value
-            for state in TERMINAL_REVERSION_STATES
-            if state is not ReversionJobState.EXPIRED
-        )
-        try:
-            with DatabaseSession(self._engine) as database, database.begin():
-                serialize_sqlite_write(database, self._engine)
-                claimable = or_(
-                    and_(
-                        ReversionJobRow.state.in_(terminal),
-                        ReversionJobRow.expires_at <= now,
-                    ),
-                    and_(
-                        ReversionJobRow.state == ReversionJobState.EXPIRED.value,
-                        ReversionJobRow.cleanup_completed.is_(False),
-                        or_(
-                            ReversionJobRow.cleanup_token.is_(None),
-                            ReversionJobRow.cleanup_expires_at <= now,
-                        ),
-                    ),
-                )
-                statement = (
-                    select(ReversionJobRow)
-                    .where(claimable)
-                    .order_by(ReversionJobRow.expires_at, ReversionJobRow.id)
-                    .limit(limit)
-                )
-                if self._engine.dialect.name == "postgresql":
-                    statement = statement.with_for_update(skip_locked=True)
-                rows = tuple(database.scalars(statement))
-                expired: list[ExpiredReversionObjects] = []
-                for row in rows:
-                    token = uuid4()
-                    derived = tuple(
-                        reversion_result_object_id(UUID(row.id), number)
-                        for number in range(1, row.attempt + 1)
-                    )
-                    stored = (
-                        UUID(row.result_object_id) if row.result_object_id else None
-                    )
-                    if stored is not None and stored not in derived:
-                        derived = (*derived, stored)
-                    row.state = ReversionJobState.EXPIRED.value
-                    row.error_code = None
-                    row.error_message = None
-                    row.result_mode = None
-                    row.result_object_id = None
-                    row.result_sha256 = None
-                    row.result_size = None
-                    row.trace_metadata = None
-                    row.updated_at = now
-                    row.cleanup_owner = worker_id
-                    row.cleanup_token = str(token)
-                    row.cleanup_expires_at = cleanup_lease_expires_at
-                    expired.append(
-                        ExpiredReversionObjects(
-                            UUID(row.id),
-                            token,
-                            UUID(row.owner_id),
-                            UUID(row.source_object_id),
-                            derived,
-                        )
-                    )
-                database.flush()
-                return tuple(expired)
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None
-
-    def complete_cleanup(self, job_id: UUID, cleanup_token: UUID) -> bool:
-        try:
-            with DatabaseSession(self._engine) as database, database.begin():
-                serialize_sqlite_write(database, self._engine)
-                result = database.execute(
-                    update(ReversionJobRow)
-                    .where(
-                        ReversionJobRow.id == str(job_id),
-                        ReversionJobRow.state == ReversionJobState.EXPIRED.value,
-                        ReversionJobRow.cleanup_completed.is_(False),
-                        ReversionJobRow.cleanup_token == str(cleanup_token),
-                    )
-                    .values(
-                        cleanup_completed=True,
-                        cleanup_owner=None,
-                        cleanup_token=None,
-                        cleanup_expires_at=None,
-                    )
-                )
-                return getattr(result, "rowcount", 0) == 1
-        except SQLAlchemyError:
-            raise ReversionJobRepositoryError from None

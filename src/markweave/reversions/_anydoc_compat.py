@@ -22,19 +22,18 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import PurePosixPath
 from typing import Any, Literal, Never, cast
-from urllib.parse import unquote, urlsplit
 
 import anydoc
 
+import markweave.reversions.hyperlinks as _hyperlinks
 from markweave.reversions.assets import AssetSource
 from markweave.reversions.errors import ReverseErrorCategory, reject
 from markweave.reversions.formats import FormatAdmission, FormatFamily, admit_format
 
+_is_safe_hyperlink = _hyperlinks._is_safe_hyperlink
+
 PINNED_ANYDOC_VERSION = "0.2.4"
 UPSTREAM_ANYDOC_COMMIT = "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"
-_ALLOWED_HYPERLINK_SCHEMES = frozenset({"http", "https"})
-_MAX_URL_DECODE_PASSES = 2
-_MAX_URL_PORT = 65_535
 UPSTREAM_RENDERER_SURFACES = (
     "src/render/markdown/mod.rs:document_to_markdown",
     "src/render/markdown/mod.rs:number_notes",
@@ -227,42 +226,6 @@ def _validate_style(style: Any) -> None:
     _require_type(style, anydoc.Style)
     for name in ("bold", "italic", "strike", "code"):
         _require_type(getattr(style, name), bool)
-
-
-def _decoded_destination_variants(value: str) -> tuple[str, ...]:
-    variants = [value]
-    for _ in range(_MAX_URL_DECODE_PASSES):
-        decoded = unquote(variants[-1], encoding="utf-8", errors="replace")
-        if decoded == variants[-1]:
-            break
-        variants.append(decoded)
-    return tuple(variants)
-
-
-def _is_safe_hyperlink(value: str) -> bool:
-    variants = _decoded_destination_variants(value)
-    if any(
-        character.isspace() or unicodedata.category(character) == "Cc"
-        for variant in variants
-        for character in variant
-    ):
-        return False
-    try:
-        parsed = urlsplit(value)
-        hostname = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        return False
-    return (
-        parsed.scheme.casefold() in _ALLOWED_HYPERLINK_SCHEMES
-        and bool(parsed.netloc)
-        and bool(hostname)
-        and parsed.username is None
-        and parsed.password is None
-        and (port is None or 0 <= port <= _MAX_URL_PORT)
-        and "%" not in hostname
-        and "\\" not in value
-    )
 
 
 def _validate_inlines(inlines: Any, asset_count: int) -> None:  # noqa: PLR0912, PLR0915
