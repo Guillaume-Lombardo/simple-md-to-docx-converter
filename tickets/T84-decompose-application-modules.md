@@ -87,6 +87,26 @@ Tests and scripts are outside the size-reduction scope.
   Public pins are unchanged pending publication; hosted final-image CI and
   independent review remain required before merge.
 
+- PR #247 merged as `5dd3328a17d12279d1c7c11a8c96b68cb062ecb3` after all
+  17 hosted CI checks and independent CodeRabbit review passed. Hosted coverage:
+  90.10% branches and 94.78% changed application lines. Main CI `35537766132`
+  subsequently passed, including both final-image E2E and storage profiles.
+- Automatic release `35537766223` completed successfully: PyPI 0.7.1, both GHCR
+  images, SBOMs, receipts and provenance are published. Public PyPI installation
+  and tag source verified. Receipt identities, all 13 attached release-manifest
+  entries, bundle evidence checksums and frontend lockfile verified.
+- The immediate adoption follow-up on `chore/T84-adopt-0.7.1-images` pins the
+  exact published backend/frontend registry digests in Compose, both quickstarts
+  and their E2E assertions, and updates release/deployment documentation. No
+  quickstart-command migration is needed. Remains In Progress until adoption is
+  verified on main and the documentary mirror is closed.
+
+- Adoption validation: anonymous public alignment passes; 96 documentation,
+  quickstart and release-alignment tests pass. The real published-pair rootless
+  Podman quickstart E2E passed, including exact running image digests, routing,
+  host validation, teardown/restart and state preservation. Disposable services
+  and volumes were cleaned up. Ruff format/lint, ty and diff checks pass.
+
 ## Synchronization
 
 Keep Linear and this mirror synchronized. Mark Done only after verification on main.

@@ -36,7 +36,7 @@ claim. `deploy/distributed.yaml.example` separates `serve` API and `worker` depl
 PostgreSQL plus an AWS S3-compatible store. RustFS is the test implementation in
 `deploy/rustfs-ci.yaml`; there is no RustFS-specific application API.
 
-The repository's public Compose quickstart pins the matched `0.7.0` backend and Next.js frontend
+The repository's public Compose quickstart pins the matched `0.7.1` backend and Next.js frontend
 images by their verified registry digests. The backend starts its standalone role with
 `markweave serve`; the same-origin router exposes the browser and API routes. The deployment
 examples use `markweave serve` for API roles and `markweave worker` for distributed workers.
@@ -164,9 +164,9 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 
 ## Approved Next.js cutover topology
 
-The repository's `0.7.0` source contains no FastAPI browser pages. The public default pins the
-verified `0.7.0` image pair published from source
-`d0c150f625cce9e51102904ab9289721d6dd7054`. T64 implements the separate frontend image and the
+The repository's `0.7.1` source contains no FastAPI browser pages. The public default pins the
+verified `0.7.1` image pair published from source
+`5dd3328a17d12279d1c7c11a8c96b68cb062ecb3`. T64 implements the separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
