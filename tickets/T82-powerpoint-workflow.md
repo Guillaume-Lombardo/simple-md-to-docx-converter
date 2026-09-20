@@ -140,3 +140,14 @@ exception. It accepts only the two known new values and exact enum sets, with
 regressions rejecting other versions, additional values and unrelated route removals.
 OpenAPI comparison now passes; 23 contract tests pass. Remaining slide-oriented
 reverse scope is preserved in T83 / G1L-582, not claimed by this forward release.
+
+2026-09-20: User renewed all publication authorizations and requested HTTPS after
+SSH agent failure. No remote branch existed. Final local filtered run found four
+stale release-version assertions (4,363 passed); these were updated to 0.7.0 and
+all 66 targeted release/presentation checks pass, including real wheel/sdist build,
+clean installation and tamper rejection. Coverage now uses the source directory
+so Alembic-loaded migration 18 is measured. Added light-boundary presentation
+publication/reference tests and SQLite coverage; combined light/targeted evidence
+passes 90.01% branch and 93.58% changed-line coverage. Quality policy checks pass
+(24 tests). A fresh CI-equivalent light run is in progress. No failed assertion is
+waived. Final hosted image workflows and independent review remain mandatory.

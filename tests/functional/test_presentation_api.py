@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -51,6 +52,7 @@ def authenticate(client):
     return {"X-CSRF-Token": response.json()["csrf_token"]}
 
 
+@pytest.mark.light_coverage
 def test_presentation_plan_admission_idempotency_and_cancellation(tmp_path):
     with client_for(tmp_path) as client:
         files = {
@@ -122,6 +124,7 @@ def test_presentation_plan_admission_idempotency_and_cancellation(tmp_path):
         b"\xff",
     ],
 )
+@pytest.mark.light_coverage
 def test_presentation_plan_rejects_unsafe_or_invalid_input(tmp_path, source):
     with client_for(tmp_path) as client:
         response = client.post(
@@ -196,3 +199,64 @@ def test_real_worker_generates_without_any_template(tmp_path, output, archive_in
                 assert any(name.startswith("ppt/media/") for name in slides.namelist())
             assert b"Editable text" in slides.read("ppt/slides/slide1.xml")
             assert b"A bullet" in slides.read("ppt/slides/slide2.xml")
+
+
+@pytest.mark.light_coverage
+@pytest.mark.parametrize("archive_input", [False, True])
+def test_worker_source_bundle_and_default_reference_boundary(
+    tmp_path, mocker, archive_input
+):
+    """Exercise durable publication with a substituted engine, never launching Pandoc."""
+    converted = mocker.patch(
+        "markweave.presentations.pandoc.PandocPptxConverter.convert",
+        return_value=b"engine-output",
+    )
+
+    def write_reference(*args, stdout, **kwargs):
+        os.write(stdout, b"native-reference")
+
+    mocker.patch("markweave.presentations.runtime._run", side_effect=write_reference)
+    with client_for(tmp_path) as client:
+        headers = authenticate(client)
+        reference = client.get("/api/v1/presentation-reference")
+        assert reference.status_code == 200
+        assert reference.content == b"native-reference"
+        source = b"# First\n\nText\n\n---\n\n# Second\n"
+        filename = "slides.md"
+        if archive_input:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("slides.md", source)
+            source = buffer.getvalue()
+            filename = "slides.zip"
+        created = client.post(
+            "/api/v1/conversions",
+            headers=headers,
+            files={"source": (filename, source)},
+            data={"output": "pptx-bundle"},
+        )
+        assert created.status_code == 202
+        components = client.app.state.components
+        worker = components.build_conversion_worker(
+            worker_id="bounded-presentation",
+            processor=build_production_processor(
+                settings_for(tmp_path), components.object_store
+            ),
+        )
+        assert worker.run_once()
+        result = client.get(f"/api/v1/conversions/{created.json()['id']}/result")
+        assert result.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(result.content)) as bundle:
+            assert bundle.read("presentation.pptx") == b"engine-output"
+            assert (
+                bundle.read(
+                    "source/source.zip" if archive_input else "source/document.md"
+                )
+                == source
+            )
+            assert (
+                json.loads(bundle.read("generation.json"))["template_mode"]
+                == "pandoc-default"
+            )
+        assert converted.call_args.args[1] is None
+        assert callable(converted.call_args.kwargs["cancellation_requested"])

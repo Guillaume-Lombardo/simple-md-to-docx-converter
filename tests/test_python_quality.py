@@ -83,14 +83,14 @@ def test_committed_quality_configuration_enforces_required_tools() -> None:
         "--strict-config",
         "--strict-markers",
         "scripts.ci.pytest_branch_coverage",
-        "--cov=markweave",
+        "--cov=src/markweave",
         "--cov-branch",
         "--cov-report=json:coverage.json",
         "--cov-fail-under=90",
     }.issubset(pytest_options["addopts"])
     assert config["tool"]["coverage"]["run"] == {
         "branch": True,
-        "source": ["markweave"],
+        "source": ["src/markweave"],
     }
     assert config["tool"]["coverage"]["report"]["fail_under"] == 90
     assert config["tool"]["coverage"]["report"]["exclude_also"] == [
