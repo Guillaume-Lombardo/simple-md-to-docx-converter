@@ -374,7 +374,7 @@ def test_unavailable_empty_alt_image_is_not_retained() -> None:
 
 
 def test_inventory_and_license_bind_the_exact_upstream_surface() -> None:
-    license_path = Path(compat.__file__).with_name("ANYDOC_COMPAT_LICENSE.txt")
+    license_path = Path(compat.__file__).parent.parent / "ANYDOC_COMPAT_LICENSE.txt"
 
     assert compat.PINNED_ANYDOC_VERSION == "0.2.4"
     assert compat.UPSTREAM_ANYDOC_COMMIT == "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fcntl
-import ipaddress
 import math
 import os
 import secrets
@@ -15,10 +14,10 @@ from pathlib import Path
 from threading import BoundedSemaphore, Event, Lock, Thread, current_thread
 from time import monotonic
 from typing import Final, cast
-from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import markweave.broker.mtls_control as _mtls_control
+import markweave.broker.mtls_identity as _mtls_identity
 from markweave.broker.dispatch import BrokerDispatcher
 from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.models import AuthenticatedPrincipal, RuntimeChannelLimits
@@ -53,7 +52,7 @@ from markweave.broker.reconciliation_protocol import (
 from markweave.broker.reconciliation_protocol import (
     encode_response as encode_reconciliation_response,
 )
-from markweave.broker.unix_transport import (
+from markweave.broker.response_binding import (
     _validate_response_binding,
     _validate_workspace_response_binding,
 )
@@ -75,150 +74,69 @@ from markweave.broker.workspace_protocol import (
     frame_protocol,
 )
 
+_DIGEST_PREFIX = _mtls_identity._DIGEST_PREFIX
+_PIN_LENGTH = _mtls_identity._PIN_LENGTH
+_sha256 = _mtls_identity._sha256
+_valid_digest = _mtls_identity._valid_digest
+MTLS_ALPN = _mtls_identity.MTLS_ALPN
+_IPV4_VERSION = _mtls_identity._IPV4_VERSION
+_MAX_PORT = _mtls_identity._MAX_PORT
+_MAX_PINS = _mtls_identity._MAX_PINS
+_MAX_URI_LENGTH = _mtls_identity._MAX_URI_LENGTH
+_SERVER_CONTEXT_TOKEN = _mtls_identity._SERVER_CONTEXT_TOKEN
+MtlsEndpoint = _mtls_identity.MtlsEndpoint
+MtlsTransportLimits = _mtls_identity.MtlsTransportLimits
+MtlsLocalIdentity = _mtls_identity.MtlsLocalIdentity
+MtlsPeerIdentity = _mtls_identity.MtlsPeerIdentity
+MtlsServerContext = _mtls_identity.MtlsServerContext
+_valid_uri_san = _mtls_identity._valid_uri_san
+leaf_certificate_sha256 = _mtls_identity.leaf_certificate_sha256
+_tls_context = _mtls_identity._tls_context
+_authenticate_peer = _mtls_identity._authenticate_peer
+
 _ACK_KEYS = _mtls_control._ACK_KEYS
+
 _CONTROL_PAYLOAD_MAX = _mtls_control._CONTROL_PAYLOAD_MAX
-_DIGEST_PREFIX = _mtls_control._DIGEST_PREFIX
+
 _EXCHANGE_HEX_LENGTH = _mtls_control._EXCHANGE_HEX_LENGTH
-_PIN_LENGTH = _mtls_control._PIN_LENGTH
+
 _RESERVATION_KEYS = _mtls_control._RESERVATION_KEYS
+
 _RESPONSE_KEYS = _mtls_control._RESPONSE_KEYS
+
 _SUBMIT_KEYS = _mtls_control._SUBMIT_KEYS
+
 MTLS_PROTOCOL_NAME = _mtls_control.MTLS_PROTOCOL_NAME
+
 MTLS_PROTOCOL_VERSION = _mtls_control.MTLS_PROTOCOL_VERSION
+
 _ack_mapping = _mtls_control._ack_mapping
+
 _canonical_json = _mtls_control._canonical_json
+
 _control_frame = _mtls_control._control_frame
+
 _decode_control = _mtls_control._decode_control
+
 _exchange_id = _mtls_control._exchange_id
+
 _positive_length = _mtls_control._positive_length
+
 _reservation_mapping = _mtls_control._reservation_mapping
+
 _response_mapping = _mtls_control._response_mapping
-_sha256 = _mtls_control._sha256
+
 _submit_mapping = _mtls_control._submit_mapping
+
 _unique_object = _mtls_control._unique_object
+
 _uuid = _mtls_control._uuid
-_valid_digest = _mtls_control._valid_digest
 
-MTLS_ALPN: Final = "markweave-reverse-broker-mtls/1"
 _LIFECYCLE_FRAME_MAX: Final = LENGTH_PREFIX_BYTES + 4096
-_IPV4_VERSION: Final = 4
-_MAX_PORT: Final = 65535
-_MAX_PINS: Final = 2
-_MAX_URI_LENGTH: Final = 255
+
 _TLS_MATERIAL_COUNT: Final = 3
+
 _TLS_MATERIAL_MAX_BYTES: Final = 65_536
-_SERVER_CONTEXT_TOKEN = object()
-
-
-@dataclass(frozen=True, slots=True)
-class MtlsEndpoint:
-    """Explicit canonical IPv4 endpoint for one inert mTLS boundary."""
-
-    host: str
-    port: int
-
-    def __post_init__(self) -> None:
-        if type(self.host) is not str:
-            raise ValueError("Broker mTLS endpoint is invalid")
-        try:
-            address = ipaddress.ip_address(self.host)
-        except (TypeError, ValueError) as error:
-            raise ValueError("Broker mTLS endpoint is invalid") from error
-        if (
-            type(self.host) is not str
-            or address.version != _IPV4_VERSION
-            or str(address) != self.host
-            or type(self.port) is not int
-            or not 0 <= self.port <= _MAX_PORT
-        ):
-            raise ValueError("Broker mTLS endpoint is invalid")
-
-
-@dataclass(frozen=True, slots=True)
-class MtlsTransportLimits:
-    """Deployment-supplied mTLS bounds, with no production defaults."""
-
-    operation_timeout_seconds: float
-    shutdown_timeout_seconds: float
-    max_handshakes: int
-    max_pending_exchanges: int
-    max_handlers: int
-    listen_backlog: int
-
-    def __post_init__(self) -> None:
-        numbers = (self.operation_timeout_seconds, self.shutdown_timeout_seconds)
-        counts = (
-            self.max_handshakes,
-            self.max_pending_exchanges,
-            self.max_handlers,
-            self.listen_backlog,
-        )
-        if any(
-            type(value) not in {int, float} or value <= 0 or not math.isfinite(value)
-            for value in numbers
-        ) or any(type(value) is not int or value <= 0 for value in counts):
-            raise ValueError("Broker mTLS transport limits are invalid")
-
-
-@dataclass(frozen=True, slots=True)
-class MtlsLocalIdentity:
-    """Required local certificate material and its stable protocol principal."""
-
-    ca_certificate: Path
-    certificate_chain: Path
-    private_key: Path
-    uri_san: str
-    principal: AuthenticatedPrincipal
-
-    def __post_init__(self) -> None:
-        if (
-            not all(
-                isinstance(path, Path) and path.is_absolute()
-                for path in (
-                    self.ca_certificate,
-                    self.certificate_chain,
-                    self.private_key,
-                )
-            )
-            or not _valid_uri_san(self.uri_san)
-            or type(self.principal) is not AuthenticatedPrincipal
-        ):
-            raise ValueError("Broker mTLS local identity is invalid")
-
-
-@dataclass(frozen=True, slots=True)
-class MtlsPeerIdentity:
-    """Exact peer role and current/next leaf-certificate pins."""
-
-    uri_san: str
-    leaf_certificate_sha256: tuple[str, ...]
-    principal: AuthenticatedPrincipal
-
-    def __post_init__(self) -> None:
-        pins = self.leaf_certificate_sha256
-        if (
-            not _valid_uri_san(self.uri_san)
-            or type(pins) is not tuple
-            or not 1 <= len(pins) <= _MAX_PINS
-            or len(set(pins)) != len(pins)
-            or any(not _valid_digest(pin) for pin in pins)
-            or type(self.principal) is not AuthenticatedPrincipal
-        ):
-            raise ValueError("Broker mTLS peer identity is invalid")
-
-
-class MtlsServerContext:
-    """Opaque, fully loaded server TLS context safe to retain after FD closure."""
-
-    __slots__ = ("_context", "_local_identity")
-
-    def __init__(
-        self, context: ssl.SSLContext, local_identity: MtlsLocalIdentity, token: object
-    ) -> None:
-        if token is not _SERVER_CONTEXT_TOKEN:
-            raise ValueError("Broker mTLS server context is invalid")
-        self._context = context
-        self._local_identity = local_identity
 
 
 @dataclass(slots=True)
@@ -230,40 +148,6 @@ class _Reservation:
     response_ready: Event
     response_frame: bytes | None = None
     claimed: bool = False
-
-
-def _valid_uri_san(value: object) -> bool:
-    if type(value) is not str or not value.isascii() or len(value) > _MAX_URI_LENGTH:
-        return False
-    try:
-        parsed = urlsplit(value)
-        return (
-            parsed.scheme == "spiffe"
-            and bool(parsed.hostname)
-            and parsed.netloc == parsed.hostname
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.port is None
-            and parsed.path.startswith("/")
-            and parsed.path != "/"
-            and "//" not in parsed.path
-            and all(
-                character.isalnum() or character in "/._-" for character in parsed.path
-            )
-            and not parsed.query
-            and not parsed.fragment
-            and urlunsplit(parsed) == value
-        )
-    except ValueError:
-        return False
-
-
-def leaf_certificate_sha256(certificate_der: bytes) -> str:
-    """Return the canonical exact-leaf certificate pin."""
-
-    if type(certificate_der) is not bytes or not certificate_der:
-        raise ValueError("Broker mTLS leaf certificate is invalid")
-    return _sha256(certificate_der)
 
 
 def _remaining(deadline: float) -> float:
@@ -315,29 +199,6 @@ def _full_tls_close(connection: ssl.SSLSocket, deadline: float) -> None:
     connection.settimeout(_remaining(deadline))
     underlying = connection.unwrap()
     underlying.close()
-
-
-def _tls_context(local: MtlsLocalIdentity, *, server: bool) -> ssl.SSLContext:
-    protocol = ssl.PROTOCOL_TLS_SERVER if server else ssl.PROTOCOL_TLS_CLIENT
-    context = ssl.SSLContext(protocol)
-    context.minimum_version = ssl.TLSVersion.TLSv1_3
-    context.maximum_version = ssl.TLSVersion.TLSv1_3
-    context.verify_mode = ssl.CERT_REQUIRED
-    if not server:
-        context.check_hostname = False
-    context.verify_flags |= ssl.VERIFY_X509_STRICT
-    context.options |= ssl.OP_NO_COMPRESSION | ssl.OP_NO_TICKET
-    if server:
-        context.num_tickets = 0
-    try:
-        context.load_verify_locations(cafile=str(local.ca_certificate))
-        context.load_cert_chain(
-            certfile=str(local.certificate_chain), keyfile=str(local.private_key)
-        )
-        context.set_alpn_protocols([MTLS_ALPN])
-    except (OSError, ssl.SSLError, ValueError) as error:
-        raise ValueError("Broker mTLS certificate material is invalid") from error
-    return context
 
 
 def build_mtls_server_context(
@@ -425,28 +286,6 @@ def build_mtls_server_context_from_material(
     finally:
         for descriptor in descriptors:
             os.close(descriptor)
-
-
-def _authenticate_peer(
-    connection: ssl.SSLSocket, expected: MtlsPeerIdentity
-) -> tuple[AuthenticatedPrincipal, str]:
-    if (
-        connection.version() != "TLSv1.3"
-        or connection.selected_alpn_protocol() != MTLS_ALPN
-    ):
-        raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
-    certificate = connection.getpeercert()
-    certificate_der = connection.getpeercert(binary_form=True)
-    if (
-        type(certificate) is not dict
-        or certificate.get("subjectAltName") != (("URI", expected.uri_san),)
-        or type(certificate_der) is not bytes
-    ):
-        raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
-    digest = leaf_certificate_sha256(certificate_der)
-    if digest not in expected.leaf_certificate_sha256:
-        raise BrokerError(BrokerErrorCategory.AUTHENTICATION_FAILED)
-    return expected.principal, digest
 
 
 def _request_frame_max(workspace_limits: RuntimeChannelLimits | None) -> int:

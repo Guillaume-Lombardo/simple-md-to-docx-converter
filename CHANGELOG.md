@@ -6,6 +6,16 @@ All notable user-visible, operational, security, compatibility, and deprecation
 changes are recorded here. Entries use the release version as their stable link
 target. Internal ticket choreography is intentionally excluded.
 
+<a id="release-0-7-1"></a>
+
+## [0.7.1] - 2026-09-20
+
+### Changed
+
+- Split oversized broker, runtime, reverse-job persistence and private anydoc
+  compatibility modules into explicit responsibilities while preserving public
+  imports, conversion output, security checks and database transaction boundaries.
+
 <a id="release-0-7-0"></a>
 
 ## [0.7.0] - 2026-09-20

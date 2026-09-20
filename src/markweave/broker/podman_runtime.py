@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
-import os
-import re
-import stat
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 from uuid import UUID, uuid5
 
+import markweave.broker.podman_cgroups as _podman_cgroups
+import markweave.broker.podman_contract as _podman_contract
 import markweave.broker.podman_workspace as _podman_workspace
 from markweave.broker import command_runner as _command_runner
 from markweave.broker.models import (
@@ -22,9 +19,7 @@ from markweave.broker.models import (
     EvidenceDigest,
     ManagedUnit,
     ManagedUnitState,
-    RuntimeChannelLimits,
     RuntimeIncarnation,
-    RuntimeLimits,
     RuntimeRecoveryBinding,
     policy_specification_evidence,
 )
@@ -40,172 +35,81 @@ from markweave.reversions.models import (
     ReverseAttemptResponse,
 )
 
+PodmanRuntimeError = _podman_contract.PodmanRuntimeError
+_INCARNATION_NAMESPACE = _podman_contract._INCARNATION_NAMESPACE
+_NAME_PREFIX = _podman_contract._NAME_PREFIX
+_LABEL_PREFIX = _podman_contract._LABEL_PREFIX
+_MANAGED_LABEL = _podman_contract._MANAGED_LABEL
+_UNIT_LABEL = _podman_contract._UNIT_LABEL
+_ATTEMPT_LABEL = _podman_contract._ATTEMPT_LABEL
+_PRINCIPAL_LABEL = _podman_contract._PRINCIPAL_LABEL
+_POLICY_LABEL = _podman_contract._POLICY_LABEL
+_SPECIFICATION_LABEL = _podman_contract._SPECIFICATION_LABEL
+_DEADLINE_LABEL = _podman_contract._DEADLINE_LABEL
+_IMAGE_DIGEST_LABEL = _podman_contract._IMAGE_DIGEST_LABEL
+_IMAGE_REPOSITORY_LABEL = _podman_contract._IMAGE_REPOSITORY_LABEL
+_RUN_AS_UID_LABEL = _podman_contract._RUN_AS_UID_LABEL
+_CPU_QUOTA_LABEL = _podman_contract._CPU_QUOTA_LABEL
+_CPU_PERIOD_LABEL = _podman_contract._CPU_PERIOD_LABEL
+_MEMORY_LABEL = _podman_contract._MEMORY_LABEL
+_PID_LIMIT_LABEL = _podman_contract._PID_LIMIT_LABEL
+_WORKSPACE_LABEL = _podman_contract._WORKSPACE_LABEL
+_WALL_TIME_LABEL = _podman_contract._WALL_TIME_LABEL
+_MAX_INPUT_LABEL = _podman_contract._MAX_INPUT_LABEL
+_MAX_OUTPUT_LABEL = _podman_contract._MAX_OUTPUT_LABEL
+_MANAGED_LABEL_KEYS = _podman_contract._MANAGED_LABEL_KEYS
+_IMAGE_REPOSITORY_PATTERN = _podman_contract._IMAGE_REPOSITORY_PATTERN
+_CONTAINER_ID_PATTERN = _podman_contract._CONTAINER_ID_PATTERN
+_CONTAINER_ID_LENGTH = _podman_contract._CONTAINER_ID_LENGTH
+_TIMESTAMP_PATTERN = _podman_contract._TIMESTAMP_PATTERN
+_FIXED_ENTRYPOINT = _podman_contract._FIXED_ENTRYPOINT
+_FIXED_ENVIRONMENT = _podman_contract._FIXED_ENVIRONMENT
+_INSPECT_MAX_BYTES = _podman_contract._INSPECT_MAX_BYTES
+_MAX_COMMAND_OUTPUT_BYTES = _podman_contract._MAX_COMMAND_OUTPUT_BYTES
+_MIN_OUTPUT_BYTES = _podman_contract._MIN_OUTPUT_BYTES
+_MAX_LABEL_BYTES = _podman_contract._MAX_LABEL_BYTES
+_CGROUP_EVENTS_MAX_BYTES = _podman_cgroups._CGROUP_EVENTS_MAX_BYTES
+_SYSTEMD_PROPERTIES_MAX_BYTES = _podman_cgroups._SYSTEMD_PROPERTIES_MAX_BYTES
+_OWNER_ONLY_MODE = _podman_cgroups._OWNER_ONLY_MODE
+PodmanRuntimeUnit = _podman_contract.PodmanRuntimeUnit
+Command = _podman_contract.Command
+SystemdCgroupRemover = _podman_cgroups.SystemdCgroupRemover
+_container_name = _podman_contract._container_name
+_cgroup_parent = _podman_contract._cgroup_parent
+_read_cgroup_events = _podman_cgroups._read_cgroup_events
+_create_cgroup = _podman_cgroups._create_cgroup
+_validate_cgroup_root = _podman_cgroups._validate_cgroup_root
+_read_process_cgroup = _podman_cgroups._read_process_cgroup
+_validate_hooks_directory = _podman_cgroups._validate_hooks_directory
+_parse_cgroup_events = _podman_cgroups._parse_cgroup_events
+_parse_systemd_properties = _podman_cgroups._parse_systemd_properties
+_labels = _podman_contract._labels
+_policy_from_labels = _podman_contract._policy_from_labels
+_json = _podman_contract._json
+_matches_create_command = _podman_contract._matches_create_command
+_matches_entrypoint = _podman_contract._matches_entrypoint
+_mapping = _podman_contract._mapping
+_create_response_identity = _podman_contract._create_response_identity
+_matches_process_cgroup = _podman_cgroups._matches_process_cgroup
+_string = _podman_contract._string
+_boolean = _podman_contract._boolean
+_integer = _podman_contract._integer
+_timestamp = _podman_contract._timestamp
+_label = _podman_contract._label
+_positive_integer_label = _podman_contract._positive_integer_label
+_evidence = _podman_contract._evidence
+build_create_arguments = _podman_contract.build_create_arguments
+verify_realized_specification = _podman_contract.verify_realized_specification
+
 _build_request_archive = _podman_workspace._build_request_archive
+
 _read_single_file_archive = _podman_workspace._read_single_file_archive
+
 _tar_output_ceiling = _podman_workspace._tar_output_ceiling
 
 BoundedCommandRunner = _command_runner.BoundedCommandRunner
+
 PodmanCommandLimits = _command_runner.PodmanCommandLimits
-PodmanRuntimeError = _command_runner.PodmanRuntimeError
-
-_INCARNATION_NAMESPACE: Final = UUID("9448db2f-5c64-48eb-a960-d520fac4fb5f")
-_NAME_PREFIX: Final = "markweave-reverse-"
-_LABEL_PREFIX: Final = "io.markweave.reverse-broker."
-_MANAGED_LABEL: Final = f"{_LABEL_PREFIX}managed"
-_UNIT_LABEL: Final = f"{_LABEL_PREFIX}unit-id"
-_ATTEMPT_LABEL: Final = f"{_LABEL_PREFIX}attempt-id"
-_PRINCIPAL_LABEL: Final = f"{_LABEL_PREFIX}principal-id"
-_POLICY_LABEL: Final = f"{_LABEL_PREFIX}policy-revision"
-_SPECIFICATION_LABEL: Final = f"{_LABEL_PREFIX}specification"
-_DEADLINE_LABEL: Final = f"{_LABEL_PREFIX}deadline-seconds"
-_IMAGE_DIGEST_LABEL: Final = f"{_LABEL_PREFIX}image-digest"
-_IMAGE_REPOSITORY_LABEL: Final = f"{_LABEL_PREFIX}image-repository"
-_RUN_AS_UID_LABEL: Final = f"{_LABEL_PREFIX}run-as-uid"
-_CPU_QUOTA_LABEL: Final = f"{_LABEL_PREFIX}cpu-quota-micros"
-_CPU_PERIOD_LABEL: Final = f"{_LABEL_PREFIX}cpu-period-micros"
-_MEMORY_LABEL: Final = f"{_LABEL_PREFIX}memory-bytes"
-_PID_LIMIT_LABEL: Final = f"{_LABEL_PREFIX}pid-limit"
-_WORKSPACE_LABEL: Final = f"{_LABEL_PREFIX}workspace-bytes"
-_WALL_TIME_LABEL: Final = f"{_LABEL_PREFIX}wall-time-millis"
-_MAX_INPUT_LABEL: Final = f"{_LABEL_PREFIX}max-input-bytes"
-_MAX_OUTPUT_LABEL: Final = f"{_LABEL_PREFIX}max-output-bytes"
-_MANAGED_LABEL_KEYS: Final = frozenset(
-    {
-        _ATTEMPT_LABEL,
-        _CPU_PERIOD_LABEL,
-        _CPU_QUOTA_LABEL,
-        _DEADLINE_LABEL,
-        _IMAGE_DIGEST_LABEL,
-        _IMAGE_REPOSITORY_LABEL,
-        _MANAGED_LABEL,
-        _MEMORY_LABEL,
-        _PID_LIMIT_LABEL,
-        _POLICY_LABEL,
-        _PRINCIPAL_LABEL,
-        _RUN_AS_UID_LABEL,
-        _SPECIFICATION_LABEL,
-        _UNIT_LABEL,
-        _WORKSPACE_LABEL,
-        _WALL_TIME_LABEL,
-        _MAX_INPUT_LABEL,
-        _MAX_OUTPUT_LABEL,
-    }
-)
-_IMAGE_REPOSITORY_PATTERN = re.compile(
-    r"(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?"
-    r"/[a-z0-9][a-z0-9._/-]*\Z"
-)
-_CONTAINER_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
-_CONTAINER_ID_LENGTH: Final = 64
-_TIMESTAMP_PATTERN = re.compile(
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+(?:Z|[+-][0-9:]+)?\Z"
-)
-_FIXED_ENTRYPOINT: Final = (
-    "python",
-    "-m",
-    "markweave.reversions.attempt_main",
-)
-_FIXED_ENVIRONMENT: Final = (
-    "HOME=/work/home",
-    "PATH=/opt/markweave/venv/bin:/usr/local/bin:/usr/bin",
-    "PYTHONDONTWRITEBYTECODE=1",
-    "PYTHONUNBUFFERED=1",
-    "RAYON_NUM_THREADS=1",
-    "TMPDIR=/work/tmp",
-    "XDG_CACHE_HOME=/work/xdg/cache",
-    "XDG_CONFIG_HOME=/work/xdg/config",
-    "XDG_DATA_HOME=/work/xdg/data",
-    "XDG_RUNTIME_DIR=/work/xdg/runtime",
-)
-_INSPECT_MAX_BYTES: Final = 64 * 1024
-_MAX_COMMAND_OUTPUT_BYTES: Final = 128 * 1024
-_MIN_OUTPUT_BYTES: Final = 1024
-_MAX_LABEL_BYTES: Final = 128
-_CGROUP_EVENTS_MAX_BYTES: Final = 4096
-_SYSTEMD_PROPERTIES_MAX_BYTES: Final = 512
-_OWNER_ONLY_MODE: Final = 0o700
-
-
-@dataclass(frozen=True, slots=True)
-class PodmanRuntimeUnit:
-    """Verified opaque identity of one exact Podman container incarnation."""
-
-    unit_id: UUID
-    attempt_id: UUID
-    principal_id: UUID
-    incarnation: RuntimeIncarnation
-    container_id: str
-    name: str
-    recovery_binding: RuntimeRecoveryBinding | None = None
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.unit_id) is not UUID
-            or type(self.attempt_id) is not UUID
-            or type(self.principal_id) is not UUID
-            or type(self.incarnation) is not RuntimeIncarnation
-            or type(self.container_id) is not str
-            or _CONTAINER_ID_PATTERN.fullmatch(self.container_id) is None
-            or self.name != _container_name(self.unit_id)
-        ):
-            raise ValueError("Podman runtime unit identity is invalid")
-
-
-type Command = Callable[..., tuple[int, bytes]]
-
-
-class SystemdCgroupRemover:
-    """Stop one exact rootless systemd slice through a bounded local command."""
-
-    def __init__(self, command: Command) -> None:
-        if not callable(command):
-            raise ValueError("Systemd cgroup remover configuration is invalid")
-        self._command = command
-
-    def __call__(self, path: Path) -> None:
-        if (
-            not isinstance(path, Path)
-            or not path.is_absolute()
-            or re.fullmatch(r"markweavet70[0-9a-f]{32}\.slice", path.name) is None
-        ):
-            raise PodmanRuntimeError("Podman cgroup cleanup identity is invalid")
-        self._command(("--user", "stop", path.name), max_output_bytes=0)
-        _, output = self._command(
-            (
-                "--user",
-                "show",
-                path.name,
-                "--property=LoadState",
-                "--property=ActiveState",
-                "--property=SubState",
-                "--property=ControlGroup",
-            ),
-            max_output_bytes=_SYSTEMD_PROPERTIES_MAX_BYTES,
-        )
-        properties = _parse_systemd_properties(output)
-        if properties != {
-            "ActiveState": "inactive",
-            "ControlGroup": "",
-            "LoadState": "loaded",
-            "SubState": "dead",
-        }:
-            raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
-        try:
-            path.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            return
-        except OSError as error:
-            raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
-        if _parse_cgroup_events(_read_cgroup_events(path)).get("populated") != 0:
-            raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
-        try:
-            path.rmdir()
-            path.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            return
-        except OSError as error:
-            raise PodmanRuntimeError("Podman cgroup cleanup failed") from error
-        raise PodmanRuntimeError("Podman cgroup cleanup is unconfirmed")
 
 
 class PodmanIsolationRuntime:
@@ -654,63 +558,9 @@ class PodmanIsolationRuntime:
     def _create_arguments(
         self, name: str, labels: Mapping[str, str], policy: BrokerPolicy
     ) -> tuple[str, ...]:
-        seconds = math.ceil(policy.limits.wall_time_millis / 1000)
-        arguments = [
-            "create",
-            "--pull=never",
-            "--name",
-            name,
-            "--hostname",
-            name,
-            "--network=none",
-            "--read-only",
-            "--read-only-tmpfs=false",
-            "--cap-drop=all",
-            "--security-opt=no-new-privileges",
-            "--user",
-            f"{self._run_as_uid}:0",
-            "--cgroups=enabled",
-            "--cgroup-parent",
-            _cgroup_parent(name),
-            "--ipc=none",
-            "--pid=private",
-            "--uts=private",
-            "--restart=no",
-            "--no-healthcheck",
-            "--log-driver=none",
-            "--pids-limit",
-            str(policy.limits.pid_limit),
-            "--memory",
-            f"{policy.limits.memory_bytes}b",
-            "--memory-swap",
-            f"{policy.limits.memory_bytes}b",
-            "--cpu-period",
-            str(policy.limits.cpu_period_micros),
-            "--cpu-quota",
-            str(policy.limits.cpu_quota_micros),
-            "--timeout",
-            str(seconds),
-            "--stop-timeout",
-            "0",
-            "--unsetenv-all",
-            "--mount",
-            "type=tmpfs,destination=/work,tmpfs-mode=0770,"
-            f"tmpfs-size={policy.limits.workspace_bytes}",
-            "--workdir=/work",
-            "--entrypoint",
-            json.dumps(_FIXED_ENTRYPOINT, separators=(",", ":")),
-        ]
-        environment_values = (
-            *_FIXED_ENVIRONMENT,
-            f"MARKWEAVE_REVERSE_MAX_INPUT_BYTES={policy.channel_limits.max_input_bytes}",
-            f"MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES={policy.channel_limits.max_output_bytes}",
+        return build_create_arguments(
+            self._image_repository, self._run_as_uid, name, labels, policy
         )
-        for environment in environment_values:
-            arguments.extend(("--env", environment))
-        for key in sorted(labels):
-            arguments.extend(("--label", f"{key}={labels[key]}"))
-        arguments.append(f"{self._image_repository}@{policy.image_digest}")
-        return tuple(arguments)
 
     def _cgroup_path(self, unit_id: UUID) -> Path:
         parent = _cgroup_parent(_container_name(unit_id))
@@ -969,77 +819,9 @@ class PodmanIsolationRuntime:
     def _verify_realized_specification(
         self, inspected: Mapping[str, Any], policy: BrokerPolicy
     ) -> None:
-        config = _mapping(inspected, "Config")
-        host = _mapping(inspected, "HostConfig")
-        expected_config: Mapping[str, object] = {
-            "Cmd": None,
-            "StopTimeout": 0,
-            "Timeout": math.ceil(policy.limits.wall_time_millis / 1000),
-            "User": f"{self._run_as_uid}:0",
-            "WorkingDir": "/work",
-        }
-        expected_host: Mapping[str, object] = {
-            "AutoRemove": False,
-            "Binds": [],
-            "CapAdd": [],
-            "CapDrop": list(self._runtime_capabilities),
-            "CgroupParent": _cgroup_parent(_string(inspected, "Name").lstrip("/")),
-            "Cgroups": "default",
-            "CpuPeriod": policy.limits.cpu_period_micros,
-            "CpuQuota": policy.limits.cpu_quota_micros,
-            "Devices": [],
-            "Dns": [],
-            "DnsOptions": [],
-            "DnsSearch": [],
-            "ExtraHosts": [],
-            "GroupAdd": [],
-            "IpcMode": "none",
-            "LogConfig": {
-                "Config": None,
-                "Path": "",
-                "Size": "0B",
-                "Tag": "",
-                "Type": "none",
-            },
-            "Memory": policy.limits.memory_bytes,
-            "MemorySwap": policy.limits.memory_bytes,
-            "NetworkMode": "none",
-            "PidMode": "private",
-            "PidsLimit": policy.limits.pid_limit,
-            "PortBindings": {},
-            "Privileged": False,
-            "PublishAllPorts": False,
-            "ReadonlyRootfs": True,
-            "RestartPolicy": {"MaximumRetryCount": 0, "Name": "no"},
-            "SecurityOpt": ["no-new-privileges"],
-            "Tmpfs": {
-                "/work": (
-                    f"mode=0770,size={policy.limits.workspace_bytes},"
-                    "rw,rprivate,nosuid,nodev,tmpcopyup"
-                )
-            },
-            "UTSMode": "private",
-            "VolumesFrom": None,
-        }
-        if (
-            type(config.get("Env")) is not list
-            or sorted(config["Env"])
-            != sorted(
-                (
-                    *_FIXED_ENVIRONMENT,
-                    "MARKWEAVE_REVERSE_MAX_INPUT_BYTES="
-                    f"{policy.channel_limits.max_input_bytes}",
-                    "MARKWEAVE_REVERSE_MAX_OUTPUT_BYTES="
-                    f"{policy.channel_limits.max_output_bytes}",
-                    f"HOSTNAME={_string(inspected, 'Name').lstrip('/')}",
-                )
-            )
-            or not _matches_entrypoint(config.get("Entrypoint"))
-            or any(config.get(key) != value for key, value in expected_config.items())
-            or any(host.get(key) != value for key, value in expected_host.items())
-            or inspected.get("Mounts") != []
-        ):
-            raise PodmanRuntimeError("Podman realized specification is invalid")
+        verify_realized_specification(
+            self._run_as_uid, self._runtime_capabilities, inspected, policy
+        )
 
     def _verify_incarnation(
         self, inspected: Mapping[str, Any], expected: PodmanRuntimeUnit
@@ -1100,307 +882,3 @@ class PodmanIsolationRuntime:
                 _container_name(unit_id),
             )
         raise PodmanRuntimeError("Podman runtime identity is invalid")
-
-
-def _container_name(unit_id: UUID) -> str:
-    return f"{_NAME_PREFIX}{unit_id.hex}"
-
-
-def _cgroup_parent(container_name: str) -> str:
-    if not container_name.startswith(_NAME_PREFIX):
-        raise PodmanRuntimeError("Podman cgroup identity is invalid")
-    return f"markweavet70{container_name.removeprefix(_NAME_PREFIX)}.slice"
-
-
-def _read_cgroup_events(path: Path) -> bytes:
-    try:
-        descriptor = os.open(
-            path / "cgroup.events", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
-        )
-        try:
-            value = os.read(descriptor, _CGROUP_EVENTS_MAX_BYTES + 1)
-        finally:
-            os.close(descriptor)
-    except OSError as error:
-        raise PodmanRuntimeError("Podman cgroup evidence is unavailable") from error
-    if len(value) > _CGROUP_EVENTS_MAX_BYTES:
-        raise PodmanRuntimeError("Podman cgroup evidence exceeded its bound")
-    return value
-
-
-def _create_cgroup(path: Path) -> None:
-    with suppress(FileExistsError):
-        path.mkdir(mode=_OWNER_ONLY_MODE)
-    try:
-        metadata = path.stat(follow_symlinks=False)
-        (path / "cgroup.events").stat(follow_symlinks=False)
-    except OSError as error:
-        raise PodmanRuntimeError("Podman cgroup preparation failed") from error
-    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
-        raise PodmanRuntimeError("Podman cgroup preparation failed")
-
-
-def _validate_cgroup_root(path: Path) -> None:
-    expected = Path(
-        f"/sys/fs/cgroup/user.slice/user-{os.geteuid()}.slice/"
-        f"user@{os.geteuid()}.service"
-    )
-    try:
-        resolved = path.resolve(strict=True)
-        metadata = path.stat(follow_symlinks=False)
-        (path / "cgroup.controllers").stat(follow_symlinks=False)
-        (path / "cgroup.events").stat(follow_symlinks=False)
-    except OSError as error:
-        raise PodmanRuntimeError("Podman cgroup root is invalid") from error
-    if (
-        path != expected
-        or resolved != expected
-        or not stat.S_ISDIR(metadata.st_mode)
-        or metadata.st_uid != os.geteuid()
-    ):
-        raise PodmanRuntimeError("Podman cgroup root is invalid")
-
-
-def _read_process_cgroup(pid: int) -> bytes:
-    if type(pid) is not int or pid <= 0:
-        raise PodmanRuntimeError("Podman cgroup binding is invalid")
-    path = Path("/proc") / str(pid) / "cgroup"
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-        try:
-            value = os.read(descriptor, _CGROUP_EVENTS_MAX_BYTES + 1)
-        finally:
-            os.close(descriptor)
-    except OSError as error:
-        raise PodmanRuntimeError("Podman cgroup binding is unavailable") from error
-    if len(value) > _CGROUP_EVENTS_MAX_BYTES:
-        raise PodmanRuntimeError("Podman cgroup binding exceeded its bound")
-    return value
-
-
-def _validate_hooks_directory(path: Path) -> None:
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-        try:
-            metadata = os.fstat(descriptor)
-            entries = os.listdir(descriptor)
-        finally:
-            os.close(descriptor)
-    except OSError as error:
-        raise PodmanRuntimeError("Podman hooks directory is invalid") from error
-    if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or metadata.st_uid != os.geteuid()
-        or stat.S_IMODE(metadata.st_mode) != _OWNER_ONLY_MODE
-        or entries
-    ):
-        raise PodmanRuntimeError("Podman hooks directory is invalid")
-
-
-def _parse_cgroup_events(value: bytes) -> dict[str, int]:
-    if type(value) is not bytes or not value or len(value) > _CGROUP_EVENTS_MAX_BYTES:
-        raise PodmanRuntimeError("Podman cgroup evidence is invalid")
-    parsed: dict[str, int] = {}
-    try:
-        text = value.decode("ascii")
-        for line in text.splitlines():
-            key, raw = line.split(" ", 1)
-            if key not in {"frozen", "populated"} or key in parsed:
-                raise ValueError
-            parsed[key] = int(raw)
-    except (UnicodeDecodeError, ValueError) as error:
-        raise PodmanRuntimeError("Podman cgroup evidence is invalid") from error
-    if set(parsed) != {"frozen", "populated"} or any(
-        item not in {0, 1} for item in parsed.values()
-    ):
-        raise PodmanRuntimeError("Podman cgroup evidence is invalid")
-    return parsed
-
-
-def _parse_systemd_properties(value: bytes) -> dict[str, str]:
-    if (
-        type(value) is not bytes
-        or not value
-        or len(value) > _SYSTEMD_PROPERTIES_MAX_BYTES
-    ):
-        raise PodmanRuntimeError("Podman systemd evidence is invalid")
-    parsed: dict[str, str] = {}
-    allowed = {"ActiveState", "ControlGroup", "LoadState", "SubState"}
-    try:
-        text = value.decode("ascii")
-        if not text.endswith("\n"):
-            raise ValueError
-        for line in text.splitlines():
-            key, raw = line.split("=", 1)
-            if key not in allowed or key in parsed:
-                raise ValueError
-            parsed[key] = raw
-    except (UnicodeDecodeError, ValueError) as error:
-        raise PodmanRuntimeError("Podman systemd evidence is invalid") from error
-    if set(parsed) != allowed:
-        raise PodmanRuntimeError("Podman systemd evidence is invalid")
-    return parsed
-
-
-def _labels(
-    unit: ManagedUnit,
-    policy: BrokerPolicy,
-    image_repository: str,
-    run_as_uid: int,
-) -> dict[str, str]:
-    seconds = math.ceil(policy.limits.wall_time_millis / 1000)
-    return {
-        _ATTEMPT_LABEL: str(unit.attempt_id),
-        _DEADLINE_LABEL: str(seconds),
-        _CPU_PERIOD_LABEL: str(policy.limits.cpu_period_micros),
-        _CPU_QUOTA_LABEL: str(policy.limits.cpu_quota_micros),
-        _IMAGE_DIGEST_LABEL: policy.image_digest,
-        _IMAGE_REPOSITORY_LABEL: image_repository,
-        _MANAGED_LABEL: "1",
-        _MEMORY_LABEL: str(policy.limits.memory_bytes),
-        _PID_LIMIT_LABEL: str(policy.limits.pid_limit),
-        _POLICY_LABEL: unit.policy_revision,
-        _PRINCIPAL_LABEL: str(unit.principal.principal_id),
-        _SPECIFICATION_LABEL: unit.policy_specification.value,
-        _UNIT_LABEL: str(unit.unit_id),
-        _RUN_AS_UID_LABEL: str(run_as_uid),
-        _WORKSPACE_LABEL: str(policy.limits.workspace_bytes),
-        _WALL_TIME_LABEL: str(policy.limits.wall_time_millis),
-        _MAX_INPUT_LABEL: str(policy.channel_limits.max_input_bytes),
-        _MAX_OUTPUT_LABEL: str(policy.channel_limits.max_output_bytes),
-    }
-
-
-def _policy_from_labels(labels: Mapping[str, Any]) -> BrokerPolicy:
-    try:
-        return BrokerPolicy(
-            _label(labels, _POLICY_LABEL),
-            _label(labels, _IMAGE_DIGEST_LABEL),
-            RuntimeLimits(
-                _positive_integer_label(labels, _CPU_QUOTA_LABEL),
-                _positive_integer_label(labels, _CPU_PERIOD_LABEL),
-                _positive_integer_label(labels, _MEMORY_LABEL),
-                _positive_integer_label(labels, _PID_LIMIT_LABEL),
-                _positive_integer_label(labels, _WORKSPACE_LABEL),
-                _positive_integer_label(labels, _WALL_TIME_LABEL),
-            ),
-            RuntimeChannelLimits(
-                _positive_integer_label(labels, _MAX_INPUT_LABEL),
-                _positive_integer_label(labels, _MAX_OUTPUT_LABEL),
-            ),
-        )
-    except ValueError as error:
-        raise PodmanRuntimeError("Podman policy labels are invalid") from error
-
-
-def _json(output: bytes) -> Any:
-    try:
-        return json.loads(output.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PodmanRuntimeError("Podman JSON evidence is invalid") from error
-
-
-def _matches_create_command(value: Any, arguments: tuple[str, ...]) -> bool:
-    return (
-        type(value) is list
-        and len(value) == len(arguments) + 1
-        and all(type(item) is str for item in value)
-        and Path(value[0]).name == "podman"
-        and value[1:] == list(arguments)
-    )
-
-
-def _matches_entrypoint(value: Any) -> bool:
-    """Accept the exact Podman 4.9 string or 5.x argument-vector projection."""
-
-    return value == list(_FIXED_ENTRYPOINT) or (
-        type(value) is str and value == " ".join(_FIXED_ENTRYPOINT)
-    )
-
-
-def _mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    nested = value.get(key)
-    if not isinstance(nested, Mapping):
-        raise PodmanRuntimeError("Podman evidence field is invalid")
-    return nested
-
-
-def _create_response_identity(output: bytes) -> str | None:
-    """Return only a canonical ID emitted by a successful local create."""
-
-    raw = (
-        output[:-1]
-        if len(output) == _CONTAINER_ID_LENGTH + 1 and output.endswith(b"\n")
-        else output
-    )
-    if len(raw) != _CONTAINER_ID_LENGTH:
-        return None
-    try:
-        identity = raw.decode("ascii", errors="strict")
-    except UnicodeDecodeError:
-        return None
-    if _CONTAINER_ID_PATTERN.fullmatch(identity) is None:
-        return None
-    return identity
-
-
-def _matches_process_cgroup(evidence: bytes, expected: str) -> bool:
-    """Match the two exact cgroup-v2 placements supported by crun systemd."""
-
-    return evidence in {
-        f"0::{expected}\n".encode(),
-        f"0::{expected}/container\n".encode(),
-    }
-
-
-def _string(value: Mapping[str, Any], key: str) -> str:
-    item = value.get(key)
-    if type(item) is not str:
-        raise PodmanRuntimeError("Podman evidence field is invalid")
-    return item
-
-
-def _boolean(value: Mapping[str, Any], key: str) -> bool:
-    item = value.get(key)
-    if type(item) is not bool:
-        raise PodmanRuntimeError("Podman evidence field is invalid")
-    return item
-
-
-def _integer(value: Mapping[str, Any], key: str) -> int:
-    item = value.get(key)
-    if type(item) is not int:
-        raise PodmanRuntimeError("Podman evidence field is invalid")
-    return item
-
-
-def _timestamp(value: Mapping[str, Any], key: str) -> str:
-    item = _string(value, key)
-    if _TIMESTAMP_PATTERN.fullmatch(item) is None:
-        raise PodmanRuntimeError("Podman timestamp evidence is invalid")
-    return item
-
-
-def _label(labels: Mapping[str, Any], key: str) -> str:
-    value = labels.get(key)
-    if type(value) is not str or len(value) > _MAX_LABEL_BYTES:
-        raise PodmanRuntimeError("Podman label evidence is invalid")
-    return value
-
-
-def _positive_integer_label(labels: Mapping[str, Any], key: str) -> int:
-    value = _label(labels, key)
-    if not value.isascii() or not value.isdigit() or int(value) <= 0:
-        raise PodmanRuntimeError("Podman numeric label evidence is invalid")
-    return int(value)
-
-
-def _evidence(kind: str, fields: Mapping[str, object]) -> EvidenceDigest:
-    payload = json.dumps(
-        {"fields": fields, "kind": kind, "schema_version": 1},
-        ensure_ascii=True,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
-    return EvidenceDigest(f"sha256:{hashlib.sha256(payload).hexdigest()}")
