@@ -26,12 +26,12 @@ keep separate source selections. The default 0.6.2 Compose quickstart does not c
 optional reverse service; see the [reverse configuration](../docs/configuration.md) before enabling
 it. File-type validation occurs only when submitting a document in Revert.
 
-The `md 2 docx` (`/convert`) and `x 2 md` (`/revert`, Experimental) tabs are independent workflows: neither transfers its selected file, submission,
+The `2docx` (`/convert`) and `2md` (`/revert`, Experimental) tabs are independent workflows: neither transfers its selected file, submission,
 job status, or errors to the other. Navigating between them never submits a file. Each upload goes
 only to its own API endpoint, and late responses from a departed workspace cannot update the
 current one.
 
-The `template docx` tab continues to open `/templates`; its permissions are unchanged.
+The `templates` tab continues to open `/templates`; its permissions are unchanged.
 
 Use the reviewed Node.js 24.19.0, Corepack 0.36.0, and pnpm 11.25.0 workspace
 toolchain from the repository root:

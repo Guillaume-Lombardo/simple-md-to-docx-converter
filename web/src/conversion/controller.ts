@@ -1,10 +1,13 @@
 import type {
+  PresentationDialect,
+  PresentationPlanResponse,
   ConversionOptionsResponse,
   ConversionResponse,
   JobOutput,
   TemplateResponse,
 } from "../api/generated/types.gen";
 import {
+  vPreviewPresentationApiV1PresentationPlanPostResponse,
   vCancelConversionApiV1ConversionsJobIdDeleteResponse,
   vCreateConversionApiV1ConversionsPostResponse,
   vGetConversionApiV1ConversionsJobIdGetResponse,
@@ -34,6 +37,10 @@ export type TemplateSelection = {
 
 export type ConversionState = {
   phase: "loading" | "ready" | "unavailable";
+  dialect: PresentationDialect;
+  slideLevel: number;
+  plan?: PresentationPlanResponse;
+  planning: boolean;
   maximumBytes?: number;
   source?: File;
   output: JobOutput;
@@ -56,7 +63,9 @@ type Scheduler = (
 ) => ReturnType<typeof setTimeout>;
 
 export class ConversionController {
-  private state: ConversionState = initialState();
+  private state: ConversionState;
+  private planGeneration = 0;
+  private planRequest?: AbortController;
   private readonly listeners = new Set<Listener>();
   private loadGeneration = 0;
   private searchGeneration = 0;
@@ -80,7 +89,10 @@ export class ConversionController {
     private readonly cancelSchedule: (
       timer: ReturnType<typeof setTimeout>,
     ) => void = clearTimeout,
-  ) {}
+    readonly presentation = false,
+  ) {
+    this.state = initialState(presentation);
+  }
 
   snapshot = (): ConversionState => this.state;
 
@@ -94,11 +106,13 @@ export class ConversionController {
     const request = new AbortController();
     this.loadRequest = request;
     const generation = ++this.loadGeneration;
-    this.publish({ ...initialState(), phase: "loading" });
+    this.publish({ ...initialState(this.presentation), phase: "loading" });
     try {
       const [options, recent] = await Promise.all([
         this.api.json(
-          "/api/v1/conversion-options",
+          this.presentation
+            ? "/api/v1/conversion-options?template_kind=pptx"
+            : "/api/v1/conversion-options",
           vGetConversionOptionsApiV1ConversionOptionsGetResponse,
           { signal: request.signal },
         ),
@@ -110,16 +124,23 @@ export class ConversionController {
       ]);
       if (!this.currentLoad(generation)) return;
       this.publish({
-        ...initialState(),
+        ...initialState(this.presentation),
         phase: "ready",
         maximumBytes: options.conversion_upload_max_bytes,
         selection: selectionFromOptions(options),
-        recent: recent.items,
+        recent: recent.items.filter(
+          (job) =>
+            job.state !== "expired" &&
+            job.output.startsWith("pptx") === this.presentation,
+        ),
       });
     } catch (error) {
       if (!this.currentLoad(generation) || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
-      this.publish({ ...initialState(), phase: "unavailable" });
+      this.publish({
+        ...initialState(this.presentation),
+        phase: "unavailable",
+      });
     }
   }
 
@@ -206,6 +227,7 @@ export class ConversionController {
     this.publish({ ...this.state, searching: true, error: undefined });
     const parameters = new URLSearchParams({
       status: "active",
+      kind: this.presentation ? "pptx" : "docx",
       offset: "0",
       limit: "20",
     });
@@ -232,6 +254,63 @@ export class ConversionController {
     }
   }
 
+  setPresentationOptions(
+    dialect: PresentationDialect,
+    slideLevel: number,
+  ): void {
+    this.invalidateSubmission();
+    this.publish({
+      ...this.state,
+      dialect,
+      slideLevel,
+      submitting: false,
+      error: undefined,
+    });
+  }
+
+  async preview(): Promise<void> {
+    const invalid = validateSource(this.state.source, this.state.maximumBytes);
+    if (invalid) {
+      this.publish({ ...this.state, error: invalid });
+      return;
+    }
+    this.planRequest?.abort();
+    const request = new AbortController();
+    this.planRequest = request;
+    const generation = ++this.planGeneration;
+    const form = new FormData();
+    form.append("source", this.state.source!);
+    form.append("dialect", this.state.dialect);
+    form.append("slide_level", String(this.state.slideLevel));
+    this.publish({
+      ...this.state,
+      planning: true,
+      plan: undefined,
+      error: undefined,
+    });
+    try {
+      const plan = await this.api.multipart(
+        "/api/v1/presentation-plan",
+        form,
+        vPreviewPresentationApiV1PresentationPlanPostResponse,
+        { csrf: true, signal: request.signal },
+      );
+      if (generation !== this.planGeneration) return;
+      this.publish({ ...this.state, planning: false, plan });
+    } catch (error) {
+      if (generation !== this.planGeneration || isAbort(error)) return;
+      if (this.authoritativeExpiry(error)) return;
+      this.publish({
+        ...this.state,
+        planning: false,
+        error: errorMessage(
+          error,
+          "The presentation outline could not be prepared.",
+        ),
+      });
+    }
+  }
+
   async submit(): Promise<void> {
     if (this.state.phase !== "ready" || this.state.submitting) return;
     const invalid = validateSource(this.state.source, this.state.maximumBytes);
@@ -247,6 +326,10 @@ export class ConversionController {
     const form = new FormData();
     form.append("source", this.state.source!);
     form.append("output", this.state.output);
+    if (this.presentation) {
+      form.append("presentation_dialect", this.state.dialect);
+      form.append("slide_level", String(this.state.slideLevel));
+    }
     if (this.state.selection) {
       form.append("template_id", this.state.selection.id);
       form.append("template_version_id", this.state.selection.versionId);
@@ -374,6 +457,8 @@ export class ConversionController {
     this.submissionGeneration += 1;
     this.jobGeneration += 1;
     this.loadRequest?.abort();
+    this.planGeneration += 1;
+    this.planRequest?.abort();
     this.searchRequest?.abort();
     this.submissionRequest?.abort();
     this.jobRequest?.abort();
@@ -460,6 +545,9 @@ export class ConversionController {
   }
 
   private invalidateSubmission(): void {
+    this.planGeneration += 1;
+    this.planRequest?.abort();
+    this.state = { ...this.state, plan: undefined, planning: false };
     this.submissionGeneration += 1;
     this.submissionRequest?.abort();
     this.idempotencyKey = undefined;
@@ -513,16 +601,20 @@ export function statusPresentation(job: ConversionResponse): string {
     validating: "Validating the package",
     rendering: "Rendering diagrams and images",
     docx: "Creating the DOCX file",
+    pptx: "Creating the PowerPoint file",
     pdf: "Creating the PDF file",
     publishing: "Publishing the result",
   };
   return `${steps[job.step] ?? "Processing"} (${job.progress}%).`;
 }
 
-function initialState(): ConversionState {
+function initialState(presentation = false): ConversionState {
   return {
     phase: "loading",
-    output: "docx",
+    output: presentation ? "pptx" : "docx",
+    dialect: "auto",
+    slideLevel: 2,
+    planning: false,
     templates: [],
     searching: false,
     recent: [],
@@ -570,10 +662,9 @@ function upsertRecent(
   recent: ConversionResponse[],
   job: ConversionResponse,
 ): ConversionResponse[] {
-  return [job, ...recent.filter((candidate) => candidate.id !== job.id)].slice(
-    0,
-    10,
-  );
+  return [job, ...recent.filter((candidate) => candidate.id !== job.id)]
+    .filter((candidate) => candidate.state !== "expired")
+    .slice(0, 10);
 }
 
 function errorMessage(error: unknown, fallback = SAFE_FAILURE): string {

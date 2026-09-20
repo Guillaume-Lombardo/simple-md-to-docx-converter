@@ -1,7 +1,9 @@
+<p align="center"><img src="web/public/markweave-logo.png" alt="Markweave" width="320"></p>
+
 # Markweave: Markdown to DOCX and PDF
 
-Markweave turns a Markdown file into DOCX, PDF, or both from a small browser interface. It keeps
-your Word templates and completed jobs on local persistent storage. It scans every upload with
+Markweave turns a Markdown file into DOCX, PDF, or an editable PowerPoint presentation from a small browser interface. It keeps
+your Word and PowerPoint templates and completed jobs on local persistent storage. It scans every upload with
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
 The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.6.4`.
@@ -25,7 +27,7 @@ scripts/quickstart-simple.sh password
 ```
 
 Open <http://localhost:8080> and sign in as `admin` with the displayed password.
-In **md 2 docx**, upload `examples/quickstart-source.md`, keep **Pandoc default**,
+In **2docx**, upload `examples/quickstart-source.md`, keep **Pandoc default**,
 choose DOCX, PDF, or both, and start the conversion. Download the result when ready.
 The first startup can take several minutes while ClamAV loads its signatures.
 
@@ -48,6 +50,7 @@ and the explicit trusted-upstream and insecure SSH-tunnel modes with their restr
 
 - [Provision users from a startup CSV and require password renewal](docs/authentication.md#startup-csv-provisioning)
 - [Conversion interface](docs/conversion-ui.md)
+- [PowerPoint and Marp workflow](docs/powerpoint.md)
 - [Template administration](docs/administration-ui.md)
 - [Supported Markdown and DOCX behavior](docs/pandoc-docx.md)
 - [Word templates and fonts](docs/word-templates-fonts.md)

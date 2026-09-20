@@ -11,6 +11,7 @@ class ConversionErrorCode(StrEnum):
     PANDOC_UNAVAILABLE = "pandoc_unavailable"
     PANDOC_TIMEOUT = "pandoc_timeout"
     PANDOC_FAILURE = "pandoc_failure"
+    INVALID_PPTX = "invalid_pptx"
     INVALID_DOCX = "invalid_docx"
     MERMAID_UNAVAILABLE = "mermaid_unavailable"
     MERMAID_TIMEOUT = "mermaid_timeout"

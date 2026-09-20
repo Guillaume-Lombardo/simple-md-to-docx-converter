@@ -11,6 +11,13 @@ from uuid import UUID
 SHA256_CHARACTERS = 64
 
 
+class TemplateKind(StrEnum):
+    """Immutable reference document family."""
+
+    DOCX = "docx"
+    PPTX = "pptx"
+
+
 class TemplateStatus(StrEnum):
     """Visibility lifecycle available before T15 adds version mutations."""
 
@@ -50,6 +57,7 @@ class TemplateIdentity:
     status: TemplateStatus
     revision: int = 1
     current_version_id: UUID | None = None
+    kind: TemplateKind = TemplateKind.DOCX
 
     def __post_init__(self) -> None:
         if not self.normalized_name:
@@ -74,6 +82,7 @@ class TemplateCreate:
     name: str
     description: str
     status: TemplateStatus = TemplateStatus.ACTIVE
+    kind: TemplateKind = TemplateKind.DOCX
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,7 @@ class TemplateSearch:
     status: TemplateStatus | None = None
     offset: int = 0
     limit: int = 20
+    kind: TemplateKind | None = None
 
     def __post_init__(self) -> None:
         if self.offset < 0:

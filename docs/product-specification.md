@@ -33,6 +33,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
+| Markdown to PPTX | Pandoc with editable slides, a documented Marp subset, and optional immutable PowerPoint reference templates; omitted templates use Pandoc defaults |
 | Mermaid | Local Mermaid CLI and Chromium |
 | DOCX to PDF | LibreOffice headless |
 | Documents to Markdown | Local `firecrawl-anydoc==0.2.4` with no hosted fallback; the exact x86-64 ABI3 wheel, source commit, format matrix, and limitations are pinned by T69 |
@@ -86,6 +87,28 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 - Return the component versions and explicit template mode needed to reproduce a conversion; a
   versioned-template job also returns its immutable template identifiers.
 
+### 3.1.1 Editable PowerPoint presentations
+
+T82 adds the independent `/presentations` (`2pptx`) workspace. It accepts bounded Markdown or
+ZIP assets, uses explicit slide breaks or a configurable heading level, and previews the outline
+and compatibility warnings before submission. No content is summarized or silently truncated.
+A documented Marp subset maps to editable Pandoc slides; arbitrary CSS/HTML, rasterized Marp
+export, executable Quarto, and OCR are excluded. Speaker notes, columns, tables, local images and
+Mermaid use the existing bounded document pipeline. Pandoc runs with no `--reference-doc` when
+no template is selected; an empty template catalog never prevents presentation generation.
+
+The existing durable queue freezes presentation options and the optional template version, binds
+them to idempotency and preserves cancellation, recovery and both storage profiles. PPTX templates
+have a distinct immutable type, layout validation, existing ownership/versioning, and typed search.
+Outputs are PPTX or a portable ZIP containing the presentation, original Markdown/assets and
+generation settings. Source recovery is explicitly separate from extracting an edited PPTX.
+
+T83 separately adds opt-in slide-oriented Markdown/Marp output with notes/image options.
+Existing anydoc extraction remains the default. Where its model loses slide boundaries, T83 may
+use a narrowly bounded non-executing OOXML presentation reader inside the same isolated reverse
+attempt; it must retain archive/XML/image limits, no network, ownership and lifecycle guarantees.
+Embedding source in the PPTX itself and full visual round-trip fidelity remain excluded.
+
 ### 3.2 Word templates
 
 - Derive an immutable owner from the authenticated identity.
@@ -99,15 +122,18 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 
 ### 3.3 Web interface
 
+The primary navigation displays the frontend build's Markweave release version as a
+small subscript beside the product name, derived from `pyproject.toml`.
+
 Provide a login page and three main browser workflows. The target implementation is the Next.js,
 TypeScript, and Tailwind CSS application under `web/`; the current server-rendered pages remain the
 production implementation until T64 completes parity, rootless E2E verification, and cutover:
 
-- **md 2 docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
+- **2docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
   choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
   display accessible English errors.
-- **template docx:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
-- **x 2 md (Experimental):** upload or drag-and-drop a supported office document, create a local
+- **templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
+- **2md (Experimental):** upload or drag-and-drop a supported office document, create a local
   document-to-Markdown job, poll with progressive backoff, cancel, inspect status, download the
   Markdown result or asset package, and display accessible English errors. The navigation label has
   a visible stamp-style `Experimental` treatment whose meaning is also available to assistive
@@ -767,6 +793,8 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T78 | Make node asset permission tests independent of checkout modes | T05, T20 |
 | T79 | Decompose large reverse-conversion modules without changing contracts | T70, T71 |
 | T80 | Clean maintenance assets and provide automatic local distributed-test services | T22, T23, T67, T76 |
+| T81 | Shorten workflow tab labels to `2docx`, `2md`, and `templates` | T76 |
+| T82 | Add editable PowerPoint generation, typed templates, portable sources and slide-oriented reverse conversion | T81, T07, T08, T09, T10, T12, T13, T15, T16, T17, T69, T70, T71, T72 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -861,3 +889,11 @@ the ticket before touching any path owned by another active ticket.
   separate product, privacy, security, cost, egress, retention, and operations decision.
 
 Do not silently resolve deferred parameters in unrelated implementation work.
+
+
+### T83 follow-up scope
+
+T82 delivers editable PowerPoint generation and original-source packages in 0.7.0.
+T83 retains the unfinished slide-oriented Markdown/Marp extraction options from
+edited PPTX files under the existing reverse isolation contract. It is not part of
+the 0.7.0 forward-workflow completion claim.

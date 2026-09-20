@@ -17,10 +17,12 @@ from xml.etree import ElementTree
 from defusedxml import ElementTree as DefusedElementTree
 from defusedxml.common import DefusedXmlException
 
+from markweave.presentations.templates import inspect_layouts, presentation_fonts
 from markweave.templates.errors import (
     TemplateValidationError,
     TemplateValidationErrorCode,
 )
+from markweave.templates.models import TemplateKind
 
 _CONTENT_TYPES = "[Content_Types].xml"
 _ROOT_RELS = "_rels/.rels"
@@ -167,6 +169,7 @@ APPROVED_FONT_POLICY = FontPolicy(
         ("Courier New", "Liberation Mono"),
         ("Consolas", "Liberation Mono"),
         ("Calibri", "Carlito"),
+        ("Calibri Light", "Carlito"),
         ("Aptos", "Carlito"),
         ("Aptos Display", "Carlito"),
         ("Cambria", "Caladea"),
@@ -258,6 +261,7 @@ class ValidatedTemplate:
     declared_fonts: tuple[str, ...]
     referenced_fonts: tuple[str, ...]
     resolved_fonts: tuple[tuple[str, str], ...]
+    kind: TemplateKind = TemplateKind.DOCX
 
 
 @dataclass(frozen=True)
@@ -465,7 +469,9 @@ def _internal_target(source: PurePosixPath, target: str) -> str:
 
 
 def _inspect_relationships(
-    roots: dict[str, ElementTree.Element], part_keys: set[str]
+    roots: dict[str, ElementTree.Element],
+    part_keys: set[str],
+    main_part: str = "word/document.xml",
 ) -> dict[str, frozenset[str]]:
     office_targets: list[str] = []
     identifiers_by_source: dict[str, frozenset[str]] = {}
@@ -513,7 +519,7 @@ def _inspect_relationships(
             if part_name == _ROOT_RELS and relationship_type == _OFFICE_DOCUMENT_REL:
                 office_targets.append(resolved)
         identifiers_by_source[source.as_posix()] = frozenset(identifiers)
-    if office_targets != ["word/document.xml"]:
+    if office_targets != [main_part]:
         _invalid_package()
     return identifiers_by_source
 
@@ -535,7 +541,9 @@ def _inspect_relationship_references(
                     _invalid_package()
 
 
-def _inspect_content_types(root: ElementTree.Element) -> None:
+def _inspect_content_types(
+    root: ElementTree.Element, main_part: str = "word/document.xml"
+) -> None:
     main_parts: list[str] = []
     for kind in ("Default", "Override"):
         for node in root.iter(f"{{{_TYPE_NS}}}{kind}"):
@@ -548,9 +556,14 @@ def _inspect_content_types(root: ElementTree.Element) -> None:
     for node in root.iter(f"{{{_TYPE_NS}}}Override"):
         part_name = node.attrib.get("PartName", "")
         content_type = node.attrib.get("ContentType", "")
-        if content_type == _DOCX_MAIN_TYPE:
+        main_type = (
+            _DOCX_MAIN_TYPE
+            if main_part == "word/document.xml"
+            else "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
+        )
+        if content_type == main_type:
             main_parts.append(part_name)
-    if main_parts != ["/word/document.xml"]:
+    if main_parts != [f"/{main_part}"]:
         _invalid_package()
 
 
@@ -630,6 +643,21 @@ def _referenced_fonts(
     )
 
 
+def _inspect_active_parts(payloads: dict[str, bytes]) -> None:
+    for part_name in payloads:
+        lowered_parts = set(PurePosixPath(part_name.casefold()).parts)
+        lowered_name = PurePosixPath(part_name).name.casefold()
+        if (
+            lowered_parts & _PROHIBITED_PART_SEGMENTS
+            or "vbaproject" in lowered_name
+            or lowered_name.endswith((".bin", ".xls", ".xlsx", ".docm", ".dotm"))
+        ):
+            _error(
+                TemplateValidationErrorCode.ACTIVE_CONTENT,
+                "Template contains active content.",
+            )
+
+
 def _validate_template(
     data: bytes,
     declaration: TemplateFontDeclaration,
@@ -659,21 +687,18 @@ def _validate_template(
             payloads[member.name], total_read = _read_member(
                 archive, member, limits, total_read
             )
-    required = {_CONTENT_TYPES, _ROOT_RELS, "word/document.xml", "word/styles.xml"}
+    kind = (
+        TemplateKind.PPTX if "ppt/presentation.xml" in payloads else TemplateKind.DOCX
+    )
+    main_part = (
+        "ppt/presentation.xml" if kind is TemplateKind.PPTX else "word/document.xml"
+    )
+    required = {_CONTENT_TYPES, _ROOT_RELS, main_part}
+    if kind is TemplateKind.DOCX:
+        required.add("word/styles.xml")
     if not required <= payloads.keys():
         _invalid_package()
-    for part_name in payloads:
-        lowered_parts = set(PurePosixPath(part_name.casefold()).parts)
-        lowered_name = PurePosixPath(part_name).name.casefold()
-        if (
-            lowered_parts & _PROHIBITED_PART_SEGMENTS
-            or "vbaproject" in lowered_name
-            or lowered_name.endswith((".bin", ".xls", ".xlsx", ".docm", ".dotm"))
-        ):
-            _error(
-                TemplateValidationErrorCode.ACTIVE_CONTENT,
-                "Word template contains active content.",
-            )
+    _inspect_active_parts(payloads)
     roots = {
         part_name: _parse_xml(payload, limits)
         for part_name, payload in payloads.items()
@@ -681,15 +706,24 @@ def _validate_template(
     }
     if roots[_CONTENT_TYPES].tag != f"{{{_TYPE_NS}}}Types":
         _invalid_package()
-    if roots["word/document.xml"].tag != f"{{{_WORD_NS}}}document":
+    expected_root = (
+        "{http://schemas.openxmlformats.org/presentationml/2006/main}presentation"
+        if kind is TemplateKind.PPTX
+        else f"{{{_WORD_NS}}}document"
+    )
+    if roots[main_part].tag != expected_root:
         _invalid_package()
-    _inspect_content_types(roots[_CONTENT_TYPES])
+    _inspect_content_types(roots[_CONTENT_TYPES], main_part)
     relationship_ids = _inspect_relationships(
-        roots, {_part_key(name) for name in payloads}
+        roots, {_part_key(name) for name in payloads}, main_part
     )
     _inspect_relationship_references(roots, relationship_ids)
-    _inspect_styles(roots["word/styles.xml"])
-    referenced, _ = _referenced_fonts(roots, policy)
+    if kind is TemplateKind.DOCX:
+        _inspect_styles(roots["word/styles.xml"])
+        referenced, _ = _referenced_fonts(roots, policy)
+    else:
+        inspect_layouts(roots)
+        referenced = presentation_fonts(roots)
     declared_keys = {_font_key(family) for family in declared}
     resolved_keys = {
         _font_key(resolved)
@@ -712,6 +746,7 @@ def _validate_template(
         declared,
         referenced,
         resolved,
+        kind,
     )
 
 

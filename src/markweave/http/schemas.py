@@ -8,10 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from markweave.auth.models import Role
 from markweave.jobs.models import JobOutput, TemplateMode
+from markweave.presentations.models import PresentationOptions
 from markweave.reversion_jobs.models import ReversionJobState, ReversionJobStep
 from markweave.reversions.formats import FormatFamily
 from markweave.reversions.models import ReverseOutputMode
-from markweave.templates.models import TemplateSelectionSource, TemplateStatus
+from markweave.templates.models import (
+    TemplateKind,
+    TemplateSelectionSource,
+    TemplateStatus,
+)
 
 
 class LoginRequest(BaseModel):
@@ -124,10 +129,12 @@ class ConversionResponse(BaseModel):
 
     id: UUID
     owner_id: UUID
+    source_filename: str | None = None
     template_mode: TemplateMode
     template_id: UUID | None
     template_version_id: UUID | None
     output: JobOutput
+    presentation_options: PresentationOptions | None = None
     component_versions: tuple[tuple[str, str], ...]
     correlation_id: str
     state: str
@@ -164,6 +171,7 @@ class TemplateResponse(BaseModel):
     revision: int
     current_version_id: UUID | None
     owner_username: str
+    kind: TemplateKind = TemplateKind.DOCX
 
 
 class ConversionOptionsResponse(BaseModel):

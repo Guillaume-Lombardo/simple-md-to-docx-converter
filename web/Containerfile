@@ -19,6 +19,8 @@ COPY web/app ./web/app
 COPY web/components ./web/components
 COPY web/public ./web/public
 COPY web/src ./web/src
+COPY pyproject.toml ./pyproject.toml
+COPY web/project-version.mjs ./web/project-version.mjs
 COPY web/next-env.d.ts web/next.config.ts web/postcss.config.mjs web/proxy.ts web/tsconfig.json ./web/
 RUN pnpm --filter @markweave/web run build \
     && pnpm --filter @markweave/web deploy --prod --legacy /opt/markweave-web-production
@@ -36,6 +38,8 @@ COPY --from=build --chown=1001:0 /opt/app-root/src/web/.next ./.next
 COPY --from=build --chown=1001:0 /opt/markweave-web-production/node_modules ./node_modules
 COPY --from=build --chown=1001:0 /opt/markweave-web-production/package.json ./package.json
 COPY --from=build --chown=1001:0 /opt/app-root/src/web/next.config.ts ./next.config.ts
+COPY --from=build --chown=1001:0 /opt/app-root/src/web/project-version.mjs ./project-version.mjs
+COPY --from=build --chown=1001:0 /opt/app-root/src/pyproject.toml /opt/pyproject.toml
 COPY --from=build --chown=1001:0 /opt/app-root/src/web/public ./public
 COPY --chown=1001:0 web/server.mjs ./server.mjs
 COPY --chown=1001:0 web/router.mjs ./router.mjs

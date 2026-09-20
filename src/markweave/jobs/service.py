@@ -17,6 +17,7 @@ from markweave.jobs.models import (
     JobSubmission,
 )
 from markweave.jobs.ports import JobRepository
+from markweave.presentations.models import PresentationOptions
 from markweave.storage import (
     ObjectKey,
     ObjectNotFoundError,
@@ -76,6 +77,12 @@ def _request_digest(
             repr(request.component_versions).encode("utf-8"),
         )
     )
+    if request.output.is_presentation:
+        fields.append(
+            (request.presentation_options or PresentationOptions())
+            .canonical_json()
+            .encode("utf-8")
+        )
     return _digest(b"\0".join(fields))
 
 
@@ -129,6 +136,7 @@ class JobService:
                 source_kind=request.source_kind,
                 source_sha256=source_sha256,
                 source_size=source_size,
+                presentation_options=request.presentation_options,
             )
         )
         if replayed:

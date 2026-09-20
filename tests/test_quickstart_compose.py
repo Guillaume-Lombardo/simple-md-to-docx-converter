@@ -228,8 +228,8 @@ def test_readme_uses_reproducible_template_and_safe_password_file() -> None:
     assert "scripts/quickstart.sh down" in readme
     assert "scripts/quickstart.sh password" in readme
     assert "http://localhost:8080" in readme
-    assert "**template docx**" in readme
-    assert "**md 2 docx**" in readme
+    assert "**templates**" in readme
+    assert "**2docx**" in readme
     assert "**Administration**" not in readme
     assert "examples/quickstart-template.docx.base64" in readme
     assert "examples/quickstart-source.md" in readme

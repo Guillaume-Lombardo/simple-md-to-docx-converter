@@ -116,7 +116,7 @@ export function ReversionWorkspace({
               }}
             >
               <label
-                className="grid gap-2 rounded-control border border-muted p-4 font-medium"
+                className="grid gap-2 rounded-control border border-muted p-4 font-medium focus-within:outline-2 focus-within:outline-accent"
                 onDragEnter={(event) => {
                   event.preventDefault();
                   setDragging(true);
@@ -140,14 +140,21 @@ export function ReversionWorkspace({
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     controller.setSource(event.target.files)
                   }
+                  className="sr-only"
                   type="file"
                 />
-                <span className="text-sm text-muted">
+                <span className="py-4 text-center text-lg font-semibold wrap-anywhere">
                   {dragging
                     ? "Drop the document now."
                     : state.source
                       ? `Selected ${state.source.name} (${state.source.size} bytes).`
                       : `Choose or drop exactly one supported document (maximum ${state.capabilities?.maximum_upload_bytes} bytes).`}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="w-fit cursor-pointer rounded-control border border-muted px-2 py-1 text-xs font-normal text-muted"
+                >
+                  {state.source ? "Change file" : "Choose file"}
                 </span>
               </label>
               <button
@@ -183,6 +190,7 @@ export function ReversionWorkspace({
               )}
               {state.active?.state === "succeeded" && (
                 <button
+                  className="primary-button w-full"
                   type="button"
                   onClick={() =>
                     void controller.download().then((download) => {
@@ -209,6 +217,7 @@ export function ReversionWorkspace({
                     <li key={job.id}>
                       <button
                         type="button"
+                        title={job.id}
                         onClick={() => void controller.openJob(job.id)}
                       >
                         {job.source_stem}

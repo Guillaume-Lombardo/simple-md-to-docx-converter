@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { readProjectVersion } from "../project-version.mjs";
 
 const pagePort = 31960;
 const probePort = 31961;
@@ -98,6 +100,19 @@ async function assertNonceHtml(
   assert.equal(first.headers.get("x-content-type-options"), "nosniff");
   return html;
 }
+
+test("production build carries the authoritative Markweave release", async () => {
+  const build = JSON.parse(
+    await readFile(
+      resolve(webRoot, ".next/required-server-files.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    build.config.env.NEXT_PUBLIC_MARKWEAVE_VERSION,
+    readProjectVersion(),
+  );
+});
 
 test("all dynamic and generated error HTML receives fresh nonce policies", async () => {
   await assertNonceHtml("/convert", 200);

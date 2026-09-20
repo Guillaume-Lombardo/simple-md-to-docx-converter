@@ -43,6 +43,7 @@ from markweave.jobs.models import (
     source_kind_for_filename,
 )
 from markweave.jobs.ports import CancellationProbe
+from markweave.presentations.processor import PresentationProcessor
 from markweave.storage import (
     ObjectKey,
     ObjectNotFoundError,
@@ -76,6 +77,7 @@ class ProductionTemplateAwareProcessor:
         archive_limits: ArchiveLimits,
         image_limits: ImageLimits,
         traceability: ProcessorTraceability,
+        presentations: PresentationProcessor | None = None,
     ) -> None:
         self._objects = objects
         self._docx = docx
@@ -83,6 +85,7 @@ class ProductionTemplateAwareProcessor:
         self._archive_limits = archive_limits
         self._image_limits = image_limits
         self._traceability = traceability
+        self._presentations = presentations
 
     def process_with_template(  # noqa: PLR0913 - explicit worker boundary
         self,
@@ -135,6 +138,20 @@ class ProductionTemplateAwareProcessor:
         progress(JobStep.VALIDATING, 10)
         self._require_active(cancelled)
         progress(JobStep.RENDERING, 30)
+        if job.output.is_presentation:
+            if self._presentations is None:
+                raise ConversionError(
+                    ConversionErrorCode.PANDOC_UNAVAILABLE,
+                    "Presentation conversion is unavailable.",
+                )
+            return self._presentations.process(
+                job,
+                source,
+                template_content,
+                cancelled=cancelled,
+                deadline_monotonic=deadline_monotonic,
+                progress=progress,
+            )
         try:
             docx = self._convert_docx(
                 source,
@@ -305,31 +322,30 @@ def build_production_processor(
         ),
         os.environ,
     )
-    mermaid = MermaidPreprocessingConverter(
-        pandoc,
-        MermaidCliRenderer(
-            MermaidConfig(
-                settings.conversion_mermaid_executable,
-                settings.conversion_chromium_executable,
-                settings.template_engine_timeout_seconds,
-                settings.template_engine_termination_grace_seconds,
-                settings.conversion_mermaid_max_width_pixels,
-                settings.conversion_mermaid_max_height_pixels,
-                workspace,
-                settings.conversion_pdf_cancellation_poll_seconds,
-            ),
-            os.environ,
-        ),
-        MermaidLimits(
-            settings.conversion_max_diagrams,
-            settings.conversion_mermaid_max_source_bytes,
-            settings.conversion_mermaid_max_total_source_bytes,
-            settings.conversion_mermaid_max_output_bytes,
-            settings.conversion_mermaid_max_total_output_bytes,
+    renderer = MermaidCliRenderer(
+        MermaidConfig(
+            settings.conversion_mermaid_executable,
+            settings.conversion_chromium_executable,
+            settings.template_engine_timeout_seconds,
+            settings.template_engine_termination_grace_seconds,
             settings.conversion_mermaid_max_width_pixels,
             settings.conversion_mermaid_max_height_pixels,
+            workspace,
+            settings.conversion_pdf_cancellation_poll_seconds,
         ),
-        image_limits,
+        os.environ,
+    )
+    mermaid_limits = MermaidLimits(
+        settings.conversion_max_diagrams,
+        settings.conversion_mermaid_max_source_bytes,
+        settings.conversion_mermaid_max_total_source_bytes,
+        settings.conversion_mermaid_max_output_bytes,
+        settings.conversion_mermaid_max_total_output_bytes,
+        settings.conversion_mermaid_max_width_pixels,
+        settings.conversion_mermaid_max_height_pixels,
+    )
+    mermaid = MermaidPreprocessingConverter(
+        pandoc, renderer, mermaid_limits, image_limits
     )
     pdf = LibreOfficePdfConverter(
         LibreOfficeConfig(
@@ -358,6 +374,20 @@ def build_production_processor(
     )
     return ProductionTemplateAwareProcessor(
         objects=objects,
+        presentations=PresentationProcessor(
+            pandoc_config=PandocConfig(
+                settings.template_pandoc_executable,
+                settings.template_engine_timeout_seconds,
+                settings.template_engine_termination_grace_seconds,
+                workspace,
+                settings.conversion_pdf_cancellation_poll_seconds,
+            ),
+            environment=os.environ,
+            renderer=renderer,
+            mermaid_limits=mermaid_limits,
+            archive_limits=archive_limits,
+            image_limits=image_limits,
+        ),
         docx=DocxConversionService(mermaid),
         pdf=pdf,
         archive_limits=archive_limits,

@@ -21,6 +21,7 @@ from markweave.storage import (
 from markweave.templates.errors import (
     TemplateConflictError,
     TemplateIntegrityError,
+    TemplateRequestError,
     TemplateStorageError,
     TemplateUnavailableError,
 )
@@ -28,6 +29,7 @@ from markweave.templates.models import (
     TemplateAuditRecord,
     TemplateCreate,
     TemplateIdentity,
+    TemplateKind,
     TemplatePage,
     TemplatePublicationState,
     TemplateSearch,
@@ -116,6 +118,7 @@ class TemplateService:
             name=request.name,
             description=request.description,
             status=request.status,
+            kind=request.kind,
         )
         self._catalog.add(template)
         return template
@@ -138,8 +141,11 @@ class TemplateService:
             TemplateStatus.ACTIVE,
             1,
             version_id,
+            request.kind,
         )
         validated = validator(content, TemplateFontDeclaration(expected_fonts))
+        if validated.kind is not template.kind:
+            raise TemplateRequestError("Template content must match its immutable type")
         version = self._new_version(
             actor,
             template,
@@ -213,6 +219,8 @@ class TemplateService:
         if template.status is not TemplateStatus.ACTIVE:
             raise TemplateConflictError
         validated = validator(content, TemplateFontDeclaration(expected_fonts))
+        if validated.kind is not template.kind:
+            raise TemplateRequestError("Template content must match its immutable type")
         version = self._new_version(
             actor,
             template,
@@ -361,6 +369,10 @@ class TemplateService:
         template = self.get_visible(actor, template_id)
         if template.status is not TemplateStatus.ACTIVE:
             raise TemplateUnavailableError
+        if template.kind is not TemplateKind.DOCX:
+            raise TemplateRequestError(
+                "PowerPoint templates are selected explicitly per presentation"
+            )
         self._selections.set_preferred_audited(
             actor.id,
             template_id,
@@ -389,6 +401,10 @@ class TemplateService:
         template = self._catalog.get(template_id)
         if template is None or template.status is not TemplateStatus.ACTIVE:
             raise TemplateUnavailableError
+        if template.kind is not TemplateKind.DOCX:
+            raise TemplateRequestError(
+                "PowerPoint templates are selected explicitly per presentation"
+            )
         authorization = self._authorization(
             actor, template, TemplateOperation.SET_SYSTEM_FALLBACK
         )

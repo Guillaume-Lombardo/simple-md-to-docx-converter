@@ -52,6 +52,8 @@ class _TemplateSearchRepository(_SqlTemplateStore):
                     description, autoescape=True
                 )
             )
+        if query.kind is not None:
+            conditions.append(TemplateRow.kind == query.kind.value)
         if query.owner_id is not None:
             conditions.append(TemplateRow.owner_id == str(query.owner_id))
         if query.status is not None:

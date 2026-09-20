@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { PresentationControls } from "./presentation-controls";
 import { Alert, AppShell, Progress } from "../../components/primitives";
 import { useAuth } from "../auth/context";
 import {
@@ -31,12 +32,23 @@ export function saveDownload(
 
 export function ConversionWorkspace({
   controller: supplied,
+  presentation = false,
 }: {
   controller?: ConversionController;
+  presentation?: boolean;
 }) {
   const { controller: auth, state: authState } = useAuth();
   const [controller] = useState(
-    () => supplied ?? new ConversionController(undefined, () => auth.expire()),
+    () =>
+      supplied ??
+      new ConversionController(
+        undefined,
+        () => auth.expire(),
+        undefined,
+        undefined,
+        undefined,
+        presentation,
+      ),
   );
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -61,12 +73,14 @@ export function ConversionWorkspace({
   if (authState.phase !== "authenticated") return null;
   return (
     <AppShell
-      current="Convert"
+      current={presentation ? "Presentations" : "Convert"}
       user={authState.user}
       pending={authState.pending}
       onLogout={() => void auth.logout()}
     >
-      <h1 className="text-3xl font-semibold">Convert Markdown</h1>
+      <h1 className="text-3xl font-semibold">
+        {presentation ? "Create a PowerPoint presentation" : "Convert Markdown"}
+      </h1>
       {state.phase === "loading" && (
         <p aria-live="polite">Loading conversion options…</p>
       )}
@@ -104,7 +118,7 @@ export function ConversionWorkspace({
               }}
             >
               <label
-                className="grid gap-2 rounded-control border border-muted p-4 font-medium"
+                className="grid gap-2 rounded-control border border-muted p-4 font-medium focus-within:outline-2 focus-within:outline-accent"
                 onDragEnter={(event) => {
                   event.preventDefault();
                   setDragging(true);
@@ -129,19 +143,32 @@ export function ConversionWorkspace({
                     controller.setSource(event.target.files)
                   }
                   ref={fileInput}
+                  className="sr-only"
                   type="file"
                 />
-                <span className="text-sm text-muted">
+                <span className="py-4 text-center text-lg font-semibold wrap-anywhere">
                   {dragging
                     ? "Drop the file now."
                     : state.source
                       ? `Selected ${state.source.name} (${state.source.size} bytes).`
                       : `Choose or drop exactly one .md or .zip file (maximum ${state.maximumBytes} bytes).`}
                 </span>
+                <span
+                  aria-hidden="true"
+                  className="w-fit cursor-pointer rounded-control border border-muted px-2 py-1 text-xs font-normal text-muted"
+                >
+                  {state.source ? "Change file" : "Choose file"}
+                </span>
               </label>
+              {presentation && (
+                <PresentationControls controller={controller} state={state} />
+              )}
               <fieldset className="space-y-2">
                 <legend className="font-semibold">Output</legend>
-                {(["docx", "pdf", "both"] as const).map((output) => (
+                {(presentation
+                  ? (["pptx", "pptx-bundle"] as const)
+                  : (["docx", "pdf", "both"] as const)
+                ).map((output) => (
                   <label className="mr-5 inline-flex gap-2" key={output}>
                     <input
                       checked={state.output === output}
@@ -150,11 +177,15 @@ export function ConversionWorkspace({
                       type="radio"
                       value={output}
                     />
-                    {output === "docx"
-                      ? "DOCX"
-                      : output === "pdf"
-                        ? "PDF"
-                        : "DOCX and PDF (ZIP)"}
+                    {output === "pptx"
+                      ? "PowerPoint (PPTX)"
+                      : output === "pptx-bundle"
+                        ? "PowerPoint and original source (ZIP)"
+                        : output === "docx"
+                          ? "DOCX"
+                          : output === "pdf"
+                            ? "PDF"
+                            : "DOCX and PDF (ZIP)"}
                   </label>
                 ))}
               </fieldset>
@@ -232,41 +263,44 @@ export function ConversionWorkspace({
               <h2 className="text-xl font-semibold" id="status-heading">
                 Conversion status
               </h2>
-              <div aria-live="polite">
+              <div aria-live="polite" className="min-h-12">
                 {state.active
                   ? statusPresentation(state.active)
                   : "Submit a conversion or choose a recent one."}
               </div>
-              {state.active && (
-                <Progress
-                  label="Conversion progress"
-                  value={state.active.progress}
-                />
-              )}
-              {state.active && isCancellable(state.active) && (
-                <button
-                  disabled={state.cancelling}
-                  onClick={() => void controller.cancel()}
-                  type="button"
-                >
-                  {state.cancelling
-                    ? "Requesting cancellation…"
-                    : "Cancel conversion"}
-                </button>
-              )}
-              {state.active?.state === "succeeded" && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    void controller.download().then((download) => {
-                      if (!download) return;
-                      saveDownload(download);
-                    })
-                  }
-                >
-                  Download result
-                </button>
-              )}
+              <div className="min-h-24 space-y-3">
+                {state.active && state.active.state !== "succeeded" && (
+                  <Progress
+                    label="Conversion progress"
+                    value={state.active.progress}
+                  />
+                )}
+                {state.active && isCancellable(state.active) && (
+                  <button
+                    disabled={state.cancelling}
+                    onClick={() => void controller.cancel()}
+                    type="button"
+                  >
+                    {state.cancelling
+                      ? "Requesting cancellation…"
+                      : "Cancel conversion"}
+                  </button>
+                )}
+                {state.active?.state === "succeeded" && (
+                  <button
+                    className="primary-button w-full"
+                    type="button"
+                    onClick={() =>
+                      void controller.download().then((download) => {
+                        if (!download) return;
+                        saveDownload(download);
+                      })
+                    }
+                  >
+                    Download result
+                  </button>
+                )}
+              </div>
             </section>
             <section aria-labelledby="recent-heading">
               <h2 className="text-xl font-semibold" id="recent-heading">
@@ -280,9 +314,11 @@ export function ConversionWorkspace({
                     <li key={job.id}>
                       <button
                         type="button"
+                        title={job.id}
                         onClick={() => void controller.openJob(job.id)}
                       >
-                        Conversion {job.id.slice(0, 8)} · {job.state}
+                        {job.source_filename || "Untitled document"} ·{" "}
+                        {job.state}
                       </button>
                     </li>
                   ))}

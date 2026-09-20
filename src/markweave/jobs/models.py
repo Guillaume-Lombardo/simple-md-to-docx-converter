@@ -8,6 +8,7 @@ from enum import StrEnum
 from uuid import UUID, uuid5
 
 from markweave.observability import require_correlation_id
+from markweave.presentations.models import PresentationOptions
 
 SHA256_CHARACTERS = 64
 COMPLETE_PROGRESS = 100
@@ -53,6 +54,7 @@ class JobStep(StrEnum):
     VALIDATING = "validating"
     RENDERING = "rendering"
     DOCX = "docx"
+    PPTX = "pptx"
     PDF = "pdf"
     PUBLISHING = "publishing"
     COMPLETE = "complete"
@@ -62,8 +64,14 @@ class JobOutput(StrEnum):
     """Requested immutable result format."""
 
     DOCX = "docx"
+    PPTX = "pptx"
     PDF = "pdf"
     BOTH = "both"
+    PPTX_BUNDLE = "pptx-bundle"
+
+    @property
+    def is_presentation(self) -> bool:
+        return self in {JobOutput.PPTX, JobOutput.PPTX_BUNDLE}
 
 
 class TemplateMode(StrEnum):
@@ -156,6 +164,7 @@ class JobSubmission:
     source_kind: SourceKind = SourceKind.MARKDOWN
     source_sha256: str = "0" * SHA256_CHARACTERS
     source_size: int = 1
+    presentation_options: PresentationOptions | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "created_at", _utc(self.created_at))
@@ -165,6 +174,8 @@ class JobSubmission:
         )
         _validate_component_versions(self.component_versions)
         _validate_template_pair(self.template_id, self.template_version_id)
+        if self.presentation_options is not None and not self.output.is_presentation:
+            raise ValueError("Presentation options require a PowerPoint output")
         if source_kind_for_filename(self.source_filename) is not self.source_kind:
             raise ValueError("Source filename and kind do not match")
         _validate_sha256(self.source_sha256)
@@ -210,6 +221,7 @@ class ConversionJob:
     source_sha256: str | None = None
     source_size: int | None = None
     result_manifest_object_id: UUID | None = None
+    presentation_options: PresentationOptions | None = None
 
     def __post_init__(self) -> None:
         correlation_id = self.correlation_id or str(self.id)
@@ -220,6 +232,8 @@ class ConversionJob:
         self._validate_progress()
         _validate_component_versions(self.component_versions)
         _validate_template_pair(self.template_id, self.template_version_id)
+        if self.presentation_options is not None and not self.output.is_presentation:
+            raise ValueError("Presentation options require a PowerPoint output")
         self._validate_source()
         self._validate_lease()
         self._validate_result()
@@ -352,11 +366,14 @@ class JobRequest:
     correlation_id: str = ""
     source_filename: str = "source.md"
     source_kind: SourceKind = SourceKind.MARKDOWN
+    presentation_options: PresentationOptions | None = None
 
     def __post_init__(self) -> None:
         if self.correlation_id:
             require_correlation_id(self.correlation_id)
         _validate_template_pair(self.template_id, self.template_version_id)
+        if self.presentation_options is not None and not self.output.is_presentation:
+            raise ValueError("Presentation options require a PowerPoint output")
         if not self.source:
             raise ValueError("Conversion source must not be empty")
         if source_kind_for_filename(self.source_filename) is not self.source_kind:

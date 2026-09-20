@@ -948,3 +948,168 @@ test("authoritative 401 during an authenticated operation expires once without r
   expect(expire).toHaveBeenCalledOnce();
   expect(multipart).toHaveBeenCalledOnce();
 });
+
+test("recent conversions omit expired entries on load and after a job update", async () => {
+  const current = job();
+  const expired = job({
+    id: "00000000-0000-4000-8000-000000000202",
+    state: "expired",
+  });
+  const failed = job({
+    id: "00000000-0000-4000-8000-000000000203",
+    state: "failed",
+  });
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockResolvedValueOnce({
+      items: [expired, current, failed],
+      limit: 10,
+      offset: 0,
+      total: 3,
+    })
+    .mockResolvedValueOnce(job({ state: "expired" }))
+    .mockResolvedValueOnce(expired);
+  const controller = new ConversionController(api({ json }));
+  await controller.load();
+  expect(controller.snapshot().recent).toEqual([current, failed]);
+  await controller.openJob(current.id);
+  expect(controller.snapshot().recent).toEqual([failed]);
+  expect(controller.snapshot().active?.state).toBe("expired");
+  await controller.openJob(expired.id);
+  expect(controller.snapshot().recent).toEqual([failed]);
+  controller.dispose();
+});
+
+test("an all-expired history produces an empty recent list", async () => {
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockResolvedValueOnce({
+      items: [job({ state: "expired" })],
+      limit: 10,
+      offset: 0,
+      total: 1,
+    });
+  const controller = new ConversionController(api({ json }));
+  await controller.load();
+  expect(controller.snapshot().recent).toEqual([]);
+  controller.dispose();
+});
+
+test("PowerPoint workspace uses native defaults, typed templates and its own history", async () => {
+  const pptx = job({ output: "pptx" });
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockResolvedValueOnce({
+      items: [
+        job({ id: "word" }),
+        pptx,
+        job({ id: "expired", output: "pptx", state: "expired" }),
+      ],
+    })
+    .mockResolvedValueOnce({ items: [] });
+  const multipartWithMetadata = vi
+    .fn()
+    .mockResolvedValue(accepted(job({ output: "pptx", state: "succeeded" })));
+  const controller = new ConversionController(
+    api({ json, multipartWithMetadata }),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  await controller.load();
+  expect(controller.snapshot().output).toBe("pptx");
+  expect(controller.snapshot().selection).toBeUndefined();
+  expect(controller.snapshot().recent).toEqual([pptx]);
+  expect(json.mock.calls[0]![0]).toBe(
+    "/api/v1/conversion-options?template_kind=pptx",
+  );
+  await controller.searchTemplates("");
+  expect(json.mock.calls[2]![0]).toContain("kind=pptx");
+  controller.setSource([new File(["## Slide"], "slides.md")]);
+  controller.setPresentationOptions("marp", 3);
+  controller.setOutput("pptx-bundle");
+  await controller.submit();
+  const form = multipartWithMetadata.mock.calls[0]![1] as FormData;
+  expect(form.get("template_id")).toBeNull();
+  expect(form.get("presentation_dialect")).toBe("marp");
+  expect(form.get("slide_level")).toBe("3");
+  expect(form.get("output")).toBe("pptx-bundle");
+  controller.dispose();
+});
+
+test("presentation outline is invalidated by source changes and ignores stale responses", async () => {
+  let finish!: (value: unknown) => void;
+  const plan = {
+    dialect: "marp",
+    slide_level: 2,
+    titles: ["First"],
+    warnings: ["Review layout"],
+    explicit_breaks: true,
+  };
+  const multipart = vi
+    .fn()
+    .mockResolvedValueOnce(plan)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const controller = await loadedController(
+    api({
+      multipart,
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [] }),
+    }),
+  );
+  await controller.preview();
+  expect(controller.snapshot().error).toMatch(/Choose/);
+  controller.setSource([new File(["## First"], "slides.md")]);
+  await controller.preview();
+  expect(controller.snapshot().plan).toEqual(plan);
+  const pending = controller.preview();
+  controller.setSource([new File(["## Second"], "other.md")]);
+  finish(plan);
+  await pending;
+  expect(controller.snapshot().plan).toBeUndefined();
+  expect(controller.snapshot().planning).toBe(false);
+  controller.dispose();
+});
+
+test("presentation outline failures are safe and session expiry remains authoritative", async () => {
+  const expire = vi.fn();
+  const multipart = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("private detail"))
+    .mockRejectedValueOnce(new DOMException("Aborted", "AbortError"))
+    .mockRejectedValueOnce(
+      new ApiError(401, "AUTHENTICATION_REQUIRED", "expired"),
+    );
+  const controller = new ConversionController(
+    api({
+      multipart,
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(options())
+        .mockResolvedValueOnce({ items: [] }),
+    }),
+    expire,
+  );
+  await controller.load();
+  controller.setSource([new File(["## Slide"], "slides.md")]);
+  await controller.preview();
+  expect(controller.snapshot().error).toBe(
+    "The presentation outline could not be prepared.",
+  );
+  await controller.preview();
+  await controller.preview();
+  expect(expire).toHaveBeenCalledOnce();
+  controller.dispose();
+});

@@ -266,6 +266,26 @@
   {
     "include_in_schema": true,
     "methods": [
+      "POST"
+    ],
+    "name": "preview_presentation",
+    "path": "/api/v1/presentation-plan",
+    "response_class": "JSONResponse",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
+      "GET"
+    ],
+    "name": "download_presentation_reference",
+    "path": "/api/v1/presentation-reference",
+    "response_class": "Response",
+    "status_code": null
+  },
+  {
+    "include_in_schema": true,
+    "methods": [
       "GET"
     ],
     "name": "get_reversion_capabilities",

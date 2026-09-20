@@ -112,6 +112,8 @@ def _run(
     workspace: Path,
     environment: Mapping[str, str],
     config: TemplateEngineConfig,
+    *,
+    stdout: int = subprocess.DEVNULL,
 ) -> None:
     try:
         process = subprocess.Popen(  # noqa: S603 - fixed, shell-free argv
@@ -119,7 +121,7 @@ def _run(
             cwd=workspace,
             env=dict(environment),
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=stdout,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
@@ -234,17 +236,18 @@ def validate_template_for_activation(
             "libreoffice",
         ):
             (workspace / directory).mkdir(mode=0o700)
-        reference = workspace / "reference.docx"
+        extension = validated.kind.value
+        reference = workspace / f"reference.{extension}"
         blank = workspace / "blank.md"
-        canonical = workspace / "pandoc" / "canonical.docx"
+        canonical = workspace / "pandoc" / f"canonical.{extension}"
         reference.write_bytes(data)
-        blank.write_bytes(b"")
+        blank.write_bytes(b"## Template validation\n" if extension == "pptx" else b"")
         environment = _environment(workspace, context.host_environment)
         _run(
             (
                 config.pandoc_executable,
                 f"--from={PANDOC_READER}",
-                "--to=docx",
+                f"--to={extension}",
                 f"--reference-doc={reference}",
                 f"--output={canonical}",
                 str(blank),
@@ -266,7 +269,7 @@ def validate_template_for_activation(
                 "--nofirststartwizard",
                 f"-env:UserInstallation={profile.as_uri()}",
                 "--convert-to",
-                "docx",
+                extension,
                 "--outdir",
                 str(workspace / "libreoffice"),
                 str(canonical),
@@ -276,7 +279,8 @@ def validate_template_for_activation(
             config,
         )
         opened = _bounded_regular_file(
-            workspace / "libreoffice" / "canonical.docx", limits.max_archive_bytes
+            workspace / "libreoffice" / f"canonical.{extension}",
+            limits.max_archive_bytes,
         )
         # LibreOffice adds application-default font names while opening/saving even
         # when those fonts are neither installed nor used by the source template.

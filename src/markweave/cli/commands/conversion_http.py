@@ -86,6 +86,8 @@ class ConversionHttpClient:
         template_id: str | None,
         template_version_id: str | None,
         idempotency_key: str | None,
+        presentation_dialect: str | None = None,
+        slide_level: int | None = None,
     ) -> ConversionHttpResponse:
         """Submit one multipart conversion without revealing the local filename."""
         body, content_type = _multipart_body(
@@ -94,6 +96,8 @@ class ConversionHttpClient:
             output=output,
             template_id=template_id,
             template_version_id=template_version_id,
+            presentation_dialect=presentation_dialect,
+            slide_level=slide_level,
         )
         headers = {"Content-Type": content_type}
         if idempotency_key is not None:
@@ -274,18 +278,24 @@ class ConversionHttpClient:
             ) from error
 
 
-def _multipart_body(
+def _multipart_body(  # noqa: PLR0913 - explicit multipart API contract
     source: bytes,
     *,
     source_kind: str,
     output: str,
     template_id: str | None,
     template_version_id: str | None,
+    presentation_dialect: str | None = None,
+    slide_level: int | None = None,
 ) -> tuple[bytes, str]:
     boundary = f"markweave-{uuid4().hex}"
     while boundary.encode("ascii") in source:
         boundary = f"markweave-{uuid4().hex}"
     fields = [("output", output)]
+    if presentation_dialect is not None:
+        fields.append(("presentation_dialect", presentation_dialect))
+    if slide_level is not None:
+        fields.append(("slide_level", str(slide_level)))
     if template_id is not None and template_version_id is not None:
         fields.extend(
             (("template_id", template_id), ("template_version_id", template_version_id))

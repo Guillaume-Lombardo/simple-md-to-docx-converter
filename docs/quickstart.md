@@ -138,12 +138,12 @@ use `scripts/quickstart.sh ps` or `scripts/quickstart.sh logs` until both servic
 
 To make a first conversion:
 
-1. Open **md 2 docx**, upload `examples/quickstart-source.md`, keep **Pandoc default** selected, and
+1. Open **2docx**, upload `examples/quickstart-source.md`, keep **Pandoc default** selected, and
    choose DOCX, PDF, or both.
-2. Optional: open **template docx**, create a template, and select the generated template at the path
+2. Optional: open **templates**, create a template, and select the generated template at the path
    printed by the setup script when you want custom Word styles. In **Expected fonts**, enter
    `Aptos, Aptos Display, Calibri, Cambria, Cambria Math, Consolas, Courier New, Times New Roman`.
-   Return to **md 2 docx** and select it.
+   Return to **2docx** and select it.
 3. Start the conversion. When the job says it is ready, download the result.
 
 A tiny source file is enough to try the workflow; `examples/quickstart-source.md` contains:

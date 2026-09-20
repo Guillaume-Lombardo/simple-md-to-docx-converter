@@ -102,7 +102,7 @@ export class ReversionController {
         phase: "ready",
         capabilities,
         extensions,
-        recent: recent.items,
+        recent: recent.items.filter((job) => job.state !== "expired"),
       });
     } catch (error) {
       if (generation !== this.loadGeneration || isAbort(error)) return;
@@ -463,10 +463,9 @@ function upsertRecent(
   recent: ReversionResponse[],
   job: ReversionResponse,
 ): ReversionResponse[] {
-  return [job, ...recent.filter((candidate) => candidate.id !== job.id)].slice(
-    0,
-    10,
-  );
+  return [job, ...recent.filter((candidate) => candidate.id !== job.id)]
+    .filter((candidate) => candidate.state !== "expired")
+    .slice(0, 10);
 }
 
 function errorMessage(error: unknown, fallback = SAFE_FAILURE): string {

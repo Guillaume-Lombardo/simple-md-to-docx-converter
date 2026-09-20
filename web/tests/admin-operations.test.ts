@@ -174,3 +174,27 @@ test.each([
     readTemplateDownload(new Response("unsafe", { headers })),
   ).rejects.toThrow("Unexpected template download");
 });
+
+test("PowerPoint template downloads require matching media type and extension", async () => {
+  const headers = {
+    ...docxHeaders,
+    "Content-Disposition": 'attachment; filename="reference.pptx"',
+    "Content-Type":
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  };
+  const result = await readTemplateDownload(
+    new Response("pptx bytes", { headers }),
+  );
+  expect(result.filename).toBe("reference.pptx");
+  expect(await result.blob.text()).toBe("pptx bytes");
+  await expect(
+    readTemplateDownload(
+      new Response("pptx bytes", {
+        headers: {
+          ...headers,
+          "Content-Disposition": 'attachment; filename="reference.docx"',
+        },
+      }),
+    ),
+  ).rejects.toThrow("Unexpected template download");
+});

@@ -210,7 +210,7 @@ test("workspace uses authoritative capabilities for accessible controls and copy
   ).toBeVisible();
   expect(screen.getAllByText("Experimental")).not.toHaveLength(0);
   expect(
-    screen.getByRole("link", { name: "x 2 md, Experimental" }),
+    screen.getByRole("link", { name: "2md, Experimental" }),
   ).toHaveAttribute("aria-current", "page");
   expect(screen.getByLabelText(/Source document/)).toHaveAttribute(
     "accept",
@@ -275,6 +275,8 @@ test("drop, submission, status, and download form one browser workflow", async (
   fireEvent.dragLeave(dropZone);
   fireEvent.dragOver(dropZone);
   fireEvent.drop(dropZone, { dataTransfer: { files: [source] } });
+  expect(screen.getByText("Change file")).toBeVisible();
+  expect(dropZone.querySelector('input[type="file"]')).toHaveClass("sr-only");
   expect(screen.getByText(/Selected report.docx/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
   expect(
@@ -283,6 +285,12 @@ test("drop, submission, status, and download form one browser workflow", async (
   expect(
     (multipartWithMetadata.mock.calls[0]![1] as FormData).get("source"),
   ).toBe(source);
+  expect(screen.getByRole("button", { name: "Download result" })).toHaveClass(
+    "primary-button",
+  );
+  expect(
+    screen.getByRole("button", { name: /report.docx · succeeded/ }),
+  ).toHaveAttribute("title", reversionJob.id);
   fireEvent.click(screen.getByRole("button", { name: "Download result" }));
   await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
   expect(createObjectURL).toHaveBeenCalledOnce();

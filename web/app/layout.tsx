@@ -6,6 +6,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Markweave",
   description: "Markdown document conversion",
+  icons: { icon: { url: "/markweave-icon.svg", type: "image/svg+xml" } },
 };
 export const dynamic = "force-dynamic";
 
