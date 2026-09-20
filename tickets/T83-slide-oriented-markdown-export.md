@@ -29,4 +29,3 @@ T82 forward PowerPoint baseline; T69-T72 reverse-conversion isolation and lifecy
 ## Progress
 
 2026-09-20: Split from T82 during user-authorized 0.7.0 publication preparation so unfinished reverse options remain explicitly tracked. No reverse parser or option implementation is claimed.
-
