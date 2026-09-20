@@ -116,11 +116,7 @@ export class ConversionController {
           vGetConversionOptionsApiV1ConversionOptionsGetResponse,
           { signal: request.signal },
         ),
-        this.api.json(
-          "/api/v1/conversions?offset=0&limit=10",
-          vListConversionsApiV1ConversionsGetResponse,
-          { signal: request.signal },
-        ),
+        this.loadRecent(request.signal),
       ]);
       if (!this.currentLoad(generation)) return;
       this.publish({
@@ -128,11 +124,7 @@ export class ConversionController {
         phase: "ready",
         maximumBytes: options.conversion_upload_max_bytes,
         selection: selectionFromOptions(options),
-        recent: recent.items.filter(
-          (job) =>
-            job.state !== "expired" &&
-            job.output.startsWith("pptx") === this.presentation,
-        ),
+        recent,
       });
     } catch (error) {
       if (!this.currentLoad(generation) || isAbort(error)) return;
@@ -142,6 +134,29 @@ export class ConversionController {
         phase: "unavailable",
       });
     }
+  }
+
+  private async loadRecent(signal: AbortSignal): Promise<ConversionResponse[]> {
+    const recent: ConversionResponse[] = [];
+    let offset = 0;
+    do {
+      signal.throwIfAborted();
+      const page = await this.api.json(
+        `/api/v1/conversions?offset=${offset}&limit=10`,
+        vListConversionsApiV1ConversionsGetResponse,
+        { signal },
+      );
+      recent.push(
+        ...page.items.filter(
+          (job) =>
+            job.state !== "expired" &&
+            job.output.startsWith("pptx") === this.presentation,
+        ),
+      );
+      offset += page.items.length;
+      if (page.items.length === 0 || offset >= page.total) break;
+    } while (recent.length < 10);
+    return recent.slice(0, 10);
   }
 
   setSource(files: FileList | File[] | null): void {

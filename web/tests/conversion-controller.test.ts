@@ -1008,6 +1008,7 @@ test("PowerPoint workspace uses native defaults, typed templates and its own his
         pptx,
         job({ id: "expired", output: "pptx", state: "expired" }),
       ],
+      total: 3,
     })
     .mockResolvedValueOnce({ items: [] });
   const multipartWithMetadata = vi
@@ -1112,4 +1113,83 @@ test("presentation outline failures are safe and session expiry remains authorit
   await controller.preview();
   expect(expire).toHaveBeenCalledOnce();
   controller.dispose();
+});
+
+test.each([false, true])(
+  "history paginates past other workflows and expired entries (presentation=%s)",
+  async (presentation) => {
+    const matching = Array.from({ length: 10 }, (_, index) =>
+      job({
+        id: `match-${index}`,
+        output: presentation ? "pptx-bundle" : "pdf",
+      }),
+    );
+    const json = vi
+      .fn()
+      .mockResolvedValueOnce(options())
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 10 }, () =>
+          job({ output: presentation ? "docx" : "pptx" }),
+        ),
+        total: 40,
+      })
+      .mockResolvedValueOnce({
+        items: [job({ state: "expired" }), matching[0]],
+        total: 40,
+      })
+      .mockResolvedValueOnce({
+        items: matching
+          .slice(1)
+          .concat(job({ output: presentation ? "pptx" : "both" })),
+        total: 40,
+      });
+    const controller = new ConversionController(
+      api({ json }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      presentation,
+    );
+    await controller.load();
+    expect(controller.snapshot().recent).toEqual(matching);
+    expect(json.mock.calls.map(([url]) => url).slice(1)).toEqual([
+      "/api/v1/conversions?offset=0&limit=10",
+      "/api/v1/conversions?offset=10&limit=10",
+      "/api/v1/conversions?offset=12&limit=10",
+    ]);
+    controller.dispose();
+  },
+);
+
+test("history stops when a page becomes empty despite an earlier total", async () => {
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockResolvedValueOnce({ items: [job({ output: "pptx" })], total: 20 })
+    .mockResolvedValueOnce({ items: [], total: 20 });
+  const controller = await loadedController(api({ json }));
+  expect(controller.snapshot().recent).toEqual([]);
+  expect(json).toHaveBeenCalledTimes(3);
+  controller.dispose();
+});
+
+test("disposing during history loading prevents subsequent pages", async () => {
+  let complete!: (value: unknown) => void;
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(options())
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+  const controller = new ConversionController(api({ json }));
+  const loading = controller.load();
+  controller.dispose();
+  complete({ items: [job({ output: "pptx" })], total: 20 });
+  await loading;
+  expect(json).toHaveBeenCalledTimes(2);
+  expect(controller.snapshot().recent).toEqual([]);
 });

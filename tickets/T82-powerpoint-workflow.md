@@ -151,3 +151,13 @@ publication/reference tests and SQLite coverage; combined light/targeted evidenc
 passes 90.01% branch and 93.58% changed-line coverage. Quality policy checks pass
 (24 tests). A fresh CI-equivalent light run is in progress. No failed assertion is
 waived. Final hosted image workflows and independent review remain mandatory.
+
+2026-09-20: PR #244 independent review found workflow history truncation when the
+first ten jobs belong to the other workspace. The controller now paginates until
+ten matching non-expired jobs or exhaustion, retaining abort/generation guards.
+Regressions cover both workflows, expiry, limit, empty pages and cancellation;
+frontend checks pass (229 tests, 90.20% branch coverage). CI-equivalent local light
+suite passed (4,019 tests; 90.07% branch and 95.45% changed-line coverage).
+Final hosted checks, reviewer confirmation, protected merge and publication remain
+pending. Published 0.6.4 image receipts replaced inherited stale 0.6.3 pins; 0.7.0
+receipts must still be adopted only after actual publication.
