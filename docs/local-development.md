@@ -211,3 +211,38 @@ uv build --build-constraint build-constraints.txt --require-hashes
 The default local suite excludes tests marked for Pandoc, Mermaid/Chromium, and LibreOffice. Install
 the locked engines to run their integration suites and the complete final-image tests. An unavailable
 engine test is skipped only through its registered marker and must never be reported as passed.
+
+### Parallel light CI
+
+`CI / light` runs formatting, lint, types, OpenAPI, public release alignment,
+frontend and policy checks. The Python suite keeps the exact `unit or light_coverage`
+selection but runs in two separate jobs. A stable SHA-256 of each pytest node ID
+assigns it to exactly one partition; neither job installs document engines.
+The normal local test commands remain unchanged.
+
+To reproduce a partition, use index `0` or `1` and a distinct coverage data file:
+
+```bash
+COVERAGE_FILE=.coverage.shard0 uv run pytest -m 'unit or light_coverage' \
+  -p no:scripts.ci.pytest_branch_coverage \
+  -p scripts.ci.light_sharding --light-shard-count=2 --light-shard-index=0 \
+  --cov-fail-under=0 --cov-report=
+```
+
+The zero threshold applies only to incomplete partition data. `CI / Python coverage`
+requires both successful jobs and both nonempty artifacts from the same workflow run
+and attempt, combines raw coverage, and enforces the original 90% total, branch-only
+and changed-line thresholds. `CI / gate` requires rapid checks, both partitions,
+combined coverage and all selected heavy domains. Coverage artifacts expire after
+one day. After a failure, rerun **all jobs** so that both partition artifacts belong
+to the new attempt; rerunning only one partition or the aggregator fails closed
+instead of accepting data from an older attempt.
+
+
+The partition and aggregation jobs restore the existing lock-keyed `uv` cache but
+never save it. The trusted main light job populates it. The frontend restores only
+`web/.next/cache`, keyed by the pinned Node version, dependency lock hash and commit,
+with reuse restricted to the same runtime/dependency prefix. Only trusted main pushes
+save that compiler cache. Existing pnpm and verified engine caches remain active.
+No test result, coverage report, installed virtual environment or built release image
+is substituted by these compiler/dependency caches.

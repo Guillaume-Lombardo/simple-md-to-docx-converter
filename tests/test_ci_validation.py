@@ -236,7 +236,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 2
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 3
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -254,7 +254,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
 def test_ci_uses_only_github_hosted_runners() -> None:
     """The upload-artifact v7 runner floor is delegated to GitHub-hosted images."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert workflow.count("runs-on: ubuntu-24.04") == 5
+    assert workflow.count("runs-on: ubuntu-24.04") == 7
     assert "self-hosted" not in workflow
 
 
@@ -2037,3 +2037,74 @@ def test_python_source_discovery_excludes_installed_package_managers(
     assert validate_python_imports(sources) == [
         f"direct unittest.mock import in {application}"
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        ("shard: [0, 1]", "shard: [0]"),
+        ("needs: python-tests", "needs: light"),
+        ("include-hidden-files: true", "include-hidden-files: false"),
+        ("light-coverage-${{ github.run_attempt }}-1", "light-coverage-1-1"),
+        ("test -s artifacts/light-coverage/1/.coverage", "true"),
+        (
+            "coverage json -o coverage.json --fail-under=90",
+            "coverage json -o coverage.json --fail-under=0",
+        ),
+        (
+            "PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}",
+            "PYTHON_TESTS_RESULT: success",
+        ),
+        (
+            "PYTHON_COVERAGE_RESULT: ${{ needs.python-coverage.result }}",
+            "PYTHON_COVERAGE_RESULT: success",
+        ),
+        (
+            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy]",
+            "needs: [detect, light, domain-plan, heavy]",
+        ),
+    ],
+)
+def test_sharded_light_cannot_omit_tests_or_weaken_aggregate_gate(
+    original: str, replacement: str
+) -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert original in workflow
+    assert validate_workflow_text(workflow.replace(original, replacement, 1))
+
+
+@pytest.mark.unit
+def test_split_jobs_reuse_dependencies_and_only_trusted_main_writes_compiler_cache() -> (
+    None
+):
+    text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    workflow = yaml.load(text, Loader=WorkflowLoader)  # noqa: S506
+    for job in ("python-tests", "python-coverage"):
+        setup = next(
+            step
+            for step in workflow["jobs"][job]["steps"]
+            if step["name"] == "Set up uv"
+        )
+        assert setup["with"] == {
+            "version": "0.12.1",
+            "enable-cache": True,
+            "cache-dependency-glob": "uv.lock",
+            "cache-suffix": "py314",
+            "save-cache": False,
+        }
+    steps = workflow["jobs"]["light"]["steps"]
+    restore = next(
+        step for step in steps if step["name"] == "Restore the Next.js compiler cache"
+    )
+    save = next(
+        step
+        for step in steps
+        if step["name"] == "Save the Next.js compiler cache from trusted main"
+    )
+    assert restore["with"]["path"] == save["with"]["path"] == "web/.next/cache"
+    assert restore["with"]["key"] == save["with"]["key"]
+    assert "hashFiles('pnpm-lock.yaml')" in restore["with"]["restore-keys"]
+    assert "github.event_name == 'push'" in save["if"]
+    assert "github.ref == 'refs/heads/main'" in save["if"]
+    assert validate_workflow_text(text.replace(save["if"], "${{ always() }}"))

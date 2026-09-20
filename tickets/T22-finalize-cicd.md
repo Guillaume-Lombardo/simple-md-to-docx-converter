@@ -376,3 +376,21 @@ Update this file and Linear whenever scope, status, priority, dependencies, acce
   unchanged, so JavaScript checks were not rerun. Protected hosted CI remains the publication gate.
 - The user authorized publication, protected squash merge and exact source-branch cleanup
   through the `yolo` skill on 2026-09-20. Hosted checks and independent review remain required.
+
+2026-09-20: User requested splitting the light job after all 4,024 Python tests
+and all thresholds passed but the runner reached its 20-minute job limit.
+Rapid/frontend checks are separated from two deterministic complementary Python
+partitions. Same-attempt artifact aggregation preserves total, branch and changed-line
+90% gates; every partition and aggregate result is mandatory in CI / gate.
+The selector and workflow policy have 193 passing focused checks, including real
+pytest marker selection and invalid-argument rejection. Full partition execution
+and independent implementation review are in progress; no release gate is bypassed.
+
+Independent review found and resolved two issues before publication: shard commands
+now disable only the local per-run branch coverage hook, and both new uv jobs restore
+the existing lock-keyed cache without saving from PRs. The user additionally requested
+caching; light CI now restores the Next.js compiler cache, keyed to Node/lockfile,
+and saves it only on trusted main. No test/coverage outcomes are cached. Independent
+re-review found no remaining blocker. Full local partition runs are pending; Ruff,
+ty and the exact workflow policy pass. Previous hosted heavy domains all passed;
+the old unsplit light retry is superseded by the requested CI improvement.
