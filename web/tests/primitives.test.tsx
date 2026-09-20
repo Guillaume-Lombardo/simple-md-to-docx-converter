@@ -18,14 +18,22 @@ test("application shell exposes navigation and skip target", () => {
     </AppShell>,
   );
   expect(screen.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "md 2 docx" })).toHaveAttribute(
+  const version = screen.getByLabelText(
+    `Version ${process.env.NEXT_PUBLIC_MARKWEAVE_VERSION}`,
+  );
+  expect(version.tagName).toBe("SUB");
+  expect(version).toHaveTextContent(
+    `v${process.env.NEXT_PUBLIC_MARKWEAVE_VERSION}`,
+  );
+  expect(version.parentElement).toHaveTextContent("Markweave");
+  expect(screen.getByRole("link", { name: "2docx" })).toHaveAttribute(
     "aria-current",
     "page",
   );
-  expect(screen.queryByRole("link", { name: "template docx" })).toBeNull();
-  expect(screen.queryByRole("link", { name: /x 2 md/ })).toBeNull();
-  expect(screen.getByText("x 2 md")).toHaveAttribute("aria-disabled", "true");
-  expect(screen.getByText("template docx")).toHaveAttribute(
+  expect(screen.queryByRole("link", { name: "templates" })).toBeNull();
+  expect(screen.queryByRole("link", { name: /2md/ })).toBeNull();
+  expect(screen.getByText("2md")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByText("templates")).toHaveAttribute(
     "aria-disabled",
     "true",
   );
@@ -50,12 +58,12 @@ test("administrator shell shows identity, inactivity policy, users, and pending 
       Work
     </AppShell>,
   );
-  expect(screen.getByRole("link", { name: "template docx" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "templates" })).toHaveAttribute(
     "aria-current",
     "page",
   );
   expect(
-    screen.getByRole("link", { name: "x 2 md, Experimental" }),
+    screen.getByRole("link", { name: "2md, Experimental" }),
   ).toHaveAttribute("href", "/revert");
   expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute(
     "href",

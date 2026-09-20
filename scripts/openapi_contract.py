@@ -753,6 +753,27 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _approved_pptx_transition(
+    change: Change, baseline: Mapping[str, Any], current: Mapping[str, Any]
+) -> bool:
+    """Apply only the user-approved 0.6.4 to 0.7.0 response enum expansion."""
+    return (
+        baseline.get("info", {}).get("version") == "0.6.4"
+        and current.get("info", {}).get("version") == "0.7.0"
+        and change
+        == Change(
+            "incompatible",
+            "schema",
+            "components/schemas/JobOutput",
+            "response enum values added: ['pptx', 'pptx-bundle']",
+        )
+        and baseline["components"]["schemas"]["JobOutput"]["enum"]
+        == ["docx", "pdf", "both"]
+        and sorted(current["components"]["schemas"]["JobOutput"]["enum"])
+        == ["both", "docx", "pdf", "pptx", "pptx-bundle"]
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Generate, verify, or compare the canonical OpenAPI artifact."""
     args = _parse_args(argv)
@@ -788,7 +809,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"{change.severity}: {change.category}: {change.location}: {change.message}"
         )
-    return int(any(change.severity == "incompatible" for change in changes))
+    blocked = False
+    for change in changes:
+        if change.severity != "incompatible":
+            continue
+        if _approved_pptx_transition(change, baseline, current):
+            print(
+                "approved exception: 0.6.4 -> 0.7.0 PPTX response values; see docs/powerpoint.md"
+            )
+        else:
+            blocked = True
+    return int(blocked)
 
 
 if __name__ == "__main__":

@@ -145,6 +145,13 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm run workspace:check
           pnpm run test:web
+      - name: Restore the Next.js compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-next-node-24.19.0-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-next-node-24.19.0-${{ hashFiles('pnpm-lock.yaml') }}-
       - name: Verify the workspace frontend
         run: |
           test "$(node --version)" = "v24.19.0"
@@ -153,10 +160,114 @@ jobs:
           pnpm --filter @markweave/web run check
           pnpm --filter @markweave/web run build
           pnpm --filter @markweave/web run test:production
-      - name: Run light tests with branch coverage
+      - name: Run cheap CI security checks
+        run: |
+          uv lock --check
+          uv run python -m scripts.ci.validate_ci
+      - name: Save the exact pnpm store cache from trusted main
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store/v11
+          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Save the Next.js compiler cache from trusted main
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: ${{ runner.os }}-next-node-24.19.0-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+
+  python-tests:
+    name: CI / Python tests (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1]
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314
+          save-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Run a complementary light test shard
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
         run: >-
           uv run pytest -m "unit or light_coverage"
-          --cov-report=json:coverage.json
+          -p no:scripts.ci.pytest_branch_coverage
+          -p scripts.ci.light_sharding --light-shard-count=2
+          --light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report=
+      - name: Retain shard coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: light-coverage-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  python-coverage:
+    name: CI / Python coverage
+    needs: python-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py314
+          save-cache: false
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --all-groups
+      - name: Download first shard coverage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: light-coverage-${{ github.run_attempt }}-0
+          path: artifacts/light-coverage/0
+      - name: Download second shard coverage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: light-coverage-${{ github.run_attempt }}-1
+          path: artifacts/light-coverage/1
+      - name: Combine complete light coverage
+        run: |
+          set -euo pipefail
+          test -s artifacts/light-coverage/0/.coverage
+          test -s artifacts/light-coverage/1/.coverage
+          uv run coverage combine artifacts/light-coverage/0/.coverage artifacts/light-coverage/1/.coverage
+          uv run coverage json -o coverage.json --fail-under=90
       - name: Enforce application branch-only coverage
         run: >-
           uv run python -m scripts.ci.check_branch_coverage
@@ -170,16 +281,6 @@ jobs:
           uv run python -m scripts.ci.check_changed_coverage
           --base "$BASE_SHA" --head "$HEAD_SHA"
           --coverage coverage.json --source-root src/markweave --fail-under 90
-      - name: Run cheap CI security checks
-        run: |
-          uv lock --check
-          uv run python -m scripts.ci.validate_ci
-      - name: Save the exact pnpm store cache from trusted main
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Guillaume-Lombardo/simple-md-to-docx-converter' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.local/share/pnpm/store/v11
-          key: ${{ runner.os }}-node-24.19.0-pnpm-11.25.0-${{ hashFiles('pnpm-lock.yaml') }}
 
   domain-plan:
     name: CI / affected domains
@@ -461,7 +562,7 @@ jobs:
   gate:
     name: CI / gate
     if: ${{ always() }}
-    needs: [detect, light, domain-plan, heavy]
+    needs: [detect, light, python-tests, python-coverage, domain-plan, heavy]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -471,6 +572,8 @@ jobs:
           DOMAIN_PLAN_RESULT: ${{ needs.domain-plan.result }}
           HEAVY_RESULT: ${{ needs.heavy.result }}
           LIGHT_RESULT: ${{ needs.light.result }}
+          PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
+          PYTHON_COVERAGE_RESULT: ${{ needs.python-coverage.result }}
           RUNNABLE_DOMAINS: ${{ needs.detect.outputs.runnable-domains }}
         run: |
           set -euo pipefail
@@ -482,3 +585,5 @@ jobs:
             [[ "$HEAVY_RESULT" == "success" ]]
           fi
           [[ "$LIGHT_RESULT" == "success" ]]
+          [[ "$PYTHON_TESTS_RESULT" == "success" ]]
+          [[ "$PYTHON_COVERAGE_RESULT" == "success" ]]

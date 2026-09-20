@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import test from "node:test";
 import { chromium } from "playwright-core";
+import { execFileSync } from "node:child_process";
+
+const expectedVersion = execFileSync(
+  "python",
+  ["-c", "from markweave import __version__; print(__version__)"],
+  { encoding: "utf8" },
+).trim();
 
 const baseURL = "http://localhost:3100";
 
@@ -16,6 +23,28 @@ async function login(page, username, password) {
     page.getByRole("button", { name: "Sign in" }).click(),
   ]);
   await page.getByRole("heading", { name: "New conversion" }).waitFor();
+  const version = page
+    .getByRole("navigation", { name: "Primary" })
+    .locator("sub");
+  assert.equal(await version.textContent(), `v${expectedVersion}`);
+  assert.equal(
+    await version.getAttribute("aria-label"),
+    `Version ${expectedVersion}`,
+  );
+  const suffixBounds = await page
+    .getByText("eave", { exact: true })
+    .boundingBox();
+  const versionBounds = await version.boundingBox();
+  assert.ok(suffixBounds && versionBounds);
+  assert.ok(versionBounds.y >= suffixBounds.y + suffixBounds.height - 2);
+  assert.ok(
+    Math.abs(
+      versionBounds.x +
+        versionBounds.width / 2 -
+        suffixBounds.x -
+        suffixBounds.width / 2,
+    ) < 1,
+  );
 }
 
 async function api(page, method, path, body) {
@@ -213,11 +242,7 @@ test(
       assert.equal(browserDownload.suggestedFilename(), "browser-source.docx");
 
       await alicePage.reload({ waitUntil: "networkidle" });
-      await alicePage
-        .getByRole("button", {
-          name: new RegExp(`Conversion ${completed.id.slice(0, 8)}`),
-        })
-        .click();
+      await alicePage.locator(`button[title="${completed.id}"]`).click();
       await alicePage
         .getByText("Your conversion is ready to download.")
         .waitFor();
@@ -236,17 +261,25 @@ test(
       );
       assert.ok(Number.isFinite(untilExpiration));
       await new Promise((resolve) => setTimeout(resolve, untilExpiration));
+      await alicePage.waitForFunction(
+        async (id) => {
+          const response = await fetch(`/api/v1/conversions/${id}`, {
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          return response.ok && (await response.json()).state === "expired";
+        },
+        completed.id,
+        { timeout: 15_000 },
+      );
       await alicePage.reload({ waitUntil: "networkidle" });
       await alicePage
-        .getByRole("button", {
-          name: new RegExp(`Conversion ${completed.id.slice(0, 8)}`),
-        })
-        .click();
-      await alicePage
-        .getByText(
-          "This conversion has expired and its files are no longer available.",
-        )
+        .getByRole("heading", { name: "Recent conversions" })
         .waitFor({ timeout: 15_000 });
+      assert.equal(
+        await alicePage.locator(`button[title="${completed.id}"]`).count(),
+        0,
+      );
       assert.equal(
         await alicePage
           .getByRole("button", { name: "Download result" })

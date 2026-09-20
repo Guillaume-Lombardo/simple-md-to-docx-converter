@@ -1,0 +1,195 @@
+"""PowerPoint admission, planning and durable worker contracts."""
+
+import io
+import json
+import os
+import zipfile
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from markweave.app import create_app
+from markweave.config import Settings
+from markweave.conversion.processor import build_production_processor
+from markweave.malware import TrustingUploadScanner
+from tests.settings import template_settings
+
+pytestmark = pytest.mark.functional
+
+
+def settings_for(tmp_path: Path, *, pandoc: str = "/bin/true") -> Settings:
+    return Settings(
+        **template_settings(template_pandoc_executable=pandoc),
+        initial_admin_username="admin",
+        initial_admin_password="test-" + "password",
+        argon2_memory_cost=8,
+        argon2_time_cost=1,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=1_000_000,
+        conversion_request_max_bytes=1_100_000,
+        conversion_retry_after_seconds=1,
+        job_result_retention_seconds=3600,
+    )
+
+
+def client_for(tmp_path: Path, *, pandoc: str = "/bin/true") -> TestClient:
+    return TestClient(
+        create_app(
+            settings_for(tmp_path, pandoc=pandoc), scanner=TrustingUploadScanner()
+        ),
+        base_url="https://testserver",
+    )
+
+
+def authenticate(client):
+    response = client.post(
+        "/api/v1/login", json={"username": "admin", "password": "test-password"}
+    )
+    assert response.status_code == 200
+    return {"X-CSRF-Token": response.json()["csrf_token"]}
+
+
+@pytest.mark.light_coverage
+def test_presentation_plan_admission_idempotency_and_cancellation(tmp_path):
+    with client_for(tmp_path) as client:
+        files = {
+            "source": ("slides.md", b"## One\n\nText\n\n## Two\n\nEnd", "text/markdown")
+        }
+        assert client.post("/api/v1/presentation-plan", files=files).status_code == 401
+        headers = authenticate(client)
+        assert client.post("/api/v1/presentation-plan", files=files).status_code == 403
+        plan = client.post("/api/v1/presentation-plan", headers=headers, files=files)
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["titles"] == ["One", "Two"]
+        assert client.get("/api/v1/templates?kind=pptx").json()["items"] == []
+        assert (
+            client.get("/api/v1/conversion-options?template_kind=pptx").json()[
+                "selection_source"
+            ]
+            == "pandoc_default"
+        )
+        headers["Idempotency-Key"] = "presentation-request"
+        data = {"output": "pptx", "slide_level": "3", "presentation_dialect": "marp"}
+        job = client.post(
+            "/api/v1/conversions", headers=headers, files=files, data=data
+        )
+        assert job.status_code == 202, job.text
+        assert job.json()["source_filename"] == "slides.md"
+        assert (
+            client.get("/api/v1/conversions").json()["items"][0]["source_filename"]
+            == "slides.md"
+        )
+        assert job.json()["template_mode"] == "pandoc-default"
+        assert job.json()["presentation_options"] == {
+            "dialect": "marp",
+            "slide_level": 3,
+        }
+        replay = client.post(
+            "/api/v1/conversions", headers=headers, files=files, data=data
+        )
+        assert replay.json()["id"] == job.json()["id"]
+        changed = client.post(
+            "/api/v1/conversions",
+            headers=headers,
+            files=files,
+            data={**data, "slide_level": "2"},
+        )
+        assert changed.status_code == 409
+        assert (
+            client.post(
+                "/api/v1/conversions",
+                headers=headers,
+                files=files,
+                data={**data, "output": "docx"},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.delete(
+                f"/api/v1/conversions/{job.json()['id']}", headers=headers
+            ).json()["state"]
+            == "cancelled"
+        )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        b"<script>alert(1)</script>",
+        b"![bad](https://example.com/image.png)",
+        b"---\n- invalid\n---\n",
+        b"\xff",
+    ],
+)
+@pytest.mark.light_coverage
+def test_presentation_plan_rejects_unsafe_or_invalid_input(tmp_path, source):
+    with client_for(tmp_path) as client:
+        response = client.post(
+            "/api/v1/presentation-plan",
+            headers=authenticate(client),
+            files={"source": ("slides.md", source)},
+        )
+        assert response.status_code == 422
+
+
+@pytest.mark.light_coverage
+@pytest.mark.parametrize("archive_input", [False, True])
+def test_worker_source_bundle_and_default_reference_boundary(
+    tmp_path, mocker, archive_input
+):
+    """Exercise durable publication with a substituted engine, never launching Pandoc."""
+    converted = mocker.patch(
+        "markweave.presentations.pandoc.PandocPptxConverter.convert",
+        return_value=b"engine-output",
+    )
+
+    def write_reference(*args, stdout, **kwargs):
+        os.write(stdout, b"native-reference")
+
+    mocker.patch("markweave.presentations.runtime._run", side_effect=write_reference)
+    with client_for(tmp_path) as client:
+        headers = authenticate(client)
+        reference = client.get("/api/v1/presentation-reference")
+        assert reference.status_code == 200
+        assert reference.content == b"native-reference"
+        source = b"# First\n\nText\n\n---\n\n# Second\n"
+        filename = "slides.md"
+        if archive_input:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("slides.md", source)
+            source = buffer.getvalue()
+            filename = "slides.zip"
+        created = client.post(
+            "/api/v1/conversions",
+            headers=headers,
+            files={"source": (filename, source)},
+            data={"output": "pptx-bundle"},
+        )
+        assert created.status_code == 202
+        components = client.app.state.components
+        worker = components.build_conversion_worker(
+            worker_id="bounded-presentation",
+            processor=build_production_processor(
+                settings_for(tmp_path), components.object_store
+            ),
+        )
+        assert worker.run_once()
+        result = client.get(f"/api/v1/conversions/{created.json()['id']}/result")
+        assert result.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(result.content)) as bundle:
+            assert bundle.read("presentation.pptx") == b"engine-output"
+            assert (
+                bundle.read(
+                    "source/source.zip" if archive_input else "source/document.md"
+                )
+                == source
+            )
+            assert (
+                json.loads(bundle.read("generation.json"))["template_mode"]
+                == "pandoc-default"
+            )
+        assert converted.call_args.args[1] is None
+        assert callable(converted.call_args.kwargs["cancellation_requested"])

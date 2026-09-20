@@ -979,3 +979,36 @@ def test_wait_timeout_is_rechecked_after_the_http_request(mocker) -> None:
 
     assert main(("--timeout", "1", "jobs", "wait", JOB_ID)) == 1
     client_factory.assert_called_once()
+
+
+def test_powerpoint_cli_forwards_explicit_options_without_requiring_a_template(
+    tmp_path: Path, mocker
+) -> None:
+    source = tmp_path / "slides.md"
+    source.write_text("# Slide\n\nContent", encoding="utf-8")
+    client = mocker.Mock()
+    client.submit.return_value = _response(
+        202, _job(), headers={"retry-after": "2", "x-correlation-id": CORRELATION_ID}
+    )
+    mocker.patch.object(conversions, "_client", return_value=client)
+    assert (
+        main(
+            (
+                "convert",
+                str(source),
+                "--output",
+                "pptx-bundle",
+                "--presentation-dialect",
+                "marp",
+                "--slide-level",
+                "3",
+            )
+        )
+        == 0
+    )
+    submitted = client.submit.call_args.kwargs
+    assert submitted["output"] == "pptx-bundle"
+    assert submitted["presentation_dialect"] == "marp"
+    assert submitted["slide_level"] == 3
+    assert submitted["template_id"] is None
+    assert submitted["template_version_id"] is None

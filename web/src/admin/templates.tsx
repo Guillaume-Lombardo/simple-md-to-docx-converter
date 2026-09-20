@@ -56,6 +56,8 @@ export function TemplatesWorkspace({
     useState<TemplateAdministrationContextResponse>();
   const [managed, setManaged] = useState<ManagedTemplate>();
   const [query, setQuery] = useState("");
+  const [createKind, setCreateKind] = useState<"docx" | "pptx">("docx");
+  const [kindFilter, setKindFilter] = useState("all");
   const [mine, setMine] = useState(false);
   const [status, setStatus] = useState<"all" | "active" | "archived">("all");
   const [loading, setLoading] = useState(true);
@@ -113,6 +115,8 @@ export function TemplatesWorkspace({
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return templates.filter((template) => {
+      if (kindFilter !== "all" && (template.kind ?? "docx") !== kindFilter)
+        return false;
       if (mine && template.owner_id !== user.id) return false;
       if (status !== "all" && template.status !== status) return false;
       if (!normalized) return true;
@@ -122,7 +126,7 @@ export function TemplatesWorkspace({
         template.owner_username,
       ].some((value) => value.toLocaleLowerCase().includes(normalized));
     });
-  }, [mine, query, status, templates, user.id]);
+  }, [kindFilter, mine, query, status, templates, user.id]);
 
   async function fetchManaged(
     templateId: string,
@@ -273,10 +277,14 @@ export function TemplatesWorkspace({
     }
   }
 
-  function validateFile(file: File | undefined): string | undefined {
-    if (!file || file.size === 0) return "Choose one non-empty DOCX file.";
-    if (!file.name.toLocaleLowerCase().endsWith(".docx"))
-      return "Choose a file with the .docx extension.";
+  function validateFile(
+    file: File | undefined,
+    kind = "docx",
+  ): string | undefined {
+    if (!file || file.size === 0)
+      return `Choose one non-empty ${kind.toUpperCase()} file.`;
+    if (!file.name.toLocaleLowerCase().endsWith(`.${kind}`))
+      return `Choose a file with the .${kind} extension.`;
     if (context && file.size > context.template_max_archive_bytes)
       return `The selected file exceeds the configured ${context.template_max_archive_bytes} byte limit.`;
     return undefined;
@@ -291,7 +299,7 @@ export function TemplatesWorkspace({
     const content = formElement.elements.namedItem("content");
     const file =
       content instanceof HTMLInputElement ? content.files?.[0] : undefined;
-    const validation = validateFile(file);
+    const validation = validateFile(file, createKind);
     if (validation || !file) {
       setError(validation);
       return;
@@ -301,6 +309,7 @@ export function TemplatesWorkspace({
         api.create(
           {
             content: file,
+            kind: createKind,
             description: String(form.get("description") ?? ""),
             expectedFonts: String(form.get("expected-fonts") ?? ""),
             name: String(form.get("name") ?? ""),
@@ -321,7 +330,7 @@ export function TemplatesWorkspace({
         <h1 className="text-3xl font-semibold" id="templates-title">
           Templates
         </h1>
-        <p>Manage visible Word templates. FastAPI validates every operation.</p>
+        <p>Manage Word and PowerPoint templates.</p>
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {notice && <Alert>{notice}</Alert>}
@@ -333,6 +342,19 @@ export function TemplatesWorkspace({
           className="grid gap-4"
           onSubmit={(event) => void createTemplate(event)}
         >
+          <label className="grid gap-2">
+            Template format
+            <select
+              value={createKind}
+              disabled={pending}
+              onChange={(event) =>
+                setCreateKind(event.target.value as "docx" | "pptx")
+              }
+            >
+              <option value="docx">Word (DOCX)</option>
+              <option value="pptx">PowerPoint (PPTX)</option>
+            </select>
+          </label>
           <TextField disabled={pending} label="Name" name="name" required />
           <label className="grid gap-2 font-medium">
             Description
@@ -349,9 +371,9 @@ export function TemplatesWorkspace({
             name="expected-fonts"
           />
           <label className="grid gap-2 font-medium">
-            DOCX file
+            {createKind.toUpperCase()} file
             <input
-              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept={`.${createKind}`}
               disabled={pending}
               name="content"
               required
@@ -372,6 +394,17 @@ export function TemplatesWorkspace({
         <h2 className="text-xl font-semibold" id="library-title">
           Template library
         </h2>
+        <label className="grid gap-2">
+          Filter template format
+          <select
+            value={kindFilter}
+            onChange={(event) => setKindFilter(event.target.value)}
+          >
+            <option value="all">All formats</option>
+            <option value="docx">Word</option>
+            <option value="pptx">PowerPoint</option>
+          </select>
+        </label>
         <TextField
           label="Search name, description, or owner"
           name="template-search"
@@ -416,25 +449,27 @@ export function TemplatesWorkspace({
                         onClick={() => void downloadTemplate(template.id)}
                         type="button"
                       >
-                        Download current DOCX
+                        Download current{" "}
+                        {(template.kind ?? "docx").toUpperCase()}
                       </button>
                     )}
-                    {template.status === "active" && (
-                      <button
-                        disabled={pending}
-                        onClick={() =>
-                          void mutation(
-                            (signal) => api.setPreferred(template.id, signal),
-                            "Preferred template updated.",
-                          )
-                        }
-                        type="button"
-                      >
-                        {context?.preferred_template_id === template.id
-                          ? "Preferred"
-                          : "Make preferred"}
-                      </button>
-                    )}
+                    {template.status === "active" &&
+                      template.kind !== "pptx" && (
+                        <button
+                          disabled={pending}
+                          onClick={() =>
+                            void mutation(
+                              (signal) => api.setPreferred(template.id, signal),
+                              "Preferred template updated.",
+                            )
+                          }
+                          type="button"
+                        >
+                          {context?.preferred_template_id === template.id
+                            ? "Preferred"
+                            : "Make preferred"}
+                        </button>
+                      )}
                     {(template.owner_id === user.id ||
                       user.role === "admin") && (
                       <button
@@ -445,22 +480,24 @@ export function TemplatesWorkspace({
                         Manage
                       </button>
                     )}
-                    {user.role === "admin" && template.status === "active" && (
-                      <button
-                        disabled={pending}
-                        onClick={() =>
-                          void mutation(
-                            (signal) => api.setFallback(template.id, signal),
-                            "System fallback updated.",
-                          )
-                        }
-                        type="button"
-                      >
-                        {context?.system_fallback_template_id === template.id
-                          ? "System fallback"
-                          : "Set system fallback"}
-                      </button>
-                    )}
+                    {user.role === "admin" &&
+                      template.status === "active" &&
+                      template.kind !== "pptx" && (
+                        <button
+                          disabled={pending}
+                          onClick={() =>
+                            void mutation(
+                              (signal) => api.setFallback(template.id, signal),
+                              "System fallback updated.",
+                            )
+                          }
+                          type="button"
+                        >
+                          {context?.system_fallback_template_id === template.id
+                            ? "System fallback"
+                            : "Set system fallback"}
+                        </button>
+                      )}
                   </div>
                 </li>
               ))}
@@ -511,7 +548,9 @@ export function TemplatesWorkspace({
               invalid={setError}
               key={`replacement-${managed.etag}-${managed.template.current_version_id}`}
               managed={managed}
-              validate={validateFile}
+              validate={(file) =>
+                validateFile(file, managed.template.kind ?? "docx")
+              }
               submit={(file, fonts) =>
                 mutation(
                   (signal) =>
@@ -719,9 +758,9 @@ function ReplacementForm({
         name="replacement-fonts"
       />
       <label className="grid gap-2 font-medium">
-        Replacement DOCX
+        Replacement {(managed.template.kind ?? "docx").toUpperCase()}
         <input
-          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          accept={`.${managed.template.kind ?? "docx"}`}
           name="replacement"
           required
           type="file"

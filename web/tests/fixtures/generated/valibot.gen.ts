@@ -41,16 +41,6 @@ export const vBodyCreateReversionApiV1ReversionsPost = v.object({
 });
 
 /**
- * Body_create_template_api_v1_templates_post
- */
-export const vBodyCreateTemplateApiV1TemplatesPost = v.object({
-    content: v.string(),
-    description: v.string(),
-    expected_fonts: v.array(v.string()),
-    name: v.string()
-});
-
-/**
  * Body_replace_template_api_v1_templates__template_id__content_put
  */
 export const vBodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = v.object({
@@ -136,19 +126,11 @@ export const vIdleSessionPolicyUpdateRequest = v.object({
  */
 export const vJobOutput = v.picklist([
     'docx',
+    'pptx',
     'pdf',
-    'both'
+    'both',
+    'pptx-bundle'
 ]);
-
-/**
- * Body_create_conversion_api_v1_conversions_post
- */
-export const vBodyCreateConversionApiV1ConversionsPost = v.object({
-    output: vJobOutput,
-    source: v.string(),
-    template_id: v.nullish(v.pipe(v.string(), v.uuid())),
-    template_version_id: v.nullish(v.pipe(v.string(), v.uuid()))
-});
 
 /**
  * LoginRequest
@@ -187,6 +169,57 @@ export const vPasswordChangeRequirementRequest = v.object({
 export const vPasswordResetRequest = v.object({
     password: v.string(),
     password_change_required: v.optional(v.boolean(), false)
+});
+
+/**
+ * PresentationDialect
+ */
+export const vPresentationDialect = v.picklist([
+    'auto',
+    'markdown',
+    'marp'
+]);
+
+/**
+ * Body_create_conversion_api_v1_conversions_post
+ */
+export const vBodyCreateConversionApiV1ConversionsPost = v.object({
+    output: vJobOutput,
+    presentation_dialect: v.nullish(vPresentationDialect),
+    slide_level: v.nullish(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(6))),
+    source: v.string(),
+    template_id: v.nullish(v.pipe(v.string(), v.uuid())),
+    template_version_id: v.nullish(v.pipe(v.string(), v.uuid()))
+});
+
+/**
+ * Body_preview_presentation_api_v1_presentation_plan_post
+ */
+export const vBodyPreviewPresentationApiV1PresentationPlanPost = v.object({
+    dialect: v.optional(vPresentationDialect, 'auto'),
+    slide_level: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(6)), 2),
+    source: v.string()
+});
+
+/**
+ * PresentationOptions
+ *
+ * No caller-selected executable, reader, filter, or template path is accepted.
+ */
+export const vPresentationOptions = v.object({
+    dialect: v.optional(vPresentationDialect, 'auto'),
+    slide_level: v.optional(v.pipe(v.number(), v.integer()), 2)
+});
+
+/**
+ * PresentationPlanResponse
+ */
+export const vPresentationPlanResponse = v.object({
+    dialect: vPresentationDialect,
+    explicit_breaks: v.boolean(),
+    slide_level: v.pipe(v.number(), v.integer()),
+    titles: v.array(v.string()),
+    warnings: v.array(v.string())
 });
 
 /**
@@ -352,6 +385,24 @@ export const vTemplateAdministrationContextResponse = v.object({
 });
 
 /**
+ * TemplateKind
+ *
+ * Immutable reference document family.
+ */
+export const vTemplateKind = v.picklist(['docx', 'pptx']);
+
+/**
+ * Body_create_template_api_v1_templates_post
+ */
+export const vBodyCreateTemplateApiV1TemplatesPost = v.object({
+    content: v.string(),
+    description: v.string(),
+    expected_fonts: v.array(v.string()),
+    kind: v.optional(vTemplateKind, 'docx'),
+    name: v.string()
+});
+
+/**
  * TemplateMetadataRequest
  */
 export const vTemplateMetadataRequest = v.object({
@@ -383,7 +434,9 @@ export const vConversionResponse = v.object({
     id: v.pipe(v.string(), v.uuid()),
     output: vJobOutput,
     owner_id: v.pipe(v.string(), v.uuid()),
+    presentation_options: v.nullish(vPresentationOptions),
     progress: v.pipe(v.number(), v.integer()),
+    source_filename: v.nullish(v.string()),
     state: v.string(),
     step: v.string(),
     template_id: v.nullable(v.pipe(v.string(), v.uuid())),
@@ -431,6 +484,7 @@ export const vTemplateResponse = v.object({
     current_version_id: v.nullable(v.pipe(v.string(), v.uuid())),
     description: v.string(),
     id: v.pipe(v.string(), v.uuid()),
+    kind: v.optional(vTemplateKind, 'docx'),
     name: v.string(),
     owner_id: v.pipe(v.string(), v.uuid()),
     owner_username: v.string(),
@@ -510,6 +564,24 @@ export const vUserResponse = v.object({
 export const vLoginResponse = v.object({
     csrf_token: v.string(),
     user: vUserResponse
+});
+
+/**
+ * ValidationError
+ */
+export const vValidationError = v.object({
+    ctx: v.optional(v.record(v.string(), v.unknown())),
+    input: v.optional(v.unknown()),
+    loc: v.array(v.unknown()),
+    msg: v.string(),
+    type: v.string()
+});
+
+/**
+ * HTTPValidationError
+ */
+export const vHttpValidationError = v.object({
+    detail: v.optional(v.array(vValidationError))
 });
 
 /**
@@ -603,6 +675,10 @@ export const vListAuditRecordsApiV1AuditGetQuery = v.object({
  * Successful Response
  */
 export const vListAuditRecordsApiV1AuditGetResponse = v.array(vAuditRecordResponse);
+
+export const vGetConversionOptionsApiV1ConversionOptionsGetQuery = v.object({
+    template_kind: v.optional(vTemplateKind, 'docx')
+});
 
 /**
  * Successful Response
@@ -698,6 +774,22 @@ export const vChangeOwnPasswordApiV1PasswordPostHeaders = v.object({
  */
 export const vChangeOwnPasswordApiV1PasswordPostResponse = v.void();
 
+export const vPreviewPresentationApiV1PresentationPlanPostBody = vBodyPreviewPresentationApiV1PresentationPlanPost;
+
+export const vPreviewPresentationApiV1PresentationPlanPostHeaders = v.object({
+    'X-CSRF-Token': v.nullish(v.string())
+});
+
+/**
+ * Successful Response
+ */
+export const vPreviewPresentationApiV1PresentationPlanPostResponse = vPresentationPlanResponse;
+
+/**
+ * Native Pandoc PowerPoint reference
+ */
+export const vDownloadPresentationReferenceApiV1PresentationReferenceGetResponse = v.string();
+
 export const vListReversionsApiV1ReversionsGetQuery = v.object({
     offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50)
@@ -780,6 +872,7 @@ export const vListTemplatesApiV1TemplatesGetQuery = v.object({
     description: v.nullish(v.string()),
     owner_id: v.nullish(v.pipe(v.string(), v.uuid())),
     status: v.nullish(vTemplateStatus),
+    kind: v.nullish(vTemplateKind),
     offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 20)
 });

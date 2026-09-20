@@ -85,6 +85,11 @@ export type AuditRecordResponse = {
  */
 export type BodyCreateConversionApiV1ConversionsPost = {
     output: JobOutput;
+    presentation_dialect?: PresentationDialect | null;
+    /**
+     * Slide Level
+     */
+    slide_level?: number | null;
     /**
      * Source
      */
@@ -125,10 +130,26 @@ export type BodyCreateTemplateApiV1TemplatesPost = {
      * Expected Fonts
      */
     expected_fonts: Array<string>;
+    kind?: TemplateKind;
     /**
      * Name
      */
     name: string;
+};
+
+/**
+ * Body_preview_presentation_api_v1_presentation_plan_post
+ */
+export type BodyPreviewPresentationApiV1PresentationPlanPost = {
+    dialect?: PresentationDialect;
+    /**
+     * Slide Level
+     */
+    slide_level?: number;
+    /**
+     * Source
+     */
+    source: Blob | File;
 };
 
 /**
@@ -237,10 +258,15 @@ export type ConversionResponse = {
      * Owner Id
      */
     owner_id: string;
+    presentation_options?: PresentationOptions | null;
     /**
      * Progress
      */
     progress: number;
+    /**
+     * Source Filename
+     */
+    source_filename?: string | null;
     /**
      * State
      */
@@ -295,6 +321,16 @@ export type ErrorResponse = {
  * Ordered format families approved by T69.
  */
 export type FormatFamily = 'word' | 'powerpoint' | 'excel' | 'opendocument' | 'rtf' | 'epub' | 'csv' | 'pdf';
+
+/**
+ * HTTPValidationError
+ */
+export type HttpValidationError = {
+    /**
+     * Detail
+     */
+    detail?: Array<ValidationError>;
+};
 
 /**
  * IdleSessionPolicyDurationBoundsResponse
@@ -367,7 +403,7 @@ export type IdleSessionPolicyUpdateRequest = {
  *
  * Requested immutable result format.
  */
-export type JobOutput = 'docx' | 'pdf' | 'both';
+export type JobOutput = 'docx' | 'pptx' | 'pdf' | 'both' | 'pptx-bundle';
 
 /**
  * LoginRequest
@@ -442,6 +478,47 @@ export type PasswordResetRequest = {
      * Password Change Required
      */
     password_change_required?: boolean;
+};
+
+/**
+ * PresentationDialect
+ */
+export type PresentationDialect = 'auto' | 'markdown' | 'marp';
+
+/**
+ * PresentationOptions
+ *
+ * No caller-selected executable, reader, filter, or template path is accepted.
+ */
+export type PresentationOptions = {
+    dialect?: PresentationDialect;
+    /**
+     * Slide Level
+     */
+    slide_level?: number;
+};
+
+/**
+ * PresentationPlanResponse
+ */
+export type PresentationPlanResponse = {
+    dialect: PresentationDialect;
+    /**
+     * Explicit Breaks
+     */
+    explicit_breaks: boolean;
+    /**
+     * Slide Level
+     */
+    slide_level: number;
+    /**
+     * Titles
+     */
+    titles: Array<string>;
+    /**
+     * Warnings
+     */
+    warnings: Array<string>;
 };
 
 /**
@@ -724,6 +801,13 @@ export type TemplateAdministrationContextResponse = {
 };
 
 /**
+ * TemplateKind
+ *
+ * Immutable reference document family.
+ */
+export type TemplateKind = 'docx' | 'pptx';
+
+/**
  * TemplateMetadataRequest
  */
 export type TemplateMetadataRequest = {
@@ -784,6 +868,7 @@ export type TemplateResponse = {
      * Id
      */
     id: string;
+    kind?: TemplateKind;
     /**
      * Name
      */
@@ -919,6 +1004,34 @@ export type UserResponse = {
      * Username
      */
     username: string;
+};
+
+/**
+ * ValidationError
+ */
+export type ValidationError = {
+    /**
+     * Context
+     */
+    ctx?: {
+        [key: string]: unknown;
+    };
+    /**
+     * Input
+     */
+    input?: unknown;
+    /**
+     * Location
+     */
+    loc: Array<string | number>;
+    /**
+     * Message
+     */
+    msg: string;
+    /**
+     * Error Type
+     */
+    type: string;
 };
 
 export type GetSessionPolicyApiV1AdminSessionPolicyGetData = {
@@ -1278,7 +1391,9 @@ export type ListAuditRecordsApiV1AuditGetResponse = ListAuditRecordsApiV1AuditGe
 export type GetConversionOptionsApiV1ConversionOptionsGetData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        template_kind?: TemplateKind;
+    };
     url: '/api/v1/conversion-options';
 };
 
@@ -1287,6 +1402,10 @@ export type GetConversionOptionsApiV1ConversionOptionsGetErrors = {
      * Authentication failed or is required
      */
     401: ErrorResponse;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
     /**
      * The service is not ready
      */
@@ -1704,6 +1823,82 @@ export type ChangeOwnPasswordApiV1PasswordPostResponses = {
 
 export type ChangeOwnPasswordApiV1PasswordPostResponse = ChangeOwnPasswordApiV1PasswordPostResponses[keyof ChangeOwnPasswordApiV1PasswordPostResponses];
 
+export type PreviewPresentationApiV1PresentationPlanPostData = {
+    body: BodyPreviewPresentationApiV1PresentationPlanPost;
+    headers?: {
+        /**
+         * X-Csrf-Token
+         */
+        'X-CSRF-Token'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/presentation-plan';
+};
+
+export type PreviewPresentationApiV1PresentationPlanPostErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The operation is forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * The request body is too large
+     */
+    413: ErrorResponse;
+    /**
+     * The request is invalid
+     */
+    422: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type PreviewPresentationApiV1PresentationPlanPostError = PreviewPresentationApiV1PresentationPlanPostErrors[keyof PreviewPresentationApiV1PresentationPlanPostErrors];
+
+export type PreviewPresentationApiV1PresentationPlanPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PresentationPlanResponse;
+};
+
+export type PreviewPresentationApiV1PresentationPlanPostResponse = PreviewPresentationApiV1PresentationPlanPostResponses[keyof PreviewPresentationApiV1PresentationPlanPostResponses];
+
+export type DownloadPresentationReferenceApiV1PresentationReferenceGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/presentation-reference';
+};
+
+export type DownloadPresentationReferenceApiV1PresentationReferenceGetErrors = {
+    /**
+     * Authentication failed or is required
+     */
+    401: ErrorResponse;
+    /**
+     * The service is not ready
+     */
+    503: ErrorResponse;
+};
+
+export type DownloadPresentationReferenceApiV1PresentationReferenceGetError = DownloadPresentationReferenceApiV1PresentationReferenceGetErrors[keyof DownloadPresentationReferenceApiV1PresentationReferenceGetErrors];
+
+export type DownloadPresentationReferenceApiV1PresentationReferenceGetResponses = {
+    /**
+     * Native Pandoc PowerPoint reference
+     */
+    200: Blob | File;
+};
+
+export type DownloadPresentationReferenceApiV1PresentationReferenceGetResponse = DownloadPresentationReferenceApiV1PresentationReferenceGetResponses[keyof DownloadPresentationReferenceApiV1PresentationReferenceGetResponses];
+
 export type ListReversionsApiV1ReversionsGetData = {
     body?: never;
     path?: never;
@@ -2091,6 +2286,10 @@ export type ListTemplatesApiV1TemplatesGetData = {
          * Status
          */
         status?: TemplateStatus | null;
+        /**
+         * Kind
+         */
+        kind?: TemplateKind | null;
         /**
          * Offset
          */

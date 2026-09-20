@@ -596,3 +596,51 @@ test("source cardinality and detached subscribers are deterministic", async () =
   expect(listener).toHaveBeenCalledTimes(2);
   controller.dispose();
 });
+
+test("recent conversions omit expired entries on load and after a job update", async () => {
+  const current = job();
+  const expired = job({
+    id: "00000000-0000-4000-8000-000000000202",
+    state: "expired",
+  });
+  const failed = job({
+    id: "00000000-0000-4000-8000-000000000203",
+    state: "failed",
+  });
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(capabilities())
+    .mockResolvedValueOnce({
+      items: [expired, current, failed],
+      limit: 10,
+      offset: 0,
+      total: 3,
+    })
+    .mockResolvedValueOnce(job({ state: "expired" }))
+    .mockResolvedValueOnce(expired);
+  const controller = new ReversionController(api({ json }));
+  await controller.load();
+  expect(controller.snapshot().recent).toEqual([current, failed]);
+  await controller.openJob(current.id);
+  expect(controller.snapshot().recent).toEqual([failed]);
+  expect(controller.snapshot().active?.state).toBe("expired");
+  await controller.openJob(expired.id);
+  expect(controller.snapshot().recent).toEqual([failed]);
+  controller.dispose();
+});
+
+test("an all-expired history produces an empty recent list", async () => {
+  const json = vi
+    .fn()
+    .mockResolvedValueOnce(capabilities())
+    .mockResolvedValueOnce({
+      items: [job({ state: "expired" })],
+      limit: 10,
+      offset: 0,
+      total: 1,
+    });
+  const controller = new ReversionController(api({ json }));
+  await controller.load();
+  expect(controller.snapshot().recent).toEqual([]);
+  controller.dispose();
+});

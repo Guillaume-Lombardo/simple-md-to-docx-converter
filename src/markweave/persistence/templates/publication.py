@@ -71,6 +71,7 @@ class _TemplatePublicationRepository(_SqlTemplateStore):
                         id=str(template.id),
                         owner_id=str(template.owner_id),
                         name=template.name,
+                        kind=template.kind.value,
                         normalized_name=template.normalized_name,
                         description=template.description,
                         normalized_description=template.normalized_description,

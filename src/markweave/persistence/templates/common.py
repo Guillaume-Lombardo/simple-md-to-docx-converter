@@ -14,6 +14,7 @@ from markweave.persistence.schema import (
 )
 from markweave.templates.models import (
     TemplateIdentity,
+    TemplateKind,
     TemplatePublicationState,
     TemplateStatus,
     TemplateVersion,
@@ -27,6 +28,7 @@ def _template(row: TemplateRow) -> TemplateIdentity:
         id=UUID(row.id),
         owner_id=UUID(row.owner_id),
         name=row.name,
+        kind=TemplateKind(row.kind),
         description=row.description,
         status=TemplateStatus(row.status),
         revision=row.revision,

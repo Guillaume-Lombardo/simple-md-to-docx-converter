@@ -33,6 +33,7 @@ Actions workflows, and an autonomous Codex development workflow.
 | Frontend runtime baseline | Linux/AMD64 UBI 9 Node.js 24 builder and minimal runtime pinned by digest, resolving to Node.js `24.19.0`; verified Corepack `0.36.0` selects pnpm `11.25.0`; Next.js `16.3.4`, TypeScript `6.0.3`, and Tailwind CSS `4.3.3` remain exact and root-lockfile-integrity pinned as reviewed on 2026-09-03 |
 | Processing | Asynchronous jobs with a persistent queue and status API |
 | Markdown to DOCX | Pandoc |
+| Markdown to PPTX | Pandoc with editable slides, a documented Marp subset, and optional immutable PowerPoint reference templates; omitted templates use Pandoc defaults |
 | Mermaid | Local Mermaid CLI and Chromium |
 | DOCX to PDF | LibreOffice headless |
 | Documents to Markdown | Local `firecrawl-anydoc==0.2.4` with no hosted fallback; the exact x86-64 ABI3 wheel, source commit, format matrix, and limitations are pinned by T69 |
@@ -86,6 +87,28 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 - Return the component versions and explicit template mode needed to reproduce a conversion; a
   versioned-template job also returns its immutable template identifiers.
 
+### 3.1.1 Editable PowerPoint presentations
+
+T82 adds the independent `/presentations` (`2pptx`) workspace. It accepts bounded Markdown or
+ZIP assets, uses explicit slide breaks or a configurable heading level, and previews the outline
+and compatibility warnings before submission. No content is summarized or silently truncated.
+A documented Marp subset maps to editable Pandoc slides; arbitrary CSS/HTML, rasterized Marp
+export, executable Quarto, and OCR are excluded. Speaker notes, columns, tables, local images and
+Mermaid use the existing bounded document pipeline. Pandoc runs with no `--reference-doc` when
+no template is selected; an empty template catalog never prevents presentation generation.
+
+The existing durable queue freezes presentation options and the optional template version, binds
+them to idempotency and preserves cancellation, recovery and both storage profiles. PPTX templates
+have a distinct immutable type, layout validation, existing ownership/versioning, and typed search.
+Outputs are PPTX or a portable ZIP containing the presentation, original Markdown/assets and
+generation settings. Source recovery is explicitly separate from extracting an edited PPTX.
+
+T83 separately adds opt-in slide-oriented Markdown/Marp output with notes/image options.
+Existing anydoc extraction remains the default. Where its model loses slide boundaries, T83 may
+use a narrowly bounded non-executing OOXML presentation reader inside the same isolated reverse
+attempt; it must retain archive/XML/image limits, no network, ownership and lifecycle guarantees.
+Embedding source in the PPTX itself and full visual round-trip fidelity remain excluded.
+
 ### 3.2 Word templates
 
 - Derive an immutable owner from the authenticated identity.
@@ -99,15 +122,18 @@ Asynchronous processing avoids coupling job duration to browser, OpenShift Route
 
 ### 3.3 Web interface
 
+The primary navigation displays the frontend build's Markweave release version as a
+small subscript beside the product name, derived from `pyproject.toml`.
+
 Provide a login page and three main browser workflows. The target implementation is the Next.js,
 TypeScript, and Tailwind CSS application under `web/`; the current server-rendered pages remain the
 production implementation until T64 completes parity, rootless E2E verification, and cutover:
 
-- **md 2 docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
+- **2docx:** upload or drag-and-drop, choose Pandoc's default or search and select a template,
   choose output, create a job, poll with progressive backoff, cancel, inspect status, download, and
   display accessible English errors.
-- **template docx:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
-- **x 2 md (Experimental):** upload or drag-and-drop a supported office document, create a local
+- **templates:** list visible templates and owners, filter “my templates,” create, download, rename, replace, restore, delete, and choose the preferred template.
+- **2md (Experimental):** upload or drag-and-drop a supported office document, create a local
   document-to-Markdown job, poll with progressive backoff, cancel, inspect status, download the
   Markdown result or asset package, and display accessible English errors. The navigation label has
   a visible stamp-style `Experimental` treatment whose meaning is also available to assistive
@@ -665,7 +691,7 @@ coverage or final E2E coverage.
 
 Use selective path/domain detection while keeping one required `CI / gate` result. Support pull requests, `merge_group`, `main`, releases, manual execution, and a scheduled complete suite. Pin actions by commit SHA, minimize permissions, avoid privileged containers and untrusted secret access, cache safely, cancel superseded runs, and apply bounded timeouts.
 
-Light draft checks include formatting, lint, types, unit tests, coverage, and cheap security checks. Ready and merge-queue checks add affected functional, integration, container, and E2E domains. Run the full two-profile matrix on schedule and before releases. Publish the image, SBOM, and provenance only for releases.
+Light draft checks include formatting, lint, types, unit tests, coverage, and cheap security checks. Run the unchanged `unit or light_coverage` Python selection in two deterministic, complementary partitions on separate jobs. Require both successful partitions and their same-run, same-attempt raw coverage artifacts before enforcing aggregate total, branch-only and changed-line coverage at 90%. Keep rapid checks separate and require every stage through `CI / gate`; missing artifacts or skipped partitions fail closed. Ready and merge-queue checks add affected functional, integration, container, and E2E domains. Run the full two-profile matrix on schedule and before releases. Publish the image, SBOM, and provenance only for releases.
 
 Use an isolated release workflow to publish the `markweave` Python distribution with the matching public import `markweave`. A protected pull-request merge to `main` is the sole human gate. A trusted main push that changes `pyproject.toml` must compare `project.version` and the positive integer `tool.markweave.release.attempt` at the exact before and head SHAs. An unchanged version and attempt is a no-op. After an infrastructure failure leaves a run impossible to close or rerun and creates no tag, GitHub Release, PyPI version, or GHCR version tag, a protected recovery pull request may increment the attempt by exactly one to retry the same final version; decreases, skipped attempts, and a non-reset attempt on a new version fail closed. An invalid, non-canonical, pre-release, development, local, epoch, or lower-precedence version also fails closed. A changed canonical spelling with equal PEP 440 precedence remains a valid transition. For a real final-version or protected retry transition, reject an existing `v<version>` tag, matching GitHub Release, or already-published PyPI version. Build the sdist and wheel once from the reviewed main SHA, validate metadata, installation, the documented public import, and artifact integrity, then publish those exact files without rebuilding. Atomically create `v<version>` at that SHA before publishing the matching GitHub Release automatically; a failed-job rerun may reuse partial tag or Release state only after verifying its exact identity. Publish the dynamically tagged GHCR image, provenance, SBOM, and evidence from the same trusted push through a secretless reusable workflow that verifies the Release identity before idempotent evidence attachment. Derive the actual registry digest before remote publication by serializing once into a private local `dir:` transport, validate that digest against the exact staged manifest bytes, and copy only those bytes to GHCR. Authenticated preflight must reject every observed conflicting source-SHA or version tag, same-digest state is idempotent, every copy must be followed by exact digest verification, and workflow/repository concurrency must prevent the automation from racing itself. Because GHCR conditional manifest creation is not established, document the narrow residual race with another principal holding `packages: write`; do not claim immutable or conditional tag creation. Retain a receipt relating the internally bound OCI-archive digest to the registry digest used for provenance. Use PyPI Trusted Publishing through the `pypi` environment with no long-lived token. Grant `contents: write` only to tag/Release creation and evidence attachment, `id-token: write` only to PyPI upload and container attestation, pin actions by full SHA, and prevent pull requests, forks, tag pushes, Release events, and every other untrusted context from publishing. Manual dispatch must never rebuild or republish Python or container artifacts. It may only recover provenance, SBOM, and GitHub Release evidence for an already-published exact Release from a retained artifact produced by a successful upstream build job. Before attestation or attachment, bind the selected run to this upstream repository, workflow file, and the current trusted `main` history by requiring both the release source to be an ancestor of the selected run SHA and that run SHA to be an ancestor of the current workflow SHA; require its successful build job; download the single non-expired bounded artifact by immutable artifact ID; verify its exact regular-file set, checksum manifest, internal OCI identity, publication receipt, version, tag, source SHA, and anonymously readable public GHCR digest; then pass that digest to the existing attestation job and the unchanged evidence files to the existing Release attachment job. Version `0.3.0` maps to the first derived tag `v0.3.0`; future versions are never hardcoded in workflow logic.
 
@@ -767,6 +793,8 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T78 | Make node asset permission tests independent of checkout modes | T05, T20 |
 | T79 | Decompose large reverse-conversion modules without changing contracts | T70, T71 |
 | T80 | Clean maintenance assets and provide automatic local distributed-test services | T22, T23, T67, T76 |
+| T81 | Shorten workflow tab labels to `2docx`, `2md`, and `templates` | T76 |
+| T82 | Add editable PowerPoint generation, typed templates, portable sources and slide-oriented reverse conversion | T81, T07, T08, T09, T10, T12, T13, T15, T16, T17, T69, T70, T71, T72 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -861,3 +889,11 @@ the ticket before touching any path owned by another active ticket.
   separate product, privacy, security, cost, egress, retention, and operations decision.
 
 Do not silently resolve deferred parameters in unrelated implementation work.
+
+
+### T83 follow-up scope
+
+T82 delivers editable PowerPoint generation and original-source packages in 0.7.0.
+T83 retains the unfinished slide-oriented Markdown/Marp extraction options from
+edited PPTX files under the existing reverse isolation contract. It is not part of
+the 0.7.0 forward-workflow completion claim.

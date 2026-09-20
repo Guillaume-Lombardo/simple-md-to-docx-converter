@@ -34,6 +34,9 @@ _JSON_RESPONSE_LIMIT = 1_048_576
 _DOCUMENT_LIMIT = 268_435_456
 _SHA256_HEX_LENGTH = 64
 _MAX_PAGE_SIZE = 100
+_PPTX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
 _DOCX_MEDIA_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
@@ -148,6 +151,9 @@ def register(  # noqa: PLR0915 - the fixed public family is registered together
     _identifier(show, "template_id", "Template UUID.")
 
     create = _leaf(commands, "create", "Create a template and initial version.")
+    create.add_argument(
+        "--kind", choices=("docx", "pptx"), action=_Option, default="docx"
+    )
     create.add_argument("--name", action=_Option, required=True)
     create.add_argument("--description", action=_Option, default="")
     _file(create)
@@ -691,6 +697,7 @@ def _template_multipart(
     content = _read_upload(command.values["file"])
     fields: list[tuple[str, str]] = []
     if include_metadata:
+        fields.append(("kind", str(command.values.get("kind", "docx"))))
         fields.extend(
             (
                 ("name", str(command.values["name"])),
@@ -747,7 +754,7 @@ def _read_upload(value: Any) -> bytes:
 def _download_to(writer: OutputWriter, command: _Command, response: _Response) -> None:
     _expect_status(response, 200)
     media_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-    if media_type != _DOCX_MEDIA_TYPE:
+    if media_type not in {_DOCX_MEDIA_TYPE, _PPTX_MEDIA_TYPE}:
         raise CliError(
             "invalid_download", "The service returned an invalid template document."
         )

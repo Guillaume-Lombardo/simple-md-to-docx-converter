@@ -59,7 +59,7 @@ test(
           response.url().endsWith("/api/v1/reversions/capabilities") &&
           response.request().method() === "GET",
       );
-      await page.getByRole("link", { name: "x 2 md, Experimental" }).click();
+      await page.getByRole("link", { name: "2md, Experimental" }).click();
       await page.waitForURL("**/revert");
       assert.equal((await capabilitiesResponse).status(), 200);
       await page
@@ -115,7 +115,7 @@ test(
         await page.getByRole("button", { name: "Download result" }).count(),
         0,
       );
-      await page.getByRole("link", { name: "md 2 docx", exact: true }).click();
+      await page.getByRole("link", { name: "2docx", exact: true }).click();
       await page
         .getByRole("heading", { name: "New conversion", exact: true })
         .waitFor();

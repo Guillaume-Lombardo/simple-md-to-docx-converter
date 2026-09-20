@@ -6,7 +6,32 @@ All notable user-visible, operational, security, compatibility, and deprecation
 changes are recorded here. Entries use the release version as their stable link
 target. Internal ticket choreography is intentionally excluded.
 
-## Unreleased
+<a id="release-0-7-0"></a>
+
+## [0.7.0] - 2026-09-20
+
+### Fixed
+
+- Progress-to-download transitions preserve the status column height.
+
+- File selection displays the selected document consistently for picker and drag/drop in every conversion workspace.
+- Download buttons match the primary conversion action; recent history shows source names with conversion identifiers in tooltips.
+- PowerPoint slide settings start collapsed and can be expanded on demand.
+
+### Added
+
+- Markweave branding and a dedicated browser tab icon.
+
+- The `2pptx` workspace generates editable PowerPoint from Markdown, a documented Marp
+  subset or ZIP assets, with optional PowerPoint templates, outline preview and source bundles.
+  Omitted templates use Pandoc’s native reference presentation.
+
+### Changed
+
+- Navigation tabs are now `2docx`, `2md`, and `templates`.
+- The primary navigation shows the Markweave release version directly below the `eave` suffix of the product name.
+- Recent conversion lists hide expired conversions, including jobs whose updated
+  status reports expiration while the workspace is open.
 
 <a id="release-0-6-4"></a>
 

@@ -1,6 +1,11 @@
 import { defineConfig } from "vitest/config";
+import { readProjectVersion } from "./project-version.mjs";
 
 export default defineConfig({
+  define: {
+    "process.env.NEXT_PUBLIC_MARKWEAVE_VERSION":
+      JSON.stringify(readProjectVersion()),
+  },
   test: {
     environment: "jsdom",
     globals: true,

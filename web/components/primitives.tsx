@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import {
   forwardRef,
   type ComponentPropsWithoutRef,
@@ -20,6 +21,7 @@ export function AppShell({
 }: {
   children: ReactNode;
   current:
+    | "Presentations"
     | "Convert"
     | "Password"
     | "Revert"
@@ -40,22 +42,53 @@ export function AppShell({
           aria-label="Primary"
           className="mx-auto flex max-w-5xl items-center gap-6 p-4"
         >
-          <span className="font-semibold">Markweave</span>
+          <span className="flex shrink-0 items-center gap-2">
+            <Image
+              src="/markweave-icon.svg"
+              alt=""
+              width={28}
+              height={30}
+              unoptimized
+            />
+            <span className="grid shrink-0 grid-cols-[auto_auto] leading-none font-semibold whitespace-nowrap">
+              <span>Markw</span>
+              <span>eave</span>
+              <sub
+                aria-label={`Version ${process.env.NEXT_PUBLIC_MARKWEAVE_VERSION}`}
+                className="static col-start-2 -mt-0.5 justify-self-center text-xs leading-none font-normal text-muted"
+              >
+                v{process.env.NEXT_PUBLIC_MARKWEAVE_VERSION}
+              </sub>
+            </span>
+          </span>
           <Link
             aria-current={current === "Convert" ? "page" : undefined}
             className="text-accent underline-offset-4 hover:underline"
             href="/convert"
           >
-            md 2 docx
+            2docx
           </Link>
           {user && !user.password_change_required ? (
             <Link
+              href="/presentations"
+              aria-current={current === "Presentations" ? "page" : undefined}
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              2pptx
+            </Link>
+          ) : (
+            <span aria-disabled="true" className="text-muted">
+              2pptx
+            </span>
+          )}
+          {user && !user.password_change_required ? (
+            <Link
               aria-current={current === "Revert" ? "page" : undefined}
-              aria-label="x 2 md, Experimental"
+              aria-label="2md, Experimental"
               className="flex items-center gap-2 text-accent underline-offset-4 hover:underline"
               href="/revert"
             >
-              x 2 md
+              2md
               <span aria-hidden="true" className="experimental-stamp">
                 Experimental
               </span>
@@ -65,7 +98,7 @@ export function AppShell({
               aria-disabled="true"
               className="flex items-center gap-2 text-muted"
             >
-              x 2 md
+              2md
               <span className="experimental-stamp">Experimental</span>
             </span>
           )}
@@ -75,11 +108,11 @@ export function AppShell({
               className="text-accent underline-offset-4 hover:underline"
               href="/templates"
             >
-              template docx
+              templates
             </Link>
           ) : (
             <span aria-disabled="true" className="text-muted">
-              template docx
+              templates
             </span>
           )}
           {user?.role === "admin" && !user.password_change_required && (

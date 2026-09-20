@@ -28,6 +28,7 @@ from markweave.templates.errors import (
 )
 from markweave.templates.models import (
     TemplateCreate,
+    TemplateKind,
     TemplatePage,
     TemplateSearch,
     TemplateStatus,
@@ -84,6 +85,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
         description: str | None = None,
         owner_id: UUID | None = None,
         template_status: Annotated[TemplateStatus | None, Query(alias="status")] = None,
+        kind: TemplateKind | None = None,
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> TemplatePageResponse:
@@ -91,6 +93,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
             actor,
             TemplateSearch(
                 name=name,
+                kind=kind,
                 description=description,
                 owner_id=owner_id,
                 status=template_status,
@@ -119,6 +122,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
         description: Annotated[str, Form()],
         expected_fonts: Annotated[list[str], Form()],
         content: Annotated[UploadFile, File()],
+        kind: Annotated[TemplateKind, Form()] = TemplateKind.DOCX,
     ) -> TemplateResponse:
         try:
             data = await content.read(settings.template_max_archive_bytes + 1)
@@ -144,7 +148,7 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
             template, _version = await run_in_threadpool(
                 dependencies.template_runtime().create_versioned,
                 actor,
-                TemplateCreate(uuid4(), name, description),
+                TemplateCreate(uuid4(), name, description, kind=kind),
                 data,
                 _expected_fonts_from_form(expected_fonts),
             )
@@ -266,11 +270,15 @@ def build_router(  # noqa: PLR0915 - route declarations are intentionally groupe
         )
         return Response(
             data,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                if _template.kind is TemplateKind.PPTX
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
             headers={
                 "Content-Disposition": (
                     f'attachment; filename="template-{template_id}-v'
-                    f'{version.number}.docx"'
+                    f'{version.number}.{_template.kind.value}"'
                 ),
                 "Cache-Control": "private, no-store",
                 "ETag": f'"sha256-{version.sha256}"',

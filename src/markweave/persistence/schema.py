@@ -168,6 +168,12 @@ class TemplateRow(Base):
     owner_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    kind: Mapped[str] = mapped_column(
+        String(8),
+        CheckConstraint("kind IN ('docx', 'pptx')", name="ck_templates_kind"),
+        nullable=False,
+        server_default="docx",
+    )
     name: Mapped[str] = mapped_column(String(), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(), nullable=False)
     description: Mapped[str] = mapped_column(String(), nullable=False)
@@ -320,7 +326,8 @@ class ConversionJobRow(Base):
     __tablename__ = "conversion_jobs"
     __table_args__ = (
         CheckConstraint(
-            "output IN ('docx', 'pdf', 'both')", name="ck_conversion_jobs_output"
+            "output IN ('docx', 'pdf', 'both', 'pptx', 'pptx-bundle')",
+            name="ck_conversion_jobs_output",
         ),
         CheckConstraint(
             "state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', "
@@ -328,7 +335,7 @@ class ConversionJobRow(Base):
             name="ck_conversion_jobs_state",
         ),
         CheckConstraint(
-            "step IN ('queued', 'validating', 'rendering', 'docx', 'pdf', "
+            "step IN ('queued', 'validating', 'rendering', 'docx', 'pdf', 'pptx', "
             "'publishing', 'complete')",
             name="ck_conversion_jobs_step",
         ),
@@ -360,6 +367,7 @@ class ConversionJobRow(Base):
     template_id: Mapped[str | None] = mapped_column(String(36))
     template_version_id: Mapped[str | None] = mapped_column(String(36))
     output: Mapped[str] = mapped_column(String(16), nullable=False)
+    presentation_options: Mapped[str | None] = mapped_column(String())
     component_versions: Mapped[str] = mapped_column(String(), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(128))
     state: Mapped[str] = mapped_column(String(16), nullable=False)

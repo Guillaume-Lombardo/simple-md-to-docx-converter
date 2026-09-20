@@ -58,6 +58,11 @@ class _JobSubmissionRepository(_SqlJobStore):
                 else None
             ),
             output=submission.output.value,
+            presentation_options=(
+                submission.presentation_options.canonical_json()
+                if submission.presentation_options
+                else None
+            ),
             component_versions=json.dumps(
                 submission.component_versions, separators=(",", ":")
             ),
@@ -90,6 +95,10 @@ class _JobSubmissionRepository(_SqlJobStore):
                         )
                         .where(
                             TemplateRow.id == str(submission.template_id),
+                            TemplateRow.kind
+                            == (
+                                "pptx" if submission.output.is_presentation else "docx"
+                            ),
                             TemplateRow.status == "active",
                             TemplateRow.publication_state == "published",
                             TemplateRow.current_version_id

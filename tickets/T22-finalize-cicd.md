@@ -376,3 +376,31 @@ Update this file and Linear whenever scope, status, priority, dependencies, acce
   unchanged, so JavaScript checks were not rerun. Protected hosted CI remains the publication gate.
 - The user authorized publication, protected squash merge and exact source-branch cleanup
   through the `yolo` skill on 2026-09-20. Hosted checks and independent review remain required.
+
+2026-09-20: User requested splitting the light job after all 4,024 Python tests
+and all thresholds passed but the runner reached its 20-minute job limit.
+Rapid/frontend checks are separated from two deterministic complementary Python
+partitions. Same-attempt artifact aggregation preserves total, branch and changed-line
+90% gates; every partition and aggregate result is mandatory in CI / gate.
+The selector and workflow policy have 193 passing focused checks, including real
+pytest marker selection and invalid-argument rejection. Full partition execution
+and independent implementation review are in progress; no release gate is bypassed.
+
+Independent review found and resolved two issues before publication: shard commands
+now disable only the local per-run branch coverage hook, and both new uv jobs restore
+the existing lock-keyed cache without saving from PRs. The user additionally requested
+caching; light CI now restores the Next.js compiler cache, keyed to Node/lockfile,
+and saves it only on trusted main. No test/coverage outcomes are cached. Independent
+re-review found no remaining blocker. Full local partition runs are pending; Ruff,
+ty and the exact workflow policy pass. Previous hosted heavy domains all passed;
+the old unsplit light retry is superseded by the requested CI improvement.
+
+The full collection audit caught generated parameter IDs containing timestamps and
+UUIDs. The partition key now excludes parameter IDs and keeps each function's cases
+together. Three real collections prove exact per-function case-count union: 4,042
+selected cases, split 2,129/1,913, with no shared function and no missing case.
+The independent reviewer confirmed this fix; all 193 focused tests still pass.
+An earlier local split completed in 5m06s/5m34s with aggregate 90.10% branches,
+but its random-parameter allocation is not accepted as final coverage evidence.
+The corrected full partitions are running again. Hosted rapid light passed in 1m33s;
+pnpm cache restoration is verified, new uv/Next.js cache entries await trusted main.

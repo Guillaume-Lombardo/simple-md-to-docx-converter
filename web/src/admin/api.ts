@@ -39,6 +39,7 @@ export interface TemplateFilters {
 }
 
 export interface TemplateCreateInput {
+  kind?: "docx" | "pptx";
   content: File;
   description: string;
   expectedFonts: string;
@@ -123,6 +124,7 @@ export class AdministrationApi {
   ): Promise<TemplateResponse> {
     const form = new FormData();
     form.append("name", input.name);
+    form.append("kind", input.kind ?? "docx");
     form.append("description", input.description);
     appendExpectedFonts(form, input.expectedFonts);
     form.append("content", input.content);

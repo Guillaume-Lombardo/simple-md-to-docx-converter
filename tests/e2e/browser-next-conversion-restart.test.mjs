@@ -38,11 +38,7 @@ test("Next conversion workspace reopens a durable result after application resta
       page.waitForURL("**/convert"),
       page.getByRole("button", { name: "Sign in" }).click(),
     ]);
-    await page
-      .getByRole("button", {
-        name: new RegExp(`Conversion ${state.job_id.slice(0, 8)}`),
-      })
-      .click();
+    await page.getByTitle(state.job_id, { exact: true }).click();
     await page.getByText("Your conversion is ready to download.").waitFor();
     assert.equal(
       await page.getByRole("button", { name: "Download result" }).count(),

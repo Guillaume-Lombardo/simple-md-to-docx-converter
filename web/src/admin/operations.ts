@@ -2,6 +2,8 @@ import { ApiError } from "../api/transport";
 import type { IdleSessionPolicyDurationBoundsResponse } from "../api/generated/types.gen";
 
 export const SESSION_ENDED = "Your session ended. Please sign in again.";
+const PPTX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -93,19 +95,24 @@ function downloadFilename(response: Response): string | undefined {
 export async function readTemplateDownload(
   response: Response,
 ): Promise<TemplateDownload> {
+  const mediaType = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
   if (
-    response.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() !== DOCX_MEDIA_TYPE ||
+    ![DOCX_MEDIA_TYPE, PPTX_MEDIA_TYPE].includes(mediaType ?? "") ||
     response.headers.get("cache-control")?.toLowerCase() !==
       "private, no-store" ||
     response.headers.get("x-content-type-options")?.toLowerCase() !== "nosniff"
   )
     throw new TypeError("Unexpected template download response.");
   const filename = downloadFilename(response);
-  if (!filename?.toLowerCase().endsWith(".docx"))
+  if (
+    !filename
+      ?.toLowerCase()
+      .endsWith(mediaType === PPTX_MEDIA_TYPE ? ".pptx" : ".docx")
+  )
     throw new TypeError("Unexpected template download filename.");
   return { blob: await response.blob(), filename };
 }

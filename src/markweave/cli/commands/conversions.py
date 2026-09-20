@@ -102,10 +102,18 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     convert.add_argument("source", action=_RequestOption, help="Markdown or ZIP input.")
     convert.add_argument(
         "--output",
-        choices=("docx", "pdf", "both"),
+        choices=("docx", "pdf", "both", "pptx", "pptx-bundle"),
         default="docx",
         action=_RequestOption,
         help="Requested result format (default: docx).",
+    )
+    convert.add_argument(
+        "--presentation-dialect",
+        choices=("auto", "markdown", "marp"),
+        action=_RequestOption,
+    )
+    convert.add_argument(
+        "--slide-level", type=int, choices=range(1, 7), action=_RequestOption
     )
     convert.add_argument("--template-id", action=_RequestOption)
     convert.add_argument("--template-version-id", action=_RequestOption)
@@ -238,6 +246,11 @@ def _convert(context: CommandContext, writer: OutputWriter, request: _Request) -
                 template_id=template_id,
                 template_version_id=template_version_id,
                 idempotency_key=idempotency_key,
+                **{
+                    name: request.values[name]
+                    for name in ("presentation_dialect", "slide_level")
+                    if request.values.get(name) is not None
+                },
             )
             break
         except CliError as error:

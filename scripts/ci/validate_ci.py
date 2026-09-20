@@ -93,7 +93,8 @@ RUN_STEP_FIELDS = frozenset({"name", "run", "env", "id", "if"})
 READ_ONLY_ENV_STEPS = frozenset(
     {
         ("detect", "Select affected domains"),
-        ("light", "Enforce changed application line coverage"),
+        ("python-tests", "Run a complementary light test shard"),
+        ("python-coverage", "Enforce changed application line coverage"),
         ("light", "Validate the canonical OpenAPI contract"),
         ("light", "Verify public release alignment"),
         ("domain-plan", "Report runnable and explicitly planned suites"),
@@ -174,7 +175,15 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "schedule",
             }
         ),
-        jobs={"detect": 5, "light": 20, "domain-plan": 5, "heavy": 45, "gate": 5},
+        jobs={
+            "detect": 5,
+            "light": 20,
+            "python-tests": 20,
+            "python-coverage": 5,
+            "domain-plan": 5,
+            "heavy": 45,
+            "gate": 5,
+        },
         actions=frozenset(
             {
                 "actions/checkout",
@@ -201,6 +210,12 @@ READ_ONLY_WORKFLOW_POLICIES = {
             ),
             "light": frozenset(
                 {"name", "permissions", "runs-on", "steps", "timeout-minutes"}
+            ),
+            "python-tests": frozenset(
+                {"name", "runs-on", "timeout-minutes", "strategy", "steps"}
+            ),
+            "python-coverage": frozenset(
+                {"name", "needs", "runs-on", "timeout-minutes", "steps"}
             ),
             "domain-plan": frozenset(
                 {"name", "needs", "runs-on", "steps", "timeout-minutes"}
@@ -229,7 +244,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
         },
         step_conditions={
             (
-                "light",
+                "python-coverage",
                 "Enforce changed application line coverage",
             ): (
                 "${{ github.event_name == 'pull_request' || "
@@ -238,6 +253,14 @@ READ_ONLY_WORKFLOW_POLICIES = {
             (
                 "light",
                 "Save the exact pnpm store cache from trusted main",
+            ): (
+                "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+                "&& github.repository == "
+                "'Guillaume-Lombardo/simple-md-to-docx-converter' }}"
+            ),
+            (
+                "light",
+                "Save the Next.js compiler cache from trusted main",
             ): (
                 "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
                 "&& github.repository == "
@@ -335,7 +358,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
         },
-        canonical_digest="e8a064c2e29334dc1f88b37da285c96c3974f2caed206bbaa9c1152ad59ba35f",
+        canonical_digest="dfd1123088c5dc46fd7ad877e35370ead4582004d6178be523ba35984b8ea5c8",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
@@ -785,6 +808,80 @@ def _validate_public_alignment_credentials(
     return []
 
 
+def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
+    """Require exhaustive shards and same-attempt coverage before the final gate."""
+    jobs = _mapping(workflow.get("jobs")) or {}
+    tests = _mapping(jobs.get("python-tests")) or {}
+    coverage = _mapping(jobs.get("python-coverage")) or {}
+    gate = _mapping(jobs.get("gate")) or {}
+    errors = []
+    if tests.get("strategy") != {
+        "fail-fast": False,
+        "max-parallel": 2,
+        "matrix": {"shard": [0, 1]},
+    }:
+        errors.append("light Python tests must run both complementary shards")
+    if coverage.get("needs") != "python-tests" or gate.get("needs") != [
+        "detect",
+        "light",
+        "python-tests",
+        "python-coverage",
+        "domain-plan",
+        "heavy",
+    ]:
+        errors.append("light coverage and final gate must require every shard")
+    contracts = [
+        (
+            "python-tests",
+            "Run a complementary light test shard",
+            "env",
+            {"SHARD_INDEX": "${{ matrix.shard }}"},
+        ),
+        (
+            "python-tests",
+            "Retain shard coverage",
+            "with",
+            {
+                "name": "light-coverage-${{ github.run_attempt }}-${{ matrix.shard }}",
+                "path": ".coverage",
+                "include-hidden-files": True,
+                "if-no-files-found": "error",
+                "retention-days": 1,
+            },
+        ),
+    ]
+    contracts.extend(
+        (
+            "python-coverage",
+            f"Download {('first', 'second')[index]} shard coverage",
+            "with",
+            {
+                "name": f"light-coverage-${{{{ github.run_attempt }}}}-{index}",
+                "path": f"artifacts/light-coverage/{index}",
+            },
+        )
+        for index in (0, 1)
+    )
+    for job_name, step_name, field, expected in contracts:
+        matches = [
+            step
+            for step in _job_steps(workflow, job_name)
+            if step.get("name") == step_name
+        ]
+        if len(matches) != 1 or matches[0].get(field) != expected:
+            errors.append(f"light sharding contract mismatch: {step_name}")
+    gate_steps = list(_job_steps(workflow, "gate"))
+    if (
+        len(gate_steps) != 1
+        or (_mapping(gate_steps[0].get("env")) or {}).get("PYTHON_TESTS_RESULT")
+        != "${{ needs.python-tests.result }}"
+        or (_mapping(gate_steps[0].get("env")) or {}).get("PYTHON_COVERAGE_RESULT")
+        != "${{ needs.python-coverage.result }}"
+    ):
+        errors.append("final gate must bind actual Python job results")
+    return errors
+
+
 def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     jobs = _mapping(workflow.get("jobs")) or {}
@@ -795,14 +892,25 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
         errors.append("workflow must define exactly one CI / gate check")
 
     required_commands = {
-        ("light", "Run light tests with branch coverage"): (
-            'uv run pytest -m "unit or light_coverage" --cov-report=json:coverage.json'
+        ("python-tests", "Run a complementary light test shard"): (
+            'uv run pytest -m "unit or light_coverage" '
+            "-p no:scripts.ci.pytest_branch_coverage "
+            "-p scripts.ci.light_sharding --light-shard-count=2 "
+            '--light-shard-index="$SHARD_INDEX" --cov-fail-under=0 --cov-report='
         ),
-        ("light", "Enforce application branch-only coverage"): (
+        ("python-coverage", "Combine complete light coverage"): (
+            "set -euo pipefail\n"
+            "test -s artifacts/light-coverage/0/.coverage\n"
+            "test -s artifacts/light-coverage/1/.coverage\n"
+            "uv run coverage combine artifacts/light-coverage/0/.coverage "
+            "artifacts/light-coverage/1/.coverage\n"
+            "uv run coverage json -o coverage.json --fail-under=90\n"
+        ),
+        ("python-coverage", "Enforce application branch-only coverage"): (
             "uv run python -m scripts.ci.check_branch_coverage "
             "--coverage coverage.json --fail-under 90"
         ),
-        ("light", "Enforce changed application line coverage"): (
+        ("python-coverage", "Enforce changed application line coverage"): (
             "uv run python -m scripts.ci.check_changed_coverage "
             '--base "$BASE_SHA" --head "$HEAD_SHA" --coverage coverage.json '
             "--source-root src/markweave --fail-under 90"
@@ -839,6 +947,8 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             '  [[ "$HEAVY_RESULT" == "skipped" ]]\nelse\n'
             '  [[ "$HEAVY_RESULT" == "success" ]]\nfi\n'
             '[[ "$LIGHT_RESULT" == "success" ]]\n'
+            '[[ "$PYTHON_TESTS_RESULT" == "success" ]]\n'
+            '[[ "$PYTHON_COVERAGE_RESULT" == "success" ]]\n'
         ),
     }
     for (job_name, step_name), expected_command in required_commands.items():
@@ -853,9 +963,10 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
     errors.extend(_validate_no_legacy_browser_command(workflow))
     errors.extend(_validate_chrome_downgrade_install(workflow))
     errors.extend(_validate_public_alignment_credentials(workflow))
+    errors.extend(_validate_light_sharding(workflow))
 
     required_conditions = {
-        ("light", "Enforce changed application line coverage"): (
+        ("python-coverage", "Enforce changed application line coverage"): (
             "${{ github.event_name == 'pull_request' || "
             "github.event_name == 'merge_group' }}"
         ),
@@ -935,7 +1046,12 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             options = _mapping(step.get("with")) or {}
             if "save-cache" in options:
                 cache_writes.append(options["save-cache"])
-    if cache_writes != [TRUSTED_CACHE_WRITE.removeprefix("save-cache: ")] * 2:
+    if cache_writes != [
+        TRUSTED_CACHE_WRITE.removeprefix("save-cache: "),
+        False,
+        False,
+        TRUSTED_CACHE_WRITE.removeprefix("save-cache: "),
+    ]:
         errors.append("cache writes must be limited to trusted pushes on main")
     libreoffice_cache_writes = [
         step.get("if")

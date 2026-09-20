@@ -56,7 +56,9 @@ class PandocConfig:
             raise ValueError("Pandoc workspace root must be an existing directory")
 
 
-def _is_safe_docx(data: bytes) -> bool:
+def _is_safe_docx(
+    data: bytes, required_parts: frozenset[str] = _REQUIRED_DOCX_PARTS
+) -> bool:
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
@@ -79,11 +81,15 @@ def _is_safe_docx(data: bytes) -> bool:
             ):
                 return False
             names.add(name)
-        return names >= _REQUIRED_DOCX_PARTS
+        return names >= required_parts
 
 
 class PandocDocxConverter:
     """Run Pandoc with fixed arguments inside a disposable per-call workspace."""
+
+    output_format = "docx"
+    required_parts = _REQUIRED_DOCX_PARTS
+    extra_arguments: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -166,8 +172,8 @@ class PandocDocxConverter:
             package_path.mkdir(mode=0o700)
             markdown_path = package_path / markdown.entrypoint
             markdown_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            reference_path = workspace / "reference.docx"
-            output_path = workspace / "output.docx"
+            reference_path = workspace / f"reference.{self.output_format}"
+            output_path = workspace / f"output.{self.output_format}"
             markdown_path.write_text(markdown.text, encoding="utf-8")
             for resource in markdown.resources:
                 resource_path = package_path / resource.path
@@ -182,9 +188,10 @@ class PandocDocxConverter:
         arguments = [
             self._config.executable,
             f"--from={PANDOC_READER}",
-            "--to=docx",
+            f"--to={self.output_format}",
             f"--resource-path={markdown_path.parent}",
             f"--output={output_path}",
+            *self.extra_arguments,
             str(markdown_path),
         ]
         if reference_docx is not None:
@@ -201,10 +208,12 @@ class PandocDocxConverter:
             result = output_path.read_bytes()
         except OSError:
             raise self._workspace_failure() from None
-        if not _is_safe_docx(result):
+        if not _is_safe_docx(result, self.required_parts):
             raise ConversionError(
-                ConversionErrorCode.INVALID_DOCX,
-                "Pandoc produced an invalid DOCX document.",
+                ConversionErrorCode.INVALID_DOCX
+                if self.output_format == "docx"
+                else ConversionErrorCode.INVALID_PPTX,
+                f"Pandoc produced an invalid {self.output_format.upper()} document.",
             )
         return result
 

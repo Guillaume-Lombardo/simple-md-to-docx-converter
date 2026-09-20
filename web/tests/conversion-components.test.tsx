@@ -28,6 +28,7 @@ const conversionJob = {
   expires_at: null,
   id: "00000000-0000-4000-8000-000000000201",
   output: "docx" as const,
+  source_filename: "report.md",
   owner_id: user.id,
   progress: 100,
   state: "succeeded",
@@ -215,11 +216,11 @@ test("recent jobs reopen, cancellation is perceivable, and expired jobs have no 
     .fn()
     .mockResolvedValue({ ...running, cancel_requested: true });
   renderWorkspace({ json, cancel });
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: /Conversion 00000000 · running/,
-    }),
-  );
+  const history = await screen.findByRole("button", {
+    name: /report.md · running/,
+  });
+  expect(history).toHaveAttribute("title", conversionJob.id);
+  fireEvent.click(history);
   expect(
     await screen.findByRole("progressbar", { name: "Conversion progress" }),
   ).toHaveValue(20);
@@ -276,6 +277,8 @@ test("validated downloads use the server filename and dropped files reach submis
   fireEvent.dragEnter(dropZone);
   fireEvent.dragOver(dropZone);
   fireEvent.drop(dropZone, { dataTransfer: { files: [source] } });
+  expect(screen.getByText("Change file")).toBeVisible();
+  expect(dropZone.querySelector('input[type="file"]')).toHaveClass("sr-only");
   expect(screen.getByText("Selected dropped.md (9 bytes).")).toBeVisible();
   expect(
     (screen.getByLabelText(/Source file/) as HTMLInputElement).files,
@@ -283,6 +286,10 @@ test("validated downloads use the server filename and dropped files reach submis
   fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
   await screen.findByText("Your conversion is ready to download.");
   expect((multipart.mock.calls[0]![1] as FormData).get("source")).toBe(source);
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByRole("button", { name: "Download result" })).toHaveClass(
+    "primary-button",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Download result" }));
   await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
   expect(createObjectURL).toHaveBeenCalledOnce();
@@ -300,6 +307,10 @@ test("validated downloads use the server filename and dropped files reach submis
   });
   vi.spyOn(unreadable, "blob").mockRejectedValue(new TypeError("body failed"));
   download.mockResolvedValueOnce(unreadable);
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByRole("button", { name: "Download result" })).toHaveClass(
+    "primary-button",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Download result" }));
   expect(
     await screen.findByText("The result could not be downloaded."),

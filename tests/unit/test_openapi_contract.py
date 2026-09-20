@@ -416,3 +416,36 @@ def test_git_baseline_fails_clearly_when_git_is_missing(
         _baseline_from_git("origin/main", Path("openapi/v1.json"))
 
     run.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("versions", "extra", "remove_route", "expected"),
+    [
+        (("0.6.4", "0.7.0"), None, False, 0),
+        (("0.6.3", "0.7.0"), None, False, 1),
+        (("0.6.4", "0.7.1"), None, False, 1),
+        (("0.6.4", "0.7.0"), "future", False, 1),
+        (("0.6.4", "0.7.0"), None, True, 1),
+    ],
+)
+def test_approved_pptx_transition_is_exact_and_preserves_other_failures(
+    tmp_path, versions, extra, remove_route, expected
+):
+    current = _artifact()
+    baseline = deepcopy(current)
+    baseline["info"]["version"] = versions[0]
+    baseline["components"]["schemas"]["JobOutput"]["enum"] = ["docx", "pdf", "both"]
+    current["info"]["version"] = versions[1]
+    if extra:
+        current["components"]["schemas"]["JobOutput"]["enum"].append(extra)
+    if remove_route:
+        current["paths"].pop("/api/v1/conversions")
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    old_path.write_bytes(canonical_bytes(baseline))
+    new_path.write_bytes(canonical_bytes(current))
+    assert (
+        main(["compare", "--baseline", str(old_path), "--artifact", str(new_path)])
+        == expected
+    )

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "markweave"
 # A version change merged to main is the sole automatic publication trigger.
-version = "0.6.4"
+version = "0.7.0"
 description = "Secure Markdown-to-DOCX and PDF conversion service and HTTP CLI"
 readme = "README.md"
 license = "Apache-2.0"
@@ -119,7 +119,7 @@ addopts = [
     "--strict-markers",
     "-p",
     "scripts.ci.pytest_branch_coverage",
-    "--cov=markweave",
+    "--cov=src/markweave",
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-report=json:coverage.json",
@@ -183,7 +183,7 @@ include = ["src", "scripts", "tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["markweave"]
+source = ["src/markweave"]
 
 [tool.coverage.report]
 exclude_also = ['if not _descriptor\._USE_C_DESCRIPTORS:']

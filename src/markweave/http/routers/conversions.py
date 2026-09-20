@@ -37,6 +37,8 @@ from markweave.jobs.models import (
 )
 from markweave.observability import CORRELATION_HEADER, CORRELATION_STATE_KEY
 from markweave.persistence.errors import PersistenceError
+from markweave.presentations.models import PresentationDialect, PresentationOptions
+from markweave.templates.models import TemplateKind, TemplateSelectionSource
 from markweave.version import VERSION
 
 COMPONENT_VERSIONS = (
@@ -51,6 +53,8 @@ _RESULT_EXTENSIONS = {
     JobOutput.DOCX: "docx",
     JobOutput.PDF: "pdf",
     JobOutput.BOTH: "zip",
+    JobOutput.PPTX: "pptx",
+    JobOutput.PPTX_BUNDLE: "zip",
 }
 
 
@@ -90,9 +94,15 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
     def get_conversion_options(
         response: Response,
         actor: Annotated[User, Depends(dependencies.current_user)],
+        template_kind: TemplateKind = TemplateKind.DOCX,
     ) -> ConversionOptionsResponse:
         response.headers["Cache-Control"] = "no-store"
-        template, source = dependencies.template_runtime().resolve_with_source(actor)
+        if template_kind is TemplateKind.PPTX:
+            template, source = None, TemplateSelectionSource.PANDOC_DEFAULT
+        else:
+            template, source = dependencies.template_runtime().resolve_with_source(
+                actor
+            )
         version_id = template.current_version_id if template is not None else None
         if template is not None and version_id is None:
             raise PersistenceError
@@ -123,6 +133,8 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         template_id: Annotated[UUID | None, Form()] = None,
         template_version_id: Annotated[UUID | None, Form()] = None,
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+        presentation_dialect: Annotated[PresentationDialect | None, Form()] = None,
+        slide_level: Annotated[int | None, Form(ge=1, le=6)] = None,
     ) -> ConversionResponse:
         correlation_id = getattr(request.state, CORRELATION_STATE_KEY)
         if source.filename is None:
@@ -155,6 +167,16 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
                     correlation_id=correlation_id,
                     source_filename=source_filename,
                     source_kind=source_kind,
+                    presentation_options=(
+                        PresentationOptions(
+                            presentation_dialect or PresentationDialect.AUTO,
+                            slide_level if slide_level is not None else 2,
+                        )
+                        if output.is_presentation
+                        or presentation_dialect is not None
+                        or slide_level is not None
+                        else None
+                    ),
                 ),
                 idempotency_key,
             )

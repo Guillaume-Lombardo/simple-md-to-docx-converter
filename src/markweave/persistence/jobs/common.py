@@ -26,6 +26,7 @@ from markweave.jobs.policy import JobAdmissionPolicy
 from markweave.persistence.schema import (
     ConversionJobRow,
 )
+from markweave.presentations.models import PresentationOptions
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -52,6 +53,11 @@ def _job(row: ConversionJobRow) -> ConversionJob:
             else None
         ),
         output=JobOutput(row.output),
+        presentation_options=(
+            PresentationOptions.from_json(row.presentation_options)
+            if row.presentation_options
+            else None
+        ),
         component_versions=_component_versions(row.component_versions),
         correlation_id=row.correlation_id or row.id,
         state=JobState(row.state),
