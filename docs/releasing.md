@@ -332,3 +332,10 @@ Podman insecure quickstart E2E passed with this published pair, verifying runnin
 container digests, browser/API routing, host validation, teardown, restart and
 preserved evaluation state. Documentation, quickstart and public-alignment tests
 passed (96). The disposable E2E services and volumes were cleaned up.
+
+[Adoption PR #249](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/249)
+merged as `355b92c298b92c9cacfda37e353eaacf5ef73c35` after independent review and
+[all required checks](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35539772814)
+passed. Public release alignment passed again on this exact main commit. T84 is
+complete: every application Python module remains below 1,000 lines, with a
+maximum of 989, and public package/image defaults agree on 0.7.1.
