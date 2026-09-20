@@ -422,7 +422,7 @@ PDF path produces Markdown directly without exposing the shared document model o
 Because anydoc 0.2.4 exposes no supported renderer hook for an already parsed `Document`, T70 may
 maintain one bounded internal compatibility adapter around the exact pinned document-model and
 renderer behavior. The adapter consumes the single parsed `Document`; it never reparses source
-bytes or introduces a second document parser. One module boundary inventories every private symbol
+bytes or introduces a second document parser. One private compatibility package inventories every private symbol
 and any minimally mirrored upstream renderer logic, fails closed for an unknown anydoc version or
 model variant, retains applicable upstream license notices, and is included in dependency, SBOM,
 license, and vulnerability review. Asset-free structures must pass serializer-parity tests against
@@ -800,6 +800,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T80 | Clean maintenance assets and provide automatic local distributed-test services | T22, T23, T67, T76 |
 | T81 | Shorten workflow tab labels to `2docx`, `2md`, and `templates` | T76 |
 | T82 | Add editable PowerPoint generation, typed templates, portable sources and slide-oriented reverse conversion | T81, T07, T08, T09, T10, T12, T13, T15, T16, T17, T69, T70, T71, T72 |
+| T84 | Continue responsibility-based decomposition of application Python modules above 1,000 lines, preserving imports, transaction/proof boundaries and the single private anydoc adapter | T79 |
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 

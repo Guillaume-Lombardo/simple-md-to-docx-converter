@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import stat
 import tarfile
 from collections.abc import Callable, Mapping, Sequence
@@ -13,7 +14,7 @@ from uuid import UUID, uuid5
 import pytest
 from pytest_mock import MockerFixture
 
-from markweave.broker import command_runner, podman_runtime
+from markweave.broker import command_runner, podman_cgroups, podman_runtime
 from markweave.broker.models import (
     AuthenticatedPrincipal,
     BrokerPolicy,
@@ -1633,7 +1634,7 @@ def test_process_cgroup_compatibility_accepts_only_two_exact_forms(
 def test_exact_owned_cgroup_root_validation_contract(mocker: MockerFixture) -> None:
     expected = Path("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
     metadata = mocker.Mock(st_mode=stat.S_IFDIR | 0o700, st_uid=1000)
-    mocker.patch.object(podman_runtime.os, "geteuid", return_value=1000)
+    mocker.patch.object(os, "geteuid", return_value=1000)
     mocker.patch.object(
         Path, "resolve", autospec=True, side_effect=lambda path, strict: path
     )
@@ -1721,7 +1722,7 @@ def test_systemd_cgroup_remover_removes_inactive_empty_precreated_leaf(
     path = tmp_path / f"markweavet70{UNIT_ID.hex}.slice"
     path.mkdir()
     mocker.patch.object(
-        podman_runtime,
+        podman_cgroups,
         "_read_cgroup_events",
         return_value=b"populated 0\nfrozen 0\n",
     )
@@ -1739,7 +1740,7 @@ def test_systemd_cgroup_remover_removes_inactive_empty_precreated_leaf(
 
     path.mkdir()
     mocker.patch.object(
-        podman_runtime,
+        podman_cgroups,
         "_read_cgroup_events",
         return_value=b"populated 1\nfrozen 0\n",
     )
@@ -1747,7 +1748,7 @@ def test_systemd_cgroup_remover_removes_inactive_empty_precreated_leaf(
         SystemdCgroupRemover(inactive)(path)
 
     mocker.patch.object(
-        podman_runtime,
+        podman_cgroups,
         "_read_cgroup_events",
         return_value=b"populated 0\nfrozen 0\n",
     )
@@ -1784,7 +1785,7 @@ def test_systemd_cgroup_remover_hides_rmdir_failure(
     path = tmp_path / f"markweavet70{UNIT_ID.hex}.slice"
     path.mkdir()
     mocker.patch.object(
-        podman_runtime,
+        podman_cgroups,
         "_read_cgroup_events",
         return_value=b"populated 0\nfrozen 0\n",
     )
@@ -1970,7 +1971,7 @@ def test_command_runner_retries_nonblocking_partial_stdin_write(
         Path("/bin/cat"), PodmanCommandLimits(2), environment={}
     )
     content = b"x" * (32 * 1024)
-    original_write = podman_runtime.os.write
+    original_write = os.write
     attempts = 0
 
     def write_after_temporary_backpressure(
@@ -1982,10 +1983,8 @@ def test_command_runner_retries_nonblocking_partial_stdin_write(
             raise BlockingIOError
         return original_write(descriptor, value[:1024])
 
-    set_blocking = mocker.spy(podman_runtime.os, "set_blocking")
-    mocker.patch.object(
-        podman_runtime.os, "write", side_effect=write_after_temporary_backpressure
-    )
+    set_blocking = mocker.spy(os, "set_blocking")
+    mocker.patch.object(os, "write", side_effect=write_after_temporary_backpressure)
 
     code, output = runner(("-",), input_bytes=content, max_output_bytes=len(content))
 
