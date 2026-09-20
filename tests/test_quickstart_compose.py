@@ -50,12 +50,12 @@ EXPECTED_FONTS = (
     "Times New Roman",
 )
 MARKWEAVE_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter:0.6.4@"
-    "sha256:89a1eb87a87735441feb4d8dfee46bc597e948873ccd1808065f7d92acde19d5"
+    "ghcr.io/guillaume-lombardo/md-converter:0.7.0@"
+    "sha256:92037e2937878f02039c8e41942cf8542000a46037c1488297a13aa554983c69"
 )
 FRONTEND_DIGEST = (
-    "ghcr.io/guillaume-lombardo/md-converter-web:0.6.4@"
-    "sha256:9d113f3d7614e7e1dcbda45834b476179d9a8113909ccc96b9e3134e3a9f3b9e"
+    "ghcr.io/guillaume-lombardo/md-converter-web:0.7.0@"
+    "sha256:67167d78393725c964804d9b1e62d35fe4a7460f2e2afec411bdf1f8349ea4d1"
 )
 CLAMAV_DIGEST = (
     "docker.io/clamav/clamav-debian:1.4_base@"

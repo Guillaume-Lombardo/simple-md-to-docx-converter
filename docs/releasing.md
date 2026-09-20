@@ -273,3 +273,33 @@ Frontend registry digest:
 `sha256:9d113f3d7614e7e1dcbda45834b476179d9a8113909ccc96b9e3134e3a9f3b9e`.
 The ordinary pending-transition gate verifies these exact public receipts and
 anonymous registry manifests; no unpublished 0.7.0 image is pinned.
+
+## 0.7.0 publication and image adoption
+
+[PR #244](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/244)
+merged source `d0c150f625cce9e51102904ab9289721d6dd7054` after independent review and
+all required checks. [Release run 35519480791](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35519480791)
+successfully published the exact verified wheel/sdist and paired images for
+[0.7.0](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/releases/tag/v0.7.0).
+
+The backend receipt records
+`sha256:92037e2937878f02039c8e41942cf8542000a46037c1488297a13aa554983c69`;
+the frontend receipt records
+`sha256:67167d78393725c964804d9b1e62d35fe4a7460f2e2afec411bdf1f8349ea4d1`.
+Both receipts, the release manifest and frontend lockfile bind to the same source.
+Their attached checksum manifests were verified, and anonymous GHCR/PyPI alignment
+is required before adopting them in Compose and both quickstarts. The final rootless
+pair passed both storage-profile acceptance suites before publication; the workflow
+published those staged bytes without rebuilding and attached SBOM/provenance evidence.
+
+This release includes editable PowerPoint generation, native Pandoc defaults without
+a template, typed presentation templates, stable progress/download geometry and the
+Markweave logo/favicon. Slide-oriented reverse Markdown/Marp extraction remains T83.
+The forward enum expansion is the explicit 0.6.4-to-0.7.0 exception documented in
+[PowerPoint compatibility](powerpoint.md).
+
+Light CI now separates rapid checks, two complementary Python partitions and aggregate
+coverage. Final hosted partitions passed in 8m13s/7m29s, with aggregation in 14s;
+all 4,042 selected cases were accounted for. Local aggregate coverage was 90.10% of
+branches and 95.86% of changed application lines. Trusted main successfully populated
+both the lock-keyed uv cache and the Next.js compiler cache; PRs only restore them.

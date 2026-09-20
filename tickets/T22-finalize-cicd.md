@@ -404,3 +404,14 @@ An earlier local split completed in 5m06s/5m34s with aggregate 90.10% branches,
 but its random-parameter allocation is not accepted as final coverage evidence.
 The corrected full partitions are running again. Hosted rapid light passed in 1m33s;
 pnpm cache restoration is verified, new uv/Next.js cache entries await trusted main.
+
+2026-09-20: PR #244 is merged as d0c150f625cce9e51102904ab9289721d6dd7054.
+All required checks passed, including the final split Python suite and aggregate
+coverage. Stable local partitions passed 2,129/1,913 cases in 5m14s/5m20s; hosted
+partitions passed in 8m13s/7m29s and aggregate coverage in 14s. Main populated the
+uv and Next.js caches successfully. Independent review has no unresolved findings.
+Release run 35519480791 is successful: PyPI 0.7.0, both exact GHCR images, SBOMs,
+provenance and matching source/lockfile-bound receipts are published. The adoption
+follow-up pins these published digests in Compose, both quickstarts and their E2E
+fixture. T81/T82 are verified on main and complete; T83 stays Backlog. T22 remains
+In Progress until the adoption change is verified on main and final records close.

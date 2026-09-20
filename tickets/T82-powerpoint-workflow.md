@@ -2,7 +2,7 @@
 ticket: T82
 linear_id: G1L-581
 linear_url: https://linear.app/g1lom/issue/G1L-581/t82-add-editable-powerpoint-generation-and-markdown-round-trips
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -161,3 +161,14 @@ suite passed (4,019 tests; 90.07% branch and 95.45% changed-line coverage).
 Final hosted checks, reviewer confirmation, protected merge and publication remain
 pending. Published 0.6.4 image receipts replaced inherited stale 0.6.3 pins; 0.7.0
 receipts must still be adopted only after actual publication.
+
+2026-09-20: Delivered and verified on main through PR #244, merge
+`d0c150f625cce9e51102904ab9289721d6dd7054`. Required CI run 35517825112 passed
+all stages, including both final-image E2E profiles, document engines, both storage
+profiles, frontend and aggregate coverage. Independent exact-head review has no
+unresolved finding. Release run 35519480791 successfully published PyPI 0.7.0 and
+both GHCR images with matching source, receipts, SBOMs and provenance. The navigation,
+file controls, named/filtered/paginated history, logo/favicon and stable download
+transition are delivered. Forward PowerPoint supports native default and selected
+immutable templates; advanced reverse slide extraction remains explicitly T83,
+which stays Backlog. Published-image adoption is tracked by T22.

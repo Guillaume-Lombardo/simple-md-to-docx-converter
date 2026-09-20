@@ -2,7 +2,7 @@
 ticket: T81
 linear_id: G1L-580
 linear_url: https://linear.app/g1lom/issue/G1L-580/t81-shorten-workflow-tab-labels
-status: In Progress
+status: Done
 priority: Low
 project: Markdown to DOCX and PDF Converter
 ---
@@ -73,3 +73,14 @@ Rename the browser tabs to `2docx`, `2md`, and `templates` as requested on 2026-
 - 2026-09-20: Updated visible/accessible and disabled tab labels, existing component and E2E selectors, current documentation, specification, and unreleased changelog. Routes, permissions, and Experimental badge are preserved.
 - Validation passed: frozen pnpm installation; `pnpm --filter @markweave/web check` (format, lint, types, bindings, 9 structure tests, 207 component tests; 90.32% branch coverage); `pnpm run test:web` (16 tests); `uv sync --all-groups`; `uv run ruff format --check .`; `uv run ruff check .`; `uv run ty check`; `uv run pytest tests/test_quickstart_compose.py --no-cov` (47 tests); `git diff --check`.
 - Validation limits: canonical filtered/full Python suites and final-image E2E runs were not executed for this label-only change. E2E selectors are updated but final-image verification remains pending. No push, PR, release, or deployment performed; status remains In Progress until verification on main.
+
+2026-09-20: Delivered and verified on main through PR #244, merge
+`d0c150f625cce9e51102904ab9289721d6dd7054`. Required CI run 35517825112 passed
+all stages, including both final-image E2E profiles, document engines, both storage
+profiles, frontend and aggregate coverage. Independent exact-head review has no
+unresolved finding. Release run 35519480791 successfully published PyPI 0.7.0 and
+both GHCR images with matching source, receipts, SBOMs and provenance. The navigation,
+file controls, named/filtered/paginated history, logo/favicon and stable download
+transition are delivered. Forward PowerPoint supports native default and selected
+immutable templates; advanced reverse slide extraction remains explicitly T83,
+which stays Backlog. Published-image adoption is tracked by T22.
