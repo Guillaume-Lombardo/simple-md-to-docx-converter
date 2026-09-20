@@ -7,7 +7,7 @@ your Word and PowerPoint templates and completed jobs on local persistent storag
 ClamAV by default and can explicitly delegate that boundary to a trusted upstream proxy.
 
 The project is licensed under [Apache-2.0](LICENSE). The source package version is `0.7.1`.
-The default public quickstart pins the matched published `0.7.0` backend and Next.js frontend pair
+The default public quickstart pins the matched published `0.7.1` backend and Next.js frontend pair
 to the immutable digests recorded in the release evidence. Candidate testing may override both
 image references together with another matched immutable pair.
 

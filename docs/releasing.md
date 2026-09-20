@@ -303,3 +303,32 @@ coverage. Final hosted partitions passed in 8m13s/7m29s, with aggregation in 14s
 all 4,042 selected cases were accounted for. Local aggregate coverage was 90.10% of
 branches and 95.86% of changed application lines. Trusted main successfully populated
 both the lock-keyed uv cache and the Next.js compiler cache; PRs only restore them.
+
+
+## 0.7.1 publication and image adoption
+
+[PR #247](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/247)
+merged the responsibility-based application decomposition as
+`5dd3328a17d12279d1c7c11a8c96b68cb062ecb3`. Independent CodeRabbit review found no
+actionable issues at the exact submitted head. All 17 PR checks and the
+[main CI run](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35537766132)
+passed, including document engines and final-image E2E for both storage profiles.
+
+[Automatic release 35537766223](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35537766223)
+completed successfully and published [0.7.1](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/releases/tag/v0.7.1)
+to PyPI and the paired backend/frontend GHCR repositories. A clean install from
+public PyPI reports 0.7.1. The tag, release manifest, receipt hashes, attached
+evidence checksums and frontend lockfile all bind to the same reviewed source.
+
+The backend registry receipt records `sha256:10c84da1e783e86f56163c6bb639008436d6878462ac63e62af8a28129599a93`;
+the frontend receipt records `sha256:dad65e90b56923fb38df3fc985b51fb20ef40422ff8ccd2aae2ece1b17515082`.
+Compose, both quickstarts and the published-image E2E use these exact digests.
+The release tested the exact pair in both storage profiles before publishing it
+without rebuilding, then attached SBOMs and provenance attestations. No API,
+database, dependency or quickstart-command migration is required for this patch.
+
+Post-publication checks confirm anonymous PyPI/GHCR alignment. The real rootless
+Podman insecure quickstart E2E passed with this published pair, verifying running
+container digests, browser/API routing, host validation, teardown, restart and
+preserved evaluation state. Documentation, quickstart and public-alignment tests
+passed (96). The disposable E2E services and volumes were cleaned up.
