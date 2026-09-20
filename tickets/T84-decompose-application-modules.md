@@ -2,7 +2,7 @@
 ticket: T84
 linear_id: G1L-583
 linear_url: https://linear.app/g1lom/issue/G1L-583/t84-decompose-oversized-application-python-modules-by-responsibility
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -106,6 +106,19 @@ Tests and scripts are outside the size-reduction scope.
   Podman quickstart E2E passed, including exact running image digests, routing,
   host validation, teardown/restart and state preservation. Disposable services
   and volumes were cleaned up. Ruff format/lint, ty and diff checks pass.
+
+- 2026-09-21: PR #249 merged the published-image adoption as
+  `355b92c298b92c9cacfda37e353eaacf5ef73c35` after independent CodeRabbit
+  review and all 11 hosted checks passed in run `35539772814`. Public release
+  alignment was rerun successfully on that exact main commit. Source, PyPI,
+  GitHub tag, backend/frontend registry receipts and public Compose defaults
+  now agree on 0.7.1. The 217 application modules still have a maximum of 989
+  physical lines. The source and adoption branches were removed after their
+  verified squash merges.
+- T84 is Done following verified implementation, publication and adoption on
+  main. The documentary closure records those completed outcomes; main CI
+  `35541032843` for the adoption is monitored separately through completion.
+  No remote deployment, dependency change or acceptance exception is claimed.
 
 ## Synchronization
 
