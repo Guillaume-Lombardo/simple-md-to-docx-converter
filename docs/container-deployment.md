@@ -165,8 +165,8 @@ recorded. This reduces unused attack surface without altering the vulnerability 
 ## Approved Next.js cutover topology
 
 The repository's `0.7.0` source contains no FastAPI browser pages. The public default pins the
-verified `0.6.3` image pair published from source
-`5e789c11600d429997c037b4d24eea399821a2ed`. T64 implements the separate frontend image and the
+verified `0.7.0` image pair published from source
+`d0c150f625cce9e51102904ab9289721d6dd7054`. T64 implements the separate frontend image and the
 literal one-origin routing, resource, probe, supply-chain, and rollback contract defined in
 [the reviewed Next.js migration architecture](nextjs-migration-architecture.md).
 
