@@ -394,3 +394,13 @@ and saves it only on trusted main. No test/coverage outcomes are cached. Indepen
 re-review found no remaining blocker. Full local partition runs are pending; Ruff,
 ty and the exact workflow policy pass. Previous hosted heavy domains all passed;
 the old unsplit light retry is superseded by the requested CI improvement.
+
+The full collection audit caught generated parameter IDs containing timestamps and
+UUIDs. The partition key now excludes parameter IDs and keeps each function's cases
+together. Three real collections prove exact per-function case-count union: 4,042
+selected cases, split 2,129/1,913, with no shared function and no missing case.
+The independent reviewer confirmed this fix; all 193 focused tests still pass.
+An earlier local split completed in 5m06s/5m34s with aggregate 90.10% branches,
+but its random-parameter allocation is not accepted as final coverage evidence.
+The corrected full partitions are running again. Hosted rapid light passed in 1m33s;
+pnpm cache restoration is verified, new uv/Next.js cache entries await trusted main.

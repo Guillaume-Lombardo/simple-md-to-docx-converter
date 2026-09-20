@@ -23,7 +23,8 @@ from scripts.ci.light_sharding import (
 def test_partition_is_stable_disjoint_and_exhaustive(mocker: MockerFixture) -> None:
     items = [
         cast(
-            "pytest.Item", SimpleNamespace(nodeid=f"test_module.py::test_case[{index}]")
+            "pytest.Item",
+            SimpleNamespace(nodeid=f"test_module.py::test_case_{index}[variable]"),
         )
         for index in range(1000)
     ]
@@ -43,7 +44,9 @@ def test_partition_is_stable_disjoint_and_exhaustive(mocker: MockerFixture) -> N
     assert partitions[0] and partitions[1]
     assert not partitions[0] & partitions[1]
     assert partitions[0] | partitions[1] == {item.nodeid for item in items}
-    assert shard_for("tests/test_example.py::test_one[value]", 2) == 1
+    assert shard_for(
+        "tests/test_example.py::test_one[first-random-id]", 2
+    ) == shard_for("tests/test_example.py::test_one[second-random-id]", 2)
 
 
 @pytest.mark.unit
@@ -70,10 +73,10 @@ def test_real_pytest_shards_respect_markers_and_invalid_arguments(
     fixture = tmp_path / "test_partition_fixture.py"
     fixture.write_text(
         "import pytest\n"
-        "@pytest.mark.unit\n"
-        "@pytest.mark.parametrize('value', range(12))\n"
-        "def test_unit(value): pass\n"
-        "@pytest.mark.light_coverage\n"
+        + "".join(
+            f"@pytest.mark.unit\ndef test_unit_{index}(): pass\n" for index in range(12)
+        )
+        + "@pytest.mark.light_coverage\n"
         "def test_boundary(): pass\n"
         "def test_unselected(): raise AssertionError('not selected')\n"
     )

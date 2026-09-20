@@ -216,8 +216,8 @@ engine test is skipped only through its registered marker and must never be repo
 
 `CI / light` runs formatting, lint, types, OpenAPI, public release alignment,
 frontend and policy checks. The Python suite keeps the exact `unit or light_coverage`
-selection but runs in two separate jobs. A stable SHA-256 of each pytest node ID
-assigns it to exactly one partition; neither job installs document engines.
+selection but runs in two separate jobs. A stable SHA-256 of each pytest function identity (excluding generated parameter IDs)
+assigns all its cases to exactly one partition; neither job installs document engines.
 The normal local test commands remain unchanged.
 
 To reproduce a partition, use index `0` or `1` and a distinct coverage data file:

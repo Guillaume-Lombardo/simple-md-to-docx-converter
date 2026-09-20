@@ -10,8 +10,9 @@ SHARD_COUNT = 2
 
 
 def shard_for(nodeid: str, count: int) -> int:
-    """Assign each stable test identity to exactly one shard."""
-    return int.from_bytes(hashlib.sha256(nodeid.encode()).digest()[:8]) % count
+    """Keep a function's cases together, excluding generated parameter IDs."""
+    identity = nodeid.partition("[")[0]
+    return int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8]) % count
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
