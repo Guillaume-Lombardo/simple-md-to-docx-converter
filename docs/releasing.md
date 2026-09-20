@@ -261,3 +261,15 @@ podman run --rm --network=none --read-only --cap-drop=all \
 
 This probe verifies the host release tooling on the final image's Linux/Python runtime; the tooling
 is not included in the application image and does not change either storage profile.
+
+
+## 0.6.4 adoption before the 0.7.0 transition
+
+The published 0.6.4 pair is adopted while preparing 0.7.0 to correct the previously
+stale 0.6.3 Compose references. Both release receipts identify source
+`7e3d4eeb4ad8b1346d9b4c855999624d6e2e0436`. Backend registry digest:
+`sha256:89a1eb87a87735441feb4d8dfee46bc597e948873ccd1808065f7d92acde19d5`.
+Frontend registry digest:
+`sha256:9d113f3d7614e7e1dcbda45834b476179d9a8113909ccc96b9e3134e3a9f3b9e`.
+The ordinary pending-transition gate verifies these exact public receipts and
+anonymous registry manifests; no unpublished 0.7.0 image is pinned.
