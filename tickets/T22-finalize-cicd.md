@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: In Progress
+status: Done
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -415,3 +415,25 @@ provenance and matching source/lockfile-bound receipts are published. The adopti
 follow-up pins these published digests in Compose, both quickstarts and their E2E
 fixture. T81/T82 are verified on main and complete; T83 stays Backlog. T22 remains
 In Progress until the adoption change is verified on main and final records close.
+
+## 0.7.0 release closure (2026-09-20)
+
+- Feature and CI PR #244 is verified on main at
+  `d0c150f625cce9e51102904ab9289721d6dd7054`; main CI `35519480601` succeeded.
+- Automatic release `35519480791` completed successfully. PyPI 0.7.0 and both
+  GHCR images, SBOMs, provenance and receipt evidence are published.
+- Adoption PR #245 passed every required check in run `35521398515`, including
+  Compose, container and both final-image E2E profiles. Independent exact-head
+  review has no unresolved finding. It merged as
+  `cd6bb29c87c87db9f1f9279f7db41a5728767670`, verified on main.
+- Compose, both quickstarts and the E2E fixture now use the exact published 0.7.0
+  backend/frontend receipt digests. Anonymous public release alignment is verified.
+- GitHub Actions restored uv, pnpm and Next.js caches on the adoption PR. Light
+  passed in 1m22s, Python partitions in 8m37s/8m46s and aggregate coverage in 15s.
+  All 90% thresholds remain mandatory; no tests or coverage results are cached.
+- T22, T81 and T82 are complete. Advanced reverse presentation extraction remains
+  the explicitly separate T83 backlog scope.
+- The feature/adoption source branches are removed after verified squash merges.
+  The unrelated worktree with uncommitted 0.6.4 adoption work is preserved.
+- Docker-box remains on the previous test candidate: SSH authentication is
+  unavailable in this session. No deployment of the published 0.7.0 pair is claimed.
