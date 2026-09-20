@@ -4,8 +4,8 @@ umask 0077
 
 repository="$(pwd)"
 readonly repository
-readonly backend_image="ghcr.io/guillaume-lombardo/md-converter:0.6.4@sha256:89a1eb87a87735441feb4d8dfee46bc597e948873ccd1808065f7d92acde19d5"
-readonly frontend_image="ghcr.io/guillaume-lombardo/md-converter-web:0.6.4@sha256:9d113f3d7614e7e1dcbda45834b476179d9a8113909ccc96b9e3134e3a9f3b9e"
+readonly backend_image="ghcr.io/guillaume-lombardo/md-converter:0.7.0@sha256:92037e2937878f02039c8e41942cf8542000a46037c1488297a13aa554983c69"
+readonly frontend_image="ghcr.io/guillaume-lombardo/md-converter-web:0.7.0@sha256:67167d78393725c964804d9b1e62d35fe4a7460f2e2afec411bdf1f8349ea4d1"
 readonly suffix="${GITHUB_RUN_ID:-local}-$$-$RANDOM"
 readonly project="markweave-insecure-e2e-${suffix,,}"
 readonly work_volume="${project}_markweave-work"

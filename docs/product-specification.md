@@ -697,6 +697,11 @@ Use an isolated release workflow to publish the `markweave` Python distribution 
 
 The `0.6.0` cutover was the sole skipped-container exception: its exact GitHub tag/Release and PyPI artifact were published from the reviewed source, but its paired container job failed before staging or registry authentication and both `0.6.0` GHCR role tags remained absent. The protected `0.6.0` to `0.6.1` transition verified that state before running an ordinary new paired release; neither manual recovery nor any workflow may rebuild or publish `0.6.0`. After successful `0.6.1` publication, Compose and both quickstarts pinned the exact verified backend and frontend registry digests from source `78cb86d450e940a3190591de62ee0ebade216d8b`. After successful `0.6.3` publication, they pin the exact verified backend digest `sha256:6560d86e4ca33327a5f454530c8b6a2fadb20b55af6373aea01378b00920bb4e` and frontend digest `sha256:bb60b8b72259d738c4eb93c29cf54aef9a8cf2f875e5851ebdc063ded5c99fa5` from source `5e789c11600d429997c037b4d24eea399821a2ed`.
 
+The published `0.7.0` pair from source `d0c150f625cce9e51102904ab9289721d6dd7054`
+adopts backend `sha256:92037e2937878f02039c8e41942cf8542000a46037c1488297a13aa554983c69`
+and frontend `sha256:67167d78393725c964804d9b1e62d35fe4a7460f2e2afec411bdf1f8349ea4d1`
+from the verified receipts of successful release run `35519480791`.
+
 Before the first public release, configure a PyPI pending Trusted Publisher for project `markweave`, owner `Guillaume-Lombardo`, repository `simple-md-to-docx-converter`, workflow `release.yml`, and environment `pypi`. Immediately before every upload, recheck that the exact `markweave` version is unpublished. A pending publisher does not reserve the distribution name. The first successful OIDC upload creates the PyPI project and converts the pending publisher into a normal Trusted Publisher; verify both the project and publisher state after that upload. The public license is Apache-2.0.
 
 ## 12. Global acceptance criteria
