@@ -2,7 +2,7 @@
 ticket: T22
 linear_id: G1L-332
 linear_url: https://linear.app/g1lom/issue/G1L-332/
-status: Done
+status: In Progress
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -360,3 +360,19 @@ Finalize selective CI/CD, scheduled full suite, mutation testing, dependency upd
   workflow under the user's explicit CI-first merge and cleanup authorization.
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.
+
+## Patch release 0.6.4 preparation (2026-09-20)
+
+- Requested patch bump from main `0c7dc00`: `0.6.3` to `0.6.4`.
+- Synchronize package/application versions, lock metadata, OpenAPI snapshots, release tests,
+  source documentation and changelog on `chore/T22-release-0.6.4`.
+- Keep published Compose digests unchanged until publication evidence exists.
+- Validation passed: `uv sync --all-groups`, Ruff format/check, `ty check`, 219 version/release
+  tests, 27 OpenAPI/documentation tests, and the canonical default suite (4,339 passed,
+  45 engine tests deselected; 94.87% total coverage). Version/changelog transition and
+  `git diff --check` also pass.
+- The unrestricted engine suite and final-image E2E were not run for this metadata-only bump;
+  Pandoc, Mermaid CLI, and LibreOffice executables are unavailable on PATH. Frontend code is
+  unchanged, so JavaScript checks were not rerun. Protected hosted CI remains the publication gate.
+- The user authorized publication, protected squash merge and exact source-branch cleanup
+  through the `yolo` skill on 2026-09-20. Hosted checks and independent review remain required.

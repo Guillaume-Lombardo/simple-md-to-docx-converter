@@ -1,7 +1,7 @@
 # Backup and recovery
 
 Each release identity is a matched backend/frontend digest pair plus its route manifest and
-evidence checksum. The `0.6.3` candidate does not replace the verified `0.6.1` rollback identity
+evidence checksum. The `0.6.4` candidate does not replace the verified `0.6.1` rollback identity
 until both new image receipts are published and adopted. Rollback restores a complete matched pair
 and its route manifest as one release-level operation; never combine images across releases. Storage
 restore requirements remain profile-specific and are determined by schema/data compatibility, not

@@ -8,6 +8,21 @@ target. Internal ticket choreography is intentionally excluded.
 
 ## Unreleased
 
+<a id="release-0-6-4"></a>
+
+## [0.6.4] - 2026-09-20
+
+### Fixed
+
+- Release commands reliably reap orphaned subprocesses and clean up their process groups.
+- The Kubernetes WebSocket adapter supports the updated SDK protocol and channel state.
+
+### Changed
+
+- Reverse persistence and broker codecs are split into smaller components.
+- Local distributed-test services have an automated setup, and asset permission tests work
+  across checkout locations.
+
 <a id="release-0-6-3"></a>
 
 ## [0.6.3] - 2026-09-19
@@ -226,6 +241,7 @@ target. Internal ticket choreography is intentionally excluded.
 ## Link targets
 
 - [Changelog top](#changelog)
+- [0.6.4](#release-0-6-4)
 - [0.6.3](#release-0-6-3)
 - [0.6.2](#release-0-6-2)
 - [0.6.1](#release-0-6-1)
