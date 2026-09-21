@@ -61,3 +61,21 @@ are copied into the attempt image. The machine-readable T70 inventory in
 every mirrored upstream renderer behavior. Every anydoc upgrade must refresh the lock, provenance,
 embedded Cargo inventory, vulnerability scans, compatibility/parity suite, both image SBOM formats
 and this image validation before adoption.
+
+## Release identity and qualification
+
+The attempt image is one member of the reverse-conversion release set, not an independently
+deployable application version. A schema-2 `release-images.json` binds the immutable backend,
+frontend, and `reverse_attempt` registry digests to one release version and source SHA, and binds
+the frontend lock digest and retained per-image publication evidence. Verify the manifest and its
+checksum file before deployment; configure the broker with exactly the digest in
+`images.reverse_attempt.registry_manifest_digest`. Historical schema-1 manifests contain only the
+backend/frontend pair and do not authorize an attempt-image selection.
+
+Local builds and CI candidate bundles establish build and supply-chain evidence only. They do not
+establish public publication or final-image qualification. T73 still requires one matched set built
+from the same reviewed source identity and end-to-end acceptance against both standalone and
+distributed profiles before qualification can be claimed. No public third-image digest or release
+version is selected here. The documented image restrictions describe the intended container
+contract; exact-image CPU, memory, thread, and concurrency measurements and their approved envelope
+remain part of the pending acceptance evidence.

@@ -54,6 +54,37 @@ for the requested output. Jobs without persisted source metadata use `conversion
 filename stem. Result downloads use the `application/octet-stream` media type. Poll no faster than
 `Retry-After`, handle terminal failed/cancelled states, and download before retention expires.
 
+## Reverse conversion
+
+Reverse conversion is an authenticated, asynchronous workflow. `GET
+/api/v1/reversions/capabilities` returns the versioned admission contract: `schema_version`, ordered
+`format_families`, content-detection and mismatch policies, `maximum_upload_bytes`, result package
+modes, PDF limitations, and execution flags. The response is `private, no-store` and requires an
+authenticated session. Clients must use its format families and configured size instead of
+maintaining another format matrix. A client that does not recognize the schema, or cannot load the
+response, must leave submission unavailable. The server remains authoritative for upload size,
+malware scanning, and content detection.
+
+Submit one multipart `source` file to `POST /api/v1/reversions`; an optional `Idempotency-Key`
+supports safe replay of the same request. A newly accepted submission returns `202 Accepted`, a
+`Location` for the job, and `Retry-After`. `GET /api/v1/reversions` lists the current user's jobs
+with `offset` and `limit` pagination. Read a job with `GET /api/v1/reversions/{job_id}`, request
+cancellation with `DELETE` on that path, and download its result from `GET
+/api/v1/reversions/{job_id}/result`. The result is Markdown or a ZIP according to `result_mode`;
+responses are `private, no-store`. Poll according to `Retry-After` and download before `expires_at`.
+
+These job routes are owner-only, including for administrators. Unknown and other users' job IDs
+return the same not-found behavior; administrator audit or operational access does not grant access
+to a user's source, status, cancellation, or result. Errors use the standard stable JSON envelope
+and correlation identifier described above. Submission can fail for invalid or unsupported input,
+scanner rejection, a conflicting idempotency key, configured capacity, incomplete reverse
+configuration, or unavailable service; consult the stable error code and correlation identifier.
+
+The local engine does not provide OCR or a hosted Firecrawl fallback. PDF support extracts text
+without preserving images or layout; scanned or image-only input, or a page with no extractable text,
+fails with `needs_ocr`. The advertised capabilities response is the source for supported formats
+and current limits.
+
 ## Templates
 
 `GET /api/v1/templates` supports visibility-aware pagination and filters for name, description,

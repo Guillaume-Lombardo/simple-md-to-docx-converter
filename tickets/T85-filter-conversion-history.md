@@ -2,7 +2,7 @@
 ticket: T85
 linear_id: G1L-584
 linear_url: https://linear.app/g1lom/issue/G1L-584/t85-filter-conversion-history-in-the-api
-status: Backlog
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -32,7 +32,12 @@ Own conversion history query, HTTP/OpenAPI/client contract, recent-history UI an
 
 ## Progress
 
+* 2026-09-21: Delivered by PR #256, squash merge `741ea85c27ed3d90f2a7edac80735b0d9ec16a7b`. Exact PR head `98a0581ddb690997e8460653d4167af8826652e7` passed CI 35629909143; merged main passed complete CI 35632095314, including both database profiles, browser/API final-image E2E, frontend, document engines and Python coverage. Independent review approved; the exact task branch was removed locally and remotely. Linear is Done after main verification; this closure mirror accompanies T73 qualification.
+
 * 2026-09-21: Created from the user priority table, priority order 3 after T50 and T73. Existing UI filters expired jobs and PowerPoint output locally while fetching successive pages; no duplicate ticket exists.
+* 2026-09-21: Started implementation on `feat/T85-history-api-filters`; Linear and the repository mirror are synchronized as In Progress.
+* 2026-09-21: Implemented owner-scoped `output_family` and `expired` filters before SQL counting and pagination, changed both browser workspaces to one bounded filtered request, regenerated OpenAPI and TypeScript bindings, and added cross-profile, authorization, frontend, CLI-compatibility, and final-image E2E regressions. Focused Python and complete frontend checks pass; the orchestrated full-engine and final rootless matrices remain pending.
+* 2026-09-21: Independent review approved the implementation with no actionable correctness or security findings.
 
 ## Synchronization
 
