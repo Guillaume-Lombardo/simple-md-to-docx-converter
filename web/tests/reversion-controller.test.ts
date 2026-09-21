@@ -193,6 +193,19 @@ test("capability and source validation derive every client hint from the server"
   ).toMatch(/PowerPoint/);
   expect(
     validateOptions(
+      { extraction: "anydoc", include_images: true, include_notes: true },
+      new File(["ok"], "slides.pptx"),
+      capabilities({
+        extraction: {
+          ...capabilities().extraction,
+          default_mode: "slides",
+          modes: ["slides", "marp"],
+        },
+      }),
+    ),
+  ).toMatch(/not available/);
+  expect(
+    validateOptions(
       { extraction: "anydoc", include_images: false, include_notes: true },
       new File(["ok"], "report.docx"),
       capabilities(),
