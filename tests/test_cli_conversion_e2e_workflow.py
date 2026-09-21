@@ -59,11 +59,20 @@ def test_conversion_cli_e2e_json_parser_fails_closed() -> None:
 def test_conversion_cli_e2e_runs_after_shared_cli_and_before_template_cli() -> None:
     runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
     shared_cli = runner.index("tests.e2e.cli_workflow")
-    conversions = runner.index("tests.e2e.conversion_cli_workflow")
+    invocation = "uv run python -m tests.e2e.conversion_cli_workflow"
+    normal = runner.index(invocation)
+    held = runner.index(invocation, normal + 1)
     templates = runner.index("tests.e2e.template_cli_workflow")
+    normal_block = runner[normal : runner.index("\n\n", normal)]
+    held_block = runner[held : runner.index("\n\n", held)]
 
-    assert shared_cli < conversions < templates
-    assert runner.count("tests.e2e.conversion_cli_workflow") == 1
+    assert shared_cli < normal < templates
+    assert runner.find(invocation, held + 1) == -1
+    assert '--container "$application_name" --profile "$profile"' in normal_block
+    assert "--reverse-held-queue" not in normal_block
+    assert runner.index("MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600") < held
+    assert "--reverse-held-queue" in held_block
+    assert "--reverse-upload-max-bytes 1024" in held_block
 
 
 def test_conversion_cli_e2e_reads_authoritative_options() -> None:
