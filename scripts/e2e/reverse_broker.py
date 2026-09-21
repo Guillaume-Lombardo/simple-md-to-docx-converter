@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import sys
 import time
+from itertools import islice
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -52,6 +53,7 @@ RUNTIME_LIMITS = {
     "workspace_bytes": 33_554_432,
 }
 _MAX_PROCESS_METADATA_BYTES = 4096
+_MAX_SUPERVISOR_THREADS = 256
 _MAX_DIAGNOSTIC_BYTES = 65_536
 _MAX_DIAGNOSTIC_ATTEMPTS = 32
 CHANNEL_LIMITS = {"max_input_bytes": 1_000_000, "max_output_bytes": 4_000_000}
@@ -448,6 +450,28 @@ def _process_argv(pid: int, *, parent: int | None = None) -> list[str]:
     return argv[:-1]
 
 
+def _process_children(parent_pid: int) -> set[int]:
+    """Find children across the owned supervisor's bounded Linux thread set."""
+    tasks = list(
+        islice(
+            (Path("/proc") / str(parent_pid) / "task").iterdir(),
+            _MAX_SUPERVISOR_THREADS + 1,
+        )
+    )
+    if len(tasks) > _MAX_SUPERVISOR_THREADS:
+        raise RuntimeError("T73 broker supervisor exceeds its thread bound")
+    children: set[int] = set()
+    for task in tasks:
+        try:
+            raw = _proc_read(task / "children").split()
+        except FileNotFoundError:
+            continue  # A supervisor thread may exit during this read-only snapshot.
+        if any(not value.isdigit() for value in raw):
+            raise RuntimeError("T73 broker supervisor child metadata is invalid")
+        children.update(int(value) for value in raw)
+    return children
+
+
 def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
     """Signal the exact owned broker child, never its uv supervisor wrapper."""
     if not root.is_absolute() or parent_pid <= 0 or signal_name not in {"TERM", "KILL"}:
@@ -460,12 +484,10 @@ def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
         or parent_argv[-4:] != ["python", *expected]
     ):
         raise RuntimeError("T73 broker supervisor arguments differ")
-    children = _proc_read(
-        Path(f"/proc/{parent_pid}/task/{parent_pid}/children")
-    ).split()
-    if len(children) != 1 or not children[0].isdigit():
+    children = _process_children(parent_pid)
+    if len(children) != 1:
         raise RuntimeError("T73 broker supervisor must own exactly one child")
-    child_pid = int(children[0])
+    child_pid = next(iter(children))
     descriptor = os.pidfd_open(child_pid)
     try:
         child_argv = _process_argv(child_pid, parent=parent_pid)
