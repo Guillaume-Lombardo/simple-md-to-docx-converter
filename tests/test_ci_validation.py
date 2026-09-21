@@ -236,7 +236,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
         for line in workflow.splitlines()
         if "uses: actions/upload-artifact@" in line
     ]
-    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 3
+    assert upload_lines == [f"uses: {UPLOAD_ARTIFACT_PIN}"] * 4
     assert "archive: false" not in workflow
 
     drifted = workflow.replace(
@@ -254,7 +254,7 @@ def test_ci_upload_artifact_pin_and_comment_are_canonical() -> None:
 def test_ci_uses_only_github_hosted_runners() -> None:
     """The upload-artifact v7 runner floor is delegated to GitHub-hosted images."""
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert workflow.count("runs-on: ubuntu-24.04") == 7
+    assert workflow.count("runs-on: ubuntu-24.04") == 8
     assert "self-hosted" not in workflow
 
 
@@ -496,6 +496,19 @@ def test_gate_rejects_skipped_active_domain() -> None:
     assert any(
         "RUNNABLE_DOMAINS" in error for error in validate_workflow_text(weakened)
     )
+
+
+@pytest.mark.unit
+def test_gate_rejects_a_failed_mutation_campaign() -> None:
+    """The required aggregate must reject any non-success mutation result."""
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    weakened = workflow.replace(
+        '[[ "$MUTATION_RESULT" == "success" ]]',
+        '[[ "$MUTATION_RESULT" == "failure" ]]',
+        1,
+    )
+
+    assert any("MUTATION_RESULT" in error for error in validate_workflow_text(weakened))
 
 
 @pytest.mark.unit
@@ -2061,7 +2074,7 @@ def test_python_source_discovery_excludes_installed_package_managers(
             "PYTHON_COVERAGE_RESULT: success",
         ),
         (
-            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy]",
+            "needs: [detect, light, python-tests, python-coverage, domain-plan, heavy, mutation]",
             "needs: [detect, light, domain-plan, heavy]",
         ),
     ],

@@ -109,7 +109,8 @@ READ_ONLY_ENV_STEPS = frozenset(
         ("heavy", "Run authenticated conversion workflow in pinned Chrome"),
         ("heavy", "Run selected domain suite without a shell"),
         ("gate", "Require every implemented CI stage"),
-        ("mutation", "Run a fresh, non-empty targeted mutation campaign"),
+        ("mutation", "Run reviewed mutation campaign"),
+        ("mutation", "Run the reviewed full mutation campaign"),
     }
 )
 READ_ONLY_ID_STEPS = frozenset({("detect", "Select affected domains")})
@@ -182,6 +183,7 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "python-coverage": 5,
             "domain-plan": 5,
             "heavy": 45,
+            "mutation": 30,
             "gate": 5,
         },
         actions=frozenset(
@@ -233,6 +235,9 @@ READ_ONLY_WORKFLOW_POLICIES = {
                     "strategy",
                     "timeout-minutes",
                 }
+            ),
+            "mutation": frozenset(
+                {"name", "needs", "runs-on", "steps", "timeout-minutes"}
             ),
             "gate": frozenset(
                 {"if", "name", "needs", "runs-on", "steps", "timeout-minutes"}
@@ -357,14 +362,20 @@ READ_ONLY_WORKFLOW_POLICIES = {
                 "heavy",
                 "Retain final-image verification evidence",
             ): "${{ always() && matrix.domain == 'container' }}",
+            ("mutation", "Retain mutation evidence"): "${{ always() }}",
         },
-        canonical_digest="dfd1123088c5dc46fd7ad877e35370ead4582004d6178be523ba35984b8ea5c8",
+        canonical_digest="161b64127c1e23e2efbfad37e8c08eef63d801a325974e5c5078ca9f5fb91107",
     ),
     "mutation.yml": WorkflowPolicy(
         triggers=frozenset({"schedule", "workflow_dispatch"}),
         jobs={"mutation": 30},
         actions=frozenset(
-            {"actions/checkout", "actions/setup-python", "astral-sh/setup-uv"}
+            {
+                "actions/checkout",
+                "actions/setup-python",
+                "actions/upload-artifact",
+                "astral-sh/setup-uv",
+            }
         ),
         concurrency_group="mutation-${{ github.ref }}",
         cancel_in_progress=True,
@@ -372,8 +383,8 @@ READ_ONLY_WORKFLOW_POLICIES = {
             "mutation": frozenset({"if", "name", "runs-on", "steps", "timeout-minutes"})
         },
         job_conditions={"mutation": TRUSTED_REPOSITORY_GUARD},
-        step_conditions={},
-        canonical_digest="ce96d120e6ad58bdb7a15559f8207c52d6c25d2a6581584a0dddba373ace20b9",
+        step_conditions={("mutation", "Retain mutation evidence"): "${{ always() }}"},
+        canonical_digest="d063841d981c669f56a1c573b4dc59e1ad7f3601f0f8c1d606f601212128b6d1",
     ),
 }
 
@@ -828,6 +839,7 @@ def _validate_light_sharding(workflow: Mapping[str, Any]) -> list[str]:
         "python-coverage",
         "domain-plan",
         "heavy",
+        "mutation",
     ]:
         errors.append("light coverage and final gate must require every shard")
     contracts = [
@@ -947,6 +959,7 @@ def _validate_ci_contract(workflow: Mapping[str, Any]) -> list[str]:
             '  [[ "$HEAVY_RESULT" == "skipped" ]]\nelse\n'
             '  [[ "$HEAVY_RESULT" == "success" ]]\nfi\n'
             '[[ "$LIGHT_RESULT" == "success" ]]\n'
+            '[[ "$MUTATION_RESULT" == "success" ]]\n'
             '[[ "$PYTHON_TESTS_RESULT" == "success" ]]\n'
             '[[ "$PYTHON_COVERAGE_RESULT" == "success" ]]\n'
         ),
