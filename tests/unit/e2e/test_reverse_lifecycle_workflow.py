@@ -26,6 +26,7 @@ def _state() -> dict[str, Any]:
         "recovery_job_id": jobs[0],
         "shared_job_id": jobs[1],
         "forward_job_id": str(uuid4()),
+        "forward_evidence": None,
     }
 
 
@@ -108,6 +109,15 @@ def test_state_rejects_duplicate_or_foreign_job_identity(tmp_path) -> None:
     with pytest.raises(workflow.WorkflowFailure, match="job set"):
         workflow._read_state(path, "standalone", "worker-restart")
 
+    state = _state()
+    state["forward_evidence"] = {
+        "job_id": str(uuid4()),
+        "updated_at": "2026-09-21T00:00:00+00:00",
+    }
+    path.write_text(json.dumps(state))
+    with pytest.raises(workflow.WorkflowFailure, match="forward evidence"):
+        workflow._read_state(path, "standalone", "worker-restart")
+
 
 def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) -> None:
     state = _state()
@@ -135,10 +145,13 @@ def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) 
             "attempt": 2 if job_id == state["recovery_job_id"] else 1
         },
     )
-    mocker.patch.object(
+    wait_forward = mocker.patch.object(
         workflow,
         "_wait_forward_success",
-        return_value={"updated_at": "2026-09-21T00:00:00+00:00"},
+        return_value={
+            "id": state["forward_job_id"],
+            "updated_at": "2026-09-21T00:00:00+00:00",
+        },
     )
     mocker.patch.object(
         workflow,
@@ -168,6 +181,11 @@ def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) 
             receipt,
         )
     assert not receipt.exists()
+    retained_state = json.loads(state_path.read_text())
+    assert retained_state["forward_evidence"] == {
+        "job_id": state["forward_job_id"],
+        "updated_at": "2026-09-21T00:00:00+00:00",
+    }
     validated.reset_mock(side_effect=True)
 
     workflow.verify(
@@ -180,6 +198,7 @@ def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) 
     )
 
     validated.assert_called_once()
+    wait_forward.assert_called_once()
     assert json.loads(receipt.read_text()) == {
         "schema": workflow._RESULT_RECEIPT_SCHEMA,
         "profile": "standalone",

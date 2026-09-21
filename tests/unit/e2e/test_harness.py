@@ -991,6 +991,10 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
     assert lifecycle.index(
         'chmod 0644 "/browser-session/$stem-binding.json"'
     ) < lifecycle.index('touch "${binding%.json}.ready"')
+    verification = lifecycle[lifecycle.index("reverse_lifecycle_workflow verify") :]
+    assert verification.index('chmod 0644 "$state"') < verification.index(
+        'podman exec "$application_name"'
+    )
     assert 'runtime="$worker_one_name"' in lifecycle
     assert "md_converter_reversion_broker_ready 0" in lifecycle
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
