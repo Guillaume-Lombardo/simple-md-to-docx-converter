@@ -25,6 +25,7 @@ from markweave.reversions.manifest import (
     ManifestSource,
     canonical_manifest_bytes,
 )
+from tests.e2e import structured_pptx_workflow
 from tests.e2e.administration_cli_workflow import _interactive, _login, _plain
 from tests.e2e.cli_workflow import _exec_prefix
 
@@ -41,9 +42,12 @@ _SCANNED_SOURCE = "/tmp/markweave-t73-scanned.pdf"  # noqa: S108 - container tmp
 _UNSUPPORTED_SOURCE = "/tmp/markweave-t73-unsupported.txt"  # noqa: S108 - container tmpfs
 _SCANNER_SOURCE = "/tmp/markweave-t73-eicar.docx"  # noqa: S108 - container tmpfs
 _RESULT = "/tmp/markweave-t73-reverse-result"  # noqa: S108 - container tmpfs
+_STRUCTURED_SOURCE = "/tmp/markweave-t83-edited.pptx"  # noqa: S108 - container tmpfs
+_STRUCTURED_RESULT = "/tmp/markweave-t83-structured-result"  # noqa: S108 - container tmpfs
 _DENIED_RESULT = "/tmp/markweave-t73-reverse-denied"  # noqa: S108 - container tmpfs
 _CORPUS_SOURCE = Path("spikes/anydoc/corpus/docx/text.docx")
 _SCANNED_CORPUS_SOURCE = Path("spikes/anydoc/corpus/pdf/handmade-scanned.pdf")
+_STRUCTURED_CORPUS_SOURCE = Path("spikes/anydoc/corpus/pptx/pres.pptx")
 _PROFILE_STATE_HOME = "/tmp/markweave-cli-state"  # noqa: S108 - container tmpfs
 _UNAVAILABLE_HOLDER_PID = "/tmp/markweave-t73-unavailable-holder.pid"  # noqa: S108
 _EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
@@ -61,13 +65,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--phase",
-        choices=("primary", "expiry", "unavailable"),
+        choices=("primary", "structured-pptx", "expiry", "unavailable"),
         default="primary",
     )
     arguments = parser.parse_args()
     try:
         if arguments.phase == "primary":
             _exercise_primary_success(arguments.container, arguments.profile)
+        elif arguments.phase == "structured-pptx":
+            _exercise_structured_pptx(arguments.container, arguments.profile)
         elif arguments.phase == "expiry":
             _exercise_expiry(arguments.container, arguments.profile)
         else:
@@ -252,6 +258,97 @@ def _exercise_primary_success(container: str, profile: str) -> None:
     _cleanup(container)
 
 
+def _exercise_structured_pptx(container: str, profile: str) -> None:
+    """Exercise capability-default slide extraction through the installed CLI."""
+    _copy_structured_source(container)
+    _create_users(container)
+    _login(container, _ALICE_PROFILE, _ALICE, _ALICE_PASSWORD)
+    plain = _exec_prefix(container, tty=False)
+    before = _owner_job_ids(plain)
+    invalid = (
+        "jobs",
+        "reverse",
+        "submit",
+        _STRUCTURED_SOURCE,
+        "--extraction",
+        "anydoc",
+        "--no-include-notes",
+        "--idempotency-key",
+        f"t83-{profile}-structured-invalid",
+        "--profile",
+        _ALICE_PROFILE,
+    )
+    _require_human_error(
+        _command(plain, invalid, expected=1), "requires notes and images"
+    )
+    _require_error_code(
+        _error_json(plain, ("--json", *invalid)), "extraction_options_invalid"
+    )
+    if _owner_job_ids(plain) != before:
+        raise WorkflowFailure("invalid structured CLI options created a reverse job")
+    submitted = _json(
+        plain,
+        (
+            "--json",
+            "jobs",
+            "reverse",
+            "submit",
+            _STRUCTURED_SOURCE,
+            "--extraction",
+            "slides",
+            "--idempotency-key",
+            f"t83-{profile}-structured-slides",
+            "--profile",
+            _ALICE_PROFILE,
+        ),
+    )
+    job_id = _job_id(submitted, "structured slides submission")
+    if submitted.get("options") != {
+        "extraction": "slides",
+        "include_notes": True,
+        "include_images": True,
+    }:
+        raise WorkflowFailure("structured CLI capability defaults differ")
+    completed = _json(
+        plain,
+        (
+            "--json",
+            "--timeout",
+            "60",
+            "jobs",
+            "reverse",
+            "wait",
+            job_id,
+            "--poll-interval",
+            "1",
+            "--profile",
+            _ALICE_PROFILE,
+        ),
+        timeout=70,
+    )
+    if completed.get("state") != "succeeded":
+        raise WorkflowFailure("structured CLI slides job did not succeed")
+    downloaded = _json(
+        plain,
+        (
+            "--json",
+            "jobs",
+            "reverse",
+            "download",
+            job_id,
+            _STRUCTURED_RESULT,
+            "--profile",
+            _ALICE_PROFILE,
+        ),
+    )
+    if downloaded.get("status") != "downloaded":
+        raise WorkflowFailure(
+            "structured CLI result download did not report downloaded"
+        )
+    _inspect_structured_download(container)
+    _cleanup_structured_result(container)
+
+
 def _exercise_expiry(container: str, profile: str) -> None:
     """Require a retained reverse result to become unavailable within its live TTL."""
     _copy_source(container)
@@ -426,6 +523,21 @@ def _require_unavailable_holder(container: str, holder: subprocess.Popen[str]) -
         container, _UNAVAILABLE_HOLDER_PID
     ):
         raise WorkflowFailure("closed loopback holder ended early")
+
+
+def _copy_structured_source(container: str) -> None:
+    """Create the shared edited PPTX source for the CLI and browser phases."""
+    if not _STRUCTURED_CORPUS_SOURCE.is_file():
+        raise WorkflowFailure(
+            "redistributable PowerPoint corpus fixture is unavailable"
+        )
+    try:
+        source = structured_pptx_workflow.edited_presentation(
+            _STRUCTURED_CORPUS_SOURCE.read_bytes()
+        )
+    except structured_pptx_workflow.WorkflowFailure as error:
+        raise WorkflowFailure("creating edited PowerPoint source") from error
+    _copy_bytes(container, _STRUCTURED_SOURCE, source)
 
 
 def _copy_source(container: str) -> None:
@@ -725,6 +837,26 @@ def _inspect_download(container: str) -> str:
         return hashlib.sha256(result.read_bytes()).hexdigest()
 
 
+def _inspect_structured_download(container: str) -> None:
+    """Validate the installed CLI's selected slide-oriented package."""
+    with tempfile.TemporaryDirectory(prefix="markweave-t83-result-") as directory:
+        result = Path(directory) / "result.zip"
+        copied = subprocess.run(
+            ["podman", "cp", f"{container}:{_STRUCTURED_RESULT}", str(result)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if copied.returncode != 0:
+            raise WorkflowFailure("copying structured CLI result for inspection")
+        try:
+            structured_pptx_workflow.validate_structured_package(
+                result.read_bytes(), "slides"
+            )
+        except structured_pptx_workflow.WorkflowFailure as error:
+            raise WorkflowFailure("structured CLI package differs") from error
+
+
 def _inspect_fixture_package(path: Path) -> None:
     """Validate the corpus DOCX's expected asset reference and manifest evidence."""
     expected_asset = "assets/image-0001.png"
@@ -801,6 +933,16 @@ def _require_profile_files(container: str) -> None:
     )
     if result.returncode != 0:
         raise WorkflowFailure("CLI profile files are not isolated")
+
+
+def _cleanup_structured_result(container: str) -> None:
+    """Retain the shared PPTX source for the browser structured phase."""
+    subprocess.run(
+        ["podman", "exec", container, "/bin/sh", "-c", f"rm -f {_STRUCTURED_RESULT}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _cleanup(container: str) -> None:

@@ -1186,6 +1186,13 @@ podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   --env MARKWEAVE_E2E_REVERSE_PHASE=primary \
   "$application_name" node --test /e2e/browser-next-reversion.test.mjs
+uv run python -m tests.e2e.reverse_cli_workflow \
+  --container "$application_name" --profile "$profile" --phase structured-pptx
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_REVERSE_PHASE=structured \
+  --env MARKWEAVE_E2E_STRUCTURED_PPTX_SOURCE=/tmp/markweave-t83-edited.pptx \
+  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 podman exec "$application_name" node --test /e2e/browser-next-presentations.test.mjs
 podman exec "$application_name" node --test /e2e/browser-workspace-ui.test.mjs
 
