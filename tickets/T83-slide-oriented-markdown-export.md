@@ -28,6 +28,20 @@ T82 forward PowerPoint baseline; T69-T72 reverse-conversion isolation and lifecy
 
 ## Progress
 
+2026-09-22: Terminal final-image attempt 3 completed both standalone and distributed profiles with
+exit 0 against one matched three-image candidate set. The application images were built from
+`e3fb99be5763bb8fc6f100be43140e61e221f82d`; the clean harness head was
+`b186d3ac3718a71205196b24e0a60f72455ee8ee`, and its application build-input diff was empty. The
+structured PPTX API, installed CLI, and browser Marp paths passed with exact option and package
+inspection, alongside the existing reverse lifecycle, eight-family corpus, authorization/scanner,
+cancellation/expiry/unavailable, worker/broker crash, outage, and recovery checks. Resource
+measurements contain 21 cases and the existing T69 concurrency comparison without an approved
+production numerical threshold. CI-mode scans completed with zero Critical and High counts 133
+backend, 39 frontend, and 134 reverse; complete bundle evidence is retained. See
+[final-image evidence](../docs/evidence/t83-structured-pptx-final-images.md). This does not claim
+publication, deployment, `main` integration, or completion; engine-marked CI, exact-head/main
+checks, and T73 stacked integration remain separate boundaries.
+
 2026-09-20: Split from T82 during user-authorized 0.7.0 publication preparation so unfinished reverse options remain explicitly tracked. No reverse parser or option implementation is claimed.
 
 2026-09-21: Started implementation after pinned anydoc qualification confirmed flattened slide boundaries, presenter notes emitted as ordinary block quotes, and embedded image asset retention. The user selected notes and images enabled by default for opt-in structured Markdown/Marp extraction, with warnings and explicit placeholders for unsupported meaningful content. Existing anydoc extraction remains the default. Work stays inside the isolated reverse attempt with bounded OOXML reading, configurable reverse-specific limits, deterministic packaging and frozen lifecycle/idempotency options. T50, T73, T85 and T86 remain separate; no release/version change is included.
