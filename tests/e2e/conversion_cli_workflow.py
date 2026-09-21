@@ -27,6 +27,8 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     parser.add_argument(
         "--profile", choices=("standalone", "distributed"), required=True
     )
+    parser.add_argument("--reverse-held-queue", action="store_true")
+    parser.add_argument("--reverse-upload-max-bytes", type=int, default=1_000_000)
     arguments = parser.parse_args()
     prefix = _exec_prefix(arguments.container, tty=False)
     username = "e2e-admin"
@@ -52,6 +54,14 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if login != 0 or password in login_output:
         return _failure("login", login)
+    if arguments.reverse_held_queue:
+        failure = _exercise_reverse_held_queue(
+            prefix, arguments.profile, arguments.reverse_upload_max_bytes
+        )
+        if failure is not None:
+            return _failure(failure, 1)
+        print(f"Reverse held-queue CLI E2E passed for {arguments.profile}.")
+        return 0
     options_result = _json_result(_run([*prefix, "--json", "conversion-options"]))
     options = (
         options_result.get("conversion_options")
@@ -162,6 +172,26 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if validation.returncode != 0:
         return _failure("download validation", validation.returncode)
+    logout = _run([*prefix, "logout"])
+    if logout.returncode != 0:
+        return _failure("logout", logout.returncode)
+    cleanup = _inside(
+        arguments.container,
+        "import shutil; from pathlib import Path; "
+        f"shutil.rmtree({_STATE_HOME!r}, ignore_errors=True); "
+        f"[Path(path).unlink(missing_ok=True) for path in "
+        f"{[_SOURCE, _REVERSE_SOURCE, _REVERSE_RESULT, _RESULT, _MANIFEST]!r}]",
+    )
+    if cleanup.returncode != 0:
+        return _failure("cleanup", cleanup.returncode)
+    print(f"Conversion CLI final-image E2E passed for {arguments.profile}.")
+    return 0
+
+
+def _exercise_reverse_held_queue(  # noqa: PLR0911, PLR0912 - bounded E2E assertions
+    prefix: list[str], profile: str, expected_upload_max_bytes: int
+) -> str | None:
+    """Verify queued reverse cancellation while the harness holds workers idle."""
     reverse_capabilities = _json_result(
         _run([*prefix, "--json", "jobs", "reverse", "capabilities"])
     )
@@ -172,12 +202,17 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
     )
     if (
         not isinstance(reverse_contract, dict)
-        or reverse_contract.get("maximum_upload_bytes") != 1_000_000
+        or reverse_contract.get("maximum_upload_bytes") != expected_upload_max_bytes
         or reverse_contract.get("execution")
         != {"local": True, "ocr": False, "hosted_fallback": False}
     ):
-        return _failure("reverse capabilities", 1)
-    reverse_key = f"t71-final-image-{arguments.profile}"
+        actual = (
+            reverse_contract.get("maximum_upload_bytes")
+            if isinstance(reverse_contract, dict)
+            else "missing"
+        )
+        return f"reverse capabilities upload limit expected={expected_upload_max_bytes} actual={actual}"
+    reverse_key = f"t71-final-image-{profile}"
     reverse_submission = _json_result(
         _run(
             [
@@ -193,11 +228,11 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         )
     )
     if reverse_submission is None or reverse_submission.get("state") != "queued":
-        return _failure("reverse submission", 1)
+        return "reverse submission"
     try:
         reverse_job_id = str(UUID(str(reverse_submission["id"])))
     except KeyError, ValueError:
-        return _failure("reverse submission identity", 1)
+        return "reverse submission identity"
     reverse_replay = _json_result(
         _run(
             [
@@ -213,7 +248,62 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         )
     )
     if reverse_replay is None or reverse_replay.get("id") != reverse_job_id:
-        return _failure("reverse idempotent replay", 1)
+        return "reverse idempotent replay"
+    second_submission = _json_result(
+        _run(
+            [
+                *prefix,
+                "--json",
+                "jobs",
+                "reverse",
+                "submit",
+                _REVERSE_SOURCE,
+                "--idempotency-key",
+                f"{reverse_key}-second",
+            ]
+        )
+    )
+    if second_submission is None or second_submission.get("state") != "queued":
+        return "reverse second queued submission"
+    try:
+        second_job_id = str(UUID(str(second_submission["id"])))
+    except KeyError, ValueError:
+        return "reverse second submission identity"
+    quota_json = _run(
+        [
+            *prefix,
+            "--json",
+            "jobs",
+            "reverse",
+            "submit",
+            _REVERSE_SOURCE,
+            "--idempotency-key",
+            f"{reverse_key}-quota",
+        ]
+    )
+    try:
+        quota_error = json.loads(quota_json.stderr).get("error")
+    except AttributeError, ValueError:
+        quota_error = None
+    if (
+        quota_json.returncode != 1
+        or not isinstance(quota_error, dict)
+        or quota_error.get("code") != "reversion_user_quota_exceeded"
+    ):
+        return "reverse active quota JSON error"
+    quota_human = _run(
+        [
+            *prefix,
+            "jobs",
+            "reverse",
+            "submit",
+            _REVERSE_SOURCE,
+            "--idempotency-key",
+            f"{reverse_key}-quota-human",
+        ]
+    )
+    if quota_human.returncode != 1 or "quota is exhausted" not in quota_human.stderr:
+        return "reverse active quota human error"
     reverse_listing = _json_result(
         _run([*prefix, "--json", "jobs", "reverse", "list", "--limit", "10"])
     )
@@ -225,12 +315,12 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         for item in reverse_items
         if isinstance(item, dict)
     ):
-        return _failure("reverse job list", 1)
+        return "reverse job list"
     reverse_shown = _json_result(
         _run([*prefix, "--json", "jobs", "reverse", "show", reverse_job_id])
     )
     if reverse_shown is None or reverse_shown.get("id") != reverse_job_id:
-        return _failure("reverse job show", 1)
+        return "reverse job show"
     reverse_wait = _run(
         [
             *prefix,
@@ -245,31 +335,23 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915 - bounded E2E driver
         ]
     )
     if reverse_wait.returncode != 1 or "did not finish" not in reverse_wait.stderr:
-        return _failure("reverse bounded wait", reverse_wait.returncode)
+        return "reverse bounded wait"
     reverse_cancelled = _json_result(
         _run([*prefix, "--json", "jobs", "reverse", "cancel", reverse_job_id])
     )
     if reverse_cancelled is None or reverse_cancelled.get("state") != "cancelled":
-        return _failure("reverse job cancel", 1)
+        return "reverse job cancel"
+    second_cancelled = _json_result(
+        _run([*prefix, "--json", "jobs", "reverse", "cancel", second_job_id])
+    )
+    if second_cancelled is None or second_cancelled.get("state") != "cancelled":
+        return "reverse second job cancel"
     reverse_download = _run(
         [*prefix, "jobs", "reverse", "download", reverse_job_id, _REVERSE_RESULT]
     )
     if reverse_download.returncode != 1 or "conflicts" not in reverse_download.stderr:
-        return _failure("reverse unavailable download", reverse_download.returncode)
-    logout = _run([*prefix, "logout"])
-    if logout.returncode != 0:
-        return _failure("logout", logout.returncode)
-    cleanup = _inside(
-        arguments.container,
-        "import shutil; from pathlib import Path; "
-        f"shutil.rmtree({_STATE_HOME!r}, ignore_errors=True); "
-        f"[Path(path).unlink(missing_ok=True) for path in "
-        f"{[_SOURCE, _REVERSE_SOURCE, _REVERSE_RESULT, _RESULT, _MANIFEST]!r}]",
-    )
-    if cleanup.returncode != 0:
-        return _failure("cleanup", cleanup.returncode)
-    print(f"Conversion CLI final-image E2E passed for {arguments.profile}.")
-    return 0
+        return "reverse unavailable download"
+    return None
 
 
 def _run(
