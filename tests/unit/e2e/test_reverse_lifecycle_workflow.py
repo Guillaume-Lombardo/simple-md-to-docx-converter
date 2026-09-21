@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
@@ -106,3 +107,84 @@ def test_state_rejects_duplicate_or_foreign_job_identity(tmp_path) -> None:
     path.write_text(json.dumps(state))
     with pytest.raises(workflow.WorkflowFailure, match="job set"):
         workflow._read_state(path, "standalone", "worker-restart")
+
+
+def test_result_receipt_is_exact_bounded_proof_bound_metadata(tmp_path, mocker) -> None:
+    state = _state()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+    receipt = tmp_path / "result.json"
+
+    with pytest.raises(workflow.WorkflowFailure, match="persisted fencing"):
+        workflow.verify(
+            "http://unused",
+            "standalone",
+            "worker-restart",
+            state_path,
+            None,
+            receipt,
+        )
+    assert not receipt.exists()
+
+    package = b"inspected deterministic package"
+    mocker.patch.object(workflow, "_owner", return_value=mocker.sentinel.owner)
+    mocker.patch.object(
+        workflow,
+        "_wait_success",
+        side_effect=lambda _client, job_id: {
+            "attempt": 2 if job_id == state["recovery_job_id"] else 1
+        },
+    )
+    mocker.patch.object(
+        workflow,
+        "_wait_forward_success",
+        return_value={"updated_at": "2026-09-21T00:00:00+00:00"},
+    )
+    mocker.patch.object(
+        workflow,
+        "_timestamp",
+        side_effect=lambda _value, field: (
+            datetime(2026, 9, 21, tzinfo=UTC)
+            + (timedelta(seconds=1) if field == "reverse updated_at" else timedelta())
+        ),
+    )
+    mocker.patch.object(workflow, "_download", return_value=package)
+    mocker.patch.object(workflow, "_inspect_package")
+    mocker.patch.object(workflow, "_normalized_source", return_value=b"source")
+    mocker.patch.object(
+        workflow, "_submit", return_value={"id": state["shared_job_id"]}
+    )
+    validated = mocker.patch.object(workflow, "_validate_diagnostics")
+    diagnostics = tmp_path / "diagnostics.json"
+
+    validated.side_effect = workflow.WorkflowFailure("invalid persisted proof")
+    with pytest.raises(workflow.WorkflowFailure, match="invalid persisted proof"):
+        workflow.verify(
+            "http://unused",
+            "standalone",
+            "worker-restart",
+            state_path,
+            diagnostics,
+            receipt,
+        )
+    assert not receipt.exists()
+    validated.reset_mock(side_effect=True)
+
+    workflow.verify(
+        "http://unused",
+        "standalone",
+        "worker-restart",
+        state_path,
+        diagnostics,
+        receipt,
+    )
+
+    validated.assert_called_once()
+    assert json.loads(receipt.read_text()) == {
+        "schema": workflow._RESULT_RECEIPT_SCHEMA,
+        "profile": "standalone",
+        "scenario": "worker-restart",
+        "recovery_job_id": state["recovery_job_id"],
+        "sha256": sha256(package).hexdigest(),
+    }
+    assert receipt.stat().st_mode & 0o777 == 0o600

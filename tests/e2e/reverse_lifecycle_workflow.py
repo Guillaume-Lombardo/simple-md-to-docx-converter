@@ -13,6 +13,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from hashlib import sha256
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ else:
 
 _SCHEMA = "t73-reverse-lifecycle-v1"
 _DIAGNOSTICS_SCHEMA = "t73-reverse-attempt-diagnostics-v1"
+_RESULT_RECEIPT_SCHEMA = "t73-reverse-lifecycle-result-v1"
 _PASSWORD = "T73-lifecycle-fixture-password"  # noqa: S105 - E2E fixture
 _SOURCE = Path("spikes/anydoc/corpus/docx/text.docx")
 _SUBMISSION_COUNT = 4
@@ -317,15 +319,18 @@ def _inspect_package(content: bytes) -> None:
         raise WorkflowFailure("reverse lifecycle result integrity is invalid")
 
 
-def verify(
+def verify(  # noqa: PLR0913, PLR0917 - explicit final-image evidence inputs
     base_url: str,
     profile: str,
     scenario: str,
     state_file: Path,
     diagnostics_file: Path | None,
+    result_receipt: Path | None,
 ) -> None:
     """Verify recovered publication, deterministic output, and persisted fencing."""
     state = _read_state(state_file, profile, scenario)
+    if result_receipt is not None and diagnostics_file is None:
+        raise WorkflowFailure("a result receipt requires persisted fencing evidence")
     owner = _owner(base_url, profile, scenario)
     jobs = {job_id: _wait_success(owner, job_id) for job_id in state["job_ids"]}
     forward = _wait_forward_success(owner, state["forward_job_id"])
@@ -342,7 +347,7 @@ def verify(
         raise WorkflowFailure(
             "forward work made no progress before the reverse queue drained"
         )
-    packages = []
+    packages: dict[str, bytes] = {}
     for job_id in state["job_ids"]:
         first = _download(owner, job_id)
         second = _download(owner, job_id)
@@ -351,8 +356,9 @@ def verify(
                 "one immutable reverse result changed between downloads"
             )
         _inspect_package(first)
-        packages.append(first)
-    if any(content != packages[0] for content in packages[1:]):
+        packages[job_id] = first
+    expected_package = packages[state["recovery_job_id"]]
+    if any(content != expected_package for content in packages.values()):
         raise WorkflowFailure(
             "equivalent reverse jobs produced non-deterministic packages"
         )
@@ -366,6 +372,17 @@ def verify(
         raise WorkflowFailure("post-restart idempotent replay changed job identity")
     if diagnostics_file is not None:
         _validate_diagnostics(diagnostics_file, state, jobs)
+    if result_receipt is not None:
+        _write_json(
+            result_receipt,
+            {
+                "schema": _RESULT_RECEIPT_SCHEMA,
+                "profile": profile,
+                "scenario": scenario,
+                "recovery_job_id": state["recovery_job_id"],
+                "sha256": sha256(expected_package).hexdigest(),
+            },
+        )
 
 
 def diagnostics(
@@ -590,6 +607,7 @@ def main() -> int:
         command.add_argument("--state-file", type=Path, required=True)
         if operation == "verify":
             command.add_argument("--diagnostics-file", type=Path)
+            command.add_argument("--result-receipt", type=Path)
     command = subparsers.add_parser("diagnostics")
     command.add_argument("--state-file", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
@@ -605,6 +623,7 @@ def main() -> int:
                 args.scenario,
                 args.state_file,
                 args.diagnostics_file,
+                args.result_receipt,
             )
         else:
             diagnostics(

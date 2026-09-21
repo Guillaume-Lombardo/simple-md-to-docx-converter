@@ -572,10 +572,13 @@ wait_reverse_marker() {
 
 run_reverse_lifecycle() {
   local scenario="$1"
+  local frontend_outage="${2:-false}"
+  local lifecycle_url="http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
   local stem="reverse-$scenario"
   local state="$browser_session_directory/$stem.json"
   local binding="$browser_session_directory/$stem-binding.json"
   local diagnostics="$browser_session_directory/$stem-diagnostics.json"
+  local receipt="$browser_session_directory/$stem-result.json"
   local barrier="$broker_directory/$stem-paused.json"
   local runtime="$application_name"
   # Hold execution before admission, then prearm exact-unit observers.
@@ -583,13 +586,13 @@ run_reverse_lifecycle() {
     kill -TERM "$broker_pid"
     wait "$broker_pid"
     broker_pid=""
-    wait_for_url "$base_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
+    wait_for_url "$lifecycle_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
   else
     runtime="$worker_one_name"
     podman stop --time 15 "$runtime" >/dev/null
   fi
   uv run python -m tests.e2e.reverse_lifecycle_workflow prepare \
-    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
   chmod 0644 "$state"
   (
     podman exec "$application_name" /opt/md-converter/venv/bin/python \
@@ -608,6 +611,12 @@ run_reverse_lifecycle() {
   wait "$reverse_diagnostics_pid"
   reverse_diagnostics_pid=""
   # The marker proves signed inventory, runtime incarnation and synthetic DB binding.
+  if [[ "$frontend_outage" == true ]]; then
+    test "$scenario" = broker-restart
+    # Kill only the frontend while the exact attempt is held; API/router remain live.
+    e2e_podman kill --signal KILL "$frontend_name" >/dev/null
+    test "$(podman inspect "$frontend_name" --format '{{.State.Running}}')" = false
+  fi
   if [[ "$scenario" == worker-restart ]]; then
     podman kill --signal KILL "$runtime" >/dev/null
     test "$(podman inspect "$runtime" --format '{{.State.ExitCode}}')" = 137
@@ -620,16 +629,20 @@ run_reverse_lifecycle() {
   wait "$reverse_pause_pid"
   reverse_pause_pid=""
   if [[ "$scenario" == worker-restart ]]; then podman start "$runtime" >/dev/null; else start_reverse_broker; fi
-  wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+  wait_for_url "$lifecycle_url/health/ready" "$application_name" '"status":"ready"'
   uv run python -m tests.e2e.reverse_lifecycle_workflow verify \
-    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
   podman exec "$application_name" /opt/md-converter/venv/bin/python \
     /e2e/reverse_lifecycle_workflow.py diagnostics --state-file "/browser-session/$stem.json" \
     --output "/browser-session/$stem-diagnostics.json"
   podman exec "$application_name" chmod 0644 "/browser-session/$stem-diagnostics.json"
   uv run python -m tests.e2e.reverse_lifecycle_workflow verify \
-    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state" \
-    --diagnostics-file "$diagnostics"
+    --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state" \
+    --diagnostics-file "$diagnostics" --result-receipt "$receipt"
+  chmod 0644 "$receipt"
+  if [[ "$frontend_outage" == true ]]; then
+    test "$(podman inspect "$frontend_name" --format '{{.State.Running}}')" = false
+  fi
   echo "Reverse lifecycle $scenario passed for $profile with persisted fencing evidence."
 }
 
@@ -929,7 +942,6 @@ fi
 uv run python -m tests.e2e.reverse_corpus_workflow --base-url "$base_url" --profile "$profile"
 
 run_reverse_lifecycle worker-restart
-run_reverse_lifecycle broker-restart
 
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/e2e-template.md").write_text("# Template\n", encoding="utf-8")'
@@ -1257,11 +1269,18 @@ podman exec \
 
 # Prove asymmetric runtime failures and the custom-server admission boundary
 # through the production router against the exact final images.
-e2e_podman stop --time 15 "$frontend_name" >/dev/null
+run_reverse_lifecycle broker-restart true
 e2e_podman exec \
   --env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage \
   "$application_name" node --test /e2e/browser-next-runtime-failures.test.mjs
 start_frontend
+start_production_router "$application_name"
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_REVERSE_PHASE=recovered \
+  --env MARKWEAVE_E2E_REVERSE_RECOVERY_STATE=/browser-session/reverse-broker-restart.json \
+  --env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json \
+  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 start_production_router "$application_name" http://127.0.0.1:1 \
   http://frontend:3000 502
 e2e_podman exec \

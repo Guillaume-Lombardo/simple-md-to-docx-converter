@@ -394,7 +394,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 6
+    assert runner.count('start_production_router "$application_name"') == 7
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
@@ -967,7 +967,7 @@ def test_reverse_full_matrix_runs_outside_primary_diagnostic() -> None:
     )
     corpus = runner.index("tests.e2e.reverse_corpus_workflow")
     assert diagnostic < runner.index("exit 0", diagnostic) < corpus
-    assert runner.count("/e2e/browser-next-reversion.test.mjs") == 2
+    assert runner.count("/e2e/browser-next-reversion.test.mjs") == 3
     primary = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=primary")
     held = runner.index("--env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600")
     admission = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=admission")
@@ -995,3 +995,36 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert '"$reverse_pause_pid" "$reverse_diagnostics_pid"' in cleanup
     assert 'if [[ -f "$broker_directory/broker.json" ]]' in cleanup
+
+
+@pytest.mark.unit
+def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
+    runner = RUNNER.read_text()
+    lifecycle = runner[
+        runner.index("run_reverse_lifecycle() {") : runner.index(
+            "\nremove_artifacts\nmkdir -p"
+        )
+    ]
+    assert (
+        'local lifecycle_url="http://127.0.0.1:$(podman port "$application_name"'
+        in lifecycle
+    )
+    assert (
+        lifecycle.index('wait_reverse_marker "$barrier"')
+        < lifecycle.index('kill --signal KILL "$frontend_name"')
+        < lifecycle.index('kill -KILL "$broker_pid"')
+    )
+    outage = runner.index("run_reverse_lifecycle broker-restart true")
+    unavailable = runner.index(
+        "--env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage", outage
+    )
+    restored = runner.index("start_frontend", unavailable)
+    browser = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=recovered", restored)
+    assert outage < unavailable < restored < browser
+    assert runner.count("run_reverse_lifecycle broker-restart") == 1
+    assert '--diagnostics-file "$diagnostics" --result-receipt "$receipt"' in lifecycle
+    assert 'chmod 0644 "$receipt"' in lifecycle
+    assert (
+        "--env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json"
+        in runner
+    )

@@ -1,20 +1,91 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
 
 const baseURL = "http://localhost:3100";
 
-async function login(page) {
+async function login(
+  page,
+  username = "e2e-admin",
+  password = "e2e-admin-password",
+) {
   await page.goto(`${baseURL}/login`, { waitUntil: "networkidle" });
   const retry = page.getByRole("button", { name: "Try again" });
   if (await retry.isVisible()) await retry.click();
-  await page.getByRole("textbox", { name: "Username" }).fill("e2e-admin");
-  await page.getByLabel("Password").fill("e2e-admin-password");
+  await page.getByRole("textbox", { name: "Username" }).fill(username);
+  await page.getByLabel("Password").fill(password);
   await Promise.all([
     page.waitForURL("**/convert"),
     page.getByRole("button", { name: "Sign in" }).click(),
   ]);
+}
+
+async function inspectRecoveredResult(page, context, profile) {
+  const statePath = process.env.MARKWEAVE_E2E_REVERSE_RECOVERY_STATE;
+  assert.ok(statePath);
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(state.schema, "t73-reverse-lifecycle-v1");
+  assert.equal(state.profile, profile);
+  assert.equal(state.scenario, "broker-restart");
+  assert.equal(state.owner, `t73-lifecycle-${profile}-broker-restart`);
+  assert.match(state.recovery_job_id, /^[0-9a-f-]{36}$/);
+  const receiptPath = process.env.MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT;
+  assert.ok(receiptPath);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    "profile",
+    "recovery_job_id",
+    "scenario",
+    "schema",
+    "sha256",
+  ]);
+  assert.equal(receipt.schema, "t73-reverse-lifecycle-result-v1");
+  assert.equal(receipt.profile, profile);
+  assert.equal(receipt.scenario, state.scenario);
+  assert.equal(receipt.recovery_job_id, state.recovery_job_id);
+  assert.match(receipt.sha256, /^[0-9a-f]{64}$/);
+  await login(page, state.owner, "T73-lifecycle-fixture-password");
+  await page.getByRole("link", { name: "2md, Experimental" }).click();
+  await page
+    .getByRole("heading", { name: "New conversion to Markdown" })
+    .waitFor();
+  await page.locator(`button[title="${state.recovery_job_id}"]`).click();
+  const downloadButton = page.getByRole("button", { name: "Download result" });
+  await downloadButton.waitFor();
+  const jobResponse = await context.request.get(
+    `/api/v1/reversions/${state.recovery_job_id}`,
+  );
+  assert.equal(jobResponse.status(), 200);
+  const job = await jobResponse.json();
+  assert.equal(job.state, "succeeded");
+  assert.ok(job.attempt >= 2);
+  const result = await context.request.get(
+    `/api/v1/reversions/${state.recovery_job_id}/result`,
+  );
+  assert.equal(result.status(), 200);
+  assert.match(result.headers()["cache-control"], /private/);
+  assert.match(result.headers()["cache-control"], /no-store/);
+  const downloaded = page.waitForEvent("download");
+  await downloadButton.click();
+  const download = await downloaded;
+  assert.match(download.suggestedFilename(), /\.zip$/);
+  const downloadPath = await download.path();
+  assert.ok(downloadPath);
+  const bytes = await readFile(downloadPath);
+  const inspectedBytes = await result.body();
+  for (const candidate of [bytes, inspectedBytes]) {
+    assert.ok(
+      createHash("sha256").update(candidate).digest("hex") === receipt.sha256,
+      "Recovered result differs from the package inspected during frontend outage",
+    );
+  }
+  assert.ok(
+    bytes.equals(inspectedBytes),
+    "Browser result differs from the API package inspected by lifecycle verification",
+  );
+  assert.ok(bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])));
 }
 
 test(
@@ -22,7 +93,7 @@ test(
   { timeout: 600_000 },
   async () => {
     const phase = process.env.MARKWEAVE_E2E_REVERSE_PHASE ?? "primary";
-    assert.ok(["primary", "admission"].includes(phase));
+    assert.ok(["primary", "admission", "recovered"].includes(phase));
     const profile = process.env.MARKWEAVE_E2E_PROFILE;
     assert.ok(profile === "standalone" || profile === "distributed");
     const browser = await chromium.launch({
@@ -36,6 +107,11 @@ test(
         serviceWorkers: "block",
       });
       const page = await context.newPage();
+      if (phase === "recovered") {
+        await inspectRecoveredResult(page, context, profile);
+        await context.close();
+        return;
+      }
       await login(page);
       await page.getByLabel(/Source file/).setInputFiles({
         buffer: Buffer.from("# Forward conversion source"),
