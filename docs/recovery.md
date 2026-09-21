@@ -119,3 +119,11 @@ distributed mode, start API and workers in a controlled order and confirm worker
 being scraped. Preserve the exercise report without alteration, together with platform backup logs,
 according to the approved evidence-retention policy. Exercise each production profile at least
 quarterly and after a material change to storage, deployment, encryption, or restore tooling.
+
+## Related guidance
+
+The [container deployment guide](container-deployment.md) defines runtime topology and image pins;
+the [configuration reference](configuration.md) defines recovery inputs. Follow the
+[upgrade guide](upgrading.md) for rollback boundaries and the [release process](releasing.md) for
+artifact identity. Review the [changelog](../CHANGELOG.md), [security policy](../SECURITY.md), and
+[support policy](../SUPPORT.md) before a production restore.

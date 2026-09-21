@@ -59,3 +59,10 @@ undocumented deployment configurations.
 For upstream defects, include a minimal sanitized reproduction and relevant
 versions. Maintainers may identify the appropriate upstream project, but upstream
 support and remediation remain that project's responsibility.
+
+## Related guidance
+
+Start from the [documentation index](docs/index.md), then use the [CLI guide](docs/cli.md),
+[configuration reference](docs/configuration.md), or [recovery guide](docs/recovery.md) for the
+affected workflow. Consult the [changelog](CHANGELOG.md) and [upgrade guide](docs/upgrading.md) for
+version changes. Report sensitive defects through the [security policy](SECURITY.md).

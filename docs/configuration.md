@@ -249,3 +249,11 @@ manifests, commands, logs, or documentation examples.
 
 See [storage profiles](storage-profiles.md) for data layout and [resource policy](resource-policy.md)
 for runtime interactions.
+
+## Related guidance
+
+Apply settings through the [container deployment guide](container-deployment.md), migrate legacy
+names with the [upgrade guide](upgrading.md), and protect profile data with the
+[recovery guide](recovery.md). Consult the [changelog](../CHANGELOG.md),
+[security policy](../SECURITY.md), and [support policy](../SUPPORT.md) before operating a changed
+release.
