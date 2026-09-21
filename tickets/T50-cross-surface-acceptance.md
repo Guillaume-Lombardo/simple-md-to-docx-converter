@@ -2,7 +2,7 @@
 ticket: T50
 linear_id: G1L-425
 linear_url: https://linear.app/g1lom/issue/G1L-425/t50-complete-cross-surface-cli-and-package-acceptance
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -41,17 +41,22 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 
 ## Progress
 
+* 2026-09-21: Started cross-surface qualification from `origin/main` at
+  `4ef6a53f262a8ca33e34dce2a54a2c28933ed908`. Linear and this mirror are synchronized to
+  In Progress. The qualification will record reproducible evidence and honest prerequisite gaps;
+  it will not choose a release version or absorb T48/T73 scope.
+
 * 2026-09-21: The user approved removing T48 from the blocking dependencies. T50 can qualify
   the delivered package, CLI, containers, and existing mutation baseline independently of T48's
   remaining repository-owned CI integration. All other acceptance criteria and dependencies remain;
-  T50 remains Backlog and continues to block T73 until its qualification is verified.
+  T50 is now In Progress and continues to block T73 until its qualification is verified.
 
 * 2026-08-29: Created from the approved package review. The product manager approved the complete CLI surface, HTTP-only business commands, direct operational commands, XDG `0600` session profiles without API tokens, and `MARKWEAVE_*` migration with `MD_CONVERTER_*` compatibility through 0.x.
 * 2026-08-29: Final audit follow-up made T50 the exclusive integration owner for shared documentation navigation.
 
 ## Coordination
 
-* Status: Backlog.
+* Status: In Progress.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

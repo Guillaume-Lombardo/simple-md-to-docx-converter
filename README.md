@@ -48,6 +48,8 @@ and the explicit trusted-upstream and insecure SSH-tunnel modes with their restr
 
 ## Use and operate Markweave
 
+- [Command-line interface](docs/cli.md)
+- [Python package and optional dependencies](docs/python-distribution.md)
 - [Provision users from a startup CSV and require password renewal](docs/authentication.md#startup-csv-provisioning)
 - [Conversion interface](docs/conversion-ui.md)
 - [PowerPoint and Marp workflow](docs/powerpoint.md)
@@ -57,6 +59,10 @@ and the explicit trusted-upstream and insecure SSH-tunnel modes with their restr
 - [Jobs, cancellation, retention, and recovery](docs/jobs.md)
 - [Logs, metrics, audit, and readiness](docs/observability.md)
 - [Release and image update process](docs/releasing.md)
+- [Upgrade and rollback guidance](docs/upgrading.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [Support policy](SUPPORT.md)
 
 ## How it works
 

@@ -6,6 +6,10 @@ All notable user-visible, operational, security, compatibility, and deprecation
 changes are recorded here. Entries use the release version as their stable link
 target. Internal ticket choreography is intentionally excluded.
 
+Use the [upgrade guide](docs/upgrading.md) for supported transitions and rollback, the
+[release process](docs/releasing.md) for artifact evidence, the [security policy](SECURITY.md) for
+private reporting, and the [support policy](SUPPORT.md) for help with a published release.
+
 <a id="release-0-7-1"></a>
 
 ## [0.7.1] - 2026-09-20
