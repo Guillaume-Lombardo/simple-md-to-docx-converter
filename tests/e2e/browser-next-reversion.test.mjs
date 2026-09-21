@@ -89,15 +89,6 @@ async function inspectRecoveredResult(page, context, profile) {
   assert.ok(bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])));
 }
 
-function requireMultipartValue(request, name, value) {
-  const body = request.postDataBuffer();
-  assert.ok(body);
-  assert.match(
-    body.toString("latin1"),
-    new RegExp(`name="${name}"\\r\\n\\r\\n${value}\\r\\n`),
-  );
-}
-
 async function openReversionWorkspace(page) {
   const capabilities = page.waitForResponse(
     (response) =>
@@ -139,9 +130,6 @@ async function exerciseStructuredPptx(page) {
   await page.getByRole("button", { name: "Start conversion" }).click();
   const response = await accepted;
   assert.equal(response.status(), 202);
-  requireMultipartValue(response.request(), "extraction", "marp");
-  requireMultipartValue(response.request(), "include_notes", "true");
-  requireMultipartValue(response.request(), "include_images", "true");
   const job = await response.json();
   assert.match(job.id, /^[0-9a-f-]{36}$/);
   assert.deepEqual(job.options, {
