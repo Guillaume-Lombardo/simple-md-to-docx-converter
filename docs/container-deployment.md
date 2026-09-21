@@ -218,3 +218,12 @@ At release, deploy only a matched backend/frontend version pair pinned by both v
 manifest digests. A partial pair, mutable tag, mixed version, or frontend whose CSP/routing probes
 fail is not deployable. Preserve the prior backend digest containing the legacy UI and its route
 manifest until the cutover rollback window and rehearsal are complete.
+
+## Related guidance
+
+Use the [configuration reference](configuration.md) for exact settings, the
+[recovery guide](recovery.md) before changing persistent data, and the
+[upgrade guide](upgrading.md) for version transitions and rollback. The
+[release process](releasing.md) defines image receipts and publication; the
+[changelog](../CHANGELOG.md), [security policy](../SECURITY.md), and
+[support policy](../SUPPORT.md) describe released changes and supported operations.
