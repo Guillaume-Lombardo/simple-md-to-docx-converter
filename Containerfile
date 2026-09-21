@@ -108,8 +108,8 @@ COPY --chmod=0444 toolchain/document-engines/fonts/manifest.json /opt/md-convert
 COPY --chmod=0444 toolchain/document-engines/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
 COPY --chmod=0444 toolchain/document-engines/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
-# Reviewed UBI Mesa 25.2.7-5.el9_8 inventory; see the T76 release record.
-ARG RPM_INVENTORY_SHA256=5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef
+# Reviewed UBI inventory: Curl 7.76.1-40.el9_8.7 and OpenSSL 3.5.8-1.el9_8.
+ARG RPM_INVENTORY_SHA256=d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292
 RUN mkdir -p /data /work /tmp/md-converter \
     && chgrp -R 0 /data /work /tmp/md-converter \
     && chmod -R g=u /data /work /tmp/md-converter \
