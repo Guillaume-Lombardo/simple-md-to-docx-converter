@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 4 ]]; then
-  echo "Usage: publish-release-pair.sh ARTIFACTS VERSION SOURCE_SHA [FRONTEND_LOCK]" >&2
+if [[ $# -lt 3 || $# -gt 5 ]]; then
+  echo "Usage: publish-release-pair.sh ARTIFACTS VERSION SOURCE_SHA [FRONTEND_LOCK] [--recover-legacy-pair]" >&2
   exit 2
 fi
 readonly artifacts="$1" version="$2" source_sha="$3"
@@ -10,7 +10,18 @@ readonly frontend_lock="${4:-pnpm-lock.yaml}"
 [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ && "$source_sha" != 0000000000000000000000000000000000000000 ]]
 [[ -n "${GHCR_TOKEN:-}" && -n "${GITHUB_ACTOR:-}" && -n "${RUNNER_TEMP:-}" ]]
-[[ -d "$artifacts/backend" && -d "$artifacts/frontend" ]]
+roles=(backend frontend reverse_attempt)
+create_options=()
+verify_options=()
+legacy_recovery=false
+if [[ $# = 5 ]]; then
+  [[ "$5" = --recover-legacy-pair ]]
+  roles=(backend frontend)
+  create_options=(--recover-legacy-pair)
+  legacy_recovery=true
+  [[ ! -e "$artifacts/reverse_attempt" && ! -L "$artifacts/reverse_attempt" ]]
+fi
+for required_role in "${roles[@]}"; do test -d "$artifacts/$required_role"; done
 
 staging_root="$(mktemp -d "$RUNNER_TEMP/registry-pair.XXXXXX")"
 readonly staging_root
@@ -27,10 +38,12 @@ chmod 0600 "$registry_auth_file"
 declare -A repositories=(
   [backend]="ghcr.io/guillaume-lombardo/md-converter"
   [frontend]="ghcr.io/guillaume-lombardo/md-converter-web"
+  [reverse_attempt]="ghcr.io/guillaume-lombardo/md-converter-reverse-attempt"
 )
 declare -A registry_paths=(
   [backend]="guillaume-lombardo/md-converter"
   [frontend]="guillaume-lombardo/md-converter-web"
+  [reverse_attempt]="guillaume-lombardo/md-converter-reverse-attempt"
 )
 declare -A intended_digests=()
 declare -A registry_tokens=()
@@ -74,11 +87,14 @@ copy_staged_tag() {
   return 1
 }
 
-# Serialize both images and reject every observable conflict before publishing either one.
-for role in backend frontend; do
+# Serialize all three images and reject every observable conflict before publishing any image.
+for role in "${roles[@]}"; do
   mkdir "$staging_root/$role"
   bundle_manifest_sha256="$(sha256sum "$artifacts/$role/release-bundle.sha256" | cut -d' ' -f1)"
+  profile=standard
+  if [[ "$role" = reverse_attempt ]]; then profile=reverse-attempt; fi
   uv run python -m scripts.container.verify_supply_chain verify \
+    --profile "$profile" \
     --artifacts "$artifacts/$role" \
     --expected-manifest-sha256 "$bundle_manifest_sha256"
   intended_digests[$role]="$(jq --exit-status --raw-output \
@@ -97,16 +113,18 @@ for role in backend frontend; do
       test "$remote_digest" = "${intended_digests[$role]}"
     else
       test "$?" = 4
+      test "$legacy_recovery" = false
     fi
   done
 done
 
-for role in backend frontend; do
+for role in "${roles[@]}"; do
   for tag in "source-$source_sha" "$version"; do
     if remote_digest="$(inspect_remote_tag "$role" "$tag")"; then
       test "$remote_digest" = "${intended_digests[$role]}"
     else
       test "$?" = 4
+      test "$legacy_recovery" = false
       copy_staged_tag "$role" "$tag"
       test "$(inspect_remote_tag "$role" "$tag")" = "${intended_digests[$role]}"
     fi
@@ -125,8 +143,18 @@ done
 
 uv run python -m scripts.container.release_pair create \
   --artifacts "$artifacts" --version "$version" --source-sha "$source_sha" \
-  --frontend-lock "$frontend_lock"
+  --frontend-lock "$frontend_lock" "${create_options[@]}"
+if [[ "$legacy_recovery" = false ]]; then
+  verify_options=(--reverse-attempt-registry-digest "${intended_digests[reverse_attempt]}")
+fi
+uv run python -m scripts.container.release_pair verify \
+  --artifacts "$artifacts" --version "$version" --tag "v$version" --source-sha "$source_sha" \
+  --frontend-lock-sha256 "$(sha256sum "$frontend_lock" | cut -d' ' -f1)" \
+  --backend-registry-digest "${intended_digests[backend]}" \
+  --frontend-registry-digest "${intended_digests[frontend]}" \
+  "${verify_options[@]}"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  printf 'backend-digest=%s\nfrontend-digest=%s\n' \
-    "${intended_digests[backend]}" "${intended_digests[frontend]}" >> "$GITHUB_OUTPUT"
+  printf 'backend-digest=%s\nfrontend-digest=%s\nreverse-attempt-digest=%s\n' \
+    "${intended_digests[backend]}" "${intended_digests[frontend]}" \
+    "${intended_digests[reverse_attempt]:-}" >> "$GITHUB_OUTPUT"
 fi
