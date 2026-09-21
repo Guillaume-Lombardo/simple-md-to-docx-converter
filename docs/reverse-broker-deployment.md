@@ -90,6 +90,14 @@ the broker certificate, URI identity, and principal separately from its own clie
 principal. Never copy forward-conversion budgets into this group. See
 [configuration](configuration.md) for the complete variable set.
 
+Reconciliation ownership is exclusive to one reverse-worker runtime per principal. Do not give two
+independent workers the same broker principal: they will contend for its durable reconciliation
+lease. The broker also holds a per-EUID runtime-authority lock, so separate configuration files do
+not permit a second broker process under that account. The T73 distributed qualification topology
+uses one reverse-enabled worker and a second forward-only worker. It tests concurrent submissions,
+forward progress, and recovery under that topology; it does not qualify multi-host reverse-worker
+scaling.
+
 The unit restarts unexpected runtime failures and uses `KillMode=control-group`. Configuration exit
 status `2` is excluded from restart, so an invalid owner-only configuration cannot create a restart
 loop. `TimeoutStopSec=infinity` prevents an ambient systemd manager default from replacing the

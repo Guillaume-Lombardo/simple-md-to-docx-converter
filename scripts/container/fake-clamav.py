@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import socketserver
 import struct
 
 MAX_STREAM_BYTES = 2_000_000
+EICAR_TEST_MARKER = (
+    rb"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+)
 
 
 class Handler(socketserver.BaseRequestHandler):
@@ -19,6 +23,9 @@ class Handler(socketserver.BaseRequestHandler):
         if command != b"zINSTREAM\0":
             return
         total = 0
+        tail = b""
+        infected = False
+        reject_eicar = os.environ.get("MARKWEAVE_TEST_CLAMAV_REJECT_EICAR") == "true"
         while True:
             size_bytes = self._read_exact(4)
             if size_bytes is None:
@@ -27,9 +34,18 @@ class Handler(socketserver.BaseRequestHandler):
             if size == 0:
                 break
             total += size
-            if total > MAX_STREAM_BYTES or self._read_exact(size) is None:
+            if total > MAX_STREAM_BYTES:
                 return
-        self.request.sendall(b"stream: OK\0")
+            chunk = self._read_exact(size)
+            if chunk is None:
+                return
+            if reject_eicar:
+                window = tail + chunk
+                infected = infected or EICAR_TEST_MARKER in window
+                tail = window[-(len(EICAR_TEST_MARKER) - 1) :]
+        self.request.sendall(
+            b"stream: Eicar-Test-Signature FOUND\0" if infected else b"stream: OK\0"
+        )
 
     def _read_command(self) -> bytes | None:
         command = bytearray()

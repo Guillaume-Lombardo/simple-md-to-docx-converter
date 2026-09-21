@@ -10,6 +10,8 @@ readonly profile="$1"
 readonly repository="$(pwd)"
 readonly published_image="${MARKWEAVE_E2E_IMAGE:-}"
 readonly published_frontend_image="${MARKWEAVE_E2E_FRONTEND_IMAGE:-}"
+readonly published_reverse_attempt_image="${MARKWEAVE_E2E_REVERSE_ATTEMPT_IMAGE:-}"
+readonly local_reverse_attempt_image="${MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE:-}"
 readonly local_image="${MARKWEAVE_E2E_LOCAL_IMAGE:-}"
 readonly local_frontend_image="${MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE:-}"
 if [[ -n "$published_image" ]] &&
@@ -22,9 +24,16 @@ if [[ -n "$published_frontend_image" ]] &&
   echo "MARKWEAVE_E2E_FRONTEND_IMAGE must be an immutable version-and-digest Markweave frontend image." >&2
   exit 2
 fi
+if [[ -n "$published_reverse_attempt_image" ]] &&
+  [[ ! "$published_reverse_attempt_image" =~ ^ghcr\.io/guillaume-lombardo/md-converter-reverse-attempt:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
+  echo "MARKWEAVE_E2E_REVERSE_ATTEMPT_IMAGE must be an immutable version-and-digest image." >&2
+  exit 2
+fi
 if { [[ -n "$published_image" ]] && [[ -z "$published_frontend_image" ]]; } ||
-  { [[ -z "$published_image" ]] && [[ -n "$published_frontend_image" ]]; }; then
-  echo "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together." >&2
+  { [[ -z "$published_image" ]] && [[ -n "$published_frontend_image" ]]; } ||
+  { [[ -n "$published_image" ]] && [[ -z "$published_reverse_attempt_image" ]]; } ||
+  { [[ -z "$published_image" ]] && [[ -n "$published_reverse_attempt_image" ]]; }; then
+  echo "MARKWEAVE_E2E_IMAGE and MARKWEAVE_E2E_FRONTEND_IMAGE must be supplied together with MARKWEAVE_E2E_REVERSE_ATTEMPT_IMAGE." >&2
   exit 2
 fi
 if [[ -n "$published_image" ]]; then
@@ -32,14 +41,18 @@ if [[ -n "$published_image" ]]; then
   backend_version="${backend_version##*:}"
   frontend_version="${published_frontend_image%@*}"
   frontend_version="${frontend_version##*:}"
-  if [[ "$backend_version" != "$frontend_version" ]]; then
-    echo "Published backend and frontend E2E image versions must match." >&2
+  reverse_version="${published_reverse_attempt_image%@*}"
+  reverse_version="${reverse_version##*:}"
+  if [[ "$backend_version" != "$frontend_version" || "$backend_version" != "$reverse_version" ]]; then
+    echo "Published backend, frontend and reverse-attempt E2E image versions must match." >&2
     exit 2
   fi
 fi
 if { [[ -n "$local_image" ]] && [[ -z "$local_frontend_image" ]]; } ||
-  { [[ -z "$local_image" ]] && [[ -n "$local_frontend_image" ]]; }; then
-  echo "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together." >&2
+  { [[ -z "$local_image" ]] && [[ -n "$local_frontend_image" ]]; } ||
+  { [[ -n "$local_image" ]] && [[ -z "$local_reverse_attempt_image" ]]; } ||
+  { [[ -z "$local_image" ]] && [[ -n "$local_reverse_attempt_image" ]]; }; then
+  echo "MARKWEAVE_E2E_LOCAL_IMAGE and MARKWEAVE_E2E_LOCAL_FRONTEND_IMAGE must be supplied together with MARKWEAVE_E2E_LOCAL_REVERSE_ATTEMPT_IMAGE." >&2
   exit 2
 fi
 if [[ -n "$published_image" && -n "$local_image" ]]; then
@@ -48,7 +61,8 @@ if [[ -n "$published_image" && -n "$local_image" ]]; then
 fi
 if [[ -n "$local_image" ]] && {
   [[ ! "$local_image" =~ ^localhost/md-converter:[a-zA-Z0-9_.-]+$ ]] ||
-    [[ ! "$local_frontend_image" =~ ^localhost/md-converter-web:[a-zA-Z0-9_.-]+$ ]];
+    [[ ! "$local_frontend_image" =~ ^localhost/md-converter-web:[a-zA-Z0-9_.-]+$ ]] ||
+    [[ ! "$local_reverse_attempt_image" =~ ^localhost/md-converter-reverse-attempt:[a-zA-Z0-9_.-]+$ ]];
 }; then
   echo "Local E2E images must use the isolated localhost Markweave package names." >&2
   exit 2
@@ -56,8 +70,8 @@ fi
 if [[ -n "$local_image" ]]; then
   backend_version="${local_image##*:}"
   frontend_version="${local_frontend_image##*:}"
-  if [[ "$backend_version" != "$frontend_version" ]]; then
-    echo "Local backend and frontend E2E image versions must match." >&2
+  if [[ "$backend_version" != "$frontend_version" || "$backend_version" != "${local_reverse_attempt_image##*:}" ]]; then
+    echo "Local backend, frontend and reverse-attempt E2E image versions must match." >&2
     exit 2
   fi
 fi
@@ -72,6 +86,7 @@ readonly insecure_application_name="$prefix-insecure-api"
 readonly frontend_name="$prefix-frontend"
 readonly router_name="$prefix-router"
 readonly frontend_image="${published_frontend_image:-${local_frontend_image:-localhost/markweave-web:t64-$profile}}"
+readonly reverse_attempt_image="${published_reverse_attempt_image:-${local_reverse_attempt_image:-localhost/md-converter-reverse-attempt:t73-$profile}}"
 readonly clamav_name="$prefix-clamav"
 readonly clamav_probe_name="$prefix-clamav-probe"
 readonly postgres_name="$prefix-postgres"
@@ -105,6 +120,10 @@ provisioned_username="e2e-provisioned-$profile"
 provisioned_initial_password="Provisioned-$profile-initial"
 provisioned_renewed_password="Provisioned-$profile-browser-renewed"
 provisioned_replacement_password="Provisioned-$profile-replacement"
+broker_directory="$temporary_directory/reverse-broker"
+broker_pid=""
+reverse_pause_pid=""
+reverse_diagnostics_pid=""
 created=()
 succeeded=false
 
@@ -212,17 +231,44 @@ collect_failure_artifacts() {
       || true
   fi
   retain_frontend_admission_evidence
+  if [[ -f "$broker_directory/process.log" && ! -L "$broker_directory/process.log" ]]; then
+    tail -c 16384 -- "$broker_directory/process.log" >"$artifact_directory/reverse-broker.log"
+  fi
   printf 'profile=%s\nresult=failed\n' "$profile" >"$artifact_directory/summary.txt"
+}
+
+require_reverse_workers_removed() {
+  local worker status
+  for worker in "$application_name" "$expiry_application_name" \
+    "$insecure_application_name" "$worker_one_name" "$worker_two_name"; do
+    if podman container exists "$worker"; then
+      echo "Reverse worker removal was not proven." >&2
+      return 1
+    else
+      status=$?
+      if [[ "$status" -ne 1 ]]; then
+        echo "Reverse worker absence could not be inspected." >&2
+        return 1
+      fi
+    fi
+  done
 }
 
 cleanup() {
   local exit_code=$?
   local resource
+  local broker_cleanup_proven=true
   if [[ "$succeeded" != true ]]; then
     if ! collect_failure_artifacts; then
       exit_code=1
     fi
   fi
+  for resource in "$reverse_pause_pid" "$reverse_diagnostics_pid"; do
+    if [[ -n "$resource" ]]; then
+      kill -TERM "$resource" 2>/dev/null || true
+      wait "$resource" || true
+    fi
+  done
   # The router joins the backend container's network namespace. Podman does
   # not guarantee dependency order within a multi-container removal request,
   # so detach that child before iterating over its possible parent entries.
@@ -236,14 +282,31 @@ cleanup() {
       podman rm --force "$resource" >/dev/null 2>&1 || true
     fi
   done
+  if [[ -n "$broker_pid" ]]; then
+    kill -TERM "$broker_pid" 2>/dev/null || true
+    wait "$broker_pid" || exit_code=1
+  fi
+  if [[ -f "$broker_directory/broker.json" ]]; then
+    # No authorized worker may reconnect while startup reconciliation sweeps units.
+    if ! require_reverse_workers_removed || \
+      ! uv run python -m scripts.e2e.reverse_broker sweep --root "$broker_directory"; then
+      echo "Reverse broker cleanup did not prove managed-unit removal." >&2
+      exit_code=1
+      broker_cleanup_proven=false
+    fi
+  fi
   if [[ "$succeeded" == true ]]; then
     if ! remove_artifacts; then
       exit_code=1
     fi
   fi
-  if ! e2e_remove_harness_directory \
-    "$temporary_directory" "$temporary_directory_identity"; then
-    exit_code=1
+  if [[ "$broker_cleanup_proven" == true ]]; then
+    if ! e2e_remove_harness_directory \
+      "$temporary_directory" "$temporary_directory_identity"; then
+      exit_code=1
+    fi
+  else
+    echo "Private harness state retained because broker cleanup was not proven." >&2
   fi
   if ! e2e_require_worktree_state_unchanged \
     "$repository" "$worktree_baseline"; then
@@ -483,6 +546,93 @@ kill_backend_and_reconnect_router() {
   start_production_router "$backend_container"
 }
 
+
+start_reverse_broker() {
+  uv run --directory "$temporary_directory" --project "$repository" \
+    python -m markweave.broker.process "$broker_directory/broker.json" \
+    >>"$broker_directory/process.log" 2>&1 &
+  broker_pid=$!
+  uv run python -m scripts.e2e.reverse_broker ready --root "$broker_directory"
+}
+
+wait_reverse_marker() {
+  local marker="$1" observer="$2"
+  for _ in $(seq 1 600); do
+    if [[ -f "$marker" ]]; then return 0; fi
+    if ! kill -0 "$observer" 2>/dev/null; then
+      wait "$observer"
+      echo "Reverse fault-injection observer exited without its marker." >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+  echo "Reverse fault-injection marker timed out." >&2
+  return 1
+}
+
+run_reverse_lifecycle() {
+  local scenario="$1"
+  local stem="reverse-$scenario"
+  local state="$browser_session_directory/$stem.json"
+  local binding="$browser_session_directory/$stem-binding.json"
+  local diagnostics="$browser_session_directory/$stem-diagnostics.json"
+  local barrier="$broker_directory/$stem-paused.json"
+  local runtime="$application_name"
+  # Hold execution before admission, then prearm exact-unit observers.
+  if [[ "$profile" == standalone ]]; then
+    kill -TERM "$broker_pid"
+    wait "$broker_pid"
+    broker_pid=""
+    wait_for_url "$base_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
+  else
+    runtime="$worker_one_name"
+    podman stop --time 15 "$runtime" >/dev/null
+  fi
+  uv run python -m tests.e2e.reverse_lifecycle_workflow prepare \
+    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+  chmod 0644 "$state"
+  (
+    podman exec "$application_name" /opt/md-converter/venv/bin/python \
+      /e2e/reverse_lifecycle_workflow.py diagnostics --wait-for-recovery-attempt \
+      --state-file "/browser-session/$stem.json" --output "/browser-session/$stem-binding.json"
+    podman exec "$application_name" chmod 0644 "/browser-session/$stem-binding.json"
+    touch "${binding%.json}.ready"
+  ) &
+  reverse_diagnostics_pid=$!
+  uv run python -m scripts.e2e.reverse_broker watch-pause --root "$broker_directory" \
+    --state "$state" --binding "$binding" --barrier "$barrier" &
+  reverse_pause_pid=$!
+  wait_reverse_marker "${barrier%.json}.ready" "$reverse_pause_pid"
+  if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman start "$runtime" >/dev/null; fi
+  wait_reverse_marker "$barrier" "$reverse_pause_pid"
+  wait "$reverse_diagnostics_pid"
+  reverse_diagnostics_pid=""
+  # The marker proves signed inventory, runtime incarnation and synthetic DB binding.
+  if [[ "$scenario" == worker-restart ]]; then
+    podman kill --signal KILL "$runtime" >/dev/null
+    test "$(podman inspect "$runtime" --format '{{.State.ExitCode}}')" = 137
+  else
+    kill -KILL "$broker_pid"
+    wait "$broker_pid" || test "$?" = 137
+    broker_pid=""
+  fi
+  touch "${barrier%.json}.release"
+  wait "$reverse_pause_pid"
+  reverse_pause_pid=""
+  if [[ "$scenario" == worker-restart ]]; then podman start "$runtime" >/dev/null; else start_reverse_broker; fi
+  wait_for_url "$base_url/health/ready" "$application_name" '"status":"ready"'
+  uv run python -m tests.e2e.reverse_lifecycle_workflow verify \
+    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+  podman exec "$application_name" /opt/md-converter/venv/bin/python \
+    /e2e/reverse_lifecycle_workflow.py diagnostics --state-file "/browser-session/$stem.json" \
+    --output "/browser-session/$stem-diagnostics.json"
+  podman exec "$application_name" chmod 0644 "/browser-session/$stem-diagnostics.json"
+  uv run python -m tests.e2e.reverse_lifecycle_workflow verify \
+    --base-url "$base_url" --profile "$profile" --scenario "$scenario" --state-file "$state" \
+    --diagnostics-file "$diagnostics"
+  echo "Reverse lifecycle $scenario passed for $profile with persisted fencing evidence."
+}
+
 remove_artifacts
 mkdir -p -- "$data_directory" "$evidence_directory" \
   "$temporary_directory/browser-artifacts" "$browser_session_directory"
@@ -501,20 +651,43 @@ chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-bash scripts/e2e/rollback-rehearsal.sh "$profile"
+if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" != true ]]; then
+  bash scripts/e2e/rollback-rehearsal.sh "$profile"
+fi
 if [[ -n "$published_image" ]]; then
   podman pull --quiet "$image"
   test "$(podman image inspect "$image" --format '{{.Digest}}')" = "${image##*@}"
   podman pull --quiet "$frontend_image"
   test "$(podman image inspect "$frontend_image" --format '{{.Digest}}')" = \
     "${frontend_image##*@}"
+  podman pull --quiet "$reverse_attempt_image"
+  test "$(podman image inspect "$reverse_attempt_image" --format '{{.Digest}}')" = "${reverse_attempt_image##*@}"
 elif [[ -n "$local_image" ]]; then
+  podman image exists "$reverse_attempt_image"
   podman image exists "$image"
   podman image exists "$frontend_image"
 else
   bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
   bash scripts/container/build.sh "$image"
   podman build --format oci --tag "$frontend_image" --file web/Containerfile .
+  bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
+fi
+
+
+backend_runtime_version="$(podman run --rm --network none --read-only --cap-drop all \
+  --security-opt no-new-privileges --user "$runtime_uid:0" --entrypoint python \
+  "$image" -c 'from importlib.metadata import version; print(version("markweave"))')"
+reverse_runtime_version="$(podman run --rm --network none --read-only --cap-drop all \
+  --security-opt no-new-privileges --user "$runtime_uid:0" --entrypoint python \
+  "$reverse_attempt_image" -c 'from importlib.metadata import version; print(version("markweave"))')"
+frontend_runtime_version="$(podman run --rm --network none --read-only --cap-drop all \
+  --security-opt no-new-privileges --user "$runtime_uid:0" "$frontend_image" \
+  node --input-type=module -e 'import {readProjectVersion} from "./project-version.mjs"; console.log(readProjectVersion())')"
+if [[ "$backend_runtime_version" != "$frontend_runtime_version" || \
+  "$backend_runtime_version" != "$reverse_runtime_version" ]] || \
+  { [[ -n "$published_image" ]] && [[ "$backend_runtime_version" != "$backend_version" ]]; }; then
+  echo "Final E2E image contents do not carry one matching package version." >&2
+  exit 1
 fi
 
 podman network create "$network_name" >/dev/null
@@ -525,6 +698,7 @@ e2e_run_in_harness_directory \
   "$temporary_directory" "$temporary_directory_identity" \
   podman run --detach --name "$clamav_name" --network "$network_name" \
   --network-alias e2e-clamav --read-only --cap-drop=all \
+  --env MARKWEAVE_TEST_CLAMAV_REJECT_EICAR=true \
   --security-opt=no-new-privileges --pids-limit=64 --memory=128m \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
   --volume "$clamav_script:/fake-clamav.py:ro,Z" \
@@ -553,6 +727,31 @@ fi
 # The unmapped peer above proves the network alias. Application and worker
 # containers use this mapping to avoid later transient Netavark DNS failures.
 scanner_host_mapping=(--add-host "e2e-clamav:$clamav_address")
+
+reverse_digest="$(podman image inspect "$reverse_attempt_image" --format '{{.Digest}}')"
+if [[ ! "$reverse_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "The reverse-attempt image has no immutable manifest digest." >&2
+  exit 1
+fi
+reverse_repository="${reverse_attempt_image%@*}"
+reverse_repository="${reverse_repository%:*}"
+broker_worker_host="$(podman exec "$clamav_name" python -c 'import socket; print(socket.gethostbyname("host.containers.internal"))')"
+uv run python -m scripts.e2e.reverse_broker prepare --root "$broker_directory" \
+  --image-repository "$reverse_repository" --image-digest "$reverse_digest" \
+  --worker-host "$broker_worker_host"
+# Client keys are owner-only inside arbitrary-UID containers; host broker keys never mount.
+podman unshare chown -R "$runtime_uid:0" "$broker_directory/worker"
+uv run --directory "$temporary_directory" --project "$repository" \
+  python -m markweave.broker.process "$broker_directory/broker.json" \
+  >"$broker_directory/process.log" 2>&1 &
+broker_pid=$!
+uv run python -m scripts.e2e.reverse_broker ready --root "$broker_directory"
+e2e_reverse_runtime_settings
+reverse_worker_runtime=(
+  "${REVERSE_E2E_SETTINGS[@]}"
+  --env-file "$broker_directory/worker.env"
+  --volume "$broker_directory/worker:/run/reverse-client:ro,z"
+)
 
 e2e_runtime_settings
 if [[ "$profile" == standalone ]]; then
@@ -612,7 +811,7 @@ application_volumes=(
   --volume "$provisioning_file:/run/secrets/users.csv:ro,Z"
 )
 if [[ "$profile" == standalone ]]; then
-  application_volumes+=(--volume "$data_directory:/data:rw,Z")
+  application_volumes+=(--volume "$data_directory:/data:rw,Z" "${reverse_worker_runtime[@]}")
 fi
 
 application_mode=serve
@@ -631,12 +830,19 @@ e2e_run_in_harness_directory \
 
 if [[ "$profile" == distributed ]]; then
   for worker in "$worker_one_name" "$worker_two_name"; do
+    # The broker grants one principal-exclusive reverse supervisor. The second
+    # worker retains forward capacity and never receives broker credentials.
+    worker_reverse_runtime=()
+    if [[ "$worker" == "$worker_one_name" ]]; then
+      worker_reverse_runtime=("${reverse_worker_runtime[@]}")
+    fi
     created=("$worker" "${created[@]}")
     e2e_run_in_harness_directory \
       "$temporary_directory" "$temporary_directory_identity" \
       podman run --detach --name "$worker" --network "$network_name" \
       "${scanner_host_mapping[@]}" \
       --publish 127.0.0.1::9464 "${hardened_runtime[@]}" "${E2E_SETTINGS[@]}" \
+      "${worker_reverse_runtime[@]}" \
       "$image" worker >/dev/null
   done
 fi
@@ -710,6 +916,20 @@ assert hostile_status == 403
 assert json.loads(hostile_body)["error"]["code"] == "LOGIN_ORIGIN_INVALID"
 '
 fi
+
+uv run python -m tests.e2e.reverse_workflow --base-url "$base_url" --profile "$profile"
+uv run python -m tests.e2e.reverse_cli_workflow \
+  --container "$application_name" --profile "$profile" --phase primary
+if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" == true ]]; then
+  echo "Reverse primary-path diagnostic passed for $profile; full qualification is not claimed."
+  succeeded=true
+  exit 0
+fi
+
+uv run python -m tests.e2e.reverse_corpus_workflow --base-url "$base_url" --profile "$profile"
+
+run_reverse_lifecycle worker-restart
+run_reverse_lifecycle broker-restart
 
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/e2e-template.md").write_text("# Template\n", encoding="utf-8")'
@@ -938,8 +1158,17 @@ podman exec \
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$application_name" node --test /e2e/browser-next-conversion-failure.test.mjs
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_REVERSE_PHASE=primary \
+  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 podman exec "$application_name" node --test /e2e/browser-next-presentations.test.mjs
 podman exec "$application_name" node --test /e2e/browser-workspace-ui.test.mjs
+
+uv run python -m tests.e2e.reverse_cli_workflow \
+  --container "$application_name" --profile "$profile" --phase expiry
+uv run python -m tests.e2e.reverse_cli_workflow \
+  --container "$application_name" --profile "$profile" --phase unavailable
 
 # Hold job execution while exercising exact admission boundaries through the
 # real final-image API and Next.js UI. Distributed workers can be stopped
@@ -960,6 +1189,8 @@ e2e_run_in_harness_directory \
   "${hardened_runtime[@]}" "${application_volumes[@]}" "${application_settings[@]}" \
   --env MARKWEAVE_PUBLIC_ORIGIN=http://localhost:3100 \
   --env MARKWEAVE_JOB_ACTIVE_LIMIT_PER_USER=2 \
+  --env MARKWEAVE_REVERSION_ACTIVE_LIMIT_PER_USER=2 \
+  --env MARKWEAVE_REVERSION_UPLOAD_MAX_BYTES=1024 \
   --env MARKWEAVE_JOB_GLOBAL_QUEUE_CAPACITY=3 \
   --env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600 \
   "$image" "$application_mode" >/dev/null
@@ -972,6 +1203,13 @@ start_production_router "$application_name"
 podman exec \
   --env MARKWEAVE_E2E_PROFILE="$profile" \
   "$application_name" node --test /e2e/browser-next-conversion-admission.test.mjs
+
+uv run python -m tests.e2e.conversion_cli_workflow \
+  --container "$application_name" --profile "$profile" --reverse-held-queue --reverse-upload-max-bytes 1024
+podman exec \
+  --env MARKWEAVE_E2E_PROFILE="$profile" \
+  --env MARKWEAVE_E2E_REVERSE_PHASE=admission \
+  "$application_name" node --test /e2e/browser-next-reversion.test.mjs
 
 # Restore the ordinary profile runtime before restart and expiry recovery.
 podman rm --force "$router_name" >/dev/null
