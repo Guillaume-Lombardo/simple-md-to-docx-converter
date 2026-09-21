@@ -106,9 +106,13 @@ harness tests passed, and global Ruff format/check and `ty` checks passed. Cover
 canonical run was 94.97% overall, 91.23% branch coverage (6,406/7,022), and 100% of changed
 application lines (15/15).
 
-T73 remains In Progress. The literal administrator operational-metadata acceptance criterion still
-needs the user's decision; no criterion change, waiver, or administrator reverse-job view has been
-made. The reviewed mutation manifest now contains 28 mutants, but the actual mutation campaign has
-not run. The 56 engine-marked tests remain unverified locally, and exact-head PR CI and exact-main
-checks remain pending. Public image publication and release qualification remain outside this
-evidence and require the separately authorized release work.
+The user selected qualification of the existing administrator surfaces. The criterion therefore
+requires owner-only, non-enumerating reverse routes with administrator denial, content-free
+operational metrics, and the existing authorized administrator surface exposing immutable,
+content-free audit records; it does not require a new reverse-job administrator view. The existing final-image evidence covers
+the owner/admin route denial and content-free operational behavior recorded by the current E2E
+workflow; no new endpoint is inferred here. The reviewed mutation manifest now contains 28 mutants,
+but the actual mutation campaign has not run. The 56 engine-marked tests remain unverified locally,
+and exact-head PR CI and exact-main checks remain pending. T73 remains In Progress. Public image
+publication and release qualification remain outside this evidence and require separately authorized
+release work.

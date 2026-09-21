@@ -53,9 +53,11 @@ backend, frontend, and reverse-attempt images in both storage profiles.
   deterministic ordering/digest, private download headers, and the T70-generated content-free
   traceability manifest.
 * Prove with two regular users and one administrator that reverse source, status, cancellation, and
-  result routes are owner-only and non-enumerating. Verify that administrator operational metadata
-  is separately authorized, audited, content-free, and cannot reveal filenames, Markdown, assets,
-  content-derived digests, or a download capability.
+  result routes are owner-only and non-enumerating, including administrator denial on those routes.
+  Qualify the existing content-free operational metrics and the existing authorized administrator
+  surface exposing immutable, content-free audit records; neither surface may reveal filenames,
+  Markdown, assets, content-derived digests, or a download capability. A new reverse-job
+  administrator view is not required.
 * Extend selective and scheduled CI domains, SBOM/vulnerability/license evidence, mutation scope
   where risk-ranked, and release-install verification for the native anydoc dependency.
 * Complete user, API, operations, security, configuration, supported-format, limitation,
@@ -107,6 +109,13 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-22: The user selected qualification of the existing administrator surfaces. The acceptance
+  criterion now requires owner-only, non-enumerating reverse routes with administrator denial,
+  content-free operational metrics, and the existing authorized administrator surface exposing
+  immutable, content-free audit records. It does not require a new reverse-job administrator view.
+  This resolves the earlier scope ambiguity without waiving the criterion. Remaining current gates are the actual 28-mutant
+  campaign, engine-marked CI, exact-head and exact-main checks, and any release/publication decision;
+  T73 remains In Progress.
 * 2026-09-21: Final-source local qualification completed both full, unmodified profile workflows at
   `c6ff8b1e3913eda1c8103260d37bce00ca106567` against one matched backend/frontend/reverse-attempt
   candidate image set; each profile exited 0. The tracked runner hash, exact local image IDs and
