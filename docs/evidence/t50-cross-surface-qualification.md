@@ -4,10 +4,10 @@ This is the acceptance matrix for the package, CLI, HTTP boundary, configuration
 recovery, documentation, and maintainability work delivered before T50. It does not choose a
 release version or authorize publication.
 
-T48's remaining mutation-workflow integration is a separate follow-up. T50 still verifies the
-existing reviewed mutation domains, exclusions, and strict killed-only outcome. Reverse-conversion
-final-image success, extraction, security, and two-profile acceptance belong to T73; T50 must not
-be described as completing that work.
+T48's mutation-workflow integration is a separate follow-up. T50 verifies the reviewed mutation
+domains, exclusions, and strict killed-only contract, but no actual mutation campaign ran at the
+T50 candidate SHA. Reverse-conversion final-image success, extraction, security, and two-profile
+acceptance belong to T73; T50 must not be described as completing that work.
 
 ## Reproducible commands
 
@@ -83,9 +83,17 @@ must not compare current source claims with an older published image pair.
 | Maintainability | Resource warnings fail as tests, 90% total/branch/changed-line coverage, reviewed mutation domains with strict outcomes, clean `markweave` namespace, and local documentation links/fragments |
 | Containers and parity | Rootless source build/smoke, installed CLI entrypoints, standalone/distributed final-image E2E, Docker/Podman Compose quickstarts, and failure artifacts |
 
+The complete-suite run supplies exact-candidate hosted evidence for the unit/coverage, functional,
+storage, document-engine, container, Compose, frontend, and both final-image E2E domains. The local
+canonical suite additionally covers the clean source/sdist/wheel/editable namespace-install test,
+the installed-shell/import tests, and the real-HTTP CLI integration modules; those integration
+modules are not selected directly by a named complete-suite domain. The hosted final-image E2Es
+independently exercise the public HTTP CLI boundaries in both storage profiles.
+
 ## Qualification record
 
-Development checks on 2026-09-21 used a T50 worktree based on
+Development checks on 2026-09-21 used T50 candidate
+`3ee121a023b9207a72e2c18f0af9003bde69397e`, developed from
 `4ef6a53f262a8ca33e34dce2a54a2c28933ed908`:
 
 | Command or group | Result | Notes |
@@ -94,20 +102,26 @@ Development checks on 2026-09-21 used a T50 worktree based on
 | Verified pnpm bootstrap; frozen install; `pnpm run test:web` | Passed | Exact repository toolchain and frontend coverage gates. |
 | `uv run python scripts/openapi_contract.py check` | Passed | Canonical artifact is current. |
 | Focused package, CLI, recovery, configuration, namespace, mutation-contract, quality, and documentation tests | Passed | 454 tests; this diagnostic selection used `--no-cov`, leaving coverage authority with the canonical suite. |
-| Canonical engine-excluded Pytest suite | Pending final result | Includes automatic PostgreSQL and RustFS services. |
-| Full engine suite | Not run locally | Must be covered by a complete-suite run or an environment with all three engines. |
-| Actual all-domain mutation campaign | Not run | Manifest/runner contracts passed; campaign result remains required. |
-| Source containers, final-image profiles, and quickstarts | Not run | Awaiting coordinated capacity; no older published pair is substituted for current source. |
-| Independent review | Pending | Required before completion. |
+| Canonical engine-excluded Pytest suite | Passed | 4,400 passed, 56 deselected, 11 warnings, 94.95% coverage in 28m27.75s; automatic PostgreSQL and RustFS services were included. |
+| [Complete hosted suite, attempt 2](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35618280319/attempts/2) | Passed | Exact `headSha` `3ee121a023b9207a72e2c18f0af9003bde69397e`; `workflow_dispatch` selected every domain with `--full`. Light, both Python shards, coverage, functional, frontend, both storage profiles, document engines, CI infrastructure, container, Compose, both final-image E2Es, and the final gate passed. |
+| Package and real-HTTP integration boundaries | Passed locally and in final-image workflows | The canonical suite ran the clean source/sdist/wheel/editable install, installed-shell/import, and real-HTTP CLI integration tests. The hosted unit shards verified package metadata and optional dependencies; the hosted container and E2E jobs exercised the installed CLI and public HTTP behavior. |
+| Actual all-domain mutation campaign | Not run at the T50 SHA | Manifest/runner contracts passed. A separate T48 head `83ec1b44af15e18fbd1bf896204159208372b106` killed 25/25 selected mutants with zero strict failures and a passing CI mutation job; that result is not exact-head T50 evidence. |
+| Source containers, final-image profiles, recovery, and quickstarts | Passed in the complete hosted suite | The container job exercised production standalone and distributed backup/restore. Both E2Es covered two regular users plus one administrator, installed CLI families, restarts, readiness outages, checkpoint restore, and failure recovery. No older published image pair was substituted. |
+| Independent review | Approved | The orchestrator independently reviewed the scoped evidence/navigation change and reported no blocking issue. |
 
-Replace the pending entries with exact command results, run URLs, SHA-bound artifacts, skipped
-prerequisites, and independent-review outcome before marking T50 complete. A row is not passed when
-a required engine, service, runtime, image, or credential is unavailable.
+This evidence qualifies the candidate commit. T50 remains In Progress until the integrated change
+is merged and verified on `main`.
 
 ## Residual limitations
 
 - T48 owns its remaining repository workflow integration. T50 qualifies the delivered mutation
-  baseline without claiming that follow-up complete.
+  contract without claiming an exact-head campaign or that follow-up complete. T48 remains
+  nonblocking for T50.
+- The UBI package repositories moved after this candidate's successful hosted run. A later
+  source-image build now detects six reviewed curl/OpenSSL package updates against the committed
+  inventory. T86 PR #255 owns the user-approved inventory correction; T48's otherwise-passing CI
+  observes the same RPM mismatch in its E2E build. This cross-cutting drift does not turn T48 into a
+  T50 dependency, and the next integrated-main verification must use the corrected inventory.
 - T73 owns successful reverse extraction against exact final images, reverse-specific security,
   cancellation/recovery, and both-profile acceptance.
 - OpenShift target-cluster proof remains deferred by the product specification. No T50 result may

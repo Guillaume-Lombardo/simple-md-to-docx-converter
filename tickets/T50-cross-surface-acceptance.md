@@ -41,6 +41,31 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 
 ## Progress
 
+* 2026-09-21: Candidate `3ee121a023b9207a72e2c18f0af9003bde69397e` completed the full
+  hosted acceptance matrix in CI run
+  [35618280319, attempt 2](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35618280319/attempts/2).
+  Manual dispatch selected every registered domain with `--full`; light, Python shards and
+  coverage, functional, frontend, standalone/distributed storage, document engines, CI
+  infrastructure, container, Compose, standalone/distributed final-image E2E, and the final gate
+  all passed. The E2Es cover the installed CLI families, two regular users and one administrator,
+  authentication boundaries, production backup/restore, restart/readiness failures, checkpoint
+  restore, and recovery in both profiles. Independent orchestrator review approved the scoped
+  evidence and navigation change.
+
+* 2026-09-21: The exact candidate's canonical engine-excluded suite passed with 4,400 tests, 56
+  deselections, and 94.95% coverage. It supplies the clean source/sdist/wheel/editable install,
+  installed-shell/import, and real-HTTP CLI integration evidence that is not directly selected by
+  a named complete-suite domain; the hosted final-image E2Es independently cover the public HTTP
+  CLI workflows. No actual mutation campaign ran at the T50 SHA. The 25/25 killed result with zero
+  strict failures and a passing CI mutation job belongs to separate T48 head
+  `83ec1b44af15e18fbd1bf896204159208372b106`; T48 remains a nonblocking follow-up.
+
+* 2026-09-21: A subsequent UBI repository change produces a six-package curl/OpenSSL inventory
+  mismatch in new source-image builds, including T48's otherwise-passing CI E2E build. The user
+  approved the cross-cutting inventory correction owned by T86 PR #255. T50 does not absorb that
+  work or make T48 a dependency; integrated-main verification must use the corrected inventory.
+  T50 remains In Progress until its evidence change is merged and verified on `main`.
+
 * 2026-09-21: Started cross-surface qualification from `origin/main` at
   `4ef6a53f262a8ca33e34dce2a54a2c28933ed908`. Linear and this mirror are synchronized to
   In Progress. The qualification will record reproducible evidence and honest prerequisite gaps;
