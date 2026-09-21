@@ -2,7 +2,7 @@
 ticket: T50
 linear_id: G1L-425
 linear_url: https://linear.app/g1lom/issue/G1L-425/t50-complete-cross-surface-cli-and-package-acceptance
-status: In Progress
+status: Done
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -40,6 +40,8 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 * T48 is not a blocking dependency. Qualify the delivered mutation baseline without taking ownership of T48's remaining CI integration or requiring contributor-immutable enforcement.
 
 ## Progress
+
+* 2026-09-21: Verified Done after PR #254 squash merge `6bae1e4d4abc14c44dfca32752bc422d0dfd2502` and successful main CI [35629775995](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35629775995). The reviewed matrix retains exact candidate full-suite evidence (35618280319, attempt 2), 4,400 passing local canonical tests, corrected baseline full-main CI 35626304165, and final PR CI 35626505860. Mutation contracts are qualified; actual T48 campaign execution and its CI integration remain explicitly separate and nonblocking. No release version or publication was selected. T73 may now begin.
 
 * 2026-09-21: Candidate `3ee121a023b9207a72e2c18f0af9003bde69397e` completed the full
   hosted acceptance matrix in CI run
@@ -81,7 +83,7 @@ Integrate the CLI, package, container, configuration, contract, documentation, a
 
 ## Coordination
 
-* Status: In Progress.
+* Status: Done.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.

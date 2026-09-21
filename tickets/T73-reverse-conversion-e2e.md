@@ -2,7 +2,7 @@
 ticket: T73
 linear_id: G1L-541
 linear_url: https://linear.app/g1lom/issue/G1L-541/t73-verify-and-document-reverse-conversion-end-to-end
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -106,6 +106,8 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 * Keep repository artifacts and user-facing text in English.
 
 ## Progress
+
+* 2026-09-21: Started after T50 was verified on main `6bae1e4d4abc14c44dfca32752bc422d0dfd2502` with successful CI 35629775995; all other recorded dependencies are Done. Extend the existing two-profile E2E harness with the exact reverse-attempt image and a host-native mTLS broker, reuse the T69 corpus and installed CLI/browser workflows, and extend existing atomic release tooling to three images. File ownership is split between E2E/broker orchestration, release tooling, and CLI acceptance; independent reviews remain mandatory. No new framework, release version, public image pin, or T74 implementation is authorized by this start.
 
 * 2026-09-21: The user approved removing the indirect T48 blocker by removing T48 from T50's
   dependencies. T73 still waits for T50 qualification; all final-image, two-profile, security,
