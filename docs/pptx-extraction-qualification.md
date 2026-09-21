@@ -77,9 +77,27 @@ This measurement supports the provisional depth headroom; it does not qualify ar
 Tests exercise each override independently. XML counters are enforced during parsing, entities and
 DTDs are rejected, and ragged table padding is sized against the Markdown budget before allocation.
 
+## Candidate validation
+
+The canonical engine-excluded suite passed on commit
+`dc2ee475acac0d556090ce4262a631babc3ac034`: 4,544 passed, 56 deselected and 11 warnings
+in 1,835.82 seconds. Actual PostgreSQL and RustFS integration tests ran, including populated-job
+migration round trips under both database profiles. Combined coverage was 94.95%, application
+branch coverage 91.17% (6,615/7,256), and changed-line coverage 97.00% (614/633) against the feature
+base. The warnings were dependency deprecations and existing `SESSION_IDLE_SECONDS` warnings.
+The tested commit stayed unchanged throughout the run.
+
+This successful run followed two independently reviewed corrections: Unix staging now validates
+optional PPTX limits through the limits model, and migration 19 uses a table-copy downgrade for
+SQLite 3.34. Real Unix/mTLS regressions cover anydoc, slides and Marp; populated migration regressions
+preserve rows, defaults, foreign keys, indexes and checks. PostgreSQL tests use an isolated schema.
+Earlier failed runs remain diagnostic evidence and are not counted as passing validation.
+
 ## Remaining qualification boundary
 
-The focused local reader tests do not substitute for the HTTP/CLI/browser contracts, shared
-SQLite/PostgreSQL persistence tests or final rootless image workflows required by T83.
-The broader cross-format, three-image release qualification remains T73 and still depends on T50.
-No package version, public image pin, release workflow or deployment is changed by this evidence.
+HTTP/CLI/browser contracts and both database profiles have focused and integration coverage.
+The engine-excluded suite does not qualify the omitted external-engine cases or the required final
+rootless image workflows. Final rootless two-profile T83 acceptance remains pending the T73 harness
+foundation, without an exception or waiver. The broader cross-format, three-image release
+qualification remains T73. No package version, public image pin, release workflow or deployment is
+changed by this evidence.
