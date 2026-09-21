@@ -107,6 +107,20 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 ## Progress
 
+* 2026-09-21: Final-source local qualification completed both full, unmodified profile workflows at
+  `c6ff8b1e3913eda1c8103260d37bce00ca106567` against one matched backend/frontend/reverse-attempt
+  candidate image set; each profile exited 0. The tracked runner hash, exact local image IDs and
+  digests, independent E2E/resource review, 21-case resource measurements, CI-mode image scan
+  counts, and complete bundle inventory hashes are recorded in
+  [T73 qualification evidence](../docs/evidence/t73-reverse-conversion-qualification.md). These are
+  local candidate identities; no public third image, version, or release was selected. At the
+  earlier canonical run `5f90757`, 4,520 tests passed but one stale harness-order assertion failed;
+  56 engine-marked tests were deselected and 11 warnings were reported. Its corrected 44 focused
+  CLI/harness tests plus global Ruff and `ty` checks passed at `c6ff8b1`; this does not convert the
+  full canonical invocation into a pass. T73 remains In Progress: the administrator operational-
+  metadata criterion still needs the user's decision, the 28-mutant campaign has not run, engine-
+  marked tests and exact-head PR/main checks remain outstanding, and public release qualification
+  is separate work.
 * 2026-09-21: The canonical local suite at `5f90757` completed with 4,520 passed, 56 engine-marked tests deselected, and one stale harness-order assertion: the intentional held-queue CLI phase added a second invocation. The corrected assertion verifies both invocation contexts and flags; all 44 focused CLI/harness tests pass. Global Ruff formatting/lint and ty pass. Coverage is 94.97% overall, 91.23% branches (6,406/7,022), and 100% of changed application lines (15/15). This records the failed complete invocation and successful targeted correction separately; exact-head CI and complete final-image runs remain required.
 * 2026-09-21: Independent review approved the scoped worker reconciliation fix. Actual worker-crash and broker-crash recovery diagnostics now pass in both storage profiles, including persisted fencing, frontend outage, and restored browser download matching the retained result digest. Application images are bound to `ed67b098`; the latest reviewed test harness is `5f90757`. These diagnostic phase runs do not replace the complete tracked final-image workflow. The administrator-metadata criterion still awaits the user decision recorded below.
 
