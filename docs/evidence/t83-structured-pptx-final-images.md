@@ -61,3 +61,27 @@ tests still require the applicable CI/environment checks.
 T83 remains In Progress. Exact-head and exact-main checks, release/publication decisions, and any
 T73 stacked integration or deployment qualification remain separate. No public image, version,
 registry digest, or `main` completion is claimed here.
+
+## Isolated test deployment
+
+On 2026-09-22, the same candidate application and native broker source was deployed to the existing
+docker-box test instance. This is not a public release: package version remains 0.7.1. The three
+runtime image identities above were verified, all four Compose services were healthy, and public
+HTTPS readiness passed. SQLite migration `20260921_19` and `quick_check` passed after a complete
+pre-migration database/object backup and verification of its independent host copy.
+
+An authenticated structured Slides job succeeded on that host. The shared validator checked the
+edited slide order/text, presenter note, normalized image pixels, unsupported-content warning, and
+package manifest. Broker and reconciliation READY metrics were both 1 before ingress reopened.
+The smoke session was logged out. The earlier interrupted synthetic job also completed after
+recovery; no user data was restored or directly edited.
+
+Transport required a Docker archive for the backend/frontend and an uncompressed OCI archive for
+the reverse runtime to preserve its exact manifest digest. An initial compressed import exposed a
+Podman cache distinction between image lookup and the digest actually bound to a created container.
+The latter was checked before accepting the final deployment. The failed never-started creation was
+recovered through the existing validated runtime adapter and normal broker reconciliation after
+independent review of exact identity, provenance, historical events and runtime absence. No broker
+inventory row was edited and no digest check was relaxed. Operator receipts retain the complete
+failure and recovery sequence; this is not a general recovery procedure for unknown execution
+histories.
