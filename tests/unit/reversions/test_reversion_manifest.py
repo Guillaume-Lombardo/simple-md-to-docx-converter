@@ -16,6 +16,7 @@ from markweave.reversions.manifest import (
     SourceFamily,
     canonical_manifest_bytes,
 )
+from markweave.reversions.options import PPTX_EXTRACTOR
 
 pytestmark = pytest.mark.unit
 
@@ -72,3 +73,33 @@ def test_result_mode_invariants_fail_closed(result: ManifestResult) -> None:
     with pytest.raises(ReverseConversionError) as captured:
         canonical_manifest_bytes(ManifestSource("pdf", "pdf"), result)
     assert captured.value.category is ReverseErrorCategory.PROTOCOL_ERROR
+
+
+def test_structured_extractor_is_optional_additive_content_free_metadata() -> None:
+    source = ManifestSource("powerpoint", "pptx")
+    result = ManifestResult("markdown_with_unavailable_assets", 0, 0, 1)
+    original = json.loads(canonical_manifest_bytes(source, result))
+    structured = json.loads(
+        canonical_manifest_bytes(source, result, extractor=PPTX_EXTRACTOR)
+    )
+    assert "extractor" not in original
+    assert structured.pop("extractor") == PPTX_EXTRACTOR
+    assert structured == original
+
+
+@pytest.mark.parametrize(
+    "source,extractor",
+    [
+        (ManifestSource("powerpoint", "pptx"), "unknown"),
+        (ManifestSource("word", "docx"), "markweave-pptx-v1"),
+        (ManifestSource("powerpoint", "ppt"), "markweave-pptx-v1"),
+    ],
+)
+def test_extractor_must_be_known_and_match_source(
+    source: ManifestSource, extractor: str
+) -> None:
+    with pytest.raises(ReverseConversionError) as raised:
+        canonical_manifest_bytes(
+            source, ManifestResult("markdown_with_assets", 1, 1, 0), extractor=extractor
+        )
+    assert raised.value.category is ReverseErrorCategory.PROTOCOL_ERROR

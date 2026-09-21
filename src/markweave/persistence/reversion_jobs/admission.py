@@ -59,6 +59,9 @@ class _SqlReversionAdmission(_SqlReversionStore):
             component_versions=json.dumps(
                 submission.component_versions, separators=(",", ":")
             ),
+            options=json.dumps(
+                submission.options.to_dict(), separators=(",", ":"), sort_keys=True
+            ),
             request_digest=submission.request_digest,
             idempotency_digest=submission.idempotency_digest,
             correlation_id=submission.correlation_id,

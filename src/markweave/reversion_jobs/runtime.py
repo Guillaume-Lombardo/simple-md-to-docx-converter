@@ -186,19 +186,29 @@ def build_reversion_execution_policies(
         _required(settings.reversion_output_max_bytes),
     )
     content = ReverseContentLimits(
-        channel.max_input_bytes,
-        channel.max_output_bytes,
-        _required(settings.reversion_image_max_source_bytes),
-        _required(settings.reversion_image_max_width_pixels),
-        _required(settings.reversion_image_max_height_pixels),
-        _required(settings.reversion_image_max_pixels),
-        _required(settings.reversion_image_max_svg_elements),
-        _required(settings.reversion_image_max_svg_depth),
-        _required(settings.reversion_asset_max_count),
-        _required(settings.reversion_asset_max_total_source_bytes),
-        _required(settings.reversion_asset_max_total_output_bytes),
-        _required(settings.reversion_markdown_max_bytes),
-        _required(settings.reversion_package_max_bytes),
+        max_input_bytes=channel.max_input_bytes,
+        max_output_bytes=channel.max_output_bytes,
+        max_image_source_bytes=_required(settings.reversion_image_max_source_bytes),
+        max_image_width_pixels=_required(settings.reversion_image_max_width_pixels),
+        max_image_height_pixels=_required(settings.reversion_image_max_height_pixels),
+        max_image_pixels=_required(settings.reversion_image_max_pixels),
+        max_svg_elements=_required(settings.reversion_image_max_svg_elements),
+        max_svg_depth=_required(settings.reversion_image_max_svg_depth),
+        max_asset_count=_required(settings.reversion_asset_max_count),
+        max_total_asset_source_bytes=_required(
+            settings.reversion_asset_max_total_source_bytes
+        ),
+        max_total_asset_output_bytes=_required(
+            settings.reversion_asset_max_total_output_bytes
+        ),
+        max_markdown_bytes=_required(settings.reversion_markdown_max_bytes),
+        max_package_bytes=_required(settings.reversion_package_max_bytes),
+        max_pptx_archive_entries=settings.reversion_pptx_max_archive_entries,
+        max_pptx_member_bytes=settings.reversion_pptx_max_member_bytes,
+        max_pptx_uncompressed_bytes=settings.reversion_pptx_max_uncompressed_bytes,
+        max_pptx_xml_elements=settings.reversion_pptx_max_xml_elements,
+        max_pptx_xml_depth=settings.reversion_pptx_max_xml_depth,
+        max_pptx_xml_attributes=settings.reversion_pptx_max_xml_attributes,
     )
     broker_policy = BrokerPolicy(
         _required(settings.reversion_broker_policy_revision),

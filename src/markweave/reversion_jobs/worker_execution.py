@@ -297,6 +297,7 @@ class ReversionAttemptExecutor:
             claimed.job.admission.extension,
             self._runtime.content_limits,
             source,
+            claimed.job.options,
         )
         response = self._runtime.broker.stage_workspace(request)
         if type(response) is WorkspaceErrorResponse:

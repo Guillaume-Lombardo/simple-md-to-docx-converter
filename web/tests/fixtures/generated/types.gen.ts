@@ -108,6 +108,15 @@ export type BodyCreateConversionApiV1ConversionsPost = {
  * Body_create_reversion_api_v1_reversions_post
  */
 export type BodyCreateReversionApiV1ReversionsPost = {
+    extraction?: ReverseExtraction;
+    /**
+     * Include Images
+     */
+    include_images?: boolean;
+    /**
+     * Include Notes
+     */
+    include_notes?: boolean;
     /**
      * Source
      */
@@ -522,6 +531,13 @@ export type PresentationPlanResponse = {
 };
 
 /**
+ * ReverseExtraction
+ *
+ * Explicit opt-in alternatives to the original anydoc extraction.
+ */
+export type ReverseExtraction = 'anydoc' | 'slides' | 'marp';
+
+/**
  * ReverseOutputMode
  *
  * Deterministic result shapes approved by T69.
@@ -564,6 +580,7 @@ export type ReversionAdmissionPolicyResponse = {
 export type ReversionCapabilitiesResponse = {
     admission: ReversionAdmissionPolicyResponse;
     execution: ReversionExecutionCapabilitiesResponse;
+    extraction: ReversionExtractionCapabilitiesResponse;
     /**
      * Format Families
      */
@@ -604,6 +621,31 @@ export type ReversionExecutionCapabilitiesResponse = {
 };
 
 /**
+ * ReversionExtractionCapabilitiesResponse
+ *
+ * Authoritative structured PowerPoint extraction controls.
+ */
+export type ReversionExtractionCapabilitiesResponse = {
+    default_mode: ReverseExtraction;
+    /**
+     * Include Images Default
+     */
+    include_images_default: boolean;
+    /**
+     * Include Notes Default
+     */
+    include_notes_default: boolean;
+    /**
+     * Modes
+     */
+    modes: Array<ReverseExtraction>;
+    /**
+     * Structured Extensions
+     */
+    structured_extensions: Array<string>;
+};
+
+/**
  * ReversionFormatCapabilityResponse
  *
  * One ordered reverse-conversion format family and detection contract.
@@ -641,6 +683,23 @@ export type ReversionJobState = 'queued' | 'running' | 'succeeded' | 'failed' | 
  * Closed content-free reverse-job step vocabulary.
  */
 export type ReversionJobStep = 'queued' | 'isolating' | 'converting' | 'validating' | 'publishing' | 'complete';
+
+/**
+ * ReversionOptions
+ *
+ * Canonical options included in durable request identity.
+ */
+export type ReversionOptions = {
+    extraction?: ReverseExtraction;
+    /**
+     * Include Images
+     */
+    include_images?: boolean;
+    /**
+     * Include Notes
+     */
+    include_notes?: boolean;
+};
 
 /**
  * ReversionPageResponse
@@ -747,6 +806,7 @@ export type ReversionResponse = {
      * Id
      */
     id: string;
+    options: ReversionOptions;
     /**
      * Owner Id
      */

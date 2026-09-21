@@ -23,10 +23,17 @@ const TERMINAL_STATES = new Set([
   "expired",
 ]);
 
+export type ReversionSubmissionOptions = {
+  extraction: "anydoc" | "slides" | "marp";
+  include_images: boolean;
+  include_notes: boolean;
+};
+
 export type ReversionState = {
   phase: "loading" | "ready" | "unavailable";
   capabilities?: ReversionCapabilitiesResponse;
   extensions: string[];
+  options?: ReversionSubmissionOptions;
   source?: File;
   recent: ReversionResponse[];
   active?: ReversionResponse;
@@ -57,6 +64,7 @@ export class ReversionController {
   private pollDelay = POLL_START_MS;
   private pollFailures = 0;
   private idempotencyKey?: string;
+  private submissionOptions?: ReversionSubmissionOptions;
 
   constructor(
     private readonly api: ApiTransport = new ApiTransport(),
@@ -102,6 +110,7 @@ export class ReversionController {
         phase: "ready",
         capabilities,
         extensions,
+        options: defaultOptions(capabilities),
         recent: recent.items.filter((job) => job.state !== "expired"),
       });
     } catch (error) {
@@ -132,10 +141,25 @@ export class ReversionController {
     this.publish({
       ...this.state,
       source: file,
+      options: this.state.capabilities
+        ? defaultOptions(this.state.capabilities)
+        : undefined,
       submitting: false,
       error: undefined,
       notice: undefined,
     });
+  }
+
+  setExtraction(extraction: ReversionSubmissionOptions["extraction"]): void {
+    this.setOption({ extraction });
+  }
+
+  setIncludeNotes(include_notes: boolean): void {
+    this.setOption({ include_notes });
+  }
+
+  setIncludeImages(include_images: boolean): void {
+    this.setOption({ include_images });
   }
 
   async submit(): Promise<void> {
@@ -149,13 +173,26 @@ export class ReversionController {
       this.publish({ ...this.state, error: invalid, notice: undefined });
       return;
     }
+    const optionError = validateOptions(
+      this.state.options,
+      this.state.source,
+      this.state.capabilities,
+    );
+    if (optionError) {
+      this.publish({ ...this.state, error: optionError, notice: undefined });
+      return;
+    }
     const request = new AbortController();
     this.submissionRequest?.abort();
     this.submissionRequest = request;
     const generation = ++this.submissionGeneration;
     const key = (this.idempotencyKey ??= this.randomUUID());
+    const options = (this.submissionOptions ??= { ...this.state.options! });
     const form = new FormData();
     form.append("source", this.state.source!);
+    form.append("extraction", options.extraction);
+    form.append("include_notes", String(options.include_notes));
+    form.append("include_images", String(options.include_images));
     this.publish({
       ...this.state,
       submitting: true,
@@ -177,6 +214,7 @@ export class ReversionController {
       )
         throw unexpected(accepted.status);
       this.idempotencyKey = undefined;
+      this.submissionOptions = undefined;
       this.publish({
         ...this.state,
         submitting: false,
@@ -191,7 +229,10 @@ export class ReversionController {
       if (generation !== this.submissionGeneration || isAbort(error)) return;
       if (this.authoritativeExpiry(error)) return;
       const definitive = isDefinitiveSubmissionRejection(error);
-      if (definitive) this.idempotencyKey = undefined;
+      if (definitive) {
+        this.idempotencyKey = undefined;
+        this.submissionOptions = undefined;
+      }
       this.publish({
         ...this.state,
         submitting: false,
@@ -358,6 +399,25 @@ export class ReversionController {
     this.submissionGeneration += 1;
     this.submissionRequest?.abort();
     this.idempotencyKey = undefined;
+    this.submissionOptions = undefined;
+  }
+
+  private setOption(option: Partial<ReversionSubmissionOptions>): void {
+    if (!this.state.options || !this.state.capabilities) return;
+    const options = { ...this.state.options, ...option };
+    const invalid = validateOptions(
+      options,
+      this.state.source,
+      this.state.capabilities,
+    );
+    if (invalid) return;
+    this.invalidateSubmission();
+    this.publish({
+      ...this.state,
+      options,
+      error: undefined,
+      notice: undefined,
+    });
   }
 
   private authoritativeExpiry(error: unknown): boolean {
@@ -397,7 +457,54 @@ export function validateCapabilities(
     )
   )
     throw new TypeError("Unsupported reverse capabilities");
+  const extraction = capabilities.extraction;
+  if (
+    !extraction.modes.length ||
+    !extraction.modes.every(
+      (mode) => mode === "anydoc" || mode === "slides" || mode === "marp",
+    ) ||
+    !extraction.modes.includes(extraction.default_mode) ||
+    !extraction.structured_extensions.length ||
+    !extraction.structured_extensions.every((extension) =>
+      extensions.includes(extension),
+    )
+  )
+    throw new TypeError("Unsupported reverse capabilities");
   return extensions;
+}
+
+function defaultOptions(
+  capabilities: ReversionCapabilitiesResponse,
+): ReversionSubmissionOptions {
+  return {
+    extraction: capabilities.extraction.default_mode,
+    include_images: capabilities.extraction.include_images_default,
+    include_notes: capabilities.extraction.include_notes_default,
+  };
+}
+
+export function validateOptions(
+  options: ReversionSubmissionOptions | undefined,
+  source: File | undefined,
+  capabilities: ReversionCapabilitiesResponse | undefined,
+): string | undefined {
+  if (!options || !source || !capabilities)
+    return "Choose a supported document.";
+  if (!capabilities.extraction.modes.includes(options.extraction))
+    return "The selected extraction mode is not available.";
+  if (
+    options.extraction !== "anydoc" &&
+    !capabilities.extraction.structured_extensions.some((extension) =>
+      source.name.toLowerCase().endsWith(extension),
+    )
+  )
+    return "Slide-oriented extraction is available only for supported PowerPoint files.";
+  if (
+    options.extraction === "anydoc" &&
+    (!options.include_notes || !options.include_images)
+  )
+    return "Anydoc extraction requires notes and images to remain included.";
+  return undefined;
 }
 
 export function validateSource(

@@ -78,6 +78,7 @@ def reversion_response(job: ReversionJob) -> ReversionResponse:
         source_extension=job.admission.extension,
         detected_format=job.admission.detected_format,
         component_versions=job.component_versions,
+        options=job.options,
         correlation_id=job.correlation_id,
         state=job.state,
         step=job.step,

@@ -6,6 +6,7 @@ import io
 import json
 import zipfile
 from pathlib import PurePosixPath
+from typing import Any
 
 import pytest
 
@@ -38,7 +39,7 @@ def test_zip_is_byte_deterministic_closed_and_canonically_ordered() -> None:
         NormalizedAsset(PurePosixPath("assets/image-0001.png"), b"first"),
         NormalizedAsset(PurePosixPath("assets/image-0003.png"), b"third"),
     )
-    arguments = {
+    arguments: dict[str, Any] = {
         "markdown": "![](assets/image-0001.png)\n![](assets/image-0003.png)\n",
         "assets": assets,
         "asset_references": (

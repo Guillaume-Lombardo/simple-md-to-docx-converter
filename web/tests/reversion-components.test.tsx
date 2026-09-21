@@ -31,12 +31,26 @@ const capabilities = {
     undetected_policy: "reject",
   },
   execution: { hosted_fallback: false, local: true, ocr: false },
+  extraction: {
+    default_mode: "anydoc",
+    include_images_default: true,
+    include_notes_default: true,
+    modes: ["anydoc", "slides", "marp"],
+    structured_extensions: [".pptx"],
+  },
   format_families: [
     {
       content_detection: "signature",
       detected_formats: ["docx"],
       extensions: [".docx", ".pdf"],
       family: "word" as const,
+      selected_parser_format: null,
+    },
+    {
+      content_detection: "signature",
+      detected_formats: ["pptx"],
+      extensions: [".pptx"],
+      family: "powerpoint" as const,
       selected_parser_format: null,
     },
   ],
@@ -214,10 +228,10 @@ test("workspace uses authoritative capabilities for accessible controls and copy
   ).toHaveAttribute("aria-current", "page");
   expect(screen.getByLabelText(/Source document/)).toHaveAttribute(
     "accept",
-    ".docx,.pdf",
+    ".docx,.pdf,.pptx",
   );
   expect(
-    screen.getByText(/server currently accepts .docx, .pdf/),
+    screen.getByText(/server currently accepts .docx, .pdf, .pptx/),
   ).toBeVisible();
   expect(screen.getByText(/Extensions are a selection hint/)).toBeVisible();
   expect(screen.getByText(/CPU-only, low-compute/)).toBeVisible();
@@ -297,6 +311,66 @@ test("drop, submission, status, and download form one browser workflow", async (
   await vi.waitFor(() =>
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:markdown-result"),
   );
+});
+
+test("PowerPoint controls are capability-driven and send the selected options", async () => {
+  const multipartWithMetadata = vi.fn().mockResolvedValue({
+    data: reversionJob,
+    location: `/api/v1/reversions/${reversionJob.id}`,
+    retryAfterSeconds: 1,
+    status: 202,
+  });
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...capabilities,
+        format_families: [
+          {
+            ...capabilities.format_families[0],
+            extensions: [".pptx"],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+    multipartWithMetadata,
+  });
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [new File(["deck"], "slides.pptx")] },
+  });
+  fireEvent.click(screen.getByLabelText("Marp Markdown"));
+  fireEvent.click(screen.getByLabelText("Include presenter notes"));
+  expect(
+    screen.getByText(/Unsupported meaningful content is marked/),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Start conversion" }));
+  await vi.waitFor(() => expect(multipartWithMetadata).toHaveBeenCalledOnce());
+  const form = multipartWithMetadata.mock.calls[0]![1] as FormData;
+  expect(form.get("extraction")).toBe("marp");
+  expect(form.get("include_notes")).toBe("false");
+  expect(form.get("include_images")).toBe("true");
+});
+
+test("PowerPoint controls omit unavailable modes and select the advertised default", async () => {
+  renderWorkspace({
+    json: vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...capabilities,
+        extraction: {
+          ...capabilities.extraction,
+          default_mode: "marp",
+          modes: ["slides", "marp"],
+        },
+      })
+      .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+  });
+  fireEvent.change(await screen.findByLabelText(/Source document/), {
+    target: { files: [new File(["deck"], "slides.pptx")] },
+  });
+  expect(screen.queryByLabelText("Standard document extraction")).toBeNull();
+  expect(screen.getByLabelText("Marp Markdown")).toBeChecked();
+  expect(screen.getByLabelText("Include presenter notes")).toBeChecked();
 });
 
 test("recent running jobs can be reopened and cancelled", async () => {

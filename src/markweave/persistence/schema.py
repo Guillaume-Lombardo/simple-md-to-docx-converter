@@ -497,6 +497,7 @@ class ReversionJobRow(Base):
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     source_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     component_versions: Mapped[str] = mapped_column(String(), nullable=False)
+    options: Mapped[str] = mapped_column(String(), nullable=False)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_digest: Mapped[str | None] = mapped_column(String(64))
     correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)

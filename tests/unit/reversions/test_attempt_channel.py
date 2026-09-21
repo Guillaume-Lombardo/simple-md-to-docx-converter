@@ -19,6 +19,7 @@ from markweave.reversions.models import (
     ReverseContentLimits,
     ReverseOutputMode,
 )
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 pytestmark = pytest.mark.unit
 LIMITS = channel.AttemptChannelLimits(max_input_bytes=16, max_output_bytes=32)
@@ -75,6 +76,59 @@ def test_request_metadata_round_trips_canonically_without_filename_or_policy() -
     assert b"argv" not in encoded
     assert b"mount" not in encoded
     assert b"network" not in encoded
+    assert b"options" not in encoded
+    assert b"max_pptx_" not in encoded
+
+
+def test_structured_request_extends_v1_with_options_and_pptx_limits() -> None:
+    request = ReverseAttemptRequest(
+        uuid4(),
+        ".pptx",
+        CONTENT_LIMITS,
+        b"source",
+        ReversionOptions(ReverseExtraction.SLIDES, False, True),
+    )
+
+    encoded = channel.encode_request_metadata(request)
+    decoded = channel.decode_request_metadata(encoded, request.source)
+    metadata = json.loads(encoded)
+
+    assert decoded == request
+    assert metadata["options"]["extraction"] == "slides"
+    assert {name for name in metadata["limits"] if name.startswith("max_pptx_")} == {
+        "max_pptx_archive_entries",
+        "max_pptx_member_bytes",
+        "max_pptx_uncompressed_bytes",
+        "max_pptx_xml_elements",
+        "max_pptx_xml_depth",
+        "max_pptx_xml_attributes",
+    }
+
+
+def test_request_decoder_rejects_mixed_legacy_and_structured_shapes() -> None:
+    legacy = json.loads(channel.encode_request_metadata(_request()))
+    structured_request = ReverseAttemptRequest(
+        uuid4(),
+        ".pptx",
+        CONTENT_LIMITS,
+        b"source",
+        ReversionOptions(ReverseExtraction.SLIDES, True, True),
+    )
+    structured = json.loads(channel.encode_request_metadata(structured_request))
+    legacy_with_options = dict(legacy)
+    legacy_with_options["options"] = structured["options"]
+    full_without_options = dict(structured)
+    del full_without_options["options"]
+    explicit_anydoc = dict(structured)
+    explicit_anydoc["options"] = ReversionOptions().to_dict()
+
+    for metadata in (legacy_with_options, full_without_options, explicit_anydoc):
+        encoded = (
+            json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        with pytest.raises(ReverseConversionError) as caught:
+            channel.decode_request_metadata(encoded, b"source")
+        assert caught.value.category is ReverseErrorCategory.PROTOCOL_ERROR
 
 
 def test_success_and_failure_metadata_round_trip_with_strict_result_shape() -> None:

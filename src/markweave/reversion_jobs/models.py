@@ -15,6 +15,11 @@ from markweave.broker.models import (
 from markweave.observability import require_correlation_id
 from markweave.reversions.formats import FormatAdmission, FormatFamily
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import (
+    PPTX_EXTRACTOR,
+    ReverseExtraction,
+    ReversionOptions,
+)
 
 SHA256_CHARACTERS = 64
 MAX_SOURCE_STEM_CHARACTERS = 255
@@ -128,6 +133,7 @@ class ReversionTraceMetadata:
     local: bool = True
     ocr: bool = False
     hosted_fallback: bool = False
+    extractor: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -149,6 +155,7 @@ class ReversionTraceMetadata:
             or self.local is not True
             or self.ocr is not False
             or self.hosted_fallback is not False
+            or self.extractor not in {None, PPTX_EXTRACTOR}
         ):
             raise ValueError("Reverse trace metadata is invalid")
         if self.source_family is FormatFamily.CSV and self.detected_format != "csv":
@@ -187,6 +194,7 @@ class ReversionSubmission:
     idempotency_digest: str | None
     correlation_id: str
     created_at: datetime
+    options: ReversionOptions = dataclass_field(default_factory=ReversionOptions)
 
     def __post_init__(self) -> None:
         _source_stem(self.source_stem)
@@ -201,6 +209,11 @@ class ReversionSubmission:
             _sha256(self.idempotency_digest, "Reverse idempotency digest")
         require_correlation_id(self.correlation_id)
         object.__setattr__(self, "created_at", _utc(self.created_at))
+        if type(self.options) is not ReversionOptions or (
+            self.options.extraction is not ReverseExtraction.ANYDOC
+            and self.admission.extension != ".pptx"
+        ):
+            raise ValueError("Reverse extraction options do not match the source")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +227,7 @@ class ReversionRequest:
     now: datetime
     source: bytes = dataclass_field(repr=False)
     correlation_id: str | None = None
+    options: ReversionOptions = dataclass_field(default_factory=ReversionOptions)
 
     def __post_init__(self) -> None:
         if type(self.owner_id) is not UUID:
@@ -227,6 +241,11 @@ class ReversionRequest:
             raise ValueError("Reverse request source must not be empty")
         if self.correlation_id is not None:
             require_correlation_id(self.correlation_id)
+        if type(self.options) is not ReversionOptions or (
+            self.options.extraction is not ReverseExtraction.ANYDOC
+            and self.admission.extension != ".pptx"
+        ):
+            raise ValueError("Reverse extraction options do not match the source")
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +372,7 @@ class ReversionJob:
     step: ReversionJobStep
     created_at: datetime
     updated_at: datetime
+    options: ReversionOptions = dataclass_field(default_factory=ReversionOptions)
     attempt: int = 0
     source_ready: bool = False
     lease_owner: str | None = None
@@ -388,6 +408,11 @@ class ReversionJob:
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _utc(value))
+        if type(self.options) is not ReversionOptions or (
+            self.options.extraction is not ReverseExtraction.ANYDOC
+            and self.admission.extension != ".pptx"
+        ):
+            raise ValueError("Reverse extraction options do not match the source")
         if self.attempt < 0:
             raise ValueError("Reverse attempt counter must not be negative")
         lease_values = (
@@ -428,6 +453,15 @@ class ReversionJob:
                 or self.trace.detected_format != self.admission.parser_format
             ):
                 raise ValueError("Reverse trace does not match source admission")
+            expected_extractor = (
+                None
+                if self.options.extraction is ReverseExtraction.ANYDOC
+                else PPTX_EXTRACTOR
+            )
+            if self.trace is not None and self.trace.extractor != expected_extractor:
+                raise ValueError(
+                    "Reverse trace extractor does not match extraction options"
+                )
         elif any(value is not None for value in result_values):
             raise ValueError("Only succeeded reverse jobs may expose a result")
         if self.state is ReversionJobState.FAILED:

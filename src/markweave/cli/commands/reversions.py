@@ -37,6 +37,7 @@ _STATES = _TERMINAL_STATES | {"queued", "running"}
 _RESULT_MODES = frozenset(
     {"markdown", "markdown_with_assets", "markdown_with_unavailable_assets"}
 )
+_EXTRACTION_MODES = frozenset({"anydoc", "slides", "marp"})
 
 
 @dataclass
@@ -76,6 +77,23 @@ class _FlagOption(argparse.Action):
         _set_request_value(namespace, self.dest, True)
 
 
+class _BooleanOption(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs) -> None:
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        del parser, values
+        value = option_string is not None and not option_string.startswith("--no-")
+        setattr(namespace, self.dest, value)
+        _set_request_value(namespace, self.dest, value)
+
+
 def _set_request_value(namespace: argparse.Namespace, key: str, value: Any) -> None:
     request = namespace.command_name
     if isinstance(request, _Request):
@@ -104,6 +122,26 @@ def register(parser: argparse.ArgumentParser) -> None:
     )
     submit.add_argument("source", action=_RequestOption, help="Supported input file.")
     submit.add_argument("--idempotency-key", action=_RequestOption)
+    submit.add_argument(
+        "--extraction",
+        choices=sorted(_EXTRACTION_MODES),
+        action=_RequestOption,
+        help="Extraction mode (default: connected-service capability).",
+    )
+    submit.add_argument(
+        "--include-notes",
+        "--no-include-notes",
+        action=_BooleanOption,
+        dest="include_notes",
+        help="Include PowerPoint presenter notes (default: connected-service capability).",
+    )
+    submit.add_argument(
+        "--include-images",
+        "--no-include-images",
+        action=_BooleanOption,
+        dest="include_images",
+        help="Include PowerPoint images (default: connected-service capability).",
+    )
     submit.add_argument(
         "--retries",
         default="0",
@@ -226,6 +264,7 @@ def _submit(context: CommandContext, writer: OutputWriter, request: _Request) ->
         maximum_bytes=capabilities["maximum_upload_bytes"],
         extensions=extensions,
     )
+    options = _submission_options(capabilities, source_path, request)
     idempotency_key = _idempotency_key(request.values.get("idempotency_key"))
     retries = _integer(request, "retries", minimum=0, maximum=_MAX_RETRIES)
     if retries and idempotency_key is None:
@@ -239,6 +278,9 @@ def _submit(context: CommandContext, writer: OutputWriter, request: _Request) ->
                 source,
                 filename=source_path.name,
                 idempotency_key=idempotency_key,
+                extraction=str(options["extraction"]),
+                include_notes=bool(options["include_notes"]),
+                include_images=bool(options["include_images"]),
             )
             break
         except CliError as error:
@@ -427,6 +469,7 @@ def _validated_capabilities(
     admission = value.get("admission")
     pdf = value.get("pdf")
     execution = value.get("execution")
+    extraction = value.get("extraction")
     if (
         type(schema_version) is not int
         or schema_version <= 0
@@ -443,6 +486,7 @@ def _validated_capabilities(
         or execution.get("local") is not True
         or execution.get("ocr") is not False
         or execution.get("hosted_fallback") is not False
+        or not isinstance(extraction, dict)
     ):
         raise _invalid_response()
     extensions: list[str] = []
@@ -465,7 +509,60 @@ def _validated_capabilities(
         extensions.extend(family_extensions)
     if len(set(extensions)) != len(extensions):
         raise _invalid_response()
+    extraction_modes = extraction.get("modes")
+    structured_extensions = extraction.get("structured_extensions")
+    if (
+        not isinstance(extraction_modes, list)
+        or not extraction_modes
+        or any(mode not in _EXTRACTION_MODES for mode in extraction_modes)
+        or extraction.get("default_mode") not in extraction_modes
+        or not isinstance(structured_extensions, list)
+        or not structured_extensions
+        or any(extension not in extensions for extension in structured_extensions)
+        or type(extraction.get("include_notes_default")) is not bool
+        or type(extraction.get("include_images_default")) is not bool
+    ):
+        raise _invalid_response()
     return dict(value), frozenset(extensions)
+
+
+def _submission_options(
+    capabilities: dict[str, Any], source_path: Path, request: _Request
+) -> dict[str, bool | str]:
+    contract = capabilities["extraction"]
+    extraction = request.values.get("extraction", contract["default_mode"])
+    if not isinstance(extraction, str):
+        raise CliError("invalid_request", "The command arguments are invalid.")
+    if extraction not in contract["modes"]:
+        raise CliError(
+            "extraction_unavailable",
+            "The selected extraction mode is not available from the connected service.",
+        )
+    include_notes = request.values.get(
+        "include_notes", contract["include_notes_default"]
+    )
+    include_images = request.values.get(
+        "include_images", contract["include_images_default"]
+    )
+    if type(include_notes) is not bool or type(include_images) is not bool:
+        raise CliError("invalid_request", "The command arguments are invalid.")
+    if extraction == "anydoc" and (not include_notes or not include_images):
+        raise CliError(
+            "extraction_options_invalid",
+            "Anydoc extraction requires notes and images to remain included.",
+        )
+    if extraction != "anydoc" and source_path.suffix.casefold() not in set(
+        contract["structured_extensions"]
+    ):
+        raise CliError(
+            "extraction_source_invalid",
+            "Slide-oriented extraction is available only for supported PowerPoint files.",
+        )
+    return {
+        "extraction": extraction,
+        "include_notes": include_notes,
+        "include_images": include_images,
+    }
 
 
 def _job(value: Any) -> dict[str, Any]:

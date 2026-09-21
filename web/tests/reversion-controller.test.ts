@@ -9,6 +9,7 @@ import {
   ReversionController,
   statusPresentation,
   validateCapabilities,
+  validateOptions,
   validateSource,
 } from "../src/reversion/controller";
 
@@ -23,6 +24,13 @@ const capabilities = (
     undetected_policy: "reject",
   },
   execution: { hosted_fallback: false, local: true, ocr: false },
+  extraction: {
+    default_mode: "anydoc",
+    include_images_default: true,
+    include_notes_default: true,
+    modes: ["anydoc", "slides", "marp"],
+    structured_extensions: [".pptx"],
+  },
   format_families: [
     {
       content_detection: "signature",
@@ -36,6 +44,13 @@ const capabilities = (
       detected_formats: ["pdf"],
       extensions: [".pdf"],
       family: "pdf",
+      selected_parser_format: null,
+    },
+    {
+      content_detection: "signature",
+      detected_formats: ["pptx"],
+      extensions: [".pptx"],
+      family: "powerpoint",
       selected_parser_format: null,
     },
   ],
@@ -67,6 +82,11 @@ const job = (
   expires_at: null,
   id: "00000000-0000-4000-8000-000000000201",
   owner_id: "00000000-0000-4000-8000-000000000001",
+  options: {
+    extraction: "anydoc",
+    include_images: true,
+    include_notes: true,
+  },
   result_mode: null,
   result_size: null,
   source_extension: ".docx",
@@ -100,6 +120,7 @@ test("capability and source validation derive every client hint from the server"
     ".docx",
     ".docm",
     ".pdf",
+    ".pptx",
   ]);
   expect(() =>
     validateCapabilities(capabilities({ schema_version: 2 })),
@@ -156,6 +177,27 @@ test("capability and source validation derive every client hint from the server"
   expect(
     validateSource(new File(["ok"], "REPORT.DOCX"), [".docx"], 10),
   ).toBeUndefined();
+  expect(
+    validateOptions(
+      { extraction: "slides", include_images: true, include_notes: true },
+      new File(["ok"], "slides.pptx"),
+      capabilities(),
+    ),
+  ).toBeUndefined();
+  expect(
+    validateOptions(
+      { extraction: "marp", include_images: true, include_notes: true },
+      new File(["ok"], "report.docx"),
+      capabilities(),
+    ),
+  ).toMatch(/PowerPoint/);
+  expect(
+    validateOptions(
+      { extraction: "anydoc", include_images: false, include_notes: true },
+      new File(["ok"], "report.docx"),
+      capabilities(),
+    ),
+  ).toMatch(/requires/);
 });
 
 test("status, cancellation, and polling presentation cover the lifecycle", () => {
@@ -208,7 +250,7 @@ test("load accepts schema v1 and fails closed for unavailable or unsupported cap
   await controller.load();
   expect(controller.snapshot()).toMatchObject({
     phase: "ready",
-    extensions: [".docx", ".docm", ".pdf"],
+    extensions: [".docx", ".docm", ".pdf", ".pptx"],
     recent: [{ source_stem: "report" }],
   });
   await controller.load();
@@ -248,7 +290,59 @@ test("submission validates locally and preserves an idempotency key after ambigu
   expect(
     (multipartWithMetadata.mock.calls[0]![1] as FormData).get("source"),
   ).toBeInstanceOf(File);
+  expect(
+    (multipartWithMetadata.mock.calls[0]![1] as FormData).get("extraction"),
+  ).toBe("anydoc");
   expect(controller.snapshot().active?.state).toBe("succeeded");
+  controller.dispose();
+});
+
+test("structured submission resets on a new source and freezes its options on retry", async () => {
+  const multipartWithMetadata = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("network"))
+    .mockResolvedValueOnce({
+      data: job(),
+      location: `/api/v1/reversions/${job().id}`,
+      retryAfterSeconds: 1,
+      status: 202,
+    });
+  const controller = await loadedController(
+    api({
+      json: vi
+        .fn()
+        .mockResolvedValueOnce(
+          capabilities({
+            format_families: [
+              {
+                content_detection: "signature",
+                detected_formats: ["pptx"],
+                extensions: [".pptx"],
+                family: "powerpoint",
+                selected_parser_format: null,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce({ items: [], limit: 10, offset: 0, total: 0 }),
+      multipartWithMetadata,
+    }),
+  );
+  controller.setSource([new File(["deck"], "slides.pptx")]);
+  controller.setExtraction("marp");
+  controller.setIncludeNotes(false);
+  await controller.submit();
+  await controller.submit();
+  for (const call of multipartWithMetadata.mock.calls) {
+    const form = call[1] as FormData;
+    expect(form.get("extraction")).toBe("marp");
+    expect(form.get("include_notes")).toBe("false");
+  }
+  controller.setSource([new File(["deck"], "slides.pptx")]);
+  expect(controller.snapshot().options).toMatchObject({
+    extraction: "anydoc",
+    include_notes: true,
+  });
   controller.dispose();
 });
 

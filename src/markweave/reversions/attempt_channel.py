@@ -25,6 +25,7 @@ from markweave.reversions.models import (
     ReverseContentLimits,
     ReverseOutputMode,
 )
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 PROTOCOL_NAME = "markweave-reverse-attempt"
 PROTOCOL_VERSION = 1
@@ -70,6 +71,16 @@ _CONTENT_LIMIT_FIELDS = frozenset(
         "max_total_asset_output_bytes",
         "max_markdown_bytes",
         "max_package_bytes",
+    }
+)
+_PPTX_LIMIT_FIELDS = frozenset(
+    {
+        "max_pptx_archive_entries",
+        "max_pptx_member_bytes",
+        "max_pptx_uncompressed_bytes",
+        "max_pptx_xml_elements",
+        "max_pptx_xml_depth",
+        "max_pptx_xml_attributes",
     }
 )
 
@@ -153,14 +164,20 @@ def _protocol_header(metadata: dict[str, object], message_type: str) -> None:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
 
 
-def _encode_limits(limits: ReverseContentLimits) -> dict[str, int]:
-    return {field: getattr(limits, field) for field in sorted(_CONTENT_LIMIT_FIELDS)}
+def _encode_limits(
+    limits: ReverseContentLimits, *, structured: bool
+) -> dict[str, int | None]:
+    fields = _CONTENT_LIMIT_FIELDS | (_PPTX_LIMIT_FIELDS if structured else frozenset())
+    return {field: getattr(limits, field) for field in sorted(fields)}
 
 
-def _decode_limits(value: object) -> ReverseContentLimits:
-    if not isinstance(value, dict) or value.keys() != _CONTENT_LIMIT_FIELDS:
+def _decode_limits(value: object, *, structured: bool) -> ReverseContentLimits:
+    expected = _CONTENT_LIMIT_FIELDS | (
+        _PPTX_LIMIT_FIELDS if structured else frozenset()
+    )
+    if not isinstance(value, dict) or set(value) != expected:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
-    if any(type(item) is not int for item in value.values()):
+    if any(item is not None and type(item) is not int for item in value.values()):
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
     try:
         return ReverseContentLimits(**value)
@@ -171,41 +188,43 @@ def _decode_limits(value: object) -> ReverseContentLimits:
 def encode_request_metadata(request: ReverseAttemptRequest) -> bytes:
     """Encode the request's fixed, content-free canonical metadata."""
 
-    return _canonical_metadata(
-        {
-            "attempt_id": str(request.attempt_id),
-            "extension": request.extension,
-            "limits": _encode_limits(request.limits),
-            "protocol": PROTOCOL_NAME,
-            "type": "request",
-            "version": PROTOCOL_VERSION,
-        }
-    )
+    structured = request.options.extraction is not ReverseExtraction.ANYDOC
+    metadata: dict[str, object] = {
+        "attempt_id": str(request.attempt_id),
+        "extension": request.extension,
+        "limits": _encode_limits(request.limits, structured=structured),
+        "protocol": PROTOCOL_NAME,
+        "type": "request",
+        "version": PROTOCOL_VERSION,
+    }
+    if structured:
+        metadata["options"] = request.options.to_dict()
+    return _canonical_metadata(metadata)
 
 
 def decode_request_metadata(encoded: bytes, source: bytes) -> ReverseAttemptRequest:
     """Decode a request while rejecting non-canonical or caller-extended policy."""
 
     metadata = _decode_metadata(encoded)
-    _require_keys(
-        metadata,
-        frozenset(
-            {
-                "attempt_id",
-                "extension",
-                "limits",
-                "protocol",
-                "type",
-                "version",
-            }
-        ),
+    required = frozenset(
+        {"attempt_id", "extension", "limits", "protocol", "type", "version"}
     )
+    if set(metadata) not in {required, required | {"options"}}:
+        reject(ReverseErrorCategory.PROTOCOL_ERROR)
     _protocol_header(metadata, "request")
     try:
         extension = metadata["extension"]
         if not isinstance(extension, str) or not source:
             reject(ReverseErrorCategory.PROTOCOL_ERROR)
-        limits = _decode_limits(metadata["limits"])
+        structured = "options" in metadata
+        limits = _decode_limits(metadata["limits"], structured=structured)
+        options = (
+            ReversionOptions.from_dict(metadata["options"])
+            if structured
+            else ReversionOptions()
+        )
+        if structured and options.extraction is ReverseExtraction.ANYDOC:
+            reject(ReverseErrorCategory.PROTOCOL_ERROR)
     except KeyError, ValueError, ReverseConversionError:
         reject(ReverseErrorCategory.PROTOCOL_ERROR)
     return ReverseAttemptRequest(
@@ -213,6 +232,7 @@ def decode_request_metadata(encoded: bytes, source: bytes) -> ReverseAttemptRequ
         extension=extension,
         limits=limits,
         source=source,
+        options=options,
     )
 
 

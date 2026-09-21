@@ -34,13 +34,6 @@ export const vAuditRecordResponse = v.object({
 });
 
 /**
- * Body_create_reversion_api_v1_reversions_post
- */
-export const vBodyCreateReversionApiV1ReversionsPost = v.object({
-    source: v.string()
-});
-
-/**
  * Body_replace_template_api_v1_templates__template_id__content_put
  */
 export const vBodyReplaceTemplateApiV1TemplatesTemplateIdContentPut = v.object({
@@ -223,6 +216,27 @@ export const vPresentationPlanResponse = v.object({
 });
 
 /**
+ * ReverseExtraction
+ *
+ * Explicit opt-in alternatives to the original anydoc extraction.
+ */
+export const vReverseExtraction = v.picklist([
+    'anydoc',
+    'slides',
+    'marp'
+]);
+
+/**
+ * Body_create_reversion_api_v1_reversions_post
+ */
+export const vBodyCreateReversionApiV1ReversionsPost = v.object({
+    extraction: v.optional(vReverseExtraction, 'anydoc'),
+    include_images: v.optional(v.boolean(), true),
+    include_notes: v.optional(v.boolean(), true),
+    source: v.string()
+});
+
+/**
  * ReverseOutputMode
  *
  * Deterministic result shapes approved by T69.
@@ -255,6 +269,19 @@ export const vReversionExecutionCapabilitiesResponse = v.object({
     hosted_fallback: v.boolean(),
     local: v.boolean(),
     ocr: v.boolean()
+});
+
+/**
+ * ReversionExtractionCapabilitiesResponse
+ *
+ * Authoritative structured PowerPoint extraction controls.
+ */
+export const vReversionExtractionCapabilitiesResponse = v.object({
+    default_mode: vReverseExtraction,
+    include_images_default: v.boolean(),
+    include_notes_default: v.boolean(),
+    modes: v.array(vReverseExtraction),
+    structured_extensions: v.array(v.string())
 });
 
 /**
@@ -299,6 +326,17 @@ export const vReversionJobStep = v.picklist([
 ]);
 
 /**
+ * ReversionOptions
+ *
+ * Canonical options included in durable request identity.
+ */
+export const vReversionOptions = v.object({
+    extraction: v.optional(vReverseExtraction, 'anydoc'),
+    include_images: v.optional(v.boolean(), true),
+    include_notes: v.optional(v.boolean(), true)
+});
+
+/**
  * ReversionPdfCapabilitiesResponse
  *
  * Client-visible limitations of the pinned PDF path.
@@ -320,6 +358,7 @@ export const vReversionPdfCapabilitiesResponse = v.object({
 export const vReversionCapabilitiesResponse = v.object({
     admission: vReversionAdmissionPolicyResponse,
     execution: vReversionExecutionCapabilitiesResponse,
+    extraction: vReversionExtractionCapabilitiesResponse,
     format_families: v.array(vReversionFormatCapabilityResponse),
     maximum_upload_bytes: v.pipe(v.number(), v.integer(), v.gtValue(0)),
     pdf: vReversionPdfCapabilitiesResponse,
@@ -343,6 +382,7 @@ export const vReversionResponse = v.object({
     error_message: v.nullable(v.string()),
     expires_at: v.nullable(v.pipe(v.string(), v.isoTimestamp())),
     id: v.pipe(v.string(), v.uuid()),
+    options: vReversionOptions,
     owner_id: v.pipe(v.string(), v.uuid()),
     result_mode: v.nullable(vReverseOutputMode),
     result_size: v.nullable(v.pipe(v.number(), v.integer())),

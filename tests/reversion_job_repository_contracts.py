@@ -28,8 +28,9 @@ from markweave.reversion_jobs.models import (
     ReversionTraceMetadata,
     reversion_result_object_id,
 )
-from markweave.reversions.formats import FormatFamily, admit_format
+from markweave.reversions.formats import FormatAdmission, FormatFamily, admit_format
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 NOW = datetime(2026, 9, 6, tzinfo=UTC)
 LEASE_END = NOW + timedelta(seconds=30)
@@ -38,19 +39,21 @@ PRINCIPAL = AuthenticatedPrincipal(UUID("10000000-0000-4000-8000-000000000071"))
 POLICY_SPECIFICATION = EvidenceDigest("sha256:" + "a" * 64)
 
 
-def submission(
+def submission(  # noqa: PLR0913 - explicit durable submission fixture
     owner_id: UUID,
     *,
     created_at: datetime = NOW,
     idempotency_digest: str | None = None,
     request_digest: str = "2" * 64,
+    options: ReversionOptions | None = None,
+    admission: FormatAdmission | None = None,
 ) -> ReversionSubmission:
     return ReversionSubmission(
         id=uuid4(),
         owner_id=owner_id,
         source_object_id=uuid4(),
         source_stem="quarterly-report",
-        admission=admit_format(".docx", "docx"),
+        admission=admission or admit_format(".docx", "docx"),
         source_sha256="1" * 64,
         source_size=128,
         component_versions=(
@@ -61,6 +64,7 @@ def submission(
         idempotency_digest=idempotency_digest,
         correlation_id=str(uuid4()),
         created_at=created_at,
+        options=options or ReversionOptions(),
     )
 
 
@@ -331,3 +335,15 @@ def exercise_reversion_job_repository_contract(  # noqa: PLR0915
 
     page = repository.list_owner(owner_id, offset=0, limit=10)
     assert page.total == 1 and page.items[0].state is ReversionJobState.EXPIRED
+
+    structured_submission = submission(
+        owner_id,
+        options=ReversionOptions(ReverseExtraction.MARP, False, True),
+        admission=admit_format(".pptx", "pptx"),
+        request_digest="6" * 64,
+    )
+    structured, replayed = repository.create(structured_submission)
+    assert not replayed
+    assert structured.options == structured_submission.options
+    persisted = repository.get_internal(structured.id)
+    assert persisted is not None and persisted.options == structured_submission.options

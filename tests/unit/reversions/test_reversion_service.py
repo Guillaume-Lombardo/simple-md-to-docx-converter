@@ -27,6 +27,7 @@ from markweave.reversion_jobs.models import (
 )
 from markweave.reversion_jobs.service import ReversionService, ReversionServicePolicy
 from markweave.reversions.formats import FormatAdmission, FormatFamily
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 from markweave.storage import (
     BoundedObjectStore,
     ObjectKey,
@@ -143,6 +144,20 @@ def test_submit_reserves_stores_and_activates_exact_source(
     assert submission.source_sha256 == sha256(SOURCE).hexdigest()
     assert submission.source_size == len(SOURCE)
     assert submission.idempotency_digest == sha256(b"stable-key").hexdigest()
+    legacy_fields = (
+        submission.source_sha256,
+        str(len(SOURCE)),
+        request.source_stem,
+        request.admission.family.value,
+        request.admission.extension,
+        request.admission.detected_format or "",
+        request.admission.parser_format,
+        repr(request.component_versions),
+    )
+    assert (
+        submission.request_digest
+        == sha256("\0".join(legacy_fields).encode()).hexdigest()
+    )
     objects.put.assert_called_once_with(
         ObjectKey(
             ObjectScope.REVERSION_UPLOAD,
@@ -173,6 +188,39 @@ def test_submit_replays_ready_source_without_rewriting_object(
 
     assert was_replayed and replayed.source_ready
     objects.put.assert_not_called()
+
+
+def test_structured_options_are_persisted_and_change_request_identity(
+    mocker: MockerFixture,
+) -> None:
+    service, repository, _objects = _service(mocker)
+    submissions: list[ReversionSubmission] = []
+
+    def create(submission: ReversionSubmission) -> tuple[ReversionJob, bool]:
+        submissions.append(submission)
+        return _job(submission, source_ready=True), True
+
+    repository.create.side_effect = create
+    admission = FormatAdmission(FormatFamily.POWERPOINT, ".pptx", "pptx", "pptx")
+    common = {"admission": admission, "source_stem": "slides"}
+
+    service.submit(
+        _request(
+            **common,
+            options=ReversionOptions(ReverseExtraction.SLIDES, True, True),
+        ),
+        "stable-key",
+    )
+    service.submit(
+        _request(
+            **common,
+            options=ReversionOptions(ReverseExtraction.MARP, True, True),
+        ),
+        "stable-key",
+    )
+
+    assert submissions[0].options.extraction is ReverseExtraction.SLIDES
+    assert submissions[0].request_digest != submissions[1].request_digest
     repository.activate_source.assert_not_called()
 
 

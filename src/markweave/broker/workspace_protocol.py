@@ -23,6 +23,7 @@ from markweave.reversions.models import (
     ReverseContentLimits,
     ReverseOutputMode,
 )
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 WORKSPACE_PROTOCOL_NAME = "markweave-reverse-broker-workspace"
 WORKSPACE_PROTOCOL_VERSION = 1
@@ -30,6 +31,9 @@ WORKSPACE_HEADER_BYTES = 4096
 WORKSPACE_LENGTH_PREFIX_BYTES = 4
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _LIMIT_FIELDS = tuple(ReverseContentLimits.__dataclass_fields__)
+_LEGACY_LIMIT_FIELDS = tuple(
+    name for name in _LIMIT_FIELDS if not name.startswith("max_pptx_")
+)
 
 
 class WorkspaceOperation(StrEnum):
@@ -51,12 +55,13 @@ class WorkspaceStageRequest:
     extension: str
     limits: ReverseContentLimits
     source: bytes = field(repr=False)
+    options: ReversionOptions = field(default_factory=ReversionOptions)
 
     def reverse_request(self) -> ReverseAttemptRequest:
         """Build the existing runtime-port request after wire validation."""
 
         return ReverseAttemptRequest(
-            self.attempt_id, self.extension, self.limits, self.source
+            self.attempt_id, self.extension, self.limits, self.source, self.options
         )
 
 
@@ -73,6 +78,7 @@ class WorkspaceStageHeader:
     limits: ReverseContentLimits
     source_length: int
     source_sha256: str = field(repr=False)
+    options: ReversionOptions = field(default_factory=ReversionOptions)
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,16 +240,25 @@ def _positive(value: object) -> int:
     return value
 
 
-def _limits(value: object, channel: RuntimeChannelLimits) -> ReverseContentLimits:
+def _limits(
+    value: object, channel: RuntimeChannelLimits, *, structured: bool
+) -> ReverseContentLimits:
     if type(value) is not dict:
         _fail()
     mapping = cast(dict[str, object], value)
-    if set(mapping) != set(_LIMIT_FIELDS):
+    expected = _LIMIT_FIELDS if structured else _LEGACY_LIMIT_FIELDS
+    if set(mapping) != set(expected):
         _fail()
     try:
-        limits = ReverseContentLimits(
-            *(_positive(mapping[name]) for name in _LIMIT_FIELDS)
-        )
+        decoded: dict[str, Any] = {
+            name: (
+                None
+                if name.startswith("max_pptx_") and mapping[name] is None
+                else _positive(mapping[name])
+            )
+            for name in mapping
+        }
+        limits = ReverseContentLimits(**decoded)
     except ValueError:
         _fail()
     if (
@@ -311,12 +326,16 @@ def encode_workspace_request(
             _fail()
         value = _base(request.request_id, WorkspaceOperation.STAGE)
         value.update(_request_identity(request))
+        structured = request.options.extraction is not ReverseExtraction.ANYDOC
+        fields = _LIMIT_FIELDS if structured else _LEGACY_LIMIT_FIELDS
         value.update(
             extension=extension,
-            limits={name: getattr(request.limits, name) for name in _LIMIT_FIELDS},
+            limits={name: getattr(request.limits, name) for name in fields},
             source_length=len(request.source),
             source_sha256=f"sha256:{hashlib.sha256(request.source).hexdigest()}",
         )
+        if structured:
+            value["options"] = request.options.to_dict()
         return _frame(value) + request.source
     if type(request) is WorkspaceCollectRequest:
         if any(
@@ -354,7 +373,7 @@ def decode_workspace_request_header(
     value = _mapping(frame)
     operation = value.get("operation")
     if operation == WorkspaceOperation.STAGE:
-        expected = {
+        required = {
             "attempt_id",
             "create_sequence",
             "extension",
@@ -368,7 +387,7 @@ def decode_workspace_request_header(
             "unit_id",
             "version",
         }
-        if set(value) != expected:
+        if set(value) != required and set(value) != required | {"options"}:
             _fail()
         request_id, sequence, attempt, unit, create_sequence = _identity(value)
         source_length = _positive(value.get("source_length"))
@@ -381,7 +400,18 @@ def decode_workspace_request_header(
             or type(extension) is not str
         ):
             _fail()
-        limits = _limits(value.get("limits"), channel)
+        structured = "options" in value
+        limits = _limits(value.get("limits"), channel, structured=structured)
+        try:
+            options = (
+                ReversionOptions.from_dict(value["options"])
+                if structured
+                else ReversionOptions()
+            )
+            if structured and options.extraction is ReverseExtraction.ANYDOC:
+                _fail()
+        except ValueError:
+            _fail()
         if source_length > limits.max_input_bytes:
             _fail()
         try:
@@ -398,6 +428,7 @@ def decode_workspace_request_header(
             limits,
             source_length,
             digest,
+            options,
         )
     if operation == WorkspaceOperation.COLLECT:
         expected = {
@@ -451,6 +482,7 @@ def bind_workspace_source(
             header.extension,
             header.limits,
             source,
+            header.options,
         )
     except ValueError:
         _fail()

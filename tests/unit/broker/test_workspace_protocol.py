@@ -38,6 +38,7 @@ from markweave.reversions.models import (
     ReverseContentLimits,
     ReverseOutputMode,
 )
+from markweave.reversions.options import ReverseExtraction, ReversionOptions
 
 pytestmark = pytest.mark.unit
 
@@ -53,6 +54,60 @@ LIMITS = ReverseContentLimits(
 
 def _stage(source: bytes = b"private") -> WorkspaceStageRequest:
     return WorkspaceStageRequest(REQUEST, 7, ATTEMPT, UNIT, 3, ".docx", LIMITS, source)
+
+
+def test_structured_options_round_trip_through_workspace_protocol() -> None:
+    request = WorkspaceStageRequest(
+        REQUEST,
+        7,
+        ATTEMPT,
+        UNIT,
+        3,
+        ".pptx",
+        LIMITS,
+        b"private",
+        ReversionOptions(ReverseExtraction.MARP, False, True),
+    )
+
+    header, payload = _header(encode_workspace_request(request))
+    decoded = decode_workspace_request_header(header, CHANNEL)
+
+    assert isinstance(decoded, WorkspaceStageHeader)
+    assert bind_workspace_source(decoded, payload) == request
+    value = json.loads(header[4:])
+    assert value["options"]["extraction"] == "marp"
+    assert set(value["limits"]) == set(ReverseContentLimits.__dataclass_fields__)
+
+
+def test_stage_decoder_rejects_mixed_legacy_and_structured_shapes() -> None:
+    structured = WorkspaceStageRequest(
+        REQUEST,
+        7,
+        ATTEMPT,
+        UNIT,
+        3,
+        ".pptx",
+        LIMITS,
+        b"private",
+        ReversionOptions(ReverseExtraction.SLIDES, True, True),
+    )
+    legacy_wire = encode_workspace_request(_stage())
+    structured_wire = encode_workspace_request(structured)
+    structured_value = json.loads(_header(structured_wire)[0][4:])
+    mutations = (
+        (legacy_wire, lambda value: value.update(options=structured_value["options"])),
+        (structured_wire, lambda value: value.pop("options")),
+        (
+            structured_wire,
+            lambda value: value.update(options=ReversionOptions().to_dict()),
+        ),
+    )
+
+    for wire, mutate in mutations:
+        changed = _replace_header(wire, mutate)
+        with pytest.raises(BrokerError) as caught:
+            decode_workspace_request_header(_header(changed)[0], CHANNEL)
+        assert caught.value.category is BrokerErrorCategory.PROTOCOL_ERROR
 
 
 def _header(wire: bytes) -> tuple[bytes, bytes]:
@@ -74,6 +129,26 @@ def test_stage_golden_is_canonical_header_raw_payload_and_digest_bound() -> None
     header, payload = _header(wire)
     value = json.loads(header[4:])
 
+    expected_header = (
+        b'{"attempt_id":"20000000-0000-4000-8000-000000000002",'
+        b'"create_sequence":3,"extension":".docx","limits":'
+        b'{"max_asset_count":2,"max_image_height_pixels":10,'
+        b'"max_image_pixels":100,"max_image_source_bytes":100,'
+        b'"max_image_width_pixels":10,"max_input_bytes":1000,'
+        b'"max_markdown_bytes":500,"max_output_bytes":2000,'
+        b'"max_package_bytes":1000,"max_svg_depth":5,"max_svg_elements":10,'
+        b'"max_total_asset_output_bytes":200,'
+        b'"max_total_asset_source_bytes":100},"operation":"stage",'
+        b'"protocol":"markweave-reverse-broker-workspace",'
+        b'"request_id":"10000000-0000-4000-8000-000000000001",'
+        b'"sequence":7,"source_length":7,'
+        b'"source_sha256":"sha256:'
+        b'715dc8493c36579a5b116995100f635e3572fdf8703e708ef1a08d943b36774e",'
+        b'"unit_id":"30000000-0000-4000-8000-000000000003","version":1}'
+    )
+    assert (
+        wire == len(expected_header).to_bytes(4, "big") + expected_header + b"private"
+    )
     assert len(header) <= 4100
     assert payload == b"private"
     assert value == {
@@ -83,6 +158,7 @@ def test_stage_golden_is_canonical_header_raw_payload_and_digest_bound() -> None
         "limits": {
             name: getattr(LIMITS, name)
             for name in ReverseContentLimits.__dataclass_fields__
+            if not name.startswith("max_pptx_")
         },
         "operation": "stage",
         "protocol": "markweave-reverse-broker-workspace",

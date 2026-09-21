@@ -29,6 +29,7 @@ from markweave.reversion_jobs.models import (
 from markweave.reversion_jobs.policy import ReversionAdmissionPolicy
 from markweave.reversions.formats import FormatAdmission, FormatFamily
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import ReversionOptions
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -57,7 +58,7 @@ def _trace(value: str | None) -> ReversionTraceMetadata | None:
         return None
     try:
         decoded: Any = json.loads(value)
-        if type(decoded) is not dict or set(decoded) != {
+        required = {
             "schema_version",
             "engine_name",
             "engine_version",
@@ -70,6 +71,9 @@ def _trace(value: str | None) -> ReversionTraceMetadata | None:
             "local",
             "ocr",
             "hosted_fallback",
+        }
+        if type(decoded) is not dict or not required <= set(decoded) <= required | {
+            "extractor"
         }:
             raise ValueError
         return ReversionTraceMetadata(
@@ -85,6 +89,7 @@ def _trace(value: str | None) -> ReversionTraceMetadata | None:
             local=decoded["local"],
             ocr=decoded["ocr"],
             hosted_fallback=decoded["hosted_fallback"],
+            extractor=decoded.get("extractor"),
         )
     except KeyError, TypeError, ValueError:
         raise ReversionJobRepositoryError from None
@@ -105,6 +110,7 @@ def _trace_json(trace: ReversionTraceMetadata) -> str:
             "local": trace.local,
             "ocr": trace.ocr,
             "hosted_fallback": trace.hosted_fallback,
+            **({"extractor": trace.extractor} if trace.extractor is not None else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -135,6 +141,7 @@ def _mapped_job(row: ReversionJobRow) -> ReversionJob:
         source_sha256=row.source_sha256,
         source_size=row.source_size,
         component_versions=_versions(row.component_versions),
+        options=ReversionOptions.from_dict(json.loads(row.options)),
         request_digest=row.request_digest,
         idempotency_digest=row.idempotency_digest,
         correlation_id=row.correlation_id,

@@ -36,6 +36,7 @@ from markweave.reversion_jobs.models import (
 from markweave.reversion_jobs.service import ReversionService
 from markweave.reversions.formats import FormatAdmission, FormatFamily
 from markweave.reversions.models import ReverseOutputMode
+from markweave.reversions.options import ReverseExtraction
 from tests.reversion_job_repository_contracts import NOW
 from tests.settings import template_settings
 
@@ -141,6 +142,49 @@ def test_submission_scans_before_detection_and_durable_reservation(
     assert events == ["scan", "submit"]
     assert response.headers["Location"] == f"/api/v1/reversions/{expected.id}"
     assert response.headers["Retry-After"] == "2"
+
+
+def test_capabilities_advertise_structured_pptx_defaults(
+    mocker: MockerFixture,
+) -> None:
+    client, _actor = _client(mocker, reversions=mocker.Mock(spec=ReversionService))
+
+    with client:
+        response = client.get("/api/v1/reversions/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["extraction"] == {
+        "modes": ["anydoc", "slides", "marp"],
+        "default_mode": "anydoc",
+        "structured_extensions": [".pptx"],
+        "include_notes_default": True,
+        "include_images_default": True,
+    }
+
+
+def test_anydoc_rejects_disabled_structured_controls_before_scanning(
+    mocker: MockerFixture,
+) -> None:
+    scanner = mocker.Mock(spec=UploadScanner)
+    client, _actor = _client(
+        mocker,
+        scanner=scanner,
+        reversions=mocker.Mock(spec=ReversionService),
+    )
+
+    with client:
+        response = client.post(
+            "/api/v1/reversions",
+            headers={"X-CSRF-Token": "csrf"},
+            data={
+                "extraction": ReverseExtraction.ANYDOC.value,
+                "include_notes": "false",
+            },
+            files={"source": ("report.rtf", b"{\\rtf1 report}", "application/rtf")},
+        )
+
+    assert response.status_code == 422
+    scanner.scan.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -41,6 +41,25 @@ archives may contain one Markdown source plus approved local resources, and path
 archive are rejected. See [archives and images](archive-images.md) and [local Mermaid
 rendering](mermaid.md).
 
+## Extract an edited PowerPoint presentation
+
+Open `/revert` (2md) and select an accepted document. The default extraction uses the existing
+document-oriented anydoc workflow. For an accepted `.pptx`, choose **Slide-oriented Markdown** to
+preserve slide boundaries or **Marp Markdown** for the documented Marp subset. These choices are
+opt-in: they do not change ordinary document extraction.
+
+Structured PowerPoint extraction starts with the service's advertised presenter-note and image
+defaults. You can exclude either before submission. The output identifies meaningful PowerPoint
+content that cannot be represented safely with a clear placeholder; it does not silently omit that content. Images use
+the normal safe result package when assets are present or unavailable, so download the ZIP when
+the job reports an asset package.
+
+This extracts the edited presentation; it does not recover the original Markdown or a source archive
+from a 2pptx output, and it does not promise full visual round-trip fidelity. Layout, master, and
+background details appear as warning placeholders when they matter. OCR, arbitrary CSS, executable
+presentation formats, and hosted fallbacks are unavailable. Documents whose text requires OCR still fail with the displayed safe error; embedded images
+are preserved as assets without text recognition.
+
 ## Templates
 
 The template library at `/templates` shows visible active and archived templates. A DOCX reference
