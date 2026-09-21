@@ -18,7 +18,9 @@ Extend bounded mutation testing from observability to the security, authenticati
 * Define a reviewed risk-ranked mutation scope and deterministic per-domain commands with bounded runtime; the gate passes only when every selected non-equivalent mutant is killed, while each excluded/equivalent mutant requires a reviewed technical justification recorded in the artifact.
 * Cover authentication/session versioning, origin/CSRF checks, archive/path/SVG validation, job leases/fencing/idempotency, retention, and storage integrity.
 * Add or strengthen tests to kill relevant surviving mutants without asserting implementation trivia.
-* Run affected mutation domains on pull requests and a broader bounded matrix on schedule, preserving one required gate and useful artifacts.
+* Run affected mutation domains in repository-owned GitHub Actions on pull requests and a broader bounded matrix on schedule, preserving one required gate and useful artifacts.
+* Require independent review of mutation workflow and policy changes. Explicitly document that repository-owned checks remain modifiable in a pull request and do not provide contributor-immutable enforcement.
+* Keep Markweave under the personal GitHub account. No organization, Enterprise subscription, repository transfer, separately owned policy repository, or external check provider is a prerequisite.
 * Fail on surviving, untested, timed-out, or suspicious selected mutants; document reviewed exclusions with technical justification and track the exact killed/selected counts without weakening existing coverage thresholds.
 
 ## Dependencies
@@ -33,8 +35,22 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 * Own mutation configuration, CI scheduling, artifacts, and mutation-driven tests after target modules stabilize.
 * Do not combine production refactors with mutation-test enablement.
+* T48 is independent follow-up work and does not block T50 or T73. Preserve existing mutation tests, reviewed exclusions, strict failure semantics, and coverage thresholds.
+
+## Current decision
+
+The 2026-09-21 user decision supersedes the contributor-immutable gate and organization-level
+prerequisites recorded in the historical progress below. Complete the repository-owned CI gate
+and verify it on main under the existing review process. This scope update does not activate a
+workflow, change branch protection, or declare T48 complete.
 
 ## Progress
+
+* 2026-09-21: The user approved retaining mutation testing in repository-owned CI and abandoned
+  contributor-immutable enforcement and all organization/Enterprise/transfer prerequisites.
+  Workflow changes require independent review; their mutability in a PR is an accepted limitation.
+  Removed T48 as a blocking dependency of T50, thereby removing its indirect block on T73.
+  T48 remains Backlog for CI integration and verification; no tests or quality thresholds are removed.
 
 * 2026-09-11: Maintenance PR
   [#226](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/pull/226) was
@@ -86,8 +102,8 @@ Extend bounded mutation testing from observability to the security, authenticati
 
 ## Coordination
 
-* Status: Backlog; all repository-local work is exhausted and completion remains blocked on the
-  selected organization-level required-workflow prerequisite.
+* Status: Backlog; repository-owned mutation CI integration and verification remain separate
+  follow-up work. No organization-level prerequisite remains, and T48 does not block T50 or T73.
 * One worker owns this ticket's implementation files at a time.
 * Synchronize Linear and the repository mirror before starting and after every scope, dependency, status, or progress change.
 * All repository artifacts and user-facing text are English.
