@@ -121,17 +121,11 @@ class ReversionBrokerReconciler:
         *,
         now_factory: Callable[[], datetime],
     ) -> bool:
-        """Process at most one configured ACK batch and one inventory page."""
+        """Validate one inventory page before draining one durable ACK batch."""
 
         cursor = self._store.begin_reconciliation(
             principal, owner, token, now, expires_at
         )
-        pending = self._store.pending_reconciliation_acknowledgements(
-            principal, token, now_factory(), self._ack_batch_limit
-        )
-        for tombstone in pending:
-            self._ack(principal, token, tombstone, now_factory())
-
         request = ReconciliationRequest(self._request_id_factory(), cursor)
         response = self._broker.reconcile(request)
         if type(response) is ReconciliationErrorResponse:
@@ -143,6 +137,11 @@ class ReversionBrokerReconciler:
             or response.request_id != request.request_id
         ):
             raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
+        pending = self._store.pending_reconciliation_acknowledgements(
+            principal, token, now_factory(), self._ack_batch_limit
+        )
+        for pending_tombstone in pending:
+            self._ack(principal, token, pending_tombstone, now_factory())
         tombstone = self._store.record_reconciliation_page(
             principal, token, response, now_factory()
         )

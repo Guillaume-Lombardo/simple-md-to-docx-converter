@@ -45,15 +45,6 @@ class ReversionWorker:
     def reconcile(self, token: UUID | None = None) -> None:
         """Reach the principal broker-inventory fixed point before queue work."""
 
-        if self._runtime.require_ready:
-            ready_request = ReadyRequest(self._runtime.request_id_factory(), 1)
-            ready_response = self._runtime.broker.request(ready_request)
-            if (
-                type(ready_response) is not ReadyResponse
-                or ready_response.request_id != ready_request.request_id
-                or not ready_response.ready
-            ):
-                raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
         now = self._runtime.clock()
         reconciliation_token = token or self._runtime.request_id_factory()
         self._runtime.reconciler.reconcile(
@@ -64,21 +55,13 @@ class ReversionWorker:
             now + timedelta(seconds=self._runtime.policy.recovery_lease_seconds),
             now_factory=self._runtime.clock,
         )
+        self._require_ready()
 
     def reconcile_step(self) -> bool:
         """Advance one bounded authenticated reconciliation quantum."""
 
-        if self._runtime.require_ready:
-            ready_request = ReadyRequest(self._runtime.request_id_factory(), 1)
-            ready_response = self._runtime.broker.request(ready_request)
-            if (
-                type(ready_response) is not ReadyResponse
-                or ready_response.request_id != ready_request.request_id
-                or not ready_response.ready
-            ):
-                raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
         now = self._runtime.clock()
-        return self._runtime.reconciler.reconcile_step(
+        completed = self._runtime.reconciler.reconcile_step(
             self._runtime.principal,
             f"{self._runtime.worker_id}-reconciler",
             self._reconciliation_token,
@@ -86,6 +69,23 @@ class ReversionWorker:
             now + timedelta(seconds=self._runtime.policy.recovery_lease_seconds),
             now_factory=self._runtime.clock,
         )
+        if completed:
+            self._require_ready()
+        return completed
+
+    def _require_ready(self) -> None:
+        """Require the broker readiness latch only after durable reconciliation."""
+
+        if not self._runtime.require_ready:
+            return
+        ready_request = ReadyRequest(self._runtime.request_id_factory(), 1)
+        ready_response = self._runtime.broker.request(ready_request)
+        if (
+            type(ready_response) is not ReadyResponse
+            or ready_response.request_id != ready_request.request_id
+            or not ready_response.ready
+        ):
+            raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
 
     def run_once(self) -> bool:
         """Run at most one exact reverse attempt after mandatory reconciliation."""

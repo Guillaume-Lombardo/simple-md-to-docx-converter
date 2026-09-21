@@ -15,6 +15,7 @@ from sqlalchemy import Engine, create_engine
 
 from markweave.auth.models import Role, User
 from markweave.broker.dispatch import BrokerDispatcher
+from markweave.broker.errors import BrokerError, BrokerErrorCategory
 from markweave.broker.fake_runtime import FakeIsolationRuntime, FakeRuntimeUnit
 from markweave.broker.inventory import SQLiteBrokerInventory
 from markweave.broker.models import (
@@ -22,11 +23,30 @@ from markweave.broker.models import (
     ManagedUnit,
     policy_specification_evidence,
 )
+from markweave.broker.protocol import (
+    AcknowledgeRequest,
+    BrokerRequest,
+    BrokerResponse,
+    CreateRequest,
+    CreateResponse,
+    ErrorResponse,
+    TerminateRequest,
+)
+from markweave.broker.reconciliation_protocol import (
+    ReconciliationRequest,
+    ReconciliationResult,
+)
 from markweave.broker.service import IsolationBrokerService
 from markweave.broker.unix_transport import (
     UnixBrokerClient,
     UnixBrokerServer,
     UnixTransportLimits,
+)
+from markweave.broker.workspace_protocol import (
+    WorkspaceCollectRequest,
+    WorkspaceResponse,
+    WorkspaceStageReceipt,
+    WorkspaceStageRequest,
 )
 from markweave.http.components import build_components
 from markweave.jobs.models import (
@@ -43,7 +63,10 @@ from markweave.persistence.schema import Base
 from markweave.persistence.sql import SqlUserRepository
 from markweave.reversion_jobs.models import ReversionJob, ReversionJobState
 from markweave.reversion_jobs.reconciliation import ReversionBrokerReconciler
-from markweave.reversion_jobs.runtime import ReversionWorkerRuntime
+from markweave.reversion_jobs.runtime import (
+    ReversionBrokerClient,
+    ReversionWorkerRuntime,
+)
 from markweave.reversion_jobs.worker import ReversionWorker
 from markweave.reversions.models import ReverseAttemptSuccess, ReverseOutputMode
 from markweave.storage import FilesystemObjectStore, ObjectKey, ObjectScope, ObjectStore
@@ -131,6 +154,31 @@ class _Until:
         return self.is_set()
 
 
+class _LoseOneAcknowledgement:
+    """Keep one proof locally durable while the real Unix broker remains live."""
+
+    def __init__(self, client: UnixBrokerClient) -> None:
+        self._client = client
+        self._lost = False
+
+    def request(self, request: BrokerRequest) -> BrokerResponse:
+        if type(request) is AcknowledgeRequest and not self._lost:
+            self._lost = True
+            raise BrokerError(BrokerErrorCategory.RECONCILIATION_INCOMPLETE)
+        return self._client.request(request)
+
+    def reconcile(self, request: ReconciliationRequest) -> ReconciliationResult:
+        return self._client.reconcile(request)
+
+    def stage_workspace(
+        self, request: WorkspaceStageRequest
+    ) -> WorkspaceStageReceipt | WorkspaceResponse:
+        return self._client.stage_workspace(request)
+
+    def collect_workspace(self, request: WorkspaceCollectRequest) -> WorkspaceResponse:
+        return self._client.collect_workspace(request)
+
+
 def _repository() -> tuple[SqlReversionJobRepository, User, Engine]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -160,7 +208,11 @@ def _queue(
     return repository.activate_source(queued.id, NOW)
 
 
-def _server(tmp_path: Path) -> tuple[UnixBrokerServer, UnixBrokerClient]:
+def _server(
+    tmp_path: Path,
+) -> tuple[
+    UnixBrokerServer, UnixBrokerClient, IsolationBrokerService, _SuccessfulRuntime
+]:
     parent = tmp_path / "broker"
     parent.mkdir(mode=0o700)
     parent.chmod(0o700)
@@ -170,9 +222,10 @@ def _server(tmp_path: Path) -> tuple[UnixBrokerServer, UnixBrokerClient]:
         b"integration-inventory-key-32bytes",
         max_records=32,
     )
+    runtime = _SuccessfulRuntime()
     service = IsolationBrokerService(
         inventory,
-        _SuccessfulRuntime(),
+        runtime,
         BROKER_POLICY,
         max_discovered_units=32,
         unit_id_factory=uuid4,
@@ -192,13 +245,13 @@ def _server(tmp_path: Path) -> tuple[UnixBrokerServer, UnixBrokerClient]:
         operation_timeout_seconds=2,
         workspace_limits=BROKER_POLICY.channel_limits,
     )
-    return server, client
+    return server, client, service, runtime
 
 
 def _runtime(
     repository: SqlReversionJobRepository,
     objects: FilesystemObjectStore,
-    client: UnixBrokerClient,
+    client: ReversionBrokerClient,
     clock: list[datetime],
 ) -> ReversionWorkerRuntime:
     reconciler = ReversionBrokerReconciler(
@@ -228,7 +281,7 @@ def test_real_unix_supervisor_publishes_and_retires_exact_proof(
 ) -> None:
     repository, owner, engine = _repository()
     objects = FilesystemObjectStore(tmp_path / "objects")
-    server, client = _server(tmp_path)
+    server, client, _service, _broker_runtime = _server(tmp_path)
     clock = [NOW]
     runtime = _runtime(repository, objects, client, clock)
     job = _queue(repository, objects, owner)
@@ -246,7 +299,7 @@ def test_real_unix_supervisor_publishes_and_retires_exact_proof(
 def test_real_reconciler_unblocks_crash_before_create_replay(tmp_path: Path) -> None:
     repository, owner, engine = _repository()
     objects = FilesystemObjectStore(tmp_path / "objects")
-    server, client = _server(tmp_path)
+    server, client, _service, _broker_runtime = _server(tmp_path)
     clock = [NOW]
     runtime = _runtime(repository, objects, client, clock)
     job = _queue(repository, objects, owner)
@@ -279,10 +332,83 @@ def test_real_reconciler_unblocks_crash_before_create_replay(tmp_path: Path) -> 
         engine.dispose()
 
 
+def test_real_unix_reconciliation_restores_ready_before_draining_durable_ack(
+    tmp_path: Path,
+) -> None:
+    repository, owner, engine = _repository()
+    objects = FilesystemObjectStore(tmp_path / "objects")
+    server, client, service, broker_runtime = _server(tmp_path)
+    clock = [NOW]
+    acknowledged_job = _queue(repository, objects, owner)
+    losing_runtime = _runtime(
+        repository, objects, _LoseOneAcknowledgement(client), clock
+    )
+    recovery_runtime = _runtime(repository, objects, client, clock)
+    try:
+        with server:
+            with pytest.raises(BrokerError):
+                ReversionWorker(losing_runtime).run_once()
+            first_attempt = repository.list_attempts(acknowledged_job.id)[0]
+            assert first_attempt.proof_acknowledged_at is None
+
+            faulted_job = _queue(repository, objects, owner)
+            claimed = repository.claim("faulted-worker", PRINCIPAL, clock[0], LEASE_END)
+            assert claimed is not None and claimed.id == faulted_job.id
+            assert (
+                claimed.current_attempt_id is not None
+                and claimed.lease_token is not None
+            )
+            repository.reserve_create_intent(
+                claimed.id,
+                claimed.current_attempt_id,
+                "faulted-worker",
+                claimed.lease_token,
+                BROKER_POLICY.revision,
+                policy_specification_evidence(BROKER_POLICY),
+                clock[0],
+            )
+            faulted_attempt = repository.get_attempt(claimed.current_attempt_id)
+            assert faulted_attempt is not None
+            broker_runtime.inject_fault("hard_terminate", point="after")
+            created = client.request(
+                CreateRequest(
+                    uuid4(),
+                    faulted_attempt.create_sequence,
+                    faulted_attempt.attempt_id,
+                )
+            )
+            assert type(created) is CreateResponse
+            failed = client.request(
+                TerminateRequest(
+                    uuid4(),
+                    faulted_attempt.create_sequence,
+                    faulted_attempt.attempt_id,
+                    created.unit_id,
+                )
+            )
+            assert (
+                type(failed) is ErrorResponse
+                and failed.category is BrokerErrorCategory.TERMINATION_UNPROVEN
+            )
+            assert not service.ready
+
+            clock[0] = LEASE_END + timedelta(seconds=1)
+            assert ReversionWorker(recovery_runtime).recover() == 1
+
+            restored_attempt = repository.get_attempt(first_attempt.attempt_id)
+            assert restored_attempt is not None
+            assert restored_attempt.proof_acknowledged_at == clock[0]
+            assert service.ready
+            recovered = repository.get_internal(faulted_job.id)
+            assert recovered is not None and recovered.state is ReversionJobState.QUEUED
+    finally:
+        engine.dispose()
+
+
 def test_production_components_keep_forward_live_across_unix_broker_reconnect(
     tmp_path: Path,
 ) -> None:
-    server, _client = _server(tmp_path)
+    server, _client, _service, _broker_runtime = _server(tmp_path)
     settings = _settings(
         tmp_path,
         reversion_broker_socket_path=(tmp_path / "broker" / "broker.sock").resolve(),
@@ -355,19 +481,21 @@ def test_production_components_keep_forward_live_across_unix_broker_reconnect(
         )
 
     try:
+        clock = [NOW]
         unavailable_loop = components.build_external_worker_loop(
             worker_id="production-worker",
             processor=_ResultProcessor(events),
-            clock=lambda: NOW,
+            clock=lambda: clock[0],
         )
         unavailable_loop.run(_Until(forward_finished_with_broker_fault))
         assert events == ["forward"]
 
         with server:
+            clock[0] += timedelta(seconds=POLICY.recovery_lease_seconds + 1)
             connected_loop = components.build_external_worker_loop(
                 worker_id="production-worker",
                 processor=_ResultProcessor(events),
-                clock=lambda: NOW,
+                clock=lambda: clock[0],
             )
             connected_loop.run(_Until(reverse_finished))
         assert reverse_finished()
