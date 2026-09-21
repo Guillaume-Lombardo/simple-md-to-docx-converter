@@ -133,6 +133,13 @@ export const vJobOutput = v.picklist([
 ]);
 
 /**
+ * JobOutputFamily
+ *
+ * Stable conversion-list grouping shared by document and presentation UIs.
+ */
+export const vJobOutputFamily = v.picklist(['document', 'presentation']);
+
+/**
  * LoginRequest
  *
  * JSON local-login request.
@@ -687,7 +694,9 @@ export const vGetConversionOptionsApiV1ConversionOptionsGetResponse = vConversio
 
 export const vListConversionsApiV1ConversionsGetQuery = v.object({
     offset: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50)
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+    output_family: v.nullish(vJobOutputFamily),
+    expired: v.nullish(v.boolean())
 });
 
 /**

@@ -13,7 +13,10 @@ from markweave.jobs.errors import (
 )
 from markweave.jobs.models import (
     ConversionJob,
+    JobOutput,
+    JobOutputFamily,
     JobPage,
+    JobState,
 )
 from markweave.persistence.jobs.common import _job, _SqlJobStore
 from markweave.persistence.schema import (
@@ -32,18 +35,45 @@ class _JobQueryRepository(_SqlJobStore):
         except SQLAlchemyError:
             raise JobRepositoryError from None
 
-    def list_owner(self, owner_id: UUID, *, offset: int, limit: int) -> JobPage:
+    def list_owner(
+        self,
+        owner_id: UUID,
+        *,
+        offset: int,
+        limit: int,
+        output_family: JobOutputFamily | None = None,
+        expired: bool | None = None,
+    ) -> JobPage:
         try:
             with DatabaseSession(self._engine) as database:
                 owner = str(owner_id)
+                conditions = [ConversionJobRow.owner_id == owner]
+                if output_family is not None:
+                    outputs = (
+                        (JobOutput.PPTX.value, JobOutput.PPTX_BUNDLE.value)
+                        if output_family is JobOutputFamily.PRESENTATION
+                        else (
+                            JobOutput.DOCX.value,
+                            JobOutput.PDF.value,
+                            JobOutput.BOTH.value,
+                        )
+                    )
+                    conditions.append(ConversionJobRow.output.in_(outputs))
+                if expired is not None:
+                    expiration_condition = (
+                        ConversionJobRow.state == JobState.EXPIRED.value
+                    )
+                    conditions.append(
+                        expiration_condition if expired else ~expiration_condition
+                    )
                 total = database.scalar(
                     select(func.count())
                     .select_from(ConversionJobRow)
-                    .where(ConversionJobRow.owner_id == owner)
+                    .where(*conditions)
                 )
                 rows = database.scalars(
                     select(ConversionJobRow)
-                    .where(ConversionJobRow.owner_id == owner)
+                    .where(*conditions)
                     .order_by(
                         ConversionJobRow.created_at.desc(),
                         ConversionJobRow.id.desc(),

@@ -63,6 +63,134 @@ def submit(  # noqa: PLR0913 - explicit HTTP form helper
     )
 
 
+def submit_default(
+    client: TestClient, csrf_token: str, *, filename: str, output: str
+) -> Any:
+    return client.post(
+        "/api/v1/conversions",
+        headers={"X-CSRF-Token": csrf_token},
+        files={"source": (filename, b"# History", "text/markdown")},
+        data={"output": output},
+    )
+
+
+@pytest.mark.functional
+def test_conversion_history_filters_before_pagination_and_remains_owner_scoped(
+    tmp_path: Path,
+) -> None:
+    admin_password = "admin-" + "password"
+    settings = Settings(
+        **template_settings(job_active_limit_per_user=10),
+        initial_admin_username="admin",
+        initial_admin_password=admin_password,
+        argon2_memory_cost=8,
+        argon2_time_cost=1,
+        storage_profile="standalone",
+        standalone_data_directory=tmp_path,
+        conversion_upload_max_bytes=64,
+        conversion_request_max_bytes=1_024,
+        conversion_retry_after_seconds=2,
+        job_result_retention_seconds=3_600,
+    )
+    app = create_app(settings, scanner=TrustingUploadScanner())
+    with (
+        managed_database_engine(standalone_database_url(tmp_path)) as auxiliary_engine,
+        TestClient(app, base_url="https://testserver") as client,
+    ):
+        admin = login(client, "admin", admin_password)
+        admin_csrf = str(admin["csrf_token"])
+        for username in ("alice", "bob"):
+            created = client.post(
+                "/api/v1/admin/users",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"username": username, "password": f"{username}-password"},
+            )
+            assert created.status_code == 201
+
+        alice = login(client, "alice", "alice-password")
+        alice_id = UUID(alice["user"]["id"])
+        alice_csrf = str(alice["csrf_token"])
+        document_old = submit_default(
+            client, alice_csrf, filename="old.md", output="docx"
+        )
+        presentation_expired = submit_default(
+            client, alice_csrf, filename="expired.md", output="pptx"
+        )
+        document_new = submit_default(
+            client, alice_csrf, filename="new.md", output="pdf"
+        )
+        presentation_new = submit_default(
+            client, alice_csrf, filename="slides.md", output="pptx-bundle"
+        )
+        assert all(
+            response.status_code == 202
+            for response in (
+                document_old,
+                presentation_expired,
+                document_new,
+                presentation_new,
+            )
+        )
+        repository = SqlJobRepository(auxiliary_engine)
+        now = datetime.now(UTC)
+        expired_id = UUID(presentation_expired.json()["id"])
+        assert repository.request_cancel(expired_id, alice_id, now, now) is not None
+        expired = repository.expire_terminal(
+            "history-test", now + timedelta(seconds=1), now + timedelta(seconds=31), 10
+        )
+        assert expired_id in {candidate.job_id for candidate in expired}
+
+        page = client.get(
+            "/api/v1/conversions",
+            params={
+                "output_family": "document",
+                "expired": "false",
+                "offset": 1,
+                "limit": 1,
+            },
+        )
+        assert page.status_code == 200
+        assert page.json()["total"] == 2
+        assert [item["id"] for item in page.json()["items"]] == [
+            document_old.json()["id"]
+        ]
+        presentation_page = client.get(
+            "/api/v1/conversions?output_family=presentation&expired=false&limit=10"
+        )
+        assert presentation_page.status_code == 200
+        assert presentation_page.json()["total"] == 1
+        assert [item["id"] for item in presentation_page.json()["items"]] == [
+            presentation_new.json()["id"]
+        ]
+        expired_page = client.get(
+            "/api/v1/conversions?output_family=presentation&expired=true"
+        )
+        assert expired_page.status_code == 200
+        assert expired_page.json()["total"] == 1
+        assert expired_page.json()["items"][0]["id"] == str(expired_id)
+        assert client.get("/api/v1/conversions").json()["total"] == 4
+        assert (
+            client.get("/api/v1/conversions?output_family=spreadsheet").status_code
+            == 422
+        )
+        assert client.get("/api/v1/conversions?expired=sometimes").status_code == 422
+
+        bob = login(client, "bob", "bob-password")
+        bob_job = submit_default(
+            client, str(bob["csrf_token"]), filename="bob.md", output="pptx"
+        )
+        assert bob_job.status_code == 202
+        bob_page = client.get(
+            "/api/v1/conversions?output_family=presentation&expired=false"
+        ).json()
+        assert bob_page["total"] == 1
+        assert bob_page["items"][0]["id"] == bob_job.json()["id"]
+
+        login(client, "admin", admin_password)
+        admin_page = client.get("/api/v1/conversions").json()
+        assert admin_page["total"] == 0
+
+
 @pytest.mark.functional
 def test_conversion_api_idempotency_authorization_cancellation_and_result(  # noqa: PLR0915
     tmp_path: Path,

@@ -31,6 +31,7 @@ from markweave.http.schemas import (
 from markweave.jobs.errors import JobRequestError
 from markweave.jobs.models import (
     JobOutput,
+    JobOutputFamily,
     JobPage,
     JobRequest,
     source_kind_for_filename,
@@ -197,8 +198,22 @@ def build_router(dependencies: HttpDependencies) -> APIRouter:
         actor: Annotated[User, Depends(dependencies.current_user)],
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        output_family: Annotated[
+            JobOutputFamily | None,
+            Query(description="Restrict results to document or presentation outputs."),
+        ] = None,
+        expired: Annotated[
+            bool | None,
+            Query(description="Restrict results by whether the job has expired."),
+        ] = None,
     ) -> ConversionPageResponse:
-        page: JobPage = components.jobs.list_owner(actor.id, offset=offset, limit=limit)
+        page: JobPage = components.jobs.list_owner(
+            actor.id,
+            offset=offset,
+            limit=limit,
+            output_family=output_family,
+            expired=expired,
+        )
         return ConversionPageResponse(
             items=tuple(conversion_response(job) for job in page.items),
             total=page.total,
