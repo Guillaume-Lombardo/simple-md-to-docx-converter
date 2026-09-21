@@ -90,3 +90,9 @@ upstream project.
 Markweave's documented rootless Podman and local k3s security properties are
 validated separately. OpenShift compatibility must not be assumed: the required
 target-cluster proof remains deferred.
+
+## Related guidance
+
+Use the [support policy](SUPPORT.md) for non-security help, the [changelog](CHANGELOG.md) to
+identify released security changes, and the [upgrade guide](docs/upgrading.md) to move to the
+supported release. Publication evidence is described in the [release process](docs/releasing.md).
