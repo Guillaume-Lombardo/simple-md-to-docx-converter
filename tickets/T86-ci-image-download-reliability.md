@@ -2,7 +2,7 @@
 ticket: T86
 linear_id: G1L-585
 linear_url: https://linear.app/g1lom/issue/G1L-585/t86-improve-ci-image-downloads-and-verify-dependency-updates
-status: Backlog
+status: In Progress
 priority: High
 project: Markdown to DOCX and PDF Converter
 ---
@@ -33,6 +33,9 @@ Own image-acquisition reliability in CI/container harnesses and focused policy t
 ## Progress
 
 * 2026-09-21: Created from user priority order 4. PR #248 at 8e8bdbde59c03a963e9b0f789120fc69d63c706f failed distributed E2E with unexpected EOF downloading a UBI9 Python 3.14 image blob from Quay (exit 125). Other matrix jobs passed; this observation does not yet establish dependency compatibility.
+* 2026-09-21: Linear moved to In Progress. The exact failing command was the unguarded `podman pull --quiet "$base_image"` in `scripts/e2e/run.sh`, after the distributed E2E workflow workload had completed. Podman exited 125 while reading Quay's `fbe94d...` UBI9 Python 3.14 layer from the upstream S3 URL with `unexpected EOF`; the other 15 CI jobs passed. This is an infrastructure transport failure, not a dependency or test regression.
+* 2026-09-21: Reviewed PR #248's only three updates: `boto3` 1.43.95 to 1.43.97, `hatchling` 1.32.0 to 1.32.3, and `ty` 0.0.81 to 0.0.82. `uv lock --check` passes and the complete PR matrix passed except for the isolated Quay transport failure. The locked Boto3 release supports Python 3.14; the Hatchling release is not yanked and has PyPI attestation; Ty publishes an immutable signed release with attestations. No other open dependency PR exists. Dependabot security alerts are disabled, so alert review could not be performed without administrative configuration.
+* 2026-09-21: Added a three-attempt, two-second, immutable-image acquisition helper for final-image CI and locally built rootless E2E. It retries only classified transport failures, never prints captured upstream URLs, rejects a permanent or integrity error before retrying, and rechecks the exact digest after a successful pull. Focused policy tests cover transient success with a presigned-URL-shaped EOF fixture, retry exhaustion, and permanent/integrity no-retry behavior. Formatting, lint, type, lock, shell-syntax, and focused policy checks pass. The exact PR #248 distributed E2E rerun remains pending coordinated CI capacity.
 
 ## Synchronization
 

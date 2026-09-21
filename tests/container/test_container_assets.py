@@ -427,14 +427,9 @@ def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> No
     digest = "194df4e35e0e5467e1b57266f4d61f821e1b1f567135f074d23066d3604ae653"
     assert f"sha256:{digest}" in containerfile
     assert f"readonly base_digest=sha256:{digest}" in script
-    pull = 'podman pull --quiet "$base_image"'
-    verification = (
-        'test "$(podman image inspect "$base_image" --format \'{{.Digest}}\')" '
-        '= "$base_digest"'
-    )
+    pull = 'bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"'
     build = 'bash scripts/container/build.sh "$image"'
-    assert verification in script
-    assert script.index(pull) < script.index(verification) < script.index(build)
+    assert script.index(pull) < script.index(build)
 
 
 def test_final_image_e2e_accepts_only_an_immutable_published_image_override() -> None:
