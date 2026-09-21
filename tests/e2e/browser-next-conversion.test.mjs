@@ -202,10 +202,18 @@ test(
       const listing = await api(
         alicePage,
         "GET",
-        "/api/v1/conversions?limit=10",
+        "/api/v1/conversions?limit=10&output_family=document&expired=false",
       );
       assert.equal(listing.status, 200);
       assert.equal(listing.body.items.length >= 1, true);
+      assert.equal(
+        listing.body.items.every(
+          (item) =>
+            item.state !== "expired" &&
+            !["pptx", "pptx-bundle"].includes(item.output),
+        ),
+        true,
+      );
       const completed = listing.body.items.find(
         (item) => item.id === submittedJob.id,
       );

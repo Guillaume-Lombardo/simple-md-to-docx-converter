@@ -10,7 +10,13 @@ import pytest
 from pytest_mock import MockerFixture
 
 from markweave.jobs.errors import JobConflictError, JobNotFoundError
-from markweave.jobs.models import JobOutput, JobRequest, JobState, JobStep
+from markweave.jobs.models import (
+    JobOutput,
+    JobOutputFamily,
+    JobRequest,
+    JobState,
+    JobStep,
+)
 from markweave.jobs.ports import JobRepository
 from markweave.jobs.service import (
     MAX_IDEMPOTENCY_KEY_CHARACTERS,
@@ -288,7 +294,21 @@ def test_visibility_cancellation_pagination_and_idempotency_validation(
         instance.list_owner(visible.owner_id, offset=-1, limit=0)
     repository.list_owner.return_value = mocker.sentinel.page
     assert (
-        instance.list_owner(visible.owner_id, offset=0, limit=1) is mocker.sentinel.page
+        instance.list_owner(
+            visible.owner_id,
+            offset=0,
+            limit=1,
+            output_family=JobOutputFamily.PRESENTATION,
+            expired=False,
+        )
+        is mocker.sentinel.page
+    )
+    repository.list_owner.assert_called_once_with(
+        visible.owner_id,
+        offset=0,
+        limit=1,
+        output_family=JobOutputFamily.PRESENTATION,
+        expired=False,
     )
     with pytest.raises(ValueError):
         instance.submit(
