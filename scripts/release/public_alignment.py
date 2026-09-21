@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
@@ -59,9 +60,12 @@ MAX_TOKEN_BYTES = 16_384
 MAX_REGISTRY_ERROR_BYTES = 4_096
 MAX_REGISTRY_USERNAME_BYTES = 256
 HTTP_TIMEOUT_SECONDS = 10.0
+HTTP_RETRY_ATTEMPTS = 3
+HTTP_RETRY_DELAY_SECONDS = 1.0
 HTTP_OK = 200
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
+TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 OCI_SCHEMA_VERSION = 2
 CUTOVER_FRONTEND_ROLES = ("frontend", "router")
 
@@ -108,6 +112,36 @@ class UrlLibTransport:
         self._opener = urllib.request.build_opener(_TrustedRedirect)
 
     def request(self, url: str, *, headers: Mapping[str, str]) -> HttpResponse:
+        for attempt in range(HTTP_RETRY_ATTEMPTS):
+            try:
+                response = self._request_once(url, headers=headers)
+            except (OSError, urllib.error.URLError) as error:
+                if (
+                    self._is_transient_network_error(error)
+                    and attempt + 1 < HTTP_RETRY_ATTEMPTS
+                ):
+                    sleep(HTTP_RETRY_DELAY_SECONDS)
+                    continue
+                raise AlignmentError(
+                    f"public endpoint request failed: {url}"
+                ) from error
+            if (
+                response.status in TRANSIENT_HTTP_STATUSES
+                and attempt + 1 < HTTP_RETRY_ATTEMPTS
+            ):
+                sleep(HTTP_RETRY_DELAY_SECONDS)
+                continue
+            return response
+        raise AssertionError("bounded public endpoint retry loop did not return")
+
+    @staticmethod
+    def _is_transient_network_error(error: OSError | urllib.error.URLError) -> bool:
+        return isinstance(error, (TimeoutError, ConnectionResetError)) or (
+            isinstance(error, urllib.error.URLError)
+            and isinstance(error.reason, (TimeoutError, ConnectionResetError))
+        )
+
+    def _request_once(self, url: str, *, headers: Mapping[str, str]) -> HttpResponse:
         if not url.startswith("https://"):
             raise AlignmentError("public release checks require HTTPS")
         request = urllib.request.Request(  # noqa: S310 - HTTPS checked above
@@ -128,7 +162,10 @@ class UrlLibTransport:
                     body=body,
                 )
         except urllib.error.HTTPError as error:
-            body = error.read(self._maximum_bytes + 1)
+            try:
+                body = error.read(self._maximum_bytes + 1)
+            finally:
+                error.close()
             if len(body) > self._maximum_bytes:
                 raise AlignmentError(
                     "public endpoint response exceeds the size limit"
@@ -140,8 +177,6 @@ class UrlLibTransport:
                 },
                 body=body,
             )
-        except (OSError, urllib.error.URLError) as error:
-            raise AlignmentError(f"public endpoint request failed: {url}") from error
 
 
 @dataclass(frozen=True)

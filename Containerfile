@@ -30,6 +30,7 @@ RUN install-md-converter-fonts \
     && rm -rf /tmp/md-converter-fonts
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 \
         "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-amd64.tar.gz" \
         --output /tmp/pandoc.tar.gz \
     && echo "${PANDOC_SHA256}  /tmp/pandoc.tar.gz" | sha256sum --check --strict \
@@ -37,6 +38,7 @@ RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     && rm /tmp/pandoc.tar.gz
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 \
         "https://dl.google.com/linux/linux_signing_key.pub" \
         --output /tmp/google-linux-signing-key.pub \
     && echo "${GOOGLE_RPM_KEY_SHA256}  /tmp/google-linux-signing-key.pub" \
@@ -44,6 +46,7 @@ RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
     && rpm --import /tmp/google-linux-signing-key.pub \
     && rm /tmp/google-linux-signing-key.pub \
     && curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 \
         "https://dl.google.com/linux/chrome/rpm/stable/x86_64/google-chrome-stable-${CHROME_VERSION}.x86_64.rpm" \
         --output /tmp/google-chrome.rpm \
     && echo "${CHROME_SHA256}  /tmp/google-chrome.rpm" | sha256sum --check --strict \
@@ -75,6 +78,7 @@ RUN npm ci --omit=dev --ignore-scripts \
     && rm -f /usr/bin/npm /usr/bin/npx
 
 RUN curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
         --output /tmp/uv.tar.gz \
     && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \
@@ -104,8 +108,8 @@ COPY --chmod=0444 toolchain/document-engines/fonts/manifest.json /opt/md-convert
 COPY --chmod=0444 toolchain/document-engines/THIRD_PARTY_NOTICES.md /opt/md-converter/THIRD_PARTY_NOTICES.md
 COPY --chmod=0444 toolchain/document-engines/LICENSE.containers-common /opt/md-converter/LICENSE.chrome-seccomp
 
-# Reviewed UBI Mesa 25.2.7-5.el9_8 inventory; see the T76 release record.
-ARG RPM_INVENTORY_SHA256=5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef
+# Reviewed UBI inventory: Curl 7.76.1-40.el9_8.7 and OpenSSL 3.5.8-1.el9_8.
+ARG RPM_INVENTORY_SHA256=d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292
 RUN mkdir -p /data /work /tmp/md-converter \
     && chgrp -R 0 /data /work /tmp/md-converter \
     && chmod -R g=u /data /work /tmp/md-converter \
