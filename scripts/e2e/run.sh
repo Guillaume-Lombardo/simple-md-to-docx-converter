@@ -574,6 +574,7 @@ run_reverse_lifecycle() {
   local scenario="$1"
   local frontend_outage="${2:-false}"
   local broker_exit=0
+  local frontend_running=""
   local lifecycle_url="http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
   local stem="reverse-$scenario"
   local state="$browser_session_directory/$stem.json"
@@ -591,7 +592,8 @@ run_reverse_lifecycle() {
     wait_for_url "$lifecycle_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
   else
     runtime="$worker_one_name"
-    podman stop --time 15 "$runtime" >/dev/null
+    # Preserve the reconciliation lease during the admission-only hold.
+    podman pause "$runtime" >/dev/null
   fi
   uv run python -m tests.e2e.reverse_lifecycle_workflow prepare \
     --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
@@ -608,7 +610,7 @@ run_reverse_lifecycle() {
     --state "$state" --binding "$binding" --barrier "$barrier" &
   reverse_pause_pid=$!
   wait_reverse_marker "${barrier%.json}.ready" "$reverse_pause_pid"
-  if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman start "$runtime" >/dev/null; fi
+  if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman unpause "$runtime" >/dev/null; fi
   wait_reverse_marker "$barrier" "$reverse_pause_pid"
   wait "$reverse_diagnostics_pid"
   reverse_diagnostics_pid=""
@@ -617,7 +619,9 @@ run_reverse_lifecycle() {
     test "$scenario" = broker-restart
     # Kill only the frontend while the exact attempt is held; API/router remain live.
     e2e_podman kill --signal KILL "$frontend_name" >/dev/null
-    test "$(podman inspect "$frontend_name" --format '{{.State.Running}}')" = false
+    frontend_running="$(podman inspect "$frontend_name" --format '{{.State.Running}}')"
+    echo "Reverse fault injection frontend running after KILL: $frontend_running."
+    test "$frontend_running" = false
   fi
   if [[ "$scenario" == worker-restart ]]; then
     podman kill --signal KILL "$runtime" >/dev/null
@@ -626,9 +630,11 @@ run_reverse_lifecycle() {
     uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \
       --parent-pid "$broker_pid" --signal KILL
     wait "$broker_pid" || broker_exit=$?
+    echo "Reverse fault injection broker supervisor exit: $broker_exit."
     test "$broker_exit" = 137
     broker_pid=""
   fi
+  echo "Reverse fault injection $scenario verified; releasing the bound attempt."
   touch "${barrier%.json}.release"
   wait "$reverse_pause_pid"
   reverse_pause_pid=""

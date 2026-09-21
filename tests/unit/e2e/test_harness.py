@@ -996,6 +996,15 @@ def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> 
         'podman exec "$application_name"'
     )
     assert 'runtime="$worker_one_name"' in lifecycle
+    assert lifecycle.index('podman pause "$runtime"') < lifecycle.index(
+        "reverse_lifecycle_workflow prepare"
+    )
+    assert (
+        lifecycle.index('wait_reverse_marker "${barrier%.json}.ready"')
+        < lifecycle.index('podman unpause "$runtime"')
+        < lifecycle.index('wait_reverse_marker "$barrier"')
+    )
+    assert 'podman stop --time 15 "$runtime"' not in lifecycle
     assert "md_converter_reversion_broker_ready 0" in lifecycle
     cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
     assert '"$reverse_pause_pid" "$reverse_diagnostics_pid"' in cleanup

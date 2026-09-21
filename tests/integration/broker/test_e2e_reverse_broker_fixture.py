@@ -64,7 +64,10 @@ def test_e2e_broker_fixture_preserves_private_material_and_fixed_policy(
 
 
 @pytest.mark.integration
-def test_uv_child_is_found_across_supervisor_threads(tmp_path: Path) -> None:
+@pytest.mark.parametrize("crash", [False, True])
+def test_uv_child_is_found_across_supervisor_threads(
+    tmp_path: Path, crash: bool
+) -> None:
     ready = tmp_path / "child.pid"
     program = (
         "import os,time;from pathlib import Path;Path("
@@ -86,6 +89,14 @@ def test_uv_child_is_found_across_supervisor_threads(tmp_path: Path) -> None:
         child = int(ready.read_text())
         assert _process_children(process.pid) == {child}
         assert _process_argv(child, parent=process.pid)[-2:] == ["-c", program]
+        if crash:
+            descriptor = os.pidfd_open(child)
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            finally:
+                os.close(descriptor)
+            assert process.wait(timeout=5) == 137
+            assert not Path(f"/proc/{child}").exists()
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
