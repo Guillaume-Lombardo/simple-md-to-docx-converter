@@ -42,7 +42,14 @@ from markweave.jobs.errors import (
     JobQueueCapacityExceededError,
     JobUserQuotaExceededError,
 )
-from markweave.jobs.models import JobOutput, JobPage, JobState, JobStep, SourceKind
+from markweave.jobs.models import (
+    JobOutput,
+    JobOutputFamily,
+    JobPage,
+    JobState,
+    JobStep,
+    SourceKind,
+)
 from markweave.jobs.runner import EmbeddedWorker
 from markweave.jobs.service import JobService
 from markweave.malware import (
@@ -1175,6 +1182,19 @@ def test_conversion_http_adapter_delegates_all_safe_routes(
         assert created.status_code == 202
         assert created.headers["Retry-After"] == "1"
         assert client.get("/api/v1/conversions").json()["total"] == 1
+        assert (
+            client.get(
+                "/api/v1/conversions?output_family=presentation&expired=false"
+            ).status_code
+            == 200
+        )
+        jobs.list_owner.assert_called_with(
+            admin.id,
+            offset=0,
+            limit=50,
+            output_family=JobOutputFamily.PRESENTATION,
+            expired=False,
+        )
         assert client.get(f"/api/v1/conversions/{queued.id}").status_code == 200
         assert (
             client.delete(

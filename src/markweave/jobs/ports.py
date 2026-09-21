@@ -11,6 +11,7 @@ from markweave.jobs.models import (
     ConversionJob,
     ExpiredJobObjects,
     JobFailure,
+    JobOutputFamily,
     JobPage,
     JobProcessResult,
     JobStep,
@@ -42,7 +43,15 @@ class JobQueryRepository(Protocol):
 
     def get(self, job_id: UUID) -> ConversionJob | None: ...
 
-    def list_owner(self, owner_id: UUID, *, offset: int, limit: int) -> JobPage: ...
+    def list_owner(
+        self,
+        owner_id: UUID,
+        *,
+        offset: int,
+        limit: int,
+        output_family: JobOutputFamily | None = None,
+        expired: bool | None = None,
+    ) -> JobPage: ...
 
 
 class JobTerminalRepository(Protocol):

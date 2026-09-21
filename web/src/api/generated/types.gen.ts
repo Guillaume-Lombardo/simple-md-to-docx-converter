@@ -406,6 +406,13 @@ export type IdleSessionPolicyUpdateRequest = {
 export type JobOutput = 'docx' | 'pptx' | 'pdf' | 'both' | 'pptx-bundle';
 
 /**
+ * JobOutputFamily
+ *
+ * Stable conversion-list grouping shared by document and presentation UIs.
+ */
+export type JobOutputFamily = 'document' | 'presentation';
+
+/**
  * LoginRequest
  *
  * JSON local-login request.
@@ -1435,6 +1442,18 @@ export type ListConversionsApiV1ConversionsGetData = {
          * Limit
          */
         limit?: number;
+        /**
+         * Output Family
+         *
+         * Restrict results to document or presentation outputs.
+         */
+        output_family?: JobOutputFamily | null;
+        /**
+         * Expired
+         *
+         * Restrict results by whether the job has expired.
+         */
+        expired?: boolean | null;
     };
     url: '/api/v1/conversions';
 };

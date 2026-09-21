@@ -46,8 +46,12 @@ conflict. A successful new submission returns `202 Accepted`, a `Location` heade
 The response `template_mode` is `pandoc-default` or `versioned`; template identifiers are `null` in
 default mode.
 
-Use `GET /api/v1/conversions` for the current user's paginated list and
-`GET /api/v1/conversions/{job_id}` for one job. `DELETE` on the job requests cancellation.
+Use `GET /api/v1/conversions` for the current user's paginated list. The optional
+`output_family=document|presentation` filter groups DOCX/PDF/both results separately from
+PPTX/PPTX-bundle results. The optional `expired=true|false` filter selects expired jobs or excludes
+them. Filters apply before `offset` and `limit`, and `total` counts only matching jobs. Omitting both
+filters preserves the complete owner-scoped history. Use `GET /api/v1/conversions/{job_id}` for one
+job. `DELETE` on the job requests cancellation.
 Completed output is available from `/result`; `/result/manifest` returns its traceability manifest.
 The result download filename preserves the uploaded source stem and uses `.docx`, `.pdf`, or `.zip`
 for the requested output. Jobs without persisted source metadata use `conversion-<job-id>` as the

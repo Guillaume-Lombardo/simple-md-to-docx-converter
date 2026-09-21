@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from markweave.jobs.errors import JobConflictError, JobNotFoundError
 from markweave.jobs.models import (
     ConversionJob,
+    JobOutputFamily,
     JobPage,
     JobRequest,
     JobState,
@@ -170,10 +171,24 @@ class JobService:
             raise JobNotFoundError("Conversion job was not found")
         return job
 
-    def list_owner(self, owner_id: UUID, *, offset: int, limit: int) -> JobPage:
+    def list_owner(
+        self,
+        owner_id: UUID,
+        *,
+        offset: int,
+        limit: int,
+        output_family: JobOutputFamily | None = None,
+        expired: bool | None = None,
+    ) -> JobPage:
         if offset < 0 or limit <= 0:
             raise ValueError("Job pagination values are invalid")
-        return self._repository.list_owner(owner_id, offset=offset, limit=limit)
+        return self._repository.list_owner(
+            owner_id,
+            offset=offset,
+            limit=limit,
+            output_family=output_family,
+            expired=expired,
+        )
 
     def cancel(
         self,

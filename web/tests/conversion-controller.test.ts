@@ -177,7 +177,7 @@ test("load applies authoritative Pandoc, preferred, and fallback snapshots with 
     recent: [{ state: "queued" }],
   });
   expect(json).toHaveBeenCalledWith(
-    "/api/v1/conversions?offset=0&limit=10",
+    "/api/v1/conversions?offset=0&limit=10&output_family=document&expired=false",
     expect.anything(),
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
@@ -963,10 +963,10 @@ test("recent conversions omit expired entries on load and after a job update", a
     .fn()
     .mockResolvedValueOnce(options())
     .mockResolvedValueOnce({
-      items: [expired, current, failed],
+      items: [current, failed],
       limit: 10,
       offset: 0,
-      total: 3,
+      total: 2,
     })
     .mockResolvedValueOnce(job({ state: "expired" }))
     .mockResolvedValueOnce(expired);
@@ -982,15 +982,12 @@ test("recent conversions omit expired entries on load and after a job update", a
 });
 
 test("an all-expired history produces an empty recent list", async () => {
-  const json = vi
-    .fn()
-    .mockResolvedValueOnce(options())
-    .mockResolvedValueOnce({
-      items: [job({ state: "expired" })],
-      limit: 10,
-      offset: 0,
-      total: 1,
-    });
+  const json = vi.fn().mockResolvedValueOnce(options()).mockResolvedValueOnce({
+    items: [],
+    limit: 10,
+    offset: 0,
+    total: 0,
+  });
   const controller = new ConversionController(api({ json }));
   await controller.load();
   expect(controller.snapshot().recent).toEqual([]);
@@ -1003,12 +1000,8 @@ test("PowerPoint workspace uses native defaults, typed templates and its own his
     .fn()
     .mockResolvedValueOnce(options())
     .mockResolvedValueOnce({
-      items: [
-        job({ id: "word" }),
-        pptx,
-        job({ id: "expired", output: "pptx", state: "expired" }),
-      ],
-      total: 3,
+      items: [pptx],
+      total: 1,
     })
     .mockResolvedValueOnce({ items: [] });
   const multipartWithMetadata = vi
@@ -1116,7 +1109,7 @@ test("presentation outline failures are safe and session expiry remains authorit
 });
 
 test.each([false, true])(
-  "history paginates past other workflows and expired entries (presentation=%s)",
+  "history requests one bounded server-filtered page (presentation=%s)",
   async (presentation) => {
     const matching = Array.from({ length: 10 }, (_, index) =>
       job({
@@ -1128,20 +1121,8 @@ test.each([false, true])(
       .fn()
       .mockResolvedValueOnce(options())
       .mockResolvedValueOnce({
-        items: Array.from({ length: 10 }, () =>
-          job({ output: presentation ? "docx" : "pptx" }),
-        ),
-        total: 40,
-      })
-      .mockResolvedValueOnce({
-        items: [job({ state: "expired" }), matching[0]],
-        total: 40,
-      })
-      .mockResolvedValueOnce({
-        items: matching
-          .slice(1)
-          .concat(job({ output: presentation ? "pptx" : "both" })),
-        total: 40,
+        items: matching,
+        total: 10,
       });
     const controller = new ConversionController(
       api({ json }),
@@ -1154,23 +1135,20 @@ test.each([false, true])(
     await controller.load();
     expect(controller.snapshot().recent).toEqual(matching);
     expect(json.mock.calls.map(([url]) => url).slice(1)).toEqual([
-      "/api/v1/conversions?offset=0&limit=10",
-      "/api/v1/conversions?offset=10&limit=10",
-      "/api/v1/conversions?offset=12&limit=10",
+      `/api/v1/conversions?offset=0&limit=10&output_family=${presentation ? "presentation" : "document"}&expired=false`,
     ]);
     controller.dispose();
   },
 );
 
-test("history stops when a page becomes empty despite an earlier total", async () => {
+test("an empty server-filtered history stays empty", async () => {
   const json = vi
     .fn()
     .mockResolvedValueOnce(options())
-    .mockResolvedValueOnce({ items: [job({ output: "pptx" })], total: 20 })
-    .mockResolvedValueOnce({ items: [], total: 20 });
+    .mockResolvedValueOnce({ items: [], total: 0 });
   const controller = await loadedController(api({ json }));
   expect(controller.snapshot().recent).toEqual([]);
-  expect(json).toHaveBeenCalledTimes(3);
+  expect(json).toHaveBeenCalledTimes(2);
   controller.dispose();
 });
 
