@@ -48,6 +48,11 @@ const reverse = {
   detected_format: "docx",
   result_mode: "markdown",
   result_size: 10,
+  options: {
+    extraction: "anydoc",
+    include_images: true,
+    include_notes: true,
+  },
   source_stem: "Meeting notes",
   source_extension: ".docx",
   source_family: "word",
@@ -71,7 +76,21 @@ const capabilities = {
       family: "word",
       selected_parser_format: null,
     },
+    {
+      content_detection: "signature",
+      detected_formats: ["pptx"],
+      extensions: [".pptx"],
+      family: "powerpoint",
+      selected_parser_format: null,
+    },
   ],
+  extraction: {
+    default_mode: "anydoc",
+    include_images_default: true,
+    include_notes_default: true,
+    modes: ["anydoc", "slides", "marp"],
+    structured_extensions: [".pptx"],
+  },
   pdf: {
     contract: "text extraction only",
     document_model_available: false,
@@ -170,6 +189,14 @@ test(
           await page
             .getByText(`Selected ${filename} (17 bytes).`, { exact: true })
             .waitFor();
+          if (route === "/revert") {
+            assert.equal(
+              await page
+                .getByRole("group", { name: "PowerPoint extraction" })
+                .count(),
+              0,
+            );
+          }
           await page.getByText("Change file", { exact: true }).waitFor();
           const message = page.getByText(`Selected ${filename} (17 bytes).`, {
             exact: true,
