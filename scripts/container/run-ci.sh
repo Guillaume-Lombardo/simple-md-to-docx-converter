@@ -23,8 +23,7 @@ record_ci_status() {
 trap record_ci_status EXIT
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-podman pull --quiet "$base_image"
-test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
+bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
 bash scripts/container/build.sh "$final_image"
 bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"
 bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"
