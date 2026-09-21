@@ -208,7 +208,7 @@ def test_signal_targets_pidfd_of_exact_broker_child(
         "_process_argv",
         side_effect=[["uv", "run", "python", *expected], [sys.executable, *expected]],
     )
-    mocker.patch.object(fixture, "_proc_read", return_value=b"43 ")
+    mocker.patch.object(fixture, "_process_children", return_value={43})
     opened = mocker.patch.object(fixture.os, "pidfd_open", return_value=descriptor)
     sent = mocker.patch.object(fixture.signal, "pidfd_send_signal")
     closed = mocker.patch.object(fixture.os, "close")
@@ -232,7 +232,9 @@ def test_signal_rejects_unbound_process(
         child[-1] = "/unrelated/broker.json"
     mocker.patch.object(fixture, "_process_argv", side_effect=[parent, child])
     mocker.patch.object(
-        fixture, "_proc_read", return_value=b"43 44" if fault == "children" else b"43"
+        fixture,
+        "_process_children",
+        return_value={43, 44} if fault == "children" else {43},
     )
     opened = mocker.patch.object(fixture.os, "pidfd_open", return_value=99)
     sent = mocker.patch.object(fixture.signal, "pidfd_send_signal")
@@ -257,3 +259,30 @@ def test_process_identity_rejects_foreign_owner_or_parent(
     mocker.patch.object(fixture, "_proc_read", return_value=metadata)
     with pytest.raises(RuntimeError):
         fixture._process_argv(43, parent=42)
+
+
+@pytest.mark.parametrize("fault", [None, "overflow", "invalid", "vanished"])
+def test_children_include_secondary_threads_with_bounded_metadata(
+    tmp_path: Path, mocker: MockerFixture, fault: str | None
+) -> None:
+    count = 257 if fault == "overflow" else 3
+    mocker.patch.object(
+        Path, "iterdir", return_value=iter(tmp_path / str(i) for i in range(count))
+    )
+    values = [b"", b"43", b"43"]
+    if fault == "invalid":
+        values[1] = b"unknown"
+    reads = mocker.patch.object(
+        fixture,
+        "_proc_read",
+        side_effect=values
+        if fault != "vanished"
+        else [FileNotFoundError(), b"43", b""],
+    )
+    if fault in {"overflow", "invalid"}:
+        with pytest.raises(RuntimeError):
+            fixture._process_children(42)
+        if fault == "overflow":
+            reads.assert_not_called()
+    else:
+        assert fixture._process_children(42) == {43}
