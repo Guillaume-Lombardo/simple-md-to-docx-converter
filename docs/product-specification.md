@@ -770,7 +770,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T47 | Add a user-facing changelog and deterministic package/container/database upgrade and rollback guidance | T22, T23, T39 |
 | T48 | Expand bounded mutation testing across authentication, input security, queue, worker, retention, and storage invariants | T05, T22, T41, T42, T43 |
 | T49 | Remove residual retired-package artifacts and enforce clean `markweave` namespace and release outputs | T22, T40 |
-| T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T48, T49 |
+| T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T49 |
 | T54 | Publish the post-T38 CLI-entrypoint release and atomically pin public Compose and quickstarts to its immutable image | T22, T38, T40 |
 | T55 | Publish LibreOffice descendant PID probes atomically in the real-process cancellation test harness | T21 |
 | T56 | Allow safe HTTP(S) hyperlinks without remote resource loading and verify the workflow against the final image | T07, T08, T21 |
@@ -801,6 +801,15 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T81 | Shorten workflow tab labels to `2docx`, `2md`, and `templates` | T76 |
 | T82 | Add editable PowerPoint generation, typed templates, portable sources and slide-oriented reverse conversion | T81, T07, T08, T09, T10, T12, T13, T15, T16, T17, T69, T70, T71, T72 |
 | T84 | Continue responsibility-based decomposition of application Python modules above 1,000 lines, preserving imports, transaction/proof boundaries and the single private anydoc adapter | T79 |
+| T85 | Filter owner-scoped conversion history by output family and expiration before pagination, avoiding browser history scans | T12, T13, T45, T62, T82 |
+| T86 | Diagnose dependency CI failures and make immutable image acquisition resilient to transient transport failures | T22, T27 |
+
+The next priorities approved on 2026-09-21 are T50 qualification, then T73 reverse-conversion
+qualification, T85 history filtering, T86 CI/dependency reliability, and T83 structured PowerPoint
+extraction. T48 mutation CI integration is independent work. T74 remains deferred until a concrete
+Kubernetes deployment need justifies it. Small documentation and obsolete-code cleanups may
+accompany focused, reviewed changes. This ordering does not add blocking dependencies between
+otherwise independent tickets or authorize a new public release version.
 
 Recommended delivery order: T00 and T01 can start in parallel, and T00 may continue alongside only foundation work that does not depend on its unresolved outcomes. T04 still waits for both T00 and T01. Continue with the remaining autonomous foundation (T02–T05), document conversion (T06–T11), storage/queue/ownership (T12–T15), Web product (T16–T17), then industrialization (T18–T23), followed by the trusted-upstream deployment option, its rootless compatibility correction, the public-origin correction, the CI/origin reliability follow-up, the bounded SSH-tunnel evaluation mode, optional-template conversion, and startup user provisioning with required password renewal (T24–T30). For the frontend migration, complete T58 first; T59 and T60 may then proceed independently, followed by T61, the authoritative runtime-metadata prerequisite T65, and the authoritative session-policy-bounds prerequisite T66 before the parallel workflow migrations T62 and T63 and the single verified cutover T64.
 
@@ -817,12 +826,21 @@ package-manager, bootstrap, workspace, command, and lockfile contract before T72
 builds the Revert workspace on that finalized pnpm toolchain. T46 and T50 must finish
 their baseline security/support policies and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
-surfaces. T48 is not a blocking dependency; its baseline mutation gate remains out of scope.
+surfaces. T48 is not a blocking dependency, directly or through T50; its remaining mutation CI
+integration remains separate follow-up work. T50 qualifies the existing mutation baseline without
+waiting for T48 completion, and remains a blocking prerequisite for T73.
 T73 does not reopen their baseline scope or edit an exclusively owned path while another
 ticket is active. T73 owns the complete final-image, two-profile, cross-format, reverse-security,
 dedicated reverse-documentation, third public reverse-attempt image contract, and release-readiness
 acceptance matrix. OCR remains outside this sequence. T74 separately owns optional Kubernetes
 support and does not block T70-T73.
+
+The 2026-09-21 user decision keeps Markweave under the personal GitHub account. T48 retains
+repository-owned pull-request and scheduled mutation checks with independent review of workflow
+and policy changes. These checks remain modifiable in a pull request; contributor-immutable
+enforcement is no longer required. No organization, Enterprise subscription, repository transfer,
+separately owned policy repository, or external check provider is a prerequisite. Existing mutation
+tests, reviewed exclusions, strict failure semantics, and coverage thresholds remain required.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
