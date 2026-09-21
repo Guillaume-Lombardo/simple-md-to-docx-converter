@@ -1012,7 +1012,7 @@ def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
     assert (
         lifecycle.index('wait_reverse_marker "$barrier"')
         < lifecycle.index('kill --signal KILL "$frontend_name"')
-        < lifecycle.index('kill -KILL "$broker_pid"')
+        < lifecycle.index('--parent-pid "$broker_pid" --signal KILL')
     )
     outage = runner.index("run_reverse_lifecycle broker-restart true")
     unavailable = runner.index(
@@ -1028,3 +1028,13 @@ def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
         "--env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json"
         in runner
     )
+
+
+@pytest.mark.unit
+def test_reverse_broker_crash_signals_verified_child_not_uv_wrapper() -> None:
+    runner = RUNNER.read_text()
+    assert 'kill -KILL "$broker_pid"' not in runner
+    assert '--parent-pid "$broker_pid" --signal KILL' in runner
+    assert 'wait "$broker_pid" || broker_exit=$?' in runner
+    assert 'test "$broker_exit" = 137' in runner
+    assert 'wait "$broker_pid" || test "$?" = 137' not in runner

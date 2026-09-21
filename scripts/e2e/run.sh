@@ -573,6 +573,7 @@ wait_reverse_marker() {
 run_reverse_lifecycle() {
   local scenario="$1"
   local frontend_outage="${2:-false}"
+  local broker_exit=0
   local lifecycle_url="http://127.0.0.1:$(podman port "$application_name" 8080/tcp | sed 's/.*://')"
   local stem="reverse-$scenario"
   local state="$browser_session_directory/$stem.json"
@@ -583,7 +584,8 @@ run_reverse_lifecycle() {
   local runtime="$application_name"
   # Hold execution before admission, then prearm exact-unit observers.
   if [[ "$profile" == standalone ]]; then
-    kill -TERM "$broker_pid"
+    uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \
+      --parent-pid "$broker_pid" --signal TERM
     wait "$broker_pid"
     broker_pid=""
     wait_for_url "$lifecycle_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
@@ -621,8 +623,10 @@ run_reverse_lifecycle() {
     podman kill --signal KILL "$runtime" >/dev/null
     test "$(podman inspect "$runtime" --format '{{.State.ExitCode}}')" = 137
   else
-    kill -KILL "$broker_pid"
-    wait "$broker_pid" || test "$?" = 137
+    uv run python -m scripts.e2e.reverse_broker signal --root "$broker_directory" \
+      --parent-pid "$broker_pid" --signal KILL
+    wait "$broker_pid" || broker_exit=$?
+    test "$broker_exit" = 137
     broker_pid=""
   fi
   touch "${barrier%.json}.release"

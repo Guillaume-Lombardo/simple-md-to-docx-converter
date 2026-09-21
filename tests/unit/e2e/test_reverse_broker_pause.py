@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import signal
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -194,3 +195,65 @@ def test_observer_termination_resumes_owned_unit(
         fixture.watch_pause(tmp_path, state, binding, barrier)
     assert not barrier.exists()
     command.assert_any_call(("unpause", observed.container_id))
+
+
+@pytest.mark.parametrize("signal_name", ["TERM", "KILL"])
+def test_signal_targets_pidfd_of_exact_broker_child(
+    tmp_path: Path, mocker: MockerFixture, signal_name: str
+) -> None:
+    parent, child, descriptor = 42, 43, 99
+    expected = ["-m", "markweave.broker.process", str(tmp_path / "broker.json")]
+    argv = mocker.patch.object(
+        fixture,
+        "_process_argv",
+        side_effect=[["uv", "run", "python", *expected], [sys.executable, *expected]],
+    )
+    mocker.patch.object(fixture, "_proc_read", return_value=b"43 ")
+    opened = mocker.patch.object(fixture.os, "pidfd_open", return_value=descriptor)
+    sent = mocker.patch.object(fixture.signal, "pidfd_send_signal")
+    closed = mocker.patch.object(fixture.os, "close")
+    fixture.signal_broker(tmp_path, parent, signal_name)
+    opened.assert_called_once_with(child)
+    argv.assert_any_call(child, parent=parent)
+    sent.assert_called_once_with(descriptor, getattr(signal, f"SIG{signal_name}"))
+    closed.assert_called_once_with(descriptor)
+
+
+@pytest.mark.parametrize("fault", ["wrapper", "children", "child"])
+def test_signal_rejects_unbound_process(
+    tmp_path: Path, mocker: MockerFixture, fault: str
+) -> None:
+    expected = ["-m", "markweave.broker.process", str(tmp_path / "broker.json")]
+    parent = ["uv", "run", "python", *expected]
+    child = [sys.executable, *expected]
+    if fault == "wrapper":
+        parent[-1] = "/unrelated/broker.json"
+    if fault == "child":
+        child[-1] = "/unrelated/broker.json"
+    mocker.patch.object(fixture, "_process_argv", side_effect=[parent, child])
+    mocker.patch.object(
+        fixture, "_proc_read", return_value=b"43 44" if fault == "children" else b"43"
+    )
+    opened = mocker.patch.object(fixture.os, "pidfd_open", return_value=99)
+    sent = mocker.patch.object(fixture.signal, "pidfd_send_signal")
+    closed = mocker.patch.object(fixture.os, "close")
+    with pytest.raises(RuntimeError):
+        fixture.signal_broker(tmp_path, 42, "KILL")
+    sent.assert_not_called()
+    if fault == "child":
+        closed.assert_called_once_with(99)
+    else:
+        opened.assert_not_called()
+
+
+@pytest.mark.parametrize("fault", ["uid", "parent"])
+def test_process_identity_rejects_foreign_owner_or_parent(
+    mocker: MockerFixture, fault: str
+) -> None:
+    uid = fixture.os.geteuid()
+    actual_uid = uid + 1 if fault == "uid" else uid
+    actual_parent = 999 if fault == "parent" else 42
+    metadata = f"Uid:\t{actual_uid}\t{actual_uid}\t{actual_uid}\t{actual_uid}\nPPid:\t{actual_parent}\n".encode()
+    mocker.patch.object(fixture, "_proc_read", return_value=metadata)
+    with pytest.raises(RuntimeError):
+        fixture._process_argv(43, parent=42)

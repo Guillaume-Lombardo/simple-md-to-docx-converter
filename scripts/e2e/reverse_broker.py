@@ -11,6 +11,7 @@ import signal
 import socket
 import ssl
 import subprocess
+import sys
 import time
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -50,6 +51,7 @@ RUNTIME_LIMITS = {
     "wall_time_millis": 10_000,
     "workspace_bytes": 33_554_432,
 }
+_MAX_PROCESS_METADATA_BYTES = 4096
 _MAX_DIAGNOSTIC_BYTES = 65_536
 _MAX_DIAGNOSTIC_ATTEMPTS = 32
 CHANNEL_LIMITS = {"max_input_bytes": 1_000_000, "max_output_bytes": 4_000_000}
@@ -421,10 +423,67 @@ def watch_pause(
             _resume_owned(command, runtime, paused_id)
 
 
+def _proc_read(path: Path) -> bytes:
+    with path.open("rb") as stream:
+        data = stream.read(_MAX_PROCESS_METADATA_BYTES + 1)
+    if len(data) > _MAX_PROCESS_METADATA_BYTES:
+        raise RuntimeError("T73 broker process metadata exceeds its bound")
+    return data
+
+
+def _process_argv(pid: int, *, parent: int | None = None) -> list[str]:
+    root = Path("/proc") / str(pid)
+    fields = dict(
+        line.split(":", 1)
+        for line in _proc_read(root / "status").decode().splitlines()
+        if ":" in line
+    )
+    if fields.get("Uid", "").split() != [str(os.geteuid())] * 4:
+        raise RuntimeError("T73 broker process owner differs")
+    if parent is not None and fields.get("PPid", "").strip() != str(parent):
+        raise RuntimeError("T73 broker child parent differs")
+    argv = _proc_read(root / "cmdline").decode().split("\0")
+    if argv[-1] != "":
+        raise RuntimeError("T73 broker process arguments are invalid")
+    return argv[:-1]
+
+
+def signal_broker(root: Path, parent_pid: int, signal_name: str) -> None:
+    """Signal the exact owned broker child, never its uv supervisor wrapper."""
+    if not root.is_absolute() or parent_pid <= 0 or signal_name not in {"TERM", "KILL"}:
+        raise ValueError("T73 broker signal request is invalid")
+    expected = ["-m", "markweave.broker.process", str(root / "broker.json")]
+    parent_argv = _process_argv(parent_pid)
+    if (
+        not parent_argv
+        or Path(parent_argv[0]).name != "uv"
+        or parent_argv[-4:] != ["python", *expected]
+    ):
+        raise RuntimeError("T73 broker supervisor arguments differ")
+    children = _proc_read(
+        Path(f"/proc/{parent_pid}/task/{parent_pid}/children")
+    ).split()
+    if len(children) != 1 or not children[0].isdigit():
+        raise RuntimeError("T73 broker supervisor must own exactly one child")
+    child_pid = int(children[0])
+    descriptor = os.pidfd_open(child_pid)
+    try:
+        child_argv = _process_argv(child_pid, parent=parent_pid)
+        if (
+            len(child_argv) != len(expected) + 1
+            or child_argv[1:] != expected
+            or Path(child_argv[0]).resolve() != Path(sys.executable).resolve()
+        ):
+            raise RuntimeError("T73 broker child arguments differ")
+        signal.pidfd_send_signal(descriptor, getattr(signal, f"SIG{signal_name}"))
+    finally:
+        os.close(descriptor)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "operation", choices=("prepare", "ready", "sweep", "watch-pause")
+        "operation", choices=("prepare", "ready", "sweep", "watch-pause", "signal")
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--image-repository")
@@ -433,6 +492,8 @@ def main() -> None:
     parser.add_argument("--state", type=Path)
     parser.add_argument("--binding", type=Path)
     parser.add_argument("--barrier", type=Path)
+    parser.add_argument("--parent-pid", type=int)
+    parser.add_argument("--signal", choices=("TERM", "KILL"))
     args = parser.parse_args()
     if args.operation == "prepare":
         if not all((args.image_repository, args.image_digest, args.worker_host)):
@@ -442,6 +503,10 @@ def main() -> None:
         if args.state is None or args.binding is None or args.barrier is None:
             parser.error("watch-pause requires state, binding and barrier")
         watch_pause(args.root, args.state, args.binding, args.barrier)
+    elif args.operation == "signal":
+        if args.parent_pid is None or args.signal is None:
+            parser.error("signal requires parent PID and signal")
+        signal_broker(args.root, args.parent_pid, args.signal)
     elif args.operation == "ready":
         wait_ready(args.root)
     else:
