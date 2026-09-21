@@ -20,6 +20,7 @@ Diagnose PR #248's network failure, verify its grouped dependency updates and ma
 * Add a small bounded retry mechanism at the failing image-acquisition boundary with actionable logs and deterministic final failure. Preserve exact digest pins, integrity verification and existing timeout/resource limits; do not retry test failures or use mutable fallback images.
 * Cover transient success, retry exhaustion, and permanent/integrity failure handling with appropriate harness/policy tests, and verify the affected distributed rootless E2E path on the exact PR head.
 * Review other pending dependency updates and report actionable issues without broad unsolicited upgrades.
+* Correct the observed reverse CLI wait deadline race without masking network errors before the deadline or non-network failures, and cover the boundary deterministically.
 * Run applicable canonical checks and independent review, preserve coverage/gates and verify main after merge.
 
 ## Dependencies
@@ -28,7 +29,7 @@ Diagnose PR #248's network failure, verify its grouped dependency updates and ma
 
 ## Implementation boundary
 
-Own bounded transient acquisition retries for immutable CI/container images, checksum-pinned Containerfile downloads, and read-only public-release alignment HTTP requests, with focused policy tests. Coordinate CI workflow ownership with independent T48 mutation integration and later T73 final-image work. Do not change branch protection or publish a product release.
+Own bounded transient acquisition retries for immutable CI/container images, checksum-pinned Containerfile downloads, and read-only public-release alignment HTTP requests, with focused policy tests. Coordinate CI workflow ownership with independent T48 mutation integration and later T73 final-image work. The user also authorized the minimal reverse CLI deadline-race correction required by the failed final-image check in PRs #248 and #253. Do not change branch protection or publish a product release.
 
 ## Progress
 
@@ -40,6 +41,8 @@ Own bounded transient acquisition retries for immutable CI/container images, che
 * 2026-09-21: Added bounded Curl retries to all checksum-pinned Containerfile downloads without `--retry-all-errors`; each transfer keeps HTTPS restrictions, a 20-second connect timeout, a 180-second transfer timeout, three retries after the initial transfer attempt, and a 120-second retry budget before its existing checksum/signature validation. Public alignment now retries only 429/5xx responses, timeouts, and connection resets, preserving response-byte limits, trusted redirects, and terminal authentication/not-found/TLS-certificate behavior. Focused policy checks cover retry exhaustion and now pass (118 selected tests), together with formatting, lint, type, lock, and shell-syntax checks. Exact CI reruns and post-merge main validation remain pending.
 
 * 2026-09-21: User explicitly approved the reviewed UBI RPM inventory baseline update after two independent T48 final-image builds failed closed with the same mismatch. The immutable base-image digest and every checksum-pinned non-RPM source are unchanged. Reconstructing the inventory from the approved `5062777d84d38c9d70c8a52c11b84c5e082fc652ec70e2d3255721a00ce031ef` final-image inventory by substituting exactly six rows reproduces the failed `d35b361f72fcb13a8dd683649ba825b6c0363900105c99ded006543e07917292` digest: `curl-minimal`, `libcurl-minimal`, and `libcurl-devel` advance from `0:7.76.1-40.el9_8.5` to `0:7.76.1-40.el9_8.7`; `openssl`, `openssl-libs`, and `openssl-devel` advance from `1:3.5.5-6.el9_8` to `1:3.5.8-1.el9_8`. Package names, licenses, architectures, `tar` (`2:1.34-13.el9_8`), and all three imported RPM GPG public-key rows are unchanged. Updated only the fail-closed inventory digest and review comment; no source pin, retry, signature, workflow, release, or public image pin changes. Hosted build, security scan, both final-image E2E storage profiles, CI gate, and post-merge main validation remain pending.
+
+* 2026-09-22: User explicitly authorized correcting the reverse CLI deadline race and resuming publication, checks, squash merge and cleanup for PRs #248/#253. The final status poll can exhaust the global wait budget inside the HTTP client and currently report network_error instead of wait_timeout. Translate only network_error observed after the global monotonic deadline; preserve earlier network failures and every non-network failure. Implemented the focused prerequisite on `fix/T86-cli-wait-deadline`; independent review approved the precise error boundary. All 46 targeted CLI tests passed, including a real loopback HTTP timeout. Global Ruff formatting/lint and ty passed. The canonical engine-excluded suite passed 4,418 tests (56 deselected, 11 warnings), with 94.96% total and 91.20% branch coverage; source HEAD and binary diff were unchanged throughout. Exact-head final-image checks, the engine-marked cases, and main verification remain pending.
 
 ## Synchronization
 
