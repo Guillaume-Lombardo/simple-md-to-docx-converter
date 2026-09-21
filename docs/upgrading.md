@@ -113,3 +113,12 @@ required or select values for unresolved production limits.
 - [Upgrade procedure](#upgrade-procedure)
 - [Schema changes and rollback](#schema-changes-and-rollback)
 - [Configuration compatibility during 0.x](#configuration-compatibility)
+
+## Related guidance
+
+Read the [changelog](../CHANGELOG.md) for the exact source release, the
+[configuration reference](configuration.md) for accepted settings, and the
+[recovery guide](recovery.md) before changing persistent state. The
+[container deployment guide](container-deployment.md) and [release process](releasing.md) define
+immutable image and publication evidence. The [security policy](../SECURITY.md) and
+[support policy](../SUPPORT.md) define the supported release boundary.

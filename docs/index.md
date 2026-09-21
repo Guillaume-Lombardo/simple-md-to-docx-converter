@@ -8,6 +8,10 @@ HTTP API. Start with the guide for your role:
   download results.
 - [API guide](api-guide.md): authentication, CSRF protection, conversion and template endpoints,
   idempotency, errors, and result retrieval.
+- [Command-line interface](cli.md): stable output, profiles, remote command families, and local
+  operational commands.
+- [Python distribution](python-distribution.md): base installation, optional dependency groups,
+  public imports, and package verification.
 - [Template administration](templates.md): immutable versions, visibility, preferences, fallback,
   archive, restore, and deletion.
 - [Account and template UI](administration-ui.md): administrator workflows in the browser.
@@ -23,6 +27,12 @@ HTTP API. Start with the guide for your role:
 - [Local development](local-development.md): toolchain, tests, CI, and dependency changes.
 - [Agent workflow](agent-workflow.md): repository-specific process for automated contributors.
 - [Release process](releasing.md): versioning, publication, provenance, and post-release checks.
+- [Upgrade and rollback](upgrading.md): supported transitions, backups, schema handling, and
+  configuration migration.
+- [Changelog](../CHANGELOG.md): released user-visible, operational, security, and compatibility
+  changes.
+- [Security policy](../SECURITY.md): private reporting, supported releases, and disclosure.
+- [Support policy](../SUPPORT.md): help channels, safe diagnostic information, and support scope.
 - [Reverse-conversion broker](reverse-broker-deployment.md): experimental document-to-Markdown
   isolation, worker transport, and operational boundaries.
 - [Optional Kubernetes reverse isolation](kubernetes-reverse-isolation.md): dedicated-node policy,
@@ -33,6 +43,11 @@ Format-specific and security details are documented in [conversion jobs](jobs.md
 [observability](observability.md), [archives and images](archive-images.md),
 [Pandoc DOCX](pandoc-docx.md), [Mermaid](mermaid.md), [PDF conversion](pdf-conversion.md), and
 [Word templates and fonts](word-templates-fonts.md).
+
+Release-readiness work uses the executable
+[cross-surface qualification matrix](evidence/t50-cross-surface-qualification.md), which records
+the exact commands, prerequisites, artifacts, and residual limitations without selecting a release
+version.
 
 The [product specification](product-specification.md) is normative for product, architecture,
 security, deployment, and acceptance decisions. The guides explain the implemented system; they do
