@@ -11,6 +11,7 @@ from markweave.jobs.errors import JobLeaseLostError
 from markweave.jobs.models import (
     JobFailure,
     JobOutput,
+    JobOutputFamily,
     JobState,
     JobStep,
     JobSubmission,
@@ -31,14 +32,15 @@ def submission(
     *,
     created_at: datetime = NOW,
     idempotency_digest: str | None = None,
+    output: JobOutput = JobOutput.BOTH,
 ) -> JobSubmission:
     return JobSubmission(
         id=uuid4(),
         owner_id=owner_id,
         source_object_id=uuid4(),
-        template_id=TEMPLATE_ID,
-        template_version_id=TEMPLATE_VERSION_ID,
-        output=JobOutput.BOTH,
+        template_id=None if output.is_presentation else TEMPLATE_ID,
+        template_version_id=None if output.is_presentation else TEMPLATE_VERSION_ID,
+        output=output,
         component_versions=(("md-converter", "0.1.0"),),
         request_digest="1" * 64,
         idempotency_digest=idempotency_digest,
@@ -314,3 +316,105 @@ def exercise_job_repository_contract(  # noqa: PLR0915
         RETENTION_END + timedelta(seconds=31),
         20,
     )
+
+    prior_document_total = repository.list_owner(
+        owner_id,
+        offset=0,
+        limit=1,
+        output_family=JobOutputFamily.DOCUMENT,
+        expired=False,
+    ).total
+    prior_presentation_total = repository.list_owner(
+        owner_id,
+        offset=0,
+        limit=1,
+        output_family=JobOutputFamily.PRESENTATION,
+        expired=False,
+    ).total
+    prior_expired_presentation_total = repository.list_owner(
+        owner_id,
+        offset=0,
+        limit=1,
+        output_family=JobOutputFamily.PRESENTATION,
+        expired=True,
+    ).total
+
+    document_old, _ = repository.create(
+        submission(
+            owner_id,
+            created_at=NOW + timedelta(minutes=10),
+            output=JobOutput.DOCX,
+        )
+    )
+    repository.activate_source(document_old.id, NOW)
+    presentation_expired, _ = repository.create(
+        submission(
+            owner_id,
+            created_at=NOW + timedelta(minutes=11),
+            output=JobOutput.PPTX,
+        )
+    )
+    repository.activate_source(presentation_expired.id, NOW)
+    document_new, _ = repository.create(
+        submission(
+            owner_id,
+            created_at=NOW + timedelta(minutes=12),
+            output=JobOutput.PDF,
+        )
+    )
+    repository.activate_source(document_new.id, NOW)
+    presentation_new, _ = repository.create(
+        submission(
+            owner_id,
+            created_at=NOW + timedelta(minutes=13),
+            output=JobOutput.PPTX_BUNDLE,
+        )
+    )
+    repository.activate_source(presentation_new.id, NOW)
+    foreign_presentation, _ = repository.create(
+        submission(
+            other_owner_id,
+            created_at=NOW + timedelta(minutes=14),
+            output=JobOutput.PPTX,
+        )
+    )
+    repository.activate_source(foreign_presentation.id, NOW)
+    cancelled_presentation = repository.request_cancel(
+        presentation_expired.id, owner_id, NOW, NOW
+    )
+    assert cancelled_presentation is not None
+    expired_batch = repository.expire_terminal(
+        "history-cleanup",
+        NOW + timedelta(seconds=1),
+        NOW + timedelta(seconds=31),
+        100,
+    )
+    assert presentation_expired.id in {candidate.job_id for candidate in expired_batch}
+
+    document_page = repository.list_owner(
+        owner_id,
+        offset=1,
+        limit=1,
+        output_family=JobOutputFamily.DOCUMENT,
+        expired=False,
+    )
+    assert document_page.total == prior_document_total + 2
+    assert [item.id for item in document_page.items] == [document_old.id]
+    presentation_page = repository.list_owner(
+        owner_id,
+        offset=0,
+        limit=1,
+        output_family=JobOutputFamily.PRESENTATION,
+        expired=False,
+    )
+    assert presentation_page.total == prior_presentation_total + 1
+    assert [item.id for item in presentation_page.items] == [presentation_new.id]
+    expired_page = repository.list_owner(
+        owner_id,
+        offset=0,
+        limit=10,
+        output_family=JobOutputFamily.PRESENTATION,
+        expired=True,
+    )
+    assert expired_page.total == prior_expired_presentation_total + 1
+    assert expired_page.items[0].id == presentation_expired.id

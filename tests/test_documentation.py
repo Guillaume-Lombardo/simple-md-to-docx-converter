@@ -161,6 +161,13 @@ def test_documentation_index_exposes_all_role_guides() -> None:
         "architecture.md",
         "local-development.md",
         "agent-workflow.md",
+        "cli.md",
+        "python-distribution.md",
+        "upgrading.md",
+        "../CHANGELOG.md",
+        "../SECURITY.md",
+        "../SUPPORT.md",
+        "evidence/t50-cross-surface-qualification.md",
     ):
         assert f"({guide})" in index
 

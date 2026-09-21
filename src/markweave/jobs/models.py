@@ -60,6 +60,13 @@ class JobStep(StrEnum):
     COMPLETE = "complete"
 
 
+class JobOutputFamily(StrEnum):
+    """Stable conversion-list grouping shared by document and presentation UIs."""
+
+    DOCUMENT = "document"
+    PRESENTATION = "presentation"
+
+
 class JobOutput(StrEnum):
     """Requested immutable result format."""
 

@@ -339,3 +339,11 @@ merged as `355b92c298b92c9cacfda37e353eaacf5ef73c35` after independent review an
 passed. Public release alignment passed again on this exact main commit. T84 is
 complete: every application Python module remains below 1,000 lines, with a
 maximum of 989, and public package/image defaults agree on 0.7.1.
+
+## Related guidance
+
+The [changelog](../CHANGELOG.md) records released behavior, while the
+[upgrade guide](upgrading.md) and [recovery guide](recovery.md) define operator transitions and
+rollback. Use the [container deployment guide](container-deployment.md) for immutable image
+consumption, the [security policy](../SECURITY.md) for private vulnerability reports, and the
+[support policy](../SUPPORT.md) for published-release help.

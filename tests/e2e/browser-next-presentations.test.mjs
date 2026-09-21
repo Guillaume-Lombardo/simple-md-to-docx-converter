@@ -30,7 +30,17 @@ test(
         .fill(process.env.MARKWEAVE_PPTX_E2E_PASSWORD || "e2e-admin-password");
       await page.getByRole("button", { name: "Sign in" }).click();
       await page.waitForURL("**/convert");
+      const presentationHistory = page.waitForRequest((request) => {
+        const url = new URL(request.url());
+        return (
+          url.pathname === "/api/v1/conversions" &&
+          url.searchParams.get("limit") === "10" &&
+          url.searchParams.get("output_family") === "presentation" &&
+          url.searchParams.get("expired") === "false"
+        );
+      });
       await page.getByRole("link", { name: "2pptx", exact: true }).click();
+      await presentationHistory;
       await page.waitForURL("**/presentations");
       const suffix = await page
         .getByText("eave", { exact: true })
@@ -129,7 +139,17 @@ test(
       await page
         .getByText("Your conversion is ready to download.")
         .waitFor({ timeout: 60000 });
+      const documentHistory = page.waitForRequest((request) => {
+        const url = new URL(request.url());
+        return (
+          url.pathname === "/api/v1/conversions" &&
+          url.searchParams.get("limit") === "10" &&
+          url.searchParams.get("output_family") === "document" &&
+          url.searchParams.get("expired") === "false"
+        );
+      });
       await page.getByRole("link", { name: "2docx", exact: true }).click();
+      await documentHistory;
       await page
         .getByRole("heading", { name: "Convert Markdown", exact: true })
         .waitFor();

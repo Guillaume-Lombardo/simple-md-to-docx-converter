@@ -728,6 +728,15 @@
         "title": "JobOutput",
         "type": "string"
       },
+      "JobOutputFamily": {
+        "description": "Stable conversion-list grouping shared by document and presentation UIs.",
+        "enum": [
+          "document",
+          "presentation"
+        ],
+        "title": "JobOutputFamily",
+        "type": "string"
+      },
       "LoginRequest": {
         "description": "JSON local-login request.",
         "properties": {
@@ -2969,6 +2978,42 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Restrict results to document or presentation outputs.",
+            "in": "query",
+            "name": "output_family",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobOutputFamily"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict results to document or presentation outputs.",
+              "title": "Output Family"
+            }
+          },
+          {
+            "description": "Restrict results by whether the job has expired.",
+            "in": "query",
+            "name": "expired",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict results by whether the job has expired.",
+              "title": "Expired"
             }
           }
         ],
