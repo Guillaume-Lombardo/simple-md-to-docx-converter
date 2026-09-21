@@ -421,6 +421,21 @@ def test_final_image_version_comes_from_project_metadata() -> None:
     assert 'os.environ[\\"EXPECTED_APPLICATION_VERSION\\"]' in smoke
 
 
+def test_checksum_pinned_container_downloads_use_bounded_transient_retries() -> None:
+    containerfile = Path("Containerfile").read_text(encoding="utf-8")
+    reverse_attempt = Path("containers/reverse-attempt/Containerfile").read_text(
+        encoding="utf-8"
+    )
+    retry = "--connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120"
+
+    assert containerfile.count(retry) == 4
+    assert reverse_attempt.count(retry) == 1
+    assert "--retry-all-errors" not in containerfile
+    assert "--retry-all-errors" not in reverse_attempt
+    for source in (containerfile, reverse_attempt):
+        assert "sha256sum --check --strict" in source
+
+
 def test_final_image_e2e_pulls_and_verifies_the_pinned_base_before_build() -> None:
     script = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
     containerfile = Path("Containerfile").read_text(encoding="utf-8")

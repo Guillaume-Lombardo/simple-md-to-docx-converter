@@ -11,6 +11,7 @@ ARG ANYDOC_CARGO_SBOM_SHA256=ccc492d3014d12a0b5e5cb0a256e130444e6ca910f6c696d538
 RUN test "$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' cairo)" = \
         "${CAIRO_NEVRA}" \
     && curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 \
         "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
         --output /tmp/uv.tar.gz \
     && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum --check --strict \
