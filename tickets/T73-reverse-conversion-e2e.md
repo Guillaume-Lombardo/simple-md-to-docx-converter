@@ -81,9 +81,12 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 
 * Own final-image integration, two-profile browser/API/CLI acceptance, selective CI wiring, cross-
   cutting documentation, and release-readiness evidence.
-* Begin only after T46, T50, and T67 complete their baseline policy, mutation, documentation,
+* Begin only after T46, T50, and T67 complete their baseline policy, documentation,
   acceptance, and JavaScript-tooling ownership. Add narrowly scoped reverse-conversion extensions
   to the established surfaces without reopening those tickets' baseline decisions.
+* T48 completion and its remaining CI gate integration are not prerequisites, directly or through
+  T50. Preserve the delivered mutation baseline and extend relevant reverse-conversion targets
+  without requiring contributor-immutable enforcement. T50 remains a blocking qualification dependency.
 * Do not edit `SECURITY.md`, `SUPPORT.md`, README, `docs/index.md`, shared cross-guide navigation,
   T67's finalized package-manager/bootstrap/workspace contract, or T48's baseline mutation runner/
   gate unless ownership is explicitly transferred. Put reverse documentation in dedicated guides,
@@ -103,6 +106,11 @@ backend, frontend, and reverse-attempt images in both storage profiles.
 * Keep repository artifacts and user-facing text in English.
 
 ## Progress
+
+* 2026-09-21: The user approved removing the indirect T48 blocker by removing T48 from T50's
+  dependencies. T73 still waits for T50 qualification; all final-image, two-profile, security,
+  documentation, and release acceptance criteria remain. No organization, Enterprise subscription,
+  repository transfer, or contributor-immutable gate is required. T73 remains Backlog.
 
 * 2026-09-03: Created from the approved feasibility decomposition; blocked by T70, T71, and T72.
 * 2026-09-03: Final-image acceptance now includes explicit CPU-only proof and measured low-compute

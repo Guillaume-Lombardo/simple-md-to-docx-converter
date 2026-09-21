@@ -770,7 +770,7 @@ Before the first public release, configure a PyPI pending Trusted Publisher for 
 | T47 | Add a user-facing changelog and deterministic package/container/database upgrade and rollback guidance | T22, T23, T39 |
 | T48 | Expand bounded mutation testing across authentication, input security, queue, worker, retention, and storage invariants | T05, T22, T41, T42, T43 |
 | T49 | Remove residual retired-package artifacts and enforce clean `markweave` namespace and release outputs | T22, T40 |
-| T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T48, T49 |
+| T50 | Run the complete package, CLI, container, configuration, contract, documentation, and maintainability acceptance matrix | T38, T41, T42, T43, T44, T45, T46, T47, T49 |
 | T54 | Publish the post-T38 CLI-entrypoint release and atomically pin public Compose and quickstarts to its immutable image | T22, T38, T40 |
 | T55 | Publish LibreOffice descendant PID probes atomically in the real-process cancellation test harness | T21 |
 | T56 | Allow safe HTTP(S) hyperlinks without remote resource loading and verify the workflow against the final image | T07, T08, T21 |
@@ -817,12 +817,21 @@ package-manager, bootstrap, workspace, command, and lockfile contract before T72
 builds the Revert workspace on that finalized pnpm toolchain. T46 and T50 must finish
 their baseline security/support policies and cross-surface documentation/acceptance
 ownership before T73 begins. T73 may then add only reverse-specific extensions to those established
-surfaces. T48 is not a blocking dependency; its baseline mutation gate remains out of scope.
+surfaces. T48 is not a blocking dependency, directly or through T50; its remaining mutation CI
+integration remains separate follow-up work. T50 qualifies the existing mutation baseline without
+waiting for T48 completion, and remains a blocking prerequisite for T73.
 T73 does not reopen their baseline scope or edit an exclusively owned path while another
 ticket is active. T73 owns the complete final-image, two-profile, cross-format, reverse-security,
 dedicated reverse-documentation, third public reverse-attempt image contract, and release-readiness
 acceptance matrix. OCR remains outside this sequence. T74 separately owns optional Kubernetes
 support and does not block T70-T73.
+
+The 2026-09-21 user decision keeps Markweave under the personal GitHub account. T48 retains
+repository-owned pull-request and scheduled mutation checks with independent review of workflow
+and policy changes. These checks remain modifiable in a pull request; contributor-immutable
+enforcement is no longer required. No organization, Enterprise subscription, repository transfer,
+separately owned policy repository, or external check provider is a prerequisite. Existing mutation
+tests, reviewed exclusions, strict failure semantics, and coverage thresholds remain required.
 
 For T31–T50, begin T31, T39, and T44 in parallel because their owned paths do not overlap. T32
 follows T31. T33, T34, and T35 then run in parallel by filling the command-family modules and test
