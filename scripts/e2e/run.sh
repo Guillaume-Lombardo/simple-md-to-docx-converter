@@ -592,7 +592,8 @@ run_reverse_lifecycle() {
     wait_for_url "$lifecycle_url/metrics" "$application_name" 'md_converter_reversion_broker_ready 0'
   else
     runtime="$worker_one_name"
-    podman stop --time 15 "$runtime" >/dev/null
+    # Preserve the reconciliation lease during the admission-only hold.
+    podman pause "$runtime" >/dev/null
   fi
   uv run python -m tests.e2e.reverse_lifecycle_workflow prepare \
     --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
@@ -609,7 +610,7 @@ run_reverse_lifecycle() {
     --state "$state" --binding "$binding" --barrier "$barrier" &
   reverse_pause_pid=$!
   wait_reverse_marker "${barrier%.json}.ready" "$reverse_pause_pid"
-  if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman start "$runtime" >/dev/null; fi
+  if [[ "$profile" == standalone ]]; then start_reverse_broker; else podman unpause "$runtime" >/dev/null; fi
   wait_reverse_marker "$barrier" "$reverse_pause_pid"
   wait "$reverse_diagnostics_pid"
   reverse_diagnostics_pid=""
