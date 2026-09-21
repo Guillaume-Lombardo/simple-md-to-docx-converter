@@ -64,6 +64,18 @@ def test_mutmut_generation_is_bounded_to_reviewed_manifest_modules() -> None:
 
 
 @pytest.mark.unit
+def test_mutmut_uses_project_import_configuration_without_coverage_gates() -> None:
+    configuration = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["mutmut"]
+
+    assert "--no-cov" in configuration["pytest_add_cli_args"]
+    assert "-c" not in configuration["pytest_add_cli_args"]
+    assert "/dev/null" not in configuration["pytest_add_cli_args"]
+    assert configuration["also_copy"] == ["scripts"]
+
+
+@pytest.mark.unit
 def test_observability_domain_preserves_the_preexisting_bounded_target() -> None:
     manifest = load_manifest(MANIFEST)
     observability = manifest.domains[0]

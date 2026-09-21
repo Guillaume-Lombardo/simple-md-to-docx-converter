@@ -192,6 +192,7 @@ show_missing = true
 
 [tool.mutmut]
 source_paths = ["src/markweave"]
+also_copy = ["scripts"]
 only_mutate = [
     "src/markweave/auth/service.py",
     "src/markweave/conversion/archive.py",
@@ -204,8 +205,7 @@ only_mutate = [
     "src/markweave/storage.py",
 ]
 pytest_add_cli_args = [
-    "-c",
-    "/dev/null",
+    "--no-cov",
     "-q",
     "tests/unit/test_observability.py",
     "tests/unit/auth/test_service.py",

@@ -46,6 +46,12 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Progress
 
+* 2026-09-21: Corrected the activated campaign's generated-workspace test setup. Mutmut now
+  retains the project Pytest configuration without coverage gates and copies the repository-local
+  `scripts` package required by `conftest.py` and the branch-coverage plugin. A real local campaign
+  in the generated `mutants/` workspace killed all 25 selected mutants with every strict failure
+  status at zero.
+
 * 2026-09-21: Started repository-owned CI integration on branch
   `ci/T48-mutation-gate`. The delivery adds affected-domain mutation testing to the
   existing required `CI / gate`, retains a bounded scheduled/manual full campaign,
