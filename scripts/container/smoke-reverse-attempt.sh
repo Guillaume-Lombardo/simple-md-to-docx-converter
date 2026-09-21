@@ -1,7 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly image="${1:-localhost/markweave-reverse-attempt:t70}"
+if [[ $# -gt 2 ]]; then
+  echo "Usage: smoke-reverse-attempt.sh [IMAGE] [MEASUREMENT_RECEIPT]" >&2
+  exit 2
+fi
+readonly requested_image="${1:-localhost/markweave-reverse-attempt:t70}"
+readonly measurement_receipt="${2:-}"
+image="$(podman image inspect "$requested_image" --format '{{.Id}}')"
+if [[ "$image" =~ ^[0-9a-f]{64}$ ]]; then image="sha256:$image"; fi
+readonly image
+[[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]]
+if [[ -n "$measurement_receipt" ]]; then
+  uv run python - "$measurement_receipt" <<'PY_OUTPUT'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+if not path.is_absolute() or path.resolve().is_relative_to(Path.cwd().resolve()):
+    raise SystemExit("measurement receipt must be an absolute path outside the repository")
+if path.exists() or path.is_symlink() or not path.parent.is_dir():
+    raise SystemExit("measurement receipt destination must be new with an existing parent")
+PY_OUTPUT
+fi
 readonly expected_entrypoint='["python","-m","markweave.reversions.attempt_main"]'
 
 test "$(podman image inspect "$image" --format '{{json .Config.Entrypoint}}')" = \
@@ -186,3 +206,106 @@ with zipfile.ZipFile(io.BytesIO(result)) as archive:
     assert manifest["result"]["mode"] == "markdown_with_assets"
     assert manifest["result"]["asset_count"] == 1
 '
+
+if [[ -n "$measurement_receipt" ]]; then
+  # Reuse T69 instrumentation inside the exact final image. These are smoke
+  # containment ceilings, not approved production performance thresholds.
+  podman run --rm --timeout 60 \
+    --network none --read-only --cap-drop all \
+    --security-opt no-new-privileges \
+    --pids-limit 16 --memory 256m --cpus 1 --user 12345:0 \
+    --tmpfs /work:rw,noexec,nosuid,nodev,size=32m,mode=0770 \
+    --volume "$PWD/spikes/anydoc/probe.py:/probe.py:ro" \
+    --volume "$PWD/spikes/anydoc/corpus:/corpus:ro" \
+    --entrypoint python "$image" -c '
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import runpy
+import sys
+
+# Inspect the actual runtime namespace; do not infer these observations from flags.
+status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
+assert os.getuid() == 12345
+assert int(status["CapEff"].strip(), 16) == 0
+assert status["NoNewPrivs"].strip() == "1"
+assert sorted(path.name for path in Path("/sys/class/net").iterdir()) == ["lo"]
+accelerators = [str(path) for pattern in ("nvidia*", "dri", "kfd", "accel*") for path in Path("/dev").glob(pattern)]
+assert not accelerators
+for module in ("torch", "tensorflow", "onnxruntime", "jax", "cupy", "tensorrt"):
+    assert importlib.util.find_spec(module) is None
+cgroup = Path("/sys/fs/cgroup")
+observed_limits = {name: (cgroup / name).read_text().strip() for name in ("cpu.max", "memory.max", "pids.max")}
+quota, period = map(int, observed_limits["cpu.max"].split())
+assert quota == period
+assert int(observed_limits["memory.max"]) == 256 * 1024 * 1024
+assert int(observed_limits["pids.max"]) == 16
+workspace = os.statvfs("/work")
+workspace_bytes = workspace.f_blocks * workspace.f_frsize
+assert 0 < workspace_bytes <= 32 * 1024 * 1024
+
+sys.argv = ["/probe.py", "--corpus", "/corpus", "--iterations", "5"]
+output = io.StringIO()
+with contextlib.redirect_stdout(output):
+    runpy.run_path("/probe.py", run_name="__main__")
+raw = output.getvalue()
+assert len(raw.encode()) <= 131072
+report = json.loads(raw)
+assert report["environment"]["rayon_num_threads"] == "1"
+assert all(value is None for value in report["environment"]["visible_accelerators"].values())
+assert report["process_inventory"]["loaded_module_names"] == []
+assert all(value is None for value in report["process_inventory"]["engine_executables_on_path"].values())
+assert all(not sample["child_processes_observed"] for section in ("cases", "concurrency") for sample in report[section])
+assert not report["cancellation"]["child_processes_observed"]
+assert report["offline_no_ocr"]["result"] == "needs_ocr"
+assert [sample["workers"] for sample in report["concurrency"]] == [1, 2, 4]
+report["runtime_observations"] = {
+    "accelerator_devices": accelerators,
+    "network_interfaces": ["lo"],
+    "effective_capabilities": 0,
+    "no_new_privileges": True,
+    "uid": os.getuid(),
+    "cgroup_limits": observed_limits,
+    "workspace_capacity_bytes": workspace_bytes,
+}
+print(json.dumps(report, sort_keys=True))
+' 2>/dev/null | head -c 131073 > "$run_root/measurements.json"
+
+  uv run python - "$run_root/measurements.json" "$measurement_receipt" "$image" <<'PY_RECEIPT'
+import json
+import os
+from pathlib import Path
+import sys
+
+source, destination, image_id = sys.argv[1:]
+raw = Path(source).read_bytes()
+if not 0 < len(raw) <= 131072:
+    raise SystemExit("final-image measurement output exceeds the bounded receipt")
+measurements = json.loads(raw)
+receipt = {
+    "schema_version": 1,
+    "image_id": image_id,
+    "measurement_scope": "T69 engine probe inside the final reverse-attempt image; fixed entrypoint smoke passed separately",
+    "harness_containment": {
+        "cpu_cores": 1, "memory_bytes": 268435456, "pids": 16,
+        "workspace_bytes": 33554432, "runtime_deadline_seconds": 60,
+        "network": "none", "read_only_root": True,
+    },
+    "qualification": {
+        "production_numeric_thresholds_approved": False,
+        "child_process_observation": "sampled; zero observations do not exclude transient processes",
+        "concurrency_scope": "T69 in-process comparison at 1, 2, and 4 workers; not production worker admission",
+    },
+    "measurements": measurements,
+}
+payload = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode()
+if len(payload) > 131072:
+    raise SystemExit("final-image measurement receipt exceeds its byte ceiling")
+fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "wb") as output:
+    output.write(payload)
+PY_RECEIPT
+fi

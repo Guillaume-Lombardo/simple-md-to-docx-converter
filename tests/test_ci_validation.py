@@ -1012,8 +1012,8 @@ def test_container_release_inspects_remote_version_before_push() -> None:
     )
     assert validate_container_publish_pair_text(publisher) == []
     assert publisher.count("oci-archive:$artifacts/$role/image.oci.tar") == 1
-    first_loop = publisher.index("for role in backend frontend; do")
-    second_loop = publisher.index("for role in backend frontend; do", first_loop + 1)
+    first_loop = publisher.index('for role in "${roles[@]}"; do')
+    second_loop = publisher.index('for role in "${roles[@]}"; do', first_loop + 1)
     stage = publisher.index("oci-archive:$artifacts/$role/image.oci.tar", first_loop)
     inspect = publisher.index('inspect_remote_tag "$role" "$tag"', stage)
     copy = publisher.index('copy_staged_tag "$role" "$tag"', second_loop)

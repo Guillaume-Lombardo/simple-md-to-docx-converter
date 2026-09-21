@@ -47,7 +47,7 @@ PROOF = TerminationProof(
 TOMBSTONE = ReconciliationTombstone(4, EvidenceDigest("sha256:" + "4" * 64), PROOF)
 
 
-def test_reconciler_drains_ack_then_requires_stable_fixed_point(
+def test_reconciler_validates_page_before_draining_ack_and_requiring_fixed_point(
     mocker: MockerFixture,
 ) -> None:
     store = mocker.Mock()
@@ -60,7 +60,7 @@ def test_reconciler_drains_ack_then_requires_stable_fixed_point(
         None,
     )
     broker.request.return_value = AcknowledgeResponse(
-        UUID("30000000-0000-4000-8000-000000000001"),
+        UUID("30000000-0000-4000-8000-000000000002"),
         PROOF.attempt_id,
         PROOF.unit_id,
         PROOF.proof_id,
@@ -68,7 +68,7 @@ def test_reconciler_drains_ack_then_requires_stable_fixed_point(
     )
     broker.reconcile.side_effect = (
         ReconciliationResponse(
-            UUID("30000000-0000-4000-8000-000000000002"),
+            UUID("30000000-0000-4000-8000-000000000001"),
             PRINCIPAL.principal_id,
             4,
             7,
@@ -135,19 +135,25 @@ def test_compatibility_loop_renews_the_original_lease_duration_each_step(
     ]
 
 
-def test_reconcile_step_persists_one_page_and_defers_its_ack(
+def test_reconcile_step_validates_page_before_draining_prior_ack_and_persisting_new_one(
     mocker: MockerFixture,
 ) -> None:
     events: list[str] = []
     store = mocker.Mock()
     broker = mocker.Mock()
     store.begin_reconciliation.return_value = 0
-    store.pending_reconciliation_acknowledgements.side_effect = ((), (TOMBSTONE,))
-    store.record_reconciliation_page.side_effect = lambda *_args: (
-        events.append("persist") or TOMBSTONE
-    )
-    broker.reconcile.side_effect = lambda request: ReconciliationResponse(
-        request.request_id, PRINCIPAL.principal_id, 0, 4, TOMBSTONE, False
+    store.pending_reconciliation_acknowledgements.return_value = (TOMBSTONE,)
+
+    def record_page(*_args: object) -> ReconciliationTombstone | None:
+        events.append("persist")
+        return TOMBSTONE
+
+    store.record_reconciliation_page.side_effect = record_page
+    broker.reconcile.side_effect = lambda request: (
+        events.append("page")
+        or ReconciliationResponse(
+            request.request_id, PRINCIPAL.principal_id, 0, 4, TOMBSTONE, False
+        )
     )
     broker.request.side_effect = lambda request: (
         events.append("ack")
@@ -168,16 +174,7 @@ def test_reconcile_step_persists_one_page_and_defers_its_ack(
         NOW + timedelta(minutes=1),
         now_factory=lambda: NOW,
     )
-    assert events == ["persist"]
-    assert not reconciler.reconcile_step(
-        PRINCIPAL,
-        "reconciler",
-        TOKEN,
-        NOW,
-        NOW + timedelta(minutes=1),
-        now_factory=lambda: NOW,
-    )
-    assert events[:2] == ["persist", "ack"]
+    assert events == ["page", "ack", "persist"]
 
 
 @pytest.mark.parametrize(

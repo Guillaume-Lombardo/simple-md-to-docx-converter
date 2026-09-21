@@ -1,9 +1,18 @@
 # Backup and recovery
 
-Each release identity is a matched backend/frontend digest pair plus its route manifest and
-evidence checksum. The `0.6.4` candidate does not replace the verified `0.6.1` rollback identity
-until both new image receipts are published and adopted. Rollback restores a complete matched pair
-and its route manifest as one release-level operation; never combine images across releases. Storage
+Each release identity is recorded in a schema-versioned `release-images.json` with a checksum file
+and retained image evidence. Schema 1 records the historical matched backend/frontend pair. Schema
+2 records the backend, frontend, and reverse-attempt images, all bound to the same release version
+and source SHA, plus the frontend lock digest. A schema-1 pair has no reverse-attempt identity and
+must not be treated as a qualified reverse release. The former `0.6.4` candidate and `0.6.1`
+rollback references document an earlier backend/frontend pair transition. Keep that record as
+historical release evidence; those versions do not select a current release or public digest for
+T73.
+
+Rollback restores the complete image set and its route manifest as one release-level operation;
+never combine images across releases or add a reverse-attempt image to a historical schema-1 pair.
+Before starting workers after rollback, account for queued or running reverse jobs and ensure the
+broker's configured immutable attempt digest belongs to the same verified release set. Storage
 restore requirements remain profile-specific and are determined by schema/data compatibility, not
 by the stateless frontend.
 
@@ -29,8 +38,10 @@ For distributed, stop new submissions and reach a named worker-quiescence or pro
 point before running the command. The typed PostgreSQL adapter takes one repeatable-read logical
 snapshot; the AWS S3-compatible adapter requires identical inventories before and after its copy.
 The manifest binds the PostgreSQL snapshot identity, object inventory identity, and the supplied
-quiescence proof. Use the providers' encryption, immutability, and retention controls around the
-resulting set.
+quiescence proof. This database and object-store set includes reverse-job records and retained
+reverse source/result objects present at the backup point. The broker's host-local content-free
+attempt inventory is separate from application storage and is not part of this set. Use the
+providers' encryption, immutability, and retention controls around the resulting set.
 
 Record the backup identifier, UTC creation time, profile, database checkpoint/snapshot identity,
 object-store snapshot or version identity, application image digest, configuration revision, and
@@ -83,6 +94,15 @@ Restore into an isolated environment with the same profile and an immutable appl
 Validate storage integrity, start the correct runtime mode, and require `/health/ready` to succeed.
 Then verify authenticated template resolution and a representative conversion without exposing its
 content in logs or reports.
+
+When restoring a reverse-enabled deployment, select the complete matched image identity from its
+retained release evidence and restore the protected worker/broker policy configuration for that
+release. Confirm the broker reports `READY` only after its inventoried attempt sweep completes, and
+verify the authenticated capabilities response and configured upload limit before reopening reverse
+submission. Treat queued or interrupted reverse jobs according to their recovered persisted state;
+do not run workers against an unverified attempt-image digest or mix broker and application release
+identities. Exact-image reverse recovery qualification remains in progress until T73 acceptance
+passes.
 
 Run the production restore command with `--report-directory` and `--evidence-id`. This measures the
 approved profile RPO/RTO and exclusively retains a content-free owner-only report. The compatibility

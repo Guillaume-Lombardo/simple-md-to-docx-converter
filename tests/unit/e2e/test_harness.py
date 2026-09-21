@@ -376,8 +376,14 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
         in runner
     )
     assert "Published and local E2E image pairs are mutually exclusive" in runner
-    assert "Published backend and frontend E2E image versions must match" in runner
-    assert "Local backend and frontend E2E image versions must match" in runner
+    assert (
+        "Published backend, frontend and reverse-attempt E2E image versions must match"
+        in runner
+    )
+    assert (
+        "Local backend, frontend and reverse-attempt E2E image versions must match"
+        in runner
+    )
     assert 'podman image exists "$image"' in runner
     assert 'podman image exists "$frontend_image"' in runner
     assert '"$frontend_image" node router.mjs' in runner
@@ -388,7 +394,7 @@ def test_next_browser_matrix_uses_the_paired_production_router_image() -> None:
     assert "AbortSignal.timeout(1000)" in runner
     assert "--env PUBLIC_HOSTS=localhost:3100" in runner
     assert "--env ROUTER_UPSTREAM_TIMEOUT_MS=30000" in runner
-    assert runner.count('start_production_router "$application_name"') == 6
+    assert runner.count('start_production_router "$application_name"') == 7
     assert runner.count('restart_backend_and_router "$application_name"') == 1
     assert runner.count('kill_backend_and_reconnect_router "$application_name"') == 1
     assert runner.count('start_production_router "$expiry_application_name"') == 1
@@ -577,12 +583,12 @@ def test_failure_artifacts_retain_bounded_frontend_admission_evidence(
         (
             "ghcr.io/guillaume-lombardo/md-converter:0.6.0@sha256:" + "a" * 64,
             "ghcr.io/guillaume-lombardo/md-converter-web:0.6.1@sha256:" + "b" * 64,
-            "Published backend and frontend E2E image versions must match.",
+            "Published backend, frontend and reverse-attempt E2E image versions must match.",
         ),
         (
             "localhost/md-converter:0.6.0",
             "localhost/md-converter-web:0.6.1",
-            "Local backend and frontend E2E image versions must match.",
+            "Local backend, frontend and reverse-attempt E2E image versions must match.",
         ),
     ],
 )
@@ -601,6 +607,9 @@ def test_e2e_runner_rejects_mismatched_pair_versions(
         | {
             f"{prefix}_IMAGE": backend,
             f"{prefix}_FRONTEND_IMAGE": frontend,
+            f"{prefix}_REVERSE_ATTEMPT_IMAGE": backend.replace(
+                "md-converter:", "md-converter-reverse-attempt:"
+            ),
         },
     )
 
@@ -882,3 +891,151 @@ def test_next_conversion_admission_phase_holds_workers_and_restores_runtime() ->
     ]
     assert 'podman start "$worker_one_name" "$worker_two_name"' in restore
     assert restore.count('"${application_settings[@]}"') == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("suffix", ["IMAGE", "FRONTEND_IMAGE", "REVERSE_ATTEMPT_IMAGE"])
+def test_e2e_runner_requires_complete_reverse_image_set(suffix: str) -> None:
+    result = subprocess.run(
+        [str(RUNNER), "standalone"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ["PATH"],
+            f"MARKWEAVE_E2E_LOCAL_{suffix}": "localhost/"
+            + {
+                "IMAGE": "md-converter",
+                "FRONTEND_IMAGE": "md-converter-web",
+                "REVERSE_ATTEMPT_IMAGE": "md-converter-reverse-attempt",
+            }[suffix]
+            + ":test",
+        },
+    )
+    assert result.returncode == 2
+    assert "supplied together" in result.stderr
+
+
+@pytest.mark.unit
+def test_reverse_broker_stays_host_native_and_pinned() -> None:
+    runner = RUNNER.read_text()
+    assert (
+        'python -m markweave.broker.process "$broker_directory/broker.json"' in runner
+    )
+    assert 'scripts.e2e.reverse_broker sweep --root "$broker_directory"' in runner
+    assert '"$broker_directory/worker:/run/reverse-client:ro,z"' in runner
+    assert (
+        'podman unshare chown -R "$runtime_uid:0" "$broker_directory/worker"' in runner
+    )
+    assert (
+        'scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"' in runner
+    )
+    assert "tests.e2e.reverse_cli_workflow" in runner
+    assert "/run/podman/podman.sock" not in runner
+
+
+@pytest.mark.unit
+def test_reverse_cleanup_requires_worker_absence_before_inventory_sweep() -> None:
+    runner = RUNNER.read_text()
+    cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
+    assert cleanup.index("require_reverse_workers_removed") < cleanup.index(
+        "scripts.e2e.reverse_broker sweep"
+    )
+    assert 'if [[ "$broker_cleanup_proven" == true ]]' in cleanup
+    assert '"$status" -ne 1' in runner
+
+
+@pytest.mark.unit
+def test_one_reverse_supervisor_owns_each_host_broker_principal() -> None:
+    runner = RUNNER.read_text()
+    assert 'if [[ "$worker" == "$worker_one_name" ]]' in runner
+    assert "worker_reverse_runtime=()" in runner
+    assert '"${worker_reverse_runtime[@]}"' in runner
+    volumes = runner[
+        runner.index("application_volumes=(") : runner.index("application_mode=serve")
+    ]
+    assert volumes.index('if [[ "$profile" == standalone ]]') < volumes.index(
+        '"${reverse_worker_runtime[@]}"'
+    )
+
+
+@pytest.mark.unit
+def test_reverse_full_matrix_runs_outside_primary_diagnostic() -> None:
+    runner = RUNNER.read_text()
+    diagnostic = runner.index(
+        'if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" == true ]]'
+    )
+    corpus = runner.index("tests.e2e.reverse_corpus_workflow")
+    structured = runner.index("tests.e2e.structured_pptx_workflow")
+    assert diagnostic < runner.index("exit 0", diagnostic) < corpus < structured
+    assert runner.count("/e2e/browser-next-reversion.test.mjs") == 3
+    primary = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=primary")
+    held = runner.index("--env MARKWEAVE_WORKER_IDLE_POLL_SECONDS=600")
+    admission = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=admission")
+    assert primary < held < admission
+    assert runner.index("--reverse-held-queue") > held
+    assert "--env MARKWEAVE_TEST_CLAMAV_REJECT_EICAR=true" in runner
+
+
+@pytest.mark.unit
+def test_reverse_fault_injection_waits_for_bound_pause_and_joins_observers() -> None:
+    runner = RUNNER.read_text()
+    lifecycle = runner[
+        runner.index("run_reverse_lifecycle() {") : runner.index(
+            "\nremove_artifacts\nmkdir -p"
+        )
+    ]
+    assert lifecycle.index('wait_reverse_marker "$barrier"') < lifecycle.index(
+        'podman kill --signal KILL "$runtime"'
+    )
+    assert lifecycle.index(
+        'chmod 0644 "/browser-session/$stem-binding.json"'
+    ) < lifecycle.index('touch "${binding%.json}.ready"')
+    assert 'runtime="$worker_one_name"' in lifecycle
+    assert "md_converter_reversion_broker_ready 0" in lifecycle
+    cleanup = runner[runner.index("cleanup() {") : runner.index("trap cleanup EXIT")]
+    assert '"$reverse_pause_pid" "$reverse_diagnostics_pid"' in cleanup
+    assert 'if [[ -f "$broker_directory/broker.json" ]]' in cleanup
+
+
+@pytest.mark.unit
+def test_reverse_frontend_outage_reuses_bound_broker_recovery() -> None:
+    runner = RUNNER.read_text()
+    lifecycle = runner[
+        runner.index("run_reverse_lifecycle() {") : runner.index(
+            "\nremove_artifacts\nmkdir -p"
+        )
+    ]
+    assert (
+        'local lifecycle_url="http://127.0.0.1:$(podman port "$application_name"'
+        in lifecycle
+    )
+    assert (
+        lifecycle.index('wait_reverse_marker "$barrier"')
+        < lifecycle.index('kill --signal KILL "$frontend_name"')
+        < lifecycle.index('--parent-pid "$broker_pid" --signal KILL')
+    )
+    outage = runner.index("run_reverse_lifecycle broker-restart true")
+    unavailable = runner.index(
+        "--env MARKWEAVE_E2E_RUNTIME_FAILURE=frontend-outage", outage
+    )
+    restored = runner.index("start_frontend", unavailable)
+    browser = runner.index("--env MARKWEAVE_E2E_REVERSE_PHASE=recovered", restored)
+    assert outage < unavailable < restored < browser
+    assert runner.count("run_reverse_lifecycle broker-restart") == 1
+    assert '--diagnostics-file "$diagnostics" --result-receipt "$receipt"' in lifecycle
+    assert 'chmod 0644 "$receipt"' in lifecycle
+    assert (
+        "--env MARKWEAVE_E2E_REVERSE_RESULT_RECEIPT=/browser-session/reverse-broker-restart-result.json"
+        in runner
+    )
+
+
+@pytest.mark.unit
+def test_reverse_broker_crash_signals_verified_child_not_uv_wrapper() -> None:
+    runner = RUNNER.read_text()
+    assert 'kill -KILL "$broker_pid"' not in runner
+    assert '--parent-pid "$broker_pid" --signal KILL' in runner
+    assert 'wait "$broker_pid" || broker_exit=$?' in runner
+    assert 'test "$broker_exit" = 137' in runner
+    assert 'wait "$broker_pid" || test "$?" = 137' not in runner

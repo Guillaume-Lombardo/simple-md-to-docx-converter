@@ -152,12 +152,12 @@ class ReleaseWorkflowPolicy:
 
 
 CONTAINER_RELEASE_CANONICAL_DIGEST = (
-    "8b1116138bdb8603c5643ad0330ce9b95aeb4e69dec303af0b87cf112891d411"
+    "fcc32df9fab25e5055a84b8beddba4a233ed57740aebf61bf83df086e9eebb3d"
 )
 CONTAINER_PAIR_PUBLISHER_CANONICAL_DIGEST = (
-    "b180243d6fefbbbe9b4966e50cb5f42dea066cef48d419d0fb034e618758b3fe"
+    "3a61c6bd75e47afe761ead42b77f73ae46cc0da2e8430f09e5dce0f74a7d6fdc"
 )
-RELEASE_IMAGE_ROLES = ("backend", "frontend")
+RELEASE_IMAGE_ROLES = ("backend", "frontend", "reverse_attempt")
 PRODUCTION_RELEASE_CANONICAL_DIGEST = (
     "7f1e229cb775c2d79c397bae9269c410676dd7ab624cfb7b15c3b44636e60392"
 )
@@ -1685,12 +1685,16 @@ def validate_container_publish_pair_text(text: str) -> list[str]:
         errors.append("container pair publisher differs from the reviewed policy")
     required_fragments = (
         "set -euo pipefail",
-        "for role in backend frontend; do",
+        'for role in "${roles[@]}"; do',
+        "roles=(backend frontend reverse_attempt)",
         "scripts.container.verify_supply_chain verify",
+        'test "$legacy_recovery" = false',
         '"oci-archive:$artifacts/$role/image.oci.tar" "dir:$staging_root/$role"',
         "skopeo copy --preserve-digests",
         'test "sha256:$(sha256sum "$staging_root/$role/manifest.json"',
         "ghcr.io/guillaume-lombardo/md-converter-web",
+        "ghcr.io/guillaume-lombardo/md-converter-reverse-attempt",
+        '--profile "$profile"',
         'skopeo copy --authfile "$registry_auth_file" --preserve-digests --retry-times 3',
         'skopeo login --authfile "$registry_auth_file"',
         "--password-stdin ghcr.io",
@@ -1701,7 +1705,7 @@ def validate_container_publish_pair_text(text: str) -> list[str]:
         'test "$remote_digest" = "${intended_digests[$role]}"',
         'test "$(inspect_remote_tag "$role" "$tag")" = "${intended_digests[$role]}"',
         "scripts.container.release_pair create",
-        "backend-digest=%s\\nfrontend-digest=%s\\n",
+        "backend-digest=%s\\nfrontend-digest=%s\\nreverse-attempt-digest=%s\\n",
     )
     errors.extend(
         f"container pair publisher is missing: {required}"
@@ -1710,14 +1714,14 @@ def validate_container_publish_pair_text(text: str) -> list[str]:
     )
     if "set +e" in text or "--privileged" in text.casefold():
         errors.append("container pair publisher weakens the execution boundary")
-    stage_loop = text.find("for role in backend frontend; do")
-    copy_loop = text.find("for role in backend frontend; do", stage_loop + 1)
+    stage_loop = text.find('for role in "${roles[@]}"; do')
+    copy_loop = text.find('for role in "${roles[@]}"; do', stage_loop + 1)
     stage = text.find("oci-archive:$artifacts/$role/image.oci.tar", stage_loop)
     preflight = text.find('inspect_remote_tag "$role" "$tag"', stage)
     copy = text.find('copy_staged_tag "$role" "$tag"', copy_loop)
     if not 0 <= stage_loop < stage < preflight < copy_loop < copy:
         errors.append(
-            "container pair publisher must preflight both images before any copy"
+            "container pair publisher must preflight all three images before any copy"
         )
     return errors
 
@@ -1891,6 +1895,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         "skopeo --version",
         "scripts/container/publish-release-pair.sh",
         "scripts.container.release_pair verify",
+        'git show "$SOURCE_SHA:scripts/container/release_pair.py"',
+        "scripts.container.release_pair source-schema",
+        'if [[ "$schema" = 1 ]]; then recovery_options=(--recover-legacy-pair); fi',
         "artifact-ids: ${{ steps.identity.outputs.artifact-id }}",
         "run-id: ${{ inputs.artifact-run-id }}",
         "merge-multiple: true",
@@ -1909,6 +1916,9 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         "container-stage-${{ inputs.tag }}",
         "needs.build-and-publish.outputs.backend-digest || needs.recover-evidence.outputs.backend-digest",
         "needs.build-and-publish.outputs.frontend-digest || needs.recover-evidence.outputs.frontend-digest",
+        "needs.build-and-publish.outputs.reverse-attempt-digest || needs.recover-evidence.outputs.reverse-attempt-digest",
+        "artifacts/container/reverse_attempt/",
+        "anydoc-cargo.cdx.json anydoc-cargo-vulnerabilities.json",
         '--repo "$GITHUB_REPOSITORY"',
         "--clobber",
     ):
@@ -1940,6 +1950,8 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         'podman build --format oci --timestamp "$source_date_epoch"',
         'bash scripts/container/recovery-cli-smoke.sh "$backend_image"',
         'bash web/scripts/run-rootless-smoke.sh "$frontend_image" --existing',
+        'SOURCE_DATE_EPOCH="$source_date_epoch" bash scripts/container/build-reverse-attempt.sh "$reverse_attempt_image"',
+        'bash scripts/container/smoke-reverse-attempt.sh "$reverse_attempt_image"',
     ):
         if not isinstance(build_run, str) or required not in build_run:
             errors.append(f"automatic container build is missing: {required}")
@@ -2007,6 +2019,7 @@ def validate_container_release_workflow_text(  # noqa: PLR0912, PLR0915
         in {
             "Attest the published backend image identity",
             "Attest the published frontend image identity",
+            "Attest the published reverse-attempt image identity",
         }
         and step.get("uses", "").startswith("actions/attest-build-provenance@")
     ]

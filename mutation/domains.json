@@ -123,6 +123,22 @@
       "review_notes": [
         "Covers bounded cleanup, retained-version floors, stable object targeting, atomic staging, and provider-neutral missing-object errors."
       ]
+    },
+    {
+      "name": "reverse-result-security",
+      "priority": 6,
+      "paths": [
+        "src/markweave/reversion_jobs/service.py",
+        "tests/unit/reversions/test_reversion_service.py"
+      ],
+      "mutants": [
+        "markweave.reversion_jobs.service.xǁReversionServiceǁget__mutmut_3",
+        "markweave.reversion_jobs.service.xǁReversionServiceǁdownload__mutmut_33",
+        "markweave.reversion_jobs.service.xǁReversionServiceǁdownload__mutmut_36"
+      ],
+      "review_notes": [
+        "Mutant 3 replaces the authenticated owner_id with None in the owner-scoped job lookup; the focused lifecycle test detects this lost identity and separately rejects administrator bypass, preserving owner scoping. Mutant 33 changes size-or-digest mismatch rejection to require both mismatches, and mutant 36 accepts digest equality as a mismatch; the focused download test checks exact size and digest, including same-size wrong content. These are reviewed targets only; no campaign result is implied."
+      ]
     }
   ]
 }

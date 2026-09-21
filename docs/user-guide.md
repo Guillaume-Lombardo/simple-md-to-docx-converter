@@ -41,6 +41,25 @@ archives may contain one Markdown source plus approved local resources, and path
 archive are rejected. See [archives and images](archive-images.md) and [local Mermaid
 rendering](mermaid.md).
 
+## Revert a document to Markdown
+
+The **Revert** page converts a supported document to Markdown. It loads the accepted extensions
+and upload limit from the authenticated service before enabling file selection. The extensions
+are hints; the server scans the upload and checks its content before accepting it. Choose or drop
+one file, submit it, and follow its status in the page or Recent conversions. You can request
+cancellation while the job is active. Download a completed Markdown file or ZIP package while its
+result is retained.
+
+Reverse conversion runs locally and does not use OCR or send documents to a hosted Firecrawl
+fallback. PDF support extracts text; it does not preserve PDF images or layout. A scanned or
+image-only PDF, or a PDF containing a page with no extractable text, fails with `needs_ocr`. Other
+unsupported, encrypted, malformed, or resource-limited files fail with a safe explanation. The
+service advertises the supported format families and current upload limit.
+
+If the service cannot provide supported-format information, or the page does not recognize its
+capability schema, submission stays disabled. Ask the service operator if Revert remains unavailable.
+Reverse conversion is experimental; its exact final-image qualification is still in progress.
+
 ## Extract an edited PowerPoint presentation
 
 Open `/revert` (2md) and select an accepted document. The default extraction uses the existing
@@ -50,15 +69,16 @@ opt-in: they do not change ordinary document extraction.
 
 Structured PowerPoint extraction starts with the service's advertised presenter-note and image
 defaults. You can exclude either before submission. The output identifies meaningful PowerPoint
-content that cannot be represented safely with a clear placeholder; it does not silently omit that content. Images use
-the normal safe result package when assets are present or unavailable, so download the ZIP when
-the job reports an asset package.
+content that cannot be represented safely with a clear placeholder; it does not silently omit that
+content. Images use the normal safe result package when assets are present or unavailable, so
+download the ZIP when the job reports an asset package.
 
-This extracts the edited presentation; it does not recover the original Markdown or a source archive
-from a 2pptx output, and it does not promise full visual round-trip fidelity. Layout, master, and
-background details appear as warning placeholders when they matter. OCR, arbitrary CSS, executable
-presentation formats, and hosted fallbacks are unavailable. Documents whose text requires OCR still fail with the displayed safe error; embedded images
-are preserved as assets without text recognition.
+This extracts the edited presentation; it does not recover the original Markdown or a source
+archive from a 2pptx output, and it does not promise full visual round-trip fidelity. Layout,
+master, and background details appear as warning placeholders when they matter. OCR, arbitrary
+CSS, executable presentation formats, and hosted fallbacks are unavailable. Documents whose text
+requires OCR still fail with the displayed safe error; embedded images are preserved as assets
+without text recognition.
 
 ## Templates
 

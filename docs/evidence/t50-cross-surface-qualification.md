@@ -109,8 +109,11 @@ Development checks on 2026-09-21 used T50 candidate
 | Source containers, final-image profiles, recovery, and quickstarts | Passed in the complete hosted suite | The container job exercised production standalone and distributed backup/restore. Both E2Es covered two regular users plus one administrator, installed CLI families, restarts, readiness outages, checkpoint restore, and failure recovery. No older published image pair was substituted. |
 | Independent review | Approved | The orchestrator independently reviewed the scoped evidence/navigation change and reported no blocking issue. |
 
-This evidence qualifies the candidate commit. T50 remains In Progress until the integrated change
-is merged and verified on `main`.
+This evidence qualifies the candidate commit. PR #254 merged as
+`6bae1e4d4abc14c44dfca32752bc422d0dfd2502`; its [main CI](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35629775995)
+passed after the corrected UBI baseline had passed the complete [main matrix](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35626304165).
+The final integrated PR head also passed [CI](https://github.com/Guillaume-Lombardo/simple-md-to-docx-converter/actions/runs/35626505860).
+T50 is verified Done; the distinct T48 and T73 boundaries below remain explicit.
 
 ## Residual limitations
 

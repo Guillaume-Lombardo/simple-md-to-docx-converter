@@ -86,6 +86,19 @@ administrators. Waiting requires the global positive `--timeout`. Downloads use 
 atomic, no-symlink destination boundary as forward results; the caller chooses `.md` or `.zip`
 from the job's `result_mode`, and existing files are preserved unless `--overwrite` is explicit.
 
+`capabilities` displays the server's versioned format and admission contract. `--json` emits compact
+JSON on success; human-readable output is the default. Reverse command failures use the CLI process
+contract above, and service errors include their stable code and correlation identifier. Waiting
+reports a timeout if the job does not finish within `--timeout`; terminal failure, cancellation, or
+expiration is reported as an error. Use separate named profiles for separate services or accounts;
+each profile retains its own session credentials.
+
+The advertised extensions and upload limit come from the service. Submission checks the local file
+and then relies on server-side scanning and content detection. The workflow uses a local engine,
+without OCR or hosted Firecrawl fallback. PDF text is extracted without its images or layout;
+scanned or image-only PDFs fail with `needs_ocr`. Reverse conversion remains experimental while
+exact final-image qualification is in progress.
+
 ## Authentication profiles
 
 `login`, `logout`, `whoami`, and `password change` use the documented HTTPS API.
