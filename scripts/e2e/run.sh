@@ -512,8 +512,7 @@ elif [[ -n "$local_image" ]]; then
   podman image exists "$image"
   podman image exists "$frontend_image"
 else
-  podman pull --quiet "$base_image"
-  test "$(podman image inspect "$base_image" --format '{{.Digest}}')" = "$base_digest"
+  bash scripts/ci/pull-immutable-image.sh "$base_image" "$base_digest"
   bash scripts/container/build.sh "$image"
   podman build --format oci --tag "$frontend_image" --file web/Containerfile .
 fi

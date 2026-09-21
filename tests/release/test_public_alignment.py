@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import ssl
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -744,3 +748,125 @@ def test_http_redirects_are_limited_to_the_fixed_github_release_cdn() -> None:
             {},
             "https://example.invalid/receipt",
         )
+
+
+class _UrlLibResponse:
+    status = 200
+
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+    def __enter__(self) -> _UrlLibResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, _: int) -> bytes:
+        return b"{}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure",
+    (
+        urllib.error.HTTPError(
+            "https://example.test", 504, "Gateway Timeout", Message(), io.BytesIO()
+        ),
+        urllib.error.HTTPError(
+            "https://example.test", 429, "Too Many Requests", Message(), io.BytesIO()
+        ),
+        urllib.error.URLError(TimeoutError("timed out")),
+        urllib.error.URLError(ConnectionResetError("connection reset by peer")),
+    ),
+)
+def test_url_lib_transport_retries_only_transient_http_or_network_failures(
+    mocker, failure: urllib.error.HTTPError | urllib.error.URLError
+) -> None:
+    transport = public_alignment.UrlLibTransport()
+    opener = mocker.Mock()
+    opener.open.side_effect = [failure, _UrlLibResponse()]
+    transport._opener = opener
+    pause = mocker.patch("scripts.release.public_alignment.sleep")
+
+    response = transport.request("https://example.test", headers={})
+
+    assert response.status == 200
+    assert opener.open.call_count == 2
+    pause.assert_called_once_with(public_alignment.HTTP_RETRY_DELAY_SECONDS)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status", (401, 404))
+def test_url_lib_transport_does_not_retry_auth_or_not_found_response(
+    mocker, status: int
+) -> None:
+    transport = public_alignment.UrlLibTransport()
+    opener = mocker.Mock()
+    opener.open.side_effect = urllib.error.HTTPError(
+        "https://example.test", status, "Permanent failure", Message(), io.BytesIO()
+    )
+    transport._opener = opener
+    pause = mocker.patch("scripts.release.public_alignment.sleep")
+
+    response = transport.request("https://example.test", headers={})
+
+    assert response.status == status
+    opener.open.assert_called_once()
+    pause.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failures", "message"),
+    (
+        (
+            [urllib.error.URLError(TimeoutError("timed out")) for _ in range(3)],
+            "public endpoint request failed",
+        ),
+        (
+            [
+                urllib.error.HTTPError(
+                    "https://example.test",
+                    504,
+                    "Gateway Timeout",
+                    Message(),
+                    io.BytesIO(),
+                )
+                for _ in range(3)
+            ],
+            "public endpoint returned an invalid response",
+        ),
+    ),
+)
+def test_url_lib_transport_fails_closed_after_bounded_transient_retries(
+    mocker, failures: list[urllib.error.HTTPError | urllib.error.URLError], message: str
+) -> None:
+    transport = public_alignment.UrlLibTransport()
+    opener = mocker.Mock()
+    opener.open.side_effect = failures
+    transport._opener = opener
+    pause = mocker.patch("scripts.release.public_alignment.sleep")
+
+    with pytest.raises(AlignmentError, match=message):
+        public_alignment._json_response(transport, "https://example.test")
+
+    assert opener.open.call_count == 3
+    assert pause.call_count == 2
+
+
+@pytest.mark.unit
+def test_url_lib_transport_does_not_retry_tls_certificate_failures(mocker) -> None:
+    transport = public_alignment.UrlLibTransport()
+    opener = mocker.Mock()
+    opener.open.side_effect = urllib.error.URLError(
+        ssl.SSLCertVerificationError("certificate verify failed")
+    )
+    transport._opener = opener
+    pause = mocker.patch("scripts.release.public_alignment.sleep")
+
+    with pytest.raises(AlignmentError, match="public endpoint request failed"):
+        transport.request("https://example.test", headers={})
+
+    opener.open.assert_called_once()
+    pause.assert_not_called()
