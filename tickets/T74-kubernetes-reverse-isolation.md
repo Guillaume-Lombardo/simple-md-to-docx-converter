@@ -2,7 +2,7 @@
 ticket: T74
 linear_id: G1L-571
 linear_url: https://linear.app/g1lom/issue/G1L-571/t74-design-and-implement-the-kubernetes-reverse-isolation-backend
-status: In Progress
+status: Backlog
 priority: Medium
 project: Markdown to DOCX and PDF Converter
 ---
@@ -55,6 +55,11 @@ backend.
 * Keep repository artifacts and user-facing errors in English.
 
 ## Progress
+
+* 2026-09-22: T74 is deferred until a concrete Kubernetes deployment need is selected. The optional
+  backend's remaining real-cluster, production-environment, restart/recovery, and exact-image E2E
+  evidence remains outstanding. Existing T70 Podman isolation, broker contracts, attestation
+  foundations, and the current acceptance criteria and dependencies are preserved unchanged.
 
 * 2026-09-11: Addressed seven incremental findings from the independent PR #225 review. Acceptance
   manifests containing private keys now require a new non-symlink output and are restricted to
