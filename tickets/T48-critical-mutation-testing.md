@@ -46,6 +46,10 @@ workflow, change branch protection, or declare T48 complete.
 
 ## Progress
 
+* 2026-09-21: The mutation job passed the old PR head, including all 25 selected mutants,
+  but both final-image E2E jobs then failed on T86's stale six-package curl/OpenSSL RPM inventory.
+  The T86 correction is merged into this branch; the final exact-head CI run remains pending.
+
 * 2026-09-21: Corrected the activated campaign's generated-workspace test setup. Mutmut now
   retains the project Pytest configuration without coverage gates and copies the repository-local
   `scripts` package required by `conftest.py` and the branch-coverage plugin. A real local campaign
