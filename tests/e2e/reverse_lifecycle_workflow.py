@@ -155,6 +155,7 @@ def _read_state(
         "recovery_job_id",
         "shared_job_id",
         "forward_job_id",
+        "forward_evidence",
     }
     if not isinstance(value, dict) or set(value) != expected:
         raise WorkflowFailure("reverse lifecycle state schema is invalid")
@@ -175,7 +176,7 @@ def _read_state(
         validated = [str(UUID(job)) for job in jobs]
         recovery = str(UUID(value["recovery_job_id"]))
         shared = str(UUID(value["shared_job_id"]))
-        str(UUID(value["forward_job_id"]))
+        forward = str(UUID(value["forward_job_id"]))
     except (TypeError, ValueError) as error:
         raise WorkflowFailure(
             "reverse lifecycle state contains an invalid UUID"
@@ -188,6 +189,15 @@ def _read_state(
         != _username(str(value["profile"]), str(value["scenario"]))
     ):
         raise WorkflowFailure("reverse lifecycle state binding is invalid")
+    evidence = value["forward_evidence"]
+    if evidence is not None:
+        if (
+            not isinstance(evidence, dict)
+            or set(evidence) != {"job_id", "updated_at"}
+            or evidence.get("job_id") != forward
+        ):
+            raise WorkflowFailure("reverse lifecycle forward evidence is invalid")
+        _timestamp(evidence.get("updated_at"), "forward updated_at")
     return value
 
 
@@ -248,6 +258,7 @@ def prepare(base_url: str, profile: str, scenario: str, state_file: Path) -> Non
             "recovery_job_id": recovery_job_id,
             "shared_job_id": next(iter(shared_ids)),
             "forward_job_id": forward_job_id,
+            "forward_evidence": None,
         },
     )
 
@@ -332,14 +343,25 @@ def verify(  # noqa: PLR0913, PLR0917 - explicit final-image evidence inputs
     if result_receipt is not None and diagnostics_file is None:
         raise WorkflowFailure("a result receipt requires persisted fencing evidence")
     owner = _owner(base_url, profile, scenario)
+    forward_evidence = state["forward_evidence"]
+    if forward_evidence is None:
+        forward = _wait_forward_success(owner, state["forward_job_id"])
+        if forward.get("id") != state["forward_job_id"]:
+            raise WorkflowFailure("concurrent forward evidence changed job identity")
+        forward_evidence = {
+            "job_id": state["forward_job_id"],
+            "updated_at": forward.get("updated_at"),
+        }
+        _timestamp(forward_evidence["updated_at"], "forward updated_at")
+        state["forward_evidence"] = forward_evidence
+        _write_json(state_file, state)
     jobs = {job_id: _wait_success(owner, job_id) for job_id in state["job_ids"]}
-    forward = _wait_forward_success(owner, state["forward_job_id"])
     recovery = jobs[state["recovery_job_id"]]
     if not isinstance(recovery.get("attempt"), int) or recovery["attempt"] < 2:
         raise WorkflowFailure(
             "the interrupted reverse job did not exercise lease recovery"
         )
-    forward_updated = _timestamp(forward.get("updated_at"), "forward updated_at")
+    forward_updated = _timestamp(forward_evidence["updated_at"], "forward updated_at")
     reverse_updates = [
         _timestamp(job.get("updated_at"), "reverse updated_at") for job in jobs.values()
     ]

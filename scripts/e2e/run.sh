@@ -636,6 +636,7 @@ run_reverse_lifecycle() {
   wait_for_url "$lifecycle_url/health/ready" "$application_name" '"status":"ready"'
   uv run python -m tests.e2e.reverse_lifecycle_workflow verify \
     --base-url "$lifecycle_url" --profile "$profile" --scenario "$scenario" --state-file "$state"
+  chmod 0644 "$state"
   podman exec "$application_name" /opt/md-converter/venv/bin/python \
     /e2e/reverse_lifecycle_workflow.py diagnostics --state-file "/browser-session/$stem.json" \
     --output "/browser-session/$stem-diagnostics.json"
