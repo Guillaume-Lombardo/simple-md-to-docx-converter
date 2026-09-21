@@ -10,7 +10,7 @@ import socket
 import stat
 import struct
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import BoundedSemaphore, Event, Lock, Thread, current_thread
 from time import monotonic
@@ -851,14 +851,10 @@ class UnixBrokerClient:
         if type(request) is WorkspaceStageRequest:
             source = getattr(request, "source", None)
             declared = getattr(request, "limits", None)
-            values = tuple(
-                getattr(declared, name, None)
-                for name in ReverseContentLimits.__dataclass_fields__
-            )
-            if any(type(value) is not int for value in values):
+            if type(declared) is not ReverseContentLimits:
                 raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR)
             try:
-                validated = ReverseContentLimits(*cast("tuple[int, ...]", values))
+                validated = replace(declared)
             except TypeError, ValueError:
                 raise BrokerError(BrokerErrorCategory.PROTOCOL_ERROR) from None
             if (
