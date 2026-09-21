@@ -404,6 +404,27 @@ def test_wait_requires_timeout_and_handles_success_failure_and_timeout(
 
 
 @pytest.mark.parametrize(
+    ("error", "times", "expected"),
+    (
+        (CliError("network_error", "offline"), (0.0, 0.5, 1.0), "wait_timeout"),
+        (CliError("network_error", "offline"), (0.0, 0.5, 0.75), "network_error"),
+        (CliError("not_found", "missing"), (0.0, 0.5, 1.0), "not_found"),
+    ),
+)
+def test_wait_translates_only_deadline_network_errors(
+    error: CliError, times: tuple[float, float, float], expected: str, mocker, capsys
+) -> None:
+    client = mocker.Mock()
+    client.get_reversion.side_effect = error
+    mocker.patch.object(reversions, "_client", return_value=client)
+    mocker.patch.object(reversions.time, "monotonic", side_effect=times)
+
+    assert main(("--json", "--timeout", "1", "jobs", "reverse", "wait", JOB_ID)) == 1
+
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == expected
+
+
+@pytest.mark.parametrize(
     ("payload", "expected"),
     (
         ({"items": None, "total": 0}, "invalid response"),

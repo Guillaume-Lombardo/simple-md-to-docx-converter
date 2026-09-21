@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from time import sleep
 from typing import Any
 from uuid import UUID
@@ -68,6 +69,46 @@ def running_reversion_service(tmp_path: Path):
             thread.join(timeout=5)
 
 
+class _DelayedReversionHandler(BaseHTTPRequestHandler):
+    """Hold a real loopback poll request until the client deadline expires."""
+
+    started: Event
+    release: Event
+
+    def do_GET(self) -> None:
+        self.started.set()
+        self.release.wait(timeout=1)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        except BrokenPipeError:
+            pass
+
+    def log_message(self, format: str, *args: object) -> None:
+        del format, args
+
+
+@pytest.fixture
+def delayed_reversion_service():
+    """Expose one genuine HTTP read that exceeds the CLI's supplied timeout."""
+    started = Event()
+    release = Event()
+    _DelayedReversionHandler.started = started
+    _DelayedReversionHandler.release = release
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DelayedReversionHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", started
+    finally:
+        release.set()
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def _save_login(
     service_url: str, profile_name: str, username: str, password: str
 ) -> None:
@@ -87,6 +128,38 @@ def _last_json(output: str) -> dict[str, Any]:
     value = json.loads(output.splitlines()[-1])
     assert isinstance(value, dict)
     return value
+
+
+def test_cli_reverse_wait_maps_real_deadline_transport_timeout(
+    delayed_reversion_service,
+    tmp_path: Path,
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A final poll transport timeout reports the wait deadline, not a network fault."""
+    service_url, started = delayed_reversion_service
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    ProfileStore().save(
+        ConnectionProfile("default", service_url, "session=value", "csrf")
+    )
+
+    assert (
+        main(
+            (
+                "--json",
+                "--timeout",
+                "0.1",
+                "jobs",
+                "reverse",
+                "wait",
+                "11111111-1111-4111-8111-111111111111",
+            )
+        )
+        == 1
+    )
+
+    assert started.wait(timeout=1)
+    assert _last_json(capsys.readouterr().err)["error"]["code"] == "wait_timeout"
 
 
 def test_cli_reverse_lifecycle_crosses_real_http_session_and_storage(
