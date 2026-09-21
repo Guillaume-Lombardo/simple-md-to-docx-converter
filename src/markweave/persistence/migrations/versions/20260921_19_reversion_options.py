@@ -35,4 +35,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Remove persisted reverse options."""
 
-    op.drop_column("reversion_jobs", "options")
+    # SQLite 3.34 requires a table copy; PostgreSQL retains native ALTER TABLE.
+    recreate = "always" if op.get_bind().dialect.name == "sqlite" else "auto"
+    with op.batch_alter_table("reversion_jobs", recreate=recreate) as batch:
+        batch.drop_column("options")

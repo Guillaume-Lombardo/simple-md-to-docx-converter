@@ -66,6 +66,9 @@ from tests.reversion_job_repository_contracts import (
     submission,
     trace,
 )
+from tests.reversion_options_migration_contract import (
+    exercise_reversion_options_migration,
+)
 
 REVERSION_MIGRATION = import_module(
     "markweave.persistence.migrations.versions.20260906_16_reversion_queue"
@@ -893,3 +896,10 @@ def test_sqlite_conflicting_idempotent_submissions_never_replay(tmp_path: Path) 
     assert len(successes) == 1
     assert len(failures) == 1 and isinstance(failures[0], ReversionJobConflictError)
     engine.dispose()
+
+
+@pytest.mark.integration
+def test_sqlite_reversion_options_migration_preserves_populated_jobs(
+    tmp_path: Path,
+) -> None:
+    exercise_reversion_options_migration(standalone_database_url(tmp_path))

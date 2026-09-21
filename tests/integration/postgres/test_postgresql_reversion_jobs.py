@@ -42,6 +42,9 @@ from tests.reversion_job_repository_contracts import (
     proof,
     submission,
 )
+from tests.reversion_options_migration_contract import (
+    exercise_reversion_options_migration,
+)
 
 
 class _RecoveryRaceRepository(SqlReversionJobRepository):
@@ -758,3 +761,9 @@ def test_postgresql_mixed_family_global_capacity_is_atomic() -> None:
                 errors.append(error)
     assert len(results) == 1 and len(errors) == 1
     engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.requires_postgres
+def test_postgresql_reversion_options_migration_preserves_populated_jobs() -> None:
+    exercise_reversion_options_migration(os.environ["MARKWEAVE_TEST_POSTGRES_URL"])
