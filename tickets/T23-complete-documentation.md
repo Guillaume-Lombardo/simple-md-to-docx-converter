@@ -194,6 +194,8 @@ Complete English user, template, administrator, API, operations, storage, queue,
 
 - 2026-09-22: Broker-test correction validated with 34 targeted real Unix transport/package/documentation tests, 10 consecutive isolated saturation-regression runs, Ruff formatting/lint, ty and git diff --check. The rejection still requires bounded EOF/reset and zero dispatch; production broker behavior is unchanged.
 
+- 2026-09-22: Independent CodeRabbit review of 74ec18993fd13f00c17c01d307ca15fa035a021a found one minor documentation issue and no other actionable findings. Clarified that the Migration 19 upgrade guidance applies only when the source database revision predates Migration 19; retained backup and verification requirements. All nine documentation tests and git diff --check pass.
+
 ## Synchronization
 
 Update this file and Linear whenever scope, status, priority, dependencies, acceptance criteria, or progress changes.

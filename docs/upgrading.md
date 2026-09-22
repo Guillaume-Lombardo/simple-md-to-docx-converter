@@ -71,7 +71,7 @@ checks succeed on the restored previous version.
 
 ### Reverse-conversion migration 19
 
-Migration 19 persists reverse-extraction options. When upgrading a database from an earlier revision,
+Migration 19 persists reverse-extraction options. When the source database revision predates Migration 19,
 create and verify the profile-consistent database and object backup required above, record the
 running broker configuration and native-broker package/virtual environment, and drain reverse work.
 Keep the application, frontend, reverse-attempt images, and native-broker executable at the same
