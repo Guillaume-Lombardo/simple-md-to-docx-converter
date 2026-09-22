@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import UsersPage from "../app/users/page";
 import SessionPolicyPage from "../app/session-policy/page";
 import { AuthProvider } from "../src/auth/context";
@@ -15,7 +15,20 @@ vi.mock("../src/admin/users", () => ({
   UsersWorkspace: () => <h1>Accounts workspace</h1>,
 }));
 vi.mock("../src/admin/session-policy", () => ({
-  SessionPolicyWorkspace: () => <h2>Policy workspace</h2>,
+  SessionPolicyWorkspace: ({
+    expire,
+    user,
+  }: {
+    expire: () => void;
+    user: { role: string };
+  }) => (
+    <>
+      <h2>Policy workspace</h2>
+      <button type="button" onClick={expire}>
+        Expire policy session ({user.role})
+      </button>
+    </>
+  ),
 }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -32,6 +45,7 @@ test.each(["admin", "user"])(
       username: "Account",
     });
     const controller = new AuthController({ json } as unknown as ApiTransport);
+    const expire = vi.spyOn(controller, "expire");
     render(
       <AuthProvider controller={controller}>
         <UsersPage />
@@ -54,6 +68,13 @@ test.each(["admin", "user"])(
       expect(screen.getByText("Policy workspace")).toBeVisible();
       details.open = false;
       expect(screen.getByText("Policy workspace")).not.toBeVisible();
+      details.open = true;
+      fireEvent.click(
+        screen.getByRole("button", { name: "Expire policy session (admin)" }),
+      );
+      expect(expire).toHaveBeenCalledOnce();
+      await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
+      expect(screen.queryByText("Policy workspace")).toBeNull();
     } else {
       expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
       expect(screen.queryByText("Session policy")).toBeNull();
