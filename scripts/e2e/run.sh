@@ -678,9 +678,6 @@ chmod -R a+rX "$browser_runtime_directory" "$node_runtime_directory"
 refuse_existing_resources
 
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-if [[ "${MARKWEAVE_E2E_REVERSE_PRIMARY_ONLY:-false}" != true ]]; then
-  bash scripts/e2e/rollback-rehearsal.sh "$profile"
-fi
 if [[ -n "$published_image" ]]; then
   podman pull --quiet "$image"
   test "$(podman image inspect "$image" --format '{{.Digest}}')" = "${image##*@}"

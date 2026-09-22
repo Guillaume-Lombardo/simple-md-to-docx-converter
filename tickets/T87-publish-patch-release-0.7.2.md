@@ -107,3 +107,11 @@ was locally mode 0700. An exact-image arbitrary-UID probe confirmed it was not e
 explicitly authorized restoration of that single local file to 0755, the complete distributed rerun
 passed. File contents and Git state were unchanged; original failed evidence is retained. Both
 successful profiles retain the fake-ClamAV teardown warning rather than claiming a graceful stop.
+
+2026-09-22: The user authorized retirement of the historical automatic `0.5.2` rollback
+rehearsal after the verified `0.7.3` image adoption. This is limited to removing the obsolete CI
+fixture and its dead legacy-route assertion support while retaining T64 evidence and the current
+release-level backup/recovery rollback contract. It introduces no rolling N-1 CI framework, version
+change, runtime behavior change, or replacement rollback path. The change is prepared on
+`chore/T87-retire-legacy-rollback` and must not integrate before the published 0.7.3
+digest-adoption change.

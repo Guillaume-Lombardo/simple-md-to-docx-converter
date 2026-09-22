@@ -223,14 +223,12 @@ def test_container_workflow_rejects_structured_capability_drift(
         "scripts/container/build.sh",
         "scripts/container/blocking-mmdc.sh",
         "scripts/container/api-smoke.sh",
-        "scripts/container/assert-legacy-route-manifest.sh",
         "scripts/container/distributed-api-smoke.sh",
         "scripts/container/recovery-cli-smoke.sh",
         "scripts/container/run-ci.sh",
         "scripts/container/smoke.sh",
         "scripts/container/supply-chain.sh",
         "scripts/container/wait-for-fake-clamav.sh",
-        "scripts/e2e/rollback-rehearsal.sh",
     ],
 )
 def test_container_shell_assets_are_syntactically_valid(script: str) -> None:
@@ -332,15 +330,6 @@ def test_final_image_smoke_covers_reversion_capability_auth_and_configuration() 
     assert "/work/api_workflow_smoke.py" in smoke
     assert '"${MARKWEAVE_EXPECT_REVERSION_CAPABILITIES:-true}"' in smoke
     assert 'if [[ "$expect_reversion_capabilities" == true ]]' in smoke
-
-
-def test_immutable_rollback_image_does_not_expect_new_reversion_routes() -> None:
-    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
-
-    assert rollback.count("MARKWEAVE_EXPECT_REVERSION_CAPABILITIES=false") == 1
-    assert rollback.index(
-        "MARKWEAVE_EXPECT_REVERSION_CAPABILITIES=false"
-    ) < rollback.index('api-smoke.sh" "$released_image"')
 
 
 def test_final_image_smokes_wait_for_a_real_scanner_protocol_response() -> None:
@@ -468,38 +457,26 @@ def test_container_ci_always_stages_bounded_status_evidence() -> None:
     assert "MARKWEAVE_CONTAINER_EVIDENCE_DIRECTORY" in run_ci
 
 
-def test_final_e2e_rehearses_exact_released_rollback_in_both_profiles() -> None:
-    runner = Path("scripts/e2e/run.sh").read_text(encoding="utf-8")
-    rollback = Path("scripts/e2e/rollback-rehearsal.sh").read_text(encoding="utf-8")
-    route_manifest = Path(
-        "scripts/container/assert-legacy-route-manifest.sh"
-    ).read_text(encoding="utf-8")
+def test_t64_historical_cutover_evidence_is_retained() -> None:
+    """Keep the completed migration gate as evidence, never as a current CI fixture."""
     evidence = json.loads(
         Path("docs/evidence/t64-cutover-gates.json").read_text(encoding="utf-8")
     )
 
-    assert 'bash scripts/e2e/rollback-rehearsal.sh "$profile"' in runner
-    assert "curl --connect-timeout 2 --max-time 5" in route_manifest
-    assert "0.5.2@$released_digest" in rollback
-    assert (
-        "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
-        in rollback
-    )
-    assert "MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST=true" in rollback
-    assert 'scripts/container/api-smoke.sh" "$released_image"' in rollback
-    assert 'scripts/container/distributed-api-smoke.sh" "$released_image"' in rollback
-    assert 'scripts/container/recovery-cli-smoke.sh" "$released_image"' in rollback
-    assert 'cd "$runtime_directory"' in rollback
-    assert 'MARKWEAVE_REPOSITORY_ROOT="$repository"' in rollback
-    for path in ("/login", "/convert", "/templates", "/static/conversion.js"):
-        assert path in route_manifest
     assert evidence["schema"] == "t64-cutover-gates-v2"
     assert evidence["pre_removal"] == {
         "conclusion": "success",
         "run_id": 33686251439,
         "source_sha": "30c11b4f109bba147e8cc7685d0ba2a1b44ec579",
     }
-    assert evidence["rollback"]["profiles"] == ["standalone", "distributed"]
+    assert evidence["rollback"] == {
+        "backend_image": (
+            "ghcr.io/guillaume-lombardo/md-converter:0.5.2@"
+            "sha256:7d6c69ff76004bf1db6781eeec49fadac9633dbc3d8725e19060b67538fc8d8e"
+        ),
+        "profiles": ["standalone", "distributed"],
+        "route_manifest": "legacy-fastapi-browser-v0.5.2",
+    }
     assert evidence["publication"] == {
         "backend_image": (
             "ghcr.io/guillaume-lombardo/md-converter:0.6.1@"

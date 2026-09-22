@@ -249,9 +249,9 @@ manifest digest, SBOMs, scan report, archive-to-registry receipt, and provenance
 
 One release is deployable only when the PyPI artifact and every required image receipt agree on
 version and source SHA, all public digests are anonymously readable, and the release evidence
-manifest binds the applicable set plus the frontend lockfile digest. T64 completes parity and the rollback rehearsal before
-removing the legacy renderer from candidate source. The `0.6.1` continuation source satisfies that
-gate; the release workflow builds and serializes each final image once, runs the complete rootless acceptance matrix
+manifest binds the applicable set plus the frontend lockfile digest. T64 completed parity and its
+rollback rehearsal as a one-time pre-removal migration gate. The `0.6.1` continuation source
+satisfied that gate; the release workflow builds and serializes each final image once, runs the complete rootless acceptance matrix
 against those exact staged bytes, and publishes the same bytes. It must not test one image and rebuild
 another after legacy removal. If publication is partial, recover the missing image/evidence from
 the retained exact staged bytes without rebuilding, or fail the release. Never pair an older

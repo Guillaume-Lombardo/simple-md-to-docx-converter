@@ -226,10 +226,6 @@ curl --fail --silent "http://127.0.0.1:$application_port/health/ready" \
   | grep -Fq '"status":"ready"'
 bash "$repository/scripts/container/wait-for-fake-clamav.sh" \
   "$clamav_name" distributed-mapped "$application_name" clamav
-if [[ "${MARKWEAVE_EXPECT_LEGACY_ROUTE_MANIFEST:-false}" == true ]]; then
-  bash "$repository/scripts/container/assert-legacy-route-manifest.sh" \
-    "http://127.0.0.1:$application_port"
-fi
 podman exec "$application_name" /opt/md-converter/venv/bin/python -c \
   'from pathlib import Path; Path("/tmp/t20-template.md").write_text("# Template\n", encoding="utf-8")'
 podman exec "$application_name" pandoc /tmp/t20-template.md \
